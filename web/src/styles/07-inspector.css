@@ -1,0 +1,196 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * card appearance tab
+ */
+/* ---------- inspector: card appearance tab ---------- */
+.node-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px 18px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.appearance-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 170px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(0deg, var(--surface-2) 0 23px, var(--border) 23px 24px),
+    repeating-linear-gradient(90deg, var(--surface-2) 0 23px, var(--border) 23px 24px);
+}
+/* The preview reuses the canvas card, which is absolutely positioned there. */
+.appearance-preview .col-card {
+  position: relative;
+  cursor: default;
+}
+.appearance-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.appearance-group h4 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.appearance-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.appearance-shape,
+.appearance-preset,
+.appearance-align {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.appearance-shape.on,
+.appearance-preset.on,
+.appearance-align.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  color: var(--accent);
+}
+.appearance-shape:hover,
+.appearance-preset:hover,
+.appearance-align:hover {
+  color: var(--text);
+}
+.appearance-preset small {
+  color: var(--text-2);
+  font-size: 10px;
+}
+/* Little outline that shows what the shape looks like. */
+.appearance-shape-mark {
+  position: relative;
+  width: 22px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  background: none;
+}
+.appearance-shape-mark.shape-rect { border-radius: 2px; }
+.appearance-shape-mark.shape-round { border-radius: 5px; }
+.appearance-shape-mark.shape-pill { border-radius: 999px; }
+.appearance-shape-mark.shape-ellipse { border-radius: 50%; }
+.appearance-shape-mark.shape-diamond,
+.appearance-shape-mark.shape-hexagon {
+  border-color: transparent;
+  background: currentColor;
+}
+.appearance-shape-mark.shape-diamond::before,
+.appearance-shape-mark.shape-hexagon::before {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  clip-path: inherit;
+  background: var(--surface);
+}
+.appearance-shape-mark.shape-diamond {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: currentColor;
+  border: 0;
+}
+.appearance-shape-mark.shape-hexagon {
+  clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%);
+  background: currentColor;
+  border: 0;
+}
+.appearance-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.appearance-slider > span {
+  min-width: 32px;
+  color: var(--text-2);
+}
+.appearance-slider input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.appearance-slider input[type="number"] {
+  width: 62px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.appearance-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.appearance-colour-row > span {
+  min-width: 32px;
+  color: var(--text-2);
+}
+.appearance-swatches {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.appearance-swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.appearance-swatch.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.appearance-colour-row input[type="color"] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+}
+.appearance-clear {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+.appearance-clear:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.appearance-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.appearance-hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.appearance-footer {
+  display: flex;
+  justify-content: flex-end;
+}

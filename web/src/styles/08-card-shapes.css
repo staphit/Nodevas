@@ -1,0 +1,303 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * shaped cards and their drawn outlines
+ */
+/* ---------- node card shapes ---------- */
+/* Shapes are clipped, never transformed: the card keeps its box, so drag,
+   selection, wire routing and hit-testing are unaffected, and the text stays
+   upright.
+
+   Insets are calculated from the card's own size (--card-w / --card-h, set
+   inline where the card is rendered). Percentage padding would resolve against
+   the *parent* — the whole board — and blow the card up. */
+.col-card.shape-round {
+  border-radius: 14px;
+}
+.col-card.shape-pill {
+  border-radius: 999px;
+  padding-inline: calc(var(--card-w, 152px) * 0.14);
+  text-align: center;
+}
+.col-card.shape-ellipse {
+  border-radius: 50%;
+  padding: calc(var(--card-h, 68px) * 0.1) calc(var(--card-w, 152px) * 0.15);
+  text-align: center;
+}
+.col-card.shape-diamond {
+  border-radius: 4px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  padding: calc(var(--card-h, 68px) * 0.22) calc(var(--card-w, 152px) * 0.2);
+  text-align: center;
+}
+.col-card.shape-hexagon {
+  border-radius: 2px;
+  clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%);
+  padding-inline: calc(var(--card-w, 152px) * 0.15);
+  text-align: center;
+}
+/* ---- outline for the clipped shapes ---- */
+/* A border drawn on the box is cut off by the clip, which used to leave a
+   sliver near one vertex and nothing along the edges. Instead the element
+   itself is the outline colour and an inset copy of the shape carries the
+   fill, so every edge shows the same band. */
+.col-card.shape-diamond,
+.col-card.shape-hexagon {
+  border-color: transparent;
+  background: var(--card-border-color, var(--card-accent, var(--border)));
+}
+.col-card.shape-diamond::before,
+.col-card.shape-hexagon::before {
+  content: "";
+  position: absolute;
+  inset: var(--card-edge, 2px);
+  clip-path: inherit;
+  background: var(--card-bg, var(--surface));
+  pointer-events: none;
+}
+.col-card.status-ready.shape-diamond::before,
+.col-card.status-ready.shape-hexagon::before {
+  background: var(--card-bg, color-mix(in srgb, var(--st-ready-bg) 40%, var(--surface)));
+}
+.col-card.status-in_progress.shape-diamond::before,
+.col-card.status-in_progress.shape-hexagon::before {
+  background: var(--card-bg, color-mix(in srgb, var(--st-progress-bg) 40%, var(--surface)));
+}
+.col-card.status-done.shape-diamond::before,
+.col-card.status-done.shape-hexagon::before {
+  background: var(--card-bg, color-mix(in srgb, var(--st-done-bg) 40%, var(--surface)));
+}
+.col-card.status-failed.shape-diamond::before,
+.col-card.status-failed.shape-hexagon::before {
+  background: var(--card-bg, color-mix(in srgb, var(--st-failed-bg) 40%, var(--surface)));
+}
+/* The fill layer is positioned, so the text has to be lifted above it. */
+.col-card.shape-diamond > *,
+.col-card.shape-hexagon > * {
+  position: relative;
+  z-index: 1;
+}
+/* Selection and wiring states draw an outline, which the clip cuts away. A
+   ring of offset drop-shadows follows the silhouette instead, so the state
+   shows without stealing the card's own edge colour. */
+.col-card.shape-diamond,
+.col-card.shape-hexagon {
+  filter: drop-shadow(1.5px 0 0 var(--card-ring, transparent))
+    drop-shadow(-1.5px 0 0 var(--card-ring, transparent))
+    drop-shadow(0 1.5px 0 var(--card-ring, transparent))
+    drop-shadow(0 -1.5px 0 var(--card-ring, transparent));
+}
+.col-card.shape-diamond.selected,
+.col-card.shape-hexagon.selected {
+  --card-ring: var(--st-ready-fg);
+}
+.col-card.shape-diamond.active,
+.col-card.shape-hexagon.active,
+.col-card.shape-diamond.connection-source,
+.col-card.shape-hexagon.connection-source,
+.col-card.shape-diamond.connection-hover,
+.col-card.shape-hexagon.connection-hover {
+  --card-ring: var(--st-progress-fg);
+}
+.col-card.shape-diamond.connection-target.valid,
+.col-card.shape-hexagon.connection-target.valid {
+  --card-ring: var(--st-done-fg);
+}
+.col-card.shape-diamond.connection-target.invalid,
+.col-card.shape-hexagon.connection-target.invalid,
+.col-card.shape-diamond.has-error,
+.col-card.shape-hexagon.has-error {
+  --card-ring: var(--st-failed-fg);
+}
+/* Narrow shapes only have room for the essentials. */
+.col-card.shape-ellipse,
+.col-card.shape-diamond,
+.col-card.shape-hexagon,
+.col-card.shape-pill {
+  overflow: hidden;
+}
+.col-card.shape-ellipse .col-card-head,
+.col-card.shape-diamond .col-card-head,
+.col-card.shape-hexagon .col-card-head,
+.col-card.shape-pill .col-card-head {
+  justify-content: center;
+}
+.col-card.shape-diamond .col-card-assignee,
+.col-card.shape-diamond .col-card-tags,
+.col-card.shape-ellipse .col-card-tags,
+.col-card.shape-hexagon .col-card-tags,
+.col-card.shape-pill .col-card-tags,
+.col-card.shape-pill .col-card-assignee {
+  display: none;
+}
+.col-card.shape-diamond .col-card-st,
+.col-card.shape-ellipse .col-card-st,
+.col-card.shape-hexagon .col-card-st {
+  display: none;
+}
+.col-card.shape-ellipse .col-card-title,
+.col-card.shape-diamond .col-card-title,
+.col-card.shape-hexagon .col-card-title,
+.col-card.shape-pill .col-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Explicit text placement wins over the shape's default, which is why these
+   rules come after the shape rules. */
+.col-card.align-left { text-align: left; align-items: flex-start; }
+.col-card.align-center { text-align: center; align-items: center; }
+.col-card.align-right { text-align: right; align-items: flex-end; }
+.col-card.align-left .col-card-head { justify-content: flex-start; }
+.col-card.align-center .col-card-head { justify-content: center; }
+.col-card.align-right .col-card-head { justify-content: flex-end; }
+/* `safe` for the two that push text past the top edge when the stack outgrows
+   the card: an overflow there hides the status row and the title, which is
+   everything a card is read for. Overflowing downwards only costs the tail. */
+.col-card.valign-top { justify-content: flex-start; }
+.col-card.valign-middle { justify-content: safe center; }
+.col-card.valign-bottom { justify-content: safe flex-end; }
+
+/* The inspector's size sliders. */
+.card-size-row input[type="range"] {
+  flex: 1;
+  min-width: 70px;
+  accent-color: var(--accent);
+}
+.card-size-value {
+  min-width: 30px;
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: right;
+}
+.card-size-preset {
+  max-width: 130px;
+}
+
+/* Resize frame: a sibling of the card, so a clipped shape cannot clip the
+   handles away. */
+.card-resize-frame {
+  position: absolute;
+  z-index: 13;
+  pointer-events: none;
+}
+.card-resize-frame .col-card-handle {
+  pointer-events: auto;
+}
+.col-card-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow);
+  touch-action: none;
+}
+.col-card-handle:hover,
+.col-card-handle:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+.col-card-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.col-card-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.col-card-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.col-card-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.col-card-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.col-card-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.col-card-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.col-card-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+@media (pointer: coarse) {
+  .col-card-handle {
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+  }
+}
+
+/* Outline: headings of the document being edited, beside the editor. */
+.editor-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.editor-stage > .editor,
+.editor-stage > .md-preview,
+.editor-stage > .cm-theme,
+.editor-stage > .content-page-editor-loading {
+  flex: 1;
+  min-width: 0;
+}
+.doc-outline {
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 8px 4px 8px 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.doc-outline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.doc-outline-item {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 0 5px 5px 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.doc-outline-item[data-level="1"] {
+  font-weight: 600;
+  color: var(--text);
+}
+.doc-outline-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.doc-outline-item.current {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.doc-outline .ui-empty-state {
+  padding: 12px 8px;
+}
+
+/* Path breadcrumb: which file this editor writes to. */
+.editor-path {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px 0;
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.editor-path-project {
+  color: var(--accent);
+}
+.editor-path-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-path-dirty {
+  margin-left: auto;
+  color: var(--st-progress-fg, var(--accent));
+}

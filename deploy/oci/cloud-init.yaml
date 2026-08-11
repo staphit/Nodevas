@@ -1,0 +1,16 @@
+#cloud-config
+# Terraform gzip-compresses this whole document for OCI user_data.
+
+write_files:
+  - path: /usr/local/sbin/nodevas-bootstrap.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      ${nodevas_bootstrap_script}
+
+package_update: false
+runcmd:
+  - - /usr/local/sbin/nodevas-bootstrap.sh
+    - ${nodevas_backup_bucket}
+    - ${nodevas_backup_namespace}
+    - ${nodevas_data_device}

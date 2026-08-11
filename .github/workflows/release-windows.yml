@@ -1,0 +1,253 @@
+name: Release Windows Installer
+
+on:
+  push:
+    tags:
+      - "testflight-v*"
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example testflight-v1.0"
+        required: true
+        default: "testflight-v1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_OWNER: ${{ github.repository_owner }}
+      ELECTRON_REPO_NAME: ${{ github.event.repository.name }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          # A manual run must build the requested tag, not the branch from
+          # which the workflow was dispatched. Tag-push runs keep their event
+          # ref. Full history makes the local tag identity independently
+          # verifiable before any build or packaging work starts.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify release provenance
+        id: release
+        shell: bash
+        # INPUT_TAG comes in through the environment, never through ${{ }}
+        # interpolation: a dispatch value is attacker-controlled text and would
+        # otherwise be pasted into the script before bash ever parses it.
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${INPUT_TAG}"
+          fi
+          if [[ ! "${tag}" =~ ^(testflight-)?v[0-9.]+$ ]]; then
+            echo "refusing to build: release tag '${tag}' is not a supported tag" >&2
+            exit 1
+          fi
+
+          release_ref="refs/tags/${tag}"
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_REF}" != "${release_ref}" ]]; then
+            echo "refusing to build: event ref '${EVENT_REF}' does not identify '${release_ref}'" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "${release_ref}"; then
+            echo "refusing to build: checked-out repository has no exact '${release_ref}'" >&2
+            exit 1
+          fi
+
+          head_sha="$(git rev-parse HEAD)"
+          tag_sha="$(git rev-list -n 1 "${release_ref}")"
+          release_target_sha="$(git rev-parse "${release_ref}^{commit}")"
+          if [[ "${head_sha}" != "${tag_sha}" || "${head_sha}" != "${release_target_sha}" ]]; then
+            echo "refusing to build: HEAD (${head_sha}), tag (${tag_sha}), and release target (${release_target_sha}) differ" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" && "${EVENT_SHA}" != "${release_target_sha}" ]]; then
+            echo "refusing to build: event SHA '${EVENT_SHA}' does not match release target '${release_target_sha}'" >&2
+            exit 1
+          fi
+
+          node desktop/scripts/set-release-version.mjs "${tag}" "${GITHUB_RUN_NUMBER}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "target_sha=${release_target_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Build web interface
+        shell: bash
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+
+      - name: Build Go sidecar
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          mkdir -p desktop/resources/bin
+          go build -tags nomsgpack -trimpath -ldflags="-s -w" \
+            -o desktop/resources/bin/nodevas.exe ./cmd/nodevas
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+
+      - name: Build Windows installer (unsigned)
+        shell: bash
+        run: npm run pack:win --prefix desktop
+
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          exe_path="$(find desktop/dist -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          zip_path="$(find desktop/dist -maxdepth 1 -type f -name '*.zip' | head -n 1)"
+          test -n "${exe_path}"
+          test -n "${zip_path}"
+          unpacked="desktop/dist/win-unpacked/resources/bin/nodevas.exe"
+          test -f "${unpacked}"
+          echo "::warning::Installer is unsigned. Configure Windows code signing for SmartScreen-friendly releases."
+
+      - name: Create release checksums
+        shell: bash
+        run: |
+          cd desktop/dist
+          sha256sum *.exe *.zip > SHA256SUMS-windows.txt
+          cat SHA256SUMS-windows.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Nodevas-${{ steps.release.outputs.release_label }}-Windows
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+            desktop/dist/*.blockmap
+            desktop/dist/*.yml
+            desktop/dist/SHA256SUMS-windows.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TARGET_SHA: ${{ steps.release.outputs.target_sha }}
+          RELEASE_PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          RELEASE_LABEL: ${{ steps.release.outputs.release_label }}
+        run: |
+          tag="${RELEASE_TAG}"
+          resolve_remote_tag_commit() {
+            local release_tag="$1"
+            local release_ref="refs/tags/${release_tag}"
+            local remote_rows object_id ref_name extra
+            local exact_sha=""
+            local peeled_sha=""
+
+            if ! git check-ref-format "${release_ref}" >/dev/null 2>&1; then
+              printf 'refusing to publish: malformed release tag %q\n' "${release_tag}" >&2
+              return 1
+            fi
+
+            # Capture first so ls-remote's exit status cannot be hidden by a
+            # pipeline or process substitution. Request only the exact tag and
+            # its annotated-tag peel; branch names and tag prefixes never count.
+            if ! remote_rows="$(git ls-remote --exit-code --tags origin \
+              "${release_ref}" "${release_ref}^{}")"; then
+              printf 'refusing to publish: remote tag %q is missing or unreadable\n' \
+                "${release_ref}" >&2
+              return 1
+            fi
+
+            while IFS=$'\t' read -r object_id ref_name extra; do
+              if [[ -z "${object_id}" || -z "${ref_name}" || -n "${extra}" ||
+                    ! "${object_id}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+                echo "refusing to publish: malformed ls-remote response" >&2
+                return 1
+              fi
+              case "${ref_name}" in
+                "${release_ref}")
+                  if [[ -n "${exact_sha}" ]]; then
+                    echo "refusing to publish: duplicate exact remote tag row" >&2
+                    return 1
+                  fi
+                  exact_sha="${object_id}"
+                  ;;
+                "${release_ref}^{}")
+                  if [[ -n "${peeled_sha}" ]]; then
+                    echo "refusing to publish: duplicate peeled remote tag row" >&2
+                    return 1
+                  fi
+                  peeled_sha="${object_id}"
+                  ;;
+                *)
+                  printf 'refusing to publish: unexpected remote ref %q\n' "${ref_name}" >&2
+                  return 1
+                  ;;
+              esac
+            done <<< "${remote_rows}"
+
+            if [[ -z "${exact_sha}" ]]; then
+              printf 'refusing to publish: exact remote tag %q was not returned\n' \
+                "${release_ref}" >&2
+              return 1
+            fi
+            # Lightweight tags already name the commit. Annotated tags return
+            # an additional peeled row, which is the immutable commit identity.
+            printf '%s\n' "${peeled_sha:-${exact_sha}}"
+          }
+
+          if ! remote_release_sha="$(resolve_remote_tag_commit "${tag}")"; then
+            exit 1
+          fi
+          if [[ "${remote_release_sha}" != "${RELEASE_TARGET_SHA}" ]]; then
+            echo "refusing to publish: remote tag commit (${remote_release_sha}) does not match verified release SHA (${RELEASE_TARGET_SHA})" >&2
+            exit 1
+          fi
+
+          prerelease_args=()
+          if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+          notes="Nodevas ${RELEASE_LABEL} Windows 安裝檔。"
+          files=(desktop/dist/*.exe desktop/dist/*.zip desktop/dist/*.blockmap desktop/dist/SHA256SUMS-windows.txt)
+          shopt -s nullglob
+          yml_files=(desktop/dist/*.yml)
+          shopt -u nullglob
+          files+=("${yml_files[@]}")
+          if existing_tag="$(gh release view "${tag}" --json tagName --jq '.tagName' 2>/dev/null)"; then
+            if [[ "${existing_tag}" != "${tag}" ]]; then
+              echo "refusing to upload: existing release tag (${existing_tag}) does not exactly match verified tag (${tag})" >&2
+              exit 1
+            fi
+            gh release upload "${tag}" "${files[@]}" --clobber
+          else
+            gh release create "${tag}" "${files[@]}" \
+              --title "Nodevas ${RELEASE_LABEL}" \
+              --notes "${notes}" \
+              --verify-tag \
+              "${prerelease_args[@]}"
+          fi

@@ -1,0 +1,198 @@
+﻿/* Entry point. app.css was one 6,700-line file; it is now a series of
+ * contiguous slices. The order below is the original file's order and the
+ * cascade depends on it — reordering these imports changes which rules
+ * win. Add new rules to the slice that owns that area, at its end.
+ */
+
+@import "./styles/01-tokens.css"; /* palette, motion tokens, element defaults */
+@import "./styles/02-shell.css"; /* top bar, project settings, notification settings */
+@import "./styles/03-explorer.css"; /* sidebar, workspace tree, responsive overrides */
+@import "./styles/04-board.css"; /* stage, lanes, node cards */
+@import "./styles/05-drawer.css"; /* drawer, banners, metadata form */
+@import "./styles/06-editor.css"; /* content pages, editor toolbar */
+@import "./styles/07-inspector.css"; /* card appearance tab */
+@import "./styles/08-card-shapes.css"; /* shaped cards and their drawn outlines */
+@import "./styles/09-editor-preview.css"; /* live markdown, tables, export, preview */
+@import "./styles/10a-canvas-tools.css"; /* board title/hint, operation status, command palette, graph toolbar */
+@import "./styles/10b-canvas-decorations.css"; /* free-floating groups and annotations on the board */
+@import "./styles/10c-canvas-minimap.css"; /* graph minimap */
+@import "./styles/10d-canvas-chrome.css"; /* timeline controls, zoom reset, date ruler, unified overlay board */
+@import "./styles/10e-canvas-gates.css"; /* logic-gate wiring */
+@import "./styles/10f-canvas-overrides.css"; /* plan editor, future-date dimming, phone overrides for the files above */
+@import "./styles/11-history.css"; /* per-node history */
+@import "./styles/12-timeline.css"; /* timeline lanes, snapshots, split panes */
+@import "./styles/13-tour.css"; /* onboarding tour overlay and tooltips */
+@import "./styles/14-touch.css"; /* touch gestures, coarse-pointer targets, phone layout, safe areas */
+
+/* Sign-in screen (networked servers only; a loopback server never shows it) */
+.signin {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+.signin-loading {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  min-height: 100vh;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim, #888);
+}
+.signin-loading p {
+  margin: 0;
+}
+.signin-loading button {
+  min-height: 44px;
+  padding: 8px 20px;
+}
+/* One column at every width: the card is the whole screen on a phone and the
+ * two steps must not reflow into something the thumb has to hunt around. */
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 10px;
+  background: var(--panel, #1e1e1e);
+}
+.signin-form h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+/* 44px is the smallest target a finger hits reliably, and a 16px font is what
+ * stops iOS Safari from zooming the page when the field takes focus. */
+.signin-form input {
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 16px;
+}
+.signin-form button {
+  min-height: 44px;
+  padding: 8px;
+  transition: opacity 120ms ease;
+}
+.signin-form button:disabled {
+  opacity: 0.55;
+}
+.signin-form > button[type="submit"] {
+  margin-top: 12px;
+}
+.signin-otp {
+  font-family: var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.signin-actions {
+  display: flex;
+  gap: 8px;
+}
+/* The PIN and its send button share a line: they are one step, and stacking
+ * them reads as two. The button keeps its own width so the label is never
+ * clipped, and the field takes what is left. */
+.signin-pin-row {
+  display: flex;
+  gap: 8px;
+}
+.signin-pin-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.signin-pin-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Read-only sessions say so permanently — the fact does not stop being true
+ * after a few seconds — but as a pill in the top bar rather than a strip above
+ * the app, which cost a phone a whole row. The full sentence rides the title
+ * attribute; the pill itself only has to be noticed, not read. */
+.visitor-badge {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  border-radius: 999px;
+  color: var(--warn-text, #f0d9a0);
+  background: var(--warn-bg, #4a3a12);
+  border: 1px solid color-mix(in srgb, var(--warn-text, #f0d9a0) 30%, transparent);
+}
+.signin-actions button {
+  flex: 1;
+}
+.signin-hint,
+.signin-notice,
+.signin-countdown,
+.signin-warning {
+  margin: 4px 0 0;
+  color: var(--text-dim, #888);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.signin-warning {
+  color: var(--warn-text, #f0d9a0);
+}
+.signin-error {
+  margin: 4px 0 0;
+  color: var(--danger, #d05a5a);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .signin {
+    place-items: start center;
+    /* The virtual keyboard eats the lower half of the viewport, so the card
+     * sits near the top instead of behind it. */
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+    min-height: 100dvh;
+  }
+  .signin-form {
+    width: 100%;
+    padding: 20px 16px;
+    border: 0;
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signin-form button {
+    transition: none;
+  }
+}
+
+/* Live collaboration [P2]: soft lock banner and presence avatars */
+.editor-lock-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--warn-bg, #4a3a1a);
+  color: var(--warn-text, #f0d9a0);
+  font-size: 13px;
+}
+.editor-lock-banner button {
+  padding: 2px 10px;
+}
+.editor-presence {
+  display: flex;
+  gap: 4px;
+  padding: 4px 10px;
+}
+.editor-presence-peer {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  /* Per-peer, so the same person is the same colour here, in the top bar, on
+     the board pointer and on their caret. The server assigns it per account. */
+  background: var(--peer-color, var(--accent, #3a6ea5));
+  color: #fff;
+  font-size: 11px;
+  text-transform: uppercase;
+}

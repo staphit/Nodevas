@@ -1,0 +1,95 @@
+# Caddy in front of Nodevas: TLS termination and nothing else.
+#
+# Install to /etc/caddy/Caddyfile. The site name and the upstream come from
+# the environment so that this file is identical on every instance; the
+# hostname is derived from the instance's public IP at first boot and written
+# to /etc/caddy/caddy.env, which is a separate file from the app's own
+# environment precisely so that the caddy user never has the SMTP password in
+# its address space.
+
+{
+	# The admin API listens on 127.0.0.1:2019 by default and can reconfigure
+	# the whole server without authentication. Nothing on this box uses it,
+	# and any local account could.
+	admin off
+
+	# No `email` line: Caddy will issue without a contact address. Add one if
+	# you want expiry warnings from the CA — it is the only thing it is used
+	# for, and it becomes part of an ACME account record at Let's Encrypt.
+	# email you@example.com
+}
+
+# sslip.io answers 1-2-3-4.sslip.io with 1.2.3.4, so this name resolves to
+# this instance the moment it exists, with nothing to register. It is on the
+# Public Suffix List, which matters more than it sounds: each name counts as
+# its own registered domain at Let's Encrypt, so the certificates other sslip
+# users issue do not eat this instance's rate limit.
+{$NODEVAS_HOSTNAME} {
+	# Caddy forwards the Host header it received, unchanged, and that is
+	# load-bearing rather than incidental. The server compares the Origin
+	# header against Host to reject cross-origin API calls; rewriting Host to
+	# the upstream address here would make every write from the UI a 403 that
+	# looks like a bug in the app.
+	reverse_proxy {$NODEVAS_UPSTREAM:127.0.0.1:5666} {
+		# Do not buffer the response. Exports stream a whole project's
+		# documents through this hop, and the WebSocket at /ws carries live
+		# disk-change events where a buffered flush is a visible delay.
+		flush_interval -1
+	}
+
+	# Deliberately no read/write timeouts: a whole-project .docx or PDF export
+	# legitimately runs for minutes, and the app already puts an absolute
+	# 10-minute write deadline on every non-WebSocket request. A shorter one
+	# here would cut off exports and blame the network.
+
+	# Uploads are real: .veproj bundles, .docx subpages and node attachments
+	# all arrive as request bodies. This is a ceiling on accidental and
+	# malicious ones alike, not a tuning knob — raise it if a genuine bundle
+	# is rejected.
+	request_body {
+		max_size {$NODEVAS_MAX_BODY:128MB}
+	}
+
+	# The UI is a JS bundle and Markdown; both compress well and the link out
+	# of a free-tier instance is the scarce resource.
+	encode zstd gzip
+
+	header {
+		# A year, and no includeSubDomains. The parent domain is shared with
+		# every other sslip.io user, and while the directive would only ever
+		# apply to names under this one, there is nothing under this one to
+		# protect and a pinned mistake here is unreachable for a year.
+		Strict-Transport-Security "max-age=31536000"
+
+		# The editor renders user-supplied HTML subpages. Sniffing turns a
+		# text/plain attachment into whatever the browser guesses it is.
+		X-Content-Type-Options nosniff
+
+		# Nothing here is meant to be embedded elsewhere, and framing is how
+		# a clickjacking page borrows an authenticated session.
+		X-Frame-Options DENY
+		Cross-Origin-Opener-Policy same-origin
+
+		# Node titles and project names are in the path. Sending the full URL
+		# to an external site someone linked to from a document leaks them.
+		Referrer-Policy strict-origin-when-cross-origin
+
+		# The proxy version number is free reconnaissance.
+		-Server
+	}
+
+	# Deliberately no Content-Security-Policy. The proxy does not know what
+	# the bundled UI needs — workers, blob URLs, the sanitised HTML preview —
+	# and a CSP guessed here breaks the editor in ways that present as
+	# application bugs several layers away from this file.
+
+	# Access logging off. The app already logs every request as ECS JSON on
+	# stderr with a request id, the status every middleware settled on, and a
+	# client IP resolved by the trusted-proxy rules in one place. A second log
+	# here would be the same requests, stored twice, disagreeing about who the
+	# client was. Caddy still reports its own errors and certificate events to
+	# the journal, which is the part worth keeping.
+	log {
+		output discard
+	}
+}

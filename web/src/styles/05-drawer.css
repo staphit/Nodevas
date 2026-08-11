@@ -1,0 +1,961 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * drawer, banners, metadata form
+ */
+/* ---------- drawer ---------- */
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(580px, 84%);
+  max-width: 92%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-drawer);
+  animation: drawer-in 260ms var(--ease-drawer);
+}
+.drawer-resize {
+  position: absolute;
+  left: -8px;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  z-index: 2;
+}
+.drawer-resize .ui-resize-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background:
+    radial-gradient(circle, var(--text-2) 1px, transparent 1.5px) center / 4px 6px,
+    var(--surface-2);
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+}
+.drawer-resize:hover .ui-resize-grip,
+.drawer-resize:focus-visible .ui-resize-grip,
+.drawer-resize[data-resizing="true"] .ui-resize-grip {
+  border-color: var(--accent);
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleX(1.12);
+}
+.drawer.collapsed-rail {
+  width: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  animation: none;
+}
+.drawer-collapse,
+.drawer-expand {
+  border: none;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 6px 8px;
+  font: 700 13px/1 var(--mono);
+}
+.drawer-collapse:hover,
+.drawer-expand:hover {
+  color: var(--text);
+}
+.drawer-rail-title {
+  writing-mode: vertical-rl;
+  color: var(--text-2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 70vh;
+}
+.drawer-loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: 12px;
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.drawer-close {
+  border: none;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+}
+.drawer-close:hover {
+  color: var(--text);
+}
+
+.tab-bar {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-family: var(--mono);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--text-2);
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.tab.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--st-progress-fg);
+}
+.dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--st-ready-fg);
+}
+.tab-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+}
+.tab-close:hover {
+  color: var(--st-failed-fg);
+}
+
+.tab.pinned {
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+}
+
+.tab-pin {
+  flex: 0 0 auto;
+  color: var(--st-progress-fg);
+}
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  width: 278px;
+  max-height: calc(100vh - 16px);
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px var(--shadow);
+}
+
+.tab-context-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 8px 7px;
+}
+
+.tab-context-heading > span,
+.tab-context-heading > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-context-heading > span {
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.tab-context-heading > small {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+.tab-context-menu > button {
+  display: grid;
+  width: 100%;
+  min-height: 32px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab-context-menu > button:hover,
+.tab-context-menu > button:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+
+.tab-context-menu > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.tab-context-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.tab-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tab-body.loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+.node-view-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 5px 10px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.node-view-tabs button {
+  position: relative;
+  padding: 7px 13px 8px;
+  border: 0;
+  color: var(--text-2);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+.node-view-tabs button:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.node-view-tabs button.active {
+  color: var(--text);
+  font-weight: 600;
+}
+.node-view-tabs button.active::after {
+  content: "";
+  position: absolute;
+  right: 9px;
+  bottom: -1px;
+  left: 9px;
+  height: 2px;
+  background: var(--st-progress-fg);
+}
+.node-content-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.node-content-view[hidden] {
+  display: none;
+}
+.node-relations {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
+  background: var(--surface);
+}
+.node-relations-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(92px, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.node-relations-summary > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.node-relations-summary span {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.node-relations-summary b {
+  font-size: 12px;
+}
+.node-relations-section {
+  margin-bottom: 14px;
+}
+.node-relations-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+.node-relations-section h3 span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 10px;
+  text-align: center;
+}
+.node-relations-list {
+  display: grid;
+  gap: 5px;
+}
+.node-relation-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+}
+.node-relation-item:hover {
+  border-color: var(--st-progress-fg);
+}
+.node-relation-direction {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.node-relation-copy {
+  display: grid;
+  min-width: 0;
+}
+.node-relation-copy b,
+.node-relation-copy code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-relation-copy b {
+  font-size: 12px;
+}
+.node-relation-copy code {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.node-relation-style {
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+/* A link whose target no longer exists: the document still names it. */
+.node-relation-style.relation-broken {
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
+}
+/* Node links inside rendered markdown. */
+.md-preview a.node-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  cursor: pointer;
+}
+.md-preview a.node-link::before {
+  content: "◈ ";
+  opacity: 0.7;
+}
+/* Named links under the tag field: each row is a label plus its target. */
+.meta-row-links {
+  align-items: start;
+}
+.node-links-editor {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.node-links-editor > button {
+  justify-self: start;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.node-link-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+  align-items: center;
+}
+.node-link-chip input {
+  min-width: 0;
+}
+.node-link-chip-target {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-link-picker {
+  width: min(560px, calc(100vw - 32px));
+  display: grid;
+  gap: 8px;
+}
+.node-link-results {
+  max-height: min(50vh, 380px);
+  overflow: auto;
+  display: grid;
+  gap: 2px;
+}
+.node-link-results button {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.node-link-results button.selected {
+  background: var(--hover);
+}
+.node-link-results small {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.node-relation-style.relation-optional {
+  border-style: dashed;
+}
+.node-relation-style.relation-deprecated {
+  border-style: dotted;
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+.node-relations-empty,
+.node-relations-help {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.node-relations-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+}
+.node-relations-help {
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+.node-timeline {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
+  background: var(--surface);
+}
+.node-timeline-assessments {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.timeline-assessment {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.timeline-assessment > span,
+.timeline-assessment small {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.timeline-assessment b {
+  font-size: 12px;
+}
+.timeline-assessment.on-time {
+  border-left-color: var(--st-done-fg);
+}
+.timeline-assessment.late {
+  border-left-color: var(--st-failed-fg);
+}
+.timeline-assessment.pending {
+  border-left-color: var(--st-ready-fg);
+}
+.node-timeline h3 {
+  margin: 0 0 7px;
+  color: var(--text);
+  font-size: 12px;
+}
+.node-timeline-plans,
+.node-timeline-audit {
+  margin-bottom: 15px;
+}
+.timeline-plan-list {
+  display: grid;
+  gap: 5px;
+}
+.timeline-plan-list > div {
+  display: grid;
+  grid-template-columns: 64px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-size: 11px;
+}
+.timeline-plan-list time {
+  font-family: var(--mono);
+}
+.timeline-plan-list small {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-timeline-audit ol {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.node-timeline-audit li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.timeline-audit-kind {
+  min-width: 34px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--accent-text);
+  background: var(--accent);
+  font-size: 9.5px;
+  text-align: center;
+}
+.timeline-audit-kind.move {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.node-timeline-audit li > div {
+  display: grid;
+  gap: 2px;
+}
+.node-timeline-audit b {
+  font-size: 11.5px;
+}
+.node-timeline-audit time,
+.node-timeline-audit small {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.node-timeline-audit time {
+  font-family: var(--mono);
+}
+.node-timeline-empty {
+  padding: 9px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.node-timeline-help {
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ---------- banners ---------- */
+.banner {
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  z-index: var(--z-banner);
+}
+.banner button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.banner-draft {
+  background: var(--st-progress-bg);
+  color: var(--st-progress-fg);
+}
+.banner-warn {
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+}
+.banner-conflict {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  flex-direction: column;
+  align-items: stretch;
+}
+.banner-text {
+  line-height: 1.5;
+}
+.banner-actions {
+  display: flex;
+  gap: 8px;
+}
+.conflict-preview {
+  max-height: 180px;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+}
+
+/* ---------- meta form ---------- */
+/* The band the two metadata panels sit in. A <details> so that a phone can
+ * fold it away (see the sheet rules at the end of this file); here it is only
+ * a wrapper that must not change how the panels lay out, so it never gives
+ * ground — the two forms used to be flex items of .tab-body with the same
+ * flex-shrink:0, and the document below is still the pane that stretches. */
+.drawer-meta-band {
+  flex: 0 0 auto;
+}
+.drawer-meta-band > summary {
+  display: none;
+}
+.meta-form,
+.lifecycle-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+/* Named sections: the user must be able to tell plan from record [B-04]. */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.section-head h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.section-head .section-hint {
+  font-size: 10px;
+  color: var(--text-2);
+}
+.section-head .operation-status {
+  margin-left: auto;
+}
+/* The document saves itself; this does not, because a journal entry cannot be
+   taken back. The pair is therefore the way to apply it and a reminder that it
+   has not been applied — see LifecyclePanel.tsx. */
+.lifecycle-form .lifecycle-apply {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.lifecycle-form .lifecycle-staged {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  flex-wrap: wrap;
+}
+.meta-row:last-child {
+  margin-bottom: 0;
+}
+.meta-row label {
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.meta-row input {
+  flex: 1;
+  min-width: 120px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+}
+.meta-row input.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.meta-row select {
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+.meta-row .input-error {
+  border-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.meta-row .status-note-input {
+  min-width: 160px;
+}
+.meta-row .assignee-input {
+  min-width: 240px;
+}
+.status-inline-error {
+  margin: -2px 0 7px 52px;
+  color: var(--st-failed-fg);
+  font-size: 11.5px;
+}
+button.danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  color: var(--st-failed-fg);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-left: auto;
+}
+button.danger:hover {
+  background: var(--st-failed-bg);
+}
+
+/* ---------- phone: the drawer is a bottom sheet ---------- */
+
+/* A side panel on a 393px screen is the whole screen turned sideways, and the
+ * board it was opened from disappears with it. Anchored to the bottom instead,
+ * at less than full height, so the node being edited stays in view behind it.
+ * The rules live here, beside the drawer they override, rather than in the
+ * touch slice. The collapsed rail is left alone: it is already a thin strip. */
+.drawer-sheet-handle {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 0 7px;
+  background: var(--surface-2);
+  cursor: grab;
+  /* Only the bar itself claims the gesture; the form below has to keep
+     scrolling under a finger. */
+  touch-action: none;
+}
+.drawer-sheet-handle:active {
+  cursor: grabbing;
+}
+.drawer-sheet-grip {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .drawer:not(.collapsed-rail) {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+    height: var(--sheet-height, 76vh);
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    border-radius: 14px 14px 0 0;
+    /* The shadow reads as the sheet lifting off the board it covers. */
+    box-shadow: 0 -10px 34px var(--shadow);
+    /* Keeps the last control clear of the iOS home indicator. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    overflow: hidden;
+    animation: drawer-sheet-in 240ms var(--ease-drawer);
+  }
+  .drawer:not(.collapsed-rail) > .drawer-sheet-handle {
+    display: flex;
+  }
+  /* Displaced only while a drag is in flight or settling back: the transform
+     would otherwise make the sheet the containing block for the fixed tab
+     context menu, which is positioned against the viewport. */
+  .drawer.sheet-shifted:not(.collapsed-rail) {
+    transform: translateY(var(--sheet-offset, 0px));
+    transition: transform 220ms var(--ease-out);
+  }
+  /* While the finger is down the sheet follows it exactly; a transition here
+     would lag behind the pointer. */
+  .drawer[data-sheet-drag="active"]:not(.collapsed-rail) {
+    transition: none;
+  }
+
+  /* Everything from here down is about one failure: the sheet is a single
+     column that does not scroll, so its panes divide a fixed 76vh between
+     them, and every pane above the document holds its natural height. The
+     document is the one that stretches, so it absorbed the whole shortfall and
+     closed to nothing — the one thing a node is opened for on a phone was the
+     one thing that could not be reached. Fixing it is a matter of bounding
+     what sits above it rather than of picking a height for it. */
+
+  /* Folded away by default (Drawer.tsx decides the default; this only draws
+     the control). Opened, it becomes its own scroller instead of growing:
+     a band that pushes the document out again is no better than the column
+     that did. */
+  .drawer-meta-band > summary {
+    display: block;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .drawer-meta-band[open] {
+    flex: 0 1 auto;
+    /* Never more than a share of the sheet, and — because a scroll container
+       has no automatic minimum size — free to be squeezed below it when the
+       document needs the room. */
+    max-height: 46%;
+    overflow-y: auto;
+    /* A swipe that runs past the end of the band must stop there rather than
+       carry on into the board behind the sheet. */
+    overscroll-behavior: contain;
+  }
+  .drawer-meta-band[open] > summary {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  /* The rows between the tab strip and the document — 歷程, the subpage bar,
+     the path, the toolbar wrapping to four lines on a 390px screen — are all
+     fixed-height, and together they can still swallow the pane below them. So
+     the content view scrolls, and the document keeps a floor stated as a share
+     of it: an opened 歷程 now scrolls the toolbar off the top instead of
+     closing the editor. Specificity is what makes these win rather than order
+     — 08 and 09 import after this file — hence the .drawer prefix. */
+  .drawer .node-content-view {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .drawer .editor-stage {
+    min-height: 55%;
+  }
+}
+
+@keyframes drawer-sheet-in {
+  from {
+    transform: translateY(28px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+  .drawer:not(.collapsed-rail),
+  .drawer.sheet-shifted:not(.collapsed-rail) {
+    animation: none;
+    transition: none;
+  }
+}

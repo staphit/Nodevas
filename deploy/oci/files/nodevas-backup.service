@@ -1,0 +1,59 @@
+[Unit]
+Description=Snapshot the nodevas database to OCI Object Storage
+# Not After=nodevas.service and not Requires= it either. The snapshot is taken
+# with SQLite's online backup, so it neither needs the server running nor is
+# disturbed by it — and a backup that refuses to run because the application is
+# down is a backup missing from precisely the days you will want it.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# Root, deliberately. The script has to read a database that is mode 0600 and
+# owned by the service account, and it has to read that account's journal;
+# doing it as the nodevas user would mean either loosening the database
+# permissions or adding it to systemd-journal, and a half-privileged backup that
+# silently skips the logs is the failure this exists to prevent. It holds no
+# credential of its own: authentication is the instance principal.
+User=root
+
+EnvironmentFile=/etc/nodevas/nodevas.env
+ExecStart=/usr/local/bin/nodevas-backup.sh
+
+# A snapshot of a small SQLite file plus an upload. If it has not finished in
+# half an hour something is wedged — a stalled TCP connection to Object Storage,
+# most likely — and hanging forever would block tomorrow's run on the lock.
+TimeoutStartSec=30min
+
+# Failure is reported by exit status and read from `systemctl status
+# nodevas-backup` or the journal. No automatic restart: a backup that failed
+# because the bucket policy is wrong will fail identically five seconds later,
+# and the timer will try again tomorrow anyway.
+Restart=no
+
+# Hardening. The script needs to read the workspace, write its cursor and lock,
+# and reach the network; nothing else. ProtectSystem=strict makes every other
+# path read-only, so a bug in argument handling cannot damage the system it is
+# supposed to be protecting.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/nodevas /run/lock
+# The workspace database is opened read-write even though nothing is written to
+# it: SQLite has to create the -shm file to read a WAL database at all.
+ReadWritePaths=/var/lib/nodevas/workspace
+
+SyslogIdentifier=nodevas-backup
+
+[Install]
+# Present so the unit can be run by hand with `systemctl start nodevas-backup`;
+# the timer is what normally starts it.
+WantedBy=multi-user.target

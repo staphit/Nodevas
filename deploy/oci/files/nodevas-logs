@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+#
+# Ask the journal the questions people actually have.
+#
+# The server writes one ECS JSON object per line (see internal/logging), which
+# is the right thing to write and the wrong thing to read: `journalctl -u
+# nodevas` on a running instance is a wall of braces. That JSON is exactly what
+# Kibana would have consumed, and for a single-instance deployment jq gets you
+# most of what Kibana was for, without the cluster. This wrapper is the handful
+# of jq programs written down once instead of retyped badly at 3am.
+#
+# Everything here is a filter over `journalctl -o cat`, which prints the message
+# and nothing else — for this service the message *is* the JSON line. Records
+# that are not JSON (a Go panic, a runtime message, anything before the logger
+# is installed) are passed through unchanged rather than swallowed, because
+# those are the most interesting lines in the file and a jq program that dies on
+# them would hide them.
+
+set -euo pipefail
+
+UNIT="${NODEVAS_UNIT:-nodevas}"
+
+# Written as an `if` rather than `cmd && have_jq=1`, because under `set -e` an
+# AND-list whose left side fails is itself a failed command and would exit here
+# — on the machine where jq is missing, which is the one case this variable
+# exists to handle.
+have_jq=0
+if command -v jq >/dev/null 2>&1; then
+	have_jq=1
+fi
+
+warn() { printf '%s\n' "$*" >&2; }
+die() {
+	printf 'nodevas-logs: %s\n' "$*" >&2
+	exit 64
+}
+
+usage() {
+	cat <<EOF
+nodevas-logs — read the nodevas server's structured logs
+
+Usage: nodevas-logs <command> [options]
+
+Commands:
+  tail                 Follow the log as it happens.
+  errors               Error-level records only.
+  range                Records in a time window.
+  ip <address>         Records for one client IP.
+  request <id>         Records for one request id (the X-Request-Id header).
+  slow                 Slowest requests, by event.duration.
+  raw                  The underlying JSON, unformatted, for your own jq.
+  help                 This text.
+
+Common options:
+  --since <when>       journalctl time: "-1h", "today", "2026-08-04 09:00"
+  --until <when>       Same syntax.
+  -n, --lines <count>  How many records to consider. Default 200.
+  --unit <name>        Service unit. Default: $UNIT
+  --json               Emit raw JSON instead of the one-line format.
+
+Examples:
+  # What is happening right now
+  nodevas-logs tail
+
+  # Everything that went wrong today
+  nodevas-logs errors --since today
+
+  # The window a user complained about
+  nodevas-logs range --since "2026-08-04 14:00" --until "2026-08-04 14:30"
+
+  # One address that is hammering the sign-in endpoint
+  nodevas-logs ip 203.0.113.7 --since -6h
+
+  # A user quoted the id from an error page; find every line of that request
+  nodevas-logs request 9f3c1a2b7d4e5601
+
+  # The twenty slowest requests since yesterday
+  nodevas-logs slow -n 20 --since -1d
+
+  # Anything jq can do, on the raw stream
+  nodevas-logs raw --since -1h | jq -s 'group_by(.["url.path"]) | map({path: .[0]["url.path"], n: length})'
+EOF
+}
+
+# --------------------------------------------------------------------------
+# The one-line format. Fields that are absent are dropped rather than printed
+# empty, so a startup message and an HTTP record can share a stream without
+# either being padded out to the other's shape.
+# --------------------------------------------------------------------------
+readonly JQ_FORMAT='
+  def dur: if .["event.duration"] == null then empty
+           else ((.["event.duration"] / 1000000) | floor | tostring) + "ms" end;
+  [ (.["@timestamp"] // "?"),
+    ((.["log.level"] // "?") | ascii_upcase),
+    (.["http.request.method"] // empty),
+    (.["url.path"] // empty),
+    ((.["http.response.status_code"] // empty) | tostring),
+    dur,
+    (.["client.ip"] // empty),
+    (.["user.name"] // empty),
+    (.["event.action"] // empty),
+    (.message // empty),
+    (.["error.message"] // empty),
+    ((.["http.request.id"] // empty) | "req=" + .)
+  ] | map(select(. != null and . != "")) | join(" ")
+'
+
+# Runs the formatter over stdin. FILTER is a jq boolean expression evaluated
+# against each record; values it compares against arrive via --arg so that
+# nothing a caller typed is ever spliced into the jq program itself.
+#
+# $strict says what to do with a line that is not JSON: keep it when the caller
+# is browsing (tail, errors, range), drop it when the caller asked a question
+# only a structured record can answer (ip, request).
+#
+# JQ_EXTRA carries --unbuffered for the follow mode: jq buffers its output when
+# it is not a terminal, and a live tail that appears in 4KiB bursts is not a
+# live tail.
+JQ_EXTRA=()
+format() {
+	local filter="$1" strict="$2" argname="${3:-v}" argval="${4:-}"
+	jq -R -r "${JQ_EXTRA[@]+"${JQ_EXTRA[@]}"}" \
+		--arg strict "$strict" --arg "$argname" "$argval" "
+	  . as \$line
+	  | (try fromjson catch null) as \$r
+	  | if \$r == null
+	    then (if \$strict == \"1\" then empty else \$line end)
+	    else (\$r | select($filter) | ($JQ_FORMAT))
+	    end
+	"
+}
+
+# --------------------------------------------------------------------------
+# Option parsing, shared by every subcommand.
+# --------------------------------------------------------------------------
+COMMAND="${1:-help}"
+if [ $# -gt 0 ]; then
+	shift
+fi
+
+SINCE=""
+UNTIL=""
+LINES="200"
+RAW_JSON=0
+POSITIONAL=()
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--since) SINCE="${2:-}"; shift 2 ;;
+	--until) UNTIL="${2:-}"; shift 2 ;;
+	-n | --lines) LINES="${2:-}"; shift 2 ;;
+	--unit) UNIT="${2:-}"; shift 2 ;;
+	--json) RAW_JSON=1; shift ;;
+	-h | --help) usage; exit 0 ;;
+	--) shift; POSITIONAL+=("$@"); break ;;
+	-*) die "unknown option: $1" ;;
+	*) POSITIONAL+=("$1"); shift ;;
+	esac
+done
+
+case "$LINES" in
+'' | *[!0-9]*) die "--lines wants a number, got: $LINES" ;;
+esac
+
+command -v journalctl >/dev/null 2>&1 || die "journalctl is not available on this host"
+
+# journalctl arguments common to everything. -o cat gives the message alone;
+# --no-pager keeps this usable in a pipeline, which is the point of `raw`.
+jargs=(-u "$UNIT" -o cat --no-pager)
+if [ -n "$SINCE" ]; then jargs+=(--since "$SINCE"); fi
+if [ -n "$UNTIL" ]; then jargs+=(--until "$UNTIL"); fi
+
+# Warn once, not per line. Without jq the browsing commands still work — you get
+# the JSON as it was written, which is readable if unpleasant — and the
+# filtering commands fall back to journalctl's own regex match. Only `slow`
+# genuinely cannot be done, because it has to sort.
+jq_missing_note() {
+	warn "note: jq is not installed, so output is raw JSON. Install it with:"
+	warn "      sudo apt-get install -y jq"
+}
+
+case "$COMMAND" in
+help | --help | -h)
+	usage
+	;;
+
+tail)
+	# -f implies following, so --lines is how much backlog to show first.
+	if [ "$have_jq" -eq 1 ] && [ "$RAW_JSON" -eq 0 ]; then
+		JQ_EXTRA=(--unbuffered)
+		journalctl "${jargs[@]}" -n "$LINES" -f | format 'true' '0'
+	else
+		[ "$have_jq" -eq 1 ] || jq_missing_note
+		journalctl "${jargs[@]}" -n "$LINES" -f
+	fi
+	;;
+
+errors)
+	# -p err asks journald for the priority it recorded. That covers a crash or
+	# an OOM kill, which never reach the application's own logger; the jq side
+	# additionally catches records the app labelled error while systemd filed
+	# them as info, which is what happens when everything is written to stderr.
+	if [ "$have_jq" -eq 1 ] && [ "$RAW_JSON" -eq 0 ]; then
+		journalctl "${jargs[@]}" -n "$LINES" |
+			format '(.["log.level"] // "") | ascii_downcase | . == "error" or . == "warn"' '0'
+	else
+		[ "$have_jq" -eq 1 ] || jq_missing_note
+		journalctl "${jargs[@]}" -n "$LINES" -p warning
+	fi
+	;;
+
+range)
+	[ -n "$SINCE" ] || die "range needs --since (and usually --until)"
+	if [ "$have_jq" -eq 1 ] && [ "$RAW_JSON" -eq 0 ]; then
+		# No -n here on purpose: a window the caller named explicitly should not
+		# be silently truncated to the last 200 lines of it.
+		journalctl "${jargs[@]}" | format 'true' '0'
+	else
+		[ "$have_jq" -eq 1 ] || jq_missing_note
+		journalctl "${jargs[@]}"
+	fi
+	;;
+
+ip)
+	address="${POSITIONAL[0]:-}"
+	[ -n "$address" ] || die "ip needs an address, e.g. nodevas-logs ip 203.0.113.7"
+	if [ "$have_jq" -eq 1 ] && [ "$RAW_JSON" -eq 0 ]; then
+		# $v is a jq variable supplied by --arg.
+		# shellcheck disable=SC2016
+		journalctl "${jargs[@]}" -n "$LINES" |
+			format '.["client.ip"] == $v' '1' v "$address"
+	else
+		[ "$have_jq" -eq 1 ] || jq_missing_note
+		# The Go JSON encoder writes compact objects, so the field appears
+		# literally as "client.ip":"203.0.113.7". Dots are escaped because
+		# journalctl -g takes an extended regular expression, where an
+		# unescaped dot would also match 203x113y7.
+		pattern="\"client\\.ip\":\"$(printf '%s' "$address" | sed 's/[.[\*^$\\]/\\&/g')\""
+		journalctl "${jargs[@]}" -n "$LINES" -g "$pattern"
+	fi
+	;;
+
+request | req)
+	id="${POSITIONAL[0]:-}"
+	[ -n "$id" ] || die "request needs an id, e.g. nodevas-logs request 9f3c1a2b7d4e5601"
+	# A request id is hex from the middleware. Rejecting anything else keeps a
+	# stray shell metacharacter out of the regex fallback below.
+	case "$id" in
+	*[!0-9A-Fa-f]*) die "request ids are hexadecimal, got: $id" ;;
+	esac
+	if [ "$have_jq" -eq 1 ] && [ "$RAW_JSON" -eq 0 ]; then
+		# $v is a jq variable supplied by --arg.
+		# shellcheck disable=SC2016
+		journalctl "${jargs[@]}" -n "$LINES" |
+			format '.["http.request.id"] == $v' '1' v "$id"
+	else
+		[ "$have_jq" -eq 1 ] || jq_missing_note
+		journalctl "${jargs[@]}" -n "$LINES" -g "\"http\\.request\\.id\":\"$id\""
+	fi
+	;;
+
+slow)
+	if [ "$have_jq" -eq 0 ]; then
+		warn "nodevas-logs slow needs jq: it has to sort the records, which"
+		warn "journalctl cannot do. Install it with: sudo apt-get install -y jq"
+		exit 69
+	fi
+	# -s slurps, so this reads a bounded window into memory. --lines is both the
+	# window and, near enough, the answer size; asking for the slowest request
+	# of all time would mean reading the whole journal.
+	journalctl "${jargs[@]}" -n "$((LINES * 10))" |
+		jq -R -r -s --argjson n "$LINES" "
+		  [ split(\"\\n\")[]
+		    | select(length > 0)
+		    | (try fromjson catch empty) ]
+		  | map(select(.[\"event.duration\"] != null))
+		  | sort_by(-.[\"event.duration\"])
+		  | .[0:\$n]
+		  | .[]
+		  | ($JQ_FORMAT)
+		"
+	;;
+
+raw)
+	# Deliberately unformatted and unfiltered: the escape hatch for a question
+	# this wrapper does not have a subcommand for.
+	journalctl "${jargs[@]}" -n "$LINES"
+	;;
+
+*)
+	die "unknown command: $COMMAND (try: nodevas-logs help)"
+	;;
+esac

@@ -1,0 +1,90 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored; this
+# example is not, so keep real OCIDs and addresses out of it.
+#
+# Everything above the first divider has no sensible default and must be
+# supplied. Everything below it has a working default and is shown so you know
+# the knob exists.
+
+# --- Required -------------------------------------------------------------
+
+# Default is APIKey. For an interactive browser-authenticated deployment use:
+# auth_method        = "SecurityToken"
+# config_file_profile = "NODEVAS"
+
+# Console: Profile menu > Tenancy. Starts ocid1.tenancy.oc1..
+tenancy_ocid = "ocid1.tenancy.oc1..aaaaaaaaEXAMPLE"
+
+# Console: Profile menu > My profile. Starts ocid1.user.oc1..
+user_ocid = "ocid1.user.oc1..aaaaaaaaEXAMPLE"
+
+# Shown beside the key under My profile > API keys, after you upload the public
+# half of the key pair below.
+api_key_fingerprint = "12:34:56:78:9a:bc:de:f0:12:34:56:78:9a:bc:de:f0"
+
+# Path to the private half. On Windows use forward slashes or escaped
+# backslashes; Terraform treats a single backslash as an escape character.
+api_private_key_path = "~/.oci/oci_api_key.pem"
+
+# Must be your tenancy's HOME region. Always Free compute can only be created
+# there, and an instance anywhere else is billed by the hour.
+region = "eu-frankfurt-1"
+
+# Console: Identity > Compartments. Create one for this deployment rather than
+# using the root compartment, so it can be torn down cleanly later.
+compartment_ocid = "ocid1.compartment.oc1..aaaaaaaaEXAMPLE"
+
+# The contents of your public key file, on one line. Not a path. Terraform
+# variable files accept static values, so paste the complete .pub line here.
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLE you@example.com"
+
+# YOUR address, as a /32. Find it with: curl -4 https://ifconfig.me
+# There is no default on purpose. Port 22 open to 0.0.0.0/0 is the most
+# attacked thing you can put on the public internet, and if you want that you
+# have to set allow_ssh_from_anywhere = true as well.
+ssh_allowed_cidr = "203.0.113.7/32"
+
+# --- Optional -------------------------------------------------------------
+
+# nodevas by default. Prefixes every resource name and forms the bucket name.
+# project_name = "nodevas"
+
+# Switch to "VM.Standard.E2.1.Micro" when Oracle reports "Out of host capacity"
+# for the Ampere shape. Nothing else needs to change; the shape_config is
+# dropped and the image lookup picks an x86_64 build automatically.
+# instance_shape = "VM.Standard.A1.Flex"
+
+# The Always Free Ampere allowance was halved on 15 June 2026, to 1,500 OCPU
+# hours and 9,000 GB hours a month. That is 2 OCPUs and 12 GB running
+# continuously. Older guides say 4 and 24; those numbers now cost money.
+# instance_ocpus         = 2
+# instance_memory_in_gbs = 12
+# acknowledge_paid_compute = false
+
+# Free A1 capacity differs between availability domains. If AD 1 refuses the
+# launch, try 2 and then 3 before giving up and switching shape.
+# availability_domain_number = 1
+
+# Boot plus block must stay at or under 200 GB to remain free.
+# boot_volume_size_in_gbs  = 50
+# block_volume_size_in_gbs = 50
+# block_volume_vpus_per_gb = 10
+
+# Object Storage retention. The whole bucket has to fit in 20 GB.
+# backup_retention_days = 30
+# log_retention_days    = 14
+
+# Automatic bootstrap requires this to stay true. Run Terraform as a tenancy
+# administrator able to create the root-compartment dynamic group and policy.
+# create_instance_principal_iam = true
+
+# Leave false unless the backup script reuses object names. False means a
+# compromised instance cannot overwrite an existing backup.
+# backup_allow_overwrite = false
+
+# Path is relative to this directory.
+# cloud_init_file = "../cloud-init.yaml"
+
+# vcn_cidr    = "10.0.0.0/16"
+# subnet_cidr = "10.0.0.0/24"
+
+# allow_ssh_from_anywhere = false

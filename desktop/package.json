@@ -1,0 +1,122 @@
+{
+  "name": "nodevas-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nodevas desktop shell",
+  "author": "Nodevas contributors",
+  "main": "main.cjs",
+  "releaseLabel": "testflight v1.0",
+  "signedUpdates": false,
+  "scripts": {
+    "check": "node --check main.cjs",
+    "pack:mac": "node scripts/pack.mjs --mac --universal",
+    "pack:win": "node scripts/pack.mjs --win"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^1.8.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "tw.nodevas.desktop",
+    "productName": "Nodevas",
+    "icon": "../web/public/nodevas.png",
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "resetAdHocDarwinSignature": true
+    },
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "nodevas",
+          "nodevas.exe"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "artifactName": "Nodevas-testflight-v1.0-macOS-${arch}.${ext}",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "artifactName": "Nodevas-testflight-v1.0-Windows-${arch}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Nodevas"
+    },
+    "dmg": {
+      "title": "Nodevas testflight v1.0",
+      "contents": [
+        {
+          "x": 150,
+          "y": 180
+        },
+        {
+          "x": 430,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "${env.GH_OWNER}",
+        "repo": "${env.ELECTRON_REPO_NAME}",
+        "channel": "testflight",
+        "releaseType": "prerelease"
+      }
+    ],
+    "buildVersion": "1.0.43"
+  }
+}

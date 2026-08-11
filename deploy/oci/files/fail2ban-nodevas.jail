@@ -1,0 +1,87 @@
+# fail2ban jails for this instance.
+#
+# Install to /etc/fail2ban/jail.d/nodevas.local. A .local file rather than
+# edits to jail.conf: the package's own jail.conf is replaced on upgrade, and
+# anything written there goes with it.
+#
+# What this adds on top of what the application already does:
+#
+# Nodevas throttles sign-in by itself, on three budgets at once (global, per
+# source address, per account), and burns a passcode after five wrong guesses.
+# That bounds how fast one attacker can go; it does not stop them from spending
+# the next month going at exactly that speed, and every one of those attempts
+# costs an Argon2 verification against every account holding a PIN. This jail
+# is what turns "slow forever" into "an hour, then come back".
+#
+# It is not a substitute for the throttles and it cannot be. fail2ban reacts to
+# a log line, so the request it bans on has already been served.
+
+[DEFAULT]
+
+# Never ban the operator out of their own server. Loopback is here because
+# Caddy proxies from it and a misconfigured trusted-proxy setting would
+# otherwise let the instance ban itself off the network in one burst.
+#
+# ADD YOUR OWN ADDRESS HERE. It is the one in ssh_allowed_cidr in
+# deploy/oci/terraform/terraform.tfvars — the address you administer this
+# machine from. A ban does not touch SSH (see the jails below), so this is
+# insurance rather than a lockout risk, but discovering the difference during
+# an incident is not the moment for it.
+ignoreip = 127.0.0.1/8 ::1
+
+# The instance's iptables, which cloud-init has already opened 80 and 443 in.
+# OCI's security list stays the outer firewall and knows nothing about this;
+# a ban here stops the traffic after it arrives, not before.
+banaction = iptables-multiport
+
+# Journal, not files. Nothing on this box writes a web access log.
+backend = systemd
+
+
+# --------------------------------------------------------------------------
+# The sign-in surface
+# --------------------------------------------------------------------------
+#
+# Ten refusals in ten minutes, then an hour off. Sized against a person, not
+# against an attacker: someone typing a PIN from a phone screen and a passcode
+# from an email gets several goes at each, and a passcode legitimately expires
+# under them while they look for it. Ten is comfortably past that and nowhere
+# near what a script does in a second.
+[nodevas-auth]
+enabled  = true
+filter   = nodevas
+port     = http,https
+maxretry = 10
+findtime = 10m
+bantime  = 1h
+
+# Repeat offenders. The jail above forgives after an hour, which is right for a
+# person who was confused and wrong for a script that comes back at 61 minutes.
+# This one watches the ban log itself: five bans in a day earns a week.
+[recidive]
+enabled  = true
+bantime  = 1w
+findtime = 1d
+maxretry = 5
+
+# This jail reads a file, not the journal, and says so rather than inheriting
+# the backend above. The Debian package sends fail2ban's own output to
+# /var/log/fail2ban.log and nothing to the journal, so a recidive jail left on
+# the systemd backend matches an empty stream: it starts, reports healthy, and
+# never fires. That failure is invisible — a jail that has banned nobody looks
+# exactly like a jail nobody has provoked.
+backend = auto
+logpath = /var/log/fail2ban.log
+
+
+# --------------------------------------------------------------------------
+# SSH
+# --------------------------------------------------------------------------
+#
+# Off, and deliberately. The OCI security list already admits port 22 from one
+# address (ssh_allowed_cidr), which is a stronger control than banning after
+# the fact, and sshd is password-less. Enabling this would add a way for a
+# spoofed source address in a log line to lock the operator out of the only
+# machine they can reach it from.
+[sshd]
+enabled = false

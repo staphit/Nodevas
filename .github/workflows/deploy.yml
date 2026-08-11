@@ -1,0 +1,378 @@
+name: Deploy to OCI
+
+# Manual only, deliberately.
+#
+# There is no `push:` trigger here and adding one would be a change of policy,
+# not a convenience: this repository merges far more often than the single
+# instance in deploy/oci/ should be taken down and restarted, and a deploy that
+# happens because somebody fixed a typo in a README is a restart nobody chose.
+# When the rate of change settles down, a `push: branches: [master]` trigger is
+# a two-line change — the jobs below already run the whole suite first.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to deploy. Empty means the default branch."
+        required: false
+        type: string
+        default: ""
+      target_arch:
+        description: >-
+          Instance architecture. A1.Flex is arm64, E2.1.Micro is amd64 —
+          the Terraform variable instance_shape decides which.
+        required: true
+        type: choice
+        default: repository-variable
+        options:
+          - repository-variable
+          - arm64
+          - amd64
+      dry_run:
+        description: "Build, test and verify the artifact, but do not touch the server."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never cancel a deploy in progress. cancel-in-progress here would mean killing
+# the runner between `systemctl stop` and `systemctl start` on the instance,
+# which leaves the site down with nothing left running that would bring it back.
+concurrency:
+  group: deploy-oci
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # The same tag every other build of ./cmd/nodevas uses. Dropping gin's
+      # MessagePack codec saves ~9 MB; building the deployed binary without it
+      # would make the artifact on the server differ from the one CI tested.
+      GOFLAGS: -tags=nomsgpack
+    outputs:
+      goarch: ${{ steps.target.outputs.goarch }}
+      sha256: ${{ steps.artifact.outputs.sha256 }}
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Record what is being deployed
+        id: source
+        shell: bash
+        run: |
+          commit="$(git rev-parse HEAD)"
+          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+          echo "deploying ${commit} ($(git log -1 --pretty=%s))"
+
+      # The shape decides the architecture and the shape is a Terraform
+      # variable, so neither is knowable from here. It is an input with a
+      # repository variable behind it rather than a constant: assuming arm64
+      # and then falling back to the micro shape after "Out of host capacity"
+      # — which is exactly what deploy/oci/terraform says to do — would
+      # otherwise ship a binary the instance cannot execute.
+      - name: Resolve the target architecture
+        id: target
+        shell: bash
+        env:
+          INPUT_ARCH: ${{ inputs.target_arch }}
+          VAR_ARCH: ${{ vars.NODEVAS_DEPLOY_ARCH }}
+        run: |
+          arch="${INPUT_ARCH}"
+          if [ "${arch}" = "repository-variable" ]; then
+            arch="${VAR_ARCH}"
+          fi
+          case "${arch}" in
+            arm64 | amd64) ;;
+            "")
+              echo "::error::No architecture. Set the repository variable NODEVAS_DEPLOY_ARCH to arm64 or amd64, or pick one when starting this workflow." >&2
+              exit 1
+              ;;
+            *)
+              echo "::error::NODEVAS_DEPLOY_ARCH is '${arch}'; it must be arm64 or amd64." >&2
+              exit 1
+              ;;
+          esac
+          echo "goarch=${arch}" >> "${GITHUB_OUTPUT}"
+          echo "target architecture: linux/${arch}"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      # --- The suite, before anything is built for the server -----------------
+      #
+      # A deploy pipeline that does not run the tests is a pipeline that ships a
+      # regression at 2am, on the one machine that holds everyone's documents.
+      # These are the same checks CI runs on every push; running them again here
+      # costs a few minutes and means the artifact that reaches the instance is
+      # one that passed them at this exact commit rather than one whose ancestor
+      # did.
+      #
+      # The end-to-end suite is deliberately NOT here. It installs Chromium and
+      # drives the real binary, which is minutes of wall clock and a browser
+      # download standing between an operator and a fix they are trying to ship;
+      # it belongs on the CI workflow, where it already runs on every push, and
+      # not on the path a hotfix takes.
+      - name: Go build
+        run: go build ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        run: go test ./...
+
+      - name: TypeScript
+        run: npm --prefix web exec -- tsc -b
+
+      - name: Web unit tests
+        run: npm --prefix web exec -- vitest run
+
+      # --- The artifact ------------------------------------------------------
+      #
+      # Built here rather than on the instance. The fallback shape is a 1 OCPU /
+      # 1 GB micro on which `npm run build` is the heaviest thing that will ever
+      # run — cloud-init adds 4 GB of swap purely so that it does not take sshd
+      # out with it — and building on the box also means the service is down, or
+      # competing for that memory, for the whole compile. A cross-compile costs
+      # nothing here: the binary is pure Go (modernc.org/sqlite, no cgo), so
+      # there is no toolchain to arrange and nothing to install on the target.
+      - name: Build the frontend
+        run: npm run build --prefix web
+
+      # The frontend is embedded into the Go binary by web/embed.go, so the
+      # order above is not a preference. Build Go first and web.Dist() finds no
+      # index.html, the server logs one line about a missing build and serves a
+      # placeholder — a deploy that succeeds, restarts cleanly, and puts the
+      # wrong UI in front of everyone. This check is what turns that into a
+      # failed workflow.
+      - name: The frontend really was built
+        shell: bash
+        run: |
+          if [ ! -s web/dist/index.html ]; then
+            echo "::error::web/dist/index.html is missing; the binary would embed a placeholder UI." >&2
+            exit 1
+          fi
+
+      - name: Cross-compile the server
+        shell: bash
+        env:
+          GOARCH_TARGET: ${{ steps.target.outputs.goarch }}
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH_TARGET}" go build \
+            -trimpath -ldflags="-s -w" -o nodevas ./cmd/nodevas
+
+      # Two things worth proving before this leaves the runner, because both
+      # are silent on the far side: that it is an executable for the machine it
+      # is going to (the failure otherwise is "cannot execute binary file" in a
+      # restart loop), and what its digest is, so the instance can tell a
+      # complete upload from a truncated one.
+      - name: Verify the artifact
+        id: artifact
+        shell: bash
+        env:
+          GOARCH_TARGET: ${{ steps.target.outputs.goarch }}
+        run: |
+          file nodevas
+          case "${GOARCH_TARGET}" in
+            arm64) want="ARM aarch64" ;;
+            amd64) want="x86-64" ;;
+          esac
+          if ! file nodevas | grep -q "${want}"; then
+            echo "::error::the binary is not a linux/${GOARCH_TARGET} executable." >&2
+            exit 1
+          fi
+          sum="$(sha256sum nodevas | cut -d' ' -f1)"
+          echo "sha256=${sum}" >> "${GITHUB_OUTPUT}"
+          echo "nodevas linux/${GOARCH_TARGET}: ${sum} ($(stat -c%s nodevas) bytes)"
+
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodevas-linux-${{ steps.target.outputs.goarch }}
+          path: |
+            nodevas
+            deploy/oci/files/nodevas-deploy.sh
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        env:
+          COMMIT: ${{ steps.source.outputs.commit }}
+          GOARCH_TARGET: ${{ steps.target.outputs.goarch }}
+          SUM: ${{ steps.artifact.outputs.sha256 }}
+        run: |
+          {
+            echo "### Dry run — the server was not touched"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| commit | \`${COMMIT}\` |"
+            echo "| target | linux/${GOARCH_TARGET} |"
+            echo "| sha256 | \`${SUM}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy:
+    name: Install on the instance
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    # Keep SSH closed to the changing public ranges of hosted runners. Register
+    # a trusted Linux runner whose egress IP is ssh_allowed_cidr and give it the
+    # nodevas-deploy label.
+    runs-on: [self-hosted, linux, nodevas-deploy]
+    timeout-minutes: 15
+    # A GitHub Environment is what gives this job a required reviewer, a
+    # deployment record and somewhere for the SSH secrets to live that is not
+    # readable by every other workflow in the repository. Create it as
+    # "production" in Settings > Environments; the job still runs if it does
+    # not exist yet, just without the approval gate.
+    environment: production
+    env:
+      SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+      SSH_USER: ${{ secrets.DEPLOY_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      GOARCH_TARGET: ${{ needs.build.outputs.goarch }}
+      ARTIFACT_SHA256: ${{ needs.build.outputs.sha256 }}
+      COMMIT: ${{ needs.build.outputs.commit }}
+    steps:
+      - name: Download the artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: nodevas-linux-${{ needs.build.outputs.goarch }}
+
+      - name: Check the secrets are all present
+        shell: bash
+        run: |
+          missing=()
+          [ -n "${SSH_KEY}" ]         || missing+=(DEPLOY_SSH_KEY)
+          [ -n "${SSH_HOST}" ]        || missing+=(DEPLOY_HOST)
+          [ -n "${SSH_USER}" ]        || missing+=(DEPLOY_USER)
+          [ -n "${SSH_KNOWN_HOSTS}" ] || missing+=(DEPLOY_SSH_KNOWN_HOSTS)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::missing repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      # DEPLOY_SSH_KNOWN_HOSTS is required rather than optional, and there is no
+      # StrictHostKeyChecking=no anywhere below. Turning host verification off
+      # is the usual shortcut and it means the very first thing this job does,
+      # every time, is hand a private key and a binary to whatever answers on
+      # that address. Get the line once from a machine you trust:
+      #   ssh-keyscan -t ed25519 <instance-ip>
+      - name: Prepare the SSH client
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${SSH_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      # The staging directory carries the run id so two runs can never write
+      # each other's files, and everything real happens under sudo from the
+      # script — this step only puts bytes on the box.
+      #
+      # The script is installed to /usr/local/sbin on every deploy rather than
+      # only executed from /tmp, because `nodevas-deploy.sh --rollback` has to
+      # be there for an operator who has no CI, no artifact and possibly no
+      # GitHub — which is the situation a rollback is for.
+      - name: Upload and install
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_dir="/tmp/nodevas-deploy-${GITHUB_RUN_ID}"
+          ssh_opts=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes
+                    -o UserKnownHostsFile=~/.ssh/known_hosts
+                    -o ConnectTimeout=15 -o BatchMode=yes)
+
+          ssh "${ssh_opts[@]}" "${SSH_USER}@${SSH_HOST}" \
+            "mkdir -p '${remote_dir}' && chmod 700 '${remote_dir}'"
+
+          scp "${ssh_opts[@]}" \
+            nodevas deploy/oci/files/nodevas-deploy.sh \
+            "${SSH_USER}@${SSH_HOST}:${remote_dir}/"
+
+          # -tt is not used: this must never wait on a terminal. Everything the
+          # script needs is on its command line, and a sudo that wanted a
+          # password would fail here rather than hang until the job times out.
+          ssh "${ssh_opts[@]}" "${SSH_USER}@${SSH_HOST}" bash -s -- \
+            "${remote_dir}" "${ARTIFACT_SHA256}" "${COMMIT}" <<'REMOTE'
+          set -euo pipefail
+          remote_dir="$1"
+          expected_sha="$2"
+          commit="$3"
+          echo "installing ${commit} from ${remote_dir}"
+          sudo -n install -o root -g root -m 0755 \
+            "${remote_dir}/nodevas-deploy.sh" /usr/local/sbin/nodevas-deploy.sh
+          status=0
+          sudo -n /usr/local/sbin/nodevas-deploy.sh \
+            --binary "${remote_dir}/nodevas" \
+            --sha256 "${expected_sha}" || status=$?
+          # The staged copy goes whether the deploy worked or not: on success it
+          # is a duplicate of /usr/local/bin/nodevas, and on failure the script
+          # has already kept the interesting one at /usr/local/bin/nodevas.failed.
+          rm -rf -- "${remote_dir}"
+          exit "${status}"
+          REMOTE
+
+      - name: Remove the key from the runner
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f ~/.ssh/deploy_key
+
+      - name: Record what was deployed
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          {
+            echo "### Deployed"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| commit | \`${COMMIT}\` |"
+            echo "| target | linux/${GOARCH_TARGET} |"
+            echo "| sha256 | \`${ARTIFACT_SHA256}\` |"
+            echo
+            echo "To undo, on the instance: \`sudo nodevas-deploy.sh --rollback\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Say what to do about a failure
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          {
+            echo "### Deploy failed"
+            echo
+            echo "The on-box script rolls back by itself when a new binary starts but does not serve,"
+            echo "so the instance is most likely running the previous binary already."
+            echo "Confirm before doing anything else:"
+            echo
+            echo '```'
+            echo "systemctl status nodevas"
+            echo "journalctl -u nodevas -n 100"
+            echo "ls -l /usr/local/bin/nodevas*   # .previous is the last good one, .failed is this build"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

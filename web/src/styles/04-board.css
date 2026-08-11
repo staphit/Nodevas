@@ -1,0 +1,522 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * stage, lanes, node cards
+ */
+/* ---------- stage / lanes: merged tree + timeline ---------- */
+.stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  background: var(--bg);
+}
+.board {
+  height: 100%;
+  overflow: auto;
+}
+.board-inner {
+  min-width: 100%;
+  position: relative;
+}
+
+/* sticky header: node cards sit on the same grid as the date rows —
+   vertical lane lines and soft row lines make one continuous surface,
+   and give drag-snap a visible target. */
+.board-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background-color: var(--surface);
+  background-image: repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border) 80%, transparent) 0 1px,
+      transparent 1px var(--col-w)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--border) 40%, transparent) 0 1px,
+      transparent 1px var(--step)
+    );
+  background-position: 0 0;
+  border-bottom: 1px solid var(--border);
+}
+.board-header.dragging {
+  cursor: grabbing;
+}
+.board-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.board-edge {
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+.board-edge.optional {
+  stroke-dasharray: 5 4;
+}
+.board-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  z-index: 8;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.corner-toggle {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 4px;
+  width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.corner-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* node card in its column */
+.col-card {
+  position: absolute;
+  box-sizing: border-box;
+  z-index: 7;
+  border: 1px solid var(--card-border-color, var(--border));
+  border-top-width: 3px;
+  border-top-color: var(--card-border-color, var(--card-accent, var(--border)));
+  border-radius: 7px;
+  background: var(--card-bg, var(--surface));
+  text-align: left;
+  padding: 5px 8px;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  /* `safe` is the whole point: the height belongs to the user, so a stack that
+     asks for more of it than the card has must fall off the bottom rather than
+     out of both ends, and the clip keeps what falls off from landing on the
+     wires and the cards below. The lines that would be cut are dropped by the
+     container queries further down; this is only the last line of defence. */
+  justify-content: safe center;
+  overflow: hidden;
+  /* The card is sized inline, never by its text, so it can answer questions
+     about how much room it has — which is what decides how many lines it
+     shows. */
+  container-type: size;
+  gap: 1px;
+  transition: box-shadow 160ms var(--ease-out), left 200ms var(--ease-out),
+    top 200ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+.col-card.lifting {
+  transition: box-shadow 160ms var(--ease-out);
+  z-index: 12;
+  cursor: grabbing;
+  box-shadow: 0 8px 24px var(--shadow);
+  opacity: 0.95;
+}
+@media (hover: hover) and (pointer: fine) {
+  .col-card:hover {
+    box-shadow: 0 2px 8px var(--shadow);
+  }
+}
+.col-card:active {
+  transform: scale(0.98);
+}
+.col-card.active {
+  box-shadow: 0 0 0 2px var(--st-progress-fg);
+}
+.col-card.selected {
+  z-index: 11;
+  outline: 2px solid var(--st-ready-fg);
+  outline-offset: -3px;
+}
+.col-card.connection-hover,
+.col-card.connection-source {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 2px;
+  cursor: crosshair;
+}
+.col-card.connection-target.valid {
+  outline: 3px solid var(--st-done-fg);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--st-done-bg) 70%, var(--surface));
+}
+.col-card.connection-target.invalid {
+  outline: 3px solid var(--st-failed-fg);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--st-failed-bg) 70%, var(--surface));
+}
+/* --card-accent is the status colour a shaped card outlines itself with
+   when the node has no explicit outline colour. */
+.col-card.status-locked {
+  --card-accent: var(--st-locked-fg);
+  border-top-color: var(--card-border-color, var(--st-locked-fg));
+}
+.col-card.status-ready {
+  --card-accent: var(--st-ready-fg);
+  border-top-color: var(--card-border-color, var(--st-ready-fg));
+  background: var(--card-bg, color-mix(in srgb, var(--st-ready-bg) 40%, var(--surface)));
+}
+.col-card.status-in_progress {
+  --card-accent: var(--st-progress-fg);
+  border-top-color: var(--card-border-color, var(--st-progress-fg));
+  background: var(--card-bg, color-mix(in srgb, var(--st-progress-bg) 40%, var(--surface)));
+}
+.col-card.status-done {
+  --card-accent: var(--st-done-fg);
+  border-top-color: var(--card-border-color, var(--st-done-fg));
+  background: var(--card-bg, color-mix(in srgb, var(--st-done-bg) 40%, var(--surface)));
+}
+.col-card.status-skipped {
+  --card-accent: var(--st-skipped-fg);
+  border-top-color: var(--card-border-color, var(--st-skipped-fg));
+  opacity: 0.75;
+}
+/* Dropped work stays visible but reads as out of play. */
+.col-card.status-deprecated {
+  --card-accent: var(--st-deprecated-fg);
+  border-top-color: var(--card-border-color, var(--st-deprecated-fg));
+  background: var(--card-bg, color-mix(in srgb, var(--st-deprecated-bg) 55%, var(--surface)));
+  opacity: 0.6;
+  filter: saturate(0.4);
+}
+.col-card.status-deprecated.selected,
+.col-card.status-deprecated:hover {
+  opacity: 0.9;
+  filter: none;
+}
+.col-card.status-failed {
+  --card-accent: var(--st-failed-fg);
+  border-top-color: var(--card-border-color, var(--st-failed-fg));
+  background: var(--card-bg, color-mix(in srgb, var(--st-failed-bg) 40%, var(--surface)));
+}
+.col-card.has-error {
+  border-color: var(--st-failed-fg);
+}
+.col-card-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  /* The row is a line of 12px glyph boxes. The document's 1.6 would pad the
+     status label out past every icon beside it and spend a third of a line on
+     air the card cannot spare. */
+  line-height: 1.2;
+}
+.lane-kind {
+  display: inline-flex;
+  color: var(--text-2);
+}
+/* Every size on a card is stated as its own base times one shared factor, so
+   the toolbar's 文字大小 moves them all and the steps between title, status and
+   subtitle stay exactly as they were designed. The factor is set on
+   .board-inner (LaneView) and divides the node scale back out, because the card
+   already rides the board's CSS zoom. */
+.col-card-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-size: calc(12px * var(--card-font-scale, 1));
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.col-card-id {
+  font-size: calc(9.5px * var(--card-font-scale, 1));
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-card-assignee {
+  color: var(--text-2);
+  font-size: calc(9.5px * var(--card-font-scale, 1));
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-card-assignee::before {
+  content: "負責：";
+}
+.col-card-assignee.unassigned {
+  opacity: 0.72;
+}
+/* Whole lines or none. A card asks for more height than it owns as soon as the
+   user picks a short one or the node carries tags, and flex answers that by
+   shrinking the line boxes — which every line here then clips against for its
+   ellipsis, so the glyphs come out sliced through the middle instead of the
+   line simply going missing. Refusing to shrink turns that into an overflow,
+   and the overflow is dealt with below. */
+.col-card-head,
+.col-card-title,
+.col-card-assignee,
+.col-card-tags {
+  flex: none;
+}
+/* Tags inherit the document's 1.6, which on 8px text buys nothing legible and
+   costs the assignee line its place. */
+.col-card-tags {
+  line-height: 1.3;
+}
+/* 起點 (10-canvas.css) is the one thing in the status row taller than the 12px
+   icons it stands beside, and on a card that is two pixels short of a line
+   that badge is what decides the line is dropped. */
+.col-card .entry-flag {
+  line-height: calc(10px * var(--card-font-scale, 1));
+}
+/* Which lines a card can carry is a question about its own remaining height,
+   so the card answers it: below these content-box heights the line is dropped
+   whole, because a card that reads short still reads. The numbers are measured
+   from the lines above, with a pixel spare for the 50%-zoom case where hairline
+   borders inside the card cannot halve any further and the stack grows against
+   a box that did. 標準 keeps all four lines; 精簡 is two lines deep and says so
+   in its name. */
+@container (max-height: 53px) {
+  .col-card-tags {
+    display: none;
+  }
+}
+@container (max-height: 42px) {
+  .col-card-assignee {
+    display: none;
+  }
+}
+/* Level of detail, set by LaneView as one attribute on .board-inner when the
+   effective scale (zoom × node scale) falls under 0.8 (compact) and 0.6
+   (minimal). The container queries above ask what fits in a card; these ask
+   what a reader that far out can still use — secondary lines go first, then
+   the status row, until the card is its colour and its name. The two only
+   ever agree on hiding, so they cannot fight. */
+.board-inner[data-lod] .col-card-title {
+  /* CSS zoom multiplies computed lengths, so dividing the view scale back out
+     holds the title at ~11 on-screen pixels however far out the board is. */
+  font-size: max(
+    calc(12px * var(--card-font-scale, 1)),
+    calc(11px / var(--view-scale, 1))
+  );
+}
+.board-inner[data-lod] .col-card-assignee,
+.board-inner[data-lod] .col-card-tags {
+  display: none;
+}
+.board-inner[data-lod="minimal"] .col-card-head {
+  display: none;
+}
+.board-inner[data-lod="minimal"] .col-card-title {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.15;
+}
+/* A resize grip on a card drawn this small is under a finger's width, and
+   resizing a card you cannot read is not a task. Selection, drag, connect and
+   the long-press menu all stay. */
+.board-inner[data-lod="minimal"] .col-card-handle {
+  display: none;
+}
+/* 受阻 and 阻塞源 are painted into the card's corners (10-canvas.css), over
+   lines that otherwise run the full width. The text yields rather than the
+   badges moving: a badge always in the same corner is what lets a reader scan
+   a whole board for blocked work. */
+.col-card.analysis-blocking .col-card-head {
+  padding-right: 30px;
+}
+.col-card.analysis-blocked .col-card-assignee,
+.col-card.analysis-blocked .col-card-tags {
+  padding-right: 24px;
+}
+.error-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--st-failed-fg);
+  border-radius: 50%;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.op-chip {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.op-and {
+  color: var(--st-locked-fg);
+  background: var(--st-locked-bg);
+}
+.op-or {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.op-xor {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.op-nand {
+  color: var(--st-skipped-fg);
+  background: var(--st-skipped-bg);
+}
+.op-nor {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+
+/* date rows: Y axis */
+.board-rows {
+  position: relative;
+}
+.board-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.board-date {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.board-cell {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  /* the node's own vertical guide line */
+  background: linear-gradient(
+      color-mix(in srgb, var(--border) 70%, transparent),
+      color-mix(in srgb, var(--border) 70%, transparent)
+    )
+    center / 1px 100% no-repeat;
+}
+.cell-active {
+  background-color: color-mix(in srgb, var(--st-progress-bg) 30%, transparent);
+}
+.board-today .board-date {
+  color: var(--st-progress-fg);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--st-progress-bg) 60%, var(--surface-2));
+}
+.board-today .board-cell {
+  background-color: color-mix(in srgb, var(--st-progress-bg) 25%, transparent);
+}
+.board-gap {
+  display: flex;
+  align-items: stretch;
+  height: 20px;
+  cursor: pointer;
+}
+.board-gap:hover .board-gap-label {
+  color: var(--st-progress-fg);
+  opacity: 1;
+}
+.board-gap .board-date {
+  border-bottom: 1px dashed var(--border);
+}
+.board-gap-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  font-size: 10px;
+  color: var(--text-2);
+  border-bottom: 1px dashed var(--border);
+  opacity: 0.8;
+}
+.tl-marker {
+  display: inline-flex;
+  cursor: help;
+}
+.lanes-empty {
+  padding: 40px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.ui-empty-state {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: min(520px, calc(100% - 48px));
+  margin: 48px auto;
+  padding: 18px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+}
+.ui-empty-state-mark {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background:
+    linear-gradient(var(--border-strong), var(--border-strong)) 50% 7px / 12px 2px no-repeat,
+    linear-gradient(var(--border-strong), var(--border-strong)) 50% 13px / 12px 2px no-repeat,
+    linear-gradient(var(--border-strong), var(--border-strong)) 50% 19px / 8px 2px no-repeat,
+    var(--surface);
+}
+.ui-empty-state b {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+}
+.ui-empty-state p {
+  max-width: 48ch;
+  margin: 3px 0 0;
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.ui-empty-state-action button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.ui-empty-state-action button:hover {
+  filter: brightness(1.06);
+}
+.ui-empty-state-action button:active {
+  transform: translateY(1px);
+}

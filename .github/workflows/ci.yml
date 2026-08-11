@@ -1,0 +1,221 @@
+name: CI
+
+# Every push and pull request, so a red suite is caught before it is merged
+# rather than at release time.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # gin's binding package pulls in a MessagePack codec this server never
+      # renders. Dropping it saves ~9 MB in the shipped binary; every build of
+      # ./cmd/nodevas uses the same tag so dev and release stay identical.
+      GOFLAGS: -tags=nomsgpack
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "${unformatted}" ]; then
+            echo "gofmt needs to run on:"
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      # A public repository is read by people looking for a way in. A known-bad
+      # dependency is the cheapest one to find, so the build fails on it rather
+      # than leaving it for someone else to notice.
+      - name: Known vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix web
+
+      - name: Type-check
+        working-directory: web
+        run: npm exec -- tsc -b
+
+      # domain/registry.ts says which store entry points may write each
+      # persisted concept. This is what makes that binding instead of advisory.
+      - name: Components go through the store
+        run: npm --prefix web run check:api-imports
+
+      - name: Unit tests
+        run: npm --prefix web run test
+
+      - name: Build bundle
+        run: npm run build --prefix web
+
+      # `//go:embed all:dist` matches the tracked .gitkeep just as happily as a
+      # real build, so a Go binary compiled against an empty dist serves a 404
+      # wall instead of the app and nothing fails until someone opens it.
+      # deploy.yml already guards its own build; this catches it a job earlier.
+      - name: The frontend really was built
+        run: test -s web/dist/index.html
+
+      - name: Known vulnerabilities
+        run: npm audit --audit-level=high --prefix web
+
+      # The desktop shell ships electron-log and electron-updater to users, so
+      # its runtime tree is audited too. --omit=dev keeps the packaging
+      # toolchain, which never leaves this machine, from failing the build.
+      - name: Known vulnerabilities in the desktop shell
+        run: npm audit --audit-level=high --omit=dev --prefix desktop
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    # The suite drives the real binary, so it needs both toolchains. It runs
+    # on its own so a browser hiccup never hides a Go or unit-test failure.
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix web
+
+      - name: Install Chromium
+        run: npm --prefix web exec -- playwright install --with-deps chromium
+
+      # e2e/serve.mjs builds web/dist and the Go binary itself, then serves a
+      # throwaway workspace.
+      - name: Run Playwright
+        run: npm run e2e --prefix web
+
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
+  naming:
+    name: Naming
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      # The product was renamed from vised to nodevas and the dev scripts were
+      # left behind, which only surfaced when the server refused to start.
+      # Tracked files only: build output keeps the old name around for a while.
+      - name: The old command path is gone
+        run: |
+          if git grep -n -e 'cmd/vised' \
+              -- . ':!.github/workflows/ci.yml'; then
+            echo "cmd/vised no longer exists; the command lives at ./cmd/nodevas"
+            exit 1
+          fi
+
+      # scripts/ mentions vised.exe on purpose: it stops leftover instances
+      # from a build made before the rename.
+      - name: The old binary name is not built anywhere
+        run: |
+          if git grep -n -e 'vised\.exe' \
+              -- . ':!scripts' ':!.github/workflows/ci.yml'; then
+            echo "the build output is nodevas.exe"
+            exit 1
+          fi
+
+  oci-infrastructure:
+    name: OCI infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck cloud-init
+
+      - name: Check shell scripts
+        run: |
+          shellcheck \
+            deploy/oci/files/nodevas-bootstrap.sh \
+            deploy/oci/files/nodevas-backup.sh \
+            deploy/oci/files/nodevas-deploy.sh \
+            deploy/oci/files/nodevas-restore.sh \
+            deploy/oci/files/nodevas-logs
+
+      - name: Check cloud-init schema
+        run: cloud-init schema --config-file deploy/oci/cloud-init.yaml
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - name: Check Terraform
+        working-directory: deploy/oci/terraform
+        run: |
+          terraform fmt -check -diff
+          terraform init -backend=false -input=false
+          terraform validate

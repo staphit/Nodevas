@@ -1,0 +1,214 @@
+# Nodevas as a system service, with Caddy terminating TLS in front of it.
+#
+# Install to /etc/systemd/system/nodevas.service. The binary is expected at
+# /usr/local/bin/nodevas and the workspace at /var/lib/nodevas/workspace, which
+# is the attached block volume; both paths appear again in ReadWritePaths and
+# RequiresMountsFor below, so moving one means moving all three.
+
+[Unit]
+Description=Nodevas server
+# Outgoing passcode mail and ACME both need a routable address, and
+# network.target alone only means "the stack is configured", not "an address
+# exists". A server that starts too early fails its first SMTP connection and
+# then sits there looking like a mail misconfiguration.
+Wants=network-online.target
+After=network-online.target
+
+# The workspace, the SQLite database and the app's own config directory all
+# live on the attached block volume. Starting before it is mounted would not
+# fail: the server would create a second, empty workspace on the boot disk
+# under the mount point, serve it happily, and disappear the moment the volume
+# arrived. This is the directive that prevents the most confusing outcome
+# available on this machine.
+RequiresMountsFor=/var/lib/nodevas
+
+# serve() refuses to start a networked deployment that has no accounts, and
+# exits. That is the correct behaviour, but combined with Restart= it is an
+# unbounded restart loop on a freshly provisioned box where nobody has run
+# `nodevas user add` yet. Five attempts inside five minutes and systemd stops
+# trying and leaves the reason in `systemctl status nodevas`.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+# Type=exec rather than simple so that a missing or unexecutable binary is
+# reported as a failed start instead of a service that "started" and vanished.
+Type=exec
+User=nodevas
+Group=nodevas
+WorkingDirectory=/var/lib/nodevas
+
+# The SMTP password is read from NODEVAS_SMTP_PASSWORD and never from a flag,
+# because a flag is in /proc/<pid>/cmdline for every account on the machine.
+# This file must be 0600 root:root: systemd reads it as PID 1, before dropping
+# to the nodevas user, so the service account never needs to read it itself.
+EnvironmentFile=/etc/nodevas/nodevas.env
+
+# NewProjectManager calls os.UserConfigDir(), which on Linux is
+# $XDG_CONFIG_HOME or $HOME/.config and returns an *error* when neither is
+# set. A systemd service has neither, so without this line the server fails at
+# startup with "user config directory". Pointing it at the block volume also
+# puts the encrypted secrets store (the Drive OAuth token, the master key) on
+# the volume that gets backed up and snapshotted, rather than on the
+# throwaway boot disk.
+Environment=XDG_CONFIG_HOME=/var/lib/nodevas/config
+
+# --listen 127.0.0.1 keeps the app off the network entirely; the only thing
+#   that can reach it is Caddy on this host. The OCI security list and
+#   firewalld are then belt and braces rather than the only defence.
+# --behind-proxy makes the server trust X-Forwarded-Proto. Without it the
+#   server believes every request arrived over plain HTTP: session cookies
+#   lose their Secure attribute and the "OAuth credentials require HTTPS"
+#   check refuses configuration that is in fact protected. It also marks this
+#   deployment as remote, which is what turns on mandatory accounts even
+#   though the listener is loopback.
+# --trusted-proxy names who is allowed to make that claim. Caddy is on this
+#   host, so the loopback pair is the complete list; anything wider would let
+#   a client that reached the port directly assert its own scheme and IP.
+# --hostname is the public name Caddy forwards in the Host header. The server
+#   answers only on names it was told about, which is what stops a page on an
+#   attacker's domain that resolves to this IP from presenting a matching
+#   Host/Origin pair. Leaving it out does not fail loudly here (a loopback
+#   bind falls back to the three loopback names) — it fails as a 403 on every
+#   request through the proxy, which reads like the app is broken.
+# --log-format json because the log goes to journald and out to a shipper;
+#   --log-format text exists for a terminal and is the wrong choice here.
+ExecStart=/usr/local/bin/nodevas serve \
+    --project /var/lib/nodevas/workspace \
+    --listen 127.0.0.1 \
+    --port ${NODEVAS_PORT} \
+    --hostname ${NODEVAS_HOSTNAME} \
+    --behind-proxy \
+    --trusted-proxy 127.0.0.1/32,::1/128 \
+    --max-active-users ${NODEVAS_MAX_ACTIVE_USERS} \
+    --log-level ${NODEVAS_LOG_LEVEL} \
+    --log-format json \
+    --smtp-host ${NODEVAS_SMTP_HOST} \
+    --smtp-port ${NODEVAS_SMTP_PORT} \
+    --smtp-user ${NODEVAS_SMTP_USER} \
+    --smtp-from ${NODEVAS_SMTP_FROM} \
+    --smtp-security ${NODEVAS_SMTP_SECURITY}
+
+Restart=on-failure
+# Long enough that a genuine crash loop is visible in the journal rather than
+# scrolling past, short enough that a transient failure heals before anyone
+# notices.
+RestartSec=10s
+
+# SIGTERM is handled: the server stops accepting, gives in-flight requests 5
+# seconds, then spends up to 30 more finishing a last cloud backup. Killing it
+# at 35 seconds would abandon that backup, so the stop budget is set above the
+# sum with room to spare.
+TimeoutStopSec=60s
+
+# Every file the server writes — node documents, the database, history
+# snapshots — is private to the workspace. A default umask would make them
+# world-readable to any future account on the box.
+UMask=0077
+
+# Log lines are ECS JSON on stderr and journald takes them as they are; no
+# StandardOutput= gymnastics and no second log file to rotate.
+
+# --- What the sandbox is for -------------------------------------------------
+# This service parses uploaded .docx and .veproj archives, renders Markdown and
+# runs a WebSocket hub. It is a document processor exposed to the internet,
+# so the interesting question is what it can reach after a bug in one of those
+# parsers, not whether it is running as root.
+
+# A compromised process cannot regain privilege through a setuid binary, which
+# is what turns "arbitrary code as nodevas" into "arbitrary code as root".
+NoNewPrivileges=yes
+
+# The whole filesystem hierarchy is read-only apart from the exceptions below,
+# so nothing can drop a payload in /usr/local/bin next to the binary or edit a
+# unit file to run it on the next boot.
+ProtectSystem=strict
+
+# /home, /root and /run/user become empty. The service has no reason to read
+# an operator's checkout or anybody's SSH keys.
+# SSH keys.
+ProtectHome=yes
+
+# A private /tmp, so a temp file this process writes cannot be swapped for a
+# symlink by another local account between creation and use.
+PrivateTmp=yes
+
+# Only the pseudo-devices (/dev/null, /dev/urandom and friends) are visible.
+# There is no reason for a Markdown editor to open a raw block device — which
+# is exactly how a sandboxed process reads the volume around the filesystem.
+PrivateDevices=yes
+
+# The one writable tree: the block volume that holds the workspace, the SQLite
+# database and XDG_CONFIG_HOME. Note that /etc/nodevas is *not* here: the
+# service reads its configuration, it does not rewrite it.
+ReadWritePaths=/var/lib/nodevas
+
+# The server speaks TCP to its own loopback listener and to the SMTP relay,
+# and AF_UNIX to journald and the resolver. AF_NETLINK stays because Go's
+# resolver enumerates local interfaces through it; dropping it turns every
+# DNS lookup into an error that reads like a network outage.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# It needs no capabilities at all: the port is 5666, above 1024, and Caddy
+# owns 80 and 443. An empty bounding set means a future exploit cannot pick up
+# CAP_DAC_OVERRIDE or CAP_NET_RAW even if something set them.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Nothing here writes to /proc/sys, loads modules, or edits another service's
+# cgroup limits. Denying it costs nothing and removes three well-trodden
+# routes out of a container-shaped sandbox.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+# No sub-namespaces and no setuid/setgid bits on files it creates, so the
+# sandbox cannot be escaped by building a fresh, unconfined one inside it.
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+
+# Other processes on the box become invisible in /proc. Useful specifically
+# because credentials do end up in command lines elsewhere — the `nodevas
+# user pin` warnings exist for that reason — and this process should not be
+# the thing that reads them.
+ProtectProc=invisible
+ProcSubset=pid
+
+# The process image is the one Go built; there is no reason for it to switch
+# personality or ask for realtime scheduling, and both are recurring exploit
+# primitives.
+LockPersonality=yes
+RestrictRealtime=yes
+
+# The binary is a single architecture; allowing the 32-bit syscall table would
+# only add an alternate entrance to the syscalls filtered below.
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Deliberately NOT set: MemoryDenyWriteExecute. Go's runtime and the JSON
+# codecs gin can be built against generate executable pages at runtime, and a
+# service that refuses to start is worse than one that keeps a mapping this
+# process was always able to make anyway.
+
+# A percentage, not a number, because the same unit runs on a 1 GB micro and a
+# 24 GB A1. This is not here to keep the app small — it is so that a
+# whole-project export or a runaway import cannot take sshd and the journal
+# down with it and leave an instance nobody can log into.
+MemoryMax=75%
+
+# The file watcher holds descriptors across the workspace and every browser
+# tab adds a WebSocket. The default 1024 is reachable with one large project
+# open in three tabs, and the failure looks like random save errors.
+LimitNOFILE=65536
+
+# One workspace, one server: the process is not a fork bomb candidate, but a
+# bound turns a runaway goroutine-per-connection bug into a refused connection
+# instead of a dead machine.
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

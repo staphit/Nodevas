@@ -1,0 +1,548 @@
+/* Split out of the original 10-canvas.css (now several ordered siblings).
+ * app.css imports these in the original file's rule order — moving rules
+ * between files, or reordering the imports, can change which one wins.
+ *
+ * canvas tools: board title/hint, operation status, command palette,
+ * graph productivity toolbar, priority/entry/tag markers on cards
+ */
+/* ---------- lane-wrap / title / right ruler additions ---------- */
+.lane-wrap {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.lane-wrap .board {
+  flex: 1;
+  min-height: 0;
+}
+.board-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+/* Transparent to layout everywhere the header fits on one line: on a desktop
+   every control inside sits directly in .board-title exactly as it did before
+   this wrapper existed, so nothing about the wide header changes. It only
+   becomes a box of its own below 720px — see the phone block at the end. */
+.board-title-controls {
+  display: contents;
+}
+.board-title-main {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.board-title-hint {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.5;
+  flex: 1;
+  min-width: 200px;
+}
+.board-title-message {
+  max-width: 320px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.board-title-message.ok {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.board-title-message.error {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.board-title-message.selection {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+  border: 1px solid color-mix(in srgb, var(--st-progress-fg) 45%, transparent);
+}
+.inline-notice,
+.operation-status {
+  display: inline-flex;
+  max-width: 320px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.inline-notice.success,
+.operation-status.saved {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.inline-notice.error,
+.operation-status.error,
+.operation-status.conflict {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.inline-notice.warning {
+  color: var(--st-blocked-fg);
+  background: var(--st-blocked-bg);
+}
+.inline-notice.info,
+.operation-status.pending {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.operation-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.operation-status.pending .operation-status-dot {
+  animation: operation-pulse 900ms ease-in-out infinite alternate;
+}
+@keyframes operation-pulse {
+  to {
+    opacity: 0.3;
+    transform: scale(0.72);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .operation-status.pending .operation-status-dot {
+    animation: none;
+  }
+}
+
+/* ---------- command palette ---------- */
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: start center;
+  padding-top: min(16vh, 140px);
+  background: color-mix(in srgb, var(--scrim) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+.command-palette {
+  width: min(680px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+}
+.command-palette-input {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--border);
+}
+.command-palette-input input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+}
+.command-palette kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 10px var(--mono);
+}
+.command-palette-results {
+  max-height: min(52vh, 460px);
+  overflow: auto;
+  padding: 7px;
+}
+.command-palette-results button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.command-palette-results button.selected {
+  background: var(--hover);
+}
+/* Group heading: commands and search hits share one list, so each block says
+   what it is instead of leaving the reader to guess where results start. */
+.command-palette-group {
+  padding: 8px 10px 4px;
+  color: var(--text-2);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.command-palette-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border);
+}
+.command-palette-help-head button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.command-palette-help {
+  max-height: min(58vh, 500px);
+  overflow: auto;
+  padding: 12px 15px 16px;
+}
+.command-palette-help h3 {
+  margin: 12px 0 6px;
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.command-palette-help section:first-child h3 {
+  margin-top: 0;
+}
+.command-palette-help dl > div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+.command-palette-help dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.command-palette-help dd,
+.command-palette-help li {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.command-palette-help ol {
+  margin: 0;
+  padding-left: 18px;
+}
+.command-palette-results b,
+.command-palette-results small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-palette-results small,
+.command-palette-empty {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.command-palette-empty {
+  padding: 24px;
+  text-align: center;
+}
+.command-palette footer {
+  display: flex;
+  gap: 18px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+/* ---------- graph productivity tools ---------- */
+/* Primary board action: creating a node must never require a right click. */
+.board-primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.board-primary-action:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+}
+.board-primary-action:active {
+  transform: translateY(1px);
+}
+
+.board-tool-button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10px;
+}
+.board-tool-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* The only tool button carrying a glyph, so the row keeps its plain layout. */
+.board-tool-button.snap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.board-tool-button.alert::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--st-failed-fg);
+}
+.graph-batch-toolbar,
+.graph-tools-panel,
+.graph-analysis-panel {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--accent) 8%);
+}
+.graph-batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 14px;
+  font-size: 11px;
+}
+.graph-batch-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+}
+.graph-batch-toolbar button,
+.graph-batch-toolbar select,
+.graph-tools-panel button,
+.graph-tools-panel select,
+.graph-tools-panel input {
+  min-height: 27px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+/* What Ctrl+C / Ctrl+X is holding, so a paste in another project is expected. */
+.graph-batch-clipboard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.graph-batch-clipboard button {
+  min-height: 20px;
+  padding: 0 6px;
+}
+
+/* The destructive action sits apart from the rest and reads as destructive. */
+.graph-batch-toolbar button.danger {
+  margin-left: auto;
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
+}
+.graph-batch-toolbar button.danger:hover:not(:disabled) {
+  background: var(--st-failed-bg);
+}
+.graph-tools-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  overflow-x: auto;
+}
+.graph-tools-panel > input {
+  width: 230px;
+  padding: 3px 8px;
+}
+.saved-view-create,
+.saved-view-chip {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.saved-view-create input {
+  width: 105px;
+  border-radius: 5px 0 0 5px;
+}
+.saved-view-create button {
+  border-radius: 0 5px 5px 0;
+}
+.saved-view-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.saved-view-chip button {
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.graph-analysis-panel {
+  max-height: 190px;
+  overflow: auto;
+  padding: 9px 14px;
+}
+.analysis-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  align-items: center;
+  font-size: 11px;
+}
+.analysis-summary span {
+  color: var(--text-2);
+}
+.analysis-summary .danger {
+  color: var(--st-failed-fg);
+}
+.analysis-path {
+  margin-top: 6px;
+  color: var(--text-2);
+  font-size: 10px;
+}
+.analysis-path button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: inherit;
+}
+.analysis-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.analysis-items > button {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 36%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--st-failed-bg) 45%, var(--surface));
+  color: var(--text);
+  text-align: left;
+}
+.analysis-items b,
+.analysis-items small {
+  display: block;
+}
+.analysis-items small {
+  color: var(--text-2);
+}
+
+.col-card.filtered-out {
+  opacity: 0.16;
+  filter: saturate(0.25);
+}
+.col-card.analysis-critical {
+  box-shadow: inset 0 0 0 1px #a67c2d;
+}
+.col-card.analysis-overdue {
+  border-right: 3px solid var(--st-failed-fg);
+}
+.col-card.analysis-violation {
+  outline: 2px solid var(--st-failed-fg);
+  outline-offset: 2px;
+}
+.col-card.analysis-blocked::after {
+  content: "受阻";
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  color: var(--st-failed-fg);
+  font-size: calc(8px * var(--card-font-scale, 1));
+  font-weight: 700;
+}
+.col-card.analysis-blocking::before {
+  content: "阻塞源";
+  position: absolute;
+  right: 5px;
+  top: 4px;
+  color: var(--st-ready-fg);
+  font-size: calc(8px * var(--card-font-scale, 1));
+  font-weight: 700;
+}
+/* Only reachable through a deprecated wire: kept on the board, out of play. */
+.col-card.is-deprecated {
+  opacity: 0.5;
+  filter: saturate(0.4);
+}
+.col-card.is-deprecated.selected,
+.col-card.is-deprecated:hover {
+  opacity: 0.85;
+  filter: none;
+}
+
+/* Entry nodes: nothing points at them, so they are where a reader starts. */
+.col-card.is-entry {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.col-card.analysis-critical.is-entry {
+  box-shadow:
+    inset 0 0 0 1px #a67c2d,
+    inset 3px 0 0 0 var(--accent);
+}
+.entry-flag {
+  flex: none;
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 3px;
+  color: var(--accent);
+  font-size: calc(8px * var(--card-font-scale, 1));
+  font-weight: 700;
+  line-height: calc(12px * var(--card-font-scale, 1));
+  letter-spacing: 0.04em;
+}
+.priority-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+.priority-dot.urgent { background: #d94747; }
+.priority-dot.high { background: #d9822b; }
+.priority-dot.medium { background: #c5a43a; }
+.priority-dot.low { background: #5b8eac; }
+.col-card-tags {
+  overflow: hidden;
+  color: var(--accent);
+  font-size: calc(8px * var(--card-font-scale, 1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

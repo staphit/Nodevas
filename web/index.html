@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover lets the page reach under the notch and the home
+         indicator, which the safe-area insets in styles/14-touch.css then pad
+         the chrome back out of.
+
+         Page zoom is deliberately NOT disabled. The same bundle is served to a
+         browser and to the iOS app, and taking pinch-to-zoom away from a web
+         page takes it away from everyone who needs it to read. The board keeps
+         its own pinch anyway: `touch-action: none` there means the browser
+         never sees that gesture, so the two do not fight, and the iOS shell
+         turns the web view's own pinch off in Swift. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="icon" type="image/png" href="/nodevas.png" />
+    <link rel="apple-touch-icon" href="/nodevas.png" />
+    <title>Nodevas</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

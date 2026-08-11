@@ -1,0 +1,268 @@
+/* Split out of the original 10-canvas.css (now several ordered siblings).
+ * app.css imports these in the original file's rule order — moving rules
+ * between files, or reordering the imports, can change which one wins.
+ *
+ * drawer timeline plan editor, future-date dimming, and the board chrome /
+ * timeline header phone overrides (must load after the rules above they win over)
+ */
+/* drawer timeline: inline plan date editor */
+.timeline-plan-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.timeline-plan-edit-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.timeline-plan-edit-row.with-time {
+  grid-template-columns: 90px 1fr 92px;
+}
+.timeline-plan-edit-row.with-time small {
+  grid-column: 2 / 4;
+}
+.plan-time {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 9px;
+}
+.timeline-plan-edit-row span {
+  color: var(--text-2);
+}
+.timeline-plan-edit-row input[type="date"],
+.timeline-plan-edit-row input[type="time"] {
+  min-height: 27px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+}
+.timeline-plan-edit-row small {
+  grid-column: 2;
+  color: var(--text-2);
+}
+.timeline-plan-edit-row.in-progress {
+  grid-template-columns: 90px auto auto;
+}
+.timeline-plan-edit-row.in-progress button {
+  justify-self: start;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--st-failed-fg);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* future date rows */
+.board-future .board-cell {
+  opacity: 0.75;
+}
+.board-date-r.future {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* ---------- board chrome on a phone ---------- */
+
+/* On a wide window the hint sentence is already visible, so its toggle would
+   only be a second way to read the same line. */
+.board-hint-toggle {
+  display: none;
+}
+
+/* Appended, not merged into the rules above: this file is one ordered slice and
+   these are overrides that have to win over it. 14-touch.css explains why the
+   board toolbar's phone treatment lives here rather than there. */
+@media (max-width: 720px) {
+  /* The header, the batch toolbar and the tools panel stack above the canvas.
+     On a 393px screen they were together eating more than half the height,
+     mostly by wrapping: every row that wraps is a row the board loses. */
+  .board-title {
+    gap: 5px;
+    row-gap: 4px;
+    padding: 4px 10px;
+  }
+
+  /* The header's controls do not fit across 390px and never will — the gesture
+     switch alone is three finger-sized targets — so the choice is between
+     wrapping to a second row and scrolling sideways. Scrolling wins: a row of
+     header costs ~52px of canvas on every screen, while a swipe costs nothing
+     until the moment someone needs the control at the far end. Everything stays
+     in the tab order and in the accessibility tree either way. */
+  .board-title-controls {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    /* Without this the swipe that scrolls the strip continues into the board
+       behind it once the strip reaches its end. */
+    overscroll-behavior-x: contain;
+  }
+  /* Nested one level deeper because .timeline-layout-controls is display:
+     contents, so its children are laid out by this strip but are not its
+     element children. */
+  .board-title-controls > *,
+  .board-title-controls .timeline-layout-controls > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  /* The pane name is the one thing here that can lose characters without
+     losing a control, so it is the only item allowed to shrink. The floor
+     leaves enough to tell the two panes apart — 關係… against 時間… — which is
+     all it has to do once the pane is on screen. */
+  .board-title-main {
+    flex: 0 1 auto;
+    min-width: 3.6em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Says which node the timeline is following, and node titles are long: it
+     truncates rather than pushing every button past the end of the strip. */
+  .board-title-message.selection {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .board-primary-action {
+    gap: 4px;
+    padding: 4px 8px;
+  }
+  .board-tool-button {
+    padding: 4px 5px;
+  }
+  .board-zoom-reset {
+    min-width: 42px;
+    padding: 2px 5px;
+  }
+
+  /* Hidden by default so the header stays at one row; opening it is a
+     deliberate tap. Drawn small because a full-height button would set the
+     strip's height for everyone, with the 44px target restored below. */
+  .board-hint-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .board-hint-toggle[aria-expanded="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  /* The collapse chevron and the hint toggle are the two controls here drawn
+     smaller than a fingertip. Growing them would grow the strip, so the hit
+     area is added around them instead: the overlay is centred on the button
+     and is what the tap actually lands on. */
+  .board-title-controls .pane-toggle,
+  .board-hint-toggle {
+    position: relative;
+  }
+  .board-title-controls .pane-toggle::before,
+  .board-hint-toggle::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+  .board-title-hint {
+    display: none;
+  }
+  /* Pinned to the viewport rather than given a row: the strip it lives in
+     clips its own overflow, and a sentence that scrolls sideways one word at a
+     time is not readable anyway. The same reasoning parks the cell-size
+     popover at the bottom of the screen further down this file. */
+  .board-title-hint.open {
+    position: fixed;
+    /* Undoes the strip's nowrap: out of the strip it is a paragraph again. */
+    white-space: normal;
+    z-index: var(--z-popover, 60);
+    left: 12px;
+    right: 12px;
+    bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+    display: block;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 16px 40px var(--shadow);
+  }
+
+  /* The only route a finger has to the connect and marquee drags, so it keeps
+     a full touch target even while everything around it shrinks. */
+  .gesture-mode button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 3px 4px;
+  }
+
+  /* These two rows carry Chinese labels that break one character per line the
+     moment they are squeezed, which is both unreadable and three rows tall.
+     Sideways scrolling keeps every label whole and costs one row instead. */
+  .graph-batch-toolbar,
+  .graph-tools-panel {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* Without this the swipe that scrolls the strip continues into the page or
+       the board behind it once the strip reaches its end. */
+    overscroll-behavior-x: contain;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .graph-batch-toolbar > *,
+  .graph-tools-panel > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  /* A 230px field alone is more than half the strip; it still takes a
+     comfortable share, just not the whole first screenful. */
+  .graph-tools-panel > input {
+    width: 160px;
+  }
+}
+
+/* ---------- timeline header: one strip on a phone ---------- */
+
+/* Transparent to layout at every width: on a desktop the timeline's six layout
+   controls sit directly in the header row exactly as they did before this
+   wrapper existed, and on a phone .board-title-controls is already the one
+   strip that scrolls, so this stays out of the way there too. */
+.timeline-layout-controls {
+  display: contents;
+}
+
+@media (max-width: 720px) {
+  /* The cell-size popover is anchored to a control inside that scrolling
+     strip, so an absolutely positioned panel would be clipped by it and would
+     slide away as the strip scrolled. Pinned to the viewport instead: it is a
+     panel of sliders, and where it sits matters far less than being able to
+     reach all of it. */
+  .timeline-size-popover {
+    position: fixed;
+    top: auto;
+    right: auto;
+    left: 50%;
+    bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+    width: min(300px, calc(100vw - 24px));
+    transform: translateX(-50%);
+  }
+}

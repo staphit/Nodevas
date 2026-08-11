@@ -1,0 +1,3 @@
+This file keeps web/dist/ in git so //go:embed all:dist in web/embed.go
+compiles before the frontend is ever built. Vite regenerates it from
+web/public/.gitkeep on every build (it empties dist/ otherwise).

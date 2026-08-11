@@ -1,0 +1,85 @@
+# Local runtime binaries and rollback copies
+/nodevas
+/nodevas.exe
+/nodevas.*.exe
+/.local/
+
+# Go build and test artifacts
+/bin/
+/.gocache/
+/.go-build-cache/
+/.codex-cache/
+*.test
+*.prof
+coverage.out
+cover.out
+
+# Web dependencies and generated bundles
+/web/node_modules/
+# Ignore the built bundle but keep the directory (with its placeholder) so the
+# `//go:embed all:dist` in web/embed.go always has something to match, even
+# before `npm run build` has ever run.
+/web/dist/*
+!/web/dist/.gitkeep
+/web/.vite/
+/web/*.tsbuildinfo
+
+# Desktop packaging dependencies and generated artifacts
+/desktop/node_modules/
+/desktop/dist/
+/desktop/build/
+/desktop/resources/bin/
+
+# iOS build outputs. The Xcode project is generated from ios/project.yml by
+# XcodeGen, so it does not belong in review.
+/ios/*.xcodeproj/
+/ios/*.xcworkspace/
+/ios/build/
+/ios/DerivedData/
+
+# Local exports
+*.veproj
+
+# Local workspaces
+/examples/
+
+# Per-project recovery state
+**/.vised/
+**/.vised-last
+
+# Logs, temporary files, and editor backups
+*.log
+*.tmp
+*.bak
+*.orig
+*~
+
+# Local environment values
+.env
+.env.*
+!.env.example
+
+# IDE and operating-system metadata
+/.idea/
+/.vscode/
+/.vs/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Playwright
+web/test-results/
+web/playwright-report/
+web/e2e/.bin/
+# Screenshots from `npm run preview:mobile`: regenerated on demand, and a
+# binary that would churn on every layout tweak.
+web/mobile-preview/
+
+# Claude local state and agent worktrees: never part of a commit.
+/.claude/
+
+# Codebase-memory local index metadata.
+/.codebase-memory/
+
+# Cross-compiled binaries from deploy dry runs.
+/nodevas-linux-*

@@ -1,0 +1,24 @@
+# Copy this file to the workspace root as nodevas.yaml.
+# Command-line flags override this file; NODEVAS_SERVE_* environment variables
+# are applied between the file and command-line flags.
+
+listen: 127.0.0.1
+port: 5666
+hostname: ""
+behind_proxy: false
+trusted_proxy: 127.0.0.1/32,::1/128
+tls_cert: ""
+tls_key: ""
+allow_plaintext: false
+max_active_users: 0
+
+smtp:
+  host: ""
+  port: 587
+  user: ""
+  from: ""
+  security: starttls
+
+logging:
+  level: info
+  format: json

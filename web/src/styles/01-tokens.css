@@ -1,0 +1,153 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * palette, motion tokens, element defaults
+ */
+/* Warm monochrome editorial palette (taste-skill), light + dark.
+   Motion values follow emil-design-eng: custom ease-out curves, <300ms,
+   scale(0.97) press feedback, specific transition properties only. */
+:root {
+  --bg: #f3f6f8;
+  --surface: #ffffff;
+  --surface-2: #f7f9fb;
+  --border: #dfe5ea;
+  --border-strong: #bcc7d0;
+  --hover: #edf3f5;
+  --text: #17212b;
+  --text-2: #66727f;
+  --accent: #28798a;
+  --accent-text: #ffffff;
+  --shadow: rgba(23, 33, 43, 0.08);
+  --scrim: rgba(23, 33, 43, 0.12);
+
+  /* Alignment guides: deliberately not the accent, so a guide is never read
+     as a selection or as a wire being drawn. */
+  --snap-guide: #c0399a;
+
+  --st-locked-fg: #787774;
+  --st-locked-bg: #f1f0ee;
+  --st-ready-fg: #956400;
+  --st-ready-bg: #fbf3db;
+  --st-progress-fg: #1f6c9f;
+  --st-progress-bg: #e1f3fe;
+  --st-done-fg: #346538;
+  --st-done-bg: #edf3ec;
+  --st-skipped-fg: #9a9791;
+  --st-skipped-bg: #f1f0ee;
+  --st-failed-fg: #9f2f2d;
+  --st-failed-bg: #fdebec;
+  --st-deprecated-fg: #7c7a74;
+  --st-deprecated-bg: #eceae6;
+
+  --mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --z-drawer: 40;
+  --z-banner: 10;
+  --row-h: 64px;
+}
+
+[data-theme="dark"] {
+  --bg: #11161b;
+  --surface: #171d22;
+  --surface-2: #1c2329;
+  --border: #2d3740;
+  --border-strong: #485661;
+  --hover: #222b32;
+  --text: #e7edf1;
+  --text-2: #96a2ac;
+  --accent: #62b2c1;
+  --accent-text: #0b171a;
+  --shadow: rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.4);
+
+  --snap-guide: #f07cc8;
+
+  --st-locked-fg: #999691;
+  --st-locked-bg: #2a2926;
+  --st-ready-fg: #d9a441;
+  --st-ready-bg: #33290f;
+  --st-progress-fg: #6cb2e0;
+  --st-progress-bg: #12293a;
+  --st-done-fg: #7fbd85;
+  --st-done-bg: #1c2b1e;
+  --st-skipped-fg: #85827c;
+  --st-skipped-bg: #2a2926;
+  --st-failed-fg: #e08a88;
+  --st-failed-bg: #38201f;
+  --st-deprecated-fg: #6f6d67;
+  --st-deprecated-bg: #24231f;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", "Helvetica Neue", "Noto Sans TC", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.6;
+}
+html {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out), transform 120ms var(--ease-out);
+}
+button:active {
+  transform: scale(0.97);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 1px;
+}
+.mono {
+  font-family: var(--mono);
+}
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 0 4px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--surface-2);
+}
+.icon-btn svg {
+  flex-shrink: 0;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}

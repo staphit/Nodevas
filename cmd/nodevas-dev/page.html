@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nodevas dev launcher</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 1.5rem; max-width: 60rem; }
+  h1 { font-size: 1.1rem; }
+  .dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: #999; vertical-align: middle; }
+  .running .dot { background: #2a2; }
+  .stopped .dot { background: #a22; }
+  .busy .dot { background: #ca2; }
+  button { font: inherit; padding: .35rem .8rem; margin-right: .4rem; }
+  #log { background: #111; color: #ddd; padding: .6rem; height: 26rem; overflow: auto; white-space: pre-wrap; }
+  #log .stderr { color: #f8c; }
+  #log .launcher, #log .build { color: #8cf; }
+  .warn { background: #fee; border: 1px solid #c88; padding: .6rem; margin: .6rem 0; }
+  dl { display: grid; grid-template-columns: 9rem 1fr; gap: .1rem .8rem; margin: .6rem 0; }
+  dt { color: #666; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<h1>Nodevas dev launcher <small>&mdash; development only, not a production supervisor</small></h1>
+
+<p id="statusline" class="stopped"><span class="dot"></span> <strong id="state">…</strong> <span id="detail"></span></p>
+
+<dl>
+  <dt>workspace</dt><dd id="workspace"></dd>
+  <dt>serving</dt><dd id="serving"></dd>
+  <dt>server</dt><dd id="appurl"></dd>
+  <dt>binary</dt><dd id="binary"></dd>
+  <dt>frontend</dt><dd id="frontend"></dd>
+  <dt>last build</dt><dd id="build"></dd>
+</dl>
+
+<p>
+  <button id="start">Start</button>
+  <button id="stop">Stop</button>
+  <button id="restart">Restart</button>
+  <button id="open">Open the app</button>
+</p>
+<p>
+  <button id="buildFrontend">Rebuild frontend (web)</button>
+  <button id="buildBinary">Rebuild binary (go)</button>
+  <small>in that order: the frontend is embedded into the binary</small>
+</p>
+
+<div id="problem" class="warn" hidden></div>
+
+<div id="log"></div>
+
+<script>
+let appURL = "";
+let conflictPID = 0;
+
+function post(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "X-Nodevas-Dev": "1", "content-type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  }).then((r) => r.json()).then(render).catch((e) => alert(e));
+}
+
+function render(s) {
+  appURL = s.appURL;
+  const line = document.getElementById("statusline");
+  line.className = s.state === "running" ? "running" : (s.state === "stopped" ? "stopped" : "busy");
+  document.getElementById("state").textContent = s.state;
+  document.getElementById("detail").textContent =
+    s.state === "running" ? `pid ${s.pid}, port ${s.serverPort}, since ${s.since}` : (s.lastExit || "");
+  document.getElementById("workspace").textContent = s.workspace + " (requested)";
+  // The server reopens its last registered workspace, so what it actually
+  // opened is only knowable from its own log.
+  document.getElementById("serving").textContent = s.serving || "— (not reported yet)";
+  document.getElementById("appurl").textContent = s.appURL;
+  document.getElementById("binary").textContent = s.binary;
+  document.getElementById("frontend").textContent =
+    s.build.frontendBuilt ? "web/dist/index.html present" : "web/dist/index.html MISSING — the binary ships a placeholder UI";
+  document.getElementById("build").textContent =
+    s.build.running ? `${s.build.running} building…` : (s.build.last ? `${s.build.last}: ${s.build.lastResult}` : "—");
+
+  const problem = document.getElementById("problem");
+  const parts = [];
+  conflictPID = 0;
+  if (s.actionError) parts.push(escapeHTML(s.actionError));
+  if (s.problem && s.problem !== s.actionError) parts.push(escapeHTML(s.problem));
+  if (s.conflict) {
+    conflictPID = s.conflict.pid || 0;
+    if (conflictPID) {
+      parts.push(`Port held by ${escapeHTML(s.conflict.process || "an unidentified program")} (pid ${conflictPID}). ` +
+        `<button id="kill">Kill pid ${conflictPID}</button> — nothing is killed unless you press this.`);
+    }
+  }
+  problem.hidden = parts.length === 0;
+  problem.innerHTML = parts.join("<br>");
+  const kill = document.getElementById("kill");
+  if (kill) kill.onclick = () => {
+    if (confirm(`Kill pid ${conflictPID}?`)) post("/api/release-port", { pid: conflictPID });
+  };
+
+  const log = document.getElementById("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.innerHTML = s.lines.map((l) =>
+    `<div class="${l.source}">${l.at} ${escapeHTML(l.text)}</div>`).join("");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function escapeHTML(text) {
+  return String(text).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+document.getElementById("start").onclick = () => post("/api/start");
+document.getElementById("stop").onclick = () => post("/api/stop");
+document.getElementById("restart").onclick = () => post("/api/restart");
+document.getElementById("open").onclick = () => window.open(appURL, "_blank");
+document.getElementById("buildFrontend").onclick = () => post("/api/build-frontend");
+document.getElementById("buildBinary").onclick = () => post("/api/build-binary");
+
+function poll() {
+  fetch("/api/status").then((r) => r.json()).then(render).catch(() => {});
+}
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

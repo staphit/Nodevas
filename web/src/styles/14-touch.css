@@ -1,0 +1,182 @@
+/* Touch and phone-sized layout.
+ *
+ * Last in the import order on purpose: these rules exist to override desktop
+ * assumptions the earlier slices make, and each is scoped to a coarse pointer
+ * or a narrow viewport so a mouse-driven window is left exactly as it was.
+ * Coarse-pointer sizing that already lives with the component it belongs to
+ * (card resize handles in 06, shapes in 08, timeline in 12) stays there.
+ */
+
+/* ---------- the board owns its own gestures ---------- */
+
+/* Panning and pinch-zoom are handled in useCanvasPan through pointer events.
+ * Without this the browser scrolls and zooms first and the pointer stream
+ * arrives already cancelled, so a drag on a phone does nothing at all. Wheel
+ * and trackpad scrolling are unaffected: touch-action only governs touch. */
+.board {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+/* A long press is how a finger reaches a context menu, so iOS must not answer
+ * the same gesture with a selection loupe or a link callout. Scoped to the
+ * things that carry menus rather than the whole app, because note text still
+ * has to be selectable. */
+.col-card,
+.canvas-decoration,
+.logic-gate,
+.lane-card,
+.timeline-card,
+.tree-row {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Editors and fields opt back in: their content is text a user selects. */
+.cm-editor,
+.cm-content,
+.canvas-decoration textarea,
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@media (pointer: coarse) {
+  /* 44px is the smallest target Apple's own controls use, and every one of
+   * these is a row a finger has to hit exactly once. */
+  .tree-row,
+  .board-tool-button,
+  .lane-context-menu button,
+  .project-context-menu button,
+  .tab-context-menu button,
+  .transfer-menu-panel button {
+    min-height: 44px;
+  }
+
+  /* Colour swatches are 20px squares, which a mouse can hit and a finger
+     cannot. The rule above would only make them 44px *tall*, leaving a 20px
+     wide bar, so they are squared off here instead — in the inspector as well
+     as in the creation form, since both are reachable on a phone. The row has
+     to wrap once eight of them are finger-sized. */
+  .appearance-colour-row {
+    flex-wrap: wrap;
+  }
+  .appearance-swatch,
+  .appearance-colour-row input[type="color"] {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Sized for a pointer that can rest on a row; a finger cannot hover, so the
+   * scrollable strips these live in need room to be swiped rather than
+   * squeezed. */
+  .graph-tools-panel,
+  .graph-batch-toolbar {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}
+
+/* ---------- phone layout ---------- */
+
+/* Above this width the explorer can sit beside the board; below it there is
+ * room for one column, so the explorer floats over the board instead of
+ * squeezing it to nothing. The drawer already becomes a full overlay at
+ * 1024px (03-explorer.css); here it becomes a sheet, because a side panel on a
+ * 390px screen leaves neither the board nor the document readable. */
+@media (max-width: 720px) {
+  /* The top bar's own phone treatment lives in 02-shell.css, beside the rules
+     it overrides; the drawer's in 05-drawer.css and the board toolbar's in
+     10-canvas.css, for the same reason. This file keeps only what belongs to
+     no single component: gestures, pointer sizing, the explorer overlay, and
+     the device insets.
+
+     The two exceptions below have to live here rather than there. Both undo
+     rules from 03-explorer.css's 900px breakpoint, which imports *after*
+     02-shell.css and so wins at equal specificity; this file imports last, so
+     it is the only place that can have the final word without raising
+     specificity or reordering the imports. Without them the bar wraps to
+     three rows on a phone — the breadcrumb claims a full row of its own — and
+     the whole point of the phone top bar is lost. */
+  .topbar {
+    flex-wrap: nowrap;
+  }
+  .topbar .file-ops.project-breadcrumb {
+    width: auto;
+    overflow-x: visible;
+  }
+
+  /* Absolute inside .main, not fixed to the viewport: a fixed overlay covers
+     the top bar, and the top bar holds the only button that closes it. */
+  .sidebar-shell {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(86vw, 304px);
+    flex-basis: 0;
+    z-index: var(--z-drawer, 40);
+    background: var(--surface);
+    box-shadow: 8px 0 32px var(--shadow);
+    transition: transform 180ms var(--ease-out);
+  }
+  /* Collapsed slides out of the way rather than collapsing to zero width: an
+   * overlay has no neighbour to give its width back to, and the transform
+   * keeps the panel's contents laid out so reopening does not reflow them. */
+  .sidebar-shell.collapsed {
+    width: min(86vw, 304px);
+    flex-basis: 0;
+    transform: translateX(-100%);
+  }
+  .sidebar-shell > .sidebar.explorer-sidebar,
+  .sidebar.explorer-sidebar {
+    width: 100%;
+  }
+
+  /* Dims the board while the explorer overlay covers it, and a tap on it
+   * closes the panel. Absolute inside .main for the same reason the sidebar
+   * above is: fixed would also cover the top bar, whose toggle must stay
+   * tappable. One layer below the sidebar so the panel itself is never
+   * dimmed; same scrim recipe as .confirm-backdrop, same 180ms as the
+   * panel's slide, so the two read as one movement. */
+  .sidebar-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: calc(var(--z-drawer, 40) - 1);
+    background: color-mix(in srgb, var(--scrim) 82%, transparent);
+    animation: backdrop-fade 180ms var(--ease-out);
+  }
+  @keyframes backdrop-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* ---------- device safe areas ---------- */
+
+/* In the iOS app the web view runs edge to edge, under the notch and the home
+ * indicator, so the chrome insets itself rather than letting the system draw
+ * over controls. The board is left alone on purpose: the canvas should reach
+ * the edge, and its own controls sit in the inset chrome above and below. */
+@supports (padding: env(safe-area-inset-top)) {
+  .topbar {
+    padding-top: max(env(safe-area-inset-top), 8px);
+    padding-left: max(env(safe-area-inset-left), 12px);
+    padding-right: max(env(safe-area-inset-right), 12px);
+  }
+  /* No top inset: the explorer sits below the top bar, which has already
+     cleared the notch. */
+  .sidebar-shell {
+    padding-left: env(safe-area-inset-left);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .drawer {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

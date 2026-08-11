@@ -1,0 +1,254 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * content pages, editor toolbar
+ */
+/* ---------- document pages ---------- */
+.content-page-bar {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.content-page-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  padding: 4px 5px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.content-page-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-page-tabs button:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.content-page-tabs button.active {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 600;
+}
+.content-page-action {
+  display: inline-flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-left: 1px solid var(--border);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+.content-page-action:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.content-page-loading {
+  align-self: center;
+  padding: 0 8px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.content-page-create {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.content-page-create > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.content-page-create input {
+  flex: 1;
+  min-width: 80px;
+}
+.content-page-create button {
+  white-space: nowrap;
+}
+.content-page-create select {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11.5px;
+}
+/* The Word/HTML caveat wraps onto its own line under the form. */
+.content-page-create-note {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.content-page-create {
+  flex-wrap: wrap;
+}
+/* Tab badge: the extension, only when it is not the Markdown default. */
+.content-page-format {
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+}
+.content-page-tabs button.active .content-page-format {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+}
+.content-page-format-select {
+  height: 24px;
+  max-width: 130px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.md-preview-plain {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.content-page-error {
+  flex-shrink: 0;
+}
+.content-page-editor-loading {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  color: var(--text-2);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+/* ---------- editor toolbar ---------- */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.tool-btn {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 5px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tool-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tool-btn.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.tool-list-select {
+  height: 26px;
+  max-width: 92px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.tool-list-select:hover,
+.tool-list-select:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tool-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.tool-flex {
+  flex: 1;
+}
+/* Card resize handles: visible only on the selected card, 12px targets. */
+.col-card-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow);
+  z-index: 3;
+  touch-action: none;
+}
+.col-card-handle:hover,
+.col-card-handle:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+.col-card-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.col-card-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.col-card-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.col-card-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.col-card-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.col-card-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.col-card-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.col-card-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+@media (pointer: coarse) {
+  .col-card-handle {
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+  }
+}

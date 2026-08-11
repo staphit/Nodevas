@@ -1,0 +1,1513 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * top bar, project settings, notification settings
+ */
+/* ---------- top bar ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.topbar h1 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  white-space: nowrap;
+}
+.explorer-toggle {
+  min-width: 42px;
+  justify-content: center;
+  padding-inline: 7px;
+  color: var(--text-2);
+}
+.explorer-toggle span {
+  font: 700 12px/1 var(--mono);
+}
+.file-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+/* Breadcrumb: say where we are before offering to move somewhere else. */
+.project-breadcrumb .crumb-workspace {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.project-breadcrumb .crumb-separator {
+  color: var(--text-3, var(--text-2));
+  font-size: 11px;
+}
+.project-breadcrumb .crumb-label {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.project-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono);
+  max-width: 180px;
+}
+.project-type {
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  background: var(--surface-2);
+}
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.global-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 14px;
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  border-bottom: 1px solid var(--st-failed-fg);
+  font-size: 12px;
+}
+.global-error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.document-persistence-alert {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-banner);
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--st-failed-fg);
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  box-shadow: 0 4px 14px var(--shadow);
+  font-size: 12px;
+}
+
+.document-persistence-alert strong {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .document-persistence-alert {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+}
+
+.topbar-create-panel {
+  display: grid;
+  grid-template-columns: minmax(170px, auto) auto minmax(240px, 420px) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.topbar-create-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+.topbar-create-copy > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.topbar-create-copy strong {
+  color: var(--text);
+  font-size: 12px;
+}
+.topbar-create-copy small {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.topbar-create-panel label {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.topbar-create-panel input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+}
+.topbar-create-actions {
+  display: flex;
+  gap: 6px;
+}
+.topbar-create-actions button,
+.project-create-footer button {
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.topbar-create-actions button.primary,
+.project-create-footer button.primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--scrim) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+.confirm-dialog {
+  width: min(430px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--shadow) 75%, transparent);
+}
+.confirm-dialog header {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 18px;
+}
+.confirm-dialog-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.confirm-dialog.danger .confirm-dialog-icon {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.confirm-dialog header > div {
+  min-width: 0;
+  flex: 1;
+}
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.confirm-dialog p {
+  margin: 5px 0 0;
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  /* Multi-line notices (e.g. one line per transfer warning) keep their breaks. */
+  white-space: pre-line;
+}
+
+/* Project picker: a confirm dialog whose body is a searchable project list. */
+.project-picker-dialog {
+  width: min(460px, 100%);
+}
+.project-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 18px 12px;
+}
+.project-picker-body input {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11.5px;
+}
+.project-picker-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  list-style: none;
+}
+.project-picker-list button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+.project-picker-list button:hover {
+  background: var(--hover);
+}
+.project-picker-list button.selected {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.project-picker-list button small {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+.project-picker-empty {
+  padding: 14px 10px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  text-align: center;
+}
+.confirm-dialog-close {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+.confirm-dialog-close:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.confirm-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.confirm-dialog footer button {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.confirm-dialog footer button.primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.confirm-dialog footer button.danger {
+  border-color: var(--st-failed-fg);
+  color: #f7fbfc;
+  background: var(--st-failed-fg);
+}
+
+/* ---------- project settings: the one place for project-wide definitions ---- */
+.project-settings-dialog {
+  width: min(720px, 100%);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px 10px;
+}
+.settings-head div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-head small {
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+.settings-head > button {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 4px 6px;
+}
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-tabs button {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.settings-tabs button.active {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(60vh, 560px);
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.settings-hint {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.settings-hint code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+.settings-list li input[type="text"],
+.settings-list li input[type="email"],
+.settings-list li input:not([type]) {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.settings-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-flag input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.settings-usage {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.settings-user-id {
+  font-size: 10px;
+  color: var(--text-2);
+}
+.settings-create,
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.settings-create input:not([type="color"]) {
+  flex: 1;
+  min-width: 140px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.settings-row > span:first-child {
+  min-width: 56px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.legend-hint {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: var(--text-2);
+}
+/* The legend names Project Settings, so it also opens it. */
+.legend-settings-link {
+  margin-top: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 10px;
+}
+.legend-settings-link:hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+
+/* ---------- deadline notify settings ---------- */
+.notify-dialog {
+  width: min(520px, 100%);
+}
+.notify-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(58vh, 520px);
+  padding: 0 18px 16px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.notify-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.notify-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.notify-field > label,
+.notify-users > label {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.notify-field input,
+.notify-field select,
+.notify-user-row input {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+}
+.notify-lead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.notify-lead input[type="number"] {
+  width: 84px;
+}
+.notify-lead span {
+  color: var(--text-2);
+}
+.notify-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.notify-users {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notify-user-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.notify-user-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notify-message {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+.notify-message.ok {
+  color: var(--st-done-fg);
+  background: color-mix(in srgb, var(--st-done-fg) 12%, transparent);
+}
+.notify-message.error {
+  color: var(--st-failed-fg);
+  background: color-mix(in srgb, var(--st-failed-fg) 12%, transparent);
+}
+
+/* Cloud backup dialog */
+.backup-drive-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.backup-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.backup-badge.ok {
+  color: var(--st-done-fg);
+  border-color: color-mix(in srgb, var(--st-done-fg) 40%, var(--border));
+  background: color-mix(in srgb, var(--st-done-fg) 12%, transparent);
+}
+.backup-connect {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  text-decoration: none;
+  font-size: 12px;
+}
+.backup-hint {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin: 0;
+}
+.backup-hint code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.backup-drive-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.backup-drive-folder-row input {
+  min-width: 0;
+  flex: 1;
+}
+.backup-drive-folder-row button,
+.drive-folder-picker-head button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.backup-drive-folder-row button:hover:not(:disabled),
+.drive-folder-picker-head button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.backup-drive-folder-row button:disabled,
+.drive-folder-picker-head button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.backup-drive-folder-current {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-drive-connect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 7px;
+  margin-top: 7px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.workspace-drive-connect a,
+.workspace-drive-connect button {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent);
+  font-weight: 700;
+}
+.workspace-drive-connect button:hover {
+  text-decoration: underline;
+}
+.workspace-drive-connect small {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: 10px;
+}
+.drive-folder-picker {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.drive-folder-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.drive-folder-picker-head span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-folder-picker-list {
+  max-height: 150px;
+  margin: 0;
+  padding: 3px;
+  overflow-y: auto;
+  list-style: none;
+}
+.drive-folder-picker-list button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+.drive-folder-picker-list button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.drive-folder-picker-list button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.drive-folder-picker-empty {
+  padding: 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: center;
+}
+/* An invisible fence: groups controls so `disabled` reaches all of them at
+ * once, without changing how anything lays out. Used to switch whole panels
+ * off for read-only sessions. */
+.readonly-gate {
+  display: contents;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+/* The tab strip inside the cloud dialog. Buttons rather than links because
+ * the tabs swap content in place; the active one reads as pressed. */
+.backup-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.backup-tabs button {
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.backup-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.drive-workspace-state {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.drive-workspace-state strong {
+  font-size: 13px;
+}
+.drive-workspace-state p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.drive-workspace-state code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.drive-workspace-browser {
+  min-height: 260px;
+}
+.drive-workspace-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.drive-workspace-toolbar button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 10.5px;
+}
+.drive-workspace-toolbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.drive-workspace-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.drive-workspace-toolbar span {
+  min-width: 0;
+  margin-left: 2px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-workspace-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 10px;
+}
+.drive-workspace-columns section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.drive-workspace-columns h3 {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.drive-workspace-folder-list,
+.drive-workspace-bundle-list {
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+.drive-workspace-folder-list button,
+.drive-workspace-bundle-list button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+.drive-workspace-folder-list button:hover:not(:disabled),
+.drive-workspace-bundle-list button:hover:not(:disabled),
+.drive-workspace-bundle-list button.selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.drive-workspace-folder-list button:disabled,
+.drive-workspace-bundle-list button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.drive-workspace-folder-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-workspace-bundle-check {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--accent);
+}
+.drive-workspace-bundle-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.drive-workspace-bundle-meta b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-workspace-bundle-meta small {
+  color: var(--text-2);
+  font-size: 9.5px;
+}
+.drive-workspace-empty,
+.drive-workspace-loading {
+  padding: 10px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  text-align: center;
+}
+.drive-workspace-loading {
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.remote-sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+}
+.remote-sync-banner > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.remote-sync-banner strong {
+  color: var(--text);
+  font-size: 11px;
+}
+.remote-sync-banner span {
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.remote-sync-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+.remote-sync-actions button {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.remote-sync-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.remote-sync-actions .remote-sync-refresh {
+  color: var(--text-2);
+}
+@media (max-width: 760px) {
+  .remote-sync-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .remote-sync-actions {
+    justify-content: flex-end;
+  }
+}
+@media (max-width: 640px) {
+  .drive-workspace-columns {
+    grid-template-columns: 1fr;
+  }
+}
+.backup-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.backup-interval {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.backup-interval input {
+  width: 88px;
+}
+.backup-bundles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.backup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.backup-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.backup-list-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.backup-list-name {
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backup-list-sub {
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+  /* The drawer slides in from off-screen; without this its entry animation
+     briefly scrolls the whole document sideways. */
+  overflow-x: hidden;
+}
+.sidebar-shell {
+  width: 304px;
+  min-width: 0;
+  flex: 0 0 304px;
+  overflow: hidden;
+  transition:
+    width 180ms var(--ease-out),
+    flex-basis 180ms var(--ease-out);
+}
+.sidebar-shell.collapsed {
+  width: 0;
+  flex-basis: 0;
+}
+.sidebar-shell > .sidebar.explorer-sidebar {
+  width: 100%;
+  height: 100%;
+}
+.ui-resize-handle {
+  box-sizing: border-box;
+  display: block;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.ui-resize-handle[aria-orientation="vertical"] {
+  cursor: col-resize;
+}
+.ui-resize-handle[aria-orientation="horizontal"] {
+  cursor: row-resize;
+}
+.ui-resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ui-resize-handle[data-resizing="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.ui-resize-grip {
+  pointer-events: none;
+  transition:
+    background 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+.explorer-resize {
+  position: relative;
+  flex: 0 0 12px;
+  background: transparent;
+  border-right: 1px solid var(--border);
+  transition: background 160ms var(--ease-out);
+}
+.explorer-resize .ui-resize-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 32px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+}
+.explorer-resize:hover,
+.explorer-resize:focus-visible,
+.explorer-resize[data-resizing="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.explorer-resize:hover .ui-resize-grip,
+.explorer-resize:focus-visible .ui-resize-grip,
+.explorer-resize[data-resizing="true"] .ui-resize-grip {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* project tree drag-and-drop */
+.workspace-root.drop-target,
+.project-tree-row.drop-target {
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -1.5px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 5px;
+}
+.project-tree-row[draggable="true"] {
+  cursor: grab;
+}
+.current-project-tag.folder-tag {
+  opacity: 0.75;
+}
+
+/* import-from-disk folder browser */
+.fs-browser {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.fs-browser-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.fs-browser-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+.fs-browser-head button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.fs-browser-head button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fs-browser-path {
+  flex: 1;
+  min-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-family: var(--mono);
+}
+.fs-browser-path.selected {
+  color: var(--text);
+}
+.fs-browser-selection {
+  display: inline-flex;
+  min-width: 66px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-2);
+  background: var(--surface);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fs-browser-selection.selected {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.fs-browser-toolbar {
+  display: flex;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.fs-browser-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.fs-browser-toolbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fs-browser-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.fs-browser-create {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 7px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.fs-browser-create > svg {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+.fs-browser-create input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+}
+.fs-browser-create input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.fs-browser-create button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+}
+.fs-browser-create button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.fs-browser-create button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.fs-browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 3px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+.fs-browser-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+.fs-browser-list button:hover {
+  background: var(--hover);
+}
+.fs-browser-empty {
+  padding: 6px 8px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+/* ---------- top bar on a phone ---------- */
+
+/* Everything above assumes a bar wide enough to name what it shows. At 393px
+   it wraps to three rows and takes a third of the screen, so here the bar
+   keeps only what is used constantly — the explorer toggle, the brand, the
+   project switch, search — and the rest either loses its label or moves behind
+   one overflow button. Scoped to width, not pointer: a narrow desktop window
+   has the same problem. */
+@media (max-width: 720px) {
+  .topbar {
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding-inline: 12px;
+  }
+  /* The page's only h1, and an end-to-end test reads it: take its space, not
+     its place in the accessibility tree. Mirrors .visually-hidden rather than
+     reusing it, because the class is applied in markup and this is a
+     width-conditional treatment of an element that has no class. */
+  .topbar h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .explorer-toggle {
+    flex: 0 0 auto;
+  }
+  /* Purely decorative, and it draws the same tree glyph as the explorer toggle
+     sitting immediately beside it — at this width the pair reads as two of the
+     same control rather than as a logo. The brand is already named by the h1
+     for anything that reads the page, so dropping the mark loses nothing and
+     buys the project switch another 32px of a row that has none. */
+  .brand-mark {
+    display: none;
+  }
+  /* 44px is the smallest target Apple's own controls use. */
+  .explorer-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /* The breadcrumb says where we are, which the screen title already does on a
+     phone; what is left is the control that moves somewhere else, and it takes
+     the row's slack so long project names stay readable. */
+  .topbar .project-breadcrumb {
+    min-width: 0;
+    flex: 1 1 auto;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .topbar .crumb-workspace,
+  .topbar .crumb-separator,
+  .topbar .crumb-label,
+  .topbar .project-type {
+    display: none;
+  }
+  .topbar .project-select {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: 44px;
+  }
+  /* Transient, and never worth a second row: it truncates instead of pushing
+     the actions off the end. */
+  .topbar .operation-status {
+    min-width: 0;
+    max-width: 22vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-actions {
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+  .topbar .command-trigger {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 5px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  /* The shortcut it names cannot be typed on a phone. */
+  .topbar .command-trigger kbd {
+    display: none;
+  }
+  /* The five actions live in the overflow menu here; leaving them in the row
+     is what wrapped it in the first place. */
+  .topbar-actions .icon-btn:not(.topbar-overflow-trigger) {
+    display: none;
+  }
+  .topbar-overflow {
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .topbar-overflow-trigger {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  /* Anchored to the trigger, not the viewport, so it stays pointing at the
+     button it belongs to when the bar insets itself under the notch. */
+  .topbar-overflow-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: var(--z-popover, 60);
+    display: flex;
+    min-width: 200px;
+    flex-direction: column;
+    padding: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 16px 40px var(--shadow);
+  }
+  .topbar-overflow-item {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text);
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .topbar-overflow-item:hover,
+  .topbar-overflow-item:focus-visible {
+    background: var(--hover);
+  }
+}

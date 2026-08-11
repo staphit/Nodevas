@@ -1,0 +1,24 @@
+# State holds every attribute of every resource in plaintext, including the
+# generated CHAP secrets, the full instance metadata and anything a provider
+# marked sensitive. Committing it publishes all of that, and the backup files
+# left behind by each apply publish the previous versions too.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Provider binaries and the module cache. Large, platform-specific, and rebuilt
+# by `terraform init` in seconds.
+.terraform/
+.terraform.lock.hcl.bak
+
+# Real variable values: OCIDs, the path to your API signing key, your home IP
+# address. terraform.tfvars.example is deliberately not matched by this and is
+# meant to be committed.
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# Saved plans embed the variable values they were generated with.
+*.tfplan
+crash.log
+crash.*.log

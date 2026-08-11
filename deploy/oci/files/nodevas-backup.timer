@@ -1,0 +1,27 @@
+[Unit]
+Description=Nodevas database backup every eight hours
+
+[Timer]
+Unit=nodevas-backup.service
+
+# Every eight hours at an odd minute, matching the documented recovery point
+# objective while avoiding top-of-hour load.
+OnCalendar=*-*-* 00,08,16:17:00
+
+# And then spread it further. Without this, every instance built from this
+# repository fires at the same second, which turns one person's fleet into a
+# self-inflicted thundering herd against the same bucket.
+RandomizedDelaySec=30min
+
+# If the instance was off — rebooted, stopped overnight to save money, restored
+# from an image — run as soon as it is back rather than waiting for the next
+# next scheduled run. A missed backup is not made better by being skipped; the gap
+# it leaves is exactly the day you will be asked about.
+Persistent=true
+
+# The randomised delay is only worth anything if it is stable across reboots,
+# otherwise every restart re-rolls it and the schedule wanders.
+FixedRandomDelay=true
+
+[Install]
+WantedBy=timers.target
