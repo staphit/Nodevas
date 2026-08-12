@@ -184,18 +184,8 @@ jobs:
           zip_path="$(find desktop/dist -maxdepth 1 -type f -name '*.zip' | head -n 1)"
           shasum -a 256 "${dmg_path}" "${zip_path}" > desktop/dist/SHA256SUMS.txt
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: Nodevas-${{ steps.release.outputs.release_label }}-macOS
-          path: |
-            desktop/dist/*.dmg
-            desktop/dist/*.zip
-            desktop/dist/*.blockmap
-            desktop/dist/*-mac.yml
-            desktop/dist/SHA256SUMS.txt
-          if-no-files-found: error
-
+      # Release assets are uploaded directly by gh below. Keeping a second
+      # copy as an Actions artifact wastes the account's small artifact quota.
       - name: Publish GitHub release
         shell: bash
         env:

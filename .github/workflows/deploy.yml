@@ -213,7 +213,7 @@ jobs:
             nodevas
             deploy/oci/files/nodevas-deploy.sh
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
       - name: Dry run summary
         if: ${{ inputs.dry_run }}

@@ -151,7 +151,7 @@ jobs:
           path: |
             web/playwright-report
             web/test-results
-          retention-days: 7
+          retention-days: 1
 
   naming:
     name: Naming
