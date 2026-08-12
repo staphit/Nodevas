@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { lifecycleStatusUsage, type CustomLifecycleStatus } from "../../domain";
+import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import { StatusShape } from "../../statusTheme";
 import type { StatusDefinition } from "../../types";
@@ -8,12 +9,12 @@ import { confirmAction } from "../ConfirmDialog";
 import { ColorField, EmptyState } from "../InteractionPrimitives";
 import { runSettingsCommand, type SettingsNotify } from "./notify";
 
-const SHAPES: { value: StatusDefinition["shape"]; label: string }[] = [
-  { value: "circle", label: "圓形" },
-  { value: "square", label: "方形" },
-  { value: "diamond", label: "菱形" },
-  { value: "triangle", label: "三角形" },
-  { value: "dash", label: "橫線" },
+const SHAPES: { value: StatusDefinition["shape"]; labelKey: string }[] = [
+  { value: "circle", labelKey: "statusEditor.shape.circle" },
+  { value: "square", labelKey: "statusEditor.shape.square" },
+  { value: "diamond", labelKey: "statusEditor.shape.diamond" },
+  { value: "triangle", labelKey: "statusEditor.shape.triangle" },
+  { value: "dash", labelKey: "statusEditor.shape.dash" },
 ];
 
 /**
@@ -23,6 +24,7 @@ const SHAPES: { value: StatusDefinition["shape"]; label: string }[] = [
  * edit first has to work out which file owns the one being touched.
  */
 export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
+  const { t } = useI18n();
   const graph = useApp((s) => s.graph);
   const statuses = useApp((s) => s.statuses);
   const runState = useApp((s) => s.runState);
@@ -59,7 +61,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
       notify.onNotice(done);
       return true;
     } catch (error) {
-      notify.onError((error as Error).message || "儲存失敗。");
+      notify.onError((error as Error).message || t("statusEditor.saveFailed"));
       return false;
     }
   };
@@ -73,7 +75,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
         workspaceStatuses.map((item) =>
           item.id === definition.id ? { ...item, ...patch } : item,
         ),
-        `已更新「${patch.label ?? definition.label}」`,
+        t("statusEditor.updated", { label: patch.label ?? definition.label }),
       );
       return;
     }
@@ -90,7 +92,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
   const addLifecycleStatus = async () => {
     const label = statusLabel.trim();
     if (!label) {
-      notify.onError("請輸入狀態名稱。");
+      notify.onError(t("statusEditor.nameRequired"));
       return;
     }
     if (
@@ -101,7 +103,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
           }) === 0,
       )
     ) {
-      notify.onError(`已存在名稱「${label}」。`);
+      notify.onError(t("statusEditor.duplicate", { label }));
       return;
     }
     // New states are always shared: a per-project state is what made people
@@ -117,7 +119,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
           ...(statusSettled ? { settled: true } : {}),
         },
       ],
-      `已新增「${label}」（工作區共用）`,
+      t("statusEditor.added", { label }),
     );
     if (ok) setStatusLabel("");
   };
@@ -129,20 +131,22 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
       definition.id as CustomLifecycleStatus,
     );
     const confirmed = await confirmAction({
-      title: `刪除實際狀態「${definition.label}」`,
+      title: t("statusEditor.deleteTitle", { label: definition.label }),
       description:
         usage.currentNodes.length || usage.events
-          ? `目前有 ${usage.currentNodes.length} 個節點處於此狀態，歷史中有 ${usage.events} 筆相關紀錄。` +
-            "刪除只移除定義，journal 不會被改寫；既有紀錄會顯示為未知狀態。"
-          : "尚無節點或歷史使用此狀態。",
-      confirmLabel: "刪除定義",
+          ? t("statusEditor.deleteDescriptionUsed", {
+              nodes: usage.currentNodes.length,
+              events: usage.events,
+            })
+          : t("statusEditor.deleteDescriptionUnused"),
+      confirmLabel: t("statusEditor.deleteDefinition"),
       tone: "danger",
     });
     if (!confirmed) return;
     if (isShared(definition.id)) {
       await writeShared(
         workspaceStatuses.filter((item) => item.id !== definition.id),
-        `已刪除「${definition.label}」（工作區共用）`,
+        t("statusEditor.deletedShared", { label: definition.label }),
       );
       return;
     }
@@ -152,18 +156,14 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
         type: "workflow.removeLifecycleStatus",
         id: definition.id as CustomLifecycleStatus,
       }),
-      `已刪除「${definition.label}」`,
+      t("statusEditor.deleted", { label: definition.label }),
     );
   };
 
   return (
     <section className="settings-section">
       <p className="settings-hint">
-        自訂狀態存在工作區的 <code>.vised/workflow.json</code>，
-        同一個工作區的所有專案共用，不必逐一重建。
-        實際狀態記在 <code>run/journal.jsonl</code>。內建狀態不可刪除；
-        自訂狀態刪除後，歷史紀錄仍保留。勾選「視為完結」的狀態和
-        「完成」「略過」一樣，不會擋住後續節點。
+        {t("statusEditor.hint")}
       </p>
       <ul className="settings-list">
         {lifecycleDefinitions.map((definition) => {
@@ -177,7 +177,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
               <StatusShape status={definition.id} definitions={lifecycleDefinitions} />
               <input
                 defaultValue={definition.label}
-                aria-label={`${definition.label} 名稱`}
+                aria-label={t("statusEditor.nameAria", { label: definition.label })}
                 onBlur={(event) => {
                   const label = event.target.value.trim();
                   if (!label || label === definition.label) return;
@@ -186,12 +186,12 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
               />
               <ColorField
                 value={definition.color}
-                label={`${definition.label} 顏色`}
+                label={t("statusEditor.colorAria", { label: definition.label })}
                 onCommit={(color) => void editLifecycleStatus(definition, { color })}
               />
               <select
                 value={definition.shape}
-                aria-label={`${definition.label} 圖形`}
+                aria-label={t("statusEditor.shapeAria", { label: definition.label })}
                 onChange={(event) =>
                   void editLifecycleStatus(definition, {
                     shape: event.target.value as StatusDefinition["shape"],
@@ -200,7 +200,7 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
               >
                 {SHAPES.map((shape) => (
                   <option key={shape.value} value={shape.value}>
-                    {shape.label}
+                    {t(shape.labelKey)}
                   </option>
                 ))}
               </select>
@@ -208,23 +208,27 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
                 <input
                   type="checkbox"
                   checked={definition.settled === true}
-                  aria-label={`${definition.label} 視為完結`}
+                  aria-label={t("statusEditor.settledAria", { label: definition.label })}
                   onChange={(event) =>
                     void editLifecycleStatus(definition, {
                       settled: event.target.checked,
                     })
                   }
                 />
-                視為完結
+                {t("statusEditor.settled")}
               </label>
               <small className="settings-usage">
-                {isShared(definition.id) ? "工作區共用" : "僅此專案"} ·
-                使用中 {usage.currentNodes.length} · 歷史 {usage.events}
+                {isShared(definition.id)
+                  ? t("statusEditor.workspaceShared")
+                  : t("statusEditor.projectOnly")} · {t("statusEditor.usage", {
+                  nodes: usage.currentNodes.length,
+                  events: usage.events,
+                })}
               </small>
               <button
                 type="button"
                 className="danger"
-                aria-label={`刪除 ${definition.label}`}
+                aria-label={t("statusEditor.deleteAria", { label: definition.label })}
                 onClick={() => void removeLifecycleStatus(definition)}
               >
                 <IconTrash size={13} />
@@ -235,15 +239,15 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
       </ul>
       {lifecycleDefinitions.length === 0 && (
         <EmptyState
-          title="尚無自訂實際狀態"
-          description="內建狀態已可涵蓋大部分流程；需要專屬階段時再新增。"
+          title={t("statusEditor.emptyTitle")}
+          description={t("statusEditor.emptyDescription")}
         />
       )}
       <div className="settings-create">
         <input
           value={statusLabel}
-          placeholder="新狀態名稱"
-          aria-label="新狀態名稱"
+          placeholder={t("statusEditor.newPlaceholder")}
+          aria-label={t("statusEditor.newNameAria")}
           onChange={(event) => setStatusLabel(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") void addLifecycleStatus();
@@ -252,19 +256,19 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
         <input
           type="color"
           value={statusColor}
-          aria-label="新狀態顏色"
+          aria-label={t("statusEditor.newColorAria")}
           onChange={(event) => setStatusColor(event.target.value)}
         />
         <select
           value={statusShape}
-          aria-label="新狀態圖形"
+          aria-label={t("statusEditor.newShapeAria")}
           onChange={(event) =>
             setStatusShape(event.target.value as StatusDefinition["shape"])
           }
         >
           {SHAPES.map((shape) => (
             <option key={shape.value} value={shape.value}>
-              {shape.label}
+              {t(shape.labelKey)}
             </option>
           ))}
         </select>
@@ -272,14 +276,14 @@ export function StatusVocabularyEditor({ notify }: { notify: SettingsNotify }) {
           <input
             type="checkbox"
             checked={statusSettled}
-            aria-label="新狀態視為完結"
+            aria-label={t("statusEditor.newSettledAria")}
             onChange={(event) => setStatusSettled(event.target.checked)}
           />
-          視為完結
+          {t("statusEditor.settled")}
         </label>
         <button type="button" className="primary" onClick={() => void addLifecycleStatus()}>
           <IconPlus size={13} />
-          新增狀態
+          {t("statusEditor.add")}
         </button>
       </div>
     </section>

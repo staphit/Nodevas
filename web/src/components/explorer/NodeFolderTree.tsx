@@ -15,6 +15,7 @@
 import { useState, type ReactNode } from "react";
 import type { GraphNode } from "../../types";
 import { IconFolder, IconFolderOpen, IconPlus, IconTrash } from "../../icons";
+import { useI18n } from "../../i18n";
 
 /** Drag payload keys, distinct from the project tree's own. */
 export const NODE_DRAG_TYPE = "application/x-nodevas-nodes";
@@ -80,6 +81,7 @@ export function NodeFolderTree({
   moveFolder,
   moveNodes,
 }: NodeFolderTreeProps) {
+  const { t } = useI18n();
   // Collapsed rather than expanded, so a folder created during this session is
   // open without having to be added to anything.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -185,7 +187,7 @@ export function NodeFolderTree({
           }}
           onDragEnd={() => setDropTarget(null)}
           {...dropProps(path)}
-          title={`${path}（拖曳節點進來只會搬動檔案，不影響關係圖）`}
+          title={t("explorer.folderDropHint", { path })}
         >
           <button
             type="button"
@@ -198,7 +200,7 @@ export function NodeFolderTree({
                 return next;
               })
             }
-            aria-label={`${open ? "收合" : "展開"} ${folderName(path)}`}
+            aria-label={`${open ? t("explorer.collapse") : t("explorer.expand")} ${folderName(path)}`}
           >
             <span className={`tree-chevron${open ? " open" : ""}`}>
               {open ? "⌄" : "›"}
@@ -212,7 +214,7 @@ export function NodeFolderTree({
                 setRenaming(null);
                 setDraft("");
               },
-              "資料夾名稱",
+              t("explorer.folderName"),
             )
           ) : (
             <button
@@ -230,7 +232,7 @@ export function NodeFolderTree({
                   return next;
                 })
               }
-              title="雙擊改名"
+              title={t("explorer.doubleClickRename")}
             >
               {folderName(path)}
             </button>
@@ -240,8 +242,8 @@ export function NodeFolderTree({
             type="button"
             className="project-tree-add"
             onClick={() => beginCreate(path)}
-            aria-label={`在 ${folderName(path)} 新增子資料夾`}
-            title="新增子資料夾"
+            aria-label={t("explorer.addChildFolderAria", { label: folderName(path) })}
+            title={t("explorer.newFolderHere")}
           >
             <IconPlus size={12} />
           </button>
@@ -249,8 +251,8 @@ export function NodeFolderTree({
             type="button"
             className="node-folder-delete"
             onClick={() => deleteFolder(path)}
-            aria-label={`刪除資料夾 ${folderName(path)}`}
-            title="刪除資料夾（裡面的節點會移到上一層，不會被刪除）"
+            aria-label={t("explorer.deleteFolderAria", { label: folderName(path) })}
+            title={t("explorer.deleteFolderTitle")}
           >
             <IconTrash size={12} />
           </button>
@@ -265,14 +267,14 @@ export function NodeFolderTree({
                     setCreatingIn(null);
                     setDraft("");
                   },
-                  "新資料夾名稱",
+                  t("explorer.newFolderName"),
                 )}
               </li>
             )}
             {subfolders.map((child) => renderFolder(child, depth + 1))}
             {contents.map((node) => renderNode(node))}
             {contents.length === 0 && subfolders.length === 0 && creatingIn !== path && (
-              <li className="tree-empty">空資料夾</li>
+              <li className="tree-empty">{t("explorer.emptyFolderShort")}</li>
             )}
           </ul>
         )}
@@ -286,7 +288,7 @@ export function NodeFolderTree({
     return (
       <ul className="node-list tree-node-list">
         {visibleNodes.map((node) => renderNode(node))}
-        {visibleNodes.length === 0 && <li className="tree-empty">沒有符合的節點</li>}
+        {visibleNodes.length === 0 && <li className="tree-empty">{t("explorer.noMatchingNodes")}</li>}
       </ul>
     );
   }
@@ -303,10 +305,10 @@ export function NodeFolderTree({
           type="button"
           className="node-folder-create"
           onClick={() => beginCreate("")}
-          title="新增資料夾（只整理檔案，不影響關係圖）"
+          title={t("explorer.newFolderTitle")}
         >
           <IconPlus size={12} />
-          新增資料夾
+          {t("explorer.newFolderHere")}
         </button>
       </div>
       <ul className="node-list tree-node-list">
@@ -318,14 +320,14 @@ export function NodeFolderTree({
                 setCreatingIn(null);
                 setDraft("");
               },
-              "新資料夾名稱",
+              t("explorer.newFolderName"),
             )}
           </li>
         )}
         {rootFolders.map((folder) => renderFolder(folder, 0))}
         {rootNodes.map((node) => renderNode(node))}
         {rootNodes.length === 0 && rootFolders.length === 0 && (
-          <li className="tree-empty">空資料夾</li>
+          <li className="tree-empty">{t("explorer.emptyFolderShort")}</li>
         )}
       </ul>
     </div>

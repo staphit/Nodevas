@@ -9,6 +9,7 @@
 import { useRef, useState } from "react";
 import { api, type ExportFormat } from "../../api";
 import { downloadExport, printExport } from "../../editor/documentExport";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
 import type { Graph, GraphNode } from "../../types";
@@ -49,6 +50,7 @@ export function useProjectTransfer({
   const switchProject = useApp((state) => state.switchProject);
   const loadAll = useApp((state) => state.loadAll);
   const runGraphCommand = useApp((state) => state.runGraphCommand);
+  const { t } = useI18n();
   const importInputRef = useRef<HTMLInputElement>(null);
   const markdownImportInputRef = useRef<HTMLInputElement>(null);
   const jsonCanvasImportInputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +81,9 @@ export function useProjectTransfer({
     anchor.click();
     anchor.remove();
     setProjectTransferNotice(
-      `正在匯出 ${target?.label || activeProject || "目前專案"}…`,
+      t("explorer.exportingArchive", {
+        target: target?.label || activeProject || t("explorer.currentProject"),
+      }),
     );
   };
 
@@ -117,7 +121,10 @@ export function useProjectTransfer({
       return true;
     } catch (error) {
       setProjectTransferNotice(
-        `無法開啟 ${importTarget}：${(error as Error).message}`,
+        t("explorer.openImportTargetFailed", {
+          target: importTarget,
+          error: (error as Error).message,
+        }),
       );
       reportError(error);
       return false;
@@ -129,17 +136,19 @@ export function useProjectTransfer({
   const exportProjectDocument = async (choice: ExportFormat | "pdf") => {
     if (documentExportBusy) return;
     setDocumentExportBusy(true);
-    setProjectTransferNotice(`正在匯出整個專案的文件…`);
+    setProjectTransferNotice(t("explorer.exportingDocuments"));
     try {
       if (choice === "pdf") {
         await printExport({ scope: "project" });
-        setProjectTransferNotice("已開啟列印視窗，在目的地選擇「另存為 PDF」");
+        setProjectTransferNotice(t("explorer.printDialogOpened"));
       } else {
         const name = await downloadExport({ format: choice, scope: "project" });
-        setProjectTransferNotice(`已匯出 ${name}`);
+        setProjectTransferNotice(t("explorer.exportedFile", { name }));
       }
     } catch (error) {
-      setProjectTransferNotice(`文件匯出失敗：${(error as Error).message}`);
+      setProjectTransferNotice(
+        t("explorer.documentExportFailed", { error: (error as Error).message }),
+      );
     } finally {
       setDocumentExportBusy(false);
     }
@@ -147,7 +156,7 @@ export function useProjectTransfer({
 
   const runImport = async (file: File, choice?: ImportBundleChoice) => {
     setProjectTransferBusy(true);
-    setProjectTransferNotice(`正在匯入 ${file.name}…`);
+    setProjectTransferNotice(t("explorer.importingFile", { name: file.name }));
     try {
       const imported = await api.importProject(
         file,
@@ -159,9 +168,9 @@ export function useProjectTransfer({
       const next = new Set(expandedProjects);
       next.add(imported.active);
       persistExpandedProjects(next);
-      setProjectTransferNotice(`已匯入為 ${imported.active}`);
+      setProjectTransferNotice(t("explorer.importedProject", { name: imported.active }));
     } catch (error) {
-      setProjectTransferNotice(`匯入失敗：${(error as Error).message}`);
+      setProjectTransferNotice(t("explorer.importFailed", { error: (error as Error).message }));
       reportError(error);
     } finally {
       setProjectTransferBusy(false);
@@ -226,11 +235,18 @@ export function useProjectTransfer({
       }
       if (failures.length > 0) {
         setProjectTransferNotice(
-          `已匯入 ${importedIds.length} 個節點；${failures.length} 個失敗`,
+          t("explorer.importedMarkdownPartial", {
+            imported: importedIds.length,
+            failed: failures.length,
+          }),
         );
-        reportError(new Error(`Markdown 匯入失敗：${failures.join("；")}`));
+        reportError(
+          new Error(t("explorer.markdownImportFailed", { details: failures.join("；") })),
+        );
       } else {
-        setProjectTransferNotice(`已匯入 ${importedIds.length} 個 Markdown 節點`);
+        setProjectTransferNotice(
+          t("explorer.importedMarkdown", { count: importedIds.length }),
+        );
       }
     } finally {
       setMarkdownImportBusy(false);
@@ -293,10 +309,12 @@ export function useProjectTransfer({
       anchor.download = `${(activeProject || "project").split("/").at(-1)}.canvas`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setProjectTransferNotice("已匯出 JSON Canvas（.canvas）");
+      setProjectTransferNotice(t("explorer.exportedCanvas"));
     } catch (error) {
       reportError(error);
-      setProjectTransferNotice(`JSON Canvas 匯出失敗：${(error as Error).message}`);
+      setProjectTransferNotice(
+        t("explorer.exportCanvasFailed", { error: (error as Error).message }),
+      );
     } finally {
       setJsonCanvasBusy(false);
     }
@@ -337,8 +355,9 @@ export function useProjectTransfer({
           Number.isFinite(node.x) &&
           Number.isFinite(node.y),
       );
-      if (!canvasNodes.length) throw new Error("檔案沒有可匯入的節點。");
-      if (canvasNodes.length > 1000) throw new Error("單次最多匯入 1000 個節點。");
+      if (!canvasNodes.length) throw new Error(t("explorer.canvasNoNodes"));
+      if (canvasNodes.length > 1000)
+        throw new Error(t("explorer.canvasTooManyNodes"));
       const idMap = new Map<string, string>();
       const imported: Array<{
         source: (typeof canvasNodes)[number];
@@ -348,7 +367,7 @@ export function useProjectTransfer({
         const heading = source.text?.match(/^#\s+(.+)$/m)?.[1]?.trim();
         const created = await api.createNode(
           {
-            title: source.vised?.title || heading || "未命名節點",
+            title: source.vised?.title || heading || t("explorer.untitledNode"),
             kind: source.vised?.kind || "task",
           },
           stripFrontmatter(source.text || ""),
@@ -390,10 +409,14 @@ export function useProjectTransfer({
         },
       });
       if (!result.ok) throw new Error(result.message);
-      setProjectTransferNotice(`已從 JSON Canvas 匯入 ${imported.length} 個節點`);
+      setProjectTransferNotice(
+        t("explorer.importedCanvas", { count: imported.length }),
+      );
     } catch (error) {
       reportError(error);
-      setProjectTransferNotice(`JSON Canvas 匯入失敗：${(error as Error).message}`);
+      setProjectTransferNotice(
+        t("explorer.importCanvasFailed", { error: (error as Error).message }),
+      );
     } finally {
       setJsonCanvasBusy(false);
       setImportTarget("");

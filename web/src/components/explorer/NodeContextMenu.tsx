@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { IconDoc, IconPages, IconTrash } from "../../icons";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 
@@ -32,6 +33,7 @@ export function NodeContextMenu({
 }) {
   const duplicateNode = useApp((state) => state.duplicateNode);
   const deleteNodes = useApp((state) => state.deleteNodes);
+  const { t } = useI18n();
   const [nodeMenuBusy, setNodeMenuBusy] = useState(false);
 
   useEffect(() => {
@@ -56,11 +58,13 @@ export function NodeContextMenu({
     const many = ids.length > 1;
     const title = menu.title;
     const confirmed = await confirmAction({
-      title: many ? `刪除 ${ids.length} 個節點` : `刪除「${title}」？`,
+      title: many
+        ? t("explorer.deleteNodesTitleMany", { count: ids.length })
+        : t("explorer.deleteNodeTitle", { title }),
       description: many
-        ? `確定將選取的 ${ids.length} 個節點移到垃圾桶？一次撤銷即可全部復原。`
-        : "節點會移到垃圾桶，可隨時復原。",
-      confirmLabel: "移到垃圾桶",
+        ? t("explorer.deleteNodesDescriptionMany", { count: ids.length })
+        : t("explorer.deleteNodeDescription"),
+      confirmLabel: t("explorer.moveToTrash"),
       tone: "danger",
     });
     if (!confirmed) return;
@@ -80,7 +84,7 @@ export function NodeContextMenu({
     <div
       className="project-context-menu node-context-menu"
       role="menu"
-      aria-label={`${menu.title} 檔案操作`}
+      aria-label={t("explorer.nodeActions", { title: menu.title })}
       style={{
         left: Math.max(8, Math.min(menu.x, window.innerWidth - 282)),
         top: Math.max(8, Math.min(menu.y, window.innerHeight - 210)),
@@ -92,13 +96,13 @@ export function NodeContextMenu({
         <span>
           <b>
             {menu.ids.length > 1
-              ? `${menu.ids.length} 個節點`
+              ? t("explorer.nodeCount", { count: menu.ids.length })
               : menu.title}
           </b>
           <small>
             {menu.ids.length > 1
-              ? menu.ids.join("、")
-              : "節點文件"}
+              ? menu.ids.join(", ")
+              : t("explorer.nodeDocument")}
           </small>
         </span>
       </div>
@@ -119,8 +123,8 @@ export function NodeContextMenu({
               <IconDoc size={14} />
             </span>
             <span>
-              <b>開啟</b>
-              <small>在資訊欄開啟文件</small>
+              <b>{t("explorer.open")}</b>
+              <small>{t("explorer.openInInspector")}</small>
             </span>
           </button>
           <button
@@ -142,8 +146,8 @@ export function NodeContextMenu({
               <IconPages size={14} />
             </span>
             <span>
-              <b>建立副本</b>
-              <small>複製節點與文件內容</small>
+              <b>{t("explorer.duplicate")}</b>
+              <small>{t("explorer.duplicateHint")}</small>
             </span>
           </button>
           <div className="project-context-separator" />
@@ -162,13 +166,13 @@ export function NodeContextMenu({
         <span>
           <b>
             {menu.ids.length > 1
-              ? `刪除 ${menu.ids.length} 個節點`
-              : "刪除"}
+              ? t("explorer.deleteNodesAction", { count: menu.ids.length })
+              : t("explorer.delete")}
           </b>
           <small>
             {menu.ids.length > 1
-              ? "一次移到垃圾桶，一次撤銷即可全部復原"
-              : "移到垃圾桶，可從側欄還原"}
+              ? t("explorer.deleteNodesHint")
+              : t("explorer.deleteNodeHint")}
           </small>
         </span>
       </button>

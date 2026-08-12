@@ -35,14 +35,14 @@ export function snapDragDelta(startCell: number, delta: number): number {
 
 /** Eight handles like a diagram editor: corners resize both axes. */
 export const CARD_HANDLES = [
-  { name: 'nw', label: '左上', dirX: -1, dirY: -1 },
-  { name: 'n', label: '上', dirX: 0, dirY: -1 },
-  { name: 'ne', label: '右上', dirX: 1, dirY: -1 },
-  { name: 'e', label: '右', dirX: 1, dirY: 0 },
-  { name: 'se', label: '右下', dirX: 1, dirY: 1 },
-  { name: 's', label: '下', dirX: 0, dirY: 1 },
-  { name: 'sw', label: '左下', dirX: -1, dirY: 1 },
-  { name: 'w', label: '左', dirX: -1, dirY: 0 },
+  { name: 'nw', label: 'top-left', dirX: -1, dirY: -1 },
+  { name: 'n', label: 'top', dirX: 0, dirY: -1 },
+  { name: 'ne', label: 'top-right', dirX: 1, dirY: -1 },
+  { name: 'e', label: 'right', dirX: 1, dirY: 0 },
+  { name: 'se', label: 'bottom-right', dirX: 1, dirY: 1 },
+  { name: 's', label: 'bottom', dirX: 0, dirY: 1 },
+  { name: 'sw', label: 'bottom-left', dirX: -1, dirY: 1 },
+  { name: 'w', label: 'left', dirX: -1, dirY: 0 },
 ] as const;
 
 export const MIN_ZOOM = 0.5;

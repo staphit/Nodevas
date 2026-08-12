@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 
 import { formatNodeLink } from "../../domain/graph/nodeLink";
+import { translate } from "../../i18n";
 import type { NodeLinkTarget } from "../NodeLinkPicker";
 
 export type ListStyle =
@@ -60,7 +61,7 @@ export function wrapSelection(
   v: EditorView | undefined,
   before: string,
   after: string,
-  placeholder = "文字",
+  placeholder = translate("editor.textPlaceholder"),
 ) {
   if (!v) return;
   const { from, to } = v.state.selection.main;

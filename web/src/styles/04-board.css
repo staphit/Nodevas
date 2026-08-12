@@ -253,7 +253,7 @@
   white-space: nowrap;
 }
 .col-card-assignee::before {
-  content: "負責：";
+  content: attr(data-assignee-prefix);
 }
 .col-card-assignee.unassigned {
   opacity: 0.72;

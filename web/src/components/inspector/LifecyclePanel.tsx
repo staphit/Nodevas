@@ -22,10 +22,12 @@ import {
   statusOptions as availableStatusOptions,
   statusTheme,
 } from "../../statusTheme";
+import { localizedStatusLabel, useI18n } from "../../i18n";
 import type { Status } from "../../types";
 import { OperationStatus } from "../InteractionPrimitives";
 
 export function LifecyclePanel({ id }: { id: string }) {
+  const { t } = useI18n();
   const graph = useApp((state) => state.graph);
   const statuses = useApp((state) => state.statuses);
   const staged = useApp((state) => state.stagedLifecycle[id] ?? null);
@@ -48,10 +50,8 @@ export function LifecyclePanel({ id }: { id: string }) {
   return (
     <section className="lifecycle-form" aria-labelledby={`lifecycle-heading-${id}`}>
       <div className="section-head">
-        <h3 id={`lifecycle-heading-${id}`}>實際狀態</h3>
-        <span className="section-hint">
-          寫入 run/journal.jsonl 後無法收回，因此不會自動儲存；請按「套用狀態」或 Ctrl + S
-        </span>
+        <h3 id={`lifecycle-heading-${id}`}>{t("lifecycle.title")}</h3>
+        <span className="section-hint">{t("lifecycle.hint")}</span>
         <OperationStatus
           status={operation.status}
           message={
@@ -62,12 +62,12 @@ export function LifecyclePanel({ id }: { id: string }) {
         />
       </div>
       <div className="meta-row">
-        <label>目前</label>
+        <label>{t("lifecycle.current")}</label>
         <span className="status-chip" style={{ color: currentTheme.color }}>
           <StatusShape status={visibleStatus} definitions={customStatuses} />
-          {currentTheme.label}
+          {localizedStatusLabel(visibleStatus, customStatuses)}
         </span>
-        <label htmlFor={`lifecycle-select-${id}`}>改為</label>
+        <label htmlFor={`lifecycle-select-${id}`}>{t("lifecycle.changeTo")}</label>
         <select
           id={`lifecycle-select-${id}`}
           value={pending}
@@ -76,10 +76,10 @@ export function LifecyclePanel({ id }: { id: string }) {
             stageLifecycleStatus(id, event.target.value as Status | "", note)
           }
         >
-          <option value="">選擇實際狀態</option>
+          <option value="">{t("lifecycle.choose")}</option>
           {options.map((candidate) => (
             <option key={candidate} value={candidate}>
-              {statusTheme(candidate, customStatuses).label}
+              {localizedStatusLabel(candidate, customStatuses)}
             </option>
           ))}
         </select>
@@ -87,8 +87,8 @@ export function LifecyclePanel({ id }: { id: string }) {
           className="status-note-input"
           value={note}
           onChange={(event) => stageLifecycleStatus(id, pending, event.target.value)}
-          placeholder="紀錄註解（選填）"
-          aria-label="實際狀態註解"
+          placeholder={t("lifecycle.notePlaceholder")}
+          aria-label={t("lifecycle.noteLabel")}
           disabled={!pending}
         />
         {unsaved && (
@@ -99,10 +99,10 @@ export function LifecyclePanel({ id }: { id: string }) {
               disabled={busy}
               onClick={() => void commitStagedLifecycle(id).catch(reportError)}
             >
-              套用狀態
+              {t("lifecycle.apply")}
             </button>
             <span className="lifecycle-staged" role="status">
-              尚未套用
+              {t("lifecycle.pending")}
             </span>
           </>
         )}

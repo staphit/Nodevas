@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { api, type NodePageInfo, type PageFormat } from "../../api";
+import { useI18n } from "../../i18n";
 import type { PageDoc, PageSaveResult } from "../../state/types";
 import { useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
@@ -75,6 +76,7 @@ export function useNodePages({
   /** Update the mounted editor before replacing its backing page state. */
   replaceCurrentPageContent?: (content: string) => void;
 }): NodePages {
+  const { t } = useI18n();
   const refreshTrash = useApp((s) => s.refreshTrash);
   const [pages, setPages] = useState<NodePageInfo[]>([]);
   const [pagesLoading, setPagesLoading] = useState(true);
@@ -119,7 +121,7 @@ export function useNodePages({
       })
       .catch((error) => {
         if (!cancelled) {
-          setPageError(error instanceof Error ? error.message : "無法讀取子頁");
+          setPageError(error instanceof Error ? error.message : t("subpage.loadFailed"));
         }
       })
       .finally(() => {
@@ -178,7 +180,7 @@ export function useNodePages({
       } catch (error) {
         setPageDoc(null);
         setActivePageID(null);
-        setPageError(error instanceof Error ? error.message : "無法開啟子頁");
+        setPageError(error instanceof Error ? error.message : t("subpage.openFailed"));
       }
     },
     [activePageID, id, pages, saveSubpage],
@@ -221,7 +223,7 @@ export function useNodePages({
       setPageCreateOpen(false);
       if (editorMode === "preview") setEditorMode("live");
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "無法建立子頁");
+      setPageError(error instanceof Error ? error.message : t("subpage.createFailed"));
     } finally {
       setPageBusy(false);
     }
@@ -255,7 +257,7 @@ export function useNodePages({
         setPageCreateOpen(false);
         if (editorMode === "preview") setEditorMode("live");
       } catch (error) {
-        setPageError(error instanceof Error ? error.message : "無法匯入檔案");
+        setPageError(error instanceof Error ? error.message : t("subpage.importFailed"));
       } finally {
         setPageBusy(false);
         if (pageImportInputRef.current) pageImportInputRef.current.value = "";
@@ -270,12 +272,9 @@ export function useNodePages({
       const current = pages.find((page) => page.id === activePageID);
       if (!current || (current.format ?? "md") === format) return;
       const confirmed = await confirmAction({
-        title: `把「${current.title}」轉成 ${format.toUpperCase()}？`,
-        description:
-          "檔案會改寫成新格式，原檔留在版本歷史中。" +
-          "轉換只保留標題、清單、表格、程式碼、引用與連結這些共通結構，" +
-          "其他排版會流失。",
-        confirmLabel: "轉換格式",
+        title: t("subpage.convertTitle", { title: current.title, format: format.toUpperCase() }),
+        description: t("subpage.convertDescription"),
+        confirmLabel: t("subpage.convert"),
       });
       if (!confirmed) return;
       const currentEditorContent = getCurrentPageContent?.();
@@ -311,7 +310,7 @@ export function useNodePages({
           conflict: null,
         });
       } catch (error) {
-        setPageError(error instanceof Error ? error.message : "格式轉換失敗");
+        setPageError(error instanceof Error ? error.message : t("subpage.convertFailed"));
       } finally {
         setPageBusy(false);
       }
@@ -339,7 +338,7 @@ export function useNodePages({
       const response = await api.updateNodePage(id, activePageID, title);
       setPages(response.pages);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "子頁重新命名失敗");
+      setPageError(error instanceof Error ? error.message : t("subpage.renameFailed"));
     } finally {
       setPageBusy(false);
     }
@@ -363,7 +362,7 @@ export function useNodePages({
       );
       setPages(response.pages);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "子頁排序失敗");
+      setPageError(error instanceof Error ? error.message : t("subpage.reorderFailed"));
     } finally {
       setPageBusy(false);
     }
@@ -374,9 +373,9 @@ export function useNodePages({
     const current = pages.find((page) => page.id === activePageID);
     if (!current) return;
     const confirmed = await confirmAction({
-      title: `刪除子頁「${current.title}」？`,
-      description: "子頁會移到垃圾桶，可稍後還原。",
-      confirmLabel: "移到垃圾桶",
+      title: t("subpage.deleteTitle", { title: current.title }),
+      description: t("subpage.deleteDescription"),
+      confirmLabel: t("canvasOps.moveToTrash"),
       tone: "danger",
     });
     if (!confirmed || !(await saveSubpage()).ok) return;
@@ -390,7 +389,7 @@ export function useNodePages({
       setPageRename("");
       await refreshTrash();
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "子頁刪除失敗");
+      setPageError(error instanceof Error ? error.message : t("subpage.deleteFailed"));
     } finally {
       setPageBusy(false);
     }

@@ -1,0 +1,128 @@
+version: 1
+type: story
+users:
+    - id: author
+      name: Author
+nodes:
+    - id: node-0001
+      title: 'Premise: the city hears memories'
+      kind: start
+      priority: high
+      assignee: author
+      deadline: "2026-08-14"
+      tags:
+        - novel
+        - premise
+    - id: node-0002
+      title: Mara finds the archive
+      kind: scene
+      priority: high
+      assignee: author
+      deadline: "2026-08-17"
+      requires: node-0001
+      tags:
+        - novel
+        - scene
+    - id: node-0003
+      title: 'Choice: open the forbidden door'
+      kind: choice
+      priority: high
+      assignee: author
+      deadline: "2026-08-20"
+      requires: node-0002
+      tags:
+        - novel
+        - choice
+    - id: node-0004
+      title: 'Gate: trust the archivist'
+      kind: gate
+      priority: medium
+      assignee: author
+      deadline: "2026-08-22"
+      requires: node-0003
+      tags:
+        - novel
+        - gate
+    - id: node-0005
+      title: Confrontation at the rain line
+      kind: scene
+      priority: medium
+      assignee: author
+      deadline: "2026-08-25"
+      requires: node-0004
+      tags:
+        - novel
+        - climax
+    - id: node-0006
+      title: 'Ending: return the memory'
+      kind: end
+      priority: low
+      assignee: author
+      deadline: "2026-08-28"
+      requires: node-0005
+      tags:
+        - novel
+        - ending
+edges:
+    - from: node-0001
+      to: node-0002
+    - from: node-0002
+      to: node-0003
+    - from: node-0003
+      to: node-0004
+    - from: node-0004
+      to: node-0005
+    - from: node-0005
+      to: node-0006
+ui:
+    positions:
+        node-0001:
+            x: 0
+            "y": 0.488
+        node-0002:
+            x: 0.159
+            "y": 2
+        node-0003:
+            x: 1.482
+            "y": 2
+        node-0004:
+            x: 2.744
+            "y": 2.263
+        node-0005:
+            x: 1.226
+            "y": 3.775
+        node-0006:
+            x: 2.811
+            "y": 4.625
+    timeline_order:
+        - node-0001
+        - node-0002
+        - node-0003
+        - node-0004
+        - node-0005
+        - node-0006
+    plans:
+        node-0001:
+            - date: "2026-08-14"
+              status: started
+              note: Name the story's impossible premise.
+        node-0002:
+            - date: "2026-08-17"
+              status: started
+              note: Bring Mara to the archive.
+        node-0003:
+            - date: "2026-08-20"
+              status: started
+              note: Make the door choice costly.
+        node-0004:
+            - date: "2026-08-22"
+              status: started
+              note: Test trust against memory.
+        node-0005:
+            - date: "2026-08-25"
+              status: started
+              note: Reach the rain line.
+        node-0006:
+            - date: "2026-08-28"
+              status: started
+              note: Return the memory and close the arc.

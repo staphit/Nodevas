@@ -4,21 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { topLevelOp, useApp } from "../../store";
 import {
-  LINE_LABELS,
-  RELATION_LABELS,
   edgeLine,
   edgeRelation,
 } from "../../domain/graph/edgeStyle";
-
-const RELATION_OPERATOR_LABELS: Record<string, string> = {
-  and: "全部成立 · AND",
-  or: "任一成立 · OR",
-  xor: "擇一成立 · XOR",
-  nand: "非全部 · NAND",
-  nor: "皆不成立 · NOR",
-};
+import { localizedLineLabel, localizedRelationLabel, useI18n } from "../../i18n";
 
 export function NodeRelations({ id }: { id: string }) {
+  const { t, language } = useI18n();
   const graph = useApp((state) => state.graph);
   const openTab = useApp((state) => state.openTab);
   const openNodeLink = useApp((state) => state.openNodeLink);
@@ -45,7 +37,7 @@ export function NodeRelations({ id }: { id: string }) {
         <span>{relations.length}</span>
       </h3>
       {relations.length === 0 ? (
-        <div className="node-relations-empty">沒有關係</div>
+        <div className="node-relations-empty">{t("relations.empty")}</div>
       ) : (
         <div className="node-relations-list">
           {relations.map((edge) => {
@@ -59,7 +51,7 @@ export function NodeRelations({ id }: { id: string }) {
                 onClick={() => void openTab(relatedId).catch(reportError)}
               >
                 <span className="node-relation-direction">
-                  {direction === "incoming" ? "前置" : "後續"}
+                  {direction === "incoming" ? t("relations.incoming") : t("relations.outgoing")}
                 </span>
                 <span className="node-relation-copy">
                   <b>{related?.title || relatedId}</b>
@@ -69,9 +61,7 @@ export function NodeRelations({ id }: { id: string }) {
                     edgeRelation(edge) ? ` relation-${edgeRelation(edge)}` : ""
                   }`}
                 >
-                  {`${LINE_LABELS[edgeLine(edge)]}／${
-                    RELATION_LABELS[edgeRelation(edge)]
-                  }`}
+                  {`${localizedLineLabel(edgeLine(edge), language)} / ${localizedRelationLabel(edgeRelation(edge), language)}`}
                 </span>
               </button>
             );
@@ -82,33 +72,32 @@ export function NodeRelations({ id }: { id: string }) {
   );
 
   return (
-    <div className="node-relations" role="tabpanel" aria-label="關係圖">
+    <div className="node-relations" role="tabpanel" aria-label={t("relations.aria")}>
       <div className="node-relations-summary">
         <div>
-          <span>邏輯運算</span>
+          <span>{t("relations.logic")}</span>
           <b>
             {operator
-              ? RELATION_OPERATOR_LABELS[operator] ?? operator.toUpperCase()
+              ? t(`relations.operator.${operator}`)
               : incoming.length > 1
-                ? "全部成立 · AND"
-                : "單一條件"}
+                ? t("relations.operator.and")
+                : t("relations.singleCondition")}
           </b>
         </div>
         <div>
-          <span>關係數</span>
+          <span>{t("relations.count")}</span>
           <b>{incoming.length + outgoing.length}</b>
         </div>
       </div>
-      {relationList("前置節點", incoming, "incoming")}
-      {relationList("後續節點", outgoing, "outgoing")}
+      {relationList(t("relations.prerequisites"), incoming, "incoming")}
+      {relationList(t("relations.dependents"), outgoing, "outgoing")}
       <NodeLinkSection
         project={activeProject}
         nodeId={id}
         openNodeLink={openNodeLink}
       />
       <div className="node-relations-help">
-        點擊節點可切換資訊頁；關係線樣式請在主關係圖右鍵修改。文件裡的
-        <code>[[連結]]</code> 屬於參照，不影響前置條件。
+        {t("relations.help")}
       </div>
     </div>
   );
@@ -130,6 +119,7 @@ function NodeLinkSection({
   nodeId: string;
   openNodeLink: (target: { project: string; nodeId: string }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [links, setLinks] = useState<{
     backlinks: { fromProject: string; fromNode: string; fromTitle?: string }[];
     outgoing: { toProject: string; toNode: string; label?: string; missing: boolean }[];
@@ -159,9 +149,9 @@ function NodeLinkSection({
 
   return (
     <section className="node-relations-section">
-      <h3>文件連結</h3>
-      {failed && <p className="node-relations-empty">無法讀取連結。</p>}
-      {!failed && !links && <p className="node-relations-empty">讀取中…</p>}
+      <h3>{t("relations.documentLinks")}</h3>
+      {failed && <p className="node-relations-empty">{t("relations.readFailed")}</p>}
+      {!failed && !links && <p className="node-relations-empty">{t("relations.loading")}</p>}
       {links && (
         <div className="node-relations-list">
           {links.outgoing.map((link) => (
@@ -171,7 +161,7 @@ function NodeLinkSection({
               key={`out-${link.toProject}/${link.toNode}`}
               onClick={() => open({ project: link.toProject, nodeId: link.toNode })}
             >
-              <span className="node-relation-direction">連出</span>
+              <span className="node-relation-direction">{t("relations.linkOut")}</span>
               <span className="node-relation-copy">
                 <b>{link.label || link.toNode}</b>
                 <code>
@@ -181,7 +171,7 @@ function NodeLinkSection({
                 </code>
               </span>
               {link.missing && (
-                <span className="node-relation-style relation-broken">失效</span>
+                <span className="node-relation-style relation-broken">{t("relations.broken")}</span>
               )}
             </button>
           ))}
@@ -194,7 +184,7 @@ function NodeLinkSection({
                 open({ project: link.fromProject, nodeId: link.fromNode })
               }
             >
-              <span className="node-relation-direction">連入</span>
+              <span className="node-relation-direction">{t("relations.linkIn")}</span>
               <span className="node-relation-copy">
                 <b>{link.fromTitle || link.fromNode}</b>
                 <code>
@@ -207,7 +197,7 @@ function NodeLinkSection({
           ))}
           {links.outgoing.length === 0 && links.backlinks.length === 0 && (
             <p className="node-relations-empty">
-              還沒有文件連結。在內容中用 [[ ]] 按鈕插入。
+              {t("relations.noLinks")}
             </p>
           )}
         </div>

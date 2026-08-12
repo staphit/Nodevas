@@ -6,7 +6,8 @@
  */
 
 import { useApp } from "../../store";
-import { STATUS_THEME, StatusShape, statusTheme } from "../../statusTheme";
+import { useI18n } from "../../i18n";
+import { StatusShape, statusTheme } from "../../statusTheme";
 import type { BuiltinStatus } from "../../types";
 
 const LEGEND_STATUSES: BuiltinStatus[] = [
@@ -20,15 +21,16 @@ const LEGEND_STATUSES: BuiltinStatus[] = [
 ];
 
 export function StatusLegend() {
+  const { t } = useI18n();
   const customStatuses = useApp((state) => state.graph?.ui?.customStatuses) ?? [];
   return (
     <details className="sidebar-legend">
-      <summary>狀態圖例</summary>
+      <summary>{t("sidebar.statusLegend")}</summary>
       <ul className="legend">
         {LEGEND_STATUSES.map((status) => (
           <li key={status}>
             <StatusShape status={status} />
-            <span>{STATUS_THEME[status].label}</span>
+            <span>{t(`status.${status}`)}</span>
           </li>
         ))}
         {customStatuses.map((definition) => (
@@ -39,7 +41,7 @@ export function StatusLegend() {
         ))}
       </ul>
       <p className="legend-hint">
-        自訂實際狀態在「專案設定 → 實際狀態」（頂端工具列的齒輪）管理。
+        {t("sidebar.statusHint")}
       </p>
       <button
         type="button"
@@ -48,7 +50,7 @@ export function StatusLegend() {
           window.dispatchEvent(new Event("nodevas-project-settings"))
         }
       >
-        開啟專案設定
+        {t("sidebar.openProjectSettings")}
       </button>
     </details>
   );

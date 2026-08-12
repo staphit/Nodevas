@@ -7,6 +7,7 @@
  */
 
 import type { EdgeLine, EdgeRelation, Graph } from "../../types";
+import { localizedLineLabel, localizedRelationLabel, useI18n } from "../../i18n";
 import {
   LINE_LABELS,
   RELATION_LABELS,
@@ -14,10 +15,10 @@ import {
 } from "../../domain/graph/edgeStyle";
 import type { LaneContextMenu } from "../LaneView";
 
-const RELATION_HINTS: Record<EdgeRelation, string> = {
-  "": "阻擋目標，直到來源完成",
-  optional: "不阻擋，但仍算前置關係",
-  deprecated: "只留下線，不列入前置與分析",
+const RELATION_HINT_KEYS: Record<EdgeRelation, string> = {
+  "": "edgeMenu.requiredHint",
+  optional: "edgeMenu.optionalHint",
+  deprecated: "edgeMenu.deprecatedHint",
 };
 
 export interface EdgeMenuProps {
@@ -43,6 +44,7 @@ export function EdgeMenu({
   convertEdgesToLogicGate,
   setContextMenu,
 }: EdgeMenuProps) {
+  const { t } = useI18n();
   const edgeOf = (target: { from: string; to: string }) =>
     (graph?.edges ?? []).find(
       (edge) => edge.from === target.from && edge.to === target.to,
@@ -61,14 +63,14 @@ export function EdgeMenu({
     <>
       <div className="lane-context-title">
         {contextMenu.edges.length === 1
-          ? `關係線 · ${nodeTitle(contextMenu.edges[0].from)} → ${nodeTitle(
+          ? `${t("edgeMenu.connection")} · ${nodeTitle(contextMenu.edges[0].from)} → ${nodeTitle(
               contextMenu.edges[0].to,
             )}`
           : `${nodeTitle(contextMenu.edges[0]?.to)} · ${
               contextMenu.edges.length
-            } 條前置關係`}
+            } ${t("edgeMenu.prerequisites")}`}
       </div>
-      <div className="lane-context-group-label">關係語意</div>
+      <div className="lane-context-group-label">{t("edgeMenu.relationMeaning")}</div>
       {(Object.keys(RELATION_LABELS) as EdgeRelation[]).map((relation) => (
         <button
           key={relation || "required"}
@@ -78,13 +80,13 @@ export function EdgeMenu({
           onClick={() => apply({ relation })}
         >
           {everyRelationIs(relation) ? "✓ " : ""}
-          {RELATION_LABELS[relation]}
-          <small>{RELATION_HINTS[relation]}</small>
+          {localizedRelationLabel(relation)}
+          <small>{t(RELATION_HINT_KEYS[relation])}</small>
         </button>
       ))}
       {(everyRelationIs("optional") || everyRelationIs("deprecated")) && (
         <>
-          <div className="lane-context-group-label">收進邏輯閘</div>
+          <div className="lane-context-group-label">{t("edgeMenu.logicGateGroup")}</div>
           <button
             type="button"
             role="menuitem"
@@ -95,16 +97,17 @@ export function EdgeMenu({
               })
             }
           >
-            轉成邏輯閘
+            {t("edgeMenu.convertToGate")}
             <small>
-              建立一個{everyRelationIs("optional") ? "選用" : "棄用"}閘接管這
-              {contextMenu.edges.length > 1 ? `${contextMenu.edges.length} 條` : "條"}
-              關係；閘為多對多，會補齊所有輸入對輸出的連線。
+              {t("edgeMenu.convertHint", {
+                relation: t(`logicGate.op.${everyRelationIs("optional") ? "optional" : "deprecated"}`),
+                count: contextMenu.edges.length,
+              })}
             </small>
           </button>
         </>
       )}
-      <div className="lane-context-group-label">線條外觀</div>
+      <div className="lane-context-group-label">{t("edgeMenu.lineAppearance")}</div>
       <button
         type="button"
         role="menuitemradio"
@@ -112,7 +115,7 @@ export function EdgeMenu({
         onClick={() => apply({ line: "" })}
       >
         {everyLineIs("") ? "✓ " : ""}
-        自動（跟隨語意）
+        {t("edgeMenu.autoLine")}
       </button>
       {(Object.keys(LINE_LABELS) as Exclude<EdgeLine, "">[]).map((line) => (
         <button
@@ -123,7 +126,7 @@ export function EdgeMenu({
           onClick={() => apply({ line })}
         >
           {everyLineIs(line) ? "✓ " : ""}
-          {LINE_LABELS[line]}
+          {localizedLineLabel(line)}
         </button>
       ))}
     </>

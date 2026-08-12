@@ -7,6 +7,7 @@
  */
 
 import { useState } from "react";
+import { localizePlanOrderError, useI18n } from "../../i18n";
 import { nextCustomPlanStatusID, planOrderError } from "../../plan";
 import type { Graph, PlanStatus, PlanStatusDefinition } from "../../types";
 import type { PlanCommand, WorkflowCommand } from "../../domain/commands";
@@ -26,6 +27,7 @@ export function usePlanMenu({
   updateWorkflowDefinition: (command: WorkflowCommand) => Promise<CommandResult>;
   setContextMenu: (menu: LaneContextMenu | null) => void;
 }) {
+  const { t, language } = useI18n();
   const [planNote, setPlanNote] = useState("");
   const [planTime, setPlanTime] = useState("");
   const [planCustomLabel, setPlanCustomLabel] = useState("");
@@ -35,7 +37,7 @@ export function usePlanMenu({
     const current = graph?.ui?.plans?.[nodeId] ?? [];
     const error = planOrderError(current, status, date);
     if (error) {
-      setPlanError(error);
+      setPlanError(localizePlanOrderError(error, language));
       return;
     }
     const note = planNote.trim() || undefined;
@@ -55,7 +57,7 @@ export function usePlanMenu({
   const addCustomPlanStatusFromMenu = (nodeId: string, date: string) => {
     const label = planCustomLabel.trim();
     if (!label) {
-      setPlanError("請先輸入自訂狀態名稱。");
+      setPlanError(t("planMenu.customNameRequired"));
       return;
     }
     const duplicate = planStatusDefinitions.some(
@@ -63,7 +65,7 @@ export function usePlanMenu({
         definition.label.trim().toLocaleLowerCase() === label.toLocaleLowerCase(),
     );
     if (duplicate) {
-      setPlanError("已有同名的自訂狀態。");
+      setPlanError(t("planMenu.duplicateCustomName"));
       return;
     }
     const definition: PlanStatusDefinition = {

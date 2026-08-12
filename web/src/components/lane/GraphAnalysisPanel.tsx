@@ -5,6 +5,7 @@
  */
 
 import type { GraphAnalysis } from "../../analysis";
+import { useI18n } from "../../i18n";
 
 export function GraphAnalysisPanel({
   analysis,
@@ -15,16 +16,17 @@ export function GraphAnalysisPanel({
   selectNode: (nodeId: string) => void;
   nodeTitle: (id: string | undefined) => string;
 }) {
+  const { t } = useI18n();
   return (
-    <section className="graph-analysis-panel" aria-label="專案分析">
+    <section className="graph-analysis-panel" aria-label={t("analysis.aria")}>
       <div className="analysis-summary">
-        <b>關鍵路徑：{analysis.criticalDays} 天</b>
-        <span>起點 {analysis.entryNodeIds.size}</span>
-        <span>逾期 {analysis.overdue.size}</span>
-        <span>依賴違反 {analysis.violations.length}</span>
-        <span>受阻 {analysis.blocked.size}</span>
-        <span>阻塞源 {analysis.blocking.size}</span>
-        {analysis.hasCycle && <span className="danger">偵測到循環依賴</span>}
+        <b>{t("analysis.criticalPath", { days: String(analysis.criticalDays) })}</b>
+        <span>{t("analysis.entry", { count: String(analysis.entryNodeIds.size) })}</span>
+        <span>{t("analysis.overdue", { count: String(analysis.overdue.size) })}</span>
+        <span>{t("analysis.violations", { count: String(analysis.violations.length) })}</span>
+        <span>{t("analysis.blocked", { count: String(analysis.blocked.size) })}</span>
+        <span>{t("analysis.blocking", { count: String(analysis.blocking.size) })}</span>
+        {analysis.hasCycle && <span className="danger">{t("analysis.cycle")}</span>}
       </div>
       {!!analysis.criticalPath.length && (
         <div className="analysis-path">
@@ -41,7 +43,7 @@ export function GraphAnalysisPanel({
       <div className="analysis-items">
         {[...analysis.overdue].map(([id, messages]) => (
           <button type="button" key={`overdue-${id}`} onClick={() => selectNode(id)}>
-            <b>逾期 · {nodeTitle(id)}</b>
+            <b>{t("analysis.overdueItem", { title: nodeTitle(id) })}</b>
             <small>{messages.join("；")}</small>
           </button>
         ))}
@@ -51,7 +53,7 @@ export function GraphAnalysisPanel({
             key={`${item.kind}-${item.nodeId}-${index}`}
             onClick={() => selectNode(item.nodeId)}
           >
-            <b>{item.kind === "actual" ? "實際依賴違反" : "排程衝突"} · {nodeTitle(item.nodeId)}</b>
+            <b>{t(item.kind === "actual" ? "analysis.actualViolation" : "analysis.scheduleConflict", { title: nodeTitle(item.nodeId) })}</b>
             <small>{item.message}</small>
           </button>
         ))}

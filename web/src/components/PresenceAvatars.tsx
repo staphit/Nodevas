@@ -22,6 +22,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { useI18n } from "../i18n";
 
 // The type comes from the module rather than the `api` barrel: the barrel is
 // the write path components are not supposed to reach for, and
@@ -55,6 +56,7 @@ export function PresenceAvatars({ narrow = false }: { narrow?: boolean }) {
   const activeTab = useApp((s) => s.activeTab);
   const peers = usePeersOnNode(activeTab ?? null);
   const presences = useApp(useShallow((s) => s.presences));
+  const { t } = useI18n();
 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -138,7 +140,7 @@ export function PresenceAvatars({ narrow = false }: { narrow?: boolean }) {
     );
   };
 
-  const label = `${peers.length} 人和你在同一份文件`;
+  const label = t("presence.peopleHere", { count: peers.length });
 
   return (
     <div className="topbar-presence" ref={rootRef}>
@@ -175,8 +177,8 @@ export function PresenceAvatars({ narrow = false }: { narrow?: boolean }) {
             >
               <Face peer={peer} />
               <span className="topbar-presence-who">
-                <span className="topbar-presence-name">{peer.actor.name || "未具名"}</span>
-                <span className="topbar-presence-where">{whereLabel(peer, presences[peer.id])}</span>
+                <span className="topbar-presence-name">{peer.actor.name || t("presence.unnamed")}</span>
+                <span className="topbar-presence-where">{whereLabel(peer, presences[peer.id], t)}</span>
               </span>
             </button>
           ))}
@@ -198,15 +200,16 @@ function Face({ peer }: { peer: Peer }) {
   );
 }
 
-const ROLE_LABEL: Record<Peer["actor"]["role"], string> = {
-  admin: "管理者",
-  member: "成員",
-  visitor: "訪客",
-};
-
 /** What the row says under the name: their role, and whether they are typing. */
-function whereLabel(peer: Peer, presence: PresenceState | undefined): string {
-  const parts = [ROLE_LABEL[peer.actor.role] ?? "", peer.editing ? "編輯中" : "檢視中"];
-  if (presence?.pageId) parts.push(`子頁 ${presence.pageId}`);
-  return parts.filter(Boolean).join("・");
+function whereLabel(
+  peer: Peer,
+  presence: PresenceState | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const parts = [
+    t(`presence.role.${peer.actor.role}`),
+    peer.editing ? t("presence.editing") : t("presence.viewing"),
+  ];
+  if (presence?.pageId) parts.push(t("presence.subpage", { id: presence.pageId }));
+  return parts.filter(Boolean).join(" · ");
 }

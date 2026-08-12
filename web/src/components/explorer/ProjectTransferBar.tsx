@@ -8,6 +8,7 @@
 
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { type ExportFormat } from "../../api";
+import { useI18n } from "../../i18n";
 import { clampToViewport, type PanelPoint } from "../floatingPanel";
 import { reportError, useApp } from "../../store";
 import { ImportBundleDialog } from "./ImportBundleDialog";
@@ -19,11 +20,11 @@ const DOCUMENT_EXPORTS: readonly (readonly [
   string,
   string,
 ])[] = [
-  ["docx", "Word", ".docx，可在 Word 直接編輯"],
-  ["txt", "純文字", ".txt，剝掉所有標記"],
-  ["html", "網頁", ".html，單檔可直接開"],
-  ["md", "Markdown", ".md，所有節點合成一份"],
-  ["pdf", "PDF", "開列印視窗，選「另存為 PDF」"],
+  ["docx", "explorer.documentExport.docx", "explorer.documentExport.docxHint"],
+  ["txt", "explorer.documentExport.txt", "explorer.documentExport.txtHint"],
+  ["html", "explorer.documentExport.html", "explorer.documentExport.htmlHint"],
+  ["md", "explorer.documentExport.md", "explorer.documentExport.mdHint"],
+  ["pdf", "explorer.documentExport.pdf", "explorer.documentExport.pdfHint"],
 ];
 
 /**
@@ -108,6 +109,7 @@ export function ProjectTransferBar({
   } = transfer;
   const importPlacement = useTransferMenuPlacement(importMenuRef);
   const exportPlacement = useTransferMenuPlacement(exportMenuRef);
+  const { t } = useI18n();
   const saveAllTabs = useApp((state) => state.saveAllTabs);
   const dirtyDocumentCount = useApp(
     (state) =>
@@ -125,10 +127,14 @@ export function ProjectTransferBar({
     try {
       const saved = await saveAllTabs();
       setProjectTransferNotice(
-        saved > 0 ? `已儲存 ${saved} 個文件` : "沒有未儲存的變更",
+        saved > 0
+          ? t("explorer.savedCount", { count: saved })
+          : t("explorer.noUnsavedChanges"),
       );
     } catch (error) {
-      setProjectTransferNotice(`儲存失敗：${(error as Error).message}`);
+      setProjectTransferNotice(
+        t("explorer.saveFailed", { error: (error as Error).message }),
+      );
       reportError(error);
     } finally {
       setProjectSaveBusy(false);
@@ -150,31 +156,31 @@ export function ProjectTransferBar({
       {/* Two menus instead of a row of look-alike buttons: everything
           that comes in on one side, everything that goes out on the other. */}
       <div className="explorer-transfer-actions">
-        <span>專案檔案</span>
+        <span>{t("explorer.projectFiles")}</span>
         <div>
           <button
             type="button"
             onClick={() => void saveProject()}
             disabled={projectSaveBusy || !activeProject}
-            title="把所有未儲存的文件寫入磁碟"
+            title={t("explorer.saveAllTitle")}
           >
             {projectSaveBusy
-              ? "儲存中…"
+              ? t("explorer.saving")
               : dirtyDocumentCount > 0
-                ? `儲存 ${dirtyDocumentCount}`
-                : "儲存"}
+                ? t("explorer.saveCount", { count: dirtyDocumentCount })
+                : t("common.save")}
           </button>
           <button
             type="button"
             onClick={openSaveAs}
             disabled={saveAsBusy || !activeProject}
-            title="以新名稱複製一份專案並開啟"
+            title={t("explorer.saveAsTitle")}
           >
-            另存新檔
+            {t("explorer.saveAs")}
           </button>
           <details className="transfer-menu" ref={importMenuRef}>
-            <summary role="button" aria-label="匯入來源" title="把檔案帶進工作區">
-              匯入 ▾
+            <summary role="button" aria-label={t("explorer.importSource")} title={t("explorer.importTitle")}>
+              {t("explorer.import")} ▾
             </summary>
             <div
               className="transfer-menu-panel"
@@ -191,8 +197,8 @@ export function ProjectTransferBar({
                   closeTransferMenus();
                 }}
               >
-                <b>專案封裝</b>
-                <small>.veproj 或 .zip，整個專案帶進來</small>
+                <b>{t("explorer.projectBundle")}</b>
+                <small>{t("explorer.projectBundleHint")}</small>
               </button>
               <button
                 type="button"
@@ -203,8 +209,8 @@ export function ProjectTransferBar({
                   closeTransferMenus();
                 }}
               >
-                <b>Markdown 檔案</b>
-                <small>每個 .md 變成一個節點</small>
+                <b>{t("explorer.markdownFiles")}</b>
+                <small>{t("explorer.markdownFilesHint")}</small>
               </button>
               <button
                 type="button"
@@ -215,14 +221,14 @@ export function ProjectTransferBar({
                   closeTransferMenus();
                 }}
               >
-                <b>JSON Canvas</b>
-                <small>Obsidian 等工具的 .canvas 圖面</small>
+                <b>{t("explorer.jsonCanvas")}</b>
+                <small>{t("explorer.jsonCanvasHint")}</small>
               </button>
             </div>
           </details>
           <details className="transfer-menu" ref={exportMenuRef}>
-            <summary role="button" aria-label="匯出目標" title="把工作區的內容帶出去">
-              匯出 ▾
+            <summary role="button" aria-label={t("explorer.exportTarget")} title={t("explorer.exportTitle")}>
+              {t("explorer.export")} ▾
             </summary>
             <div
               className="transfer-menu-panel"
@@ -239,20 +245,20 @@ export function ProjectTransferBar({
                   closeTransferMenus();
                 }}
               >
-                <b>目前專案封裝</b>
-                <small>.veproj，含節點、子頁與執行紀錄</small>
+                <b>{t("explorer.currentProjectBundle")}</b>
+                <small>{t("explorer.currentProjectBundleHint")}</small>
               </button>
               <button
                 type="button"
                 role="menuitem"
                 disabled={projectTransferBusy}
                 onClick={() => {
-                  exportProjectArchive({ name: ".", label: "整個工作區" });
+                  exportProjectArchive({ name: ".", label: t("explorer.entireWorkspace") });
                   closeTransferMenus();
                 }}
               >
-                <b>整個工作區</b>
-                <small>.veproj 封裝，含所有子專案與資料夾結構</small>
+                <b>{t("explorer.entireWorkspace")}</b>
+                <small>{t("explorer.entireWorkspaceHint")}</small>
               </button>
               <button
                 type="button"
@@ -263,11 +269,11 @@ export function ProjectTransferBar({
                   closeTransferMenus();
                 }}
               >
-                <b>JSON Canvas</b>
-                <small>.canvas，通用圖面格式</small>
+                <b>{t("explorer.jsonCanvas")}</b>
+                <small>{t("explorer.jsonCanvasExportHint")}</small>
               </button>
               <div className="transfer-menu-separator" />
-              <div className="transfer-menu-label">整個專案的文件</div>
+              <div className="transfer-menu-label">{t("explorer.projectDocuments")}</div>
               {DOCUMENT_EXPORTS.map(([choice, label, hint]) => (
                 <button
                   key={choice}
@@ -279,8 +285,8 @@ export function ProjectTransferBar({
                     closeTransferMenus();
                   }}
                 >
-                  <b>{label}</b>
-                  <small>{hint}</small>
+                  <b>{t(label)}</b>
+                  <small>{t(hint)}</small>
                 </button>
               ))}
             </div>

@@ -2,16 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import type { NotifySettings } from "../api";
 import { remoteScope, useApp, useOperationPending } from "../store";
 import { IconBell, IconClose } from "../icons";
+import { useI18n } from "../i18n";
 
-const LEAD_PRESETS: { minutes: number; label: string }[] = [
-  { minutes: 30, label: "30 分鐘前" },
-  { minutes: 60, label: "1 小時前" },
-  { minutes: 180, label: "3 小時前" },
-  { minutes: 720, label: "12 小時前" },
-  { minutes: 1440, label: "1 天前" },
-  { minutes: 2880, label: "2 天前" },
-  { minutes: 4320, label: "3 天前" },
-  { minutes: 10080, label: "7 天前" },
+const LEAD_PRESETS: { minutes: number; key: string }[] = [
+  { minutes: 30, key: "30m" },
+  { minutes: 60, key: "1h" },
+  { minutes: 180, key: "3h" },
+  { minutes: 720, key: "12h" },
+  { minutes: 1440, key: "1d" },
+  { minutes: 2880, key: "2d" },
+  { minutes: 4320, key: "3d" },
+  { minutes: 10080, key: "7d" },
 ];
 
 /**
@@ -20,6 +21,7 @@ const LEAD_PRESETS: { minutes: number; label: string }[] = [
  * lead time, SMTP transport, and recipient emails.
  */
 export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const graph = useApp((s) => s.graph);
   const updateNode = useApp((s) => s.updateNode);
   const stored = useApp((s) => s.notifySettings);
@@ -38,7 +40,7 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void refreshNotifySettings().catch((error: unknown) =>
       setMessage({
-        text: error instanceof Error ? error.message : "載入設定失敗",
+        text: error instanceof Error ? error.message : t("notify.loadFailed"),
         kind: "error",
       }),
     );
@@ -66,7 +68,7 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
     const result = await saveNotifySettings(settings);
     setMessage(
       result.ok
-        ? { text: "設定已儲存。", kind: "ok" }
+        ? { text: t("notify.saved"), kind: "ok" }
         : { text: result.message, kind: "error" },
     );
   }, [saveNotifySettings, settings]);
@@ -77,7 +79,7 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
     const result = await sendNotifyTest(settings);
     setMessage(
       result.ok
-        ? { text: "測試信已送出，請檢查收件匣。", kind: "ok" }
+        ? { text: t("notify.testSent"), kind: "ok" }
         : { text: result.message, kind: "error" },
     );
   }, [sendNotifyTest, settings]);
@@ -104,7 +106,7 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
         className="confirm-dialog notify-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="截止提醒設定"
+        aria-label={t("notify.title")}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
@@ -112,10 +114,10 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
             <IconBell size={17} />
           </span>
           <div>
-            <h2>截止提醒</h2>
-            <p>節點到達「死線」（時間軸規劃的死線日）前，寄 email 提醒負責人。提醒由本機伺服器寄出，每個死線日期只寄一次。</p>
+            <h2>{t("notify.title")}</h2>
+            <p>{t("notify.description")}</p>
           </div>
-          <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label="關閉">
+          <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label={t("common.close")}>
             <IconClose size={14} />
           </button>
         </header>
@@ -128,11 +130,11 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
                 checked={settings.enabled}
                 onChange={(event) => patch({ enabled: event.target.checked })}
               />
-              啟用截止前 email 提醒
+              {t("notify.enabled")}
             </label>
 
             <div className="notify-field">
-              <label htmlFor="notify-lead">提前多久提醒</label>
+              <label htmlFor="notify-lead">{t("notify.leadTime")}</label>
               <div className="notify-lead">
                 <select
                   id="notify-lead"
@@ -144,39 +146,39 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
                 >
                   {LEAD_PRESETS.map((preset) => (
                     <option key={preset.minutes} value={preset.minutes}>
-                      {preset.label}
+                      {t(`notify.lead.${preset.key}`)}
                     </option>
                   ))}
-                  <option value="custom">自訂</option>
+                  <option value="custom">{t("notify.custom")}</option>
                 </select>
                 <input
                   type="number"
                   min={1}
                   max={86400}
                   value={settings.leadMinutes}
-                  aria-label="自訂提前分鐘數"
+                  aria-label={t("notify.customMinutes")}
                   onChange={(event) => {
                     const minutes = Number(event.target.value);
                     if (Number.isFinite(minutes) && minutes > 0)
                       patch({ leadMinutes: Math.floor(minutes) });
                   }}
                 />
-                <span>分鐘</span>
+                <span>{t("notify.minutes")}</span>
               </div>
             </div>
 
             <div className="notify-grid">
               <div className="notify-field">
-                <label htmlFor="notify-host">SMTP 主機</label>
+                <label htmlFor="notify-host">{t("notify.smtpHost")}</label>
                 <input
                   id="notify-host"
                   value={settings.smtpHost}
-                  placeholder="例如 smtp.gmail.com"
+                  placeholder={t("notify.smtpHostPlaceholder")}
                   onChange={(event) => patch({ smtpHost: event.target.value.trim() })}
                 />
               </div>
               <div className="notify-field">
-                <label htmlFor="notify-port">連接埠</label>
+                <label htmlFor="notify-port">{t("notify.port")}</label>
                 <input
                   id="notify-port"
                   type="number"
@@ -187,7 +189,7 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
                 />
               </div>
               <div className="notify-field">
-                <label htmlFor="notify-user">帳號</label>
+                <label htmlFor="notify-user">{t("notify.username")}</label>
                 <input
                   id="notify-user"
                   value={settings.smtpUser}
@@ -196,18 +198,18 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
                 />
               </div>
               <div className="notify-field">
-                <label htmlFor="notify-pass">密碼／應用程式密碼</label>
+                <label htmlFor="notify-pass">{t("notify.password")}</label>
                 <input
                   id="notify-pass"
                   type="password"
                   value={settings.smtpPass}
                   autoComplete="new-password"
-                  placeholder={hasPassword ? "已儲存，留空即不變更" : ""}
+                  placeholder={hasPassword ? t("notify.passwordSaved") : ""}
                   onChange={(event) => patch({ smtpPass: event.target.value })}
                 />
               </div>
               <div className="notify-field">
-                <label htmlFor="notify-from">寄件人</label>
+                <label htmlFor="notify-from">{t("notify.from")}</label>
                 <input
                   id="notify-from"
                   value={settings.from}
@@ -216,11 +218,11 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
                 />
               </div>
               <div className="notify-field">
-                <label htmlFor="notify-default-to">預設收件人</label>
+                <label htmlFor="notify-default-to">{t("notify.defaultRecipient")}</label>
                 <input
                   id="notify-default-to"
                   value={settings.defaultTo}
-                  placeholder="負責人沒填信箱時寄到這裡"
+                  placeholder={t("notify.defaultRecipientPlaceholder")}
                   onChange={(event) => patch({ defaultTo: event.target.value.trim() })}
                 />
               </div>
@@ -228,14 +230,14 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
 
             {users.length > 0 && (
               <div className="notify-users">
-                <label>負責人信箱（目前專案）</label>
+                <label>{t("notify.userEmails")}</label>
                 {users.map((user) => (
                   <div key={user.id} className="notify-user-row">
                     <span>{user.name}</span>
                     <input
                       key={`${user.id}:${user.email ?? ""}`}
                       defaultValue={user.email ?? ""}
-                      placeholder="未填則寄到預設收件人"
+                      placeholder={t("notify.userEmailPlaceholder")}
                       onBlur={(event) => commitUserEmail(user.id, event.target.value)}
                     />
                   </div>
@@ -251,16 +253,16 @@ export function NotifySettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="notify-form">
-            <p>{message ? message.text : "載入中…"}</p>
+            <p>{message ? message.text : t("common.loading")}</p>
           </div>
         )}
 
         <footer>
           <button type="button" disabled={busy || !settings} onClick={sendTest}>
-            寄測試信
+            {t("notify.sendTest")}
           </button>
           <button type="button" className="primary" disabled={busy || !settings} onClick={save}>
-            儲存
+            {t("common.save")}
           </button>
         </footer>
       </div>

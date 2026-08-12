@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { operationScope, reportError, useApp, useOperation } from "../store";
 import { IconClose } from "../icons";
+import { useI18n } from "../i18n";
 import { OperationStatus, InlineNotice } from "./InteractionPrimitives";
 import { AppearanceEditor } from "./settings/AppearanceEditor";
 import { MilestoneTypeEditor } from "./settings/MilestoneTypeEditor";
@@ -10,11 +11,11 @@ import type { SettingsNotify } from "./settings/notify";
 
 type SettingsTab = "workflow" | "milestones" | "people" | "appearance";
 
-const TABS: { id: SettingsTab; label: string; hint: string }[] = [
-  { id: "workflow", label: "實際狀態", hint: "節點可以進入哪些實際狀態" },
-  { id: "milestones", label: "里程碑類型", hint: "預期計畫可以安排哪些里程碑" },
-  { id: "people", label: "成員", hint: "可指派的負責人" },
-  { id: "appearance", label: "外觀與版面", hint: "只影響這台機器" },
+const TABS: { id: SettingsTab; labelKey: string; hintKey: string }[] = [
+  { id: "workflow", labelKey: "settings.workflow", hintKey: "settings.workflowHint" },
+  { id: "milestones", labelKey: "settings.milestones", hintKey: "settings.milestonesHint" },
+  { id: "people", labelKey: "settings.people", hintKey: "settings.peopleHint" },
+  { id: "appearance", labelKey: "settings.appearance", hintKey: "settings.appearanceHint" },
 ];
 
 /**
@@ -25,6 +26,7 @@ const TABS: { id: SettingsTab; label: string; hint: string }[] = [
  * all report through.
  */
 export function ProjectSettings({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const activeProject = useApp((s) => s.activeProject);
   const workflowOperation = useOperation(operationScope.workflow());
 
@@ -52,13 +54,13 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
         className="confirm-dialog project-settings-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="專案設定"
+        aria-label={t("settings.title")}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="settings-head">
           <div>
-            <b>專案設定</b>
-            <small>{activeProject || "目前專案"}</small>
+            <b>{t("settings.title")}</b>
+            <small>{activeProject || t("settings.currentProject")}</small>
           </div>
           <OperationStatus
             status={workflowOperation.status}
@@ -69,12 +71,12 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
                 : undefined
             }
           />
-          <button type="button" aria-label="關閉" onClick={onClose}>
+          <button type="button" aria-label={t("settings.close")} onClick={onClose}>
             <IconClose size={14} />
           </button>
         </div>
 
-        <div className="settings-tabs" role="tablist" aria-label="設定分類">
+        <div className="settings-tabs" role="tablist" aria-label={t("settings.categories")}>
           {TABS.map((entry) => (
             <button
               key={entry.id}
@@ -87,9 +89,9 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
                 setError(null);
                 setNotice(null);
               }}
-              title={entry.hint}
+              title={t(entry.hintKey)}
             >
-              {entry.label}
+              {t(entry.labelKey)}
             </button>
           ))}
         </div>

@@ -23,8 +23,10 @@ import {
 import type { NodeStyle, Status } from "../../types";
 import { OperationStatus } from "../InteractionPrimitives";
 import { AppearanceControls } from "./AppearanceControls";
+import { useI18n } from "../../i18n";
 
 export function NodeAppearance({ id }: { id: string }) {
+  const { t } = useI18n();
   const graph = useApp((state) => state.graph);
   const statuses = useApp((state) => state.statuses);
   const updateNode = useApp((state) => state.updateNode);
@@ -47,10 +49,10 @@ export function NodeAppearance({ id }: { id: string }) {
   );
 
   return (
-    <div className="node-appearance" role="tabpanel" aria-label="外觀">
+    <div className="node-appearance" role="tabpanel" aria-label={t("drawer.appearance")}>
       <div className="section-head">
-        <h3>卡片外觀</h3>
-        <span className="section-hint">寫入 graph.yaml，整個專案看到的都一樣</span>
+        <h3>{t("appearance.panelTitle")}</h3>
+        <span className="section-hint">{t("appearance.panelHint")}</span>
         <OperationStatus
           status={operation.status}
           message={
@@ -68,7 +70,7 @@ export function NodeAppearance({ id }: { id: string }) {
         status={status}
         customStatuses={customStatuses}
         previewTitle={node?.title || id}
-        sizeHint="也可以直接拖曳畫布上卡片四周的控制點。"
+        sizeHint={t("appearance.sizeHint")}
       />
     </div>
   );

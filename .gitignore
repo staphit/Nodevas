@@ -83,3 +83,13 @@ web/mobile-preview/
 
 # Cross-compiled binaries from deploy dry runs.
 /nodevas-linux-*
+
+# Local iOS deployment project; keep it on the developer machine only.
+/ios/
+
+# Private project notes and design documents.
+/MCP.md
+/plan.md
+/SECURITY.md
+/DATABASE.md
+/DESIGN.md

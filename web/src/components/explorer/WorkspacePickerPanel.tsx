@@ -16,6 +16,7 @@ import {
   IconPlus,
 } from "../../icons";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 
 export function useWorkspacePicker({
@@ -24,6 +25,7 @@ export function useWorkspacePicker({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const addWorkspace = useApp((state) => state.addWorkspace);
+  const { t } = useI18n();
   const [importPathOpen, setImportPathOpen] = useState(false);
   const [importPathValue, setImportPathValue] = useState("");
   const [importPathBusy, setImportPathBusy] = useState(false);
@@ -45,7 +47,7 @@ export function useWorkspacePicker({
       setImportPathValue(result.path);
       setImportPathError(null);
     } catch (error) {
-      setImportPathError((error as Error).message || "無法讀取資料夾。");
+      setImportPathError((error as Error).message || t("explorer.readFolderFailed"));
     }
   };
 
@@ -70,11 +72,11 @@ export function useWorkspacePicker({
     const name = fsNewFolderName.trim();
     if (!parent || fsNewFolderBusy || importPathBusy) return;
     if (!name) {
-      setImportPathError("請輸入新資料夾名稱。");
+      setImportPathError(t("explorer.folderNameRequired"));
       return;
     }
     if (name === "." || name === ".." || /[\\/:*?"<>|]/.test(name)) {
-      setImportPathError("資料夾名稱含有不允許的字元。");
+      setImportPathError(t("explorer.folderNameInvalid"));
       return;
     }
 
@@ -87,7 +89,7 @@ export function useWorkspacePicker({
       setImportPathValue(result.path);
       await browseTo(result.path);
     } catch (error) {
-      setImportPathError((error as Error).message || "無法建立資料夾。");
+      setImportPathError((error as Error).message || t("explorer.createFolderFailed"));
     } finally {
       setFsNewFolderBusy(false);
     }
@@ -98,18 +100,18 @@ export function useWorkspacePicker({
     if (importPathBusy) return;
     const path = importPathValue.trim();
     if (!path) {
-      setImportPathError("請輸入或從下方選擇資料夾。");
+      setImportPathError(t("explorer.chooseFolderRequired"));
       return;
     }
     setImportPathBusy(true);
     setImportPathError(null);
     try {
       const result = await addWorkspace(path);
-      setProjectTransferNotice(`已加入並開啟工作區 ${result.label}`);
+      setProjectTransferNotice(t("explorer.workspaceAdded", { label: result.label }));
       setImportPathOpen(false);
       setImportPathValue("");
     } catch (error) {
-      setImportPathError((error as Error).message || "加入工作區失敗。");
+      setImportPathError((error as Error).message || t("explorer.addWorkspaceFailed"));
     } finally {
       setImportPathBusy(false);
     }
@@ -159,6 +161,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
     createFSFolder,
     importFromDiskPath,
   } = picker;
+  const { t } = useI18n();
   if (!importPathOpen) return null;
 
   return (
@@ -168,23 +171,23 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
           <IconImport size={15} />
         </span>
         <div>
-          <strong>加入工作區</strong>
-          <span>選本機或已掛載的雲端資料夾；資料夾保留原位置</span>
+          <strong>{t("explorer.pickerTitle")}</strong>
+          <span>{t("explorer.pickerDescription")}</span>
         </div>
         <button
           type="button"
           className="project-create-close"
           onClick={() => setImportPathOpen(false)}
-          aria-label="關閉加入工作區面板"
+          aria-label={t("explorer.closePickerPanel")}
         >
           <IconClose size={14} />
         </button>
       </div>
-      <label htmlFor="import-path-value">資料夾完整路徑</label>
+      <label htmlFor="import-path-value">{t("explorer.fullFolderPath")}</label>
       <input
         id="import-path-value"
         value={importPathValue}
-        placeholder={String.raw`例如：D:\我的筆記\企劃（或用下方瀏覽選擇）`}
+        placeholder={t("explorer.folderPathPlaceholder")}
         onChange={(event) => {
           setImportPathValue(event.target.value);
           setImportPathError(null);
@@ -193,11 +196,11 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
         autoComplete="off"
       />
       <div className="workspace-drive-connect">
-        <span>不想先掛載雲端資料夾？</span>
+        <span>{t("explorer.driveQuestion")}</span>
         <button type="button" onClick={openDriveWorkspace}>
-          使用 Google Drive OAuth
+          {t("explorer.useDriveOAuth")}
         </button>
-        <small>授權後可選 Drive 資料夾，將雲端快照匯入本機 workspace。</small>
+        <small>{t("explorer.driveHint")}</small>
       </div>
       <div className="fs-browser">
         <div className="fs-browser-head">
@@ -205,7 +208,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             type="button"
             onClick={() => void browseTo(fsBrowse?.parent ?? "")}
             disabled={!fsBrowse || importPathBusy}
-            title="上一層"
+            title={t("explorer.parentFolder")}
           >
             ↰
           </button>
@@ -218,7 +221,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             }`}
             title={fsBrowse?.path || ""}
           >
-            {fsBrowse ? fsBrowse.path || "選擇磁碟機" : "載入中…"}
+            {fsBrowse ? fsBrowse.path || t("explorer.chooseDrive") : t("explorer.loading")}
           </span>
           <span
             className={`fs-browser-selection${
@@ -233,10 +236,10 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             importPathValue.trim() === fsBrowse.path ? (
               <>
                 <IconCheck size={12} />
-                已選取
+                {t("explorer.selected")}
               </>
             ) : (
-              "尚未選取"
+              t("explorer.notSelected")
             )}
           </span>
         </div>
@@ -252,7 +255,9 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             aria-expanded={fsNewFolderOpen}
           >
             <IconPlus size={12} />
-            {fsNewFolderOpen ? "收起新增資料夾" : "在此新增資料夾"}
+            {fsNewFolderOpen
+              ? t("explorer.collapseNewFolder")
+              : t("explorer.newFolderHere")}
           </button>
         </div>
         {fsNewFolderOpen && (
@@ -260,8 +265,8 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             <IconFolder size={13} />
             <input
               value={fsNewFolderName}
-              placeholder="新資料夾名稱"
-              aria-label="新資料夾名稱"
+              placeholder={t("explorer.newFolderName")}
+              aria-label={t("explorer.newFolderName")}
               disabled={fsNewFolderBusy}
               autoFocus
               autoComplete="off"
@@ -285,7 +290,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
               disabled={!fsNewFolderName.trim() || fsNewFolderBusy}
               onClick={() => void createFSFolder()}
             >
-              {fsNewFolderBusy ? "建立中…" : "建立"}
+              {fsNewFolderBusy ? t("explorer.creating") : t("explorer.create")}
             </button>
             <button
               type="button"
@@ -295,7 +300,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
                 setFsNewFolderName("");
               }}
             >
-              取消
+              {t("common.cancel")}
             </button>
           </div>
         )}
@@ -312,7 +317,7 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
             </li>
           ))}
           {fsBrowse && (fsBrowse.dirs ?? []).length === 0 && (
-            <li className="fs-browser-empty">沒有子資料夾</li>
+            <li className="fs-browser-empty">{t("explorer.noSubfolders")}</li>
           )}
         </ul>
       </div>
@@ -323,14 +328,14 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
       )}
       <div className="project-create-footer">
         <button type="button" onClick={() => setImportPathOpen(false)}>
-          取消
+          {t("common.cancel")}
         </button>
         <button
           className="primary"
           type="submit"
           disabled={importPathBusy || !importPathValue.trim()}
         >
-          {importPathBusy ? "加入中…" : "加入並開啟"}
+          {importPathBusy ? t("explorer.adding") : t("explorer.addAndOpen")}
         </button>
       </div>
     </form>

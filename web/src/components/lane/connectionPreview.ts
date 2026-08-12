@@ -9,6 +9,8 @@ import {
   logicGateOutputs,
   logicGateRelation,
 } from "../../domain";
+import { translate } from "../../i18n";
+import { useApp } from "../../store";
 import type { GraphEdge, LogicGate } from "../../types";
 import { LOGIC_GATE_H, LOGIC_GATE_W } from "../canvas/LogicGate";
 import type { ConnectionDragState } from "../canvas/useConnectionDrag";
@@ -38,6 +40,7 @@ export function connectionPreview({
   graphOffsetX: number;
   graphOffsetY: number;
 }): { previewEnd: Point | null | undefined; previewError: string | null } {
+  const language = useApp.getState().preferences.language;
   const connectionTargetGate = connectionDrag?.targetGateId
     ? logicGates.find((gate) => gate.id === connectionDrag.targetGateId)
     : undefined;
@@ -53,25 +56,25 @@ export function connectionPreview({
     );
   } else if (connectionDrag?.sourceId && connectionTargetGate) {
     if (connectionTargetGate.inputs.includes(connectionDrag.sourceId)) {
-      connectionPreviewError = "此節點已接到邏輯閘。";
+      connectionPreviewError = translate("canvasOps.nodeAlreadyGateInput", language);
     } else if (
       connectionTargetGate.operator === "must" &&
       connectionTargetGate.inputs.length >= 1
     ) {
-      connectionPreviewError = "MUST 僅接受一個輸入節點。";
+      connectionPreviewError = translate("canvasOps.mustSingleInput", language);
     }
   } else if (connectionSourceGate && connectionDrag?.targetId) {
     const outputs = logicGateOutputs(connectionSourceGate);
     // A relation gate is many-to-many, so only the same node twice is refused.
     if (outputs.includes(connectionDrag.targetId)) {
-      connectionPreviewError = "此邏輯閘已連接該輸出節點。";
+      connectionPreviewError = translate("canvasOps.gateOutputAlreadyConnected", language);
     } else if (
       outputs.length > 0 &&
       !logicGateRelation(connectionSourceGate.operator)
     ) {
-      connectionPreviewError = "此邏輯閘已有輸出節點。";
+      connectionPreviewError = translate("canvasOps.gateHasOutput", language);
     } else if (connectionSourceGate.inputs.includes(connectionDrag.targetId)) {
-      connectionPreviewError = "輸出節點不可同時作為此閘門的輸入。";
+      connectionPreviewError = translate("canvasOps.outputCannotBeInput", language);
     }
   }
   const connectionTargetColumn = connectionDrag?.targetId

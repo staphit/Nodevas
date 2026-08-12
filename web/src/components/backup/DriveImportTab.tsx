@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type DriveFolder, type RemoteBundle } from "../../api";
 import { IconCheck, IconFolder } from "../../icons";
+import { useI18n } from "../../i18n";
 import { driveReady, remoteScope, useApp, useOperationPending } from "../../store";
 import { formatSize, formatWhen, reason } from "./format";
 import type { Note } from "./useBackupConfig";
@@ -14,6 +15,7 @@ import type { Note } from "./useBackupConfig";
  * bundle list is further restricted to the appProperties marker on the server.
  */
 export function DriveImportTab({ onImported }: { onImported: () => void }) {
+  const { t } = useI18n();
   const config = useApp((state) => state.remoteConfig);
   const connect = useApp((state) => state.connectDriveWorkspace);
   const busy = useOperationPending(remoteScope.drive());
@@ -26,7 +28,7 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
   const [note, setNote] = useState<Note>(null);
 
   const currentFolderID = folderStack.at(-1)?.id ?? "root";
-  const currentFolderName = folderStack.at(-1)?.name ?? "我的雲端硬碟";
+  const currentFolderName = folderStack.at(-1)?.name ?? t("backup.currentDriveRoot");
   const canBrowse = driveReady(config);
 
   const loadFolder = useCallback(async (folderID: string) => {
@@ -43,11 +45,11 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
     } catch (error) {
       setFolders([]);
       setBundles([]);
-      setNote({ text: reason(error, "讀取 Google Drive 失敗"), kind: "error" });
+      setNote({ text: reason(error, t("backup.readDriveFailed")), kind: "error" });
     } finally {
       setBrowseBusy(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (canBrowse) void loadFolder("root");
@@ -80,7 +82,7 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
       return;
     }
     setNote({
-      text: `已從 Google Drive 匯入並開啟「${result.value}」；之後可用備份分頁回存。`,
+      text: t("backup.importedFromDrive", { name: result.value }),
       kind: "ok",
     });
     onImported();
@@ -89,8 +91,8 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
   if (!config?.driveAvailable) {
     return (
       <div className="drive-workspace-state">
-        <strong>尚未設定 Google OAuth</strong>
-        <p>請先在「備份」分頁輸入 OAuth Client ID 與 Client Secret。</p>
+        <strong>{t("backup.oauthNotConfigured")}</strong>
+        <p>{t("backup.oauthSetupHint")}</p>
       </div>
     );
   }
@@ -98,11 +100,15 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
     return (
       <div className="drive-workspace-state">
         <strong>
-          {config.driveNeedsReauth ? "需要更新 Google Drive 權限" : "尚未連線 Google Drive"}
+          {config.driveNeedsReauth
+            ? t("backup.driveReauthRequired")
+            : t("backup.driveNotConnected")}
         </strong>
-        <p>首次使用或舊版只授予備份權限時，需要重新授權，才能瀏覽資料夾並下載既有快照。</p>
+        <p>{t("backup.driveReauthHint")}</p>
         <a className="backup-connect" href={api.driveAuthURL("workspace")}>
-          {config.driveNeedsReauth ? "重新授權 Google Drive" : "連線 Google Drive"}
+          {config.driveNeedsReauth
+            ? t("backup.reauthorizeDrive")
+            : t("backup.connectDrive")}
         </a>
       </div>
     );
@@ -113,17 +119,17 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
       <div className="drive-workspace-browser">
         <div className="drive-workspace-toolbar">
           <button type="button" onClick={goBack} disabled={browseBusy || folderStack.length === 0}>
-            上層
+            {t("backup.parentFolder")}
           </button>
           <button type="button" onClick={goRoot} disabled={browseBusy}>
-            根目錄
+            {t("backup.rootFolder")}
           </button>
           <span title={currentFolderName}>{currentFolderName}</span>
         </div>
 
         <div className="drive-workspace-columns">
           <section>
-            <h3>資料夾</h3>
+            <h3>{t("backup.folders")}</h3>
             <ul className="drive-workspace-folder-list">
               {folders.map((folder) => (
                 <li key={folder.id}>
@@ -134,12 +140,12 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
                 </li>
               ))}
               {!browseBusy && folders.length === 0 && (
-                <li className="drive-workspace-empty">沒有子資料夾</li>
+                <li className="drive-workspace-empty">{t("backup.noChildFolders")}</li>
               )}
             </ul>
           </section>
           <section>
-            <h3>Nodevas 快照</h3>
+            <h3>{t("backup.snapshots")}</h3>
             <ul className="drive-workspace-bundle-list">
               {bundles.map((bundle) => (
                 <li key={bundle.id}>
@@ -161,13 +167,13 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
               ))}
               {!browseBusy && bundles.length === 0 && (
                 <li className="drive-workspace-empty">
-                  此資料夾沒有 Nodevas 快照（只會列出由 Nodevas 備份產生的檔案）
+                  {t("backup.noSnapshots")}
                 </li>
               )}
             </ul>
           </section>
         </div>
-        {browseBusy && <p className="drive-workspace-loading">讀取 Drive 中…</p>}
+        {browseBusy && <p className="drive-workspace-loading">{t("backup.readingDrive")}</p>}
       </div>
 
       {note && (
@@ -183,7 +189,7 @@ export function DriveImportTab({ onImported }: { onImported: () => void }) {
           onClick={() => void importSelected()}
           disabled={busy || !selected}
         >
-          {busy ? "匯入中…" : "匯入並開啟"}
+          {busy ? t("backup.importing") : t("backup.importAndOpen")}
         </button>
       </footer>
     </>

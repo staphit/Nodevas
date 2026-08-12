@@ -7,6 +7,7 @@
  */
 
 import type { CanvasCommand } from "../../domain/commands";
+import { useI18n } from "../../i18n";
 import type { CanvasAnnotation, CanvasGroup, Graph } from "../../types";
 import { COL_W, ROW_H, type Col } from "./geometry";
 import type { LaneContextMenu } from "../LaneView";
@@ -26,10 +27,11 @@ export function useCanvasDecorations({
   setContextMenu: (menu: LaneContextMenu | null) => void;
   setGraphNotice: (notice: { text: string; kind: "ok" | "error" } | null) => void;
 }) {
+  const { t } = useI18n();
   const createCanvasGroup = (menu: Extract<LaneContextMenu, { kind: "graph" }>) => {
     const item: CanvasGroup = {
       id: `group-${Date.now()}`,
-      title: "新群組",
+      title: t("canvasOps.newGroup"),
       x: menu.col * COL_W,
       y: menu.row * ROW_H,
       width: 480,
@@ -43,7 +45,7 @@ export function useCanvasDecorations({
   const createCanvasAnnotation = (menu: Extract<LaneContextMenu, { kind: "graph" }>) => {
     const item: CanvasAnnotation = {
       id: `note-${Date.now()}`,
-      text: "輸入註解…",
+      text: t("canvasOps.annotationPlaceholder"),
       x: menu.col * COL_W,
       y: menu.row * ROW_H,
       width: 220,
@@ -63,7 +65,7 @@ export function useCanvasDecorations({
     const bottom = Math.max(...selected.map((c) => c.row * ROW_H + ROW_H / 2 + c.height / 2));
     const item: CanvasGroup = {
       id: `group-${Date.now()}`,
-      title: "新群組",
+      title: t("canvasOps.newGroup"),
       x: Math.max(0, left - 24),
       y: Math.max(0, top - 40),
       width: Math.max(140, right - left + 48),
@@ -71,7 +73,7 @@ export function useCanvasDecorations({
       color: "#31566a",
     };
     runCanvasCommand({ type: "canvas.upsertGroup", group: item });
-    setGraphNotice({ text: `已為 ${selected.length} 個節點建立群組底圖`, kind: "ok" });
+    setGraphNotice({ text: t("canvasOps.groupCreated", { count: selected.length }), kind: "ok" });
   };
 
   const updateCanvasDecoration = (

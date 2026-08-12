@@ -12,6 +12,7 @@ import {
   type CanvasCommand,
 } from "../store";
 import { statusOptions } from "../statusTheme";
+import { useI18n } from "../i18n";
 import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
 import { analyzeGraph } from "../analysis";
@@ -127,6 +128,7 @@ export function LaneView({
   keyboardActive,
   onActivate,
 }: PaneProps & { variant: "graph" | "timeline" }) {
+  const { t } = useI18n();
   const isGraph = variant === "graph";
   const graph = useApp((s) => s.graph);
   const statuses = useApp((s) => s.statuses);
@@ -435,7 +437,7 @@ export function LaneView({
         ),
       });
       if (count > 1) {
-        setGraphNotice({ text: `已移動 ${count} 個節點`, kind: "ok" });
+      setGraphNotice({ text: t("lane.nodesMoved", { count }), kind: "ok" });
       }
     },
     onReject: (message) => setGraphNotice({ text: message, kind: "error" }),
@@ -476,11 +478,11 @@ export function LaneView({
       return next.x !== column.index || next.y !== column.row;
     }).length;
     if (!moved) {
-      setGraphNotice({ text: "所有節點都已經在格線上", kind: "ok" });
+      setGraphNotice({ text: t("lane.alreadyAligned"), kind: "ok" });
       return;
     }
     runCanvasCommand({ type: "canvas.moveNodes", positions });
-    setGraphNotice({ text: `已對齊 ${moved} 個節點`, kind: "ok" });
+    setGraphNotice({ text: t("lane.nodesAligned", { count: moved }), kind: "ok" });
   };
   // ----- live drag. What a peer sees while a card is still under a pointer;
   // where it lands arrives afterwards as a graph op.
@@ -645,7 +647,7 @@ export function LaneView({
       );
       onSelectedNodeChange?.(null);
       setGraphNotice({
-        text: `已選取 ${edges.length} 條關係線（右鍵可改語意或線條）`,
+        text: t("lane.edgesSelected", { count: edges.length }),
         kind: "ok",
       });
     },
@@ -1116,7 +1118,7 @@ export function LaneView({
       className={`lane-wrap ${isGraph ? "graph" : "timeline"}${
         collapsed ? " pane-collapsed" : ""
       }${timelineWidthResizeEdge ? " timeline-cell-resizing" : ""}`}
-      aria-label={isGraph ? "關係圖" : "時間軸"}
+      aria-label={isGraph ? t("lane.graph") : t("lane.timeline")}
       style={collapsed ? undefined : paneStyle}
       onPointerDownCapture={onActivate}
       onFocusCapture={onActivate}
@@ -1378,8 +1380,8 @@ export function LaneView({
           )}
           {cols.length === 0 && (
             <EmptyState
-              title="尚無節點"
-              description="建立第一個節點後，即可安排依賴與時間規劃。"
+              title={t("lane.emptyTitle")}
+              description={t("lane.emptyDescription")}
               action={
                 <button
                   type="button"
@@ -1394,7 +1396,7 @@ export function LaneView({
                   }
                 >
                   <IconPlus size={13} />
-                  新增節點
+                  {t("nodeCreate.create")}
                 </button>
               }
             />

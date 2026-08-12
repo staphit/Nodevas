@@ -11,6 +11,7 @@
 import { Fragment } from "react";
 import { reportError } from "../../store";
 import { StatusShape, statusTheme } from "../../statusTheme";
+import { localizedStatusLabel, useI18n } from "../../i18n";
 import { kindIcon } from "../../icons";
 import type {
   CanvasAnnotation,
@@ -212,6 +213,7 @@ export function GraphCanvas({
   updateNode,
   setGraphNotice,
 }: GraphCanvasProps) {
+  const { t } = useI18n();
   // A marquee grabs cards, but a wire between two grabbed cards belongs to the
   // same selection: it is drawn selected so the picked set reads as one shape.
   const selectedEdgeKeys = new Set<string>();
@@ -456,7 +458,7 @@ export function GraphCanvas({
                   return;
                 }
                 setGraphNotice({
-                  text: "已刪除條件閘，前置關係改為單純連線。",
+                  text: t("canvas.deleteGateNotice"),
                   kind: "ok",
                 });
               });
@@ -467,7 +469,7 @@ export function GraphCanvas({
       {cols.map((c) => {
         const n = c.node;
         const st: Status = statuses[n.id] ?? "ready";
-        const assigned = (n.assignee && userNames.get(n.assignee)) || "尚未指派";
+        const assigned = (n.assignee && userNames.get(n.assignee)) || t("canvas.unassigned");
         const isDragging = drag?.ids.includes(n.id) === true && drag.moved;
         const isConnectionTarget = connectionDrag?.targetId === n.id;
         const nodeStyle = graph?.ui?.nodeStyles?.[n.id];
@@ -562,6 +564,8 @@ export function GraphCanvas({
               if (connectionDrag?.sourceId === n.id) connectionHandlers.cancel();
             }}
             aria-selected={selectedGraphNodeIDs.has(n.id)}
+            data-blocked-label={analysis.blocked.has(n.id) ? t("canvas.blockedBadge") : undefined}
+            data-blocking-label={analysis.blocking.has(n.id) ? t("canvas.blockingBadge") : undefined}
             title={`${n.title || n.id} · ${assigned}`}
           >
             <span className="col-card-head">
@@ -570,11 +574,11 @@ export function GraphCanvas({
                   className="entry-flag"
                   title={
                     typeof graph?.ui?.entryOverrides?.[n.id] === "boolean"
-                      ? "起始節點：手動標記"
-                      : "起始節點：沒有任何節點指向它"
+                      ? t("canvas.entry.manual")
+                      : t("canvas.entry.auto")
                   }
                 >
-                  起點
+                  {t("canvas.entryLabel")}
                 </span>
               )}
               <StatusShape status={st} definitions={customStatuses} />
@@ -582,14 +586,17 @@ export function GraphCanvas({
                 className="col-card-st"
                 style={{ color: statusTheme(st, customStatuses).color }}
               >
-                {statusTheme(st, customStatuses).label}
+                {localizedStatusLabel(st, customStatuses)}
               </span>
               <span className="lane-kind">{kindIcon(n.kind || "task", 11)}</span>
               {n.priority && <span className={`priority-dot ${n.priority}`} />}
               {errorNodes.has(n.id) && <span className="error-dot" />}
             </span>
             <span className="col-card-title">{n.title || n.id}</span>
-            <span className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}>
+            <span
+              className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
+              data-assignee-prefix={t("canvas.assigneePrefix")}
+            >
               {assigned}
             </span>
             {!!n.tags?.length && (
@@ -614,12 +621,15 @@ export function GraphCanvas({
                   className={`col-card-handle ${handle.name}`}
                   role="slider"
                   tabIndex={0}
-                  aria-label={`${handle.label}調整「${n.title || n.id}」卡片大小`}
+                  aria-label={t("canvas.resizeCard", {
+                    handle: t(`canvas.handle.${handle.name}`),
+                    title: n.title || n.id,
+                  })}
                   aria-valuemin={handle.dirX ? CARD_MIN_W : CARD_MIN_H}
                   aria-valuemax={handle.dirX ? CARD_MAX_W : CARD_MAX_H}
                   aria-valuenow={Math.round(handle.dirX ? liveWidth : liveHeight)}
                   aria-valuetext={`${Math.round(liveWidth)}×${Math.round(liveHeight)}`}
-                  title="拖曳調整卡片大小；方向鍵微調"
+                  title={t("canvas.resizeCardTitle")}
                   onPointerDown={(event) =>
                     cardResizeHandlers.onPointerDown(
                       event,

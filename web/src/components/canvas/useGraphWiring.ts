@@ -14,6 +14,7 @@ import {
   logicGateOutputs,
   logicGateRelation,
 } from "../../domain";
+import { useI18n } from "../../i18n";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
 import type { Graph, LogicGateOperator } from "../../types";
@@ -40,6 +41,7 @@ export function useGraphWiring({
   /** Fire-and-forget layout write: failures surface through reportError. */
   runCanvasCommand: (command: CanvasCommand) => void;
 }) {
+  const { t } = useI18n();
   const connectNodes = (sourceId: string, targetId: string) => {
     const error = dependencyConnectionError(graph?.edges ?? [], sourceId, targetId);
     if (error) {
@@ -53,7 +55,10 @@ export function useGraphWiring({
           return;
         }
         setGraphNotice({
-          text: `已建立：${nodeTitle(sourceId)} → ${nodeTitle(targetId)}`,
+          text: t("canvasOps.connected", {
+            source: nodeTitle(sourceId),
+            target: nodeTitle(targetId),
+          }),
           kind: "ok",
         });
         selectNode(targetId);
@@ -65,11 +70,11 @@ export function useGraphWiring({
     const gate = graph?.ui?.logicGates?.find((candidate) => candidate.id === gateId);
     if (!gate) return;
     if (gate.inputs.includes(sourceId)) {
-      setGraphNotice({ text: "此節點已接到邏輯閘。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.nodeAlreadyGateInput"), kind: "error" });
       return;
     }
     if (gate.operator === "must" && gate.inputs.length >= 1) {
-      setGraphNotice({ text: "MUST 僅接受一個輸入節點。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.mustSingleInput"), kind: "error" });
       return;
     }
     // A relation gate writes edges that nothing waits on, so a loop through it
@@ -100,8 +105,10 @@ export function useGraphWiring({
       setGraphNotice({
         text:
           gate.output && nextCount >= required
-            ? "邏輯閘接線完成，條件已生效。"
-            : `已接上輸入；${gate.output ? `至少需要 ${required} 個輸入` : "仍需連接輸出節點"}。`,
+            ? t("canvasOps.gateComplete")
+            : t("canvasOps.gateInputAdded", {
+                detail: gate.output ? `at least ${required} input(s)` : "an output node is still required",
+              }),
         kind: "ok",
       });
     });
@@ -112,16 +119,16 @@ export function useGraphWiring({
     if (!gate) return;
     const outputs = logicGateOutputs(gate);
     if (outputs.includes(targetId)) {
-      setGraphNotice({ text: "此邏輯閘已連接該輸出節點。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.gateOutputAlreadyConnected"), kind: "error" });
       return;
     }
     // A relation gate is many-to-many; a boolean gate drives a single node.
     if (outputs.length > 0 && !logicGateRelation(gate.operator)) {
-      setGraphNotice({ text: "此邏輯閘已有輸出節點。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.gateHasOutput"), kind: "error" });
       return;
     }
     if (gate.inputs.includes(targetId)) {
-      setGraphNotice({ text: "輸出節點不可同時作為此閘門的輸入。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.outputCannotBeInput"), kind: "error" });
       return;
     }
     const otherGate = graph?.ui?.logicGates?.find(
@@ -129,7 +136,7 @@ export function useGraphWiring({
         candidate.id !== gateId && logicGateOutputs(candidate).includes(targetId),
     );
     if (otherGate) {
-      setGraphNotice({ text: "此節點已由另一個邏輯閘控制。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.nodeControlledByGate"), kind: "error" });
       return;
     }
     if (!logicGateRelation(gate.operator)) {
@@ -156,8 +163,10 @@ export function useGraphWiring({
       }
       setGraphNotice({
         text: logicGateIsComplete({ ...gate, outputs: [...outputs, targetId] })
-          ? "邏輯閘接線完成，條件已生效。"
-          : `已接上輸出；仍需至少 ${logicGateInputRequirement(gate.operator)} 個輸入。`,
+          ? t("canvasOps.gateComplete")
+          : t("canvasOps.gateOutputAdded", {
+              detail: `at least ${logicGateInputRequirement(gate.operator)} input(s) remain`,
+            }),
         kind: "ok",
       });
     });
@@ -189,7 +198,7 @@ export function useGraphWiring({
     const gate = graph?.ui?.logicGates?.find((candidate) => candidate.id === gateId);
     if (!gate) return;
     if (targetId && gate.inputs.includes(targetId)) {
-      setGraphNotice({ text: "輸出節點不可同時作為此閘門的輸入。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.outputCannotBeInput"), kind: "error" });
       return;
     }
     const otherGate = graph?.ui?.logicGates?.find(
@@ -197,7 +206,7 @@ export function useGraphWiring({
         candidate.id !== gateId && logicGateOutputs(candidate).includes(targetId),
     );
     if (targetId && otherGate) {
-      setGraphNotice({ text: "此節點已由另一個邏輯閘控制。", kind: "error" });
+      setGraphNotice({ text: t("canvasOps.nodeControlledByGate"), kind: "error" });
       return;
     }
     if (targetId && !logicGateRelation(gate.operator)) {
@@ -224,12 +233,15 @@ export function useGraphWiring({
       }
       setGraphNotice({
         text: targetId
-          ? `已將 ${gate.operator.toUpperCase()} 指派給「${nodeTitle(targetId)}」${
+          ? t("canvasOps.gateOutputAssigned", {
+              operator: gate.operator.toUpperCase(),
+              node: nodeTitle(targetId),
+              detail:
               logicGateIsComplete({ ...gate, output: targetId, outputs: [targetId] })
-                ? "，條件已生效。"
-                : `；仍需 ${logicGateInputRequirement(gate.operator)} 個輸入。`
-            }`
-          : "已解除邏輯閘的輸出節點。",
+                ? "; the condition is active."
+                : `; ${logicGateInputRequirement(gate.operator)} input(s) remain`,
+            })
+          : t("canvasOps.gateOutputCleared"),
         kind: "ok",
       });
     });
@@ -270,7 +282,11 @@ export function useGraphWiring({
           return;
         }
         setGraphNotice({
-          text: `已改由 ${replacement.operator.toUpperCase()} · ${replacement.id} 控制「${nodeTitle(targetId)}」。`,
+          text: t("canvasOps.gateReassigned", {
+            operator: replacement.operator.toUpperCase(),
+            id: replacement.id,
+            node: nodeTitle(targetId),
+          }),
           kind: "ok",
         });
       });

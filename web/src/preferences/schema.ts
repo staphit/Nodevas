@@ -17,6 +17,8 @@ export type PreferenceScope =
   | "editor"
   | "onboarding";
 
+export type Language = "en" | "zh-TW";
+
 export const PREFERENCE_SCOPES: readonly PreferenceScope[] = [
   "appearance",
   "layout",
@@ -130,6 +132,7 @@ function systemTheme(): "light" | "dark" {
 export const PREFERENCE_SCHEMA = {
   // appearance
   theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, systemTheme),
+  language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, () => "en" as const),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),

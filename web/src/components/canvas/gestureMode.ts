@@ -26,16 +26,10 @@ export type GraphGestureMode =
 
 export const GRAPH_GESTURE_MODES: {
   mode: GraphGestureMode;
-  label: string;
-  title: string;
 }[] = [
-  { mode: "select", label: "選取", title: "拖曳節點移動、拖曳空白處平移畫布" },
-  {
-    mode: "connect",
-    label: "連線",
-    title: "從節點拖曳建立關係線；點擊關係線新增轉折點（等同 Alt＋左鍵）",
-  },
-  { mode: "marquee", label: "框選", title: "拖曳空白處框選多個節點（等同 Ctrl/⌘＋拖曳）" },
+  { mode: "select" },
+  { mode: "connect" },
+  { mode: "marquee" },
 ];
 
 /**

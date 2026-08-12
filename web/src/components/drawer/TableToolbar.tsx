@@ -11,16 +11,18 @@ import {
   type TableAlign,
 } from "../../editor/table";
 import type { TableEditing } from "./useTableEditing";
+import { useI18n } from "../../i18n";
 
 const TABLE_ALIGNS: readonly (readonly [TableAlign, string])[] = [
-  ["none", "預設"],
-  ["left", "靠左"],
-  ["center", "置中"],
-  ["right", "靠右"],
+  ["none", "none"],
+  ["left", "left"],
+  ["center", "center"],
+  ["right", "right"],
 ];
 
 /** The second toolbar row, shown only while the caret sits inside a table. */
 export function TableToolbar({ tables }: { tables: TableEditing }) {
+  const { t } = useI18n();
   const fieldID = useId();
   const { tableAt, applyTableEdit } = tables;
   if (!tableAt) return null;
@@ -29,18 +31,22 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
     <div
       className="editor-toolbar editor-table-toolbar"
       role="toolbar"
-      aria-label="表格編輯"
+      aria-label={t("table.aria")}
     >
       <span className="editor-table-where">
-        表格 {tableAt.rows.length}×{tableAt.align.length}・第{" "}
-        {tableAt.row + 1} 列第 {tableAt.column + 1} 欄
+        {t("table.position", {
+          rows: String(tableAt.rows.length),
+          columns: String(tableAt.align.length),
+          row: String(tableAt.row + 1),
+          column: String(tableAt.column + 1),
+        })}
       </span>
-      <span className="editor-tool-more-label">列</span>
+      <span className="editor-tool-more-label">{t("table.rows")}</span>
       <button
         type="button"
         className="tool-btn"
-        title="在上方插入一列"
-        aria-label="在上方插入一列"
+        title={t("table.insertRowAbove")}
+        aria-label={t("table.insertRowAbove")}
         onClick={() => applyTableEdit((info) => insertRow(info, -1))}
       >
         ＋↑
@@ -48,8 +54,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="在下方插入一列"
-        aria-label="在下方插入一列"
+        title={t("table.insertRowBelow")}
+        aria-label={t("table.insertRowBelow")}
         onClick={() => applyTableEdit((info) => insertRow(info, 1))}
       >
         ＋↓
@@ -57,8 +63,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="上移這一列"
-        aria-label="上移這一列"
+        title={t("table.moveRowUp")}
+        aria-label={t("table.moveRowUp")}
         disabled={tableAt.row <= 1}
         onClick={() => applyTableEdit((info) => moveRow(info, -1))}
       >
@@ -67,8 +73,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="下移這一列"
-        aria-label="下移這一列"
+        title={t("table.moveRowDown")}
+        aria-label={t("table.moveRowDown")}
         disabled={tableAt.row === 0 || tableAt.row >= tableAt.rows.length - 1}
         onClick={() => applyTableEdit((info) => moveRow(info, 1))}
       >
@@ -77,19 +83,19 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn danger"
-        title={tableAt.row === 0 ? "標題列無法刪除" : "刪除這一列"}
+        title={tableAt.row === 0 ? t("table.headerDelete") : t("table.deleteRow")}
         disabled={tableAt.row === 0}
         onClick={() => applyTableEdit(removeRow)}
       >
         ✕
       </button>
       <span className="tool-sep" />
-      <span className="editor-tool-more-label">欄</span>
+      <span className="editor-tool-more-label">{t("table.columns")}</span>
       <button
         type="button"
         className="tool-btn"
-        title="在左方插入一欄"
-        aria-label="在左方插入一欄"
+        title={t("table.insertColumnLeft")}
+        aria-label={t("table.insertColumnLeft")}
         onClick={() => applyTableEdit((info) => insertColumn(info, -1))}
       >
         ＋←
@@ -97,8 +103,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="在右方插入一欄"
-        aria-label="在右方插入一欄"
+        title={t("table.insertColumnRight")}
+        aria-label={t("table.insertColumnRight")}
         onClick={() => applyTableEdit((info) => insertColumn(info, 1))}
       >
         ＋→
@@ -106,8 +112,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="左移這一欄"
-        aria-label="左移這一欄"
+        title={t("table.moveColumnLeft")}
+        aria-label={t("table.moveColumnLeft")}
         disabled={tableAt.column === 0}
         onClick={() => applyTableEdit((info) => moveColumn(info, -1))}
       >
@@ -116,8 +122,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn"
-        title="右移這一欄"
-        aria-label="右移這一欄"
+        title={t("table.moveColumnRight")}
+        aria-label={t("table.moveColumnRight")}
         disabled={tableAt.column >= tableAt.align.length - 1}
         onClick={() => applyTableEdit((info) => moveColumn(info, 1))}
       >
@@ -126,8 +132,8 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       <button
         type="button"
         className="tool-btn danger"
-        title="刪除這一欄"
-        aria-label="刪除這一欄"
+        title={t("table.deleteColumn")}
+        aria-label={t("table.deleteColumn")}
         disabled={tableAt.align.length <= 1}
         onClick={() => applyTableEdit(removeColumn)}
       >
@@ -135,7 +141,7 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       </button>
       <span className="tool-sep" />
       <label className="editor-tool-more-label" htmlFor={`${fieldID}-table-align`}>
-        對齊
+        {t("table.align")}
       </label>
       <select
         id={`${fieldID}-table-align`}
@@ -149,18 +155,18 @@ export function TableToolbar({ tables }: { tables: TableEditing }) {
       >
         {TABLE_ALIGNS.map(([align, label]) => (
           <option key={align} value={align}>
-            {label}
+            {t(`table.align.${label}`)}
           </option>
         ))}
       </select>
       <button
         type="button"
         className="tool-btn"
-        title="重新對齊表格欄寬"
-        aria-label="重新對齊表格欄寬"
+        title={t("table.realign")}
+        aria-label={t("table.realign")}
         onClick={() => applyTableEdit((info) => info)}
       >
-        整理
+        {t("table.realignLabel")}
       </button>
     </div>
   );

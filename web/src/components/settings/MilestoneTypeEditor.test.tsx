@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import { ConfirmDialogHost } from "../ConfirmDialog";
 import { MilestoneTypeEditor } from "./MilestoneTypeEditor";
@@ -35,6 +36,8 @@ function open(options: { scheduled?: boolean } = {}) {
 }
 
 beforeEach(() => {
+  useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+  useApp.getState().updateUIPreference("language", "zh-TW");
   updateWorkflowDefinition.mockReset().mockResolvedValue({ ok: true });
 });
 

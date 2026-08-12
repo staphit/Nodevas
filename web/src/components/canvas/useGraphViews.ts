@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { useI18n } from "../../i18n";
 import { reportError } from "../../store";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
@@ -32,6 +33,7 @@ export function useGraphViews({
   updateCanvasLayout: (command: CanvasCommand) => Promise<CommandResult>;
   runCanvasCommand: (command: CanvasCommand) => void;
 }) {
+  const { t } = useI18n();
   const [savedViewName, setSavedViewName] = useState("");
   const [viewFilter, setViewFilter] = useState<{
     query: string;
@@ -71,9 +73,12 @@ export function useGraphViews({
   const applyBatchStatus = (status: Status) => {
     if (!selectedIDs.length) return;
     setShortcutBusy(true);
-    void Promise.all(selectedIDs.map((id) => setStatus(id, status, "批次更新")))
+    void Promise.all(selectedIDs.map((id) => setStatus(id, status, t("canvasOps.batchUpdateActor"))))
       .then(() =>
-        setGraphNotice({ text: `已更新 ${selectedIDs.length} 個節點狀態。`, kind: "ok" }),
+        setGraphNotice({
+          text: t("canvasOps.statusBatchUpdated", { count: selectedIDs.length }),
+          kind: "ok",
+        }),
       )
       .catch(reportError)
       .finally(() => setShortcutBusy(false));

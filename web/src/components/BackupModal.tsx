@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type RemoteKind } from "../api";
+import { useI18n } from "../i18n";
 import { driveReady } from "../store";
 import { IconClose, IconCloud } from "../icons";
 import { DriveCredentialsPanel } from "./backup/DriveCredentialsPanel";
 import { DriveFolderPicker } from "./backup/DriveFolderPicker";
 import { DriveImportTab } from "./backup/DriveImportTab";
-import { formatCoverage, formatSize, formatWhen } from "./backup/format";
+import { formatSize, formatWhen } from "./backup/format";
 import {
   MIN_RETAIN,
   useBackupConfig,
   type Note,
 } from "./backup/useBackupConfig";
-import { useDriveConnection } from "./backup/useDriveConnection";
+import { DRIVE_ROOT_LABEL, useDriveConnection } from "./backup/useDriveConnection";
 
 /** The dialog's two jobs. "backup" pushes copies out; "import" brings one in. */
 export type BackupTab = "backup" | "import";
@@ -37,6 +38,7 @@ export function BackupModal({
   initialTab?: BackupTab;
 }) {
   const [tab, setTab] = useState<BackupTab>(initialTab);
+  const { t } = useI18n();
   const backup = useBackupConfig();
   const { busy, config, draft, patch, note, setNote } = backup;
 
@@ -67,7 +69,7 @@ export function BackupModal({
     const result = await drive.disconnect();
     setNote(
       result.ok
-        ? { text: "已中斷 Google Drive 連線。", kind: "ok" }
+        ? { text: t("backup.disconnected"), kind: "ok" }
         : { text: result.message, kind: "error" },
     );
   };
@@ -77,8 +79,10 @@ export function BackupModal({
     config && !config.lastBackupAt.startsWith("0001-01-01")
       ? formatWhen(config.lastBackupAt)
       : "";
+  const driveLabel = drive.label === DRIVE_ROOT_LABEL ? t("backup.driveRoot") : drive.label;
+  const coverage = formatLocalizedCoverage(draft.retainBundles, draft.intervalHours, t);
   // Pushing while the form disagrees with the server would back up settings
-  // nobody chose, so both buttons wait for 儲存設定.
+  // nobody chose, so both buttons wait for the saved settings.
   const pushBlocked =
     busy || !backup.canBackup || backup.dirty || (config?.kind === "drive" && !connected);
 
@@ -88,7 +92,7 @@ export function BackupModal({
         className="confirm-dialog notify-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="雲端備份"
+        aria-label={t("backup.title")}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
@@ -96,14 +100,12 @@ export function BackupModal({
             <IconCloud size={17} />
           </span>
           <div>
-            <h2>雲端備份</h2>
+            <h2>{t("backup.title")}</h2>
             <p>
-              把專案打包成 .veproj 推送到本機資料夾或 Google Drive，
-              或把 Drive 上既有的快照匯入成新專案。
-              伺服器永遠是唯一寫入者，備份不在寫入路徑上。
+              {t("backup.description")}
             </p>
           </div>
-          <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label="關閉" disabled={busy}>
+          <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label={t("backup.close")} disabled={busy}>
             <IconClose size={14} />
           </button>
         </header>
@@ -116,7 +118,7 @@ export function BackupModal({
             className={tab === "backup" ? "active" : ""}
             onClick={() => setTab("backup")}
           >
-            備份
+            {t("backup.tab.backup")}
           </button>
           <button
             type="button"
@@ -125,7 +127,7 @@ export function BackupModal({
             className={tab === "import" ? "active" : ""}
             onClick={() => setTab("import")}
           >
-            從 Drive 匯入
+            {t("backup.tab.import")}
           </button>
         </div>
 
@@ -133,27 +135,27 @@ export function BackupModal({
           tab === "backup" ? (
             <div className="notify-form">
               <div className="notify-field">
-                <label htmlFor="backup-kind">備份後端</label>
+                <label htmlFor="backup-kind">{t("backup.backend")}</label>
                 <select
                   id="backup-kind"
                   value={draft.kind}
                   onChange={(event) => patch({ kind: event.target.value as RemoteKind })}
                 >
-                  <option value="">停用</option>
-                  <option value="folder">本機資料夾</option>
+                  <option value="">{t("backup.disabled")}</option>
+                  <option value="folder">{t("backup.localFolder")}</option>
                   <option value="drive">
-                    Google Drive{config.driveAvailable ? "" : "（需設定 OAuth 憑證）"}
+                    Google Drive{config.driveAvailable ? "" : t("backup.googleDriveOAuthRequired")}
                   </option>
                 </select>
               </div>
 
               {draft.kind === "folder" && (
                 <div className="notify-field">
-                  <label htmlFor="backup-folder">資料夾路徑</label>
+                  <label htmlFor="backup-folder">{t("backup.folderPath")}</label>
                   <input
                     id="backup-folder"
                     value={draft.folder}
-                    placeholder="伺服器本機上的備份資料夾"
+                    placeholder={t("backup.folderPathPlaceholder")}
                     onChange={(event) => patch({ folder: event.target.value })}
                   />
                 </div>
@@ -165,24 +167,24 @@ export function BackupModal({
                   <div className="backup-drive-status">
                     {connected ? (
                       <>
-                        <span className="backup-badge ok">已連線</span>
+                        <span className="backup-badge ok">{t("backup.connected")}</span>
                         <button type="button" disabled={busy} onClick={() => void disconnect()}>
-                          中斷連線
+                          {t("backup.disconnect")}
                         </button>
                       </>
                     ) : config.driveAvailable ? (
                       <a className="backup-connect" href={api.driveAuthURL("backup")}>
-                        連線 Google Drive
+                        {t("backup.connectDrive")}
                       </a>
                     ) : null}
                   </div>
                   <div className="notify-field">
-                    <label htmlFor="backup-drive-folder">Drive 資料夾（選填）</label>
+                    <label htmlFor="backup-drive-folder">{t("backup.driveFolderOptional")}</label>
                     <div className="backup-drive-folder-row">
                       <input
                         id="backup-drive-folder"
                         value={draft.driveFolderId}
-                        placeholder="留空存到雲端硬碟根目錄"
+                        placeholder={t("backup.driveFolderPlaceholder")}
                         onChange={(event) => drive.selectFolderId(event.target.value)}
                       />
                       <button
@@ -190,11 +192,11 @@ export function BackupModal({
                         disabled={busy || drive.busy || !connected}
                         onClick={drive.openPicker}
                       >
-                        瀏覽
+                        {t("backup.browse")}
                       </button>
                     </div>
                     <span className="backup-drive-folder-current">
-                      目前：{drive.label}
+                      {t("backup.currentFolder", { label: driveLabel })}
                     </span>
                     {drive.open && <DriveFolderPicker drive={drive} />}
                   </div>
@@ -209,11 +211,11 @@ export function BackupModal({
                       checked={draft.autoBackup}
                       onChange={(event) => patch({ autoBackup: event.target.checked })}
                     />
-                    自動排程備份整個工作區
+                    {t("backup.autoBackup")}
                   </label>
                   {draft.autoBackup && (
                     <div className="notify-field">
-                      <label htmlFor="backup-interval">每隔幾小時備份</label>
+                      <label htmlFor="backup-interval">{t("backup.interval")}</label>
                       <div className="backup-interval">
                         <input
                           id="backup-interval"
@@ -228,7 +230,7 @@ export function BackupModal({
                             }
                           }}
                         />
-                        <span>小時</span>
+                        <span>{t("backup.hours")}</span>
                       </div>
                     </div>
                   )}
@@ -240,14 +242,14 @@ export function BackupModal({
                           checked={draft.pruneOld}
                           onChange={(event) => patch({ pruneOld: event.target.checked })}
                         />
-                        排程備份成功後清理較舊的備份
+                        {t("backup.pruneOld")}
                       </label>
                       {draft.pruneOld ? (
                         <>
                           <div className="backup-interval">
                             <input
                               id="backup-retain"
-                              aria-label="保留份數"
+                              aria-label={t("backup.retainedBundles")}
                               type="number"
                               min={MIN_RETAIN}
                               max={500}
@@ -259,28 +261,28 @@ export function BackupModal({
                                 }
                               }}
                             />
-                            <span>份</span>
+                            <span>{t("backup.bundlesUnit")}</span>
                           </div>
                           <p className="backup-hint">
-                            保留最近 {draft.retainBundles} 份（目前 {draft.intervalHours} 小時間隔下
-                            {formatCoverage(draft.retainBundles, draft.intervalHours)}）。
-                            更舊的會在每次排程備份成功後刪除；最新一份永遠保留，
-                            資料夾裡不是本程式建立的檔案也不會被刪除。
-                            手動「立即備份」產生的備份也算在這個份數裡，但按下它本身不會刪除任何東西。
-                            最少 {MIN_RETAIN} 份，填得更小會自動調整回 {MIN_RETAIN}。
+                            {t("backup.retentionHint", {
+                              count: draft.retainBundles,
+                              hours: draft.intervalHours,
+                              coverage,
+                              min: MIN_RETAIN,
+                            })}
                           </p>
                         </>
                       ) : (
                         <p className="backup-hint">
-                          不刪除任何備份。每次排程都會新增一份完整工作區封存，
-                          目前間隔下一年約 {Math.round((365 * 24) / Math.max(draft.intervalHours, 1))} 份，
-                          儲存空間與還原清單都會持續增長。
+                          {t("backup.noPruneHint", {
+                            count: Math.round((365 * 24) / Math.max(draft.intervalHours, 1)),
+                          })}
                         </p>
                       )}
                     </div>
                   )}
                   <p className="backup-hint">
-                    上次備份：{lastBackup || "尚未備份"}
+                    {t("backup.lastBackup", { value: lastBackup || t("backup.never") })}
                   </p>
                 </div>
               )}
@@ -288,15 +290,15 @@ export function BackupModal({
               {backup.canBackup && (
                 <div className="backup-bundles">
                   <div className="backup-bundles-head">
-                    <label>備份（新到舊）</label>
+                    <label>{t("backup.bundles")}</label>
                     <button type="button" disabled={busy} onClick={backup.reloadBundles}>
-                      重新整理
+                      {t("backup.refresh")}
                     </button>
                   </div>
                   {backup.bundles == null ? (
-                    <p className="backup-hint">載入中…</p>
+                    <p className="backup-hint">{t("backup.loading")}</p>
                   ) : backup.bundles.length === 0 ? (
-                    <p className="backup-hint">尚無備份。</p>
+                    <p className="backup-hint">{t("backup.empty")}</p>
                   ) : (
                     <ul className="backup-list">
                       {backup.bundles.map((bundle) => (
@@ -312,7 +314,7 @@ export function BackupModal({
                             disabled={busy}
                             onClick={() => void backup.restore(bundle)}
                           >
-                            還原
+                            {t("backup.restore")}
                           </button>
                         </li>
                       ))}
@@ -328,7 +330,7 @@ export function BackupModal({
           )
         ) : (
           <div className="notify-form">
-            <p>{note ? note.text : "載入中…"}</p>
+            <p>{note ? note.text : t("backup.loading")}</p>
           </div>
         )}
 
@@ -338,17 +340,17 @@ export function BackupModal({
               type="button"
               disabled={pushBlocked}
               onClick={() => void backup.pushWorkspace()}
-              title={backup.dirty ? "先儲存設定" : "所有專案與資料夾結構打包成一份"}
+              title={backup.dirty ? t("backup.saveFirst") : t("backup.workspacePushTitle")}
             >
-              備份整個工作區
+              {t("backup.workspacePush")}
             </button>
             <button
               type="button"
               disabled={pushBlocked}
               onClick={() => void backup.push()}
-              title={backup.dirty ? "先儲存設定" : ""}
+              title={backup.dirty ? t("backup.saveFirst") : undefined}
             >
-              備份目前專案
+              {t("backup.projectPush")}
             </button>
             <button
               type="button"
@@ -356,13 +358,26 @@ export function BackupModal({
               disabled={busy || !backup.dirty}
               onClick={() => void backup.save()}
             >
-              儲存設定
+              {t("backup.saveSettings")}
             </button>
           </footer>
         )}
       </div>
     </div>
   );
+}
+
+function formatLocalizedCoverage(
+  count: number,
+  hours: number,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const total = count * hours;
+  if (!Number.isFinite(total) || total <= 0) return "";
+  if (total < 48) return t("backup.coverageHours", { count: Math.round(total) });
+  return t("backup.coverageDays", {
+    count: Number((total / 24).toFixed(1)),
+  });
 }
 
 function NoteStrip({ note }: { note: Note }) {

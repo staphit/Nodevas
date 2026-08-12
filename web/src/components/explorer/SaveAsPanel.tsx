@@ -8,6 +8,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { IconClose, IconFolder } from "../../icons";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
 
@@ -24,6 +25,7 @@ export function useSaveAs({
   persistExpandedProjects: (next: Set<string>) => void;
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
+  const { t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
   const saveAllTabs = useApp((state) => state.saveAllTabs);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
@@ -35,7 +37,7 @@ export function useSaveAs({
   const openSaveAs = () => {
     if (!activeProject) return;
     const base = activeProject.split("/").at(-1) ?? activeProject;
-    setSaveAsName(`${base} 副本`);
+    setSaveAsName(`${base}${t("explorer.renameCopySuffix")}`);
     setSaveAsError(null);
     setSaveAsOpen(true);
     requestAnimationFrame(() => saveAsInputRef.current?.select());
@@ -52,11 +54,11 @@ export function useSaveAs({
     if (saveAsBusy || !activeProject) return;
     const name = saveAsName.trim();
     if (!name) {
-      setSaveAsError("請輸入新專案名稱。");
+      setSaveAsError(t("explorer.saveAsRequired"));
       return;
     }
     if (name.includes("/") || name === "." || name === "..") {
-      setSaveAsError("名稱不能包含 / 或為 . / ..");
+      setSaveAsError(t("explorer.saveAsInvalid"));
       return;
     }
     const parent = activeProject.includes("/")
@@ -64,7 +66,7 @@ export function useSaveAs({
       : "";
     const fullName = parent ? `${parent}/${name}` : name;
     if (projectByName.has(fullName)) {
-      setSaveAsError("這個位置已經有同名專案。");
+      setSaveAsError(t("explorer.saveAsDuplicate"));
       return;
     }
 
@@ -79,10 +81,10 @@ export function useSaveAs({
       next.add(fullName);
       if (parent) next.add(parent);
       persistExpandedProjects(next);
-      setProjectTransferNotice(`已另存為 ${fullName} 並開啟`);
+      setProjectTransferNotice(t("explorer.savedAs", { name: fullName }));
       closeSaveAs();
     } catch (error) {
-      setSaveAsError((error as Error).message || "另存新檔失敗。");
+      setSaveAsError((error as Error).message || t("explorer.saveAsFailed"));
     } finally {
       setSaveAsBusy(false);
     }
@@ -111,6 +113,7 @@ export function SaveAsPanel({
   saveAs: SaveAs;
   activeProject: string;
 }) {
+  const { t } = useI18n();
   const {
     saveAsOpen,
     saveAsName,
@@ -131,19 +134,19 @@ export function SaveAsPanel({
           <IconFolder size={15} />
         </span>
         <div>
-          <strong>另存新檔</strong>
-          <span>來源：{activeProject}</span>
+          <strong>{t("explorer.saveAs")}</strong>
+          <span>{t("explorer.saveAsSource", { project: activeProject })}</span>
         </div>
         <button
           type="button"
           className="project-create-close"
           onClick={closeSaveAs}
-          aria-label="關閉另存新檔面板"
+          aria-label={t("explorer.closeSaveAsPanel")}
         >
           <IconClose size={14} />
         </button>
       </div>
-      <label htmlFor="project-save-as-name">新專案名稱</label>
+      <label htmlFor="project-save-as-name">{t("explorer.saveAsProjectName")}</label>
       <input
         ref={saveAsInputRef}
         id="project-save-as-name"
@@ -163,7 +166,7 @@ export function SaveAsPanel({
         autoComplete="off"
       />
       <p id="project-save-as-help" className="project-create-help">
-        複製節點、子頁與附件到同一層的新專案並開啟；草稿、歷史與垃圾桶留在原專案。
+        {t("explorer.saveAsHint")}
       </p>
       {saveAsError && (
         <p id="project-save-as-error" className="project-create-error" role="alert">
@@ -172,14 +175,14 @@ export function SaveAsPanel({
       )}
       <div className="project-create-footer">
         <button type="button" onClick={closeSaveAs}>
-          取消
+          {t("common.cancel")}
         </button>
         <button
           className="primary"
           type="submit"
           disabled={!saveAsName.trim() || saveAsBusy}
         >
-          {saveAsBusy ? "另存中…" : "另存並開啟"}
+          {saveAsBusy ? t("explorer.savingAs") : t("explorer.saveAsAndOpen")}
         </button>
       </div>
     </form>

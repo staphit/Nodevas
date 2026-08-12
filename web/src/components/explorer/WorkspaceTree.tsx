@@ -20,6 +20,7 @@ import {
   IconTrash,
   IconWarning,
 } from "../../icons";
+import { useI18n } from "../../i18n";
 import { reportError } from "../../store";
 import { StatusShape } from "../../statusTheme";
 import { NODE_DRAG_TYPE, NodeFolderTree } from "./NodeFolderTree";
@@ -202,8 +203,9 @@ export function WorkspaceTree({
   validationExpanded,
   setValidationExpanded,
 }: WorkspaceTreeProps) {
+  const { t } = useI18n();
   return (
-    <div className="workspace-tree" role="tree" aria-label="工作區檔案樹">
+    <div className="workspace-tree" role="tree" aria-label={t("explorer.treeLabel")}>
       {workspaceRoots.map((root) => {
         const rootActive = root.path === workspace || root.active;
         // Only the open workspace has a project list to show, so only it can
@@ -225,8 +227,8 @@ export function WorkspaceTree({
               aria-busy={switching}
               title={
                 rootActive
-                  ? `${root.path}（點擊收合或展開；可把子專案拖到這裡移到最上層）`
-                  : `${root.path}（點擊開啟；拖入專案可搬到此工作區）`
+                  ? t("explorer.workspaceExpandTitle", { path: root.path })
+                  : t("explorer.workspaceOpenTitle", { path: root.path })
               }
               onClick={() => {
                 if (rootActive) {
@@ -323,7 +325,7 @@ export function WorkspaceTree({
                       : " drop-after"
                     : ""
                 }`}
-                title={`${project.path}（右鍵開啟專案選單；拖到列上搬移層級，拖到列的上下緣調整順序，Alt + ↑／↓ 也可以）`}
+                title={t("explorer.projectRowTitle", { path: project.path })}
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.setData(
@@ -409,7 +411,7 @@ export function WorkspaceTree({
                   type="button"
                   className="project-tree-toggle"
                   onClick={() => toggleProject(project.name)}
-                  aria-label={`${expanded ? "收合" : "展開"} ${project.label}`}
+                  aria-label={`${expanded ? t("explorer.collapse") : t("explorer.expand")} ${project.label}`}
                 >
                   <span className={`tree-chevron${expanded ? " open" : ""}`}>
                     {expanded ? "⌄" : "›"}
@@ -467,15 +469,15 @@ export function WorkspaceTree({
                   aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                   title={
                     project.isFolder
-                      ? "工作區目錄（分組用，不可開啟）"
-                      : "Ctrl／⌘ + 點擊多選，Shift + 點擊選取範圍，右鍵批次操作，Alt + ↑／↓ 調整順序"
+                      ? t("explorer.folderProjectTitle")
+                      : t("explorer.projectSelectionTitle")
                   }
                 >
                   <span className="project-tree-name">{project.label}</span>
                   {project.isFolder && (
-                    <span className="current-project-tag folder-tag">目錄</span>
+                    <span className="current-project-tag folder-tag">{t("explorer.folderTag")}</span>
                   )}
-                  {active && <span className="current-project-tag">目前</span>}
+                  {active && <span className="current-project-tag">{t("explorer.currentTag")}</span>}
                 </button>
                 {!project.isFolder && (
                   <span className="tree-count">{project.nodes}</span>
@@ -489,8 +491,8 @@ export function WorkspaceTree({
                       parent: project.name,
                     })
                   }
-                  aria-label={`在 ${project.label} 新增子專案`}
-                  title="新增子專案"
+                  aria-label={t("explorer.addChildProjectAria", { label: project.label })}
+                  title={t("explorer.newChildProject")}
                 >
                   <IconPlus size={12} />
                 </button>
@@ -502,7 +504,7 @@ export function WorkspaceTree({
                   {project.isFolder ? (
                     <div className="tree-folder-row tree-empty-row">
                       <span className="tree-indent" />
-                      <span>空目錄（可把專案拖進來）</span>
+                      <span>{t("explorer.emptyFolder")}</span>
                     </div>
                   ) : (
                     <button
@@ -512,10 +514,10 @@ export function WorkspaceTree({
                         void openProject(project.name).catch(reportError)
                       }
                       disabled={Boolean(switchingProject)}
-                      title="節點只在開啟的專案載入"
+                      title={t("explorer.openProjectToViewNodes")}
                     >
                       <span className="tree-indent" />
-                      <span>開啟此專案以檢視節點</span>
+                      <span>{t("explorer.openProjectToViewNodes")}</span>
                     </button>
                   )}
                 </div>
@@ -537,7 +539,7 @@ export function WorkspaceTree({
                     ) : (
                       <IconFolder size={13} />
                     )}
-                    <span>節點</span>
+                    <span>{t("explorer.nodes")}</span>
                     <span className="tree-count">{activeNodes.length}</span>
                   </button>
 
@@ -611,9 +613,7 @@ export function WorkspaceTree({
                                   y: event.clientY,
                                 });
                               }}
-                              title={`${
-                                node.title || node.id
-                              }（Ctrl／⌘ + 點擊多選，Shift + 點擊選取範圍，右鍵開啟檔案選單）`}
+                              title={`${node.title || node.id} (${t("explorer.nodeSelectionTitle")})`}
                             >
                               <span className="tree-indent" />
                               <IconDoc size={13} />
@@ -629,7 +629,7 @@ export function WorkspaceTree({
                                   {node.id}.md ·{" "}
                                   {(node.assignee &&
                                     userNames.get(node.assignee)) ||
-                                    "尚未指派"}
+                                    t("explorer.unassigned")}
                                 </span>
                               </span>
                               <StatusShape
@@ -655,12 +655,12 @@ export function WorkspaceTree({
                     <summary>
                       <span className="tree-chevron">›</span>
                       <IconWarning size={12} />
-                      <span>驗證</span>
+                      <span>{t("explorer.validation")}</span>
                       <span className="tree-count">{issues.length}</span>
                     </summary>
                     {issues.length === 0 ? (
                       <div className="tree-ok-msg">
-                        <IconCheck size={12} /> 沒有問題
+                        <IconCheck size={12} /> {t("explorer.noIssues")}
                       </div>
                     ) : (
                       <ul className="issue-list">
@@ -689,7 +689,7 @@ export function WorkspaceTree({
                       <summary>
                         <span className="tree-chevron">›</span>
                         <IconTrash size={12} />
-                        <span>垃圾桶</span>
+                        <span>{t("explorer.trash")}</span>
                         <span className="tree-count">{trash.length}</span>
                       </summary>
                       <ul className="trash-list">
@@ -699,7 +699,7 @@ export function WorkspaceTree({
                               {item.kind === "page" ? (
                                 <>
                                   <b>{item.title || item.nodeId}</b>
-                                  <small>{item.parentId} 的子頁</small>
+                                  <small>{t("explorer.childPage", { parent: item.parentId ?? "" })}</small>
                                 </>
                               ) : (
                                 <span className="mono">{item.nodeId}.md</span>
@@ -710,10 +710,10 @@ export function WorkspaceTree({
                               onClick={() =>
                                 void restoreTrash(item.file).catch(reportError)
                               }
-                              title="復原此節點"
+                              title={t("explorer.restoreNode")}
                             >
                               <IconRestore size={12} />
-                              復原
+                              {t("explorer.restore")}
                             </button>
                           </li>
                         ))}
@@ -726,7 +726,7 @@ export function WorkspaceTree({
           );
         })}
         {visibleProjects.length === 0 && (
-          <li className="tree-empty project-empty">沒有符合的專案</li>
+          <li className="tree-empty project-empty">{t("explorer.noMatchingProjects")}</li>
         )}
             </ul>}
           </div>

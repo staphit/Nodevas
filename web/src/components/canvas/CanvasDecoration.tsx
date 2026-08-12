@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { CanvasAnnotation, CanvasGroup } from "../../types";
 import { ColorField } from "../InteractionPrimitives";
+import { useI18n } from "../../i18n";
 import type { Rect } from "./geometry";
 import {
   NO_SNAP_TARGETS,
@@ -44,6 +45,7 @@ export function CanvasDecoration({
    */
   onSnapGuides?: (guides: SnapGuide[]) => void;
 }) {
+  const { t } = useI18n();
   const [working, setWorking] = useState(item);
   const targets = useRef<SnapTargets>(NO_SNAP_TARGETS);
   const gesture = useRef<{
@@ -188,14 +190,14 @@ export function CanvasDecoration({
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
       >
-        <span>{kind === "group" ? "群組" : "註解"}</span>
+        <span>{kind === "group" ? t("canvas.decoration.group") : t("canvas.decoration.annotation")}</span>
         <span
           className="canvas-decoration-color"
           onPointerDown={(event) => event.stopPropagation()}
         >
           <ColorField
-            label={kind === "group" ? "選擇群組顏色" : "選擇註解顏色"}
-            title={kind === "group" ? "選擇群組顏色" : "選擇註解顏色"}
+            label={kind === "group" ? t("canvas.decoration.groupColor") : t("canvas.decoration.annotationColor")}
+            title={kind === "group" ? t("canvas.decoration.groupColor") : t("canvas.decoration.annotationColor")}
             value={working.color || "#31566a"}
             // The decoration is drawn from `working`, so it can follow the
             // picker for free; only the write waits for the picker to close.
@@ -203,7 +205,7 @@ export function CanvasDecoration({
             onCommit={(color) => onChange({ color })}
           />
         </span>
-        <button type="button" aria-label="刪除" onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}>
+        <button type="button" aria-label={t("common.delete")} onPointerDown={(event) => event.stopPropagation()} onClick={onDelete}>
           ×
         </button>
       </header>
@@ -214,8 +216,8 @@ export function CanvasDecoration({
           onChange={(event) =>
             setWorking((value) => ({ ...value, title: event.target.value }) as CanvasGroup)
           }
-          onBlur={(event) => onChange({ title: event.target.value.trim() || "未命名群組" })}
-          aria-label="群組名稱"
+          onBlur={(event) => onChange({ title: event.target.value.trim() || t("canvas.decoration.untitledGroup") })}
+          aria-label={t("canvas.decoration.groupName")}
         />
       ) : (
         <textarea
@@ -225,7 +227,7 @@ export function CanvasDecoration({
             setWorking((value) => ({ ...value, text: event.target.value }) as CanvasAnnotation)
           }
           onBlur={(event) => onChange({ text: event.target.value })}
-          aria-label="畫布註解"
+          aria-label={t("canvas.decoration.annotationText")}
         />
       )}
       <span

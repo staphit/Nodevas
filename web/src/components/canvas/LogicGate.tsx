@@ -16,6 +16,7 @@ import {
 } from "../../domain";
 import { DEFAULT_LINE } from "../../domain/graph/edgeStyle";
 import type { LogicGate, LogicGateOperator } from "../../types";
+import { useI18n } from "../../i18n";
 import { DependencyLine } from "./DependencyLine";
 import {
   cardBoundary,
@@ -37,22 +38,12 @@ export const LOGIC_GATE_H = 46;
 // The wire keys are part of the file contract; they live in `domain/graph/keys`.
 export { logicGateInputWireKey, logicGateOutputWireKey };
 
-export const LOGIC_GATE_LABELS: Record<LogicGateOperator, string> = {
-  must: "必須 · MUST",
-  and: "全部 · AND",
-  or: "任一 · OR",
-  xor: "擇一 · XOR",
-  nand: "非全部 · NAND",
-  nor: "皆非 · NOR",
-  optional: "選用",
-  deprecated: "棄用",
-};
-
 export function LogicGateGlyph({
   operator,
 }: {
   operator: LogicGateOperator;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <rect
@@ -64,7 +55,7 @@ export function LogicGateGlyph({
         rx={6}
       />
       <text className="logic-gate-symbol-label" x={0} y={0}>
-        {LOGIC_GATE_LABELS[operator]}
+        {t(`gate.label.${operator}`)}
       </text>
     </>
   );
@@ -118,6 +109,7 @@ export function StandaloneLogicGate({
   onSelectVertex: (wireKey: string, index: number) => void;
   obstacles: Rect[];
 }) {
+  const { t } = useI18n();
   const [displayCenter, setDisplayCenter] = useState(center);
   const dragRef = useRef<{
     pointerId: number;
@@ -134,11 +126,16 @@ export function StandaloneLogicGate({
   const required = logicGateInputRequirement(gate.operator);
   const outputs = logicGateOutputs(gate);
   const relation = logicGateRelation(gate.operator);
-  const title = `${LOGIC_GATE_LABELS[gate.operator]} · 輸入 ${gate.inputs.length}/${
-    gate.operator === "must" ? required : `${required}+`
-  } · ${outputs.length > 0 ? `已接 ${outputs.length} 個輸出` : "未接輸出"}${
-    complete ? (relation ? " · 關係已生效" : " · 條件已生效") : " · 接線未完成"
-  }`;
+  const title = t("logicGate.aria", {
+    label: t(`gate.label.${gate.operator}`),
+    inputs: `${gate.inputs.length}/${gate.operator === "must" ? required : `${required}+`}`,
+    outputs: outputs.length,
+    state: complete
+      ? relation
+        ? t("logicGate.state.relationActive")
+        : t("logicGate.state.conditionActive")
+      : t("logicGate.state.incomplete"),
+  });
 
   const finishDrag = (event: React.PointerEvent<SVGGElement>, commit: boolean) => {
     if (onConnectionEnd(event, commit)) return;
@@ -298,16 +295,18 @@ export function StandaloneLogicGate({
           <g
             className="logic-gate-delete"
             role="button"
-            aria-label="刪除未完成的邏輯閘"
+            aria-label={t("logicGate.deleteIncompleteAria")}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onDelete();
             }}
           >
-            <title>{`接線未完成（需要 ${required}${
-              gate.operator === "must" ? "" : "+"
-            } 個輸入與 1 個輸出）。點擊刪除此閘。`}</title>
+            <title>
+              {t("logicGate.incompleteTitle", {
+                required: `${required}${gate.operator === "must" ? "" : "+"}`,
+              })}
+            </title>
             <circle cx={LOGIC_GATE_W / 2 + 2} cy={-14} r={7} />
             <path d="M 35.5 -16.5 l 5 5 M 40.5 -16.5 l -5 5" />
           </g>

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { AuthError, api, onUnauthorized, type Actor } from "../api";
 import { IconSignOut } from "../icons";
+import { LANGUAGE_OPTIONS, useI18n } from "../i18n";
 
 /**
  * ViewerContext carries who this browser is signed in as.
@@ -49,6 +50,7 @@ export function useCanEdit(): boolean {
  * back 401 puts the form back up without a reload.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"loading" | "local" | "accounts" | "unknown">(
     "loading",
   );
@@ -97,12 +99,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (mode === "loading") {
-    return <div className="signin-loading">載入中…</div>;
+    return <div className="signin-loading">{t("auth.loading")}</div>;
   }
   if (mode === "unknown") {
     return (
       <div className="signin-loading" role="alert">
-        <p>無法連線到伺服器，因此無法確認登入狀態。</p>
+        <p>{t("auth.connectionFailed")}</p>
         <button
           type="button"
           onClick={() => {
@@ -110,7 +112,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             setAttempt((count) => count + 1);
           }}
         >
-          重試
+          {t("auth.retry")}
         </button>
       </div>
     );
@@ -140,15 +142,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
  * condition.
  */
 export function VisitorBadge() {
+  const { t } = useI18n();
   const viewer = useViewer();
   if (viewer?.role !== "visitor") return null;
   return (
     <span
       className="visitor-badge"
       role="status"
-      title="訪客模式：唯讀。可以瀏覽、複製與儲存可見的文件和附件，但無法編輯、整案匯出或使用管理／主機功能。"
+      title={t("auth.visitorTitle")}
     >
-      訪客 · 唯讀
+      {t("auth.visitorBadge")}
     </span>
   );
 }
@@ -166,10 +169,11 @@ export function useSignOut(): () => void {
 }
 
 export function SignOutButton({ className = "icon-btn" }: { className?: string }) {
+  const { t } = useI18n();
   const actor = useViewer();
   const signOut = useSignOut();
   if (!actor) return null;
-  const label = `登出（${actor.name || actor.role}）`;
+  const label = t("topbar.signOut", { name: actor.name || actor.role });
   return (
     <button type="button" className={className} onClick={signOut} title={label} aria-label={label}>
       <IconSignOut size={16} />
@@ -192,23 +196,21 @@ const OTP_LENGTH = 8;
  * passcode is fixed and was never mailed; saying anything else here would tell
  * an unauthenticated caller which kind of PIN they just typed.
  */
-const OTP_SENT_NOTICE = "若這組 PIN 有效，驗證碼已寄出";
-
 /** Turns a failure into something worth reading. Throttling and a missing mail
  * transport get their own wording because the server's raw text for those is
  * often an English identifier that means nothing to the person reading it. */
-function describe(failure: unknown): string {
+function describe(failure: unknown, t: (key: string) => string): string {
   if (failure instanceof AuthError) {
     // A message with no CJK in it is a machine string, not a sentence for a
     // reader of this UI, so it is replaced rather than shown.
     const readable = /[一-鿿]/.test(failure.message);
-    if (failure.status === 429 && !readable) return "嘗試次數過多，請稍後再試";
+    if (failure.status === 429 && !readable) return t("auth.tooManyAttempts");
     if (failure.status === 503 && !readable) {
-      return "此伺服器尚未設定郵件服務，請聯絡管理員";
+      return t("auth.mailUnavailable");
     }
     return failure.message;
   }
-  return failure instanceof Error ? failure.message : "登入失敗";
+  return failure instanceof Error ? failure.message : t("auth.signInFailed");
 }
 
 function formatRemaining(ms: number): string {
@@ -231,6 +233,7 @@ function formatRemaining(ms: number): string {
  * loses nothing — the passcode field simply sits empty until the mail lands.
  */
 export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
+  const { language, setLanguage, t } = useI18n();
   const [pin, setPin] = useState("");
   const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState<"" | "send" | "login">("");
@@ -261,14 +264,14 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     try {
       await api.requestOtp(pin.trim());
       setExpiresAt(Date.now() + OTP_TTL_MS);
-      setNotice(OTP_SENT_NOTICE);
+      setNotice(t("auth.codeSent"));
       otpField.current?.focus();
     } catch (failure) {
-      setError(describe(failure));
+      setError(describe(failure, t));
     } finally {
       setBusy("");
     }
-  }, [busy, pin]);
+  }, [busy, pin, t]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -284,7 +287,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
       setOtp("");
       onSignedIn(result.actor);
     } catch (failure) {
-      setError(describe(failure));
+      setError(describe(failure, t));
     } finally {
       setBusy("");
     }
@@ -296,9 +299,23 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
   return (
     <div className="signin">
       <form className="signin-form" onSubmit={submit}>
+        <label className="signin-language">
+          <span>{t("language.label")}</span>
+          <select
+            value={language}
+            aria-label={t("language.label")}
+            onChange={(event) => setLanguage(event.target.value as typeof language)}
+          >
+            {LANGUAGE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {t(`language.option.${option}`)}
+              </option>
+            ))}
+          </select>
+        </label>
         <h1>Nodevas</h1>
         <p className="signin-hint">
-          請輸入管理員提供的 PIN，按「寄送驗證碼」後填入信箱收到的驗證碼。
+          {t("auth.signInHint")}
         </p>
 
         <label htmlFor="signin-pin">PIN</label>
@@ -325,11 +342,11 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
             onClick={sendOtp}
             disabled={busy !== "" || pin.trim() === ""}
           >
-            {busy === "send" ? "寄送中…" : "寄送驗證碼"}
+            {busy === "send" ? t("auth.sendingCode") : t("auth.sendCode")}
           </button>
         </div>
 
-        <label htmlFor="signin-otp">驗證碼</label>
+        <label htmlFor="signin-otp">{t("auth.verificationCode")}</label>
         <input
           id="signin-otp"
           ref={otpField}
@@ -355,8 +372,8 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
         {expiresAt !== 0 && (
           <p className="signin-countdown">
             {expired
-              ? "驗證碼已失效，請重新寄送"
-              : `驗證碼將在 ${formatRemaining(remaining)} 後失效`}
+              ? t("auth.codeExpired")
+              : t("auth.codeExpiresIn", { time: formatRemaining(remaining) })}
           </p>
         )}
         {error && (
@@ -371,10 +388,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
             busy !== "" || pin.trim() === "" || otp.trim().length !== OTP_LENGTH
           }
         >
-          {busy === "login" ? "登入中…" : "登入"}
+          {busy === "login" ? t("auth.signingIn") : t("auth.signIn")}
         </button>
         <p className="signin-warning">
-          重新寄送會產生新的驗證碼，並且會將這組 PIN 目前所有的登入工作階段登出。
+          {t("auth.signInWarning")}
         </p>
       </form>
     </div>

@@ -14,6 +14,7 @@ import {
   IconImport,
   IconPlus,
 } from "../../icons";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import type { WorkspaceEntry } from "../../state/types";
 import { confirmAction } from "../ConfirmDialog";
@@ -50,6 +51,7 @@ export function TreeContextMenu({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const removeWorkspace = useApp((state) => state.removeWorkspace);
+  const { t } = useI18n();
   const [workspaceRemoveBusy, setWorkspaceRemoveBusy] = useState(false);
   const treeContextMenuTop = Math.max(
     8,
@@ -77,11 +79,12 @@ export function TreeContextMenu({
     const fallback = workspaceRoots.find((root) => root.path !== workspace);
     if (!fallback) return;
     const confirmed = await confirmAction({
-      title: `從清單移除「${workspaceName}」？`,
-      description:
-        `只會移除工作區紀錄；${workspace} 的資料夾與檔案完全保留。` +
-        `完成後會切換到「${fallback.label}」。`,
-      confirmLabel: "移除工作區",
+      title: t("explorer.removeWorkspaceTitle", { workspace: workspaceName }),
+      description: t("explorer.removeWorkspaceDescription", {
+        path: workspace,
+        fallback: fallback.label,
+      }),
+      confirmLabel: t("explorer.removeWorkspace"),
       tone: "danger",
     });
     if (!confirmed) return;
@@ -89,9 +92,9 @@ export function TreeContextMenu({
     onClose();
     try {
       await removeWorkspace(workspace);
-      setProjectTransferNotice(`已移除工作區：${workspaceName}（磁碟檔案保留）`);
+      setProjectTransferNotice(t("explorer.workspaceRemoved", { workspace: workspaceName }));
     } catch (error) {
-      setProjectTransferNotice(`無法移除工作區：${(error as Error).message}`);
+      setProjectTransferNotice(t("explorer.removeWorkspaceFailed", { error: (error as Error).message }));
       reportError(error);
     } finally {
       setWorkspaceRemoveBusy(false);
@@ -102,7 +105,7 @@ export function TreeContextMenu({
     <div
       className="project-context-menu tree-context-menu"
       role="menu"
-      aria-label="工作區操作"
+      aria-label={t("explorer.workspaceActions")}
       style={{
         left: Math.max(8, Math.min(menu.x, window.innerWidth - 282)),
         top: treeContextMenuTop,
@@ -115,7 +118,7 @@ export function TreeContextMenu({
         <IconFolderOpen size={14} />
         <span>
           <b>{workspaceName}</b>
-          <small>工作區</small>
+            <small>{t("explorer.workspace")}</small>
         </span>
       </div>
       <button
@@ -131,8 +134,8 @@ export function TreeContextMenu({
           <IconFolderOpen size={14} />
         </span>
         <span>
-          <b>在檔案總管中開啟</b>
-          <small>{workspace || "工作區路徑不可用"}</small>
+          <b>{t("explorer.openInExplorer")}</b>
+          <small>{workspace || t("explorer.workspacePathUnavailable")}</small>
         </span>
       </button>
       {workspaceRoots.length <= 1 ? (
@@ -141,8 +144,8 @@ export function TreeContextMenu({
             <IconClose size={14} />
           </span>
           <span>
-            <b>最後一個工作區不可移除</b>
-            <small>請先加入另一個工作區</small>
+            <b>{t("explorer.lastWorkspaceUnavailable")}</b>
+            <small>{t("explorer.addAnotherWorkspace")}</small>
           </span>
         </button>
       ) : (
@@ -157,8 +160,8 @@ export function TreeContextMenu({
             <IconClose size={14} />
           </span>
           <span>
-            <b>{workspaceRemoveBusy ? "移除中…" : "移除工作區"}</b>
-            <small>從清單移除，保留磁碟檔案</small>
+            <b>{workspaceRemoveBusy ? t("explorer.removing") : t("explorer.removeWorkspace")}</b>
+            <small>{t("explorer.keepFiles")}</small>
           </span>
         </button>
       )}
@@ -175,8 +178,8 @@ export function TreeContextMenu({
           <IconPlus size={14} />
         </span>
         <span>
-          <b>新專案</b>
-          <small>在工作區最上層建立專案目錄</small>
+          <b>{t("explorer.newProject")}</b>
+          <small>{t("explorer.newProjectHint")}</small>
         </span>
       </button>
       <button
@@ -192,8 +195,8 @@ export function TreeContextMenu({
           <IconFolder size={14} />
         </span>
         <span>
-          <b>新增子專案</b>
-          <small>建立在目前專案底下</small>
+          <b>{t("explorer.newChildProject")}</b>
+          <small>{t("explorer.newChildProjectHint")}</small>
         </span>
       </button>
       <button
@@ -208,8 +211,8 @@ export function TreeContextMenu({
           <IconFolderOpen size={14} />
         </span>
         <span>
-          <b>新增工作區目錄</b>
-          <small>純資料夾，用來分組專案</small>
+          <b>{t("explorer.newWorkspaceFolder")}</b>
+          <small>{t("explorer.newWorkspaceFolderHint")}</small>
         </span>
       </button>
       <button
@@ -225,8 +228,8 @@ export function TreeContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>加入工作區</b>
-          <small>保留原位置，加入最上層工作區清單</small>
+          <b>{t("explorer.addWorkspace")}</b>
+          <small>{t("explorer.addWorkspaceHint")}</small>
         </span>
       </button>
       <div className="project-context-separator" />
@@ -248,8 +251,8 @@ export function TreeContextMenu({
           <IconExport size={14} />
         </span>
         <span>
-          <b>匯出整個工作區</b>
-          <small>.veproj 封裝，含所有專案與資料夾結構</small>
+          <b>{t("explorer.exportWorkspace")}</b>
+          <small>{t("explorer.exportWorkspaceHint")}</small>
         </span>
       </button>
       <button
@@ -265,8 +268,8 @@ export function TreeContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入 MD</b>
-          <small>把 Markdown 檔加入目前專案</small>
+          <b>{t("explorer.importMarkdown")}</b>
+          <small>{t("explorer.importMarkdownHint")}</small>
         </span>
       </button>
       <button
@@ -282,8 +285,8 @@ export function TreeContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入專案</b>
-          <small>.veproj 或 .zip 專案封裝</small>
+          <b>{t("explorer.importArchive")}</b>
+          <small>{t("explorer.importArchiveHint")}</small>
         </span>
       </button>
       <button
@@ -299,8 +302,8 @@ export function TreeContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入 Canvas</b>
-          <small>Obsidian JSON Canvas（.canvas）</small>
+          <b>{t("explorer.importCanvas")}</b>
+          <small>{t("explorer.importCanvasHint")}</small>
         </span>
       </button>
     </div>

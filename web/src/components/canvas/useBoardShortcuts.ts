@@ -11,6 +11,7 @@
  */
 
 import { useEffect } from "react";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 import { nodeLabels, pasteNodeClipboard, stashNodes } from "./nodeTransfer";
@@ -55,6 +56,7 @@ export function useBoardShortcuts({
   shortcutBusy: boolean;
   setShortcutBusy: (busy: boolean) => void;
 }) {
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!isGraph || collapsed || !keyboardActive) return;
@@ -164,11 +166,11 @@ export function useBoardShortcuts({
       if (graphSelection.kind === "node") {
         const node = (graph?.nodes ?? []).find((item) => item.id === graphSelection.id);
         const confirmed = await confirmAction({
-          title: "刪除節點",
-          description: `確定刪除「${
-            node?.title || graphSelection.id
-          }」？節點會移到垃圾桶，可隨時復原。`,
-          confirmLabel: "移到垃圾桶",
+          title: t("canvasOps.deleteNodeTitle"),
+          description: t("canvasOps.deleteNodeDescription", {
+            title: node?.title || graphSelection.id,
+          }),
+          confirmLabel: t("canvasOps.moveToTrash"),
           tone: "danger",
         });
         if (!confirmed) {
@@ -189,11 +191,9 @@ export function useBoardShortcuts({
       if (graphSelection.kind === "nodes") {
         const selected = graphSelection.ids;
         const confirmed = await confirmAction({
-          title: `刪除 ${selected.length} 個節點`,
-          description:
-            `確定將選取的 ${selected.length} 個節點移到垃圾桶？` +
-            "一次撤銷即可全部復原，也可以從側欄逐一還原。",
-          confirmLabel: "移到垃圾桶",
+          title: t("canvasOps.deleteNodesTitle", { count: selected.length }),
+          description: t("canvasOps.deleteNodesDescription", { count: selected.length }),
+          confirmLabel: t("canvasOps.moveToTrash"),
           tone: "danger",
         });
         if (!confirmed) return;
@@ -234,12 +234,18 @@ export function useBoardShortcuts({
           ? graphSelection.edges
           : [{ from: graphSelection.from, to: graphSelection.to }];
       const confirmed = await confirmAction({
-        title: targets.length > 1 ? `刪除 ${targets.length} 條關係線` : "刪除關係線",
+        title:
+          targets.length > 1
+            ? t("canvasOps.deleteEdgesTitle", { count: targets.length })
+            : t("canvasOps.deleteEdgeTitle"),
         description:
           targets.length > 1
-            ? `確定移除選取的 ${targets.length} 條關係？`
-            : `確定移除 ${targets[0].from} → ${targets[0].to} 的關係？`,
-        confirmLabel: "刪除關係",
+            ? t("canvasOps.deleteEdgesDescription", { count: targets.length })
+            : t("canvasOps.deleteEdgeDescription", {
+                from: targets[0].from,
+                to: targets[0].to,
+              }),
+        confirmLabel: t("canvasOps.deleteConnections"),
         tone: "danger",
       });
       if (!confirmed) return;
@@ -275,6 +281,7 @@ export function useBoardShortcuts({
     updateCanvasLayout,
     selectedEdgeEndpoints,
     shortcutBusy,
+    t,
     toggleEdgeStyle,
   ]);
 }

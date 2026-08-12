@@ -1,5 +1,7 @@
 /** How the backup dialog turns server values into text. */
 
+import { formatLocalizedDateTime, translate } from "../../i18n";
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -8,7 +10,7 @@ export function formatSize(bytes: number): string {
 
 export function formatWhen(iso: string): string {
   const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? "" : at.toLocaleString();
+  return formatLocalizedDateTime(at);
 }
 
 /**
@@ -20,9 +22,11 @@ export function formatWhen(iso: string): string {
 export function formatCoverage(count: number, hours: number): string {
   const total = count * hours;
   if (!Number.isFinite(total) || total <= 0) return "";
-  if (total < 48) return `約 ${Math.round(total)} 小時`;
+  if (total < 48) return translate("backup.approxHours", undefined, { count: Math.round(total) });
   const days = total / 24;
-  return `約 ${days.toFixed(1).replace(/\.0$/, "")} 天`;
+  return translate("backup.approxDays", undefined, {
+    count: days.toFixed(1).replace(/\.0$/, ""),
+  });
 }
 
 /** A thrown value as something worth showing a person. */

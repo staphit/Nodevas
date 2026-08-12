@@ -16,6 +16,7 @@ import {
   IconPin,
 } from "../../icons";
 import { nodeById, reportError, useApp } from "../../store";
+import { useI18n } from "../../i18n";
 
 type TabContextMenuState = {
   id: string;
@@ -62,6 +63,7 @@ export function DrawerTabs({
   onToggleCollapsed: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const tabs = useApp((s) => s.tabs);
   const graph = useApp((s) => s.graph);
   const setActiveTab = useApp((s) => s.setActiveTab);
@@ -173,34 +175,34 @@ export function DrawerTabs({
         <button
           type="button"
           className="drawer-collapse"
-          title="收合資訊欄（Notion 式縮進）"
-          aria-label="收合資訊欄"
+          title={t("drawer.tabs.collapseTitle")}
+          aria-label={t("drawer.tabs.collapse")}
           onClick={onToggleCollapsed}
         >
           »
         </button>
         <div className="tab-bar">
-          {tabs.map((t) => (
+          {tabs.map((tab) => (
             <div
-              key={t.id}
-              className={`tab${t.id === activeTab ? " active" : ""}${t.pinned ? " pinned" : ""}`}
-              onClick={() => setActiveTab(t.id)}
+              key={tab.id}
+              className={`tab${tab.id === activeTab ? " active" : ""}${tab.pinned ? " pinned" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                setTabContextMenu({ id: t.id, x: event.clientX, y: event.clientY });
+                setTabContextMenu({ id: tab.id, x: event.clientX, y: event.clientY });
               }}
               aria-haspopup="menu"
             >
               <IconDoc size={12} />
-              <span>{nodeById(graph, t.id)?.title || t.id}</span>
-              {t.pinned && <IconPin className="tab-pin" size={11} />}
-              {t.dirty && <span className="dirty-dot" aria-label="未儲存" />}
+              <span>{nodeById(graph, tab.id)?.title || tab.id}</span>
+              {tab.pinned && <IconPin className="tab-pin" size={11} />}
+              {tab.dirty && <span className="dirty-dot" aria-label={t("drawer.tabs.unsaved")} />}
               <button
                 className="tab-close"
-                aria-label={`關閉 ${t.id}`}
+                aria-label={t("drawer.tabs.close", { id: tab.id })}
                 onClick={(e) => {
                   e.stopPropagation();
-                  void closeTabs([t.id]).catch(reportError);
+                  void closeTabs([tab.id]).catch(reportError);
                 }}
               >
                 <IconClose size={11} />
@@ -208,7 +210,7 @@ export function DrawerTabs({
             </div>
           ))}
         </div>
-        <button className="drawer-close" aria-label="關閉面板" onClick={onClose}>
+        <button className="drawer-close" aria-label={t("drawer.tabs.closePanel")} onClick={onClose}>
           <IconClose size={15} />
         </button>
       </div>
@@ -217,7 +219,9 @@ export function DrawerTabs({
           ref={tabContextMenuRef}
           className="tab-context-menu"
           role="menu"
-          aria-label={`${nodeById(graph, contextTab.id)?.title || contextTab.id} 分頁操作`}
+          aria-label={t("drawer.tabs.actions", {
+            name: nodeById(graph, contextTab.id)?.title || contextTab.id,
+          })}
           style={{
             left: Math.max(8, Math.min(tabContextMenu.x, window.innerWidth - 290)),
             top: Math.max(8, Math.min(tabContextMenu.y, window.innerHeight - 382)),
@@ -238,12 +242,12 @@ export function DrawerTabs({
             }}
           >
             <IconPin size={14} />
-            <span>{contextTab.pinned ? "取消釘選分頁" : "釘選分頁"}</span>
+            <span>{contextTab.pinned ? t("drawer.tabs.unpin") : t("drawer.tabs.pin")}</span>
           </button>
           <div className="tab-context-separator" role="separator" />
           <button type="button" role="menuitem" onClick={() => closeFromMenu([contextTab.id])}>
             <IconClose size={14} />
-            <span>關閉</span>
+            <span>{t("common.close")}</span>
           </button>
           <button
             type="button"
@@ -252,7 +256,7 @@ export function DrawerTabs({
             onClick={() => closeFromMenu(closeOtherIDs)}
           >
             <IconPages size={14} />
-            <span>關閉其他分頁</span>
+            <span>{t("drawer.tabs.closeOther")}</span>
           </button>
           <button
             type="button"
@@ -261,7 +265,7 @@ export function DrawerTabs({
             onClick={() => closeFromMenu(closeRightIDs)}
           >
             <IconPages size={14} />
-            <span>關閉右側分頁</span>
+            <span>{t("drawer.tabs.closeRight")}</span>
           </button>
           <button
             type="button"
@@ -270,7 +274,7 @@ export function DrawerTabs({
             onClick={() => closeFromMenu(closeUnpinnedIDs)}
           >
             <IconClose size={14} />
-            <span>關閉所有未釘選分頁</span>
+            <span>{t("drawer.tabs.closeUnpinned")}</span>
           </button>
           <div className="tab-context-separator" role="separator" />
           <button
@@ -282,7 +286,7 @@ export function DrawerTabs({
             }}
           >
             <IconCopy size={14} />
-            <span>複製相對路徑</span>
+            <span>{t("drawer.tabs.copyRelative")}</span>
           </button>
           <button
             type="button"
@@ -294,7 +298,7 @@ export function DrawerTabs({
             }}
           >
             <IconCopy size={14} />
-            <span>複製完整路徑</span>
+            <span>{t("drawer.tabs.copyFull")}</span>
           </button>
           <button
             type="button"
@@ -306,7 +310,7 @@ export function DrawerTabs({
             }}
           >
             <IconFolderOpen size={14} />
-            <span>在檔案總管中開啟所在資料夾</span>
+            <span>{t("drawer.tabs.openFolder")}</span>
           </button>
         </div>
       )}

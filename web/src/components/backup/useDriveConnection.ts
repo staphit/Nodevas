@@ -10,6 +10,7 @@
 
 import { useCallback, useState } from "react";
 import { api, type DriveFolder } from "../../api";
+import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import { reason } from "./format";
 
@@ -25,6 +26,7 @@ export function useDriveConnection({
   onPick: (folderId: string) => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useI18n();
   const disconnectCommand = useApp((state) => state.disconnectDrive);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,12 +40,12 @@ export function useDriveConnection({
         const result = await api.listDriveFolders(parent);
         setFolders(result.folders);
       } catch (error) {
-        onError(reason(error, "讀取 Drive 資料夾失敗"));
+        onError(reason(error, t("backup.driveFolderReadFailed")));
       } finally {
         setBusy(false);
       }
     },
-    [onError],
+    [onError, t],
   );
 
   const openPicker = useCallback(() => {
@@ -95,7 +97,7 @@ export function useDriveConnection({
     folders,
     stack,
     /** What the current choice is called, in the picker and under the box. */
-    label: stack.at(-1)?.name ?? (folderId || DRIVE_ROOT_LABEL),
+    label: stack.at(-1)?.name ?? (folderId || t("backup.driveRoot")),
     openPicker,
     enter,
     back,

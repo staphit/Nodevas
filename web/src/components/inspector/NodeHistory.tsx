@@ -11,6 +11,7 @@ import { renderMarkdown, sanitizeHTML } from "../../markdown";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 import { IconEye } from "../../icons";
+import { formatLocalizedDateTime, localizedStatusLabel, useI18n } from "../../i18n";
 
 export /** per-node change log: lifecycle stamps + file version snapshots */
 function NodeHistory({
@@ -26,7 +27,9 @@ function NodeHistory({
   format: PageFormat;
   onRestored: () => void | Promise<void>;
 }) {
+  const { t, language } = useI18n();
   const runState = useApp((s) => s.runState);
+  const graph = useApp((s) => s.graph);
   const [versions, setVersions] = useState<{ name: string; at: string; size: number }[]>([]);
   const [open, setOpen] = useState(false);
   /** Snapshot being looked at before deciding whether to restore it. */
@@ -80,15 +83,15 @@ function NodeHistory({
       const snapshot = await api.getHistoryVersion(path, version);
       setViewing({ name: version, at, content: snapshot.content });
     } catch (error) {
-      setViewError(error instanceof Error ? error.message : "無法讀取此版本");
+      setViewError(error instanceof Error ? error.message : t("history.binaryRestore"));
     }
   };
 
   const restore = async (version: string) => {
     const confirmed = await confirmAction({
-      title: "還原歷史版本",
-      description: `將 ${path} 還原到 ${version}。目前版本會先建立快照，可再復原。`,
-      confirmLabel: "還原版本",
+      title: t("history.restoreTitle"),
+      description: t("history.restoreDescription", { path, version }),
+      confirmLabel: t("history.restoreVersion"),
     });
     if (!confirmed) return;
     await api.restoreHistory(path, version);
@@ -99,15 +102,15 @@ function NodeHistory({
   return (
     <details className="node-history" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary>
-        歷程{events.length > 0 ? `(${events.length} 筆狀態紀錄)` : ""}
+        {t("history.title")}{events.length > 0 ? ` (${t("history.statusRecords", { count: String(events.length) })})` : ""}
       </summary>
       {events.length > 0 && (
         <ul className="nh-events">
           {events.map((ev, i) => (
             <li key={i}>
-              <span className="mono nh-time">{new Date(ev.t).toLocaleString()}</span>
+                <span className="mono nh-time">{formatLocalizedDateTime(ev.t, language)}</span>
               <span className="nh-transition">
-                {ev.from || "無"} → <b>{ev.to}</b>
+                {ev.from ? localizedStatusLabel(ev.from, graph?.ui?.customStatuses ?? []) : "—"} → <b>{ev.to ? localizedStatusLabel(ev.to, graph?.ui?.customStatuses ?? []) : t("history.unknownStatus")}</b>
               </span>
               {ev.by && <span className="nh-by">by {ev.by}</span>}
               {ev.note && <span className="nh-note">「{ev.note}」</span>}
@@ -116,14 +119,14 @@ function NodeHistory({
         </ul>
       )}
       <div className="nh-files">
-        <b>檔案版本</b>
+        <b>{t("history.files")}</b>
         {versions.length === 0 ? (
-          <span className="nh-none">尚無快照(存檔時自動產生)</span>
+          <span className="nh-none">{t("history.none")}</span>
         ) : (
           <ul>
             {versions.map((v) => (
               <li key={v.name}>
-                <span className="mono nh-time">{new Date(v.at).toLocaleString()}</span>
+                <span className="mono nh-time">{formatLocalizedDateTime(v.at, language)}</span>
                 <span className="nh-size">{v.size}B</span>
                 <button
                   type="button"
@@ -133,15 +136,15 @@ function NodeHistory({
                   disabled={!previewable}
                   title={
                     previewable
-                      ? "先看內容再決定要不要還原"
-                      : "此格式是二進位檔，只能直接還原"
+                      ? t("history.previewBeforeRestore")
+                      : t("history.binaryRestore")
                   }
                 >
                   <IconEye size={12} />
-                  預覽
+                  {t("history.preview")}
                 </button>
                 <button type="button" onClick={() => void restore(v.name).catch(reportError)}>
-                  還原
+                  {t("history.restore")}
                 </button>
               </li>
             ))}
@@ -153,17 +156,17 @@ function NodeHistory({
           </div>
         )}
         {viewing && (
-          <div className="nh-preview" role="region" aria-label="版本預覽">
+            <div className="nh-preview" role="region" aria-label={t("history.versionPreview")}>
             <div className="nh-preview-head">
-              <b>{new Date(viewing.at).toLocaleString()} 的內容</b>
-              <span className="nh-preview-hint">唯讀；還原前目前版本會先建立快照</span>
+              <b>{t("history.contentAt", { date: formatLocalizedDateTime(viewing.at, language) })}</b>
+              <span className="nh-preview-hint">{t("history.readOnlyHint")}</span>
               <button
                 type="button"
                 onClick={() => void restore(viewing.name).catch(reportError)}
               >
-                還原這一版
+                {t("history.restoreThis")}
               </button>
-              <button type="button" onClick={() => setViewing(null)} aria-label="關閉預覽">
+              <button type="button" onClick={() => setViewing(null)} aria-label={t("history.closePreview")}>
                 ×
               </button>
             </div>

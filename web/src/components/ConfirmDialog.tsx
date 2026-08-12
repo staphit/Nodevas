@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { IconClose, IconWarning } from "../icons";
+import { useI18n } from "../i18n";
 
 export interface ConfirmOptions {
   title: string;
@@ -21,6 +22,7 @@ export function confirmAction(options: ConfirmOptions): Promise<boolean> {
 }
 
 export function ConfirmDialogHost() {
+  const { t } = useI18n();
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -101,14 +103,14 @@ export function ConfirmDialogHost() {
             type="button"
             className="confirm-dialog-close"
             onClick={() => close(false)}
-            aria-label="關閉"
+            aria-label={t("common.close")}
           >
             <IconClose size={15} />
           </button>
         </header>
         <footer>
           <button type="button" onClick={() => close(false)}>
-            {request.cancelLabel ?? "取消"}
+            {request.cancelLabel ?? t("common.cancel")}
           </button>
           <button
             ref={confirmRef}
@@ -116,7 +118,7 @@ export function ConfirmDialogHost() {
             className={request.tone === "danger" ? "danger" : "primary"}
             onClick={() => close(true)}
           >
-            {request.confirmLabel ?? "確認"}
+            {request.confirmLabel ?? t("common.confirm")}
           </button>
         </footer>
       </section>

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { IconClose, IconFolder } from "../../icons";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
 import type { ProjectMenuTarget } from "./ProjectContextMenu";
@@ -25,6 +26,7 @@ export function useProjectRename({
 }) {
   const refreshProjects = useApp((state) => state.refreshProjects);
   const loadAll = useApp((state) => state.loadAll);
+  const { t } = useI18n();
   const [projectRenameTarget, setProjectRenameTarget] =
     useState<ProjectMenuTarget | null>(null);
   const [projectRenameValue, setProjectRenameValue] = useState("");
@@ -60,7 +62,7 @@ export function useProjectRename({
     if (!target || projectRenameBusy) return;
     const nextLabel = projectRenameValue.trim();
     if (!nextLabel) {
-      setProjectRenameError("請輸入新名稱。");
+      setProjectRenameError(t("explorer.renameRequired"));
       return;
     }
     if (
@@ -68,11 +70,11 @@ export function useProjectRename({
       nextLabel === ".." ||
       /[\\/:*?"<>|]/.test(nextLabel)
     ) {
-      setProjectRenameError("名稱不可包含路徑或 Windows 不允許的字元。");
+      setProjectRenameError(t("explorer.renameInvalid"));
       return;
     }
     if (["nodes", "run", ".vised"].includes(nextLabel.toLocaleLowerCase())) {
-      setProjectRenameError("此名稱為系統保留名稱。");
+      setProjectRenameError(t("explorer.renameReserved"));
       return;
     }
     if (nextLabel === target.label) {
@@ -83,7 +85,7 @@ export function useProjectRename({
     const parent = separator >= 0 ? target.name.slice(0, separator) : "";
     const nextName = parent ? `${parent}/${nextLabel}` : nextLabel;
     if (projectByName.has(nextName) && nextName !== target.name) {
-      setProjectRenameError("同一層已經有相同名稱。");
+      setProjectRenameError(t("explorer.renameDuplicate"));
       return;
     }
 
@@ -103,13 +105,17 @@ export function useProjectRename({
       await refreshProjects();
       if (result.active) await loadAll();
       setProjectTransferNotice(
-        `已重新命名${target.isFolder ? "資料夾" : "專案"}：${target.label} → ${nextLabel}`,
+        t("explorer.renamed", {
+          kind: target.isFolder ? t("explorer.folderName") : t("explorer.projectName"),
+          oldLabel: target.label,
+          newLabel: nextLabel,
+        }),
       );
       setProjectRenameTarget(null);
       setProjectRenameValue("");
     } catch (error) {
       setProjectRenameError(
-        error instanceof Error ? error.message : "重新命名失敗。",
+        error instanceof Error ? error.message : t("explorer.renameFailed"),
       );
       reportError(error);
     } finally {
@@ -145,6 +151,7 @@ export function ProjectRenamePanel({ rename }: { rename: ProjectRename }) {
     closeProjectRename,
     renameProject,
   } = rename;
+  const { t } = useI18n();
   if (!projectRenameTarget) return null;
 
   return (
@@ -155,20 +162,24 @@ export function ProjectRenamePanel({ rename }: { rename: ProjectRename }) {
         </span>
         <div>
           <strong>
-            重新命名{projectRenameTarget.isFolder ? "資料夾" : "專案"}
+            {t("explorer.renameTitle", {
+              kind: projectRenameTarget.isFolder
+                ? t("explorer.folderName")
+                : t("explorer.projectName"),
+            })}
           </strong>
-          <span>目前位置：{projectRenameTarget.path}</span>
+          <span>{t("explorer.currentLocation", { path: projectRenameTarget.path })}</span>
         </div>
         <button
           type="button"
           className="project-create-close"
           onClick={closeProjectRename}
-          aria-label="關閉重新命名面板"
+          aria-label={t("explorer.closeRenamePanel")}
         >
           <IconClose size={14} />
         </button>
       </div>
-      <label htmlFor="project-rename-name">新名稱</label>
+      <label htmlFor="project-rename-name">{t("explorer.newName")}</label>
       <input
         ref={projectRenameInputRef}
         id="project-rename-name"
@@ -188,7 +199,7 @@ export function ProjectRenamePanel({ rename }: { rename: ProjectRename }) {
         autoComplete="off"
       />
       <p id="project-rename-help" className="project-create-help">
-        只會更改目前名稱；子專案與目前開啟狀態會自動跟著更新。
+        {t("explorer.projectRenameHintText")}
       </p>
       {projectRenameError && (
         <p id="project-rename-error" className="project-create-error" role="alert">
@@ -197,14 +208,14 @@ export function ProjectRenamePanel({ rename }: { rename: ProjectRename }) {
       )}
       <div className="project-create-footer">
         <button type="button" onClick={closeProjectRename}>
-          取消
+          {t("common.cancel")}
         </button>
         <button
           className="primary"
           type="submit"
           disabled={!projectRenameValue.trim() || projectRenameBusy}
         >
-          {projectRenameBusy ? "重新命名中…" : "重新命名"}
+          {projectRenameBusy ? t("explorer.renaming") : t("explorer.rename")}
         </button>
       </div>
     </form>

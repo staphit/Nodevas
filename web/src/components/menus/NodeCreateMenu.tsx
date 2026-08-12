@@ -14,7 +14,8 @@
 import { useId, type PointerEvent as ReactPointerEvent } from "react";
 import { BUILTIN_PLAN_STATUSES } from "../../plan";
 import { useApp, usePreference } from "../../store";
-import { StatusShape, statusOptions, statusTheme } from "../../statusTheme";
+import { StatusShape, statusOptions } from "../../statusTheme";
+import { localizedPlanStatusLabel, localizedStatusLabel, useI18n } from "../../i18n";
 import type {
   NodeStyle,
   PlanStatus,
@@ -83,6 +84,7 @@ export function NodeCreateMenu({
   setContextMenu,
   dragHandleProps,
 }: NodeCreateMenuProps) {
+  const { t, language } = useI18n();
   const updateUIPreference = useApp((state) => state.updateUIPreference);
   const advancedOpen = usePreference("nodeCreateAdvanced");
   const advancedID = useId();
@@ -103,12 +105,12 @@ export function NodeCreateMenu({
       <div className="node-create-heading" {...dragHandleProps}>
         <span className="node-create-icon" aria-hidden>＋</span>
         <span>
-          <b>新增節點</b>
-          <small>建立在目前點選的位置</small>
+          <b>{t("nodeCreate.title")}</b>
+          <small>{t("nodeCreate.locationHint")}</small>
         </span>
       </div>
       <label className="lane-context-field node-create-field">
-        節點標題
+        {t("nodeCreate.nodeTitle")}
         <input
           autoFocus
           value={nodeCreateTitle}
@@ -116,20 +118,20 @@ export function NodeCreateMenu({
             setNodeCreateTitle(event.target.value);
             setNodeCreateError(null);
           }}
-          placeholder="例如：第一章，進入王都"
+          placeholder={t("nodeCreate.titlePlaceholder")}
           maxLength={256}
           disabled={nodeCreateBusy}
         />
       </label>
       <div className="node-create-id-hint">
         <span aria-hidden>#</span>
-        ID 將由系統自動產生，不需要手動管理
+        {t("nodeCreate.idHint")}
       </div>
       <section className="node-create-plans">
         <div className="node-create-section-head">
           <span>
-            <b>預期日期</b>
-            <small>選填，不會改變實際狀態</small>
+            <b>{t("nodeCreate.plannedDates")}</b>
+            <small>{t("nodeCreate.plannedDatesHint")}</small>
           </span>
           <button
             type="button"
@@ -148,7 +150,7 @@ export function NodeCreateMenu({
               planStatusDefinitions.length + nodeCustomPlanDrafts.length >= 64
             }
           >
-            ＋ 自訂狀態
+            ＋ {t("nodeCreate.addCustomStatus")}
           </button>
         </div>
         <div className="node-create-plan-list">
@@ -158,9 +160,9 @@ export function NodeCreateMenu({
               status: definition.id,
               label: definition.label,
             })),
-          ].map(({ status, label }) => (
+          ].map(({ status }) => (
             <label className="node-create-plan-row" key={status}>
-              <span>{label}</span>
+              <span>{localizedPlanStatusLabel(status, planStatusDefinitions, language)}</span>
               <input
                 type="date"
                 value={nodePlanDates[status] ?? ""}
@@ -177,8 +179,8 @@ export function NodeCreateMenu({
           {nodeCustomPlanDrafts.map((draft) => (
             <div className="node-create-custom-plan" key={draft.key}>
               <input
-                aria-label="自訂狀態名稱"
-                placeholder="狀態名稱"
+                aria-label={t("nodeCreate.customStatusName")}
+                placeholder={t("nodeCreate.statusNamePlaceholder")}
                 value={draft.label}
                 maxLength={128}
                 disabled={nodeCreateBusy}
@@ -193,7 +195,9 @@ export function NodeCreateMenu({
                 }
               />
               <input
-                aria-label={`${draft.label || "自訂狀態"}預期日期`}
+                aria-label={t("nodeCreate.customDateAria", {
+                  label: draft.label || t("nodeCreate.customStatus"),
+                })}
                 type="date"
                 value={draft.date}
                 disabled={nodeCreateBusy}
@@ -209,8 +213,8 @@ export function NodeCreateMenu({
               />
               <button
                 type="button"
-                aria-label="移除自訂狀態"
-                title="移除"
+                aria-label={t("nodeCreate.removeCustomStatus")}
+                title={t("common.remove")}
                 disabled={nodeCreateBusy}
                 onClick={() =>
                   setNodeCustomPlanDrafts((current) =>
@@ -238,22 +242,22 @@ export function NodeCreateMenu({
             {advancedOpen ? "▾" : "▸"}
           </span>
           <span>
-            <b>外觀與狀態</b>
-            <small>選填，之後也能在節點編輯中修改</small>
+            <b>{t("nodeCreate.appearanceAndStatus")}</b>
+            <small>{t("nodeCreate.appearanceHint")}</small>
           </span>
         </button>
         <div id={advancedID} hidden={!advancedOpen} className="node-create-advanced-body">
           <label className="lane-context-field node-create-field">
-            實際狀態
+            {t("nodeCreate.actualStatus")}
             <select
               value={nodeCreateStatus}
               disabled={nodeCreateBusy}
               onChange={(event) => setNodeCreateStatus(event.target.value as Status | "")}
             >
-              <option value="">預設（未開始）</option>
+              <option value="">{t("nodeCreate.defaultStatus")}</option>
               {statusOptions(customStatuses).map((candidate) => (
                 <option key={candidate} value={candidate}>
-                  {statusTheme(candidate, customStatuses).label}
+                  {localizedStatusLabel(candidate, customStatuses)}
                 </option>
               ))}
             </select>
@@ -261,7 +265,7 @@ export function NodeCreateMenu({
           <div className="node-create-status-preview">
             <StatusShape status={previewStatus} definitions={customStatuses} />
             <span>
-              建立後寫入 run/journal.jsonl，與之後手動改狀態同一條紀錄
+              {t("nodeCreate.statusJournalHint")}
             </span>
           </div>
           <AppearanceControls
@@ -272,8 +276,7 @@ export function NodeCreateMenu({
             }
             status={previewStatus}
             customStatuses={customStatuses}
-            previewTitle={nodeCreateTitle || "新節點"}
-            previewAssignee="尚未指派"
+            previewTitle={nodeCreateTitle || t("nodeCreate.newNode")}
             disabled={nodeCreateBusy}
           />
         </div>
@@ -285,10 +288,10 @@ export function NodeCreateMenu({
           onClick={() => setContextMenu(null)}
           disabled={nodeCreateBusy}
         >
-          取消
+          {t("common.cancel")}
         </button>
         <button type="submit" className="primary" disabled={nodeCreateBusy}>
-          {nodeCreateBusy ? "建立中…" : "建立節點"}
+          {nodeCreateBusy ? t("nodeCreate.creating") : t("nodeCreate.create")}
         </button>
       </div>
     </form>

@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { IconImport } from "../../icons";
+import { useI18n } from "../../i18n";
 import type { BundleManifest } from "./projectArchive";
 
 /** Where the archive's projects go. Mirrors the server's `mode` field. */
@@ -33,7 +34,8 @@ export function ImportBundleDialog({
   onCancel: () => void;
   onConfirm: (choice: ImportBundleChoice) => void;
 }) {
-  // Restoring the workspace as it was exported is what "匯入整個工作區" means to
+  const { t } = useI18n();
+  // Restoring the workspace as it was exported is what "import the entire workspace" means to
   // the person who exported it; the folder is the deliberate second choice.
   // Started from a row in the tree, though, only the folder makes sense: the
   // request was for the archive to land inside that project, and spreading its
@@ -74,10 +76,10 @@ export function ImportBundleDialog({
             <IconImport size={17} />
           </span>
           <div>
-            <h2 id="import-bundle-title">匯入專案封裝</h2>
+            <h2 id="import-bundle-title">{t("explorer.bundleTitle")}</h2>
             <p>
-              偵測到這是整個工作區的封裝（{manifest.projects} 個專案）
-              {target ? `，將放進 ${target} 底下` : ""}
+              {t("explorer.bundleDetected", { count: manifest.projects })}
+              {target ? ` ${t("explorer.bundleTarget", { target })}` : ""}
             </p>
           </div>
         </header>
@@ -90,7 +92,7 @@ export function ImportBundleDialog({
                 checked={mode === "root"}
                 onChange={() => setMode("root")}
               />
-              還原到工作區最上層
+              {t("explorer.bundleRoot")}
             </label>
           )}
           <label className="notify-toggle">
@@ -100,11 +102,11 @@ export function ImportBundleDialog({
               checked={mode === "folder"}
               onChange={() => setMode("folder")}
             />
-            放進新資料夾：
+            {t("explorer.bundleFolder")}
           </label>
           <div className="notify-field">
             <label htmlFor="import-bundle-folder" className="visually-hidden">
-              新資料夾名稱
+              {t("explorer.bundleFolderName")}
             </label>
             <input
               id="import-bundle-folder"
@@ -112,14 +114,14 @@ export function ImportBundleDialog({
               onChange={(event) => setName(event.target.value)}
               // Typing a folder name is the same statement as picking the
               // radio, and a name typed into an unselected option would be
-              // silently thrown away on 匯入.
+              // silently thrown away on import.
               onFocus={() => setMode("folder")}
             />
           </div>
         </div>
         <footer>
           <button type="button" onClick={onCancel} disabled={busy}>
-            取消
+            {t("common.cancel")}
           </button>
           <button
             ref={confirmRef}
@@ -128,7 +130,7 @@ export function ImportBundleDialog({
             disabled={busy || (mode === "folder" && name.trim() === "")}
             onClick={() => onConfirm({ mode, name: name.trim() })}
           >
-            匯入
+            {t("explorer.import")}
           </button>
         </footer>
       </section>

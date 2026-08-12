@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconFolder, IconFolderOpen, IconImport, IconPlus } from "../icons";
 import { api } from "../api";
 import { reportError, useApp, usePreference } from "../store";
+import { useI18n } from "../i18n";
 import { useNarrowViewport } from "./TopbarOverflow";
 import { StatusLegend } from "./explorer/StatusLegend";
 import { WorkspaceTree } from "./explorer/WorkspaceTree";
@@ -60,6 +61,7 @@ export function SidebarBackdrop({
 }
 
 export function Sidebar() {
+  const { t } = useI18n();
   // Read-only sessions browse the tree and search; the rows that create,
   // import, rename or transfer are not offered. The server refuses them all
   // regardless — this only stops the sidebar promising what will be refused.
@@ -224,9 +226,12 @@ export function Sidebar() {
   const moveProjectsInteractively = async (target: ProjectMenuTarget) => {
     const moving = target.names.length > 0 ? target.names : [target.name];
     const parent = await pickProject({
-      title: moving.length > 1 ? `搬移 ${moving.length} 個項目` : `搬移「${target.label}」`,
-      description: "選擇要搬去的位置。內容不會變動，只是換一個位置。",
-      confirmLabel: "搬移",
+      title:
+        moving.length > 1
+          ? t("sidebar.moveTitlePlural", { count: String(moving.length) })
+          : t("sidebar.moveTitle", { label: target.label }),
+      description: t("sidebar.moveDescription"),
+      confirmLabel: t("sidebar.move"),
       includeFolders: true,
       rootLabel: workspaceName,
       exclude: projects
@@ -286,9 +291,9 @@ export function Sidebar() {
     setFolderOpenBusy(path);
     try {
       await api.openFolder(path);
-      setProjectTransferNotice(`已在檔案總管開啟：${label}`);
+      setProjectTransferNotice(t("sidebar.folderOpened", { label }));
     } catch (error) {
-      setProjectTransferNotice(`無法開啟資料夾：${(error as Error).message}`);
+      setProjectTransferNotice(t("sidebar.folderOpenFailed", { error: (error as Error).message }));
       reportError(error);
     } finally {
       setFolderOpenBusy(null);
@@ -310,20 +315,22 @@ export function Sidebar() {
       <section className="explorer">
         <div className="explorer-heading">
           <div>
-            <h3>專案總管</h3>
+            <h3>{t("sidebar.title")}</h3>
             <span className="explorer-workspace-label">{workspaceName}</span>
           </div>
-          <span className="explorer-project-count">{projects.length} 個專案</span>
+          <span className="explorer-project-count">
+            {t("sidebar.projectCount", { count: String(projects.length) })}
+          </span>
         </div>
         {canEdit && (
-        <div className="explorer-create-actions" aria-label="專案與工作區工具">
+        <div className="explorer-create-actions" aria-label={t("sidebar.tools")}>
           <button
             type="button"
             className="primary"
             onClick={() => create.beginProjectCreate({ mode: "project", parent: "" })}
           >
             <IconPlus size={13} />
-            新專案
+            {t("sidebar.newProject")}
           </button>
           <button
             type="button"
@@ -336,13 +343,13 @@ export function Sidebar() {
             disabled={!activeProject}
           >
             <IconFolder size={13} />
-            新增子專案
+            {t("sidebar.newSubproject")}
           </button>
           <label className="explorer-sort">
-            <span className="visually-hidden">專案排序方式</span>
+            <span className="visually-hidden">{t("sidebar.sortProjects")}</span>
             <select
               value={projectSort}
-              aria-label="專案排序方式"
+              aria-label={t("sidebar.sortProjects")}
               onChange={(event) =>
                 updateUIPreference(
                   "explorerProjectSort",
@@ -352,7 +359,7 @@ export function Sidebar() {
             >
               {(Object.keys(PROJECT_SORT_LABELS) as ProjectSort[]).map((sort) => (
                 <option key={sort} value={sort}>
-                  {PROJECT_SORT_LABELS[sort]}
+                  {t(PROJECT_SORT_LABELS[sort])}
                 </option>
               ))}
             </select>
@@ -361,20 +368,20 @@ export function Sidebar() {
             type="button"
             onClick={() => transfer.markdownImportInputRef.current?.click()}
             disabled={transfer.markdownImportBusy || !activeProject}
-            title="匯入 Markdown 檔案為目前專案的節點"
+            title={t("sidebar.importMdTitle")}
           >
             <IconImport size={13} />
-            {transfer.markdownImportBusy ? "匯入中…" : "匯入 MD"}
+            {transfer.markdownImportBusy ? t("sidebar.importingMd") : t("sidebar.importMd")}
           </button>
           <button
             type="button"
             className="workspace-connect-action"
             onClick={picker.openWorkspacePicker}
             disabled={picker.importPathBusy}
-            title="啟動後連接另一個本機或已掛載的雲端工作區"
+            title={t("sidebar.connectWorkspaceTitle")}
           >
             <IconFolderOpen size={13} />
-            連接工作區
+            {t("sidebar.connectWorkspace")}
           </button>
         </div>
         )}
@@ -407,8 +414,8 @@ export function Sidebar() {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜尋專案／目前節點"
-          aria-label="搜尋專案或目前節點"
+          placeholder={t("sidebar.searchPlaceholder")}
+          aria-label={t("sidebar.searchLabel")}
         />
 
       <WorkspaceTree

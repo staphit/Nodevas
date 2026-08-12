@@ -18,6 +18,7 @@
  */
 
 import { useRef, useState } from "react";
+import { localizePlanOrderError, useI18n } from "../../i18n";
 import {
   BUILTIN_PLAN_STATUSES,
   nextCustomPlanStatusID,
@@ -58,6 +59,7 @@ export function useNodeCreation({
   setGraphNotice: (notice: { text: string; kind: "ok" | "error" } | null) => void;
   setContextMenu: (menu: LaneContextMenu | null) => void;
 }) {
+  const { t, language } = useI18n();
   const [nodeCreateTitle, setNodeCreateTitle] = useState("");
   const [nodeCreateError, setNodeCreateError] = useState<string | null>(null);
   const [nodeCreateBusy, setNodeCreateBusy] = useState(false);
@@ -99,14 +101,14 @@ export function useNodeCreation({
       for (const draft of nodeCustomPlanDrafts) {
         const label = draft.label.trim();
         if (!label && !draft.date) continue;
-        if (!label) throw new Error("自訂狀態必須填寫名稱。");
-        if (label.length > 128) throw new Error("自訂狀態名稱不可超過 128 字。");
+        if (!label) throw new Error(t("nodeCreate.error.customNameRequired"));
+        if (label.length > 128) throw new Error(t("nodeCreate.error.customNameTooLong"));
         const normalized = label.toLocaleLowerCase();
         if (usedLabels.has(normalized)) {
-          throw new Error(`自訂狀態「${label}」已存在。`);
+          throw new Error(t("nodeCreate.error.customNameDuplicate", { label }));
         }
         if (definitions.length >= 64) {
-          throw new Error("自訂狀態最多 64 個。");
+          throw new Error(t("nodeCreate.error.customStatusLimit"));
         }
         usedLabels.add(normalized);
         const definition: PlanStatusDefinition = {
@@ -125,7 +127,7 @@ export function useNodeCreation({
           plan.status,
           plan.date,
         );
-        if (error) throw new Error(error);
+        if (error) throw new Error(localizePlanOrderError(error, language));
       }
       plans.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -148,13 +150,16 @@ export function useNodeCreation({
       // state did not take.
       let statusWarning = "";
       if (nodeCreateStatus) {
-        const applied = await setLifecycleStatus(id, nodeCreateStatus, "建立時設定");
-        if (!applied.ok) statusWarning = `，但實際狀態未套用：${applied.message ?? ""}`;
+        const applied = await setLifecycleStatus(id, nodeCreateStatus, t("nodeCreate.creationNote"));
+        if (!applied.ok) statusWarning = applied.message ?? "";
       }
+      const createdText = plans.length
+        ? t("nodeCreate.createdWithPlans", { id, count: plans.length })
+        : t("nodeCreate.created", { id });
       setGraphNotice({
-        text: `節點 ${id} 已建立${
-          plans.length ? `，含 ${plans.length} 個預期日期` : ""
-        }${statusWarning}。`,
+        text: statusWarning
+          ? `${createdText} ${t("nodeCreate.statusWarning", { message: statusWarning })}`
+          : createdText,
         kind: statusWarning ? "error" : "ok",
       });
       // A form that keeps the last node's colours would make the next node
@@ -163,7 +168,7 @@ export function useNodeCreation({
       setNodeCreateStyle({});
       setContextMenu(null);
     } catch (error) {
-      setNodeCreateError((error as Error).message || "新增節點失敗。");
+      setNodeCreateError((error as Error).message || t("nodeCreate.failed"));
     } finally {
       setNodeCreateBusy(false);
     }

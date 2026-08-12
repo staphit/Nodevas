@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../preferences";
+import { useApp } from "../store";
 import {
   ColorField,
   EmptyState,
@@ -8,6 +10,11 @@ import {
   OperationStatus,
   ResizeHandle,
 } from "./InteractionPrimitives";
+
+beforeEach(() => {
+  useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+  useApp.getState().updateUIPreference("language", "zh-TW");
+});
 
 function renderHandle(overrides: Partial<Parameters<typeof ResizeHandle>[0]> = {}) {
   const onChange = vi.fn();

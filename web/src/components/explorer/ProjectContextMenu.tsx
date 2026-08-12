@@ -17,6 +17,7 @@ import {
   IconTrash,
 } from "../../icons";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 import type { ProjectCreateTarget } from "./ProjectCreatePanel";
@@ -71,6 +72,7 @@ export function ProjectContextMenu({
 }) {
   const switchProject = useApp((state) => state.switchProject);
   const refreshProjects = useApp((state) => state.refreshProjects);
+  const { t } = useI18n();
   const [projectRemoveBusy, setProjectRemoveBusy] = useState(false);
   const menuTop = Math.max(8, Math.min(menu.y, window.innerHeight - 250));
 
@@ -105,27 +107,34 @@ export function ProjectContextMenu({
     );
     const many = targets.length > 1;
     const hasChildren = menu.childCount > 0;
-    const subject = many ? `${targets.length} 個專案` : `「${menu.label}」`;
+    const subject = many
+      ? t("explorer.projectSubjectMany", { count: targets.length })
+      : t("explorer.projectSubjectOne", { label: menu.label });
     const confirmed = await confirmAction(
       mode === "disk"
         ? {
-            title: many ? `永久刪除 ${targets.length} 個專案？` : `永久刪除${subject}？`,
+            title: t("explorer.deleteProjectsTitle", { subject }),
             description: many
-              ? `將刪除這些專案的磁碟資料夾：\n${targets.join("、")}\n此操作無法復原。`
-              : `將刪除磁碟資料夾：${menu.path}${
-                  hasChildren ? `，以及其中 ${menu.childCount} 個子專案` : ""
-                }。此操作無法復原。`,
-            confirmLabel: "永久刪除",
+              ? t("explorer.deleteProjectsDescriptionMany", { projects: targets.join("\n") })
+              : t("explorer.deleteProjectDescription", {
+                  path: menu.path,
+                  children: hasChildren
+                    ? t("explorer.childProjectCount", { count: menu.childCount })
+                    : "",
+                }),
+            confirmLabel: t("explorer.permanentlyDelete"),
             tone: "danger",
           }
         : {
-            title: many ? `解除匯入 ${targets.length} 個專案？` : `解除匯入${subject}？`,
+            title: t("explorer.detachProjectsTitle", { subject }),
             description: many
-              ? `這些專案會從工作區清單移除，磁碟檔案保持不變：\n${targets.join("、")}`
-              : `專案會從此工作區清單移除${
-                  hasChildren ? `，其下 ${menu.childCount} 個子專案也會一併隱藏` : ""
-                }；磁碟檔案保持不變。`,
-            confirmLabel: "解除匯入",
+              ? t("explorer.detachProjectsDescriptionMany", { projects: targets.join("\n") })
+              : t("explorer.detachProjectDescription", {
+                  children: hasChildren
+                    ? t("explorer.hiddenChildProjects", { count: menu.childCount })
+                    : "",
+                }),
+            confirmLabel: t("explorer.detach"),
           },
     );
     if (!confirmed) return;
@@ -145,7 +154,7 @@ export function ProjectContextMenu({
           removed.push(name);
           if (result.active) active = result.active;
         } catch (error) {
-          failed.push(`${name}（${(error as Error).message}）`);
+          failed.push(`${name}: ${(error as Error).message}`);
         }
       }
       const nextExpanded = new Set(
@@ -163,20 +172,29 @@ export function ProjectContextMenu({
       } else {
         await refreshProjects();
       }
-      const what = mode === "disk" ? "永久刪除" : "解除匯入";
+      const what = mode === "disk" ? t("explorer.permanentlyDelete") : t("explorer.detached");
       if (failed.length === 0) {
         setProjectTransferNotice(
           many
-            ? `已${what} ${removed.length} 個專案`
-            : `已${what}：${menu.label}${mode === "disk" ? "" : "（磁碟檔案保留）"}`,
+            ? t("explorer.removedMany", { action: what, count: removed.length })
+            : t("explorer.removedOne", {
+                action: what,
+                label: menu.label,
+                suffix: mode === "disk" ? "" : t("explorer.filesKeptSuffix"),
+              }),
         );
       } else {
         setProjectTransferNotice(
-          `已${what} ${removed.length} 個，${failed.length} 個失敗：${failed.join("；")}`,
+          t("explorer.removedPartial", {
+            action: what,
+            removed: removed.length,
+            failed: failed.length,
+            details: failed.join("; "),
+          }),
         );
       }
     } catch (error) {
-      setProjectTransferNotice(`無法移除專案：${(error as Error).message}`);
+      setProjectTransferNotice(t("explorer.projectRemoveFailed", { error: (error as Error).message }));
       reportError(error);
     } finally {
       setProjectRemoveBusy(false);
@@ -189,8 +207,8 @@ export function ProjectContextMenu({
       role="menu"
       aria-label={
         menu.names.length > 1
-          ? `${menu.names.length} 個專案操作`
-          : `${menu.label} 專案操作`
+          ? t("explorer.projectActions", { count: menu.names.length })
+          : t("explorer.singleProjectActions", { label: menu.label })
       }
       style={{
         left: Math.max(8, Math.min(menu.x, window.innerWidth - 282)),
@@ -224,8 +242,8 @@ export function ProjectContextMenu({
           <IconFolderOpen size={14} />
         </span>
         <span>
-          <b>在檔案總管中開啟</b>
-          <small>開啟此{menu.isFolder ? "資料夾" : "專案"}位置</small>
+          <b>{t("explorer.openInExplorer")}</b>
+          <small>{t("explorer.openLocation", { kind: menu.isFolder ? t("explorer.folder") : t("explorer.project") })}</small>
         </span>
       </button>
       <button
@@ -242,11 +260,11 @@ export function ProjectContextMenu({
           <IconExport size={14} />
         </span>
         <span>
-          <b>匯出封裝</b>
+          <b>{t("explorer.projectArchive")}</b>
           <small>
             {menu.isFolder || menu.childCount > 0
-              ? ".veproj，含其下所有子專案"
-              : ".veproj，含節點、子頁與執行紀錄"}
+              ? t("explorer.projectArchiveChildren")
+              : t("explorer.projectArchiveContents")}
           </small>
         </span>
       </button>
@@ -271,8 +289,8 @@ export function ProjectContextMenu({
           <IconPlus size={14} />
         </span>
         <span>
-          <b>新增子專案</b>
-          <small>建立在這個專案底下</small>
+          <b>{t("explorer.newChildProject")}</b>
+          <small>{t("explorer.projectChildHint")}</small>
         </span>
       </button>
       <button
@@ -287,8 +305,8 @@ export function ProjectContextMenu({
           <IconFolderOpen size={14} />
         </span>
         <span>
-          <b>新增子資料夾</b>
-          <small>純資料夾，建立在這裡用來分組</small>
+          <b>{t("explorer.newWorkspaceFolder")}</b>
+          <small>{t("explorer.folderChildHint")}</small>
         </span>
       </button>
       <div className="project-context-separator" />
@@ -306,8 +324,8 @@ export function ProjectContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入專案</b>
-          <small>.veproj 或 .zip，放進這個專案底下</small>
+          <b>{t("explorer.importArchive")}</b>
+          <small>{t("explorer.importProjectInto")}</small>
         </span>
       </button>
       <button
@@ -324,8 +342,8 @@ export function ProjectContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入 MD</b>
-          <small>把 Markdown 檔加入這個專案</small>
+          <b>{t("explorer.importMarkdown")}</b>
+          <small>{t("explorer.importMarkdownInto")}</small>
         </span>
       </button>
       <button
@@ -342,8 +360,8 @@ export function ProjectContextMenu({
           <IconImport size={14} />
         </span>
         <span>
-          <b>匯入 Canvas</b>
-          <small>Obsidian JSON Canvas（.canvas），加入這個專案</small>
+          <b>{t("explorer.importCanvas")}</b>
+          <small>{t("explorer.importCanvasInto")}</small>
         </span>
       </button>
       <div className="project-context-separator" />
@@ -362,9 +380,11 @@ export function ProjectContextMenu({
         </span>
         <span>
           <b>
-            {menu.names.length > 1 ? `搬移 ${menu.names.length} 個…` : "搬移到…"}
+            {menu.names.length > 1
+              ? t("explorer.moveMany", { count: menu.names.length })
+              : t("explorer.move")}
           </b>
-          <small>改變它在工作區裡的位置</small>
+          <small>{t("explorer.moveHint")}</small>
         </span>
       </button>
       <button
@@ -377,9 +397,11 @@ export function ProjectContextMenu({
           ✎
         </span>
         <span>
-          <b>重新命名</b>
+          <b>{t("explorer.rename")}</b>
           <small>
-            修改{menu.isFolder ? "資料夾" : "專案"}名稱
+            {t("explorer.projectRenameHint", {
+              kind: menu.isFolder ? t("explorer.folder") : t("explorer.project"),
+            })}
           </small>
         </span>
       </button>
@@ -396,10 +418,10 @@ export function ProjectContextMenu({
         <span>
           <b>
             {menu.names.length > 1
-              ? `解除匯入 ${menu.names.length} 個`
-              : "解除匯入"}
+              ? t("explorer.detachMany", { count: menu.names.length })
+              : t("explorer.detach")}
           </b>
-          <small>從清單移除，保留磁碟檔案</small>
+          <small>{t("explorer.detachHint")}</small>
         </span>
       </button>
       <div className="project-context-separator" />
@@ -416,10 +438,10 @@ export function ProjectContextMenu({
         <span>
           <b>
             {menu.names.length > 1
-              ? `永久刪除 ${menu.names.length} 個`
-              : "永久刪除"}
+              ? t("explorer.projectDeleteMany", { count: menu.names.length })
+              : t("explorer.projectDelete")}
           </b>
-          <small>刪除專案資料夾，無法復原</small>
+          <small>{t("explorer.projectDeleteHint")}</small>
         </span>
       </button>
     </div>

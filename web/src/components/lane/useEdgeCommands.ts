@@ -5,13 +5,10 @@
  */
 
 import type { CanvasCommand } from "../../store";
+import { localizedLineLabel, localizedRelationLabel, translate } from "../../i18n";
 import type { CommandResult } from "../../state/operations";
 import type { EdgeLine, EdgeRelation, Graph } from "../../types";
-import {
-  LINE_LABELS,
-  RELATION_LABELS,
-  edgeRelation,
-} from "../../domain/graph/edgeStyle";
+import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { edgeKeyEndpoints } from "../canvas/geometry";
 import type { GraphSelection } from "../LaneView";
 
@@ -51,12 +48,18 @@ export function useEdgeCommands({
     }
     const changed =
       patch.relation !== undefined
-        ? RELATION_LABELS[patch.relation]
+        ? localizedRelationLabel(patch.relation)
         : patch.line
-          ? LINE_LABELS[patch.line as Exclude<EdgeLine, "">]
-          : "自動線條";
+          ? localizedLineLabel(patch.line)
+          : translate("canvasOps.edgeDefault");
     setGraphNotice({
-      text: `${targets.length > 1 ? `${targets.length} 條關係` : "關係"}已設為${changed}`,
+      text: translate("canvasOps.edgeStyleChanged", undefined, {
+        target:
+          targets.length > 1
+            ? `${targets.length} ${translate("canvasOps.edgeTarget")}`
+            : translate("canvasOps.edgeDefault"),
+        changed,
+      }),
       kind: "ok",
     });
   };

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import { IconClose, IconDoc } from "../icons";
 import { nodeById, useApp } from "../store";
+import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
 
 export function PopoutEditor() {
+  const { t } = useI18n();
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const nodeID = params.get("node") ?? "";
   const pageID = params.get("page") ?? "main";
@@ -21,7 +23,7 @@ export function PopoutEditor() {
   const [saveRequest, setSaveRequest] = useState(0);
 
   const node = nodeById(graph, nodeID);
-  const title = node?.title || nodeID || "節點";
+  const title = node?.title || nodeID || t("node.title");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -29,7 +31,7 @@ export function PopoutEditor() {
 
   useEffect(() => {
     if (!nodeID) {
-      setError("缺少節點 ID，無法開啟彈窗。");
+      setError(t("popout.missingNode"));
       setLoading(false);
       return;
     }
@@ -41,7 +43,7 @@ export function PopoutEditor() {
       .catch((loadError) => {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : "無法開啟節點。",
+            loadError instanceof Error ? loadError.message : t("popout.openFailed"),
           );
         }
       })
@@ -74,12 +76,12 @@ export function PopoutEditor() {
           <IconDoc size={16} />
           <div>
             <strong>{title}</strong>
-            <span>{pageID === "main" ? "主頁" : pageID}</span>
+            <span>{pageID === "main" ? t("drawer.mainPage") : pageID}</span>
           </div>
         </div>
         <div className="popout-editor-actions">
           <span className={editorDirty ? "unsaved" : ""}>
-            {editorDirty ? "未儲存" : "已儲存"}
+            {editorDirty ? t("popout.unsaved") : t("popout.saved")}
           </span>
           <button
             type="button"
@@ -87,12 +89,12 @@ export function PopoutEditor() {
             disabled={!editorDirty}
             onClick={() => setSaveRequest((value) => value + 1)}
           >
-            儲存 <kbd>Ctrl+S</kbd>
+            {t("common.save")} <kbd>Ctrl+S</kbd>
           </button>
           <button
             type="button"
             className="icon-button"
-            aria-label="關閉視窗"
+            aria-label={t("popout.close")}
             onClick={() => window.close()}
           >
             <IconClose size={16} />
@@ -104,13 +106,13 @@ export function PopoutEditor() {
         <div className="banner banner-warn popout-banner">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)}>
-            關閉
+            {t("common.close")}
           </button>
         </div>
       )}
 
       {loading ? (
-        <div className="popout-editor-loading">正在載入完整節點資訊…</div>
+        <div className="popout-editor-loading">{t("popout.loading")}</div>
       ) : (
         <TabBody
           id={nodeID}

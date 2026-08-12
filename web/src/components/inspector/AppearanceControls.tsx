@@ -12,6 +12,7 @@
 import type { CSSProperties } from "react";
 import { ColorField } from "../InteractionPrimitives";
 import { StatusShape, statusTheme } from "../../statusTheme";
+import { localizedStatusLabel, useI18n } from "../../i18n";
 import type {
   NodeAlign,
   NodeShape,
@@ -21,33 +22,33 @@ import type {
   StatusDefinition,
 } from "../../types";
 
-const SHAPES: { value: NodeShape; label: string }[] = [
-  { value: "rect", label: "矩形" },
-  { value: "round", label: "圓角" },
-  { value: "pill", label: "膠囊" },
-  { value: "ellipse", label: "橢圓" },
-  { value: "diamond", label: "菱形" },
-  { value: "hexagon", label: "六角形" },
+const SHAPES: { value: NodeShape }[] = [
+  { value: "rect" },
+  { value: "round" },
+  { value: "pill" },
+  { value: "ellipse" },
+  { value: "diamond" },
+  { value: "hexagon" },
 ];
 
-const PRESETS: { value: string; label: string; width: number; height: number }[] = [
-  { value: "compact", label: "精簡", width: 152, height: 56 },
-  { value: "default", label: "標準", width: 152, height: 68 },
-  { value: "wide", label: "寬版", width: 240, height: 68 },
-  { value: "large", label: "大型", width: 240, height: 112 },
-  { value: "square", label: "正方", width: 140, height: 140 },
+const PRESETS: { value: string; width: number; height: number }[] = [
+  { value: "compact", width: 152, height: 56 },
+  { value: "default", width: 152, height: 68 },
+  { value: "wide", width: 240, height: 68 },
+  { value: "large", width: 240, height: 112 },
+  { value: "square", width: 140, height: 140 },
 ];
 
-const ALIGNMENTS: { value: NodeAlign; label: string; glyph: string }[] = [
-  { value: "left", label: "靠左", glyph: "⬅" },
-  { value: "center", label: "水平置中", glyph: "↔" },
-  { value: "right", label: "靠右", glyph: "➡" },
+const ALIGNMENTS: { value: NodeAlign; glyph: string }[] = [
+  { value: "left", glyph: "⬅" },
+  { value: "center", glyph: "↔" },
+  { value: "right", glyph: "➡" },
 ];
 
-const VALIGNMENTS: { value: NodeVAlign; label: string; glyph: string }[] = [
-  { value: "top", label: "靠上", glyph: "⬆" },
-  { value: "middle", label: "垂直置中", glyph: "↕" },
-  { value: "bottom", label: "靠下", glyph: "⬇" },
+const VALIGNMENTS: { value: NodeVAlign; glyph: string }[] = [
+  { value: "top", glyph: "⬆" },
+  { value: "middle", glyph: "↕" },
+  { value: "bottom", glyph: "⬇" },
 ];
 
 /** Outline palette: readable against both themes' card fills. */
@@ -132,13 +133,15 @@ export function AppearanceControls({
   status,
   customStatuses = [],
   previewTitle,
-  previewAssignee = "預覽",
+  previewAssignee,
   disabled = false,
   sizeHint,
 }: AppearanceControlsProps) {
+  const { t } = useI18n();
   const shape = style.shape ?? "rect";
   const width = style.width ?? DEFAULT_NODE_W;
   const height = style.height ?? DEFAULT_NODE_H;
+  const displayedAssignee = previewAssignee ?? t("appearance.preview");
 
   return (
     <>
@@ -168,16 +171,21 @@ export function AppearanceControls({
               className="col-card-st"
               style={{ color: statusTheme(status, customStatuses).color }}
             >
-              {statusTheme(status, customStatuses).label}
+              {localizedStatusLabel(status, customStatuses)}
             </span>
           </span>
           <span className="col-card-title">{previewTitle}</span>
-          <span className="col-card-assignee unassigned">{previewAssignee}</span>
+          <span
+            className="col-card-assignee unassigned"
+            data-assignee-prefix={t("canvas.assigneePrefix")}
+          >
+            {displayedAssignee}
+          </span>
         </div>
       </div>
 
       <section className="appearance-group" aria-labelledby={`shape-${idPrefix}`}>
-        <h4 id={`shape-${idPrefix}`}>形狀</h4>
+        <h4 id={`shape-${idPrefix}`}>{t("appearance.shape")}</h4>
         <div className="appearance-choices">
           {SHAPES.map((option) => (
             <button
@@ -194,23 +202,23 @@ export function AppearanceControls({
                 className={`appearance-shape-mark shape-${option.value}`}
                 aria-hidden
               />
-              {option.label}
+              {t(`appearance.shape.${option.value}`)}
             </button>
           ))}
         </div>
       </section>
 
       <section className="appearance-group" aria-labelledby={`size-${idPrefix}`}>
-        <h4 id={`size-${idPrefix}`}>尺寸</h4>
+        <h4 id={`size-${idPrefix}`}>{t("appearance.size")}</h4>
         <label className="appearance-slider">
-          <span>寬度</span>
+          <span>{t("appearance.width")}</span>
           <input
             type="range"
             min={MIN_W}
             max={MAX_W}
             step={4}
             value={width}
-            aria-label="寬度"
+            aria-label={t("appearance.width")}
             disabled={disabled}
             onChange={(event) => onChange({ width: Number(event.target.value) })}
           />
@@ -219,20 +227,20 @@ export function AppearanceControls({
             min={MIN_W}
             max={MAX_W}
             value={width}
-            aria-label="寬度數值"
+            aria-label={t("appearance.widthValue")}
             disabled={disabled}
             onChange={(event) => onChange({ width: Number(event.target.value) })}
           />
         </label>
         <label className="appearance-slider">
-          <span>高度</span>
+          <span>{t("appearance.height")}</span>
           <input
             type="range"
             min={MIN_H}
             max={MAX_H}
             step={4}
             value={height}
-            aria-label="高度"
+            aria-label={t("appearance.height")}
             disabled={disabled}
             onChange={(event) => onChange({ height: Number(event.target.value) })}
           />
@@ -241,7 +249,7 @@ export function AppearanceControls({
             min={MIN_H}
             max={MAX_H}
             value={height}
-            aria-label="高度數值"
+            aria-label={t("appearance.heightValue")}
             disabled={disabled}
             onChange={(event) => onChange({ height: Number(event.target.value) })}
           />
@@ -257,7 +265,7 @@ export function AppearanceControls({
               disabled={disabled}
               onClick={() => onChange({ width: preset.width, height: preset.height })}
             >
-              {preset.label}
+              {t(`appearance.preset.${preset.value}`)}
               <small>
                 {preset.width}×{preset.height}
               </small>
@@ -268,33 +276,33 @@ export function AppearanceControls({
       </section>
 
       <section className="appearance-group" aria-labelledby={`align-${idPrefix}`}>
-        <h4 id={`align-${idPrefix}`}>文字位置</h4>
-        <div className="appearance-choices" role="group" aria-label="文字水平位置">
+        <h4 id={`align-${idPrefix}`}>{t("appearance.textPosition")}</h4>
+        <div className="appearance-choices" role="group" aria-label={t("appearance.horizontalPosition")}>
           {ALIGNMENTS.map((option) => (
             <button
               key={option.value}
               type="button"
               className={`appearance-align${style.align === option.value ? " on" : ""}`}
               aria-pressed={style.align === option.value}
-              aria-label={option.label}
+              aria-label={t(`appearance.align.${option.value}`)}
               disabled={disabled}
               onClick={() =>
                 onChange({ align: style.align === option.value ? undefined : option.value })
               }
             >
               <span aria-hidden>{option.glyph}</span>
-              {option.label}
+              {t(`appearance.align.${option.value}`)}
             </button>
           ))}
         </div>
-        <div className="appearance-choices" role="group" aria-label="文字垂直位置">
+        <div className="appearance-choices" role="group" aria-label={t("appearance.verticalPosition")}>
           {VALIGNMENTS.map((option) => (
             <button
               key={option.value}
               type="button"
               className={`appearance-align${style.valign === option.value ? " on" : ""}`}
               aria-pressed={style.valign === option.value}
-              aria-label={option.label}
+              aria-label={t(`appearance.valign.${option.value}`)}
               disabled={disabled}
               onClick={() =>
                 onChange({
@@ -303,19 +311,19 @@ export function AppearanceControls({
               }
             >
               <span aria-hidden>{option.glyph}</span>
-              {option.label}
+              {t(`appearance.valign.${option.value}`)}
             </button>
           ))}
         </div>
         <p className="appearance-hint">
-          未選擇時，文字依形狀擺放：窄形狀置中，矩形靠左。
+          {t("appearance.positionHint")}
         </p>
       </section>
 
       <section className="appearance-group" aria-labelledby={`colour-${idPrefix}`}>
-        <h4 id={`colour-${idPrefix}`}>顏色</h4>
+        <h4 id={`colour-${idPrefix}`}>{t("appearance.color")}</h4>
         <div className="appearance-colour-row">
-          <span>底色</span>
+          <span>{t("appearance.fill")}</span>
           <div className="appearance-swatches">
             {SWATCHES.map((swatch) => (
               <button
@@ -323,7 +331,7 @@ export function AppearanceControls({
                 type="button"
                 className={`appearance-swatch${style.color === swatch ? " on" : ""}`}
                 style={{ background: swatch }}
-                aria-label={`底色 ${swatch}`}
+                aria-label={`${t("appearance.fill")} ${swatch}`}
                 disabled={disabled}
                 onClick={() => onChange({ color: swatch })}
               />
@@ -331,13 +339,13 @@ export function AppearanceControls({
           </div>
           <ColorField
             value={style.color || "#1b2429"}
-            label="自訂底色"
+            label={t("appearance.customFill")}
             disabled={disabled}
             onCommit={(color) => onChange({ color })}
           />
         </div>
         <div className="appearance-colour-row">
-          <span>外框</span>
+          <span>{t("appearance.border")}</span>
           <div className="appearance-swatches">
             {BORDER_SWATCHES.map((swatch) => (
               <button
@@ -347,7 +355,7 @@ export function AppearanceControls({
                   style.borderColor === swatch ? " on" : ""
                 }`}
                 style={{ background: swatch }}
-                aria-label={`外框顏色 ${swatch}`}
+                aria-label={`${t("appearance.border")} ${swatch}`}
                 disabled={disabled}
                 onClick={() => onChange({ borderColor: swatch })}
               />
@@ -355,7 +363,7 @@ export function AppearanceControls({
           </div>
           <ColorField
             value={style.borderColor || "#3a4a55"}
-            label="自訂外框顏色"
+            label={t("appearance.customBorder")}
             disabled={disabled}
             onCommit={(borderColor) => onChange({ borderColor })}
           />
@@ -365,11 +373,11 @@ export function AppearanceControls({
             disabled={disabled || !style.borderColor}
             onClick={() => onChange({ borderColor: undefined })}
           >
-            清除
+            {t("appearance.clear")}
           </button>
         </div>
         <div className="appearance-colour-row">
-          <span>文字</span>
+          <span>{t("appearance.text")}</span>
           <div className="appearance-swatches">
             {TEXT_SWATCHES.map((swatch) => (
               <button
@@ -377,7 +385,7 @@ export function AppearanceControls({
                 type="button"
                 className={`appearance-swatch${style.textColor === swatch ? " on" : ""}`}
                 style={{ background: swatch }}
-                aria-label={`文字顏色 ${swatch}`}
+                aria-label={`${t("appearance.text")} ${swatch}`}
                 disabled={disabled}
                 onClick={() => onChange({ textColor: swatch })}
               />
@@ -385,7 +393,7 @@ export function AppearanceControls({
           </div>
           <ColorField
             value={style.textColor || "#e6edf3"}
-            label="自訂文字顏色"
+            label={t("appearance.customText")}
             disabled={disabled}
             onCommit={(textColor) => onChange({ textColor })}
           />
@@ -398,7 +406,7 @@ export function AppearanceControls({
           disabled={disabled}
           onClick={() => onChange({ ...EMPTY_NODE_STYLE })}
         >
-          重設為預設外觀
+          {t("appearance.nodeReset")}
         </button>
       </div>
     </>

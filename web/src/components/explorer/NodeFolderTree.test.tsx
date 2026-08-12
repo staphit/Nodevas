@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../../preferences/storage";
+import { useApp } from "../../store";
 import type { GraphNode } from "../../types";
 import { FOLDER_DRAG_TYPE, NODE_DRAG_TYPE, NodeFolderTree } from "./NodeFolderTree";
 
@@ -42,6 +44,12 @@ function transfer(type: string, data: string) {
 }
 
 describe("NodeFolderTree", () => {
+  beforeEach(() => {
+    useApp.setState({
+      preferences: { ...readPreferences(), language: "zh-TW" },
+    });
+  });
+
   it("files each node under the folder holding it", () => {
     setup();
     // Nested folders and their contents are shown, and a node with no folder

@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import type { ProjectEntry } from "../../state/types";
 import { reportError, useApp } from "../../store";
 import { reorderProjectNames, sortProjectTree, type ProjectSort } from "./sortProjects";
@@ -46,6 +47,7 @@ export function useProjectDrag({
     (state) => state.moveProjectToWorkspace,
   );
   const saveProjectOrder = useApp((state) => state.saveProjectOrder);
+  const { t } = useI18n();
   const [projectDropTarget, setProjectDropTarget] = useState<string | null>(null);
   const [projectDropEdge, setProjectDropEdge] = useState<ProjectDropEdge | null>(
     null,
@@ -69,7 +71,7 @@ export function useProjectDrag({
     if (!movedEntry || !targetEntry) return;
     if ((movedEntry.parent ?? "") !== (targetEntry.parent ?? "")) {
       setProjectTransferNotice(
-        "只能在同一層之間調整順序；要換層級請把專案拖到另一個專案上。",
+        t("explorer.dragSameLevelOnly"),
       );
       return;
     }
@@ -84,7 +86,9 @@ export function useProjectDrag({
     } catch (error) {
       reportError(error);
       setProjectTransferNotice(
-        `排序未儲存：${error instanceof Error ? error.message : "未知錯誤"}`,
+        t("explorer.orderSaveFailed", {
+          error: error instanceof Error ? error.message : t("explorer.unknownError"),
+        }),
       );
     }
   };
@@ -95,7 +99,7 @@ export function useProjectDrag({
     if (!name || name === newParent || newParent.startsWith(`${name}/`)) return;
     try {
       const result = await api.moveProject(name, newParent);
-      setProjectTransferNotice(`已搬移專案至 ${result.name}`);
+      setProjectTransferNotice(t("explorer.movedProject", { name: result.name }));
       const next = new Set(expandedProjects);
       next.delete(name);
       next.add(result.name);
@@ -106,7 +110,9 @@ export function useProjectDrag({
     } catch (error) {
       reportError(error);
       setProjectTransferNotice(
-        `搬移失敗：${error instanceof Error ? error.message : "未知錯誤"}`,
+        t("explorer.moveFailed", {
+          error: error instanceof Error ? error.message : t("explorer.unknownError"),
+        }),
       );
     }
   };
@@ -122,11 +128,18 @@ export function useProjectDrag({
     setSwitchingWorkspace(targetWorkspace);
     try {
       const result = await moveProjectToWorkspace(name, targetWorkspace);
-      setProjectTransferNotice(`已把 ${result.name} 搬到 ${targetLabel}`);
+      setProjectTransferNotice(
+        t("explorer.movedAcrossWorkspace", {
+          name: result.name,
+          workspace: targetLabel,
+        }),
+      );
     } catch (error) {
       reportError(error);
       setProjectTransferNotice(
-        `搬移失敗：${error instanceof Error ? error.message : "未知錯誤"}`,
+        t("explorer.moveFailed", {
+          error: error instanceof Error ? error.message : t("explorer.unknownError"),
+        }),
       );
     } finally {
       setSwitchingWorkspace(null);

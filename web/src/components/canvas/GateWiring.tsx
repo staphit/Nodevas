@@ -26,6 +26,7 @@ import {
 } from "./geometry";
 import type { EdgeLine, EdgeRelation } from "../../types";
 import { DependencyLine } from "./DependencyLine";
+import { useI18n } from "../../i18n";
 
 
 
@@ -48,17 +49,6 @@ export const GATE_H = 24;
 export const DEFAULT_GATE_RATIO = 0.72;
 
 export const BINARY_GATE_OPS = new Set(["and", "or", "xor", "nand", "nor"]);
-
-export const OP_PRESENTATION: Record<string, { label: string; description: string }> = {
-  optional: { label: "選用", description: "此關係為選用分支，不阻擋進行" },
-  deprecated: { label: "棄用", description: "此關係已棄用，不列入前置條件" },
-  and: { label: "全部 · AND", description: "全部條件都成立" },
-  or: { label: "任一 · OR", description: "至少一個條件成立" },
-  xor: { label: "擇一 · XOR", description: "只有一個條件成立" },
-  not: { label: "反向 · NOT", description: "條件不成立" },
-  nand: { label: "非全部 · NAND", description: "不是全部條件都成立" },
-  nor: { label: "皆非 · NOR", description: "所有條件都不成立" },
-};
 
 export function GateWiring({
   gate,
@@ -101,6 +91,7 @@ export function GateWiring({
   onEditGate: (targetId: string, x: number, y: number) => void;
   onDeleteGate: (targetId: string) => void;
 }) {
+  const { t } = useI18n();
   const tx = centerX(gate.to);
   const cardTop = rowTop(gate.to.row);
   const targetCenter = { x: tx, y: cardTop + ROW_H / 2 };
@@ -283,9 +274,9 @@ export function GateWiring({
     );
   }
 
-  const presentation = OP_PRESENTATION[effectiveOp] ?? {
-    label: effectiveOp.toUpperCase(),
-    description: effectiveOp.toUpperCase(),
+  const presentation = {
+    label: t(`gate.label.${effectiveOp}`),
+    description: t(`gate.description.${effectiveOp}`),
   };
   // Binary operators are meaningless with a single incoming edge; flag them
   // so a dangling AND/OR reads as "wiring incomplete", not "condition ok".
@@ -406,11 +397,18 @@ export function GateWiring({
         }}
         onDoubleClick={resetGate}
       >
-        <title>{`${presentation.description}。${
-          gateInvalid
-            ? `目前只有 ${gate.parents.length} 個輸入，${presentation.label} 需要至少 2 個前置節點。`
-            : ""
-        }點擊編輯，拖曳調整位置，雙擊重設。`}</title>
+        <title>
+          {[presentation.description,
+            gateInvalid
+              ? t("gate.invalid", {
+                  count: gate.parents.length,
+                  operator: presentation.label,
+                })
+              : "",
+            t("gate.interactionHint")]
+            .filter(Boolean)
+            .join(" ")}
+        </title>
         <rect
           className="gate-node"
           x={gateCenter.x - GATE_W / 2}
@@ -426,7 +424,7 @@ export function GateWiring({
           <g
             className="logic-gate-delete"
             role="button"
-            aria-label="刪除條件閘"
+            aria-label={t("gate.deleteAria")}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault();
@@ -434,7 +432,7 @@ export function GateWiring({
               onDeleteGate(gate.to.node.id);
             }}
           >
-            <title>輸入不足的條件閘。點擊刪除（清除此節點的條件，保留連線）。</title>
+            <title>{t("gate.deleteTitle")}</title>
             <circle cx={gateCenter.x + GATE_W / 2} cy={gateCenter.y - GATE_H / 2} r={7} />
             <path
               d={`M ${gateCenter.x + GATE_W / 2 - 2.5} ${gateCenter.y - GATE_H / 2 - 2.5} l 5 5 M ${

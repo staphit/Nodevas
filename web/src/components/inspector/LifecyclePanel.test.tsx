@@ -36,6 +36,7 @@ beforeEach(() => {
     tabs: [],
     activeTab: null,
     error: null,
+    preferences: { ...useApp.getState().preferences, language: "zh-TW" },
   });
 });
 

@@ -7,8 +7,9 @@ import {
   IconPopout,
   IconTrash,
 } from "../../icons";
-import { PAGE_FORMAT_LABEL, PAGE_FORMATS } from "./pageFormats";
+import { PAGE_FORMATS } from "./pageFormats";
 import type { NodePages } from "./useNodePages";
+import { useI18n } from "../../i18n";
 
 /** Everything above the editor that picks, creates or edits a subpage. */
 export function SubpageControls({
@@ -27,6 +28,7 @@ export function SubpageControls({
    */
   canEdit?: boolean;
 }) {
+  const { t } = useI18n();
   const {
     pages,
     pagesLoading,
@@ -58,7 +60,7 @@ export function SubpageControls({
   return (
     <>
       <div className="content-page-bar">
-        <div className="content-page-tabs" role="tablist" aria-label="內容頁面">
+        <div className="content-page-tabs" role="tablist" aria-label={t("subpage.tabs")}>
           <button
             type="button"
             role="tab"
@@ -67,7 +69,7 @@ export function SubpageControls({
             onClick={() => void selectPage(null)}
           >
             <IconDoc size={13} />
-            主頁
+            {t("subpage.main")}
           </button>
           {pages.map((page) => (
             <button
@@ -83,20 +85,20 @@ export function SubpageControls({
               {page.title}
               {(page.format ?? "md") !== "md" && (
                 <span className="content-page-format">
-                  {PAGE_FORMAT_LABEL[page.format ?? "md"]}
+                  {t(`format.${page.format ?? "md"}`)}
                 </span>
               )}
             </button>
           ))}
-          {pagesLoading && <span className="content-page-loading">讀取頁面…</span>}
+          {pagesLoading && <span className="content-page-loading">{t("subpage.loading")}</span>}
         </div>
         {canEdit && (
           <>
             <button
               type="button"
               className="content-page-action"
-              aria-label="新增子頁"
-              title="新增子頁"
+              aria-label={t("subpage.add")}
+              title={t("subpage.add")}
               onClick={() => setPageCreateOpen((open) => !open)}
             >
               <IconPlus size={15} />
@@ -104,8 +106,8 @@ export function SubpageControls({
             <button
               type="button"
               className="content-page-action"
-              aria-label="匯入檔案為子頁"
-              title="把 .md / .txt / .html / .docx 檔加入為子頁"
+              aria-label={t("subpage.import")}
+              title={t("subpage.importTitle")}
               disabled={pageBusy}
               onClick={() => pageImportInputRef.current?.click()}
             >
@@ -123,8 +125,8 @@ export function SubpageControls({
         <button
           type="button"
           className="content-page-action"
-          aria-label="彈出目前頁面"
-          title="在獨立視窗編輯目前頁面"
+          aria-label={t("subpage.popout")}
+          title={t("subpage.popoutTitle")}
           onClick={onPopout}
         >
           <IconPopout size={15} />
@@ -136,7 +138,7 @@ export function SubpageControls({
           <input
             value={pageRename}
             maxLength={256}
-            aria-label="重新命名目前子頁"
+            aria-label={t("subpage.rename")}
             onChange={(event) => setPageRename(event.target.value)}
             onBlur={() => void renamePage()}
             onKeyDown={(event) => {
@@ -153,7 +155,7 @@ export function SubpageControls({
             type="button"
             disabled={pageBusy || pages[0]?.id === activePageID}
             onClick={() => void movePage(-1)}
-            title="向左移動子頁"
+            title={t("subpage.moveLeft")}
           >
             ←
           </button>
@@ -161,23 +163,23 @@ export function SubpageControls({
             type="button"
             disabled={pageBusy || pages.at(-1)?.id === activePageID}
             onClick={() => void movePage(1)}
-            title="向右移動子頁"
+            title={t("subpage.moveRight")}
           >
             →
           </button>
           <select
             className="content-page-format-select"
-            aria-label="子頁檔案格式"
-            title="轉換這一頁的檔案格式"
+            aria-label={t("subpage.format")}
+            title={t("subpage.convert")}
             value={activeFormat}
             disabled={pageBusy}
             onChange={(event) =>
               void convertPage(event.target.value as PageFormat)
             }
           >
-            {PAGE_FORMATS.map(([format, label, extension]) => (
+            {PAGE_FORMATS.map(([format, _label, extension]) => (
               <option key={format} value={format}>
-                {label}（{extension}）
+                {t(`format.${format}`)} ({extension})
               </option>
             ))}
           </select>
@@ -186,7 +188,7 @@ export function SubpageControls({
             className="danger"
             disabled={pageBusy}
             onClick={() => void removePage()}
-            title="刪除子頁"
+            title={t("subpage.delete")}
           >
             <IconTrash size={13} />
           </button>
@@ -207,24 +209,24 @@ export function SubpageControls({
             maxLength={256}
             value={pageTitle}
             onChange={(event) => setPageTitle(event.target.value)}
-            placeholder="子頁標題，例如：角色設定"
-            aria-label="子頁標題"
+            placeholder={t("subpage.titlePlaceholder")}
+            aria-label={t("subpage.titlePlaceholder")}
           />
           <select
-            aria-label="子頁檔案格式"
+            aria-label={t("subpage.format")}
             value={pageFormat}
             onChange={(event) =>
               setPageFormat(event.target.value as PageFormat)
             }
           >
-            {PAGE_FORMATS.map(([format, label, extension]) => (
+            {PAGE_FORMATS.map(([format, _label, extension]) => (
               <option key={format} value={format}>
-                {label}（{extension}）
+                {t(`format.${format}`)} ({extension})
               </option>
             ))}
           </select>
           <button type="submit" disabled={!pageTitle.trim() || pageBusy}>
-            {pageBusy ? "建立中…" : "建立頁面"}
+            {pageBusy ? t("subpage.creating") : t("subpage.create")}
           </button>
           <button
             type="button"
@@ -234,17 +236,16 @@ export function SubpageControls({
               setPageTitle("");
             }}
           >
-            取消
+            {t("subpage.cancel")}
           </button>
           {pageFormat === "docx" && (
             <p className="content-page-create-note">
-              Word 頁面以 Markdown 編輯，存檔時重新產生 .docx。
-              在 Word 端做的進階排版（欄位、頁首頁尾、追蹤修訂）會在下次存檔時流失。
+              {t("subpage.docxNote")}
             </p>
           )}
           {pageFormat === "html" && (
             <p className="content-page-create-note">
-              HTML 頁面直接編輯原始碼，預覽會渲染它。
+              {t("subpage.htmlNote")}
             </p>
           )}
         </form>
@@ -254,7 +255,7 @@ export function SubpageControls({
         <div className="banner banner-warn content-page-error">
           <span>{pageError}</span>
           <button type="button" onClick={() => setPageError(null)}>
-            關閉
+            {t("subpage.close")}
           </button>
         </div>
       )}
@@ -262,8 +263,7 @@ export function SubpageControls({
       {pageDoc?.conflict && (
         <div className="banner banner-conflict">
           <div className="banner-text">
-            <b>子頁已有較新的版本。</b>
-            可載入磁碟內容，或以目前內容覆寫。
+            <b>{t("subpage.conflictTitle")}</b> {t("subpage.conflictDescription")}
           </div>
           <div className="banner-actions">
             <button
@@ -282,7 +282,7 @@ export function SubpageControls({
                 )
               }
             >
-              載入磁碟版本
+              {t("subpage.loadDisk")}
             </button>
             <button
               type="button"
@@ -299,7 +299,7 @@ export function SubpageControls({
                 )
               }
             >
-              保留我的內容
+              {t("subpage.keepMine")}
             </button>
           </div>
         </div>

@@ -41,6 +41,17 @@ describe("validation", () => {
     expect(readPreference("explorerExpandedProjects")).toEqual([]);
   });
 
+  it("defaults the interface language to English and validates stored languages", () => {
+    configurePreferenceStorage(fakeStorage());
+    expect(readPreference("language")).toBe("en");
+
+    configurePreferenceStorage(fakeStorage({ "vised-language": "zh-TW" }));
+    expect(readPreference("language")).toBe("zh-TW");
+
+    configurePreferenceStorage(fakeStorage({ "vised-language": "fr" }));
+    expect(readPreference("language")).toBe("en");
+  });
+
   // The explorer default is a thunk over the window width: a phone-sized
   // window starts with the overlay out of the way, a desktop one starts with
   // the tree showing. It is only a default — a stored answer always wins.

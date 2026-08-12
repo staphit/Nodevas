@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { useI18n } from "../../i18n";
 import { topLevelOp } from "../../store";
 import {
   editableGateOperator,
@@ -48,6 +49,7 @@ export function useNodeConditions({
   updateCanvasLayout: (command: CanvasCommand) => Promise<CommandResult>;
   runCanvasCommand: (command: CanvasCommand) => void;
 }) {
+  const { t } = useI18n();
   const [conditionSource, setConditionSource] = useState("");
   const [conditionOperator, setConditionOperator] = useState("and");
   const [conditionRelation, setConditionRelation] = useState<EdgeRelation>("");
@@ -92,7 +94,7 @@ export function useNodeConditions({
         return;
       }
       setGraphSelection({ kind: "logic-gate", id: createdID });
-      setGraphNotice({ text: "已將關係線收進邏輯閘。", kind: "ok" });
+      setGraphNotice({ text: t("canvasOps.edgesConverted"), kind: "ok" });
       setContextMenu({ kind: "logic-gate", gateId: createdID, x: menu.x, y: menu.y });
     });
   };
@@ -116,7 +118,7 @@ export function useNodeConditions({
       }
       setGraphSelection({ kind: "logic-gate", id: createdID });
       setGraphNotice({
-        text: `${operator.toUpperCase()} 已建立；請選擇輸入節點與輸出節點。`,
+        text: t("canvasOps.gateCreated", { operator: operator.toUpperCase() }),
         kind: "ok",
       });
       setContextMenu({

@@ -1,7 +1,7 @@
 /** Graph filter and saved-view panel [B-06]. */
 
-import { statusTheme } from "../statusTheme";
 import type { Graph, SavedView, Status, StatusDefinition } from "../types";
+import { localizedStatusLabel, useI18n } from "../i18n";
 
 export interface ViewFilter {
   query: string;
@@ -39,26 +39,27 @@ export function GraphToolsPanel({
   applySavedView,
   removeSavedView,
 }: GraphToolsPanelProps) {
+  const { t } = useI18n();
   return (
-  <section className="graph-tools-panel" aria-label="篩選與儲存檢視">
+  <section className="graph-tools-panel" aria-label={t("graphTools.aria")}>
     <input
       value={viewFilter.query}
       onChange={(event) =>
         setViewFilter((current) => ({ ...current, query: event.target.value }))
       }
-      placeholder="篩選 ID、標題、標籤、負責人"
+      placeholder={t("graphTools.query")}
     />
     <select
       value={viewFilter.status}
       onChange={(event) =>
         setViewFilter((current) => ({ ...current, status: event.target.value }))
       }
-      aria-label="狀態篩選"
+      aria-label={t("graphTools.status")}
     >
-      <option value="">全部狀態</option>
+      <option value="">{t("graphTools.allStatuses")}</option>
       {selectableStatuses.map((status) => (
         <option key={status} value={status}>
-          {statusTheme(status, customStatuses).label}
+          {localizedStatusLabel(status, customStatuses)}
         </option>
       ))}
     </select>
@@ -67,10 +68,10 @@ export function GraphToolsPanel({
       onChange={(event) =>
         setViewFilter((current) => ({ ...current, assignee: event.target.value }))
       }
-      aria-label="負責人篩選"
+      aria-label={t("graphTools.assignee")}
     >
-      <option value="">全部負責人</option>
-      <option value="__unassigned__">尚未指派</option>
+      <option value="">{t("graphTools.allAssignees")}</option>
+      <option value="__unassigned__">{t("graphTools.unassigned")}</option>
       {(graph?.users ?? []).map((user) => (
         <option key={user.id} value={user.id}>
           {user.name}
@@ -82,9 +83,9 @@ export function GraphToolsPanel({
       onChange={(event) =>
         setViewFilter((current) => ({ ...current, tag: event.target.value }))
       }
-      aria-label="標籤篩選"
+      aria-label={t("graphTools.tag")}
     >
-      <option value="">全部標籤</option>
+      <option value="">{t("graphTools.allTags")}</option>
       {[...new Set((graph?.nodes ?? []).flatMap((node) => node.tags ?? []))]
         .sort()
         .map((tag) => (
@@ -98,13 +99,13 @@ export function GraphToolsPanel({
       onChange={(event) =>
         setViewFilter((current) => ({ ...current, priority: event.target.value }))
       }
-      aria-label="優先度篩選"
+      aria-label={t("graphTools.priority")}
     >
-      <option value="">全部優先度</option>
-      <option value="urgent">緊急</option>
-      <option value="high">高</option>
-      <option value="medium">中</option>
-      <option value="low">低</option>
+      <option value="">{t("graphTools.allPriorities")}</option>
+      <option value="urgent">{t("graphTools.urgent")}</option>
+      <option value="high">{t("graphTools.high")}</option>
+      <option value="medium">{t("graphTools.medium")}</option>
+      <option value="low">{t("graphTools.low")}</option>
     </select>
     <select
       value={viewFilter.sort}
@@ -114,13 +115,13 @@ export function GraphToolsPanel({
           sort: event.target.value as typeof current.sort,
         }))
       }
-      aria-label="排序方式"
+      aria-label={t("graphTools.sort")}
     >
-      <option value="manual">手動順序</option>
-      <option value="title">標題</option>
-      <option value="priority">優先度</option>
-      <option value="status">狀態</option>
-      <option value="assignee">負責人</option>
+      <option value="manual">{t("graphTools.manual")}</option>
+      <option value="title">{t("graphTools.title")}</option>
+      <option value="priority">{t("graphTools.prioritySort")}</option>
+      <option value="status">{t("graphTools.statusSort")}</option>
+      <option value="assignee">{t("graphTools.assigneeSort")}</option>
     </select>
     <button
       type="button"
@@ -135,17 +136,17 @@ export function GraphToolsPanel({
         })
       }
     >
-      清除
+      {t("graphTools.clear")}
     </button>
     <span className="saved-view-create">
       <input
         value={savedViewName}
         onChange={(event) => setSavedViewName(event.target.value)}
-        placeholder="檢視名稱"
+        placeholder={t("graphTools.viewName")}
         maxLength={80}
       />
       <button type="button" disabled={!savedViewName.trim()} onClick={saveCurrentView}>
-        儲存檢視
+        {t("graphTools.saveView")}
       </button>
     </span>
     {(graph?.ui?.savedViews ?? []).map((view) => (
@@ -153,7 +154,7 @@ export function GraphToolsPanel({
         <button type="button" onClick={() => applySavedView(view)}>
           {view.name}
         </button>
-        <button type="button" aria-label={`刪除檢視 ${view.name}`} onClick={() => removeSavedView(view.id)}>
+        <button type="button" aria-label={t("graphTools.deleteView", { name: view.name })} onClick={() => removeSavedView(view.id)}>
           ×
         </button>
       </span>

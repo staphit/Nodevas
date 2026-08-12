@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { milestoneTypeUsage } from "../../domain";
 import { useApp } from "../../store";
-import { planStatusLabel } from "../../plan";
 import { IconPlus, IconTrash } from "../../icons";
 import { confirmAction } from "../ConfirmDialog";
 import { EmptyState } from "../InteractionPrimitives";
 import { runSettingsCommand, type SettingsNotify } from "./notify";
+import { localizedPlanStatusLabel, useI18n } from "../../i18n";
 
 /**
  * The milestone-type vocabulary [B-05].
@@ -16,6 +16,7 @@ import { runSettingsCommand, type SettingsNotify } from "./notify";
 export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
   const graph = useApp((s) => s.graph);
   const updateWorkflowDefinition = useApp((s) => s.updateWorkflowDefinition);
+  const { t, language } = useI18n();
 
   const [milestoneLabel, setMilestoneLabel] = useState("");
 
@@ -24,13 +25,13 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
   const addMilestoneType = async () => {
     const label = milestoneLabel.trim();
     if (!label) {
-      notify.onError("請輸入里程碑名稱。");
+      notify.onError(t("settings.milestoneNameRequired"));
       return;
     }
     const ok = await runSettingsCommand(
       notify,
       updateWorkflowDefinition({ type: "workflow.addMilestoneType", label }),
-      `已新增「${label}」`,
+      t("settings.milestoneAdded", { label }),
     );
     if (ok) setMilestoneLabel("");
   };
@@ -40,9 +41,12 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
     const keepScheduled =
       usage.milestones > 0
         ? await confirmAction({
-            title: `刪除里程碑類型「${label}」`,
-            description: `有 ${usage.nodes.length} 個節點、共 ${usage.milestones} 筆已排定的里程碑使用此類型。選擇「一併刪除」會移除那些排程；選擇取消則保留排程，只刪定義。`,
-            confirmLabel: "一併刪除排程",
+            title: t("settings.deleteMilestoneTitle", { label }),
+            description: t("settings.deleteMilestoneDescription", {
+              nodes: usage.nodes.length,
+              milestones: usage.milestones,
+            }),
+            confirmLabel: t("settings.deleteMilestoneWithPlans"),
             tone: "danger",
           })
         : true;
@@ -50,7 +54,7 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
       await runSettingsCommand(
         notify,
         updateWorkflowDefinition({ type: "workflow.removeMilestoneType", id }),
-        `已刪除定義，保留 ${usage.milestones} 筆排程`,
+        t("settings.milestoneDefinitionRemovedKeepPlans", { count: usage.milestones }),
       );
       return;
     }
@@ -62,15 +66,14 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
         id,
         removeScheduled: usage.milestones > 0,
       }),
-      `已刪除「${label}」`,
+      t("settings.milestoneRemoved", { label }),
     );
   };
 
   return (
     <section className="settings-section">
       <p className="settings-hint">
-        里程碑類型是<b>預期計畫</b>的分類，存在 <code>graph.yaml</code>，
-        與實際狀態互不影響。
+        {t("settings.milestoneIntro")}
       </p>
       <ul className="settings-list">
         {milestoneDefinitions.map((definition) => {
@@ -81,7 +84,7 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
             <li key={definition.id}>
               <input
                 defaultValue={definition.label}
-                aria-label={`${definition.label} 名稱`}
+                aria-label={t("settings.milestoneNameAria", { label: definition.label })}
                 onBlur={(event) => {
                   const label = event.target.value.trim();
                   if (!label || label === definition.label) return;
@@ -96,12 +99,12 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
                 }}
               />
               <small className="settings-usage">
-                已排定 {usage.milestones} 筆 · {usage.nodes.length} 個節點
+                {t("settings.milestoneUsage", { milestones: usage.milestones, nodes: usage.nodes.length })}
               </small>
               <button
                 type="button"
                 className="danger"
-                aria-label={`刪除 ${definition.label}`}
+                aria-label={t("settings.deleteMilestoneAria", { label: definition.label })}
                 onClick={() => void removeMilestoneType(definition.id, definition.label)}
               >
                 <IconTrash size={13} />
@@ -112,15 +115,18 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
       </ul>
       {milestoneDefinitions.length === 0 && (
         <EmptyState
-          title="尚無自訂里程碑類型"
-          description={`內建為「${planStatusLabel("started")}」與「${planStatusLabel("done")}」。`}
+          title={t("settings.noMilestones")}
+          description={t("settings.builtinMilestones", {
+            started: localizedPlanStatusLabel("started", [], language),
+            done: localizedPlanStatusLabel("done", [], language),
+          })}
         />
       )}
       <div className="settings-create">
         <input
           value={milestoneLabel}
-          placeholder="新里程碑名稱，例如：內審"
-          aria-label="新里程碑名稱"
+          placeholder={t("settings.newMilestonePlaceholder")}
+          aria-label={t("settings.newMilestoneAria")}
           onChange={(event) => setMilestoneLabel(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") void addMilestoneType();
@@ -128,7 +134,7 @@ export function MilestoneTypeEditor({ notify }: { notify: SettingsNotify }) {
         />
         <button type="button" className="primary" onClick={() => void addMilestoneType()}>
           <IconPlus size={13} />
-          新增類型
+          {t("settings.addMilestone")}
         </button>
       </div>
     </section>

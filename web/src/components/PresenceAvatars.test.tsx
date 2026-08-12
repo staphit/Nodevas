@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Peer } from "../api";
+import { readPreferences } from "../preferences/storage";
 import { useApp } from "../store";
 import { FOLLOW_PEER_EVENT, PresenceAvatars, type FollowPeerDetail } from "./PresenceAvatars";
 
@@ -24,7 +25,12 @@ describe("PresenceAvatars", () => {
   // Reset before rather than after: vitest runs afterEach hooks in reverse
   // registration order, so a store write there lands before testing-library
   // unmounts and re-renders a component nobody is watching any more.
-  beforeEach(() => seed([]));
+  beforeEach(() => {
+    useApp.setState({
+      preferences: { ...readPreferences(), language: "zh-TW" },
+    });
+    seed([]);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   // A single-user install must not carry a permanent hole in its top bar.
@@ -44,7 +50,7 @@ describe("PresenceAvatars", () => {
     ]);
     render(<PresenceAvatars />);
 
-    expect(screen.getByRole("button", { name: "1 人和你在同一份文件" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "有 1 位協作者和你在同一份文件" })).toBeInTheDocument();
   });
 
   it("collapses the tail of a crowd into a count", () => {
@@ -67,10 +73,10 @@ describe("PresenceAvatars", () => {
     seed([peer("a", "Ada", { editing: true }), peer("b", "Bo")]);
     render(<PresenceAvatars />);
 
-    await user.click(screen.getByRole("button", { name: "2 人和你在同一份文件" }));
+    await user.click(screen.getByRole("button", { name: "有 2 位協作者和你在同一份文件" }));
 
-    expect(screen.getByRole("menuitem", { name: /Ada/ })).toHaveTextContent("成員・編輯中");
-    expect(screen.getByRole("menuitem", { name: /Bo/ })).toHaveTextContent("成員・檢視中");
+    expect(screen.getByRole("menuitem", { name: /Ada/ })).toHaveTextContent("成員 · 編輯中");
+    expect(screen.getByRole("menuitem", { name: /Bo/ })).toHaveTextContent("成員 · 檢視中");
   });
 
   it("asks the editor to follow the person that was chosen", async () => {
@@ -84,7 +90,7 @@ describe("PresenceAvatars", () => {
     window.addEventListener(FOLLOW_PEER_EVENT, listener);
 
     render(<PresenceAvatars />);
-    await user.click(screen.getByRole("button", { name: "1 人和你在同一份文件" }));
+    await user.click(screen.getByRole("button", { name: "有 1 位協作者和你在同一份文件" }));
     await user.click(screen.getByRole("menuitem", { name: /Ada/ }));
 
     window.removeEventListener(FOLLOW_PEER_EVENT, listener);
@@ -99,7 +105,7 @@ describe("PresenceAvatars", () => {
     seed([peer("a", "Ada")]);
     render(<PresenceAvatars />);
 
-    const trigger = screen.getByRole("button", { name: "1 人和你在同一份文件" });
+    const trigger = screen.getByRole("button", { name: "有 1 位協作者和你在同一份文件" });
     await user.click(trigger);
     expect(screen.getByRole("menuitem", { name: /Ada/ })).toHaveFocus();
 
@@ -119,7 +125,7 @@ describe("PresenceAvatars", () => {
       </div>,
     );
 
-    await user.click(screen.getByRole("button", { name: "1 人和你在同一份文件" }));
+    await user.click(screen.getByRole("button", { name: "有 1 位協作者和你在同一份文件" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "畫布" }));

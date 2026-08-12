@@ -20,8 +20,10 @@ import type { NodeLinkRef } from "../../types";
 import { NodeLinkPicker } from "../NodeLinkPicker";
 import { confirmAction } from "../ConfirmDialog";
 import { OperationStatus } from "../InteractionPrimitives";
+import { useI18n } from "../../i18n";
 
 export function NodeMetaForm({ id }: { id: string }) {
+  const { t } = useI18n();
   const graph = useApp((state) => state.graph);
   const updateNodeMetadata = useApp((state) => state.updateNodeMetadata);
   const updateNode = useApp((state) => state.updateNode);
@@ -119,8 +121,8 @@ export function NodeMetaForm({ id }: { id: string }) {
   return (
       <section className="meta-form" aria-labelledby={`meta-heading-${id}`}>
         <div className="section-head">
-          <h3 id={`meta-heading-${id}`}>基本資料</h3>
-          <span className="section-hint">寫入 graph.yaml，離開欄位即儲存</span>
+          <h3 id={`meta-heading-${id}`}>{t("node.meta.section")}</h3>
+          <span className="section-hint">{t("node.meta.sectionHint")}</span>
           <OperationStatus
             status={metadataOperation.status}
             message={
@@ -132,14 +134,14 @@ export function NodeMetaForm({ id }: { id: string }) {
           />
         </div>
         <div className="meta-row">
-          <label htmlFor={`title-${id}`}>標題</label>
+          <label htmlFor={`title-${id}`}>{t("node.meta.title")}</label>
           <input
             id={`title-${id}`}
             key={`${id}:${node?.title ?? ""}`}
             defaultValue={node?.title ?? ""}
             onBlur={(e) => commitMeta("title", e.target.value)}
           />
-          <label htmlFor={`kind-${id}`}>類型</label>
+          <label htmlFor={`kind-${id}`}>{t("node.meta.kind")}</label>
           <select
             id={`kind-${id}`}
             value={node?.kind ?? "task"}
@@ -147,52 +149,54 @@ export function NodeMetaForm({ id }: { id: string }) {
           >
             {(
               [
-                ["task", "任務"],
-                ["scene", "場景"],
-                ["event", "事件"],
-                ["choice", "抉擇"],
-                ["gate", "閘門"],
-                ["start", "起點"],
-                ["end", "終點"],
+                "task",
+                "scene",
+                "event",
+                "choice",
+                "gate",
+                "start",
+                "end",
               ] as const
-            ).map(([value, label]) => (
+            ).map((value) => (
               <option key={value} value={value}>
-                {label}
+                {t(`node.meta.kind.${value}`)}
               </option>
             ))}
           </select>
-          <label htmlFor={`entry-${id}`}>起點</label>
+          <label htmlFor={`entry-${id}`}>{t("node.meta.entry")}</label>
           <select
             id={`entry-${id}`}
             value={entryChoice}
-            title="自動判定是「沒有任何節點指向它」。孤立節點不一定是起點，這裡可以自己決定。"
+            title={t("node.meta.entryTitle")}
             onChange={(event) => commitEntryOverride(event.target.value)}
           >
-            <option value="auto">自動{autoEntry ? "（是起點）" : "（不是起點）"}</option>
-            <option value="yes">是起點</option>
-            <option value="no">不是起點</option>
+            <option value="auto">
+              {autoEntry ? t("node.entry.autoStart") : t("node.entry.autoNotStart")}
+            </option>
+            <option value="yes">{t("node.entry.yes")}</option>
+            <option value="no">{t("node.entry.no")}</option>
           </select>
-          <label htmlFor={`priority-${id}`}>優先度</label>
+          <label htmlFor={`priority-${id}`}>{t("node.meta.priority")}</label>
           <select
             id={`priority-${id}`}
             value={node?.priority ?? ""}
             onChange={(event) => commitMeta("priority", event.target.value)}
           >
-            <option value="">未設定</option>
-            <option value="urgent">緊急</option>
-            <option value="high">高</option>
-            <option value="medium">中</option>
-            <option value="low">低</option>
+            <option value="">{t("node.meta.unset")}</option>
+            <option value="urgent">{t("node.priority.urgent")}</option>
+            <option value="high">{t("node.priority.high")}</option>
+            <option value="medium">{t("node.priority.medium")}</option>
+            <option value="low">{t("node.priority.low")}</option>
           </select>
         </div>
         <div className="meta-row">
-          <label htmlFor={`assignee-${id}`}>負責人</label>
+          <label htmlFor={`assignee-${id}`}>{t("node.meta.assignee")}</label>
           <input
             id={`assignee-${id}`}
             className="assignee-input"
             list={`assignee-options-${id}`}
             value={assignee}
-            placeholder="尚未指派（選擇或輸入新使用者）"
+            placeholder={t("node.meta.assigneePlaceholder")}
             onChange={(event) => setAssignee(event.target.value)}
             onBlur={commitAssignee}
             onKeyDown={(event) => {
@@ -210,28 +214,28 @@ export function NodeMetaForm({ id }: { id: string }) {
           </datalist>
         </div>
         <div className="meta-row">
-          <label htmlFor={`tags-${id}`}>標籤</label>
+          <label htmlFor={`tags-${id}`}>{t("node.meta.tags")}</label>
           <input
             id={`tags-${id}`}
             key={`${id}:${(node?.tags ?? []).join(",")}`}
             defaultValue={(node?.tags ?? []).join(", ")}
-            placeholder="以逗號分隔，例如：前端, 發布"
+            placeholder={t("node.meta.tagsPlaceholder")}
             onBlur={(event) => commitTags(event.target.value)}
           />
         </div>
         <div className="meta-row meta-row-links">
-          <label>連結</label>
+          <label>{t("node.meta.links")}</label>
           <div className="node-links-editor">
             {links.length === 0 && (
               <p className="settings-hint">
-                還沒有連結。加入後，在內容中輸入 <code>/名稱</code> 就能插入。
+                {t("node.meta.linksEmpty")}
               </p>
             )}
             {links.map((link, index) => (
               <div className="node-link-chip" key={`${link.project ?? ""}/${link.node}`}>
                 <input
                   value={link.label}
-                  aria-label={`連結 ${index + 1} 名稱`}
+                  aria-label={t("node.meta.linkName", { index: String(index + 1) })}
                   onChange={(event) =>
                     setDraftLabel(index, event.target.value)
                   }
@@ -243,7 +247,7 @@ export function NodeMetaForm({ id }: { id: string }) {
                 <button
                   type="button"
                   className="node-link-chip-target"
-                  title="開啟這個節點"
+                  title={t("node.meta.openNode")}
                   onClick={() =>
                     void openNodeLink({
                       project: link.project ?? activeProject,
@@ -258,7 +262,7 @@ export function NodeMetaForm({ id }: { id: string }) {
                 <button
                   type="button"
                   className="danger"
-                  aria-label={`移除連結 ${link.label}`}
+                  aria-label={t("node.meta.removeLink", { label: link.label })}
                   onClick={() =>
                     commitLinks(links.filter((_, item) => item !== index))
                   }
@@ -268,7 +272,7 @@ export function NodeMetaForm({ id }: { id: string }) {
               </div>
             ))}
             <button type="button" onClick={() => setPickerOpen(true)}>
-              ＋ 新增連結
+              ＋ {t("node.meta.addLink")}
             </button>
           </div>
         </div>
@@ -302,16 +306,16 @@ export function NodeMetaForm({ id }: { id: string }) {
             className="danger"
             onClick={async () => {
               const confirmed = await confirmAction({
-                title: "刪除節點",
-                description: `確定刪除 ${id}？節點會移到垃圾桶，可隨時復原。`,
-                confirmLabel: "移到垃圾桶",
+                title: t("node.meta.delete"),
+                description: t("node.meta.deleteDescription", { id }),
+                confirmLabel: t("batch.moveToTrash"),
                 tone: "danger",
               });
               if (confirmed) void deleteNode(id).catch(reportError);
             }}
           >
             <IconTrash size={13} />
-            刪除節點
+            {t("node.meta.delete")}
           </button>
         </div>
       </section>

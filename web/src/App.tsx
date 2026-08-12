@@ -32,6 +32,7 @@ import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitive
 import { useTouchContextMenu } from "./components/touch";
 import { PresenceAvatars } from "./components/PresenceAvatars";
 import { TopbarOverflow, useNarrowViewport } from "./components/TopbarOverflow";
+import { LANGUAGE_OPTIONS, useI18n } from "./i18n";
 import {
   IconBell,
   IconCloud,
@@ -57,6 +58,7 @@ const EXPLORER_MAX_W = 520;
 const EXPLORER_DEFAULT_W = 304;
 
 function MainApp() {
+  const { language, setLanguage, t } = useI18n();
   const loadAll = useApp((s) => s.loadAll);
   const refreshState = useApp((s) => s.refreshState);
   const refreshTrash = useApp((s) => s.refreshTrash);
@@ -114,6 +116,10 @@ function MainApp() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
+  }, [language]);
 
   // Ctrl/⌘+Z steps back, Shift+Z (and Ctrl+Y, which Windows users reach for)
   // steps forward again. Text fields keep their own history, so anything
@@ -368,8 +374,8 @@ function MainApp() {
           type="button"
           className="icon-btn explorer-toggle"
           onClick={toggleExplorer}
-          title={explorerCollapsed ? "展開專案總管" : "摺疊專案總管"}
-          aria-label={explorerCollapsed ? "展開專案總管" : "摺疊專案總管"}
+          title={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
+          aria-label={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
           aria-expanded={!explorerCollapsed}
           aria-controls="project-explorer"
         >
@@ -383,21 +389,21 @@ function MainApp() {
 
         {/* Breadcrumb, not a bare dropdown: the workspace is named, and the
             control says what switching it does [B-03]. */}
-        <nav className="file-ops project-breadcrumb" aria-label="目前位置">
+        <nav className="file-ops project-breadcrumb" aria-label={t("topbar.currentLocation")}>
           <span className="crumb-workspace" title={workspace}>
-            {workspaceLabel || "工作區"}
+            {workspaceLabel || t("topbar.workspace")}
           </span>
           <span className="crumb-separator" aria-hidden>
             ／
           </span>
           <label className="crumb-label" htmlFor="project-quick-switch">
-            專案
+            {t("topbar.project")}
           </label>
           <select
             id="project-quick-switch"
             className="project-select"
             value={activeProject}
-            title="切換專案"
+            title={t("topbar.switchProject")}
             onChange={(e) => {
               if (e.target.value) void switchProject(e.target.value).catch(reportError);
             }}
@@ -431,16 +437,31 @@ function MainApp() {
             className="command-trigger"
             type="button"
             onClick={() => window.dispatchEvent(new Event("nodevas-command-palette"))}
-            title="全域搜尋與命令（Ctrl/⌘ K）"
+            title={`${t("topbar.searchOrCommand")} (Ctrl/⌘ K)`}
           >
-            搜尋或命令 <kbd>Ctrl/⌘ K</kbd>
+            {t("topbar.searchOrCommand")} <kbd>Ctrl/⌘ K</kbd>
           </button>
+          <label className="language-control">
+            <span className="sr-only">{t("language.label")}</span>
+            <select
+              className="language-select"
+              value={language}
+              aria-label={t("language.label")}
+              onChange={(event) => setLanguage(event.target.value as typeof language)}
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {t(`language.option.${option}`)}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             className="icon-btn"
             data-tour="tour-replay"
             onClick={() => window.dispatchEvent(new CustomEvent("nodevas-tour-start"))}
-            title="重新播放導覽"
-            aria-label="重新播放導覽"
+            title={t("topbar.replayTour")}
+            aria-label={t("topbar.replayTour")}
           >
             <IconHelp size={16} />
           </button>
@@ -448,8 +469,8 @@ function MainApp() {
             className="icon-btn"
             data-tour="settings"
             onClick={() => setModal("settings")}
-            title="專案設定：工作流程、里程碑類型、成員、外觀"
-            aria-label="專案設定"
+            title={t("topbar.projectSettingsTitle")}
+            aria-label={t("topbar.projectSettings")}
           >
             <IconGear size={16} />
           </button>
@@ -457,8 +478,8 @@ function MainApp() {
             className="icon-btn"
             data-tour="notify"
             onClick={() => setModal("notify")}
-            title="截止提醒設定"
-            aria-label="截止提醒設定"
+            title={t("topbar.deadlineSettings")}
+            aria-label={t("topbar.deadlineSettings")}
           >
             <IconBell size={16} />
           </button>
@@ -466,8 +487,8 @@ function MainApp() {
             className="icon-btn"
             data-tour="backup"
             onClick={() => setModal("backup")}
-            title="雲端備份：推送到本機資料夾或 Google Drive、從備份還原"
-            aria-label="雲端備份"
+            title={t("topbar.cloudBackupTitle")}
+            aria-label={t("topbar.cloudBackup")}
           >
             <IconCloud size={16} />
           </button>
@@ -475,7 +496,7 @@ function MainApp() {
             className="icon-btn"
             data-tour="theme"
             onClick={toggleTheme}
-            title={theme === "dark" ? "切換淺色模式" : "切換深色模式"}
+            title={theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode")}
           >
             {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
           </button>
@@ -488,31 +509,31 @@ function MainApp() {
             items={[
               {
                 id: "tour-replay",
-                label: "重新播放導覽",
+                label: t("topbar.replayTour"),
                 icon: <IconHelp size={16} />,
                 onSelect: () => window.dispatchEvent(new CustomEvent("nodevas-tour-start")),
               },
               {
                 id: "settings",
-                label: "專案設定",
+                label: t("topbar.projectSettings"),
                 icon: <IconGear size={16} />,
                 onSelect: () => setModal("settings"),
               },
               {
                 id: "notify",
-                label: "截止提醒設定",
+                label: t("topbar.deadlineSettings"),
                 icon: <IconBell size={16} />,
                 onSelect: () => setModal("notify"),
               },
               {
                 id: "backup",
-                label: "雲端備份",
+                label: t("topbar.cloudBackup"),
                 icon: <IconCloud size={16} />,
                 onSelect: () => setModal("backup"),
               },
               {
                 id: "theme",
-                label: theme === "dark" ? "切換淺色模式" : "切換深色模式",
+                label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
                 icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
                 onSelect: toggleTheme,
               },
@@ -520,7 +541,7 @@ function MainApp() {
                 ? [
                     {
                       id: "sign-out",
-                      label: `登出（${viewer.name || viewer.role}）`,
+                      label: t("topbar.signOut", { name: viewer.name || viewer.role }),
                       icon: <IconSignOut size={16} />,
                       onSelect: signOut,
                     },
@@ -544,7 +565,7 @@ function MainApp() {
       {error && (
         <div className="global-error" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={clearError} aria-label="關閉錯誤訊息">
+          <button type="button" onClick={clearError} aria-label={t("topbar.closeError")}>
             ×
           </button>
         </div>
@@ -578,9 +599,9 @@ function MainApp() {
             max={EXPLORER_MAX_W}
             step={12}
             largeStep={32}
-            label="調整專案總管寬度"
-            title="拖曳調整專案總管寬度"
-            valueText={(value) => `${Math.round(value)} 像素`}
+            label={t("topbar.resizeExplorer")}
+            title={t("topbar.resizeExplorerTitle")}
+            valueText={(value) => `${Math.round(value)} ${t("topbar.pixels")}`}
             onChange={setExplorerWidth}
             onCommit={(value) => updateUIPreference("explorerWidth", value)}
             onReset={() => {
@@ -608,6 +629,7 @@ function ResizableStage({
   paneOpen: { graph: boolean; timeline: boolean };
   togglePane: (pane: "graph" | "timeline") => void;
 }) {
+  const { t } = useI18n();
   const stageRef = useRef<HTMLElement>(null);
   const preferredSplit = usePreference("paneSplit");
   const [split, setSplit] = useState(preferredSplit);
@@ -670,9 +692,13 @@ function ResizableStage({
         largeStep={10}
         scale={Math.max(stageHeight / 100, 0.01)}
         disabled={!bothOpen}
-        label="調整關係圖與時間軸高度"
-        title="拖曳調整上下視窗；雙擊恢復各半"
-        valueText={(value) => `上方 ${Math.round(value)}%，下方 ${Math.round(100 - value)}%`}
+        label={t("stage.resize")}
+        title={t("stage.resizeTitle")}
+        valueText={(value) =>
+          `${t("stage.upper", { value: String(Math.round(value)) })}, ${t("stage.lower", {
+            value: String(Math.round(100 - value)),
+          })}`
+        }
         onChange={(value) => applySplit(value)}
         onCommit={(value) => applySplit(value, true)}
         onReset={() => applySplit(DEFAULT_SPLIT, true)}
@@ -689,7 +715,7 @@ function ResizableStage({
         onActivate={() => setActivePane("timeline")}
       />
       {activeTab !== null && (
-        <Suspense fallback={<div className="drawer drawer-loading">載入編輯器…</div>}>
+        <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
           <Drawer />
         </Suspense>
       )}
@@ -698,8 +724,13 @@ function ResizableStage({
 }
 
 export default function App() {
+  const { language, t } = useI18n();
+  useEffect(() => {
+    document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
+  }, [language]);
+
   return window.location.pathname === "/popout" ? (
-    <Suspense fallback={<div className="popout-editor-loading">載入彈窗編輯器…</div>}>
+    <Suspense fallback={<div className="popout-editor-loading">{t("stage.loadingPopout")}</div>}>
       <PopoutEditor />
     </Suspense>
   ) : (

@@ -7,11 +7,11 @@
  */
 
 import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types";
-import { RELATION_LABELS, edgeRelation } from "../../domain/graph/edgeStyle";
+import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { IconPlus } from "../../icons";
 import { confirmAction } from "../ConfirmDialog";
-import { OP_PRESENTATION } from "../canvas/GateWiring";
 import type { LaneContextMenu } from "../LaneView";
+import { localizedRelationLabel, useI18n } from "../../i18n";
 
 export interface NodeMenuProps {
   contextMenu: Extract<LaneContextMenu, { kind: "node" }>;
@@ -64,14 +64,15 @@ export function NodeMenu({
   deleteNode,
   setContextMenu,
 }: NodeMenuProps) {
+  const { t, language } = useI18n();
   return (
     <>
       <div className="lane-context-title condition-menu-title">
-        <span>設定進入條件</span>
+        <span>{t("nodeMenu.title")}</span>
         <small>{nodeTitle(contextMenu.nodeId)}</small>
       </div>
       <div className="condition-menu-intro">
-        指定哪些節點要先成立，以及有多項條件時如何判定。
+        {t("nodeMenu.intro")}
       </div>
       <div className="condition-menu-node-actions">
         <button
@@ -81,7 +82,7 @@ export function NodeMenu({
             void openTab(contextMenu.nodeId).catch(reportError);
           }}
         >
-          開啟資訊
+          {t("nodeMenu.open")}
         </button>
         <button
           type="button"
@@ -92,7 +93,7 @@ export function NodeMenu({
               .catch(reportError);
           }}
         >
-          建立副本
+          {t("nodeMenu.duplicate")}
         </button>
         <button
           type="button"
@@ -101,23 +102,23 @@ export function NodeMenu({
             const id = contextMenu.nodeId;
             setContextMenu(null);
             void confirmAction({
-              title: `移到垃圾桶？`,
-              description: `${nodeTitle(id)} 將可從專案總管的垃圾桶還原。`,
-              confirmLabel: "移到垃圾桶",
+              title: t("nodeMenu.trashTitle"),
+              description: t("nodeMenu.trashDescription", { title: nodeTitle(id) }),
+              confirmLabel: t("batch.moveToTrash"),
               tone: "danger",
             }).then((confirmed) => {
               if (confirmed) return deleteNode(id);
             }).catch(reportError);
           }}
         >
-          移到垃圾桶
+          {t("nodeMenu.trash")}
         </button>
       </div>
       {assignableLogicGates.length > 0 && (
         <div className="assign-existing-gate">
           <div>
-            <b>使用既有邏輯閘</b>
-            <small>先建立閘門，再把它指派給此節點。</small>
+            <b>{t("nodeMenu.existingGate")}</b>
+            <small>{t("nodeMenu.existingGateHint")}</small>
           </div>
           <select
             value={controllingLogicGate?.id ?? ""}
@@ -128,10 +129,10 @@ export function NodeMenu({
               )
             }
           >
-            <option value="">不使用獨立邏輯閘</option>
+            <option value="">{t("nodeMenu.noStandaloneGate")}</option>
             {assignableLogicGates.map((gate) => (
               <option key={gate.id} value={gate.id}>
-                {gate.operator.toUpperCase()} · {gate.id} · 輸入 {gate.inputs.length}
+                {t(`logicGate.op.${gate.operator}`)} · {gate.id} · {t("logicGate.input")} {gate.inputs.length}
               </option>
             ))}
           </select>
@@ -147,26 +148,26 @@ export function NodeMenu({
                 })
               }
             >
-              編輯此邏輯閘
+              {t("nodeMenu.editGate")}
             </button>
           )}
         </div>
       )}
       {controllingLogicGate ? (
         <div className="controlled-by-standalone-gate">
-          <b>前置條件由獨立邏輯閘管理</b>
+          <b>{t("nodeMenu.gateManaged")}</b>
           <span>
-            {controllingLogicGate.operator.toUpperCase()} ·{" "}
+            {t(`logicGate.op.${controllingLogicGate.operator}`)} ·{" "}
             {controllingLogicGate.id}
           </span>
-          <small>請用「編輯此邏輯閘」調整輸入節點與判定方式。</small>
+          <small>{t("nodeMenu.gateManagedHint")}</small>
         </div>
       ) : (
         <>
       {incomingConditions.length > 0 && (
         <div className="lane-context-summary">
-          <b>目前的前置節點</b>
-          <p>「選用」不阻擋此節點；「棄用」連前置關係都不算，只留下線。</p>
+          <b>{t("nodeMenu.currentPrereqs")}</b>
+          <p>{t("nodeMenu.relationHint")}</p>
           {incomingConditions.map((edge) => (
             <label
               className="lane-context-relation"
@@ -175,7 +176,7 @@ export function NodeMenu({
               <span>{nodeTitle(edge.from)}</span>
               <select
                 value={edgeRelation(edge)}
-                aria-label={`${nodeTitle(edge.from)} 的關係`}
+                aria-label={t("nodeMenu.relationAria", { title: nodeTitle(edge.from) })}
                 onChange={(event) =>
                   setDependencyRelation(
                     contextMenu.nodeId,
@@ -184,9 +185,9 @@ export function NodeMenu({
                   )
                 }
               >
-                {(Object.keys(RELATION_LABELS) as EdgeRelation[]).map((relation) => (
+                {(["", "optional", "deprecated"] as EdgeRelation[]).map((relation) => (
                   <option key={relation} value={relation}>
-                    {RELATION_LABELS[relation]}
+                    {localizedRelationLabel(relation, language)}
                   </option>
                 ))}
               </select>
@@ -196,33 +197,33 @@ export function NodeMenu({
       )}
       {(hasEditableGateOperator || incomingConditions.length > 0) && (
         <label className="lane-context-field">
-          <span className="lane-context-label">多項條件的判定方式</span>
+          <span className="lane-context-label">{t("nodeMenu.conditionMode")}</span>
           <select
             value={conditionOperator}
             onChange={(event) =>
               changeGateOperator(contextMenu.nodeId, event.target.value)
             }
           >
-            <option value="and">全部條件成立（AND）</option>
-            <option value="or">至少一項成立（OR）</option>
-            <option value="xor">恰好一項成立（XOR）</option>
-            <option value="nand">不可全部成立（NAND）</option>
-            <option value="nor">所有條件都不成立（NOR）</option>
+            <option value="and">{t("nodeMenu.and")}</option>
+            <option value="or">{t("nodeMenu.or")}</option>
+            <option value="xor">{t("nodeMenu.xor")}</option>
+            <option value="nand">{t("nodeMenu.nand")}</option>
+            <option value="nor">{t("nodeMenu.nor")}</option>
           </select>
           <small className="lane-context-field-help">
-            {OP_PRESENTATION[conditionOperator]?.description}
+            {t(`nodeMenu.${conditionOperator}`)}
           </small>
         </label>
       )}
       <label className="lane-context-field">
-        <span className="lane-context-label">要加入的前置節點</span>
+        <span className="lane-context-label">{t("nodeMenu.addSource")}</span>
         <select
           value={conditionSource}
           disabled={availableConditionSources.length === 0}
           onChange={(event) => setConditionSource(event.target.value)}
         >
           {availableConditionSources.length === 0 ? (
-            <option value="">沒有可新增的節點</option>
+            <option value="">{t("nodeMenu.noSources")}</option>
           ) : (
             availableConditionSources.map((node) => (
               <option key={node.id} value={node.id}>
@@ -233,16 +234,16 @@ export function NodeMenu({
         </select>
       </label>
       <label className="lane-context-field">
-        <span className="lane-context-label">新關係的語意</span>
+        <span className="lane-context-label">{t("nodeMenu.newRelation")}</span>
         <select
           value={conditionRelation}
           onChange={(event) =>
             setConditionRelation(event.target.value as EdgeRelation)
           }
         >
-          <option value="">必要（阻擋進行）</option>
-          <option value="optional">選用（不阻擋）</option>
-          <option value="deprecated">棄用（不算前置）</option>
+          <option value="">{t("nodeMenu.required")}</option>
+          <option value="optional">{t("nodeMenu.optional")}</option>
+          <option value="deprecated">{t("nodeMenu.deprecated")}</option>
         </select>
       </label>
       <button
@@ -256,17 +257,17 @@ export function NodeMenu({
           <IconPlus size={15} />
         </span>
         <span className="condition-primary-copy">
-          <b>加入前置節點</b>
+          <b>{t("nodeMenu.addPrerequisite")}</b>
           <small>
             {incomingConditions.length > 0
-              ? `依「${OP_PRESENTATION[conditionOperator]?.label ?? conditionOperator.toUpperCase()}」判定`
-              : "建立第一條前置關係"}
+              ? t("nodeMenu.addWithOperator", { operator: t(`nodeMenu.${conditionOperator}`) })
+              : t("nodeMenu.firstPrerequisite")}
           </small>
         </span>
         <span className="condition-primary-arrow" aria-hidden>→</span>
       </button>
       <div className="lane-context-help">
-        加入後，可點擊關係圖上的邏輯閘再次調整。
+        {t("nodeMenu.help")}
       </div>
         </>
       )}

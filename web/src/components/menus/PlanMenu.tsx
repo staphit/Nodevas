@@ -5,7 +5,7 @@
  * creating a project-wide milestone type on first use.
  */
 
-import { planStatusLabel } from "../../plan";
+import { localizedPlanStatusLabel, useI18n } from "../../i18n";
 import type { Graph, PlanStatus, PlanStatusDefinition } from "../../types";
 import type { LaneContextMenu } from "../LaneView";
 
@@ -44,16 +44,17 @@ export function PlanMenu({
   removePlan,
   addCustomPlanStatusFromMenu,
 }: PlanMenuProps) {
+  const { t, language } = useI18n();
   return (
     <>
       <div className="lane-context-title">
         {nodeTitle(contextMenu.nodeId)} · {contextMenu.date}
       </div>
       <label className="lane-context-field">
-        規劃註解
+        {t("planMenu.note")}
         <input
           value={planNote}
-          placeholder="例如：等待設計確認"
+          placeholder={t("planMenu.notePlaceholder")}
           onChange={(event) => {
             setPlanNote(event.target.value);
             setPlanError(null);
@@ -61,7 +62,7 @@ export function PlanMenu({
         />
       </label>
       <label className="lane-context-field">
-        時間（選填，精確到分鐘）
+        {t("planMenu.time")}
         <input
           type="time"
           value={planTime}
@@ -76,14 +77,14 @@ export function PlanMenu({
         role="menuitem"
         onClick={() => upsertPlan(contextMenu.nodeId, contextMenu.date, "started")}
       >
-        設為開始
+        {t("planMenu.setStarted")}
       </button>
       <button
         type="button"
         role="menuitem"
         onClick={() => upsertPlan(contextMenu.nodeId, contextMenu.date, "done")}
       >
-        設為死線
+        {t("planMenu.setDone")}
       </button>
       {planStatusDefinitions.map((definition) => (
         <button
@@ -98,13 +99,13 @@ export function PlanMenu({
             )
           }
         >
-          設為{definition.label}
+          {t("planMenu.setStatus", { label: definition.label })}
         </button>
       ))}
       <div className="lane-context-field plan-custom-add">
         <input
           value={planCustomLabel}
-          placeholder="新自訂狀態，例如：送審"
+          placeholder={t("planMenu.customPlaceholder")}
           onChange={(event) => {
             setPlanCustomLabel(event.target.value);
             setPlanError(null);
@@ -123,7 +124,7 @@ export function PlanMenu({
             addCustomPlanStatusFromMenu(contextMenu.nodeId, contextMenu.date)
           }
         >
-          ＋新增並設為此狀態
+          ＋{t("planMenu.addAndSet")}
         </button>
       </div>
       {planError && <div className="lane-context-error">{planError}</div>}
@@ -137,7 +138,9 @@ export function PlanMenu({
             key={`remove-${plan.status}`}
             onClick={() => removePlan(contextMenu.nodeId, plan.status)}
           >
-            移除{planStatusLabel(plan.status, planStatusDefinitions)}
+            {t("planMenu.removeStatus", {
+              label: localizedPlanStatusLabel(plan.status, planStatusDefinitions, language),
+            })}
           </button>
         ))}
     </>

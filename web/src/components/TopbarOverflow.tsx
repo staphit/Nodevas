@@ -22,6 +22,7 @@ import {
 } from "react";
 
 import { IconMore } from "../icons";
+import { useI18n } from "../i18n";
 
 const NARROW_QUERY = "(max-width: 720px)";
 
@@ -57,6 +58,7 @@ export type TopbarOverflowItem = {
 };
 
 export function TopbarOverflow({ items }: { items: TopbarOverflowItem[] }) {
+  const { t } = useI18n();
   const narrow = useNarrowViewport();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -127,8 +129,8 @@ export function TopbarOverflow({ items }: { items: TopbarOverflowItem[] }) {
         className="icon-btn topbar-overflow-trigger"
         ref={triggerRef}
         onClick={() => setOpen((was) => !was)}
-        title="更多操作"
-        aria-label="更多操作"
+        title={t("topbar.moreActions")}
+        aria-label={t("topbar.moreActions")}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -138,7 +140,7 @@ export function TopbarOverflow({ items }: { items: TopbarOverflowItem[] }) {
         <div
           className="topbar-overflow-menu"
           role="menu"
-          aria-label="更多操作"
+          aria-label={t("topbar.moreActions")}
           ref={menuRef}
           onKeyDown={onMenuKeyDown}
         >

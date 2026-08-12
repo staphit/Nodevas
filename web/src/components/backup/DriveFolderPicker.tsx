@@ -1,4 +1,5 @@
 import { IconFolder } from "../../icons";
+import { useI18n } from "../../i18n";
 import type { DriveConnection } from "./useDriveConnection";
 
 /**
@@ -6,6 +7,7 @@ import type { DriveConnection } from "./useDriveConnection";
  * chooses where backups go, and a file is never an answer to that.
  */
 export function DriveFolderPicker({ drive }: { drive: DriveConnection }) {
+  const { t } = useI18n();
   return (
     <div className="drive-folder-picker">
       <div className="drive-folder-picker-head">
@@ -14,15 +16,15 @@ export function DriveFolderPicker({ drive }: { drive: DriveConnection }) {
           disabled={drive.busy || drive.stack.length === 0}
           onClick={drive.back}
         >
-          上層
+          {t("backup.parentFolder")}
         </button>
         <button type="button" disabled={drive.busy} onClick={drive.toRoot}>
-          根目錄
+          {t("backup.rootFolder")}
         </button>
         <span>{drive.label}</span>
       </div>
       <ul className="drive-folder-picker-list">
-        {drive.busy && <li className="drive-folder-picker-empty">讀取中…</li>}
+        {drive.busy && <li className="drive-folder-picker-empty">{t("backup.driveLoading")}</li>}
         {drive.folders.map((folder) => (
           <li key={folder.id}>
             <button
@@ -36,7 +38,7 @@ export function DriveFolderPicker({ drive }: { drive: DriveConnection }) {
           </li>
         ))}
         {!drive.busy && drive.folders.length === 0 && (
-          <li className="drive-folder-picker-empty">沒有可用子資料夾</li>
+          <li className="drive-folder-picker-empty">{t("backup.noSubfolders")}</li>
         )}
       </ul>
     </div>

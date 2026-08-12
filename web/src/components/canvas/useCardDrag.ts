@@ -1,4 +1,5 @@
 import { useRef, useState, type PointerEvent } from "react";
+import { useI18n } from "../../i18n";
 import { COL_W, ROW_H, snapDragDelta, type Col, type Rect } from "./geometry";
 import {
   NO_SNAP_TARGETS,
@@ -70,6 +71,7 @@ export function useCardDrag({
    */
   canMove?: boolean;
 }) {
+  const { t } = useI18n();
   const dragStart = useRef({ x: 0, y: 0 });
   // The box the moving cards occupy at rest. Snapping always works from this
   // plus the raw pointer delta, so a correction never feeds into the next move.
@@ -211,7 +213,11 @@ export function useCardDrag({
       })
       .find((result) => result !== null);
     if (overlap) {
-      onReject("節點不可重疊：" + (overlap.stationary.node.title || overlap.stationary.node.id));
+      onReject(
+        t("canvasOps.nodeOverlap", {
+          title: overlap.stationary.node.title || overlap.stationary.node.id,
+        }),
+      );
       return true;
     }
 

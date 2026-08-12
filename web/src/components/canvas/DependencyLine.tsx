@@ -16,6 +16,7 @@ import {
   type Rect,
 } from "./geometry";
 import { useGraphGestureMode } from "./gestureMode";
+import { useI18n } from "../../i18n";
 
 
 
@@ -54,6 +55,7 @@ export function DependencyLine({
   onVerticesChange?: (vertices: Point[]) => void;
   obstacles?: Rect[];
 }) {
+  const { t } = useI18n();
   const vertexSignature = vertices.map((point) => `${point.x},${point.y}`).join(";");
   const [workingVertices, setWorkingVertices] = useState(vertices);
   const workingVerticesRef = useRef(vertices);
@@ -171,8 +173,8 @@ export function DependencyLine({
     >
       <title>
         {gestureMode === "connect"
-          ? "點擊新增轉折點；長按修改線型"
-          : "點擊選取；右鍵修改線型；Alt＋左鍵新增頂點"}
+          ? t("canvas.edge.insertHint")
+          : t("canvas.edge.selectHint")}
       </title>
       {(onSelect || onVerticesChange) && (
         <polyline
@@ -235,7 +237,7 @@ export function DependencyLine({
             onDoubleClick={(event) => removeVertex(event, index)}
             onContextMenu={(event) => removeVertex(event, index)}
           >
-            <title>拖曳調整；雙擊或右鍵刪除轉折點（選取後 Del 也可以）</title>
+            <title>{t("canvas.edge.vertexHint")}</title>
           </circle>
           <circle
             className={`edge-vertex${
@@ -258,4 +260,3 @@ export function DependencyLine({
     </g>
   );
 }
-

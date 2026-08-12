@@ -7,6 +7,7 @@
  */
 
 import { ROW_H, type Col } from "./geometry";
+import { useI18n } from "../../i18n";
 
 export function GraphMinimap({
   cols,
@@ -31,11 +32,12 @@ export function GraphMinimap({
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className="graph-minimap"
       role="img"
-      aria-label="關係圖縮圖；點擊可移動視角"
+      aria-label={t("canvas.minimapAria")}
       onPointerDown={(event) => {
         const board = boardRef.current;
         if (!board) return;

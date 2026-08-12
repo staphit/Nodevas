@@ -12,11 +12,11 @@ import type { ProjectEntry } from "../../state/types";
 export type ProjectSort = "name" | "name-desc" | "nodes" | "kind" | "manual";
 
 export const PROJECT_SORT_LABELS: Record<ProjectSort, string> = {
-  name: "名稱 A→Z",
-  "name-desc": "名稱 Z→A",
-  nodes: "節點數（多→少）",
-  kind: "資料夾優先",
-  manual: "手動排序",
+  name: "sidebar.sort.name",
+  "name-desc": "sidebar.sort.name-desc",
+  nodes: "sidebar.sort.nodes",
+  kind: "sidebar.sort.kind",
+  manual: "sidebar.sort.manual",
 };
 
 function compare(

@@ -26,24 +26,25 @@ import {
 } from "./markdownCommands";
 import type { Attachments } from "./useAttachments";
 import type { TableEditing } from "./useTableEditing";
+import { useI18n } from "../../i18n";
 
 const HEADING_LABELS = ["H1", "H2", "H3"] as const;
 
 const MARKDOWN_HINTS = [
-  ["# 標題", "標題（支援 #～######）"],
-  ["**粗體**", "粗體"],
-  ["*斜體*", "斜體"],
-  ["~~刪除線~~", "刪除線"],
-  ["`code`", "行內程式碼"],
-  ["```js … ```", "程式碼區塊"],
-  ["- 項目 / * 項目", "無序清單"],
-  ["1. 項目", "編號清單"],
-  ["- [ ] 待辦", "Checklist"],
-  ["> 引用", "引用區塊"],
-  ["[文字](https://…)", "連結"],
-  ["![說明](image.png)", "圖片"],
-  ["---", "水平分隔線"],
-  ["| A | B |", "表格"],
+  ["# Heading", "heading"],
+  ["**bold**", "bold"],
+  ["*italic*", "italic"],
+  ["~~strike~~", "strike"],
+  ["`code`", "inlineCode"],
+  ["```js … ```", "codeBlock"],
+  ["- item / * item", "bullet"],
+  ["1. item", "number"],
+  ["- [ ] task", "task"],
+  ["> quote", "quote"],
+  ["[text](https://…)", "link"],
+  ["![alt](image.png)", "image"],
+  ["---", "divider"],
+  ["| A | B |", "table"],
 ] as const;
 
 /** The format toolbar above the editor: markers, attachments, export, mode. */
@@ -78,6 +79,7 @@ export function EditorToolbar({
   pageId: string;
   content: string;
 }) {
+  const { t } = useI18n();
   const fieldID = useId();
   const { attachBusy, attachInputRef, attachFiles } = attachments;
   const {
@@ -91,7 +93,7 @@ export function EditorToolbar({
   } = tables;
 
   return (
-    <div className="editor-toolbar" role="toolbar" aria-label="格式">
+    <div className="editor-toolbar" role="toolbar" aria-label={t("editor.toolbar")}>
       {/* Markdown markers only make sense in a Markdown-edited page. */}
       {markdownTools && (
         <>
@@ -99,8 +101,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => setHeading(view(), 0)}
-        title="內文"
-        aria-label="設為內文"
+        title={t("editor.paragraph")}
+        aria-label={t("editor.setParagraph")}
       >
         <IconParagraph size={14} />
       </button>
@@ -110,7 +112,7 @@ export function EditorToolbar({
           type="button"
           className="tool-btn mono"
           onClick={() => setHeading(view(), index + 1)}
-          title={`標題 ${index + 1}`}
+          title={t("editor.heading", { level: String(index + 1) })}
         >
           {heading}
         </button>
@@ -120,8 +122,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => wrapSelection(view(), "**", "**")}
-        title="粗體"
-        aria-label="粗體"
+        title={t("editor.bold")}
+        aria-label={t("editor.bold")}
       >
         <b>B</b>
       </button>
@@ -129,8 +131,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => wrapSelection(view(), "*", "*")}
-        title="斜體"
-        aria-label="斜體"
+        title={t("editor.italic")}
+        aria-label={t("editor.italic")}
       >
         <i>I</i>
       </button>
@@ -138,8 +140,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => wrapSelection(view(), "~~", "~~")}
-        title="刪除線"
-        aria-label="刪除線"
+        title={t("editor.strike")}
+        aria-label={t("editor.strike")}
       >
         <s>S</s>
       </button>
@@ -148,8 +150,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => applyListStyle(view(), "dash")}
-        title="項目清單"
-        aria-label="項目清單"
+        title={t("editor.bulletList")}
+        aria-label={t("editor.bulletList")}
       >
         <IconListBullet size={14} />
       </button>
@@ -157,8 +159,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => applyListStyle(view(), "number")}
-        title="編號清單"
-        aria-label="編號清單"
+        title={t("editor.orderedList")}
+        aria-label={t("editor.orderedList")}
       >
         <IconListOrdered size={14} />
       </button>
@@ -166,8 +168,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => applyListStyle(view(), "check")}
-        title="待辦清單"
-        aria-label="待辦清單"
+        title={t("editor.taskList")}
+        aria-label={t("editor.taskList")}
       >
         <IconListTask size={14} />
       </button>
@@ -176,17 +178,17 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={() => prefixLines(view(), "> ")}
-        title="引用"
-        aria-label="引用"
+        title={t("editor.quote")}
+        aria-label={t("editor.quote")}
       >
         <IconQuote size={14} />
       </button>
       <button
         type="button"
         className="tool-btn"
-        onClick={() => wrapSelection(view(), "[", "](網址)", "連結文字")}
-        title="插入超連結"
-        aria-label="插入超連結"
+        onClick={() => wrapSelection(view(), "[", `](${t("editor.urlPlaceholder")})`, t("editor.linkTextPlaceholder"))}
+        title={t("editor.insertLink")}
+        aria-label={t("editor.insertLink")}
       >
         <IconLink size={14} />
       </button>
@@ -194,8 +196,8 @@ export function EditorToolbar({
         type="button"
         className="tool-btn"
         onClick={onInsertNodeLink}
-        title="連結到節點（工作區內）"
-        aria-label="連結到節點"
+        title={t("editor.linkToNode")}
+        aria-label={t("editor.linkToNodeLabel")}
       >
         [[ ]]
       </button>
@@ -206,8 +208,8 @@ export function EditorToolbar({
         className="tool-btn"
         disabled={attachBusy}
         onClick={() => attachInputRef.current?.click()}
-        title="插入圖片或附件（上傳到此節點）"
-        aria-label="插入圖片或附件"
+        title={t("editor.insertAttachment")}
+        aria-label={t("editor.insertAttachmentLabel")}
       >
         <IconImage size={14} />
       </button>
@@ -216,8 +218,8 @@ export function EditorToolbar({
         <summary
           className={`tool-btn${tableAt ? " on" : ""}`}
           role="button"
-          title="插入表格"
-          aria-label="插入表格"
+          title={t("editor.insertTable")}
+          aria-label={t("editor.insertTable")}
         >
           <IconTable size={14} />
         </summary>
@@ -233,7 +235,7 @@ export function EditorToolbar({
               className="editor-tool-more-label"
               htmlFor={`${fieldID}-table-rows`}
             >
-              列數
+              {t("editor.rows")}
             </label>
             <input
               id={`${fieldID}-table-rows`}
@@ -250,7 +252,7 @@ export function EditorToolbar({
               className="editor-tool-more-label"
               htmlFor={`${fieldID}-table-columns`}
             >
-              欄數
+              {t("editor.columns")}
             </label>
             <input
               id={`${fieldID}-table-columns`}
@@ -264,11 +266,11 @@ export function EditorToolbar({
               }
             />
             <button type="submit" className="tool-btn">
-              插入
+              {t("editor.insert")}
             </button>
           </form>
           <div className="editor-tool-more-hint">
-            列數不含標題列。游標移進表格後，工具列下方會出現欄列調整。
+            {t("editor.tableHint")}
           </div>
         </div>
       </details>
@@ -285,8 +287,8 @@ export function EditorToolbar({
         <summary
           className="tool-btn"
           role="button"
-          title="更多格式"
-          aria-label="更多格式"
+          title={t("editor.moreFormatting")}
+          aria-label={t("editor.moreFormatting")}
         >
           <IconMore size={14} />
         </summary>
@@ -296,21 +298,21 @@ export function EditorToolbar({
               type="button"
               className="tool-btn mono"
               onClick={() => wrapSelection(view(), "`", "`")}
-              title="行內程式碼"
+              title={t("editor.inlineCode")}
             >
               {"<>"}
             </button>
             <select
               className="tool-list-select"
               value=""
-              aria-label="其他編號格式"
+              aria-label={t("editor.otherList")}
               onChange={(event) => {
                 if (event.target.value) applyListStyle(view(), event.target.value as ListStyle);
               }}
             >
-              <option value="">其他編號</option>
-              <option value="star">* 項目</option>
-              <option value="plus">+ 項目</option>
+              <option value="">{t("editor.otherListOption")}</option>
+              <option value="star">{t("editor.starItem")}</option>
+              <option value="plus">{t("editor.plusItem")}</option>
               <option value="alpha-upper">A. B. C.</option>
               <option value="alpha-lower">a. b. c.</option>
               <option value="roman-upper">I. II. III.</option>
@@ -318,12 +320,12 @@ export function EditorToolbar({
             </select>
           </div>
           <div className="editor-tool-more-row">
-            <span className="editor-tool-more-label">字級</span>
+            <span className="editor-tool-more-label">{t("editor.fontSize")}</span>
             <button
               type="button"
               className="tool-btn"
               onClick={() => setFontSize(fontSize - 1)}
-              title="縮小字體"
+              title={t("editor.decreaseFont")}
             >
               A-
             </button>
@@ -332,17 +334,17 @@ export function EditorToolbar({
               type="button"
               className="tool-btn"
               onClick={() => setFontSize(fontSize + 1)}
-              title="放大字體"
+              title={t("editor.increaseFont")}
             >
               A+
             </button>
           </div>
-          <div className="markdown-help-title">Markdown 語法提示</div>
+          <div className="markdown-help-title">{t("editor.markdownHelp")}</div>
           <div className="markdown-help-grid">
             {MARKDOWN_HINTS.map(([syntax, meaning]) => (
               <div className="markdown-help-row" key={syntax}>
                 <code>{syntax}</code>
-                <span>{meaning}</span>
+                <span>{t(`editor.markdown.${meaning}`)}</span>
               </div>
             ))}
           </div>
@@ -357,20 +359,20 @@ export function EditorToolbar({
         aria-pressed={outlineOpen}
         disabled={!markdownTools}
         onClick={toggleOutline}
-        title="文件目錄（標題大綱）"
-        aria-label="文件目錄"
+        title={t("editor.outlineTitle")}
+        aria-label={t("editor.outline")}
       >
         <IconOutline size={14} />
       </button>
-      <div className="editor-mode-switch" role="group" aria-label="編輯模式">
+      <div className="editor-mode-switch" role="group" aria-label={t("editor.mode")}>
         {markdownTools && (
           <button
             type="button"
             className={`tool-btn${editorMode === "live" ? " on" : ""}`}
             aria-pressed={editorMode === "live"}
             onClick={() => setEditorMode("live")}
-            title="即時：直接以排版後的樣子編輯"
-            aria-label="即時編輯"
+            title={t("editor.liveTitle")}
+            aria-label={t("editor.liveLabel")}
           >
             <IconPencil size={13} />
           </button>
@@ -380,8 +382,8 @@ export function EditorToolbar({
           className={`tool-btn mono${editorMode === "source" ? " on" : ""}`}
           aria-pressed={editorMode === "source"}
           onClick={() => setEditorMode("source")}
-          title="原始碼：顯示完整 Markdown 標記"
-          aria-label="原始碼"
+          title={t("editor.sourceTitle")}
+          aria-label={t("editor.sourceLabel")}
         >
           {"<>"}
         </button>
@@ -390,8 +392,8 @@ export function EditorToolbar({
           className={`tool-btn${editorMode === "preview" ? " on" : ""}`}
           aria-pressed={editorMode === "preview"}
           onClick={() => setEditorMode("preview")}
-          title="預覽：唯讀排版"
-          aria-label="預覽"
+          title={t("editor.previewTitle")}
+          aria-label={t("editor.previewLabel")}
         >
           <IconEye size={13} />
         </button>

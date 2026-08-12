@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
+import { readPreferences } from "../../preferences/storage";
+import { useApp } from "../../store";
 import { ImportBundleDialog, type ImportBundleChoice } from "./ImportBundleDialog";
 
 const MANIFEST = { name: "workspace", projects: 3 };
@@ -22,6 +24,12 @@ function open() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+beforeEach(() => {
+  useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
+  });
 });
 
 describe("ImportBundleDialog", () => {

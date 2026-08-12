@@ -14,16 +14,15 @@
  */
 
 import type { NodeTransferMode, NodeTransferResult } from "../../api";
+import { translate } from "../../i18n";
 import { useApp } from "../../store";
 import type { NodeClipboard } from "../../state/types";
 import type { Graph } from "../../types";
 import { confirmAction } from "../ConfirmDialog";
 import { pickProject } from "../ProjectPickerDialog";
 
-const MODE_LABEL: Record<NodeTransferMode, string> = {
-  copy: "複製",
-  cut: "移動",
-};
+const modeLabel = (mode: NodeTransferMode) =>
+  translate(mode === "copy" ? "batch.copy" : "batch.move");
 
 /** Node titles for the messages, falling back to the id. */
 export function nodeLabels(graph: Graph | null, ids: string[]): string[] {
@@ -33,18 +32,23 @@ export function nodeLabels(graph: Graph | null, ids: string[]): string[] {
 }
 
 function describeSelection(labels: string[]): string {
-  if (labels.length === 1) return `「${labels[0]}」`;
-  return `「${labels[0]}」等 ${labels.length} 個節點`;
+  if (labels.length === 1) {
+    return translate("batch.selectionOne", undefined, { label: labels[0] });
+  }
+  return translate("batch.selectionMany", undefined, {
+    label: labels[0],
+    count: labels.length,
+  });
 }
 
 /** Shows what a completed transfer could not bring along. */
 async function reportWarnings(result: NodeTransferResult): Promise<void> {
   if (!result.warnings?.length) return;
   await confirmAction({
-    title: "已完成，但有內容未一併帶過",
+    title: translate("batch.transferWarningsTitle"),
     description: result.warnings.join("\n"),
-    confirmLabel: "知道了",
-    cancelLabel: "關閉",
+    confirmLabel: translate("common.confirm"),
+    cancelLabel: translate("common.close"),
   });
 }
 
@@ -60,19 +64,23 @@ export async function sendNodesToProject(
   const { activeProject, transferNodes } = useApp.getState();
   if (ids.length === 0) return null;
   const target = await pickProject({
-    title: `${MODE_LABEL[mode]}到其他專案`,
-    description: `將 ${describeSelection(labels)} ${MODE_LABEL[mode]}到選定的專案。`,
-    confirmLabel: MODE_LABEL[mode],
+    title: translate("batch.transferTitle", undefined, { mode: modeLabel(mode) }),
+    description: translate("batch.transferDescription", undefined, {
+      selection: describeSelection(labels),
+      mode: modeLabel(mode),
+    }),
+    confirmLabel: modeLabel(mode),
     exclude: [activeProject],
   });
   if (!target) return null;
   if (mode === "cut") {
     const confirmed = await confirmAction({
-      title: `移動 ${ids.length} 個節點`,
-      description:
-        `${describeSelection(labels)} 會複製到「${target}」，` +
-        "並從目前專案移到垃圾桶（可從專案總管還原）。",
-      confirmLabel: "移動",
+      title: translate("batch.moveTitle", undefined, { count: ids.length }),
+      description: translate("batch.moveDescription", undefined, {
+        selection: describeSelection(labels),
+        target,
+      }),
+      confirmLabel: translate("batch.move"),
     });
     if (!confirmed) return null;
   }
@@ -110,7 +118,7 @@ export async function pasteNodeClipboard(): Promise<NodeTransferResult | null> {
   if (nodeClipboard.project === activeProject) {
     // The nodes are already here. Copying a node within one project is
     // "建立副本"; this gesture is for crossing projects.
-    throw new Error("剪貼簿的節點就在目前專案；請切換到其他專案再貼上，或用「建立副本」");
+    throw new Error(translate("batch.sameProjectError"));
   }
   const result = await transferNodes({
     ids: nodeClipboard.ids,

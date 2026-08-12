@@ -117,8 +117,9 @@ beforeEach(() => {
     error: null,
     tabs: [],
     activeTab: null,
-    preferences: readPreferences(),
+    preferences: { ...readPreferences(), language: "zh-TW" },
   });
+  useApp.getState().updateUIPreference("language", "zh-TW");
 });
 
 afterEach(() => {

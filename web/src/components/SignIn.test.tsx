@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGate, SignIn, SignOutButton, VisitorBadge } from "./SignIn";
 import { AuthError, api } from "../api";
+import { useApp } from "../store";
 
 /**
  * The component is the whole subject here, so the network is stubbed rather
@@ -44,6 +45,9 @@ async function requestPasscode(
 
 describe("SignIn", () => {
   beforeEach(() => {
+    useApp.setState({
+      preferences: { ...useApp.getState().preferences, language: "zh-TW" },
+    });
     mocked.requestOtp.mockResolvedValue({ ok: true });
     mocked.login.mockResolvedValue({ ok: true, actor: { name: "阿明" } });
   });
@@ -67,6 +71,19 @@ describe("SignIn", () => {
     expect(field).toHaveAttribute("autocomplete", "one-time-code");
     expect(field).toHaveAttribute("inputmode", "text");
     expect(mocked.requestOtp).not.toHaveBeenCalled();
+  });
+
+  it("switches the sign-in screen language and persists the choice", async () => {
+    const user = userEvent.setup();
+    render(<SignIn onSignedIn={vi.fn()} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "語系" }), "en");
+
+    expect(screen.getByText(/Enter the PIN provided/)).toBeInTheDocument();
+    expect(useApp.getState().preferences.language).toBe("en");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Language" }), "zh-TW");
+    expect(screen.getByText(/請輸入管理員提供的 PIN/)).toBeInTheDocument();
   });
 
   it("requests a passcode for the PIN and focuses the passcode field", async () => {
@@ -219,6 +236,12 @@ describe("SignIn", () => {
 });
 
 describe("AuthGate", () => {
+  beforeEach(() => {
+    useApp.setState({
+      preferences: { ...useApp.getState().preferences, language: "zh-TW" },
+    });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });

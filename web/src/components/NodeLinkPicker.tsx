@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../store";
+import { useI18n } from "../i18n";
 
 export interface NodeLinkTarget {
   project: string;
@@ -59,6 +60,7 @@ export function NodeLinkPicker({
   /** Usually the node being edited: a node linking to itself helps nobody. */
   excludeNodeId?: string;
 }) {
+  const { t } = useI18n();
   const activeProject = useApp((state) => state.activeProject);
   const [query, setQuery] = useState("");
   const [all, setAll] = useState<NodeLinkTarget[] | null>(null);
@@ -123,20 +125,20 @@ export function NodeLinkPicker({
         className="confirm-dialog node-link-picker"
         role="dialog"
         aria-modal="true"
-        aria-label="連結到節點"
+        aria-label={t("nodeLink.title")}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="settings-head">
           <div>
-            <b>連結到節點</b>
-            <small>整個工作區都能連，跨專案也可以</small>
+            <b>{t("nodeLink.title")}</b>
+            <small>{t("nodeLink.hint")}</small>
           </div>
         </div>
         <input
           ref={inputRef}
           value={query}
-          placeholder="搜尋整個工作區的節點（標題、ID 或專案名）"
-          aria-label="搜尋節點"
+          placeholder={t("nodeLink.searchPlaceholder")}
+          aria-label={t("nodeLink.searchAria")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
@@ -164,10 +166,10 @@ export function NodeLinkPicker({
           {results.length === 0 && (
             <p className="settings-hint">
               {failed
-                ? "無法讀取節點清單。"
+                ? t("nodeLink.loadFailed")
                 : all === null
-                  ? "讀取中…"
-                  : "沒有符合的節點。"}
+                  ? t("common.loading")
+                  : t("nodeLink.noResults")}
             </p>
           )}
           {results.map((result, index) => (

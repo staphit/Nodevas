@@ -1,0 +1,114 @@
+version: 1
+type: workflow
+users:
+    - id: platform
+      name: Platform
+    - id: qa
+      name: QA
+    - id: agent-runner
+      name: Agent Runner
+    - id: reviewer
+      name: Reviewer
+nodes:
+    - id: node-0001
+      title: Define harness contract
+      kind: task
+      priority: urgent
+      assignee: platform
+      deadline: "2026-08-14"
+      tags:
+        - harness
+        - spec
+    - id: node-0002
+      title: Build deterministic evaluator
+      kind: task
+      priority: high
+      assignee: platform
+      deadline: "2026-08-16"
+      requires: node-0001
+      tags:
+        - harness
+        - evaluation
+    - id: node-0003
+      title: Add replayable fixture suite
+      kind: task
+      priority: high
+      assignee: qa
+      deadline: "2026-08-18"
+      requires: node-0002
+      tags:
+        - tests
+        - replay
+    - id: node-0004
+      title: Run agent loop against fixtures
+      kind: task
+      priority: high
+      assignee: agent-runner
+      deadline: "2026-08-20"
+      requires: node-0003
+      tags:
+        - run
+        - trace
+    - id: node-0005
+      title: Publish failure triage note
+      kind: task
+      priority: medium
+      assignee: reviewer
+      deadline: "2026-08-21"
+      requires: node-0004
+      tags:
+        - review
+        - handoff
+edges:
+    - from: node-0001
+      to: node-0002
+    - from: node-0002
+      to: node-0003
+    - from: node-0003
+      to: node-0004
+    - from: node-0004
+      to: node-0005
+ui:
+    positions:
+        node-0001:
+            x: 0
+            "y": 0
+        node-0002:
+            x: 0.707
+            "y": 1.275
+        node-0003:
+            x: 0.507
+            "y": 2.587
+        node-0004:
+            x: 0.927
+            "y": 4.087
+        node-0005:
+            x: 2.585
+            "y": 3.875
+    timeline_order:
+        - node-0001
+        - node-0002
+        - node-0003
+        - node-0004
+        - node-0005
+    plans:
+        node-0001:
+            - date: "2026-08-14"
+              status: started
+              note: Lock the harness contract.
+        node-0002:
+            - date: "2026-08-16"
+              status: started
+              note: Make evaluation deterministic.
+        node-0003:
+            - date: "2026-08-18"
+              status: started
+              note: Add replayable fixtures.
+        node-0004:
+            - date: "2026-08-20"
+              status: started
+              note: Capture an agent trace.
+        node-0005:
+            - date: "2026-08-21"
+              status: started
+              note: Publish the smallest next experiment.

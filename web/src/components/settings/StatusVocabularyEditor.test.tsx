@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../../preferences/storage";
 import { useApp } from "../../store";
 import type { StatusDefinition } from "../../types";
 import { ConfirmDialogHost } from "../ConfirmDialog";
@@ -54,6 +55,9 @@ function open(
 }
 
 beforeEach(() => {
+  useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
+  });
   saveWorkspaceStatuses.mockReset().mockResolvedValue(undefined);
   updateWorkflowDefinition.mockReset().mockResolvedValue({ ok: true });
 });

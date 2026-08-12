@@ -9,6 +9,7 @@
 import { useMemo } from "react";
 import { outlineBaseLevel, parseOutline } from "../../editor/outline";
 import { EmptyState } from "../InteractionPrimitives";
+import { useI18n } from "../../i18n";
 
 export function DocumentOutline({
   source,
@@ -20,6 +21,7 @@ export function DocumentOutline({
   activeLine?: number;
   onJump: (entry: { line: number; from: number }) => void;
 }) {
+  const { t } = useI18n();
   const entries = useMemo(() => parseOutline(source), [source]);
   const base = useMemo(() => outlineBaseLevel(entries), [entries]);
 
@@ -35,11 +37,11 @@ export function DocumentOutline({
   }, [entries, activeLine]);
 
   return (
-    <nav className="doc-outline" aria-label="文件目錄">
+    <nav className="doc-outline" aria-label={t("editor.outline.aria")}>
       {entries.length === 0 ? (
         <EmptyState
-          title="尚無標題"
-          description="用 # 開頭建立標題，目錄會自動出現。"
+          title={t("editor.outline.empty")}
+          description={t("editor.outline.emptyHint")}
         />
       ) : (
         <ul>
@@ -51,7 +53,7 @@ export function DocumentOutline({
                 style={{ paddingInlineStart: `${(entry.level - base) * 12 + 8}px` }}
                 data-level={entry.level}
                 onClick={() => onJump(entry)}
-                title={`跳到「${entry.text}」`}
+                title={t("editor.outline.jump", { title: entry.text })}
               >
                 {entry.text}
               </button>

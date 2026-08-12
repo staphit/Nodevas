@@ -1,10 +1,10 @@
 /** Multi-selection actions on the canvas [B-06]. */
 
 import { reportError, useApp } from "../store";
-import { statusTheme } from "../statusTheme";
 import type { Graph, Status, StatusDefinition } from "../types";
 import { confirmAction } from "./ConfirmDialog";
 import { nodeLabels, sendNodesToProject } from "./canvas/nodeTransfer";
+import { localizedStatusLabel, useI18n } from "../i18n";
 
 export interface GraphBatchToolbarProps {
   graph: Graph | null;
@@ -37,6 +37,7 @@ export function GraphBatchToolbar({
   setGraphSelection,
   onSelectedNodeChange,
 }: GraphBatchToolbarProps) {
+  const { t } = useI18n();
   const clipboard = useApp((state) => state.nodeClipboard);
   const clearNodeClipboard = useApp((state) => state.clearNodeClipboard);
 
@@ -61,11 +62,10 @@ export function GraphBatchToolbar({
 
   const removeSelection = async () => {
     const confirmed = await confirmAction({
-      title: `刪除 ${selectedIDs.length} 個節點`,
+      title: t("batch.deleteConfirmTitle", { count: String(selectedIDs.length) }),
       description:
-        `確定將選取的 ${selectedIDs.length} 個節點移到垃圾桶？` +
-        "一次撤銷即可全部復原，也可以從側欄逐一還原。",
-      confirmLabel: "移到垃圾桶",
+        t("batch.deleteConfirmDescription", { count: String(selectedIDs.length) }),
+      confirmLabel: t("batch.moveToTrash"),
       tone: "danger",
     });
     if (!confirmed) return;
@@ -82,7 +82,7 @@ export function GraphBatchToolbar({
   };
   return (
     <div className="graph-batch-toolbar">
-      <b>{selectedIDs.length} 個節點</b>
+      <b>{t("batch.selectedNodes", { count: String(selectedIDs.length) })}</b>
       <button
         type="button"
         disabled={selectedIDs.length !== 1 || shortcutBusy}
@@ -99,47 +99,50 @@ export function GraphBatchToolbar({
             .finally(() => setShortcutBusy(false));
         }}
       >
-        建立副本
+        {t("batch.duplicate")}
       </button>
       <button
         type="button"
         disabled={shortcutBusy}
-        title="以選取節點的範圍建立群組底圖色塊"
+        title={t("batch.groupBackgroundTitle")}
         onClick={createGroupFromSelection}
       >
-        建立群組底圖
+        {t("batch.groupBackground")}
       </button>
       <button
         type="button"
         disabled={shortcutBusy}
-        title="把選取的節點連同文件、附件、子頁面複製到另一個專案（Ctrl+C 可先暫存，切換專案後貼上）"
+        title={t("batch.copyProjectTitle")}
         onClick={() => void transferSelection("copy")}
       >
-        複製到專案…
+        {t("batch.copyProject")}
       </button>
       <button
         type="button"
         disabled={shortcutBusy}
-        title="把選取的節點移到另一個專案，來源節點會進入垃圾桶（Ctrl+X 可先暫存）"
+        title={t("batch.moveProjectTitle")}
         onClick={() => void transferSelection("cut")}
       >
-        移動到專案…
+        {t("batch.moveProject")}
       </button>
       {clipboard && (
         <span className="graph-batch-clipboard">
-          剪貼簿：{clipboard.mode === "cut" ? "已剪下" : "已複製"}{" "}
-          {clipboard.ids.length} 個節點（{clipboard.project}）
+          {t("batch.clipboard", {
+            action: clipboard.mode === "cut" ? t("batch.cut") : t("batch.copied"),
+            count: String(clipboard.ids.length),
+            project: clipboard.project,
+          })}{" "}
           <button
             type="button"
-            title="清空節點剪貼簿"
+            title={t("batch.clearClipboard")}
             onClick={() => clearNodeClipboard()}
           >
-            清除
+            {t("batch.clear")}
           </button>
         </span>
       )}
       <label>
-        狀態
+        {t("batch.status")}
         <select
           defaultValue=""
           disabled={shortcutBusy}
@@ -148,21 +151,21 @@ export function GraphBatchToolbar({
             event.target.value = "";
           }}
         >
-          <option value="">批次切換…</option>
+          <option value="">{t("batch.statusChange")}</option>
           {selectableStatuses.map((status) => (
             <option key={status} value={status}>
-              {statusTheme(status, customStatuses).label}
+              {localizedStatusLabel(status, customStatuses)}
             </option>
           ))}
         </select>
       </label>
       <label>
-        負責人
+        {t("batch.assignee")}
         <select
           defaultValue=""
           onChange={(event) => applyBatchAssignee(event.target.value)}
         >
-          <option value="">尚未指派</option>
+          <option value="">{t("graphTools.unassigned")}</option>
           {(graph?.users ?? []).map((user) => (
             <option key={user.id} value={user.id}>
               {user.name}
@@ -174,10 +177,10 @@ export function GraphBatchToolbar({
         type="button"
         className="danger"
         disabled={shortcutBusy}
-        title="把選取的節點移到垃圾桶（也可以按 Delete）"
+        title={t("batch.deleteTitle")}
         onClick={() => void removeSelection()}
       >
-        刪除
+        {t("batch.delete")}
       </button>
     </div>
   );

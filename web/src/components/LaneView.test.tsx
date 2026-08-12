@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
+import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import type { Graph, RunState } from "../types";
 import { LaneView } from "./LaneView";
@@ -30,6 +31,7 @@ beforeEach(() => {
   vi.mocked(api.getState).mockResolvedValue({ state: EMPTY_RUN, statuses: {} });
   vi.mocked(api.putGraph).mockResolvedValue({ ok: true, rev: "rev-2", issues: null });
   useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
     graph: graph([{ id: "a", title: "設計稿" }]),
     graphRev: "rev-1",
     runState: EMPTY_RUN,
@@ -40,6 +42,7 @@ beforeEach(() => {
     tabs: [],
     activeTab: null,
   });
+  useApp.getState().updateUIPreference("language", "zh-TW");
 });
 
 const paneProps = {

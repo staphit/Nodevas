@@ -90,6 +90,32 @@
   display: flex;
   gap: 8px;
 }
+.language-control {
+  display: inline-flex;
+  align-items: center;
+}
+.language-select {
+  min-width: 112px;
+  max-width: 150px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .global-error {
   display: flex;
   align-items: center;

@@ -2,27 +2,29 @@ import { assigneeUsage } from "../../domain";
 import { useApp } from "../../store";
 import { EmptyState } from "../InteractionPrimitives";
 import { runSettingsCommand, type SettingsNotify } from "./notify";
+import { useI18n } from "../../i18n";
 
 /** Members are a by-product of assigning work, so this only edits the email. */
 export function PeopleEditor({ notify }: { notify: SettingsNotify }) {
   const graph = useApp((s) => s.graph);
+  const { t } = useI18n();
   const users = graph?.users ?? [];
 
   return (
     <section className="settings-section">
       <p className="settings-hint">
-        成員在指派負責人時自動建立。信箱用於截止提醒。
+        {t("settings.peopleIntro")}
       </p>
       <ul className="settings-list">
         {users.map((user) => (
           <li key={user.id}>
             <span className="settings-user-id mono">{user.id}</span>
-            <input defaultValue={user.name} aria-label={`${user.name} 名稱`} readOnly />
+            <input defaultValue={user.name} aria-label={t("settings.personNameAria", { name: user.name })} readOnly />
             <input
               type="email"
               defaultValue={user.email ?? ""}
-              placeholder="信箱（選填）"
-              aria-label={`${user.name} 信箱`}
+              placeholder={t("settings.emailOptional")}
+              aria-label={t("settings.personEmailAria", { name: user.name })}
               onBlur={(event) => {
                 const email = event.target.value.trim();
                 if (email === (user.email ?? "")) return;
@@ -37,15 +39,15 @@ export function PeopleEditor({ notify }: { notify: SettingsNotify }) {
               }}
             />
             <small className="settings-usage">
-              指派 {graph ? assigneeUsage(graph, user.id).length : 0} 個節點
+              {t("settings.assignedNodes", { count: graph ? assigneeUsage(graph, user.id).length : 0 })}
             </small>
           </li>
         ))}
       </ul>
       {users.length === 0 && (
         <EmptyState
-          title="尚無成員"
-          description="在節點的「負責人」欄輸入名字即可建立。"
+          title={t("settings.noPeople")}
+          description={t("settings.noPeopleHint")}
         />
       )}
     </section>

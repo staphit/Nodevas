@@ -48,6 +48,7 @@ import { useAttachments } from "./drawer/useAttachments";
 import { useAutosave } from "./drawer/useAutosave";
 import { useNodePages } from "./drawer/useNodePages";
 import { useTableEditing } from "./drawer/useTableEditing";
+import { useI18n } from "../i18n";
 
 /**
  * Right-hand slide-over panel. Hidden until a node is clicked; the file's
@@ -184,6 +185,7 @@ export function DrawerSheetHandle({
 }
 
 export function Drawer() {
+  const { t } = useI18n();
   const graph = useApp((s) => s.graph);
   const activeTab = useApp((s) => s.activeTab);
   const closeDrawer = useApp((s) => s.closeDrawer);
@@ -229,12 +231,12 @@ export function Drawer() {
 
   if (collapsed) {
     return (
-      <div className="drawer collapsed-rail" aria-label="節點編輯（已收合）">
+      <div className="drawer collapsed-rail" aria-label={t("drawer.collapsedLabel")}>
         <button
           type="button"
           className="drawer-expand"
-          title="展開資訊欄"
-          aria-label="展開資訊欄"
+          title={t("drawer.expand")}
+          aria-label={t("drawer.expand")}
           onClick={toggleCollapsed}
         >
           «
@@ -250,7 +252,7 @@ export function Drawer() {
     <div
       className={`drawer${sheetDragging || sheetSettling ? " sheet-shifted" : ""}`}
       role="dialog"
-      aria-label="節點編輯"
+      aria-label={t("drawer.label")}
       data-sheet-drag={sheetDragging ? "active" : undefined}
       style={
         {
@@ -279,9 +281,9 @@ export function Drawer() {
         direction={-1}
         step={16}
         largeStep={48}
-        label="調整資訊欄寬度"
-        title="拖曳調整資訊欄寬度"
-        valueText={(value) => `${Math.round(value)} 像素`}
+        label={t("drawer.resize")}
+        title={t("drawer.resizeTitle")}
+        valueText={(value) => `${Math.round(value)} ${t("drawer.pixels")}`}
         onChange={setWidth}
         onCommit={(value) => updateUIPreference("drawerWidth", value)}
         onReset={() => {
@@ -319,6 +321,7 @@ export function TabBody({
   saveRequest?: number;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const { t } = useI18n();
   const tab = useApp((s) => s.tabs.find((t) => t.id === id));
   const setTabContent = useApp((s) => s.setTabContent);
   const adoptDocumentRev = useApp((s) => s.adoptDocumentRev);
@@ -764,33 +767,33 @@ export function TabBody({
   );
 
   if (!tab) return null;
-  if (!tab.loaded) return <div className="tab-body loading">載入中</div>;
+  if (!tab.loaded) return <div className="tab-body loading">{t("drawer.loading")}</div>;
 
   return (
     <div className="tab-body" onKeyDown={onKeyDown}>
       {tab.draftPending !== null && (
         <div className="banner banner-draft">
-          <span>找到未儲存的草稿(上次未正常結束)</span>
-           <button onClick={() => void applyDraft(id, true).catch(reportError)}>還原草稿</button>
-           <button onClick={() => void applyDraft(id, false).catch(reportError)}>捨棄</button>
+          <span>{t("drawer.draftFound")}</span>
+           <button onClick={() => void applyDraft(id, true).catch(reportError)}>{t("drawer.restoreDraft")}</button>
+           <button onClick={() => void applyDraft(id, false).catch(reportError)}>{t("drawer.discardDraft")}</button>
         </div>
       )}
       {tab.diskChanged && !tab.conflict && (
         <div className="banner banner-warn">
-          <span>檔案在磁碟上被修改了;儲存時會進行版本比對</span>
+          <span>{t("drawer.diskChanged")}</span>
         </div>
       )}
       {tab.conflict && (
         <div className="banner banner-conflict">
           <div className="banner-text">
-            <b>版本衝突</b>：磁碟上已有較新版本。兩個版本都不會遺失，磁碟版有歷史快照，你的版本已存為草稿。
+            <b>{t("drawer.conflictTitle")}</b>：{t("drawer.conflictDescription")}
           </div>
           <div className="banner-actions">
-             <button onClick={() => void resolveConflict(id, "disk").catch(reportError)}>載入磁碟版</button>
-             <button onClick={() => void resolveConflict(id, "mine").catch(reportError)}>以我的版本覆蓋</button>
+             <button onClick={() => void resolveConflict(id, "disk").catch(reportError)}>{t("drawer.loadDisk")}</button>
+             <button onClick={() => void resolveConflict(id, "mine").catch(reportError)}>{t("drawer.overwriteMine")}</button>
           </div>
           <details>
-            <summary>檢視磁碟版</summary>
+            <summary>{t("drawer.viewDisk")}</summary>
             <pre className="conflict-preview">{tab.conflict.diskContent}</pre>
           </details>
         </div>
@@ -810,14 +813,14 @@ export function TabBody({
         {/* The summary is drawn only at phone width (05-drawer.css); on a
           * desktop drawer this band is always open and the two panels look
           * exactly as they did before it existed. */}
-        <summary>基本資料與實際狀態</summary>
+        <summary>{t("drawer.metaSummary")}</summary>
         <fieldset className="readonly-gate" disabled={!canEdit}>
           <NodeMetaForm id={id} />
           <LifecyclePanel id={id} />
         </fieldset>
       </details>
 
-      <div className="node-view-tabs" role="tablist" aria-label="節點資訊">
+      <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
         <button
           type="button"
           role="tab"
@@ -825,7 +828,7 @@ export function TabBody({
           className={drawerView === "content" ? "active" : ""}
           onClick={() => setDrawerView("content")}
         >
-          內容
+          {t("drawer.content")}
         </button>
         <button
           type="button"
@@ -834,7 +837,7 @@ export function TabBody({
           className={drawerView === "relations" ? "active" : ""}
           onClick={() => setDrawerView("relations")}
         >
-          關係圖
+          {t("drawer.relations")}
         </button>
         <button
           type="button"
@@ -843,7 +846,7 @@ export function TabBody({
           className={drawerView === "timeline" ? "active" : ""}
           onClick={() => setDrawerView("timeline")}
         >
-          時間軸
+          {t("drawer.timeline")}
         </button>
         <button
           type="button"
@@ -852,7 +855,7 @@ export function TabBody({
           className={drawerView === "appearance" ? "active" : ""}
           onClick={() => setDrawerView("appearance")}
         >
-          外觀
+          {t("drawer.appearance")}
         </button>
       </div>
 
@@ -874,7 +877,7 @@ export function TabBody({
           * between subpages. The component hides its own mutators instead. */}
         <SubpageControls pages={subpages} onPopout={popoutPage} canEdit={canEdit} />
 
-        <nav className="editor-path" aria-label="檔案位置">
+        <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
           {activeProject && (
             <>
               <span className="editor-path-project">{activeProject}</span>
@@ -886,7 +889,7 @@ export function TabBody({
           <span className="editor-path-file mono" title={documentPath}>
             {documentPath}
           </span>
-          {editorDirty && <span className="editor-path-dirty">編輯中</span>}
+          {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
         </nav>
 
         {/* The formatting toolbar's whole job is inserting text, and the
@@ -926,10 +929,10 @@ export function TabBody({
         {heldByOther && lock && (
           <div className="editor-lock-banner">
             <span>
-              {lock.actor.name || "另一位使用者"} 正在編輯這份文件，目前為唯讀。
+              {t("drawer.otherUserEditing", { name: lock.actor.name || t("drawer.anotherUser") })}
             </span>
             <button type="button" onClick={() => requestLock(id, true)}>
-              強制編輯
+              {t("drawer.forceEdit")}
             </button>
           </div>
         )}
@@ -953,7 +956,7 @@ export function TabBody({
           />
         )}
         {pageDoc?.loading ? (
-          <div className="content-page-editor-loading">正在開啟子頁…</div>
+          <div className="content-page-editor-loading">{t("drawer.loadingSubpage")}</div>
         ) : preview ? (
           <DocumentPreview
             content={editorBody}
@@ -999,7 +1002,7 @@ export function TabBody({
         */}
         {!canEdit && (
           <div className="tab-footer">
-            <span className="tab-footer-hint">唯讀：訪客無法編輯或將變更寫回伺服器</span>
+            <span className="tab-footer-hint">{t("drawer.readOnlyVisitor")}</span>
           </div>
         )}
         {canEdit && (
@@ -1014,18 +1017,18 @@ export function TabBody({
           />
           {saveState.status === "error" && (
             <>
-              <span className="tab-footer-retry">自動重試中</span>
+              <span className="tab-footer-retry">{t("drawer.retrying")}</span>
               <button
                 type="button"
                 onClick={() => void autosave.flush("manual").catch(reportError)}
               >
-                立即重試
+                {t("drawer.retryNow")}
               </button>
             </>
           )}
           <span className="tab-footer-hint">
-            {editorDirty ? "編輯中，將自動儲存" : "自動儲存"}
-            <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> 立即儲存
+            {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
+            <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
           </span>
         </div>
         )}

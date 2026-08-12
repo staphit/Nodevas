@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type RemoteConfig } from "../../api";
+import { readPreferences } from "../../preferences/storage";
 import { useApp } from "../../store";
 import { resetCoalescing } from "../../state/coalesce";
 import {
@@ -65,6 +66,7 @@ beforeEach(() => {
   vi.mocked(api.pushRemote).mockResolvedValue({ backend: "folder", bundle: BUNDLE });
   vi.mocked(api.flushRemoteSync).mockResolvedValue({ state: "synced", bundle: BUNDLE });
   useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
     remoteConfig: null,
     remoteBundles: null,
     remoteSyncStatus: null,

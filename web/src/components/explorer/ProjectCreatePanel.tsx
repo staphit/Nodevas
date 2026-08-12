@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { IconClose, IconFolder, IconPlus } from "../../icons";
 import { api } from "../../api";
+import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
 
@@ -28,6 +29,7 @@ export function useProjectCreate({
 }) {
   const switchProject = useApp((state) => state.switchProject);
   const refreshProjects = useApp((state) => state.refreshProjects);
+  const { t } = useI18n();
   const [projectCreateTarget, setProjectCreateTarget] =
     useState<ProjectCreateTarget | null>(null);
   const [projectName, setProjectName] = useState("");
@@ -61,15 +63,15 @@ export function useProjectCreate({
     if (!projectCreateTarget || projectCreateBusy) return;
     const label = projectName.trim();
     if (!label) {
-      setProjectCreateError("請輸入專案名稱。");
+      setProjectCreateError(t("explorer.createProjectRequired"));
       return;
     }
     if (label === "." || label === ".." || /[\\/]/.test(label)) {
-      setProjectCreateError("名稱不可包含斜線，也不可使用 . 或 ..。");
+      setProjectCreateError(t("explorer.createNameInvalid"));
       return;
     }
     if (["nodes", "run", ".vised"].includes(label.toLocaleLowerCase())) {
-      setProjectCreateError("這是系統保留名稱，請使用其他名稱。");
+      setProjectCreateError(t("explorer.createReservedName"));
       return;
     }
     const fullName =
@@ -77,7 +79,7 @@ export function useProjectCreate({
         ? `${projectCreateTarget.parent}/${label}`
         : label;
     if (projectByName.has(fullName)) {
-      setProjectCreateError("這個位置已經有同名專案。");
+      setProjectCreateError(t("explorer.createDuplicate"));
       return;
     }
 
@@ -87,10 +89,10 @@ export function useProjectCreate({
       if (projectCreateTarget.mode === "folder") {
         await api.createProjectFolder(fullName);
         await refreshProjects();
-        setProjectTransferNotice(`已建立工作區目錄 ${fullName}`);
+        setProjectTransferNotice(t("explorer.createdFolder", { name: fullName }));
       } else {
         await switchProject(fullName, true, projectTemplate);
-        setProjectTransferNotice(`已建立並開啟 ${fullName}`);
+        setProjectTransferNotice(t("explorer.createdProject", { name: fullName }));
       }
       const next = new Set(expandedProjects);
       next.add(fullName);
@@ -99,7 +101,7 @@ export function useProjectCreate({
       setProjectCreateTarget(null);
       setProjectName("");
     } catch (error) {
-      setProjectCreateError((error as Error).message || "建立失敗。");
+      setProjectCreateError((error as Error).message || t("explorer.createFailed"));
     } finally {
       setProjectCreateBusy(false);
     }
@@ -147,6 +149,7 @@ export function ProjectCreatePanel({
     closeProjectCreate,
     createProject,
   } = create;
+  const { t } = useI18n();
   if (!projectCreateTarget) return null;
 
   return (
@@ -162,32 +165,33 @@ export function ProjectCreatePanel({
         <div>
           <strong>
             {projectCreateTarget.mode === "folder"
-              ? "新增工作區目錄"
+              ? t("explorer.projectCreateFolder")
               : projectCreateTarget.parent
-                ? "新增子專案"
-                : "建立新專案"}
+                ? t("explorer.projectCreateChild")
+                : t("explorer.projectCreateNew")}
           </strong>
           <span>
             {projectCreateTarget.mode === "folder"
-              ? "純資料夾，用來分組專案（可拖曳專案進去）"
+              ? t("explorer.projectCreateFolderHint")
               : projectCreateTarget.parent
-                ? `建立在 ${
-                    projectByName.get(projectCreateTarget.parent)?.label ||
-                    projectCreateTarget.parent
-                  } 底下`
-                : "建立在工作區根目錄"}
+                ? t("explorer.projectCreateUnder", {
+                    parent:
+                      projectByName.get(projectCreateTarget.parent)?.label ||
+                      projectCreateTarget.parent,
+                  })
+                : t("explorer.projectCreateRootHint")}
           </span>
         </div>
         <button
           type="button"
           className="project-create-close"
           onClick={closeProjectCreate}
-          aria-label="關閉建立面板"
+          aria-label={t("explorer.closeCreatePanel")}
         >
           <IconClose size={14} />
         </button>
       </div>
-      <label htmlFor="project-parent">上層位置</label>
+      <label htmlFor="project-parent">{t("explorer.parentLocation")}</label>
       <select
         id="project-parent"
         value={projectCreateTarget.parent}
@@ -200,7 +204,7 @@ export function ProjectCreatePanel({
           setProjectCreateError(null);
         }}
       >
-        <option value="">工作區根目錄</option>
+        <option value="">{t("explorer.workspaceRoot")}</option>
         {projects.map((project) => (
           <option key={project.name} value={project.name}>
             {" ".repeat(Math.max(0, project.depth) * 2)}{project.isFolder ? "📁 " : ""}
@@ -209,7 +213,9 @@ export function ProjectCreatePanel({
         ))}
       </select>
       <label htmlFor="project-name">
-        {projectCreateTarget.mode === "folder" ? "目錄名稱" : "專案名稱"}
+        {projectCreateTarget.mode === "folder"
+          ? t("explorer.folderName")
+          : t("explorer.projectName")}
       </label>
       <input
         ref={projectNameInputRef}
@@ -223,7 +229,9 @@ export function ProjectCreatePanel({
           if (event.key === "Escape") closeProjectCreate();
         }}
         placeholder={
-          projectCreateTarget.parent ? "例如：角色設定" : "例如：第二季企劃"
+          projectCreateTarget.parent
+            ? t("explorer.projectExampleChild")
+            : t("explorer.projectExampleRoot")
         }
         aria-invalid={Boolean(projectCreateError)}
         aria-describedby={
@@ -233,11 +241,11 @@ export function ProjectCreatePanel({
         autoComplete="off"
       />
       <p id="project-create-help" className="project-create-help">
-        ID 與資料夾路徑由系統管理。
+        {t("explorer.idsManaged")}
       </p>
       {projectCreateTarget.mode !== "folder" && (
         <>
-          <label htmlFor="project-template">範本</label>
+          <label htmlFor="project-template">{t("explorer.template")}</label>
           <select
             id="project-template"
             value={projectTemplate}
@@ -246,8 +254,8 @@ export function ProjectCreatePanel({
               setProjectTemplate(event.target.value as "empty" | "eisenhower")
             }
           >
-            <option value="empty">空專案</option>
-            <option value="eisenhower">艾森豪矩陣（四象限底圖）</option>
+            <option value="empty">{t("explorer.emptyProject")}</option>
+            <option value="eisenhower">{t("explorer.eisenhowerTemplate")}</option>
           </select>
         </>
       )}
@@ -258,14 +266,14 @@ export function ProjectCreatePanel({
       )}
       <div className="project-create-footer">
         <button type="button" onClick={closeProjectCreate}>
-          取消
+          {t("common.cancel")}
         </button>
         <button className="primary" type="submit" disabled={projectCreateBusy}>
           {projectCreateBusy
-            ? "建立中…"
+            ? t("explorer.creating")
             : projectCreateTarget.mode === "folder"
-              ? "建立目錄"
-              : "建立並開啟"}
+              ? t("explorer.createFolder")
+              : t("explorer.createAndOpen")}
         </button>
       </div>
     </form>

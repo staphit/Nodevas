@@ -3,7 +3,7 @@ import type { PageFormat } from "../../api";
 /** What a new subpage can be stored as, and how its tab is labelled. */
 export const PAGE_FORMATS: readonly (readonly [PageFormat, string, string])[] = [
   ["md", "Markdown", ".md"],
-  ["txt", "純文字", ".txt"],
+  ["txt", "Plain text", ".txt"],
   ["html", "HTML", ".html"],
   ["docx", "Word", ".docx"],
 ];

@@ -63,6 +63,22 @@
   margin: 0 0 8px;
   font-size: 18px;
 }
+.signin-language {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-dim, #888);
+  font-size: 13px;
+}
+.signin-language select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
 /* 44px is the smallest target a finger hits reliably, and a 16px font is what
  * stops iOS Safari from zooming the page when the field takes focus. */
 .signin-form input {

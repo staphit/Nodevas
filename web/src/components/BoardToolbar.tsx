@@ -15,6 +15,7 @@ import { GRAPH_GESTURE_MODES, type GraphGestureMode } from "./canvas/gestureMode
 import { useCoarsePointer, useTouchCapable } from "./touch";
 import { useCanEdit } from "./SignIn";
 import type { LaneContextMenu } from "./LaneView";
+import { useI18n } from "../i18n";
 
 /**
  * How far the graph will stretch its cards and their text away from the sizes
@@ -147,6 +148,7 @@ export function BoardToolbar({
   graphNotice,
   planNotice,
 }: BoardToolbarProps) {
+  const { t } = useI18n();
   // Two different questions, so two different answers. The gesture control has
   // to exist wherever a finger can land — an iPad with a keyboard attached
   // reports a fine primary pointer, and hiding the control there would take
@@ -161,9 +163,9 @@ export function BoardToolbar({
   const [hintOpen, setHintOpen] = useState(false);
   const hint = isGraph
     ? coarsePointer
-      ? "長按開啟選單 · 雙指縮放 · 切換上方手勢後拖曳即可連線或框選"
-      : "節點可自由拖放 · Ctrl/⌘＋拖曳框選（框到線就選線）· 空白處右鍵新增 · Alt＋點線新增轉折點、雙擊或右鍵刪除 · Del 刪除"
-    : "拖曳節點標題調整順序 · 實際／預期紀錄可拖曳改日期 · 儲存格右鍵新增規劃";
+      ? t("board.hint.graphTouch")
+      : t("board.hint.graphMouse")
+    : t("board.hint.timeline");
   return (
     <div className="board-title">
       {/* One wrapper around every control in the header. On a desktop it is
@@ -176,37 +178,37 @@ export function BoardToolbar({
         <button
           className="pane-toggle"
           onClick={onToggle}
-          title={collapsed ? "展開此視窗" : "折疊此視窗"}
+          title={collapsed ? t("board.expandPane") : t("board.collapsePane")}
           aria-expanded={!collapsed}
         >
           {collapsed ? "▸" : "▾"}
         </button>
         <span className="board-title-main">
-          {isGraph ? "關係圖：節點依賴結構" : "時間軸：預期規劃與實際紀錄"}
+          {isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         </span>
         {!collapsed && canEdit && (
           <button
             type="button"
             className="board-primary-action"
             onClick={() => openNodeCreationMenu(viewportCreationAnchor())}
-            title="新增節點（右鍵與命令面板仍可使用）"
+            title={t("board.newNodeTitle")}
           >
             <IconPlus size={13} />
-            新增節點
+            {t("board.newNode")}
           </button>
         )}
         {isGraph && !collapsed && touchCapable && (
-          <div className="gesture-mode" role="group" aria-label="拖曳手勢">
-            {GRAPH_GESTURE_MODES.map(({ mode, label, title }) => (
+          <div className="gesture-mode" role="group" aria-label={t("board.gestureLabel")}>
+            {GRAPH_GESTURE_MODES.map(({ mode }) => (
               <button
                 key={mode}
                 type="button"
                 className={gestureMode === mode ? "active" : ""}
                 aria-pressed={gestureMode === mode}
                 onClick={() => setGestureMode(mode)}
-                title={title}
+                title={t(`board.gesture.${mode}Title`)}
               >
-                {label}
+                {t(`board.gesture.${mode}`)}
               </button>
             ))}
           </div>
@@ -225,7 +227,7 @@ export function BoardToolbar({
               onClick={() => setHintOpen((open) => !open)}
               aria-expanded={hintOpen}
               aria-controls={hintId}
-              title="操作提示"
+              title={t("board.hintToggle")}
             >
               ⓘ
             </button>
@@ -240,8 +242,8 @@ export function BoardToolbar({
             className="board-zoom-reset"
             onClick={() => zoomAt(1)}
             disabled={zoom === 1}
-            title="重設為 100%"
-            aria-label={`目前縮放 ${Math.round(zoom * 100)}%，重設為 100%`}
+            title={t("board.resetZoomTitle")}
+            aria-label={t("board.currentZoom", { value: String(Math.round(zoom * 100)) })}
           >
             {Math.round(zoom * 100)}%
           </button>
@@ -254,7 +256,7 @@ export function BoardToolbar({
               onClick={() => setGraphToolsOpen((open) => !open)}
               aria-expanded={graphToolsOpen}
             >
-              篩選與檢視
+              {t("board.filterView")}
             </button>
             <button
               type="button"
@@ -264,17 +266,19 @@ export function BoardToolbar({
               onClick={() => setAnalysisOpen((open) => !open)}
               aria-expanded={analysisOpen}
             >
-              分析 {analysis.overdue.size + analysis.violations.length || ""}
+              {t("board.analysis", {
+                count: String(analysis.overdue.size + analysis.violations.length || ""),
+              })}
             </button>
             <button
               type="button"
               className={`board-tool-button snap${snapGuides ? " active" : ""}`}
               aria-pressed={snapGuides}
               onClick={() => setSnapGuides(!snapGuides)}
-              title="拖曳或縮放時對齊其他節點的邊緣與中心線；按住 Shift 可暫時關閉"
+              title={t("board.alignGuidesTitle")}
             >
               <IconAlignGuides size={13} />
-              對齊輔助
+              {t("board.alignGuides")}
             </button>
             {/* Two questions the zoom cannot answer, because zoom moves the box
                 and the words in it together: how big the cards are next to the
@@ -282,23 +286,25 @@ export function BoardToolbar({
                 one summary so a header that already scrolls on a phone gains
                 one control rather than two. */}
             <details className="graph-scale-control">
-              <summary title="調整節點與文字的顯示比例，不影響縮放">
-                節點 {Math.round(nodeScale * 100)}% · 文字{" "}
-                {Math.round(cardFontScale * 100)}%
+              <summary title={t("board.scaleTitle")}>
+                {t("board.scaleSummary", {
+                  node: String(Math.round(nodeScale * 100)),
+                  text: String(Math.round(cardFontScale * 100)),
+                })}
               </summary>
               <div className="timeline-size-popover">
                 <div className="timeline-size-heading">
-                  <b>顯示比例</b>
+                  <b>{t("board.displayScale")}</b>
                   <button
                     type="button"
                     disabled={nodeScale === 1 && cardFontScale === 1}
                     onClick={resetCardScale}
                   >
-                    重設為 100%
+                    {t("board.reset100")}
                   </button>
                 </div>
                 <label>
-                  <span>節點比例</span>
+                  <span>{t("board.nodeScale")}</span>
                   <input
                     type="range"
                     min={GRAPH_SCALE_MIN}
@@ -310,7 +316,7 @@ export function BoardToolbar({
                   <output>{Math.round(nodeScale * 100)}%</output>
                 </label>
                 <label>
-                  <span>文字大小</span>
+                  <span>{t("board.textSize")}</span>
                   <input
                     type="range"
                     min={GRAPH_SCALE_MIN}
@@ -323,11 +329,11 @@ export function BoardToolbar({
                   />
                   <output>{Math.round(cardFontScale * 100)}%</output>
                 </label>
-                <small>節點連同間距一起放大，文字維持原本的級距比例。</small>
+                <small>{t("board.scaleHint")}</small>
               </div>
             </details>
             <button type="button" className="board-tool-button" onClick={() => fitGraph(false)}>
-              全部置中
+              {t("board.fitAll")}
             </button>
             <button
               type="button"
@@ -335,40 +341,40 @@ export function BoardToolbar({
               disabled={!selectedIDs.length}
               onClick={() => fitGraph(true)}
             >
-              選取置中
+              {t("board.fitSelected")}
             </button>
             <button
               type="button"
               className={`board-tool-button${snapToGrid ? " active" : ""}`}
               aria-pressed={snapToGrid}
               onClick={() => setSnapToGrid(!snapToGrid)}
-              title="拖曳節點時對齊格線。按住 Alt 可暫時不貼齊"
+              title={t("board.snapGridTitle")}
             >
-              貼齊格線
+              {t("board.snapGrid")}
             </button>
             <button
               type="button"
               className="board-tool-button"
               disabled={!canAlignToGrid}
               onClick={alignAllToGrid}
-              title="把盤面上每個節點移到最近的格子。貼齊格線只管之後的拖曳，這個管現在"
+              title={t("board.alignAllTitle")}
             >
-              全部對齊
+              {t("board.alignAll")}
             </button>
             <button
               type="button"
               className={`board-tool-button${minimapVisible ? " active" : ""}`}
               aria-pressed={minimapVisible}
               onClick={() => setMinimapVisible(!minimapVisible)}
-              title="右下角的全圖縮圖，點縮圖可移動視角。手機預設隱藏"
+              title={t("board.minimapTitle")}
             >
-              縮圖
+              {t("board.minimap")}
             </button>
           </>
         )}
         {!isGraph && selectedNodeId && (
           <span className="board-title-message selection">
-            對應節點：{nodeTitle(selectedNodeId)}
+            {t("board.selectedNode", { title: nodeTitle(selectedNodeId) })}
           </span>
         )}
         {/* Groups the timeline-only layout controls so the JSX reads as one
@@ -377,45 +383,48 @@ export function BoardToolbar({
             and a nested scroller would only trap the swipe. */}
         {!isGraph && !collapsed && (
         <div className="timeline-layout-controls">
-          <div className="timeline-orientation" role="group" aria-label="時間軸方向">
+          <div className="timeline-orientation" role="group" aria-label={t("board.timelineDirection")}>
             <button
               type="button"
               className={timelineOrientation === "vertical" ? "active" : ""}
               aria-pressed={timelineOrientation === "vertical"}
               onClick={() => changeTimelineOrientation("vertical")}
-              title="日期由上往下"
+              title={t("board.dateTopBottom")}
             >
-              直式
+              {t("board.vertical")}
             </button>
             <button
               type="button"
               className={timelineOrientation === "horizontal" ? "active" : ""}
               aria-pressed={timelineOrientation === "horizontal"}
               onClick={() => changeTimelineOrientation("horizontal")}
-              title="日期由左往右"
+              title={t("board.dateLeftRight")}
             >
-              橫式
+              {t("board.horizontal")}
             </button>
           </div>
           <details className="timeline-size-control">
-            <summary title="調整時間軸格子的寬度與高度">
+            <summary title={t("board.cellTitle")}>
               <IconResizeHorizontal size={13} />
-              格子 {timelineCellWidth}×{timelineCellHeight}
-              {timelineCellAuto ? " · 自動" : ""}
+              {t("board.cellSummary", {
+                width: String(timelineCellWidth),
+                height: String(timelineCellHeight),
+                auto: timelineCellAuto ? t("board.auto") : "",
+              })}
             </summary>
             <div className="timeline-size-popover">
               <div className="timeline-size-heading">
-                <b>格子大小</b>
+                <b>{t("board.cellSize")}</b>
                 <button
                   type="button"
                   className={timelineCellAuto ? "active" : ""}
                   onClick={useAutoTimelineCellSize}
                 >
-                  依內容自動
+                  {t("board.autoCellSize")}
                 </button>
               </div>
               <label>
-                <span>寬度</span>
+                <span>{t("board.width")}</span>
                 <input
                   type="range"
                   min={TIMELINE_CELL_MIN_W}
@@ -429,7 +438,7 @@ export function BoardToolbar({
                 <output>{timelineCellWidth}px</output>
               </label>
               <label>
-                <span>高度</span>
+                <span>{t("board.height")}</span>
                 <input
                   type="range"
                   min={TIMELINE_CELL_MIN_H}
@@ -442,15 +451,15 @@ export function BoardToolbar({
                 />
                 <output>{timelineCellHeight}px</output>
               </label>
-              <small>拖曳滑桿會切換為手動，設定會保留在這台裝置。</small>
+              <small>{t("board.cellHint")}</small>
             </div>
           </details>
           {timelineOrientation === "horizontal" && (
-          <div className="timeline-width-stepper" role="group" aria-label="時間軸欄寬">
+          <div className="timeline-width-stepper" role="group" aria-label={t("board.timelineColumnWidth")}>
             <IconResizeHorizontal size={13} />
             <button
               type="button"
-              aria-label="縮小時間軸欄寬"
+              aria-label={t("board.shrinkTimelineColumn")}
               disabled={timelineCellWidth <= TIMELINE_CELL_MIN_W}
               onClick={() => setTimelineCellSize("width", timelineCellWidth - 16)}
             >
@@ -459,7 +468,7 @@ export function BoardToolbar({
             <output aria-live="polite">{timelineCellWidth}px</output>
             <button
               type="button"
-              aria-label="放大時間軸欄寬"
+              aria-label={t("board.expandTimelineColumn")}
               disabled={timelineCellWidth >= TIMELINE_CELL_MAX_W}
               onClick={() => setTimelineCellSize("width", timelineCellWidth + 16)}
             >
@@ -468,46 +477,54 @@ export function BoardToolbar({
           </div>
           )}
           {timelineOrientation === "vertical" && (
-          <div className="timeline-orientation" role="group" aria-label="座標軸位置">
+          <div className="timeline-orientation" role="group" aria-label={t("board.axisPosition")}>
             <button
               type="button"
               onClick={() =>
                 changeTimelineVNodeAxis(timelineVNodeAxis === "top" ? "bottom" : "top")
               }
-              title="切換節點列顯示在上方或下方"
+              title={t("board.axisToggleNodeRowTitle")}
             >
-              節點列：{timelineVNodeAxis === "top" ? "上" : "下"}
+              {t("board.nodeRow", {
+                position: timelineVNodeAxis === "top" ? t("board.top") : t("board.bottom"),
+              })}
             </button>
             <button
               type="button"
               onClick={() =>
                 changeTimelineVDateAxis(timelineVDateAxis === "right" ? "left" : "right")
               }
-              title="切換日期欄顯示在右側或左側"
+              title={t("board.axisToggleDateColumnTitle")}
             >
-              日期欄：{timelineVDateAxis === "right" ? "右" : "左"}
+              {t("board.dateColumn", {
+                position: timelineVDateAxis === "right" ? t("board.right") : t("board.left"),
+              })}
             </button>
           </div>
           )}
           {timelineOrientation === "horizontal" && (
-          <div className="timeline-orientation" role="group" aria-label="座標軸位置">
+          <div className="timeline-orientation" role="group" aria-label={t("board.axisPosition")}>
             <button
               type="button"
               onClick={() =>
                 changeTimelineDateAxis(timelineDateAxis === "top" ? "bottom" : "top")
               }
-              title="切換日期列顯示在上方或下方"
+              title={t("board.axisToggleDateRowTitle")}
             >
-              日期列：{timelineDateAxis === "top" ? "上" : "下"}
+              {t("board.dateRow", {
+                position: timelineDateAxis === "top" ? t("board.top") : t("board.bottom"),
+              })}
             </button>
             <button
               type="button"
               onClick={() =>
                 changeTimelineNodeAxis(timelineNodeAxis === "left" ? "right" : "left")
               }
-              title="切換節點欄顯示在左側或右側"
+              title={t("board.axisToggleNodeColumnTitle")}
             >
-              節點欄：{timelineNodeAxis === "left" ? "左" : "右"}
+              {t("board.nodeColumn", {
+                position: timelineNodeAxis === "left" ? t("board.left") : t("board.right"),
+              })}
             </button>
           </div>
           )}
@@ -517,7 +534,7 @@ export function BoardToolbar({
               checked={collapseEmpty}
               onChange={(e) => setCollapse(e.target.checked)}
             />
-            折疊空白日期
+            {t("board.collapseEmpty")}
           </label>
       </div>
       )}

@@ -480,7 +480,7 @@
   outline-offset: 2px;
 }
 .col-card.analysis-blocked::after {
-  content: "受阻";
+  content: attr(data-blocked-label);
   position: absolute;
   right: 5px;
   bottom: 4px;
@@ -489,7 +489,7 @@
   font-weight: 700;
 }
 .col-card.analysis-blocking::before {
-  content: "阻塞源";
+  content: attr(data-blocking-label);
   position: absolute;
   right: 5px;
   top: 4px;
@@ -545,4 +545,3 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-

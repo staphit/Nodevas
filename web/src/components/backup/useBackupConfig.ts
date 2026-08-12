@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { RemoteBundle, RemoteConfig, RemoteKind } from "../../api";
+import { useI18n } from "../../i18n";
 import { remoteScope, useApp, useOperationPending } from "../../store";
 import { reason } from "./format";
 
@@ -75,6 +76,7 @@ export function draftIsDirty(draft: BackupDraft, config: RemoteConfig): boolean 
 }
 
 export function useBackupConfig() {
+  const { t } = useI18n();
   const config = useApp((state) => state.remoteConfig);
   const bundles = useApp((state) => state.remoteBundles);
   const activeProject = useApp((state) => state.activeProject);
@@ -97,9 +99,9 @@ export function useBackupConfig() {
 
   useEffect(() => {
     void refreshRemoteConfig().catch((error: unknown) =>
-      setNote({ text: reason(error, "載入備份設定失敗"), kind: "error" }),
+      setNote({ text: reason(error, t("backup.loadConfigFailed")), kind: "error" }),
     );
-  }, [refreshRemoteConfig]);
+  }, [refreshRemoteConfig, t]);
 
   // Nothing has been pushed anywhere until a backend is chosen, so the listing
   // is only worth a request once one is — or once Drive is connected and the
@@ -108,9 +110,9 @@ export function useBackupConfig() {
   useEffect(() => {
     if (!configured) return;
     void refreshRemoteBundles().catch((error: unknown) =>
-      setNote({ text: reason(error, "讀取備份清單失敗"), kind: "error" }),
+      setNote({ text: reason(error, t("backup.loadBundlesFailed")), kind: "error" }),
     );
-  }, [configured, refreshRemoteBundles]);
+  }, [configured, refreshRemoteBundles, t]);
 
   // Adopting the server's reply is also how a clamped retention count reaches
   // the form. Edits are never lost to this: every action that re-reads the
@@ -135,26 +137,26 @@ export function useBackupConfig() {
     });
     setNote(
       result.ok
-        ? { text: "備份設定已儲存。", kind: "ok" }
+        ? { text: t("backup.settingsSaved"), kind: "ok" }
         : { text: result.message, kind: "error" },
     );
-  }, [draft, saveRemoteConfig]);
+  }, [draft, saveRemoteConfig, t]);
 
   const push = useCallback(async () => {
     setNote(null);
     const result = await pushRemoteBundle(activeProject || undefined);
     setNote(
       result.ok
-        ? { text: `已備份：${result.value.name}`, kind: "ok" }
+        ? { text: t("backup.projectBackedUp", { name: result.value.name }), kind: "ok" }
         : { text: result.message, kind: "error" },
     );
-  }, [activeProject, pushRemoteBundle]);
+  }, [activeProject, pushRemoteBundle, t]);
 
   const pushWorkspace = useCallback(async () => {
     setNote(null);
     const result = await flushRemoteSync();
     if (result.ok) {
-      setNote({ text: "已備份整個工作區。", kind: "ok" });
+      setNote({ text: t("backup.workspaceBackedUp"), kind: "ok" });
       return;
     }
     // A conflict means the newest remote snapshot came from somewhere else.
@@ -163,11 +165,11 @@ export function useBackupConfig() {
     const conflicted = /conflict|remote snapshot changed/i.test(result.message);
     setNote({
       text: conflicted
-        ? "雲端有這台機器沒推送過的快照。請先在「從 Drive 匯入」查看，確認不需要後再試一次。"
+        ? t("backup.conflictHint")
         : result.message,
       kind: "error",
     });
-  }, [flushRemoteSync]);
+  }, [flushRemoteSync, t]);
 
   const restore = useCallback(
     async (bundle: RemoteBundle) => {
@@ -175,18 +177,18 @@ export function useBackupConfig() {
       const result = await importRemoteBundle(bundle.id);
       setNote(
         result.ok
-          ? { text: `已還原為新專案：${result.value}`, kind: "ok" }
+          ? { text: t("backup.restoredAs", { name: result.value }), kind: "ok" }
           : { text: result.message, kind: "error" },
       );
     },
-    [importRemoteBundle],
+    [importRemoteBundle, t],
   );
 
   const reloadBundles = useCallback(() => {
     void refreshRemoteBundles().catch((error: unknown) =>
-      setNote({ text: reason(error, "讀取備份清單失敗"), kind: "error" }),
+      setNote({ text: reason(error, t("backup.loadBundlesFailed")), kind: "error" }),
     );
-  }, [refreshRemoteBundles]);
+  }, [refreshRemoteBundles, t]);
 
   return {
     config,

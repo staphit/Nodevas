@@ -12,6 +12,7 @@ import {
   IconTree,
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
+import { useI18n } from "../i18n";
 
 type SearchResult = Awaited<ReturnType<typeof api.search>>["results"][number];
 
@@ -47,42 +48,43 @@ const MOD =
 
 const HELP_SECTIONS: { title: string; rows: { keys: string[]; text: string }[] }[] = [
   {
-    title: "全域",
+    title: "palette.help.global",
     rows: [
-      { keys: [`${MOD} K`], text: "開啟或關閉這個面板" },
-      { keys: [`${MOD} S`], text: "儲存目前分頁" },
-      { keys: [`${MOD} Z`], text: "復原上一步（游標不在編輯器內時）" },
-      { keys: [`${MOD} ⇧ Z`, `${MOD} Y`], text: "重做剛剛復原的那一步" },
-      { keys: ["Esc"], text: "關閉面板、對話框或選單" },
+      { keys: [`${MOD} K`], text: "palette.help.open" },
+      { keys: [`${MOD} S`], text: "palette.help.save" },
+      { keys: [`${MOD} Z`], text: "palette.help.undo" },
+      { keys: [`${MOD} ⇧ Z`, `${MOD} Y`], text: "palette.help.redo" },
+      { keys: ["Esc"], text: "palette.help.close" },
     ],
   },
   {
-    title: "這個面板",
+    title: "palette.help.palette",
     rows: [
-      { keys: ["↑", "↓"], text: "移動選取" },
-      { keys: ["Enter"], text: "執行命令或開啟結果" },
-      { keys: ["?"], text: "空白輸入時按下即開啟操作說明" },
-      { keys: ["2 字以上"], text: "同時比對命令與全工作區內容" },
+      { keys: ["↑", "↓"], text: "palette.help.move" },
+      { keys: ["Enter"], text: "palette.help.run" },
+      { keys: ["?"], text: "palette.help.help" },
+      { keys: ["palette.key.twoChars"], text: "palette.help.search" },
     ],
   },
   {
-    title: "關係圖與專案總管",
+    title: "palette.help.graph",
     rows: [
-      { keys: [`${MOD} 拖曳`], text: "在關係圖上框選多個節點" },
-      { keys: [`${MOD} 點擊`], text: "在專案總管加選或取消單一項目" },
-      { keys: ["拖曳分隔線"], text: "調整寬高；雙擊還原預設比例" },
+      { keys: [`${MOD} palette.key.drag`], text: "palette.help.selectNodes" },
+      { keys: [`${MOD} palette.key.click`], text: "palette.help.selectItems" },
+      { keys: ["palette.key.divider"], text: "palette.help.resize" },
     ],
   },
 ];
 
 const USAGE_STEPS = [
-  "左側專案總管管理工作區、專案與節點；右鍵可重新命名、移動、匯出封裝。",
-  "節點內容是 Markdown，雙擊節點開啟編輯抽屜，可彈出成獨立視窗。",
-  "關係圖畫依賴，時間軸排里程碑與實際事件；兩者都可從這裡收合。",
-  "匯出支援 Markdown、PDF、單一專案 .veproj，以及整個工作區的多專案封裝。",
+  "palette.usage.explorer",
+  "palette.usage.editor",
+  "palette.usage.views",
+  "palette.usage.export",
 ];
 
 export function CommandPalette() {
+  const { t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
   const openTab = useApp((state) => state.openTab);
   const createNode = useApp((state) => state.createNode);
@@ -184,58 +186,58 @@ export function CommandPalette() {
     const list: Command[] = [
       {
         key: "new-node",
-        title: "新增節點",
-        detail: `建立於 ${activeProject || "目前專案"}`,
+        title: t("palette.newNode"),
+        detail: t("palette.createIn", { project: activeProject || t("topbar.project") }),
         keywords: "node create add 建立",
         icon: <IconPlus size={15} />,
         run: async () => {
-          await createNode({ title: "未命名節點", kind: "task" });
+          await createNode({ title: t("palette.untitledNode"), kind: "task" });
         },
       },
       {
         key: "toggle-graph",
-        title: paneOpen.graph ? "收合關係圖" : "顯示關係圖",
-        detail: "切換上方的關係圖區塊",
+        title: paneOpen.graph ? t("palette.hideGraph") : t("palette.showGraph"),
+        detail: t("palette.toggleGraph"),
         keywords: "graph 關係圖 圖表 切換",
         icon: <IconTree size={15} />,
         run: () => togglePane("graph"),
       },
       {
         key: "toggle-timeline",
-        title: paneOpen.timeline ? "收合時間軸" : "顯示時間軸",
-        detail: "切換下方的時間軸區塊",
+        title: paneOpen.timeline ? t("palette.hideTimeline") : t("palette.showTimeline"),
+        detail: t("palette.toggleTimeline"),
         keywords: "timeline 時間軸 里程碑 切換",
         icon: <IconLayout size={15} />,
         run: () => togglePane("timeline"),
       },
       {
         key: "toggle-explorer",
-        title: explorerCollapsed ? "展開專案總管" : "摺疊專案總管",
-        detail: "切換左側側邊欄",
+        title: explorerCollapsed ? t("palette.expandExplorer") : t("palette.collapseExplorer"),
+        detail: t("palette.toggleExplorer"),
         keywords: "sidebar explorer 側邊欄 專案總管",
         icon: <IconLayout size={15} />,
         run: () => updateUIPreference("explorerCollapsed", !explorerCollapsed),
       },
       {
         key: "toggle-theme",
-        title: theme === "dark" ? "切換淺色模式" : "切換深色模式",
-        detail: "外觀主題",
+        title: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
+        detail: t("palette.themeDetail"),
         keywords: "theme dark light 主題 深色 淺色",
         icon: theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />,
         run: () => toggleTheme(),
       },
       {
         key: "project-settings",
-        title: "專案設定",
-        detail: "工作流程狀態、里程碑類型、成員、外觀",
+        title: t("palette.settings"),
+        detail: t("palette.settingsDetail"),
         keywords: "settings 設定 狀態 成員",
         icon: <IconGear size={15} />,
         run: () => window.dispatchEvent(new Event("nodevas-project-settings")),
       },
       {
         key: "notify-settings",
-        title: "截止提醒設定",
-        detail: "郵件通知與提醒時間",
+        title: t("palette.notify"),
+        detail: t("palette.notifyDetail"),
         keywords: "notify mail 提醒 通知 郵件",
         icon: <IconBell size={15} />,
         run: () => window.dispatchEvent(new Event("nodevas-notify-settings")),
@@ -245,8 +247,8 @@ export function CommandPalette() {
       list.push(
         {
           key: "save-tab",
-          title: "儲存目前分頁",
-          detail: "寫回 Markdown 檔案",
+          title: t("palette.saveTab"),
+          detail: t("palette.saveTabDetail"),
           keywords: "save 儲存",
           hint: `${MOD} S`,
           icon: <IconDoc size={15} />,
@@ -256,8 +258,8 @@ export function CommandPalette() {
         },
         {
           key: "save-all",
-          title: "儲存所有分頁",
-          detail: "一次寫回全部未存檔的分頁",
+          title: t("palette.saveAll"),
+          detail: t("palette.saveAllDetail"),
           keywords: "save all 全部 儲存",
           icon: <IconDoc size={15} />,
           run: async () => {
@@ -269,8 +271,8 @@ export function CommandPalette() {
     list.push(
       {
         key: "undo",
-        title: "復原上一步",
-        detail: "還原最近一次結構變更",
+        title: t("palette.undo"),
+        detail: t("palette.undoDetail"),
         keywords: "undo 復原 還原",
         hint: `${MOD} Z`,
         icon: <IconRestore size={15} />,
@@ -280,8 +282,8 @@ export function CommandPalette() {
       },
       {
         key: "redo",
-        title: "重做上一步",
-        detail: "再次套用剛剛復原的結構變更",
+        title: t("palette.redo"),
+        detail: t("palette.redoDetail"),
         keywords: "redo 重做 重新",
         hint: `${MOD} ⇧ Z`,
         icon: <IconRestore size={15} />,
@@ -291,8 +293,8 @@ export function CommandPalette() {
       },
       {
         key: "reload",
-        title: "重新載入資料",
-        detail: "重新讀取專案、節點與垃圾桶",
+        title: t("palette.reload"),
+        detail: t("palette.reloadDetail"),
         keywords: "reload refresh 重新整理 同步",
         icon: <IconRestore size={15} />,
         run: async () => {
@@ -301,8 +303,8 @@ export function CommandPalette() {
       },
       {
         key: "help",
-        title: "快捷鍵與操作說明",
-        detail: "所有快速鍵與基本流程",
+        title: t("palette.helpTitle"),
+        detail: t("palette.helpDetail"),
         keywords: "help shortcut keys 說明 幫助 快捷鍵 教學",
         hint: "?",
         icon: <IconDoc size={15} />,
@@ -310,8 +312,8 @@ export function CommandPalette() {
       },
       {
         key: "tour",
-        title: "重新播放導覽",
-        detail: "重新選擇並播放各區塊導覽",
+        title: t("palette.tour"),
+        detail: t("palette.tourDetail"),
         keywords: "tour onboarding guide 導覽 教學 新手 引導",
         icon: <IconDoc size={15} />,
         run: () => {
@@ -338,6 +340,7 @@ export function CommandPalette() {
     togglePane,
     undoLast,
     updateUIPreference,
+    t,
   ]);
 
   const normalized = query.trim().toLowerCase();
@@ -355,12 +358,12 @@ export function CommandPalette() {
     ...matchedCommands.map((command) => ({
       ...command,
       kind: "action" as const,
-      group: normalized ? "命令" : "常用命令",
+      group: normalized ? t("palette.command") : t("palette.commands"),
     })),
     ...results.map((result, index) => ({
       key: `${result.project}:${result.nodeId ?? ""}:${index}`,
       kind: "result" as const,
-      group: "搜尋結果",
+      group: t("palette.searchResults"),
       resultKind: result.kind,
       project: result.project,
       nodeId: result.nodeId,
@@ -392,50 +395,52 @@ export function CommandPalette() {
         className="command-palette"
         role="dialog"
         aria-modal="true"
-        aria-label="全域搜尋與命令"
+        aria-label={t("topbar.searchOrCommand")}
         onPointerDown={(event) => event.stopPropagation()}
       >
         {view === "help" ? (
           <>
             <div className="command-palette-help-head">
-              <b>快捷鍵與操作說明</b>
+              <b>{t("palette.helpTitle")}</b>
               <button type="button" onClick={() => setView("list")}>
-                返回命令
+                {t("palette.returnToCommands")}
               </button>
             </div>
             <div className="command-palette-help">
               {HELP_SECTIONS.map((section) => (
                 <section key={section.title}>
-                  <h3>{section.title}</h3>
+                  <h3>{t(section.title)}</h3>
                   <dl>
                     {section.rows.map((row) => (
                       <div key={row.text}>
                         <dt>
                           {row.keys.map((key) => (
-                            <kbd key={key}>{key}</kbd>
+                            <kbd key={key}>
+                              {key.replace(/palette\.[\w.-]+/g, (token) => t(token))}
+                            </kbd>
                           ))}
                         </dt>
-                        <dd>{row.text}</dd>
+                        <dd>{t(row.text)}</dd>
                       </div>
                     ))}
                   </dl>
                 </section>
               ))}
               <section>
-                <h3>基本流程</h3>
+                <h3>{t("palette.basicWorkflow")}</h3>
                 <ol>
                   {USAGE_STEPS.map((step) => (
-                    <li key={step}>{step}</li>
+                    <li key={step}>{t(step)}</li>
                   ))}
                 </ol>
               </section>
             </div>
             <footer>
               <span>
-                <kbd>Esc</kbd> 關閉
+                <kbd>Esc</kbd> {t("palette.close")}
               </span>
               <span>
-                <kbd>Ctrl/⌘ K</kbd> 切換
+                <kbd>Ctrl/⌘ K</kbd> {t("palette.toggle")}
               </span>
             </footer>
           </>
@@ -446,8 +451,8 @@ export function CommandPalette() {
               <input
                 ref={inputRef}
                 value={query}
-                placeholder="搜尋所有專案、節點、Markdown；或執行命令（? 看說明）"
-                aria-label="搜尋"
+                placeholder={t("palette.searchPlaceholder")}
+                aria-label={t("palette.search")}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
@@ -511,24 +516,24 @@ export function CommandPalette() {
                   </button>
                 </div>
               ))}
-              {loading && <div className="command-palette-empty">搜尋中…</div>}
+              {loading && <div className="command-palette-empty">{t("palette.searching")}</div>}
               {!loading && normalized.length >= 2 && items.length === 0 && (
-                <div className="command-palette-empty">找不到符合的命令或內容</div>
+                <div className="command-palette-empty">{t("palette.noResults")}</div>
               )}
             </div>
             <footer>
               <span>
                 <kbd>↑</kbd>
-                <kbd>↓</kbd> 選擇
+                <kbd>↓</kbd> {t("palette.select")}
               </span>
               <span>
-                <kbd>Enter</kbd> 開啟
+                <kbd>Enter</kbd> {t("palette.open")}
               </span>
               <span>
-                <kbd>?</kbd> 說明
+                <kbd>?</kbd> {t("palette.helpShortcut")}
               </span>
               <span>
-                <kbd>Ctrl/⌘ K</kbd> 切換
+                <kbd>Ctrl/⌘ K</kbd> {t("palette.toggle")}
               </span>
             </footer>
           </>

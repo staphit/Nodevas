@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RemoteSyncState } from "../../api";
+import { useI18n } from "../../i18n";
 import { remoteScope, useApp, useOperationPending } from "../../store";
 import { reason } from "./format";
 
@@ -10,30 +11,33 @@ const attentionStates = new Set<RemoteSyncState>([
   "remote-missing",
 ]);
 
-function stateCopy(state: RemoteSyncState): { title: string; detail: string } {
+function stateCopy(
+  state: RemoteSyncState,
+  t: (key: string) => string,
+): { title: string; detail: string } {
   switch (state) {
     case "local-newer":
       return {
-        title: "本機版本較新",
-        detail: "雲端尚未包含目前修改，可立即上傳新的快照。",
+        title: t("backup.syncLocalNewer"),
+        detail: t("backup.syncLocalNewerDetail"),
       };
     case "remote-newer":
       return {
-        title: "雲端版本較新",
-        detail: "請先查看雲端快照，再決定是否匯入；Nodevas 不會自動覆蓋本機。",
+        title: t("backup.syncRemoteNewer"),
+        detail: t("backup.syncRemoteNewerDetail"),
       };
     case "conflict":
       return {
-        title: "本機與雲端都有修改",
-        detail: "這是同步衝突。請在版本中心選擇保留哪一邊。",
+        title: t("backup.syncConflict"),
+        detail: t("backup.syncConflictDetail"),
       };
     case "remote-missing":
       return {
-        title: "尚未建立雲端快照",
-        detail: "目前本機有內容，可建立第一份雲端版本。",
+        title: t("backup.syncRemoteMissing"),
+        detail: t("backup.syncRemoteMissingDetail"),
       };
     default:
-      return { title: "雲端同步", detail: "" };
+      return { title: t("backup.syncTitle"), detail: "" };
   }
 }
 
@@ -46,6 +50,7 @@ function stateCopy(state: RemoteSyncState): { title: string; detail: string } {
  * hand, which meant a push made by anything else left this banner lying.
  */
 export function RemoteSyncBanner({ onOpenBackup }: { onOpenBackup: () => void }) {
+  const { t } = useI18n();
   const status = useApp((state) => state.remoteSyncStatus);
   const refresh = useApp((state) => state.refreshRemoteSyncStatus);
   const flushRemoteSync = useApp((state) => state.flushRemoteSync);
@@ -55,9 +60,9 @@ export function RemoteSyncBanner({ onOpenBackup }: { onOpenBackup: () => void })
   const reload = useCallback(() => {
     void refresh().then(
       () => setError(""),
-      (failure: unknown) => setError(reason(failure, "無法取得同步狀態")),
+      (failure: unknown) => setError(reason(failure, t("backup.syncStatusError"))),
     );
-  }, [refresh]);
+  }, [refresh, t]);
 
   useEffect(reload, [reload]);
 
@@ -68,26 +73,26 @@ export function RemoteSyncBanner({ onOpenBackup }: { onOpenBackup: () => void })
   };
 
   if (!status || (!attentionStates.has(status.state) && !error)) return null;
-  const copy = stateCopy(status.state);
+  const copy = stateCopy(status.state, t);
   const canFlush = status.state === "local-newer" || status.state === "remote-missing";
 
   return (
     <div className={`remote-sync-banner ${status.state}`} role="status">
       <div>
         <strong>{error || copy.title}</strong>
-        <span>{error ? "請稍後重試，或開啟雲端備份中心檢查版本。" : copy.detail}</span>
+        <span>{error ? t("backup.syncRetryHint") : copy.detail}</span>
       </div>
       <div className="remote-sync-actions">
         {canFlush && (
           <button type="button" disabled={busy} onClick={() => void flush()}>
-            {busy ? "上傳中…" : "立即上傳"}
+            {busy ? t("backup.uploading") : t("backup.uploadNow")}
           </button>
         )}
         <button type="button" disabled={busy} onClick={onOpenBackup}>
-          查看版本
+          {t("backup.viewVersions")}
         </button>
         <button type="button" className="remote-sync-refresh" disabled={busy} onClick={reload}>
-          重查
+          {t("backup.recheck")}
         </button>
       </div>
     </div>

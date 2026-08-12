@@ -40,13 +40,15 @@ export function DocumentPersistenceBanner({
 }: {
   documents: ReadonlySet<string>;
 }) {
+  const { t } = useI18n();
   if (documents.size === 0) return null;
   return (
     <div className="document-persistence-alert" role="alert">
-      <strong>協作內容尚未受到伺服器保護</strong>
+      <strong>{t("persistence.title")}</strong>
       <span>
-        伺服器目前無法保護未儲存的協作內容。請保持此分頁開啟，立即匯出或複製內容，並重試儲存。
+        {t("persistence.description")}
       </span>
     </div>
   );
 }
+import { useI18n } from "../i18n";

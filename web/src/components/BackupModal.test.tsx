@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type RemoteConfig } from "../api";
+import { readPreferences } from "../preferences/storage";
 import { useApp } from "../store";
 import { resetCoalescing } from "../state/coalesce";
 import { BackupModal } from "./BackupModal";
@@ -81,6 +82,7 @@ beforeEach(() => {
   vi.mocked(api.listDriveBundles).mockResolvedValue({ parent: "root", bundles: [] });
   vi.mocked(api.pushRemote).mockResolvedValue({ backend: "folder", bundle: BUNDLE });
   useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
     remoteConfig: null,
     remoteBundles: null,
     remoteSyncStatus: null,

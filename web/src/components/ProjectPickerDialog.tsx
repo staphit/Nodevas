@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconClose } from "../icons";
 import { useApp } from "../store";
+import { useI18n } from "../i18n";
 
 export interface ProjectPickerOptions {
   title: string;
@@ -46,6 +47,7 @@ export function pickProject(options: ProjectPickerOptions): Promise<string | nul
 }
 
 export function ProjectPickerHost() {
+  const { t } = useI18n();
   const [request, setRequest] = useState<ProjectPickerRequest | null>(null);
   const [selected, setSelected] = useState("");
   const [filter, setFilter] = useState("");
@@ -134,7 +136,7 @@ export function ProjectPickerHost() {
             type="button"
             className="confirm-dialog-close"
             onClick={() => close(null)}
-            aria-label="關閉"
+            aria-label={t("common.close")}
           >
             <IconClose size={15} />
           </button>
@@ -143,13 +145,13 @@ export function ProjectPickerHost() {
           <input
             ref={filterRef}
             type="search"
-            placeholder="搜尋專案…"
+            placeholder={t("projectPicker.search")}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
           <ul className="project-picker-list">
             {options.length === 0 && !request.rootLabel && (
-              <li className="project-picker-empty">沒有可用的專案</li>
+              <li className="project-picker-empty">{t("projectPicker.empty")}</li>
             )}
             {/* Pinned above the filtered list rather than filtered with it: it
                 is the answer often enough that hunting for it, or losing it to
@@ -164,7 +166,7 @@ export function ProjectPickerHost() {
                   onDoubleClick={() => close(".")}
                 >
                   <span>{request.rootLabel}</span>
-                  <small>最上層</small>
+                    <small>{t("projectPicker.root")}</small>
                 </button>
               </li>
             )}
@@ -179,7 +181,7 @@ export function ProjectPickerHost() {
                   <span style={{ paddingLeft: `${project.depth * 12}px` }}>
                     {project.label}
                   </span>
-                  <small>{project.isFolder ? "目錄" : `${project.nodes} 個節點`}</small>
+                  <small>{project.isFolder ? t("projectPicker.folder") : t("projectPicker.nodes", { count: project.nodes })}</small>
                 </button>
               </li>
             ))}
@@ -187,7 +189,7 @@ export function ProjectPickerHost() {
         </div>
         <footer>
           <button type="button" onClick={() => close(null)}>
-            取消
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -195,7 +197,7 @@ export function ProjectPickerHost() {
             disabled={!selected}
             onClick={() => close(selected)}
           >
-            {request.confirmLabel ?? "確認"}
+            {request.confirmLabel ?? t("common.confirm")}
           </button>
         </footer>
       </section>

@@ -48,7 +48,7 @@ describe("TopbarOverflow", () => {
     const user = userEvent.setup();
     render(<TopbarOverflow items={items()} />);
 
-    const trigger = screen.getByRole("button", { name: "更多操作" });
+    const trigger = screen.getByRole("button", { name: "More actions" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await user.click(trigger);
 
@@ -62,7 +62,7 @@ describe("TopbarOverflow", () => {
     const onSelect = vi.fn();
     render(<TopbarOverflow items={items(onSelect)} />);
 
-    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
     await user.click(screen.getByRole("menuitem", { name: "專案設定" }));
 
     expect(onSelect).toHaveBeenCalledTimes(1);
@@ -75,7 +75,7 @@ describe("TopbarOverflow", () => {
     const user = userEvent.setup();
     render(<TopbarOverflow items={items()} />);
 
-    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "專案設定" })).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
@@ -90,7 +90,7 @@ describe("TopbarOverflow", () => {
     const user = userEvent.setup();
     render(<TopbarOverflow items={items()} />);
 
-    const trigger = screen.getByRole("button", { name: "更多操作" });
+    const trigger = screen.getByRole("button", { name: "More actions" });
     await user.click(trigger);
     await user.keyboard("{Escape}");
 
@@ -107,7 +107,7 @@ describe("TopbarOverflow", () => {
       </div>,
     );
 
-    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "畫布" }));

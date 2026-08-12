@@ -9,8 +9,13 @@
 
 import { useRef, useState } from "react";
 import { reportError } from "../../store";
-import { statusTheme } from "../../statusTheme";
-import { planOrderError, planStatusLabel } from "../../plan";
+import { planOrderError } from "../../plan";
+import {
+  localizePlanOrderError,
+  localizedPlanStatusLabel,
+  localizedStatusLabel,
+  useI18n,
+} from "../../i18n";
 import type {
   Graph,
   HistoryEvent,
@@ -83,6 +88,7 @@ export function useMilestoneDrag({
   /** False for a read-only session: a milestone cannot be dragged to a new date. */
   canEdit?: boolean;
 }) {
+  const { t, language } = useI18n();
   const planDragRef = useRef<PlanDragState | null>(null);
   const [planDrag, setPlanDrag] = useState<PlanDragState | null>(null);
   const actualDragRef = useRef<ActualDragState | null>(null);
@@ -191,7 +197,7 @@ export function useMilestoneDrag({
     const plans = graph?.ui?.plans?.[current.nodeId] ?? [];
     const error = planOrderError(plans, current.status, current.targetDate);
     if (error) {
-      setPlanNotice({ text: error, kind: "error" });
+      setPlanNotice({ text: localizePlanOrderError(error, language), kind: "error" });
       return;
     }
     void updatePlan({
@@ -205,9 +211,10 @@ export function useMilestoneDrag({
         return;
       }
       setPlanNotice({
-        text: `${planStatusLabel(current.status, planStatusDefinitions)}已移至 ${
-          current.targetDate
-        }`,
+        text: t("timeline.planMoved", {
+          label: localizedPlanStatusLabel(current.status, planStatusDefinitions, language),
+          date: current.targetDate,
+        }),
         kind: "ok",
       });
     });
@@ -287,7 +294,7 @@ export function useMilestoneDrag({
     const targetDay = parseLocalDay(current.targetDate);
     const sourceTime = new Date(current.eventTime);
     if (!targetDay || Number.isNaN(sourceTime.getTime())) {
-      setPlanNotice({ text: "無法解析實際紀錄日期", kind: "error" });
+      setPlanNotice({ text: t("timeline.invalidActualDate"), kind: "error" });
       return;
     }
     targetDay.setHours(
@@ -299,7 +306,10 @@ export function useMilestoneDrag({
     void moveStamp(current.eventId, targetDay.toISOString())
       .then(() =>
         setPlanNotice({
-          text: `實際${statusTheme(current.status, customStatuses).label}已移至 ${current.targetDate}，異動已寫入歷史`,
+          text: t("timeline.actualMoved", {
+            status: localizedStatusLabel(current.status, customStatuses, language),
+            date: current.targetDate,
+          }),
           kind: "ok",
         }),
       )

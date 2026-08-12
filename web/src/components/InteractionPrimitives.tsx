@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { useI18n } from "../i18n";
 
 export type OperationStatusValue =
   | "idle"
@@ -80,6 +81,7 @@ export function ResizeHandle({
   onReset,
   onResizeStateChange,
 }: ResizeHandleProps) {
+  const { t } = useI18n();
   const dragRef = useRef<{
     pointerId: number;
     coordinate: number;
@@ -126,7 +128,7 @@ export function ResizeHandle({
       aria-valuetext={valueText?.(value)}
       aria-disabled={disabled || undefined}
       tabIndex={disabled ? -1 : 0}
-      title={title ?? `${label}；拖曳或使用方向鍵，雙擊重設`}
+      title={title ?? t("common.resizeTitle", { label })}
       style={style}
       onPointerDown={(event) => {
         if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
@@ -272,12 +274,13 @@ export function OperationStatus({
   status: OperationStatusValue;
   message?: string;
 }) {
+  const { t } = useI18n();
   if (status === "idle") return null;
   const labels: Record<Exclude<OperationStatusValue, "idle">, string> = {
-    pending: "儲存中",
-    saved: "已儲存",
-    error: "儲存失敗",
-    conflict: "版本衝突",
+    pending: t("operation.pending"),
+    saved: t("operation.saved"),
+    error: t("operation.error"),
+    conflict: t("operation.conflict"),
   };
   return (
     // A conflict needs a decision, so it is announced like an error, not as

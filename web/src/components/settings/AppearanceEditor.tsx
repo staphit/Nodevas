@@ -1,9 +1,11 @@
 import { useApp } from "../../store";
+import { LANGUAGE_OPTIONS, useI18n } from "../../i18n";
 import { confirmAction } from "../ConfirmDialog";
 import type { SettingsNotify } from "./notify";
 
 /** Local preferences only — nothing here reaches the project files. */
 export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
+  const { language, setLanguage, t } = useI18n();
   const resetUIPreferences = useApp((s) => s.resetUIPreferences);
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
@@ -11,54 +13,67 @@ export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
   return (
     <section className="settings-section">
       <p className="settings-hint">
-        以下設定只存在這台機器的瀏覽器，不會寫進專案檔案。
+        {t("appearance.localOnly")}
       </p>
       <div className="settings-row">
-        <span>主題</span>
+        <span>{t("appearance.theme")}</span>
         <button type="button" onClick={toggleTheme}>
-          {theme === "dark" ? "切換為淺色" : "切換為深色"}
+          {theme === "dark" ? t("appearance.switchLight") : t("appearance.switchDark")}
         </button>
       </div>
       <div className="settings-row">
-        <span>版面</span>
+        <span>{t("appearance.language")}</span>
+        <select
+          value={language}
+          aria-label={t("language.label")}
+          onChange={(event) => setLanguage(event.target.value as typeof language)}
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {t(`language.option.${option}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="settings-row">
+        <span>{t("appearance.layout")}</span>
         <button
           type="button"
           onClick={() => {
             resetUIPreferences("layout");
-            notify.onNotice("已重設視窗版面");
+            notify.onNotice(t("appearance.layoutReset"));
           }}
         >
-          重設視窗比例與抽屜寬度
+          {t("appearance.resetLayout")}
         </button>
         <button
           type="button"
           onClick={() => {
             resetUIPreferences("timeline");
-            notify.onNotice("已恢復時間軸自動格寬");
+            notify.onNotice(t("appearance.timelineReset"));
           }}
         >
-          恢復時間軸自動格寬
+          {t("appearance.resetTimeline")}
         </button>
       </div>
       <div className="settings-row">
-        <span>全部</span>
+        <span>{t("appearance.all")}</span>
         <button
           type="button"
           className="danger"
           onClick={async () => {
             const confirmed = await confirmAction({
-              title: "重設全部本機偏好",
-              description:
-                "主題、視窗比例、專案總管寬度、時間軸設定都會回到預設值。專案資料不受影響。",
-              confirmLabel: "重設",
+              title: t("appearance.resetAllTitle"),
+              description: t("appearance.resetAllDescription"),
+              confirmLabel: t("appearance.reset"),
               tone: "danger",
             });
             if (!confirmed) return;
             resetUIPreferences();
-            notify.onNotice("已重設全部本機偏好");
+            notify.onNotice(t("appearance.resetAllNotice"));
           }}
         >
-          重設全部本機偏好
+          {t("appearance.resetAll")}
         </button>
       </div>
     </section>

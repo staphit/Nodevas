@@ -6,9 +6,14 @@
  * are deliberately shown together.
  */
 
-import { BUILTIN_PLAN_STATUSES, planStatusShortLabel } from "../../plan";
+import { BUILTIN_PLAN_STATUSES } from "../../plan";
 import { operationScope, reportError, useApp, useOperation } from "../../store";
-import { statusTheme } from "../../statusTheme";
+import {
+  formatLocalizedDateTime,
+  localizedPlanStatusLabel,
+  localizedStatusLabel,
+  useI18n,
+} from "../../i18n";
 import type { PlanStatus, Status } from "../../types";
 import { OperationStatus } from "../InteractionPrimitives";
 
@@ -31,6 +36,7 @@ function calendarDayDifference(left: string, right: string): number {
 }
 
 export function NodeTimeline({ id }: { id: string }) {
+  const { t, language } = useI18n();
   const graph = useApp((state) => state.graph);
   const runState = useApp((state) => state.runState);
   const upsertPlanMilestone = useApp((state) => state.upsertPlanMilestone);
@@ -71,12 +77,14 @@ export function NodeTimeline({ id }: { id: string }) {
   const assessment = (status: "started" | "done") => {
     const plan = plans.find((item) => item.status === status);
     const actual = statusEvents.find((event) => event.to === status);
-    const action = status === "started" ? "開工" : "完成";
+    const action = status === "started" ? t("timeline.startAction") : t("timeline.doneAction");
     if (!plan) {
       return {
         kind: "neutral",
-        result: `未設定預計${action}日`,
-        detail: actual ? `實際：${localDateKey(actual.t)}` : "尚無實際紀錄",
+        result: t("timeline.notPlanned", { action }),
+        detail: actual
+          ? t("timeline.actualDate", { date: localDateKey(actual.t) })
+          : t("timeline.noActual"),
       };
     }
     if (actual) {
@@ -86,11 +94,11 @@ export function NodeTimeline({ id }: { id: string }) {
         kind: difference <= 0 ? "on-time" : "late",
         result:
           difference === 0
-            ? `如期${action}`
+            ? t("timeline.onTime", { action })
             : difference < 0
-              ? `提前 ${Math.abs(difference)} 天${action}`
-              : `延遲 ${difference} 天${action}`,
-        detail: `預期 ${plan.date} · 實際 ${actualDate}`,
+              ? t("timeline.early", { days: String(Math.abs(difference)), action })
+              : t("timeline.late", { days: String(difference), action }),
+        detail: t("timeline.plannedActual", { planned: plan.date, actual: actualDate }),
       };
     }
     const today = localDateKey(new Date());
@@ -99,11 +107,11 @@ export function NodeTimeline({ id }: { id: string }) {
       kind: difference > 0 ? "late" : "pending",
       result:
         difference > 0
-          ? `逾期 ${difference} 天未${action}`
+          ? t("timeline.overdue", { days: String(difference), action })
           : difference === 0
-            ? `預計今日${action}`
-            : `距預計${action} ${Math.abs(difference)} 天`,
-      detail: `預期 ${plan.date} · 尚無實際紀錄`,
+            ? t("timeline.today", { action })
+            : t("timeline.daysUntil", { days: String(Math.abs(difference)), action }),
+      detail: t("timeline.plannedNoActual", { date: plan.date }),
     };
   };
 
@@ -111,11 +119,11 @@ export function NodeTimeline({ id }: { id: string }) {
   const doneAssessment = assessment("done");
 
   return (
-    <div className="node-timeline" role="tabpanel" aria-label="時間軸">
+    <div className="node-timeline" role="tabpanel" aria-label={t("timeline.aria")}>
       <div className="node-timeline-assessments">
         {[
-          ["開工", startAssessment],
-          ["完成", doneAssessment],
+          [t("timeline.assessment.start"), startAssessment],
+          [t("timeline.assessment.done"), doneAssessment],
         ].map(([label, item]) => {
           const result = item as ReturnType<typeof assessment>;
           return (
@@ -130,8 +138,8 @@ export function NodeTimeline({ id }: { id: string }) {
 
       <section className="node-timeline-plans">
         <div className="section-head">
-          <h3>預期里程碑</h3>
-          <span className="section-hint">寫入 graph.yaml，選定日期即儲存</span>
+          <h3>{t("timeline.plansTitle")}</h3>
+          <span className="section-hint">{t("timeline.plansHint")}</span>
           <OperationStatus
             status={planOperation.status}
             message={
@@ -143,7 +151,10 @@ export function NodeTimeline({ id }: { id: string }) {
         </div>
         <div className="timeline-plan-editor">
           {[
-            ...BUILTIN_PLAN_STATUSES,
+            ...BUILTIN_PLAN_STATUSES.map(({ status }) => ({
+              status,
+              label: localizedPlanStatusLabel(status, planStatusDefinitions, language),
+            })),
             ...planStatusDefinitions.map((definition) => ({
               status: definition.id as PlanStatus,
               label: definition.label,
@@ -162,7 +173,7 @@ export function NodeTimeline({ id }: { id: string }) {
                   type="time"
                   value={plan?.time ?? ""}
                   disabled={!plan?.date}
-                  title="時間（選填，精確到分鐘）"
+                  title={t("timeline.timeTitle")}
                   onChange={(event) => commitPlan(status, { time: event.target.value })}
                 />
                 {plan?.note && <small>「{plan.note}」</small>}
@@ -178,19 +189,19 @@ export function NodeTimeline({ id }: { id: string }) {
           )
           .map((plan) => (
             <div className="timeline-plan-edit-row in-progress" key={plan.status}>
-              <span>{planStatusShortLabel(plan.status, planStatusDefinitions)}</span>
+              <span>{localizedPlanStatusLabel(plan.status, planStatusDefinitions, language)}</span>
               <time>{plan.date}</time>
               <button type="button" onClick={() => commitPlanDate(plan.status, "")}>
-                移除
+                {t("timeline.remove")}
               </button>
             </div>
           ))}
       </section>
 
       <section className="node-timeline-audit">
-        <h3>實際異動順序</h3>
+        <h3>{t("timeline.auditTitle")}</h3>
         {auditEvents.length === 0 ? (
-          <div className="node-timeline-empty">尚無實際紀錄</div>
+          <div className="node-timeline-empty">{t("timeline.noAudit")}</div>
         ) : (
           <ol>
             {auditEvents.map(({ event, historyIndex }, sequence) => {
@@ -199,30 +210,30 @@ export function NodeTimeline({ id }: { id: string }) {
                 ? referenced?.to
                 : event.to) as Status | undefined;
               const statusLabel = status
-                ? statusTheme(status, customStatuses).label
-                : "事件";
+                ? localizedStatusLabel(status, customStatuses)
+                : t("timeline.event");
               const fromLabel = event.from
-                ? statusTheme(event.from, customStatuses).label
-                : "未開始";
+                ? localizedStatusLabel(event.from, customStatuses)
+                : t("timeline.notStarted");
               return (
                 <li key={`${event.id || event.ref || historyIndex}-${sequence}`}>
                   <span className={`timeline-audit-kind ${event.event}`}>
-                    {event.event === "move" ? "調整" : "實際"}
+                    {event.event === "move" ? t("timeline.adjustment") : t("timeline.actual")}
                   </span>
                   <div>
                     <b>
                       {event.event === "move"
-                        ? `調整${statusLabel}日期`
+                        ? t("timeline.adjustDate", { status: statusLabel })
                         : `${fromLabel} → ${
                             status ? statusLabel : event.to
                           }`}
                     </b>
                     <time>
-                      {event.event === "move" ? "調整為 " : ""}
-                      {new Date(event.t).toLocaleString()}
+                      {event.event === "move" ? t("timeline.adjustTo") : ""}
+                      {formatLocalizedDateTime(event.t, language)}
                     </time>
                     {event.event === "move" && event.recordedAt && (
-                      <small>異動於 {new Date(event.recordedAt).toLocaleString()}</small>
+                      <small>{t("timeline.recordedAt", { date: formatLocalizedDateTime(event.recordedAt, language) })}</small>
                     )}
                     {event.note && <small>「{event.note}」</small>}
                   </div>
@@ -234,7 +245,7 @@ export function NodeTimeline({ id }: { id: string }) {
       </section>
 
       <div className="node-timeline-help">
-        拖曳時間軸上的「實際」卡片可修正日期；每次修正都會新增調整紀錄。
+        {t("timeline.help")}
       </div>
     </div>
   );

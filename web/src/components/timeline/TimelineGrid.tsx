@@ -11,6 +11,12 @@ import { StatusShape } from "../../statusTheme";
 import type { GraphNode, Status, StatusDefinition } from "../../types";
 import { ResizeHandle } from "../InteractionPrimitives";
 import type { Col } from "../canvas/geometry";
+import {
+  formatLocalizedMonthDay,
+  formatLocalizedTime,
+  formatLocalizedWeekday,
+  useI18n,
+} from "../../i18n";
 
 export type TimelineRowItem =
   | { kind: "day"; date: Date; dayIndex: number }
@@ -136,6 +142,7 @@ export function TimelineGrid({
   timelineOrderDragRef,
   updateTimelineOrderDrag,
 }: TimelineGridProps) {
+  const { t, language } = useI18n();
   return (
     <>
         {timelineOrientation === "vertical" && (
@@ -144,7 +151,7 @@ export function TimelineGrid({
               {timelineCols.map((c, index) => {
                 const st: Status = statuses[c.node.id] ?? "ready";
                 const assigned =
-                  (c.node.assignee && userNames.get(c.node.assignee)) || "尚未指派";
+                  (c.node.assignee && userNames.get(c.node.assignee)) || t("timeline.unassigned");
                 return (
                   <button
                     key={c.node.id}
@@ -187,7 +194,7 @@ export function TimelineGrid({
                       selectNode(c.node.id);
                       void openTab(c.node.id).catch(reportError);
                     }}
-                    title={`${c.node.title || c.node.id} · ${assigned}（拖曳調整時間軸順序）`}
+                    title={t("timeline.reorderTitle", { title: c.node.title || c.node.id, assignee: assigned })}
                     aria-selected={selectedNodeId === c.node.id}
                   >
                     <StatusShape status={st} definitions={customStatuses} />
@@ -196,7 +203,7 @@ export function TimelineGrid({
                         <span className="lane-head-assignee">{assigned}</span>
                       </span>
                       {selectedNodeId === c.node.id && (
-                        <span className="lane-selected-tag">選取</span>
+                        <span className="lane-selected-tag">{t("timeline.selected")}</span>
                       )}
                   </button>
                 );
@@ -211,10 +218,10 @@ export function TimelineGrid({
                       key={`gap-${idx}`}
                       className="board-gap"
                       role="button"
-                      title="點擊展開這些日期"
+                      title={t("timeline.expandDates")}
                       onClick={() => setCollapse(false)}
                     >
-                      <div className="board-gap-label">{item.count} 天無紀錄，點擊展開</div>
+                      <div className="board-gap-label">{t("timeline.gapLabel", { count: String(item.count) })}</div>
                       <div className="board-date-r mono" style={{ width: RULER_W }}>
                         ⋯
                       </div>
@@ -264,20 +271,17 @@ export function TimelineGrid({
                       <div
                         className="now-line"
                         style={{ top: nowOffset }}
-                        aria-label={`目前時間 ${now.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}`}
+                        aria-label={t("timeline.now", { time: formatLocalizedTime(now, language) })}
                       />
                     )}
                     <div
                       className={`board-date-r mono${isToday ? " today" : ""}${isFuture ? " future" : ""}`}
                       style={{ width: RULER_W }}
                     >
-                      {d.getMonth() + 1}/{d.getDate()}
+                      {formatLocalizedMonthDay(d, language)}
                       {isToday && (
                         <span className="now-time">
-                          {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {formatLocalizedTime(now, language)}
                         </span>
                       )}
                     </div>
@@ -311,7 +315,7 @@ export function TimelineGrid({
                   height: HORIZONTAL_HEADER_H,
                 }}
               >
-                節點＼日期
+                {t("timeline.corner")}
               </div>
               {rowItems.map((item, index) => {
                 if (item.kind === "gap") {
@@ -322,7 +326,7 @@ export function TimelineGrid({
                       key={`head-gap-${index}`}
                       style={{ width: HORIZONTAL_GAP_W }}
                       onClick={() => setCollapse(false)}
-                      title={`${item.count} 天無紀錄；點擊展開`}
+                      title={t("timeline.gapLabel", { count: String(item.count) })}
                     >
                       ⋯
                     </button>
@@ -349,17 +353,14 @@ export function TimelineGrid({
                     style={{ width: timelineCellWidth }}
                   >
                     <b>
-                      {item.date.getMonth() + 1}/{item.date.getDate()}
+                      {formatLocalizedMonthDay(item.date, language)}
                     </b>
                     <span>
-                      {item.date.toLocaleDateString([], { weekday: "short" })}
+                      {formatLocalizedWeekday(item.date, language)}
                     </span>
                     {isToday && (
                       <small>
-                        {now.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {formatLocalizedTime(now, language)}
                       </small>
                     )}
                     {leftResizable && (
@@ -371,9 +372,9 @@ export function TimelineGrid({
                         max={TIMELINE_CELL_MAX_W}
                         direction={-1}
                         scale={zoom}
-                        label="從左側調整全部日期格寬度"
-                        title="拖曳調整全部日期格寬度；方向鍵微調；雙擊恢復自動"
-                        valueText={(value) => `${Math.round(value)} 像素，套用至全部日期格`}
+                        label={t("timeline.resizeLeft")}
+                        title={t("timeline.resizeTitle")}
+                        valueText={(value) => t("timeline.resizeValue", { value: String(Math.round(value)) })}
                         onChange={(value) => setTimelineCellSize("width", value)}
                         onReset={useAutoTimelineCellSize}
                         onResizeStateChange={(resizing) =>
@@ -389,9 +390,9 @@ export function TimelineGrid({
                         min={TIMELINE_CELL_MIN_W}
                         max={TIMELINE_CELL_MAX_W}
                         scale={zoom}
-                        label="從右側調整全部日期格寬度"
-                        title="拖曳調整全部日期格寬度；方向鍵微調；雙擊恢復自動"
-                        valueText={(value) => `${Math.round(value)} 像素，套用至全部日期格`}
+                        label={t("timeline.resizeRight")}
+                        title={t("timeline.resizeTitle")}
+                        valueText={(value) => t("timeline.resizeValue", { value: String(Math.round(value)) })}
                         onChange={(value) => setTimelineCellSize("width", value)}
                         onReset={useAutoTimelineCellSize}
                         onResizeStateChange={(resizing) =>
@@ -410,7 +411,7 @@ export function TimelineGrid({
                 const assigned =
                   (column.node.assignee &&
                     userNames.get(column.node.assignee)) ||
-                  "尚未指派";
+                  t("timeline.unassigned");
                 return (
                   <div
                     className={`horizontal-node-row${
@@ -469,7 +470,7 @@ export function TimelineGrid({
                         selectNode(column.node.id);
                         void openTab(column.node.id).catch(reportError);
                       }}
-                      title={`${column.node.title || column.node.id} · ${assigned}（拖曳調整時間軸順序）`}
+                      title={t("timeline.reorderTitle", { title: column.node.title || column.node.id, assignee: assigned })}
                       aria-selected={selectedNodeId === column.node.id}
                     >
                       <StatusShape
@@ -483,7 +484,7 @@ export function TimelineGrid({
                         <span className="lane-head-assignee">{assigned}</span>
                       </span>
                       {selectedNodeId === column.node.id && (
-                        <span className="lane-selected-tag">選取</span>
+                        <span className="lane-selected-tag">{t("timeline.selected")}</span>
                       )}
                     </button>
 
@@ -499,7 +500,7 @@ export function TimelineGrid({
                               height: timelineCellHeight,
                             }}
                             onClick={() => setCollapse(false)}
-                            title={`${item.count} 天無紀錄；點擊展開`}
+                            title={t("timeline.gapLabel", { count: String(item.count) })}
                           >
                             ⋯
                           </button>
@@ -563,10 +564,7 @@ export function TimelineGrid({
                     Math.max(timelineCols.length, 1) *
                     timelineCellHeight,
                 }}
-                aria-label={`目前時間 ${now.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}`}
+                aria-label={t("timeline.now", { time: formatLocalizedTime(now, language) })}
               />
             )}
           </div>

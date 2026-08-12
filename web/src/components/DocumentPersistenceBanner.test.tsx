@@ -1,10 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { readPreferences } from "../preferences";
+import { useApp } from "../store";
 import {
   degradedDocumentsReducer,
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./DocumentPersistenceBanner";
+
+beforeEach(() => {
+  useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+  useApp.getState().updateUIPreference("language", "zh-TW");
+});
 
 describe("document persistence events", () => {
   it("tracks each degraded document until its own restored event arrives", () => {

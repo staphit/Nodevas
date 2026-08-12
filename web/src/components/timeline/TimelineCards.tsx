@@ -8,7 +8,14 @@
 
 import { reportError } from "../../store";
 import { StatusShape, statusTheme } from "../../statusTheme";
-import { isBuiltinPlanStatus, planStatusLabel } from "../../plan";
+import {
+  formatLocalizedDateTime,
+  formatLocalizedTime,
+  localizedPlanStatusLabel,
+  localizedStatusLabel,
+  useI18n,
+} from "../../i18n";
+import { isBuiltinPlanStatus } from "../../plan";
 import type {
   BuiltinPlanStatus,
   HistoryEvent,
@@ -75,11 +82,12 @@ export function TimelineCards({
   openPlanMenu,
   nodeTitle,
 }: TimelineCardsProps) {
+  const { t, language } = useI18n();
   return (
     <>
       {plans.map((plan) => {
         const builtinStatus = isBuiltinPlanStatus(plan.status);
-        const label = planStatusLabel(plan.status, planStatusDefinitions);
+        const label = localizedPlanStatusLabel(plan.status, planStatusDefinitions, language);
         const lifting =
           planDrag?.nodeId === column.node.id &&
           planDrag.status === plan.status &&
@@ -120,12 +128,14 @@ export function TimelineCards({
                 plan.time ?? "",
               )
             }
-            title={`${label} ${plan.date}${
-              plan.time ? ` ${plan.time}` : ""
-            }（拖曳修改日期；右鍵修改註解與時間）`}
+            title={t("timeline.card.planTitle", {
+              label,
+              date: plan.date,
+              time: plan.time ? ` ${plan.time}` : "",
+            })}
           >
             <span className="snap-card-head">
-              <span className="record-kind expected">預期</span>
+              <span className="record-kind expected">{t("timeline.card.expected")}</span>
               {builtinStatus ? (
                 <StatusShape status={plan.status as BuiltinPlanStatus} size={11} />
               ) : (
@@ -137,7 +147,7 @@ export function TimelineCards({
             <span className="snap-card-title">
               {column.node.title || column.node.id}
             </span>
-            <span className="timeline-card-note">{plan.note || "無註解"}</span>
+            <span className="timeline-card-note">{plan.note || t("timeline.card.noNote")}</span>
           </div>
         );
       })}
@@ -180,36 +190,31 @@ export function TimelineCards({
               selectNode(historyEvent.node);
               void openTab(historyEvent.node).catch(reportError);
             }}
-            title={`${new Date(historyEvent.t).toLocaleString()} ${
+            title={`${formatLocalizedDateTime(historyEvent.t, language)} ${
               historyEvent.from
-                ? statusTheme(historyEvent.from, customStatuses).label
-                : "(初始)"
-            } → ${statusTheme(to, customStatuses).label}${
-              historyEvent.note ? `\n備註: ${historyEvent.note}` : ""
-            }\n${
-              draggable
-                ? "實際紀錄（拖曳修改日期；點擊開啟資訊）"
-                : "舊版實際紀錄（無事件 ID，無法拖曳）"
-            }`}
+                ? localizedStatusLabel(historyEvent.from, customStatuses)
+                : t("timeline.card.initial")
+            } → ${localizedStatusLabel(to, customStatuses)}${
+              historyEvent.note
+                ? `\n${t("timeline.card.note", { note: historyEvent.note })}`
+                : ""
+            }\n${draggable ? t("timeline.card.actualTitle") : t("timeline.card.legacyTitle")}`}
           >
             <span className="snap-card-head">
-              <span className="record-kind actual">實際</span>
+              <span className="record-kind actual">{t("timeline.card.actual")}</span>
               <StatusShape status={to} size={11} definitions={customStatuses} />
               <b style={{ color: statusTheme(to, customStatuses).color }}>
-                {statusTheme(to, customStatuses).label}
+                {localizedStatusLabel(to, customStatuses)}
               </b>
               <span className="snap-time mono">
-                {new Date(historyEvent.t).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatLocalizedTime(historyEvent.t, language)}
               </span>
             </span>
             <span className="snap-card-title">
               {nodeTitle(historyEvent.node)}
             </span>
             <span className="timeline-card-note">
-              {historyEvent.note || "無註解"}
+              {historyEvent.note || t("timeline.card.noNote")}
             </span>
           </div>
         );

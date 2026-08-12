@@ -1,6 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../../preferences";
+import { useApp } from "../../store";
 import { CanvasDecoration } from "./CanvasDecoration";
+
+beforeEach(() => {
+  useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+  useApp.getState().updateUIPreference("language", "zh-TW");
+});
 
 describe("CanvasDecoration color control", () => {
   it("uses one native color picker and saves immediately", () => {
