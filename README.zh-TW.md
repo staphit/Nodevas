@@ -76,6 +76,10 @@ go run ./cmd/nodevas serve -project ./workspace -port 5666
 - [OCI 部署](./deploy/oci/README.md)：建立與維運共享雲端部署。
 - [協助開發](./docs/contributing.md)：開發檢查與程式位置。
 
+## 程式碼簽章
+
+Windows 版本規劃使用 [SignPath.io](https://signpath.io) 提供的免費程式碼簽章,憑證由 [SignPath Foundation](https://signpath.org) 提供。詳見[簽章政策](./docs/code-signing-policy.md)。
+
 ## 授權
 
 Nodevas 採用 [GNU General Public License v3.0](./LICENSE) 授權。

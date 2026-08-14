@@ -76,6 +76,10 @@ Open <http://127.0.0.1:5666>. For production builds, development mode, configura
 - [OCI deployment](./deploy/oci/README.md): provision and operate a shared cloud deployment.
 - [Contributing](./docs/contributing.md): development checks and repository locations.
 
+## Code signing
+
+Windows releases are planned to be signed with free code signing provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org). See the [code signing policy](./docs/code-signing-policy.md).
+
 ## License
 
 Nodevas is licensed under the [GNU General Public License v3.0](./LICENSE).
