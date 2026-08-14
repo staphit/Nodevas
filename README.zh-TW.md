@@ -18,6 +18,15 @@ Nodevas 將分散的筆記與任務整理成一個可以看見、編輯並持續
 | [MCP 整合](./docs/mcp.md) | 讓 AI agent 找出 ready task、認領工作、更新節點、管理依賴並回報狀態。 |
 | [本機或共享工作區](./docs/collaboration.md) | 可在本機私人使用，也能部署共享 server 進行團隊協作。 |
 
+## Beta
+
+以下功能已可使用,但仍在 Beta 階段,後續版本可能調整:
+
+- [MCP 整合](./docs/mcp.md):AI agent 工具、資源與 prompts。
+- [即時共編](./docs/collaboration.md):共享 server、WebSocket 上線狀態與 CRDT 文件 session。
+- 雲端備份:Google Drive 同步、備份與還原。
+- 歷史紀錄:文件草稿、歷史版本與還原。
+
 ## 使用情境
 
 - [AI harness engineering](./demo/ai-harness-engineering)：搭配 MCP 讓 agent 安全處理具依賴關係的任務佇列。

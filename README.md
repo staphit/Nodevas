@@ -18,6 +18,15 @@ Nodevas turns scattered notes and tasks into a workspace you can see, edit, and 
 | [MCP integration](./docs/mcp.md) | Let AI agents discover ready tasks, claim work, update nodes, manage dependencies, and report status. |
 | [Local or shared workspace](./docs/collaboration.md) | Run privately on a local machine or deploy one shared server for team collaboration. |
 
+## Beta
+
+The following capabilities are available today but still in beta, and may change between releases:
+
+- [MCP integration](./docs/mcp.md): AI agent tools, resources, and prompts.
+- [Real-time co-editing](./docs/collaboration.md): shared servers, WebSocket presence, and CRDT document sessions.
+- Cloud backup: Google Drive sync, backup, and restore.
+- Version history: document drafts, past revisions, and restore.
+
 ## Use cases
 
 - [AI harness engineering](./demo/ai-harness-engineering): dependency-aware queues that agents can safely work through with MCP.
