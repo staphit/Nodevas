@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { declineTour, freshProject } from "./fixture";
+import { type Page } from "@playwright/test";
+import { declineTour, expect, freshProject, test } from "./fixture";
 
 /** The app boots with a project selected; wait for that rather than a timeout. */
 async function openApp(page: Page) {

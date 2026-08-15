@@ -1,5 +1,5 @@
-import { expect, test, type Page, type Locator } from "@playwright/test";
-import { freshProject } from "./fixture";
+import { type Page, type Locator } from "@playwright/test";
+import { expect, freshProject, test } from "./fixture";
 
 // Every timeline test edits the schedule, so each gets its own project.
 async function openApp(page: Page) {

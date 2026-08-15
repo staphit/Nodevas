@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { declineTour } from "./fixture";
+import { type Page } from "@playwright/test";
+import { declineTour, expect, test } from "./fixture";
 
 // The whole suite shares one workspace, and earlier specs rename, delete and
 // restore the fixture nodes. These tests therefore create the nodes they file,

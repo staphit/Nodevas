@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { declineTour, freshProject } from "./fixture";
+import { type Page } from "@playwright/test";
+import { declineTour, expect, freshProject, test } from "./fixture";
 
 async function openApp(page: Page) {
   await declineTour(page);
@@ -87,9 +87,14 @@ test.describe("theme", () => {
     await dialog.getByRole("button", { name: "重設全部本機偏好" }).click();
     await page.getByRole("button", { name: "重設", exact: true }).click();
 
-    await expect(dialog.getByText("已重設全部本機偏好")).toBeVisible();
-    await dialog.getByRole("button", { name: "關閉" }).click();
-    await expect(page.getByRole("separator", { name: "調整專案總管寬度" })).toHaveAttribute(
+    // The reset wipes every local preference — including the pinned zh-TW
+    // language — so the dialog has to be found again under its English name.
+    // The notice itself was translated at click time, before the language
+    // flipped, so it still reads in Chinese inside the English dialog.
+    const resetDialog = page.getByRole("dialog", { name: "Project settings" });
+    await expect(resetDialog.getByText("已重設全部本機偏好")).toBeVisible();
+    await resetDialog.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("separator", { name: "Resize project explorer" })).toHaveAttribute(
       "aria-valuenow",
       "304",
     );
