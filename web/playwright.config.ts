@@ -22,6 +22,10 @@ export default defineConfig({
   // CI runners have 4 vCPUs; three servers plus three browsers is the most
   // that fits without thrashing. Locally the Playwright default applies.
   workers: process.env.CI ? 3 : undefined,
+  // One retry on CI: a pass-on-retry is reported as "flaky" instead of
+  // failing the build, while a real bug stays red. Locally failures stay
+  // loud so they get fixed, not retried away.
+  retries: process.env.CI ? 1 : 0,
   globalSetup: "./e2e/global-setup",
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   use: {

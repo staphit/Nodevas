@@ -16,10 +16,13 @@ test.describe("main flows", () => {
     const createButtons = page.getByRole("button", { name: /新增節點/ });
     await createButtons.first().click();
 
-    const title = page.getByLabel("節點標題");
+    // More than one create form can be mounted at once (canvas menu, sidebar),
+    // so every step stays inside the one form.
+    const form = page.locator(".node-create-form").first();
+    const title = form.getByLabel("節點標題");
     await expect(title).toBeVisible();
     await title.fill("端對端節點");
-    await page.getByRole("button", { name: "建立節點" }).click();
+    await form.getByRole("button", { name: "建立節點" }).click();
 
     await expect(page.getByText("端對端節點").first()).toBeVisible();
   });
