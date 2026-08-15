@@ -1,0 +1,36 @@
+{
+  "cases": [
+    { "name": "and unwired", "operator": "and", "inputs": [], "done": [], "satisfied": false, "blockedBy": [] },
+    { "name": "and half-wired complete", "operator": "and", "inputs": ["a"], "done": ["a"], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "must pending", "operator": "must", "inputs": ["a"], "done": [], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "must complete", "operator": "must", "inputs": ["a"], "done": ["a"], "satisfied": true, "blockedBy": [] },
+
+    { "name": "and none", "operator": "and", "inputs": ["a", "b"], "done": [], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "and left", "operator": "and", "inputs": ["a", "b"], "done": ["a"], "satisfied": false, "blockedBy": ["b"] },
+    { "name": "and right", "operator": "and", "inputs": ["a", "b"], "done": ["b"], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "and both", "operator": "and", "inputs": ["a", "b"], "done": ["a", "b"], "satisfied": true, "blockedBy": [] },
+
+    { "name": "or none", "operator": "or", "inputs": ["a", "b"], "done": [], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "or left", "operator": "or", "inputs": ["a", "b"], "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "or right", "operator": "or", "inputs": ["a", "b"], "done": ["b"], "satisfied": true, "blockedBy": [] },
+    { "name": "or both", "operator": "or", "inputs": ["a", "b"], "done": ["a", "b"], "satisfied": true, "blockedBy": [] },
+
+    { "name": "xor none", "operator": "xor", "inputs": ["a", "b"], "done": [], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "xor left", "operator": "xor", "inputs": ["a", "b"], "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "xor right", "operator": "xor", "inputs": ["a", "b"], "done": ["b"], "satisfied": true, "blockedBy": [] },
+    { "name": "xor both", "operator": "xor", "inputs": ["a", "b"], "done": ["a", "b"], "satisfied": false, "blockedBy": ["a", "b"] },
+
+    { "name": "nand none", "operator": "nand", "inputs": ["a", "b"], "done": [], "satisfied": true, "blockedBy": [] },
+    { "name": "nand left", "operator": "nand", "inputs": ["a", "b"], "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "nand right", "operator": "nand", "inputs": ["a", "b"], "done": ["b"], "satisfied": true, "blockedBy": [] },
+    { "name": "nand both", "operator": "nand", "inputs": ["a", "b"], "done": ["a", "b"], "satisfied": false, "blockedBy": ["a", "b"] },
+
+    { "name": "nor none", "operator": "nor", "inputs": ["a", "b"], "done": [], "satisfied": true, "blockedBy": [] },
+    { "name": "nor left", "operator": "nor", "inputs": ["a", "b"], "done": ["a"], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "nor right", "operator": "nor", "inputs": ["a", "b"], "done": ["b"], "satisfied": false, "blockedBy": ["b"] },
+    { "name": "nor both", "operator": "nor", "inputs": ["a", "b"], "done": ["a", "b"], "satisfied": false, "blockedBy": ["a", "b"] },
+
+    { "name": "optional relation output", "operator": "optional", "inputs": ["a"], "done": [], "satisfied": true, "blockedBy": [], "edgeRelation": "optional" },
+    { "name": "deprecated relation output", "operator": "deprecated", "inputs": ["a"], "done": [], "satisfied": true, "blockedBy": [], "edgeRelation": "deprecated" }
+  ]
+}

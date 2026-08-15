@@ -1,0 +1,182 @@
+/* Onboarding tour: welcome dialog + chapter spotlights.
+ *
+ * The darkening for targeted steps comes from `.tour-highlight`'s huge
+ * box-shadow (classic cutout trick); `.tour-backdrop` itself stays transparent
+ * and only swallows clicks. Target-less steps and the welcome dialog dim the
+ * whole screen with the same scrim recipe as `.confirm-backdrop`
+ * (02-shell.css). */
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: transparent;
+}
+.tour-backdrop--dim {
+  background: color-mix(in srgb, var(--scrim) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+/* Accent glow layers sit before the giant scrim shadow so the cutout still
+ * darkens the rest of the screen; the pulse animates only the glow. */
+.tour-highlight {
+  position: fixed;
+  z-index: 130;
+  pointer-events: none;
+  border-radius: 10px;
+  outline: 3px solid var(--accent);
+  outline-offset: 0;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 0 24px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 0 0 100vmax color-mix(in srgb, var(--scrim) 70%, transparent);
+  animation: tour-highlight-pulse 2s var(--ease-out) infinite;
+  transition: top 240ms var(--ease-out), left 240ms var(--ease-out),
+    width 240ms var(--ease-out), height 240ms var(--ease-out);
+}
+
+@keyframes tour-highlight-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent),
+      0 0 24px color-mix(in srgb, var(--accent) 45%, transparent),
+      0 0 0 100vmax color-mix(in srgb, var(--scrim) 70%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent),
+      0 0 36px color-mix(in srgb, var(--accent) 60%, transparent),
+      0 0 0 100vmax color-mix(in srgb, var(--scrim) 70%, transparent);
+  }
+}
+
+.tour-popover {
+  position: fixed;
+  z-index: 131;
+  width: max-content;
+  max-width: 320px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--border-strong);
+  border-top: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--shadow) 75%, transparent);
+  transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.tour-popover:focus {
+  outline: none;
+}
+
+.tour-title {
+  display: block;
+  color: var(--accent);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.tour-body {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.tour-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.tour-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.tour-dot--active {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+/* Four buttons at the widest step (略過, 全部略過, 上一步, 下一步) can exceed the
+ * card's 320px, and every label is nowrap; wrapping keeps the last one from
+ * being pushed off the edge. */
+.tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+.tour-actions-spacer {
+  flex: 1;
+}
+
+.tour-btn {
+  min-height: 28px;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tour-btn:hover {
+  background: var(--surface-2);
+}
+.tour-btn--primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.tour-btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+.tour-btn--ghost {
+  border-color: transparent;
+  color: var(--text-2);
+  background: transparent;
+}
+.tour-btn--ghost:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Opt-in welcome dialog: same scrim + card recipe as `.confirm-backdrop`. */
+.tour-welcome-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--scrim) 82%, transparent);
+  backdrop-filter: blur(3px);
+}
+.tour-welcome {
+  width: min(360px, 100%);
+  padding: 18px 20px 16px;
+  border: 1px solid var(--border-strong);
+  border-top: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--shadow) 75%, transparent);
+}
+.tour-welcome:focus {
+  outline: none;
+}
+.tour-welcome .tour-body {
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-highlight,
+  .tour-popover,
+  .tour-dot {
+    transition: none;
+  }
+  .tour-highlight {
+    animation: none;
+  }
+}

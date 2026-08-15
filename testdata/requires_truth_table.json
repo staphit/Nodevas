@@ -1,0 +1,29 @@
+{
+  "cases": [
+    { "name": "empty", "requires": "", "done": [], "satisfied": true, "blockedBy": [] },
+    { "name": "node pending", "requires": "a", "done": [], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "node done", "requires": "a", "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "and pending", "requires": "a and b", "done": ["a"], "satisfied": false, "blockedBy": ["b"] },
+    { "name": "or pending", "requires": "a or b", "done": [], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "or satisfied", "requires": "a or b", "done": ["b"], "satisfied": true, "blockedBy": [] },
+    { "name": "not satisfied", "requires": "not a", "done": [], "satisfied": true, "blockedBy": [] },
+    { "name": "not false", "requires": "not a", "done": ["a"], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "xor none", "requires": "a xor b", "done": [], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "xor one", "requires": "a xor b", "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "xor both", "requires": "a xor b", "done": ["a", "b"], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "nand one", "requires": "a nand b", "done": ["a"], "satisfied": true, "blockedBy": [] },
+    { "name": "nand all", "requires": "a nand b", "done": ["a", "b"], "satisfied": false, "blockedBy": ["a", "b"] },
+    { "name": "nor none", "requires": "a nor b", "done": [], "satisfied": true, "blockedBy": [] },
+    { "name": "nor one", "requires": "a nor b", "done": ["a"], "satisfied": false, "blockedBy": ["a"] },
+    { "name": "precedence", "requires": "a or b and c", "done": ["b"], "satisfied": false, "blockedBy": ["a", "c"] },
+    { "name": "all any", "requires": "all(a, any(b, c))", "done": ["a", "c"], "satisfied": true, "blockedBy": [] },
+    { "name": "graph flag false", "requires": "flag(approved)", "done": [], "graphFlags": { "approved": false }, "satisfied": false, "blockedBy": [] },
+    { "name": "runtime flag overrides", "requires": "flag(approved)", "done": [], "graphFlags": { "approved": false }, "runtimeFlags": { "approved": true }, "satisfied": true, "blockedBy": [] },
+    { "name": "numeric flag", "requires": "flag(karma >= 3)", "done": [], "runtimeFlags": { "karma": 3 }, "satisfied": true, "blockedBy": [] },
+    { "name": "string flag", "requires": "flag(mood == happy)", "done": [], "runtimeFlags": { "mood": "sad" }, "satisfied": false, "blockedBy": [] },
+    { "name": "mixed", "requires": "chapter-2 and flag(karma >= 3)", "done": [], "runtimeFlags": { "karma": 5 }, "satisfied": false, "blockedBy": ["chapter-2"] },
+    { "name": "parse error", "requires": "a and and", "done": ["a"], "valid": false, "satisfied": false, "blockedBy": [] },
+    { "name": "keyword flag name", "requires": "flag(and)", "done": [], "valid": false, "satisfied": false, "blockedBy": [] },
+    { "name": "non ascii whitespace", "requires": "a\u00a0and b", "done": ["a", "b"], "valid": false, "satisfied": false, "blockedBy": [] }
+  ]
+}

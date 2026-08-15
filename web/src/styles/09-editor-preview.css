@@ -1,0 +1,530 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * live markdown, tables, export, preview
+ */
+/* ---------- editor: live markdown ---------- */
+/* One row of icons like a document editor's, not a wall of labels. */
+.editor-tool-more {
+  position: relative;
+}
+.editor-tool-more > summary {
+  list-style: none;
+}
+.editor-tool-more > summary::-webkit-details-marker {
+  display: none;
+}
+.editor-tool-more[open] > summary {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.editor-tool-more-panel {
+  position: absolute;
+  z-index: var(--z-drawer);
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(360px, 78vw);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px var(--shadow);
+}
+.editor-tool-more-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.editor-tool-more-label {
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 32px;
+}
+.editor-mode-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.editor-tool-more-hint {
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.tool-number {
+  width: 56px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+}
+.tool-btn.danger:hover {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.tool-btn:disabled:hover {
+  background: none;
+  color: var(--text-2);
+}
+
+/* ---------- table structure bar ---------- */
+/* Appears only while the caret is inside a table, so the row of arrows is
+   never noise on prose. */
+.editor-table-toolbar {
+  gap: 2px;
+  padding: 4px 10px;
+  background: var(--surface-2);
+}
+.editor-table-where {
+  margin-right: 6px;
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.editor-table-toolbar .tool-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+/* ---------- export panel ---------- */
+.editor-export > .editor-tool-more-panel {
+  left: auto;
+  right: 0;
+  width: min(320px, 80vw);
+}
+.editor-export-title {
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.editor-export-scopes {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.editor-export-scopes button {
+  flex: 1;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.editor-export-scopes button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.editor-export-scopes button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.editor-export-formats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+}
+.editor-export-formats button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.editor-export-formats button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.editor-export-formats button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.editor-export-formats b {
+  font-size: 12px;
+}
+.editor-export-formats span {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.editor-export-notice {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Live preview: the document is markdown, the rendering is decoration. */
+.cm-editor .cm-live-h1,
+.cm-editor .cm-live-h2,
+.cm-editor .cm-live-h3 {
+  color: var(--text);
+}
+.cm-editor .cm-live-bullet {
+  color: var(--accent);
+}
+.cm-editor input.cm-live-task {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cm-editor .cm-live-image {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+}
+
+.markdown-help {
+  position: relative;
+}
+.markdown-help > summary {
+  list-style: none;
+}
+.markdown-help > summary::-webkit-details-marker {
+  display: none;
+}
+.markdown-help[open] > summary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.markdown-help-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(520px, 65vh);
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 36px var(--shadow);
+}
+.markdown-help-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.markdown-help-grid {
+  display: grid;
+  gap: 3px;
+}
+.markdown-help-row {
+  display: grid;
+  grid-template-columns: minmax(145px, 1fr) minmax(110px, 0.8fr);
+  gap: 10px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: 4px;
+}
+.markdown-help-row:nth-child(odd) {
+  background: var(--surface-2);
+}
+.markdown-help-row code {
+  overflow-wrap: anywhere;
+  color: var(--st-progress-fg);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.markdown-help-row span {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.markdown-help-note {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.tool-fs {
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 18px;
+  text-align: center;
+}
+.tool-color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 12px;
+  border-bottom: 3px solid var(--st-failed-fg);
+}
+.tool-color:hover {
+  background: var(--surface-2);
+}
+.tool-color input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---------- editor & preview ---------- */
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.editor .cm-editor {
+  height: 100%;
+}
+.editor .cm-content {
+  padding: 14px 6px;
+  line-height: 1.7;
+}
+.editor .cm-gutters {
+  display: none;
+}
+.md-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 24px;
+  line-height: 1.7;
+  max-width: 100%;
+}
+.md-preview h1 {
+  font-size: 1.55em;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0.6em 0 0.4em;
+}
+.md-preview h2 {
+  font-size: 1.32em;
+  letter-spacing: -0.01em;
+  margin: 0.8em 0 0.4em;
+}
+.md-preview h3 {
+  font-size: 1.15em;
+  margin: 0.8em 0 0.3em;
+}
+.md-preview code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--scrim);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.md-preview pre code {
+  display: block;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.md-preview blockquote {
+  margin: 0.6em 0;
+  padding: 2px 14px;
+  border-left: 3px solid var(--border);
+  color: var(--text-2);
+}
+.md-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+.md-preview img {
+  max-width: 100%;
+}
+.md-preview table {
+  border-collapse: collapse;
+}
+.md-preview th,
+.md-preview td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+}
+
+/* The document saves itself, so this row is the only place a person can check
+   that it did. The save badge leads and the keyboard hint trails, pushed to the
+   far edge so a failure and its retry button never move. */
+.tab-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface-2);
+}
+.tab-footer .tab-footer-hint {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.tab-footer .tab-footer-retry {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tab-footer button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* ---------- detached document editor ---------- */
+.popout-editor-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface);
+}
+.popout-editor-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 54px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.popout-editor-title,
+.popout-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.popout-editor-title > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.popout-editor-title > div {
+  display: grid;
+  min-width: 0;
+}
+.popout-editor-title strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popout-editor-title span,
+.popout-editor-actions > span {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.popout-editor-actions > span.unsaved {
+  color: var(--st-ready-fg);
+}
+.popout-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.popout-editor-actions .icon-button {
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  background: transparent;
+}
+.popout-editor-actions .icon-button:hover {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
+}
+.popout-editor-actions kbd {
+  opacity: 0.8;
+}
+.popout-banner {
+  flex-shrink: 0;
+}
+.popout-editor,
+.popout-editor .cm-editor {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.popout-editor .cm-gutters {
+  display: none;
+}
+/* Readable document column: CodeMirror's scroller is a flex row, so an
+   auto-margin content block centers like a page. */
+.popout-editor .cm-content {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  padding: 26px 34px 60vh;
+  line-height: 1.7;
+  font-size: 14px;
+}
+.popout-editor .cm-activeLine {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.popout-editor .cm-scroller {
+  overflow: auto;
+}
+.popout-editor .cm-content {
+  width: min(920px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 30px 8px 120px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.popout-editor .cm-gutters {
+  display: none;
+}
+.popout-editor-loading {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  color: var(--text-2);
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    animation: drawer-fade 160ms ease;
+  }
+  @keyframes drawer-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  button:active {
+    transform: none;
+  }
+  .lane-card:active {
+    transform: none;
+  }
+}

@@ -1,0 +1,92 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * per-node history
+ */
+/* ---------- per-node history ---------- */
+.node-history {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12px;
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.node-history summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text-2);
+  user-select: none;
+}
+.node-history summary:hover {
+  color: var(--text);
+}
+.nh-events,
+.nh-files ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 8px;
+}
+.nh-events li,
+.nh-files li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+.nh-time {
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.nh-by {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.nh-note {
+  color: var(--st-progress-fg);
+}
+.nh-size {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.nh-files {
+  padding: 4px 12px 10px;
+  border-top: 1px dashed var(--border);
+}
+.nh-files > b {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.nh-none {
+  margin-left: 8px;
+  color: var(--text-2);
+}
+.nh-files button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.nh-files button:hover {
+  background: var(--bg);
+}
+
+/* card == cell exactly: borders sit on grid lines */
+.col-card {
+  border-radius: 0;
+  transition: box-shadow 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+.tl-marker {
+  cursor: grab;
+  touch-action: none;
+}
+.tl-marker.lifting {
+  position: relative;
+  z-index: 15;
+  cursor: grabbing;
+  filter: drop-shadow(0 2px 6px var(--shadow));
+}

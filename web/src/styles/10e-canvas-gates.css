@@ -1,0 +1,257 @@
+/* Split out of the original 10-canvas.css (now several ordered siblings).
+ * app.css imports these in the original file's rule order — moving rules
+ * between files, or reordering the imports, can change which one wins.
+ *
+ * gate wiring
+ */
+/* ---------- logic-gate wiring: obvious at a glance ---------- */
+:root {
+  --wire: #8f8b84;
+}
+[data-theme="dark"] {
+  --wire: #7d7a74;
+}
+.edge-wire {
+  stroke: var(--wire);
+  stroke-width: 1.75;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.edge-hit-target {
+  stroke: transparent;
+  stroke-width: 14;
+  fill: none;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+.dependency-line.inserting-vertex .edge-hit-target {
+  cursor: copy;
+}
+.dependency-line.selected .edge-wire {
+  stroke: var(--st-progress-fg);
+  stroke-width: 3;
+}
+/* Line and meaning are independent: the dash pattern comes from `line-*`,
+   the tint from `relation-*`. */
+.edge-wire.line-dashed {
+  stroke-dasharray: 6 4;
+}
+.edge-wire.line-dotted {
+  stroke-dasharray: 1.5 4;
+  stroke-linecap: round;
+}
+/* Deprecated: still drawn, but visibly out of play — dashed and greyed. */
+.edge-wire.relation-deprecated {
+  stroke: var(--text-2);
+  opacity: 0.45;
+}
+.edge-wire.muted {
+  stroke: var(--text-2);
+  opacity: 0.45;
+}
+.dependency-line.selected .edge-wire.relation-deprecated,
+.dependency-line.selected .edge-wire.muted {
+  opacity: 1;
+}
+.arrowhead-fill {
+  fill: var(--wire);
+}
+.arrowhead-fill.muted {
+  fill: color-mix(in srgb, var(--text-2) 55%, transparent);
+}
+.connection-draft {
+  pointer-events: none;
+}
+.connection-draft-line {
+  fill: none;
+  stroke: var(--st-progress-fg);
+  stroke-width: 2.5;
+  stroke-dasharray: 7 4;
+  vector-effect: non-scaling-stroke;
+}
+.connection-draft.invalid .connection-draft-line {
+  stroke: var(--st-failed-fg);
+}
+.connection-port,
+.connection-port-preview {
+  fill: var(--surface);
+  stroke: var(--st-progress-fg);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.connection-port-preview {
+  fill: color-mix(in srgb, var(--st-progress-bg) 70%, var(--surface));
+  stroke-dasharray: 2 2;
+}
+.connection-draft.invalid .connection-port.target {
+  stroke: var(--st-failed-fg);
+  fill: var(--st-failed-bg);
+}
+/* Invisible grab area around a bend point: small dots are hard to hit, and a
+   vertex that cannot be grabbed cannot be deleted either. */
+.edge-vertex-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: move;
+  pointer-events: all;
+}
+.edge-vertex-hit:hover + .edge-vertex {
+  fill: var(--st-progress-bg);
+  stroke: var(--st-progress-fg);
+  stroke-width: 2.5;
+}
+.edge-vertex {
+  pointer-events: none;
+  fill: var(--surface);
+  stroke: var(--wire);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  cursor: move;
+  pointer-events: all;
+}
+.edge-vertex:hover,
+.edge-vertex.selected {
+  fill: var(--st-progress-bg);
+  stroke: var(--st-progress-fg);
+  stroke-width: 2.5;
+}
+.edge-vertex-preview {
+  fill: color-mix(in srgb, var(--st-progress-fg) 28%, var(--surface));
+  stroke: var(--st-progress-fg);
+  stroke-width: 2;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.gate-node {
+  stroke: var(--wire);
+  stroke-width: 1.5;
+  fill: var(--surface);
+  vector-effect: non-scaling-stroke;
+}
+.gate-handle {
+  cursor: grab;
+  touch-action: none;
+  pointer-events: all;
+}
+.gate-handle:hover .gate-node,
+.gate-handle.dragging .gate-node {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 1px 3px var(--shadow));
+}
+.gate-handle.dragging {
+  cursor: grabbing;
+}
+.gate-label {
+  fill: var(--text);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.gate.gate-invalid .gate-node {
+  stroke: var(--st-failed-fg) !important;
+  stroke-width: 2.4;
+  fill: color-mix(in srgb, var(--st-failed-bg) 60%, var(--surface));
+}
+.gate.gate-invalid .gate-label {
+  fill: var(--st-failed-fg);
+}
+.gate-and .gate-node { stroke: var(--st-done-fg); }
+.gate-optional .gate-node { stroke: var(--st-ready-fg); }
+.gate-deprecated .gate-node {
+  stroke: var(--text-2);
+  stroke-dasharray: 4 3;
+  fill: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  opacity: 0.6;
+}
+.gate-deprecated .gate-label {
+  fill: var(--text-2);
+  opacity: 0.75;
+}
+.gate-or .gate-node { stroke: var(--st-progress-fg); }
+.gate-xor .gate-node { stroke: var(--st-ready-fg); }
+.gate-not .gate-node { stroke: var(--st-failed-fg); }
+.gate-nand .gate-node { stroke: var(--st-skipped-fg); }
+.gate-nor .gate-node { stroke: var(--st-failed-fg); }
+
+.logic-gate {
+  outline: none;
+}
+.logic-gate-shape {
+  fill: var(--surface);
+  stroke: var(--st-done-fg);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+/* per-operator stroke colors (match pill gate palette) */
+.gate-must .logic-gate-shape { stroke: var(--accent); }
+.gate-and .logic-gate-shape { stroke: var(--st-done-fg); }
+.gate-or .logic-gate-shape { stroke: var(--st-progress-fg); }
+.gate-xor .logic-gate-shape { stroke: var(--st-ready-fg); }
+.gate-nand .logic-gate-shape { stroke: var(--st-skipped-fg); }
+.gate-nor .logic-gate-shape { stroke: var(--st-failed-fg); }
+.gate-optional .logic-gate-shape { stroke: var(--st-ready-fg); }
+.gate-deprecated .logic-gate-shape {
+  stroke: var(--text-2);
+  stroke-dasharray: 4 3;
+}
+.logic-gate-symbol-label,
+.logic-gate-count {
+  fill: var(--text);
+  font-family: var(--mono);
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+.logic-gate-symbol-label {
+  font-size: 8.5px;
+}
+.logic-gate-count {
+  font-size: 8px;
+  fill: var(--text-2);
+}
+.logic-gate.invalid .logic-gate-shape {
+  fill: color-mix(in srgb, var(--st-failed-bg) 72%, var(--surface));
+  stroke: var(--st-failed-fg);
+  stroke-width: 2.6;
+}
+.logic-gate.invalid .logic-gate-count {
+  fill: var(--st-failed-fg);
+}
+.logic-gate-delete {
+  cursor: pointer;
+}
+.logic-gate-delete circle {
+  fill: var(--st-failed-fg);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+.logic-gate-delete path {
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.logic-gate-delete:hover circle {
+  filter: brightness(1.15);
+}
+.logic-gate.selected .logic-gate-shape,
+.logic-gate.connection-source .logic-gate-shape {
+  stroke-width: 3;
+  filter: drop-shadow(0 1px 4px var(--shadow));
+}
+.logic-gate.connection-target.valid .logic-gate-shape {
+  fill: color-mix(in srgb, var(--st-done-bg) 72%, var(--surface));
+  stroke: var(--st-done-fg);
+  stroke-width: 3.5;
+}
+.logic-gate.connection-target.invalid .logic-gate-shape {
+  fill: color-mix(in srgb, var(--st-failed-bg) 80%, var(--surface));
+  stroke: var(--st-failed-fg);
+  stroke-width: 3.5;
+}
+

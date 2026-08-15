@@ -1,0 +1,142 @@
+version: 1
+type: workflow
+users:
+    - id: alex
+      name: Alex
+    - id: team
+      name: Team
+nodes:
+    - id: node-0001
+      title: Inbox triage
+      kind: task
+      priority: urgent
+      assignee: alex
+      deadline: "2026-08-13"
+      tags:
+        - daily
+        - focus
+    - id: node-0002
+      title: 'Focus block: architecture'
+      kind: task
+      priority: high
+      assignee: alex
+      deadline: 2026-08-13T11:30
+      requires: node-0001
+      tags:
+        - daily
+        - deep-work
+    - id: node-0003
+      title: Team sync
+      kind: task
+      priority: medium
+      assignee: team
+      deadline: 2026-08-13T14:00
+      requires: node-0001
+      tags:
+        - daily
+        - meeting
+    - id: node-0004
+      title: Client follow-up
+      kind: task
+      priority: high
+      assignee: alex
+      deadline: "2026-08-14"
+      requires: node-0003
+      tags:
+        - daily
+        - external
+    - id: node-0005
+      title: Documentation block
+      kind: task
+      priority: medium
+      assignee: alex
+      deadline: "2026-08-14"
+      requires: node-0002 and node-0004
+      tags:
+        - daily
+        - docs
+    - id: node-0006
+      title: Weekly review
+      kind: task
+      priority: low
+      assignee: alex
+      deadline: "2026-08-15"
+      requires: node-0005
+      tags:
+        - daily
+        - review
+edges:
+    - from: node-0001
+      to: node-0002
+    - from: node-0001
+      to: node-0003
+    - from: node-0003
+      to: node-0004
+    - from: node-0002
+      to: node-0005
+    - from: node-0004
+      to: node-0005
+    - from: node-0005
+      to: node-0006
+ui:
+    positions:
+        node-0001:
+            x: 0
+            "y": 0
+        node-0002:
+            x: 0.628
+            "y": 2.812
+        node-0003:
+            x: 1.555
+            "y": 1.163
+        node-0004:
+            x: 3.135
+            "y": 2.887
+        node-0005:
+            x: 1.665
+            "y": 4.924
+        node-0006:
+            x: 3.525
+            "y": 5.624
+    timeline_order:
+        - node-0001
+        - node-0002
+        - node-0003
+        - node-0004
+        - node-0005
+        - node-0006
+    gates:
+        node-0005:
+            x: 403.45
+            "y": 321.92
+    plans:
+        node-0001:
+            - date: "2026-08-13"
+              time: "09:00"
+              status: started
+              note: Clear the inbox before focus work.
+        node-0002:
+            - date: "2026-08-13"
+              time: "10:00"
+              status: started
+              note: Protected architecture focus block.
+        node-0003:
+            - date: "2026-08-13"
+              time: "14:00"
+              status: started
+              note: Capture decisions and blockers.
+        node-0004:
+            - date: "2026-08-14"
+              time: "09:30"
+              status: started
+              note: Send the external follow-up.
+        node-0005:
+            - date: "2026-08-14"
+              time: "13:30"
+              status: started
+              note: Turn decisions into reusable Markdown.
+        node-0006:
+            - date: "2026-08-15"
+              time: "10:00"
+              status: started
+              note: Review only explicit next steps.

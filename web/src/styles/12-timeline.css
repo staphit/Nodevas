@@ -1,0 +1,1426 @@
+/* Split out of app.css. The imports there are ordered, and this file is
+ * one contiguous slice of the original — moving rules between files can
+ * change which one wins.
+ *
+ * timeline lanes, snapshots, split panes
+ */
+/* ---------- graph view: plain alignment grid ---------- */
+.board-inner.graph-bg {
+  background-image: repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border) 70%, transparent) 0 1px,
+      transparent 1px var(--col-w)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--border) 45%, transparent) 0 1px,
+      transparent 1px var(--step)
+  );
+  /* The graph centres its content in the viewport, so the cells start a
+     fraction of a cell in from the element origin. Lines painted from 0 would
+     be a ruler for a different board: a snapped card would sit at a constant
+     offset from every line and read as untouched. */
+  background-position: var(--grid-origin-x, 0) var(--grid-origin-y, 0);
+}
+.graph-marquee {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  border: 1px solid var(--st-progress-fg);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--st-progress-fg) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--st-progress-fg) 22%, transparent);
+}
+
+/* Alignment guides sit above the marquee and above the cards: they have to be
+   readable across whatever they are lining up. Their own colour, so they are
+   never confused with a selection or with a wire being drawn. */
+.snap-guide {
+  position: absolute;
+  z-index: 31;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    var(--snap-guide-angle, to bottom),
+    var(--snap-guide) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.snap-guide.horizontal {
+  --snap-guide-angle: to right;
+}
+
+/* Where somebody else is dragging a card to. Below the guides and above the
+   cards: it has to be readable over whatever it is passing across. */
+.peer-ghost {
+  position: absolute;
+  z-index: 29;
+  pointer-events: none;
+  border: 2px dashed var(--peer-color);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--peer-color) 12%, transparent);
+}
+
+/* Somebody else's pointer. Above everything, because it is the one thing on
+   the board that is about a person rather than the project. */
+.peer-pointer {
+  position: absolute;
+  z-index: 32;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  border-left: 7px solid var(--peer-color);
+  border-right: 7px solid transparent;
+  border-bottom: 11px solid transparent;
+  border-top: 11px solid var(--peer-color);
+  transform: rotate(-8deg);
+  filter: drop-shadow(0 1px 1px var(--shadow));
+}
+
+.peer-pointer-label {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--peer-color);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* ---------- timeline lane header ---------- */
+.lane-head-row {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+}
+/* vertical timeline axis positions */
+.board-inner.timeline-vertical {
+  display: flex;
+  flex-direction: column;
+}
+.board-inner.timeline-vertical.vnode-bottom .lane-head-row {
+  order: 9;
+  top: auto;
+  bottom: 0;
+  border-bottom: 0;
+  border-top: 2px solid var(--border);
+}
+.board-inner.timeline-vertical.vdate-left .board-date-r {
+  order: -1;
+  right: auto;
+  left: 0;
+  border-left: 0;
+  border-right: 1px solid var(--border);
+}
+.board-inner.timeline-vertical.vdate-left .lane-head-cell.ruler {
+  order: -1;
+}
+.lane-head-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  font-size: 12px;
+  overflow: hidden;
+}
+.lane-head-cell.order-dragging {
+  position: relative;
+  z-index: 9;
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 8px 22px var(--shadow);
+}
+.lane-head-cell.order-drop-target {
+  box-shadow: inset 3px 0 0 var(--st-progress-fg);
+}
+.lane-head-cell:hover {
+  background: var(--surface-2);
+}
+.lane-head-cell.active {
+  box-shadow: inset 0 -2px 0 var(--st-progress-fg);
+}
+.lane-head-cell.node-selected {
+  background: color-mix(in srgb, var(--st-progress-bg) 72%, var(--surface));
+  box-shadow: inset 0 -3px 0 var(--st-progress-fg);
+}
+.lane-selected-tag {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--accent-text);
+  background: var(--st-progress-fg);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.lane-head-cell.ruler {
+  cursor: default;
+  position: sticky;
+  right: 0;
+  background: var(--surface-2);
+  border-left: 1px solid var(--border);
+}
+.lane-head-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.lane-head-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  text-align: left;
+}
+.lane-head-assignee {
+  color: var(--text-2);
+  font-size: 9.5px;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Horizontal timeline: dates run left-to-right; nodes become rows. */
+.horizontal-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  background: var(--surface);
+}
+/* axis position preferences: date row top/bottom, node column left/right */
+.horizontal-timeline .horizontal-node-rows {
+  order: 1;
+}
+.horizontal-timeline.date-axis-bottom .horizontal-date-head {
+  order: 2;
+  top: auto;
+  bottom: 0;
+  border-bottom: 0;
+  border-top: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-corner,
+.horizontal-timeline.node-axis-right .horizontal-node-head {
+  order: 99;
+  left: auto;
+  right: 0;
+  border-right: 0;
+  border-left: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-node-head.active,
+.horizontal-timeline.node-axis-right .horizontal-node-head.node-selected {
+  box-shadow: inset -3px 0 0 var(--st-progress-fg);
+}
+.horizontal-date-head {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  border-bottom: 2px solid var(--border);
+  background: var(--surface);
+}
+.horizontal-corner {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 2px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.horizontal-date-label {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-right: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface);
+  font-size: 10px;
+}
+.timeline-column-resize {
+  position: absolute;
+  top: 0;
+  z-index: 12;
+  width: 24px;
+  height: var(--timeline-resize-span);
+}
+.timeline-column-resize.left {
+  left: -12px;
+}
+.timeline-column-resize.right {
+  right: -12px;
+}
+.timeline-column-resize::before {
+  position: absolute;
+  inset: 0 auto 0 11px;
+  width: 2px;
+  content: "";
+  background: color-mix(in srgb, var(--border-strong) 72%, transparent);
+  transition:
+    background 140ms var(--ease-out),
+    box-shadow 140ms var(--ease-out);
+}
+.timeline-column-resize .ui-resize-grip {
+  position: absolute;
+  top: 11px;
+  left: 7px;
+  width: 10px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background:
+    radial-gradient(circle, var(--text-2) 1px, transparent 1.5px) center / 5px 6px,
+    var(--surface-2);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--shadow) 65%, transparent);
+  opacity: 0.82;
+  transition:
+    opacity 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+.horizontal-timeline.date-axis-bottom .timeline-column-resize {
+  top: auto;
+  bottom: 0;
+}
+.horizontal-timeline.date-axis-bottom .timeline-column-resize .ui-resize-grip {
+  top: auto;
+  bottom: 11px;
+}
+.timeline-column-resize:hover::before,
+.timeline-column-resize:focus-visible::before,
+.timeline-column-resize[data-resizing="true"]::before,
+.lane-wrap.timeline-cell-resizing .timeline-column-resize::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.timeline-column-resize:hover .ui-resize-grip,
+.timeline-column-resize:focus-visible .ui-resize-grip,
+.timeline-column-resize[data-resizing="true"] .ui-resize-grip,
+.lane-wrap.timeline-cell-resizing .timeline-column-resize .ui-resize-grip {
+  border-color: var(--accent);
+  opacity: 1;
+  transform: scaleX(1.08);
+}
+.lane-wrap.timeline-cell-resizing,
+.lane-wrap.timeline-cell-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+@media (pointer: coarse) {
+  .timeline-column-resize {
+    width: 44px;
+  }
+  .timeline-column-resize.left {
+    left: -22px;
+  }
+  .timeline-column-resize.right {
+    right: -22px;
+  }
+  .timeline-column-resize::before {
+    left: 21px;
+  }
+  .timeline-column-resize .ui-resize-grip {
+    left: 17px;
+  }
+  .drawer-resize {
+    left: -22px;
+    width: 44px;
+  }
+  .drawer-resize .ui-resize-grip {
+    left: 50%;
+  }
+  .timeline-width-stepper {
+    grid-template-columns: 18px 36px 52px 36px;
+  }
+  .timeline-width-stepper button {
+    min-width: 36px;
+    height: 36px;
+  }
+}
+.horizontal-date-label b {
+  color: var(--text);
+  font-size: 11.5px;
+}
+.horizontal-date-label small {
+  color: var(--st-progress-fg);
+  font-size: 8.5px;
+}
+.horizontal-date-label.today {
+  background: color-mix(in srgb, var(--st-progress-bg) 60%, var(--surface));
+}
+.horizontal-date-label.future {
+  opacity: 0.62;
+}
+.horizontal-gap-head,
+.horizontal-gap-cell {
+  flex: 0 0 auto;
+  border: 0;
+  border-right: 1px dashed var(--border-strong);
+  color: var(--text-2);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.horizontal-gap-head:hover,
+.horizontal-gap-cell:hover {
+  color: var(--text);
+  background: var(--st-progress-bg);
+}
+.horizontal-node-rows {
+  width: max-content;
+  min-width: 100%;
+}
+.horizontal-node-row {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+}
+.horizontal-node-row.order-dragging {
+  position: relative;
+  z-index: 8;
+  opacity: 0.9;
+  box-shadow: 0 8px 22px var(--shadow);
+}
+.horizontal-node-row.order-drop-target {
+  box-shadow: inset 0 3px 0 var(--st-progress-fg);
+}
+.horizontal-node-head {
+  position: sticky;
+  left: 0;
+  z-index: 7;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 0;
+  border-right: 2px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.horizontal-node-row.order-dragging .horizontal-node-head {
+  cursor: grabbing;
+}
+.horizontal-node-head:hover {
+  background: var(--surface-2);
+}
+.horizontal-node-head.active,
+.horizontal-node-head.node-selected {
+  background: color-mix(in srgb, var(--st-progress-bg) 72%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--st-progress-fg);
+}
+.horizontal-date-cell {
+  flex: 0 0 auto;
+  background: var(--surface);
+}
+.horizontal-date-cell.board-today {
+  background: color-mix(in srgb, var(--st-progress-bg) 20%, var(--surface));
+}
+.horizontal-date-cell.board-future {
+  opacity: 0.78;
+}
+.horizontal-now-line {
+  position: absolute;
+  z-index: 6;
+  width: 1px;
+  pointer-events: none;
+  background: var(--st-progress-fg);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--st-progress-fg) 55%, transparent);
+}
+.horizontal-now-line::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--st-progress-fg);
+}
+
+/* ---------- snapshot cards (一條線上的生命週期節點) ---------- */
+.snap-card {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  margin: 3px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: default;
+  text-align: left;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+  transition: box-shadow 160ms var(--ease-out);
+}
+.snap-card.draggable {
+  cursor: grab;
+}
+.snap-card.draggable:hover {
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.snap-card.lifting {
+  z-index: 15;
+  cursor: grabbing;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+.snap-card.status-ready { border-left-color: var(--st-ready-fg); background: color-mix(in srgb, var(--st-ready-bg) 35%, var(--surface)); }
+.snap-card.status-started { border-left-color: var(--st-ready-fg); background: color-mix(in srgb, var(--st-ready-bg) 35%, var(--surface)); }
+.snap-card.status-in_progress { border-left-color: var(--st-progress-fg); background: color-mix(in srgb, var(--st-progress-bg) 35%, var(--surface)); }
+.snap-card.status-done { border-left-color: var(--st-done-fg); background: color-mix(in srgb, var(--st-done-bg) 35%, var(--surface)); }
+.snap-card.status-failed { border-left-color: var(--st-failed-fg); background: color-mix(in srgb, var(--st-failed-bg) 35%, var(--surface)); }
+.snap-card.status-skipped { border-left-color: var(--st-skipped-fg); opacity: 0.8; }
+.snap-card.status-locked { border-left-color: var(--st-locked-fg); }
+.snap-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+.snap-card-head b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snap-time {
+  font-size: 9.5px;
+  color: var(--text-2);
+  margin-left: auto;
+}
+.snap-card-title {
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expected milestones: intentionally separate from actual journal cards. */
+.plan-card {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  margin: 3px;
+  padding: 4px 7px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition:
+    box-shadow 140ms var(--ease-out),
+    opacity 140ms var(--ease-out);
+}
+.plan-card:hover {
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.plan-card.lifting {
+  z-index: 30;
+  cursor: grabbing;
+  opacity: 0.9;
+  border-style: solid;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.board-cell.plan-drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.board-cell.actual-drop-target {
+  box-shadow: inset 0 0 0 2px var(--st-progress-fg);
+  background-color: color-mix(in srgb, var(--st-progress-fg) 14%, transparent);
+}
+.plan-card.status-started {
+  border-color: var(--st-ready-fg);
+  background: color-mix(in srgb, var(--st-ready-bg) 24%, var(--surface));
+}
+.plan-card.status-in_progress {
+  border-color: var(--st-progress-fg);
+  background: color-mix(in srgb, var(--st-progress-bg) 24%, var(--surface));
+}
+.plan-card.status-done {
+  border-color: var(--st-done-fg);
+  background: color-mix(in srgb, var(--st-done-bg) 24%, var(--surface));
+}
+.plan-card.status-custom {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.custom-plan-shape {
+  display: inline-grid;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  place-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+.plan-card b {
+  font-size: 10.5px;
+  color: var(--text);
+}
+.record-kind {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.08em;
+}
+.record-kind.actual {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.record-kind.expected {
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  line-height: 13px;
+}
+.timeline-card-note {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 9.5px;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+
+/* Right-click menu for graph creation and timeline planning. */
+.lane-context-menu {
+  position: fixed;
+  z-index: 90;
+  width: 290px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px var(--shadow);
+}
+.lane-context-menu.node-create-menu {
+  width: min(380px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+.lane-context-menu.condition-menu {
+  width: min(328px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 8px;
+  gap: 6px;
+  overflow-y: auto;
+}
+.lane-context-menu.standalone-gate-menu {
+  width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 8px;
+  gap: 7px;
+  overflow-y: auto;
+}
+.lane-context-title {
+  padding: 5px 8px 7px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+/* Section heading inside a context menu: the edge menu sets meaning and looks
+   as two separate radio groups, so each needs a name. */
+.lane-context-group-label {
+  padding: 6px 8px 2px;
+  color: var(--text-2);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.lane-context-menu button > small {
+  display: block;
+  color: var(--text-2);
+  font-size: 9.5px;
+  font-weight: 400;
+}
+.condition-menu-title {
+  display: grid;
+  gap: 1px;
+  padding: 7px 8px 9px;
+  white-space: normal;
+}
+.condition-menu-title span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.condition-menu-title small {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.condition-menu-intro {
+  margin: 0 4px 2px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--accent);
+  border-radius: 2px 5px 5px 2px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.logic-gate-create-title {
+  margin-top: 4px;
+}
+.logic-gate-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+.logic-gate-create-grid > button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+}
+.logic-gate-create-grid > button > b {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.logic-gate-create-grid > button > span {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-create-form {
+  display: grid;
+  gap: 10px;
+  padding: 7px;
+}
+.node-create-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 3px 8px;
+  border-bottom: 1px solid var(--border);
+  /* Also the handle the panel is dragged by. */
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.lane-context-menu.dragging .node-create-heading {
+  cursor: grabbing;
+}
+.node-create-heading > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.node-create-heading b {
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.node-create-heading small {
+  color: var(--text-2);
+  font-size: 9.5px;
+}
+.node-create-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+  border-radius: 8px;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 78%, var(--surface));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
+  font-size: 18px;
+  font-weight: 500;
+}
+.node-create-field {
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+.node-create-field input {
+  padding: 9px 10px;
+  border-color: var(--border-strong);
+  font-size: 11px;
+  outline: none;
+}
+.node-create-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.node-create-id-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+.node-create-id-hint > span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+.node-create-plans {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 72%, var(--surface));
+}
+.node-create-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.node-create-section-head > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.node-create-section-head b {
+  color: var(--text);
+  font-size: 11px;
+}
+.node-create-section-head small {
+  color: var(--text-2);
+  font-size: 9px;
+}
+.node-create-section-head > button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 9.5px;
+}
+.node-create-section-head > button:hover:not(:disabled) {
+  border-color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.node-create-section-head > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.node-create-plan-list {
+  display: grid;
+  gap: 5px;
+}
+.node-create-plan-row,
+.node-create-custom-plan {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 148px;
+  align-items: center;
+  gap: 7px;
+}
+.node-create-plan-row > span {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-create-plan-row input,
+.node-create-custom-plan input {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 10px;
+  outline: none;
+}
+.node-create-plan-row input:focus,
+.node-create-custom-plan input:focus {
+  border-color: var(--st-progress-fg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-progress-fg) 18%, transparent);
+}
+.node-create-custom-plan {
+  grid-template-columns: minmax(80px, 1fr) 148px 26px;
+}
+.node-create-custom-plan > button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: pointer;
+}
+.node-create-custom-plan > button:hover:not(:disabled) {
+  color: var(--st-failed-fg);
+  border-color: var(--st-failed-fg);
+}
+/* Status and appearance, folded away. The heading is the whole hit target so a
+   finger does not have to find the triangle. */
+.node-create-advanced {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+}
+.node-create-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.node-create-disclosure:hover {
+  background: var(--hover);
+}
+.node-create-disclosure > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+.node-create-disclosure b {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.node-create-disclosure small {
+  color: var(--text-2);
+  font-size: 9.5px;
+}
+.node-create-disclosure-mark {
+  width: 12px;
+  color: var(--text-2);
+  font-size: 10px;
+}
+.node-create-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 2px 4px;
+}
+.node-create-advanced-body[hidden] {
+  display: none;
+}
+.node-create-advanced-body select {
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-2);
+  font-size: 11px;
+}
+.node-create-status-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--text-2);
+  font-size: 9.5px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+/* The inspector's preview gets a whole panel to itself; here it shares a menu
+   that also has to fit a phone, so it keeps the look and loses the height. */
+.node-create-advanced-body .appearance-preview {
+  min-height: 124px;
+  padding: 8px;
+}
+.node-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding-top: 2px;
+}
+.node-create-actions button {
+  min-width: 72px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.node-create-actions button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.node-create-actions button.primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.node-create-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.lane-context-field {
+  display: grid;
+  gap: 4px;
+  padding: 5px 8px;
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.lane-context-label {
+  color: var(--text);
+  font-weight: 600;
+}
+.lane-context-field input,
+.lane-context-field select {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.lane-context-field-help {
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.standalone-gate-state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.standalone-gate-state b {
+  align-self: center;
+  font-size: 10.5px;
+}
+.standalone-gate-state span,
+.standalone-gate-state small {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.standalone-gate-state.complete {
+  border-color: color-mix(in srgb, var(--st-done-fg) 48%, var(--border));
+}
+.standalone-gate-state.complete b {
+  color: var(--st-done-fg);
+}
+.standalone-gate-state.incomplete {
+  border-color: color-mix(in srgb, var(--st-failed-fg) 56%, var(--border));
+}
+.standalone-gate-state.incomplete b {
+  color: var(--st-failed-fg);
+}
+.standalone-gate-inputs {
+  display: grid;
+  gap: 3px;
+  max-height: 166px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+.standalone-gate-inputs > div {
+  display: grid;
+  gap: 2px;
+}
+.standalone-gate-inputs label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+.standalone-gate-inputs label:hover {
+  background: var(--hover);
+}
+.standalone-gate-inputs label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.standalone-gate-inputs small {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.lane-context-menu > .standalone-gate-delete {
+  margin: 2px 0 0;
+  color: var(--st-failed-fg);
+}
+.assign-existing-gate,
+.controlled-by-standalone-gate {
+  display: grid;
+  gap: 6px;
+  margin: 0 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.assign-existing-gate > div,
+.controlled-by-standalone-gate {
+  color: var(--text);
+}
+.assign-existing-gate > div {
+  display: grid;
+  gap: 2px;
+}
+.assign-existing-gate small,
+.controlled-by-standalone-gate small {
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.assign-existing-gate select,
+.assign-existing-gate button {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+}
+.assign-existing-gate button {
+  cursor: pointer;
+}
+.assign-existing-gate button:hover {
+  border-color: var(--accent);
+}
+.controlled-by-standalone-gate {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.controlled-by-standalone-gate span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.lane-context-summary,
+.lane-context-help {
+  padding: 5px 8px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.lane-context-summary {
+  max-height: 72px;
+  overflow: auto;
+}
+.lane-context-summary > b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text);
+}
+.lane-context-summary > p {
+  margin: -1px 0 4px;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.lane-context-relation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.lane-context-relation span {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-context-relation small {
+  color: var(--text-2);
+}
+.lane-context-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.lane-context-check:hover {
+  background: var(--surface-2);
+}
+.lane-context-check input {
+  margin-top: 2px;
+}
+.lane-context-check > span {
+  display: grid;
+  gap: 1px;
+}
+.lane-context-check b {
+  color: var(--text);
+  font-weight: 600;
+}
+.lane-context-check small {
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.lane-context-error {
+  padding: 5px 8px;
+  color: var(--st-failed-fg);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.lane-context-menu > button {
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.lane-context-menu > button:hover {
+  background: var(--surface-2);
+}
+.lane-context-menu > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.lane-context-menu > .condition-primary-action {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 7px 10px 7px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  text-align: left;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.lane-context-menu > .condition-primary-action:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+.lane-context-menu > .condition-primary-action:active {
+  transform: translateY(0) scale(0.985);
+}
+.lane-context-menu > .condition-primary-action:disabled {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+.condition-primary-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.condition-primary-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.condition-primary-copy b {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.condition-primary-copy small {
+  overflow: hidden;
+  font-size: 9.5px;
+  opacity: 0.82;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.condition-primary-arrow {
+  font-family: var(--mono);
+  font-size: 15px;
+}
+
+/* ---------- split panes: graph + timeline stacked, each collapsible ---------- */
+.stage.split {
+  display: flex;
+  flex-direction: column;
+}
+.stage.split .lane-wrap {
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.stage.split .lane-wrap.pane-collapsed {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+}
+.stage.split .lane-wrap.pane-collapsed .board {
+  display: none;
+}
+.board.pan-enabled {
+  cursor: grab;
+  touch-action: none;
+}
+.board.panning,
+.board.panning * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.stage.split.has-open-split .lane-wrap:not(.pane-collapsed) {
+  min-height: 120px;
+}
+.pane-resizer {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 9px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+}
+.pane-resizer span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  transform: translate(-50%, -50%);
+}
+.pane-resizer:hover,
+.pane-resizer:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  outline: none;
+}
+.pane-resizer:hover span,
+.pane-resizer:focus-visible span {
+  background: var(--accent);
+}
+.pane-resizer.disabled {
+  display: none;
+}
+body.pane-resizing,
+body.pane-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+.pane-toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 0 4px;
+}
+.pane-toggle:hover {
+  color: var(--text);
+}
+
+/* one node = one grid column: kill the mid-cell guide line */
+.board-cell {
+  background-image: none;
+}
+.board-cell.node-selected {
+  background-color: color-mix(in srgb, var(--st-progress-bg) 38%, transparent);
+  box-shadow:
+    inset 2px 0 0 color-mix(in srgb, var(--st-progress-fg) 55%, transparent),
+    inset -2px 0 0 color-mix(in srgb, var(--st-progress-fg) 55%, transparent);
+}
+.board-future .board-cell.node-selected {
+  opacity: 1;
+}
+.board-cell.node-selected .snap-card,
+.board-cell.node-selected .plan-card {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-progress-fg) 70%, transparent);
+}

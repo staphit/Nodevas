@@ -1,0 +1,37 @@
+/* Split out of the original 10-canvas.css (now several ordered siblings).
+ * app.css imports these in the original file's rule order — moving rules
+ * between files, or reordering the imports, can change which one wins.
+ *
+ * graph minimap
+ */
+.graph-minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 18;
+  width: 170px;
+  height: 108px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 5px 18px var(--shadow);
+  cursor: crosshair;
+}
+.graph-minimap-node,
+.graph-minimap-viewport {
+  position: absolute;
+}
+.graph-minimap-node {
+  min-width: 2px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: var(--text-2);
+}
+.graph-minimap-node.selected {
+  background: var(--accent);
+}
+.graph-minimap-viewport {
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}

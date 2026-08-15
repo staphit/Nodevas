@@ -1,0 +1,2 @@
+{"id":"ev-1786473759498989000-0","t":"2026-08-11T18:42:39Z","event":"status","node":"node-0001","from":"ready","to":"in_progress","by":"demo:planner","note":"claimed by demo:planner","stateFlags":null}
+{"id":"ev-1786473759576682300-1","t":"2026-08-11T18:42:39Z","event":"status","node":"node-0001","from":"in_progress","to":"done","by":"demo:planner","note":"Demo checkpoint completed through Nodevas MCP.","stateFlags":{}}
