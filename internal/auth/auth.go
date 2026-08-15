@@ -37,15 +37,39 @@ var (
 	// ErrAdminRequired is returned when a member attempts a server-wide
 	// administrative operation.
 	ErrAdminRequired = errors.New("administrator access required")
+	// ErrUnknownAgentRole is returned when a request declares an agent role
+	// this server does not know. It surfaces as a 401 via withAuth, so the
+	// message must tell the client what to send instead.
+	ErrUnknownAgentRole = errors.New(
+		"unknown " + AgentRoleHeaderName + ": send \"worker\" or \"orchestrator\", or omit the header for a human session")
 )
+
+// AgentRoleHeaderName declares which class of agent a request acts as. It is
+// honored only by LocalOnly: on loopback the OS account is the trust boundary,
+// so a header the local user's own tools set is as trustworthy as the request.
+const AgentRoleHeaderName = "X-Nodevas-Agent-Role"
 
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
 type LocalOnly struct{}
 
-func (LocalOnly) Authenticate(*http.Request) (identity.Actor, error) { return identity.Local, nil }
-func (LocalOnly) NeedsCSRF() bool                                    { return false }
-func (LocalOnly) Remote() bool                                       { return false }
+func (LocalOnly) Authenticate(r *http.Request) (identity.Actor, error) {
+	if r == nil {
+		return identity.Local, nil
+	}
+	switch role := identity.AgentClass(r.Header.Get(AgentRoleHeaderName)); role {
+	case identity.AgentHuman:
+		return identity.Local, nil
+	case identity.AgentWorker, identity.AgentOrchestrator:
+		actor := identity.Local
+		actor.Agent = role
+		return actor, nil
+	default:
+		return identity.Actor{}, ErrUnknownAgentRole
+	}
+}
+func (LocalOnly) NeedsCSRF() bool { return false }
+func (LocalOnly) Remote() bool    { return false }
 
 type actorKey struct{}
 type revalidatorKey struct{}

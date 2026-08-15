@@ -32,9 +32,13 @@ export interface NodeMetadataPatch {
   /** "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm", local time. Empty clears it. */
   deadline?: string;
   tags?: string[];
+  /** "worker" | "orchestrator" | "human-only". Empty clears it (everyone). */
+  writeAccess?: string;
 }
 
 const DEADLINE_PATTERN = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/;
+
+const WRITE_ACCESS_VALUES = new Set(["worker", "orchestrator", "human-only"]);
 
 export function findNode(graph: Graph, nodeId: string): GraphNode {
   const node = graph.nodes?.find((candidate) => candidate.id === nodeId);
@@ -65,6 +69,13 @@ export function updateNodeMetadata(
       throw invalid("死線格式須為 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm。");
     }
     node.deadline = deadline;
+  }
+  if ("writeAccess" in patch) {
+    const writeAccess = blankToUndefined(patch.writeAccess);
+    if (writeAccess && !WRITE_ACCESS_VALUES.has(writeAccess)) {
+      throw invalid("寫入權限須為 worker、orchestrator 或 human-only。");
+    }
+    node.writeAccess = writeAccess as GraphNode["writeAccess"];
   }
   if ("tags" in patch) {
     const tags = Array.from(

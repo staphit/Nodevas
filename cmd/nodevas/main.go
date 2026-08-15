@@ -70,7 +70,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    (one shared read-only credential; takes effect without a restart)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas mcp [--project <name>] [--actor <name>] [--server http://127.0.0.1:5666]")
+		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
 }

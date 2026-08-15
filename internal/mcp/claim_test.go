@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // The loop the tool descriptions promise, driven end to end over the protocol:
@@ -55,7 +56,7 @@ func TestAnAgentCanWorkTheQueueFromEndToEnd(t *testing.T) {
 // else is holding. The refusal has to carry the next move.
 func TestARefusedClaimSaysWhatToDoInstead(t *testing.T) {
 	url, pm := liveServer(t)
-	if _, err := pm.Store().ClaimNode("design", "another-agent", 0, ""); err != nil {
+	if _, err := pm.Store().ClaimNode(identity.Local, "design", "another-agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	session := mcpSession(t, url, "")
@@ -128,7 +129,7 @@ func TestGivingATaskBackPutsItInTheQueueAgain(t *testing.T) {
 // be enough to make the other look like it worked.
 func TestAnAgentCannotNameItselfAsSomebodyElse(t *testing.T) {
 	url, pm := liveServer(t)
-	if _, err := pm.Store().ClaimNode("design", "the-other-agent", 0, ""); err != nil {
+	if _, err := pm.Store().ClaimNode(identity.Local, "design", "the-other-agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	session := mcpSession(t, url, "")

@@ -33,6 +33,8 @@ export interface GraphOp {
   nodeKind?: string;
   priority?: string;
   assignee?: string;
+  /** "" clears the restriction back to everyone. */
+  writeAccess?: string;
   deadline?: string;
   tags?: string[];
   from?: string;

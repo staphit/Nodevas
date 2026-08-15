@@ -340,7 +340,7 @@ export interface GraphSlice {
 
   commitRequires: (id: string, requires: string) => Promise<void>;
   createNode: (
-    node: { id?: string; title?: string; kind?: string },
+    node: { id?: string; title?: string; kind?: string; writeAccess?: string },
     options?: {
       openDocument?: boolean;
       position?: { x: number; y: number };

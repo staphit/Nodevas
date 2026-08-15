@@ -13,6 +13,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
 	"nodevas/internal/server"
@@ -50,7 +51,7 @@ func liveServer(t *testing.T) (string, *project.ProjectManager) {
 	if err := os.WriteFile(filepath.Join(pm.Store().Root(), "graph.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := pm.Store().SaveNodeContent("design",
+	if _, _, err := pm.Store().SaveNodeContent(identity.Local, "design",
 		"# Design the thing\n\nWork out the shape before writing any of it.\n", ""); err != nil {
 		t.Fatalf("write node body: %v", err)
 	}

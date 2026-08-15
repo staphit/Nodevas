@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"nodevas/internal/identity"
 )
 
 type gatedAttachmentReader struct {
@@ -29,7 +31,7 @@ func TestDuplicateNodeCopiesAttachmentsAndRetargetsLocalLinks(t *testing.T) {
 	if err := os.WriteFile(st.NodePath("alpha"), sourceDocument, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	page, _, _, err := st.CreateNodePage("alpha", "Notes", "md")
+	page, _, _, err := st.CreateNodePage(identity.Local, "alpha", "Notes", "md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +96,7 @@ func TestDuplicateNodeCopiesAttachmentsAndRetargetsLocalLinks(t *testing.T) {
 		t.Errorf("source page changed while duplicating: %q, %v", unchangedPage, err)
 	}
 
-	if _, err := st.DeleteNode("alpha"); err != nil {
+	if _, err := st.DeleteNode(identity.Local, "alpha"); err != nil {
 		t.Fatalf("delete source: %v", err)
 	}
 	for name, want := range wantFiles {

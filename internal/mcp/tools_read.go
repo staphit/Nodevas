@@ -61,18 +61,21 @@ type getNodeInput struct {
 }
 
 type getNodeOutput struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title,omitempty"`
-	Kind       string   `json:"kind,omitempty"`
-	Status     string   `json:"status"`
-	Priority   string   `json:"priority,omitempty"`
-	Assignee   string   `json:"assignee,omitempty"`
-	Deadline   string   `json:"deadline,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Requires   string   `json:"requires,omitempty"`
-	Upstream   []string `json:"upstream,omitempty"`
-	Downstream []string `json:"downstream,omitempty"`
-	Body       string   `json:"body"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Status   string   `json:"status"`
+	Priority string   `json:"priority,omitempty"`
+	Assignee string   `json:"assignee,omitempty"`
+	Deadline string   `json:"deadline,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Requires string   `json:"requires,omitempty"`
+	// WriteAccess is who may modify this node: absent means everyone; "worker",
+	// "orchestrator" and "human-only" each refuse anything below that rank.
+	WriteAccess string   `json:"writeAccess,omitempty"`
+	Upstream    []string `json:"upstream,omitempty"`
+	Downstream  []string `json:"downstream,omitempty"`
+	Body        string   `json:"body"`
 	// Rev is what a later write must present as its baseRev. Without it the
 	// write cannot tell a fresh document from one somebody edited in between.
 	Rev        string `json:"rev,omitempty"`
@@ -186,16 +189,17 @@ func readNode(ctx context.Context, client *Client, in getNodeInput) (getNodeOutp
 	}
 
 	out := getNodeOutput{
-		ID:       node.ID,
-		Title:    node.Title,
-		Kind:     node.Kind,
-		Priority: node.Priority,
-		Assignee: node.Assignee,
-		Deadline: node.Deadline,
-		Tags:     node.Tags,
-		Requires: node.Requires,
-		Rev:      content.Rev,
-		Status:   string(statusOrReady(snapshot.Statuses, node.ID)),
+		ID:          node.ID,
+		Title:       node.Title,
+		Kind:        node.Kind,
+		Priority:    node.Priority,
+		Assignee:    node.Assignee,
+		Deadline:    node.Deadline,
+		Tags:        node.Tags,
+		Requires:    node.Requires,
+		WriteAccess: node.WriteAccess,
+		Rev:         content.Rev,
+		Status:      string(statusOrReady(snapshot.Statuses, node.ID)),
 	}
 	for _, edge := range snapshot.Graph.Edges {
 		if !edge.IsPrerequisite() {

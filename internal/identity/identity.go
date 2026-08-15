@@ -19,13 +19,28 @@ const (
 	RoleVisitor Role = "visitor"
 )
 
+// AgentClass says what kind of automation, if any, a request acts as. It is
+// orthogonal to Role: a role says what an account may reach, the class says
+// whether a person or an agent is behind the request.
+type AgentClass string
+
+const (
+	AgentHuman        AgentClass = "" // browser / person
+	AgentOrchestrator AgentClass = "orchestrator"
+	AgentWorker       AgentClass = "worker"
+)
+
 // Actor is who a request acts as. Every write records one, so history can say
 // who changed what once more than one person can reach the server.
 type Actor struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role Role   `json:"role,omitempty"`
+	ID    string     `json:"id"`
+	Name  string     `json:"name"`
+	Role  Role       `json:"role,omitempty"`
+	Agent AgentClass `json:"agent,omitempty"`
 }
+
+// IsAgent reports whether the actor is automation rather than a person.
+func (a Actor) IsAgent() bool { return a.Agent != "" }
 
 // IsAdmin reports whether the actor may change server-wide settings. The
 // loopback-only actor is an administrator because the OS account is the trust

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // newClaimTestStore builds a two-node chain: design blocks build.
@@ -104,7 +105,7 @@ func TestOnlyOneOfTwoSimultaneousClaimsWins(t *testing.T) {
 			defer done.Done()
 			start.Wait()
 			owner := "agent-" + string(rune('a'+index))
-			_, err := st.ClaimNode("design", owner, 0, "")
+			_, err := st.ClaimNode(identity.Local, "design", owner, 0, "")
 			mu.Lock()
 			defer mu.Unlock()
 			var taken *ErrAlreadyClaimed
@@ -135,7 +136,7 @@ func TestOnlyOneOfTwoSimultaneousClaimsWins(t *testing.T) {
 func TestABlockedNodeCannotBeClaimed(t *testing.T) {
 	st := newClaimTestStore(t)
 
-	_, err := st.ClaimNode("build", "agent", 0, "")
+	_, err := st.ClaimNode(identity.Local, "build", "agent", 0, "")
 	var refused *ErrNotClaimable
 	if !errors.As(err, &refused) {
 		t.Fatalf("error = %v, want ErrNotClaimable", err)
@@ -153,10 +154,10 @@ func TestClaimUsesRequiresOverLegacyEdgeProjection(t *testing.T) {
 			t.Fatal(err)
 		}
 		graph.NodeByID("build").Requires = ""
-		if _, err := st.SaveGraph(graph, rev); err != nil {
+		if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.ClaimNode("build", "agent", 0, ""); err != nil {
+		if _, err := st.ClaimNode(identity.Local, "build", "agent", 0, ""); err != nil {
 			t.Fatalf("visual-only edge refused claim: %v", err)
 		}
 	})
@@ -168,10 +169,10 @@ func TestClaimUsesRequiresOverLegacyEdgeProjection(t *testing.T) {
 			t.Fatal(err)
 		}
 		graph.Edges = nil
-		if _, err := st.SaveGraph(graph, rev); err != nil {
+		if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 			t.Fatal(err)
 		}
-		_, err = st.ClaimNode("build", "agent", 0, "")
+		_, err = st.ClaimNode(identity.Local, "build", "agent", 0, "")
 		var refused *ErrNotClaimable
 		if !errors.As(err, &refused) {
 			t.Fatalf("requires-only claim error = %v, want ErrNotClaimable", err)
@@ -186,12 +187,12 @@ func TestTheSameHolderClaimingAgainExtendsItsLease(t *testing.T) {
 	base := time.Now()
 	atTime(t, base)
 
-	first, err := st.ClaimNode("design", "agent", 10*time.Minute, "")
+	first, err := st.ClaimNode(identity.Local, "design", "agent", 10*time.Minute, "")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	atTime(t, base.Add(5*time.Minute))
-	second, err := st.ClaimNode("design", "agent", 10*time.Minute, "")
+	second, err := st.ClaimNode(identity.Local, "design", "agent", 10*time.Minute, "")
 	if err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}
@@ -205,12 +206,12 @@ func TestAnExpiredLeaseLetsAnotherAgentTakeOver(t *testing.T) {
 	st := newClaimTestStore(t)
 	base := time.Now()
 	atTime(t, base)
-	if _, err := st.ClaimNode("design", "first", time.Minute, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "first", time.Minute, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
 	atTime(t, base.Add(90*time.Second))
-	result, err := st.ClaimNode("design", "second", 0, "")
+	result, err := st.ClaimNode(identity.Local, "design", "second", 0, "")
 	if err != nil {
 		t.Fatalf("takeover: %v", err)
 	}
@@ -228,7 +229,7 @@ func TestWorkAPersonStartedIsNotStealable(t *testing.T) {
 		t.Fatalf("SetStatus: %v", err)
 	}
 
-	_, err := st.ClaimNode("design", "agent", 0, "")
+	_, err := st.ClaimNode(identity.Local, "design", "agent", 0, "")
 	var refused *ErrNotClaimable
 	if !errors.As(err, &refused) {
 		t.Fatalf("error = %v, want the claim refused", err)
@@ -237,11 +238,11 @@ func TestWorkAPersonStartedIsNotStealable(t *testing.T) {
 
 func TestReportingOnANodeYouDoNotHoldIsRefused(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "first", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "first", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
-	_, err := st.ReportStatus("design", engine.StatusDone, "second", "", "second", "")
+	_, err := st.ReportStatus(identity.Local, "design", engine.StatusDone, "second", "", "second", "")
 	var wrongOwner *ErrNotOwner
 	if !errors.As(err, &wrongOwner) {
 		t.Fatalf("error = %v, want ErrNotOwner", err)
@@ -253,10 +254,10 @@ func TestReportingOnANodeYouDoNotHoldIsRefused(t *testing.T) {
 
 func TestFinishingWorkReleasesTheNode(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err := st.ReportStatus("design", engine.StatusDone, "agent", "built it", "agent", ""); err != nil {
+	if _, err := st.ReportStatus(identity.Local, "design", engine.StatusDone, "agent", "built it", "agent", ""); err != nil {
 		t.Fatalf("report: %v", err)
 	}
 
@@ -264,7 +265,7 @@ func TestFinishingWorkReleasesTheNode(t *testing.T) {
 		t.Fatal("a finished node is still held")
 	}
 	// And the node it was blocking is now available.
-	if _, err := st.ClaimNode("build", "agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "build", "agent", 0, ""); err != nil {
 		t.Fatalf("the next task did not become claimable: %v", err)
 	}
 }
@@ -273,12 +274,12 @@ func TestFinishingWorkReleasesTheNode(t *testing.T) {
 // out of their own board. The override goes through -- and is written down.
 func TestAPersonMayOverrideAnAgentAndItIsRecorded(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "mcp:agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "mcp:agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
 	// No owner: this caller is not acting under a claim.
-	rs, err := st.ReportStatus("design", engine.StatusDone, "patrick", "done by hand", "", "")
+	rs, err := st.ReportStatus(identity.Local, "design", engine.StatusDone, "patrick", "done by hand", "", "")
 	if err != nil {
 		t.Fatalf("override: %v", err)
 	}
@@ -295,7 +296,7 @@ func TestAPersonMayOverrideAnAgentAndItIsRecorded(t *testing.T) {
 // timeline is what people read to reconstruct what happened.
 func TestARetriedReportIsCarriedOutOnce(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	before, err := st.LoadState()
@@ -304,7 +305,7 @@ func TestARetriedReportIsCarriedOutOnce(t *testing.T) {
 	}
 
 	for range 3 {
-		if _, err := st.ReportStatus(
+		if _, err := st.ReportStatus(identity.Local,
 			"design", engine.StatusDone, "agent", "finished", "agent", "req-1",
 		); err != nil {
 			t.Fatalf("report: %v", err)
@@ -322,7 +323,7 @@ func TestARetriedReportIsCarriedOutOnce(t *testing.T) {
 
 func TestReleasingANodePutsItBackInTheQueue(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if err := st.ReleaseClaim("design", "agent"); err != nil {
@@ -332,14 +333,14 @@ func TestReleasingANodePutsItBackInTheQueue(t *testing.T) {
 	if got := statusOf(t, st, "design"); got != engine.StatusReady {
 		t.Fatalf("status = %q, want ready again", got)
 	}
-	if _, err := st.ClaimNode("design", "other", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "other", 0, ""); err != nil {
 		t.Fatalf("the released node was not claimable: %v", err)
 	}
 }
 
 func TestReleasingSomebodyElsesClaimIsRefused(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "first", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "first", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -353,7 +354,7 @@ func TestReleasingSomebodyElsesClaimIsRefused(t *testing.T) {
 // is truncated, half-written or edited by hand into nonsense.
 func TestACorruptClaimsFileIsTreatedAsNoClaims(t *testing.T) {
 	st := newClaimTestStore(t)
-	if _, err := st.ClaimNode("design", "agent", 0, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "design", "agent", 0, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if err := os.WriteFile(st.claimsPath(), []byte("{not json"), 0o600); err != nil {

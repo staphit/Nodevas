@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nodevas/internal/identity"
 )
 
 func TestCommittedNodeDeleteReturnsSuccessAndRestartCleansSourceAndDraft(t *testing.T) {
@@ -19,7 +21,7 @@ func TestCommittedNodeDeleteReturnsSuccessAndRestartCleansSourceAndDraft(t *test
 	draft := st.draftPath("alpha")
 	st.deleteCleanupFault = func(deleteCleanupRecord) error { return errors.New("injected cleanup failure") }
 
-	outcome, err := st.DeleteNode("alpha")
+	outcome, err := st.DeleteNode(identity.Local, "alpha")
 	if err != nil {
 		t.Fatalf("committed delete returned an error: %v", err)
 	}
@@ -55,14 +57,14 @@ func TestCommittedNodeDeleteReturnsSuccessAndRestartCleansSourceAndDraft(t *test
 
 func TestCommittedPageDeleteReturnsSuccessAndRestartCleansSource(t *testing.T) {
 	root, st := folderProject(t)
-	page, _, _, err := st.CreateNodePage("alpha", "Notes", PageFormatMarkdown)
+	page, _, _, err := st.CreateNodePage(identity.Local, "alpha", "Notes", PageFormatMarkdown)
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := st.NodePagePath("alpha", page.ID, page.Format)
 	st.deleteCleanupFault = func(deleteCleanupRecord) error { return errors.New("injected cleanup failure") }
 
-	outcome, err := st.DeleteNodePage("alpha", page.ID)
+	outcome, err := st.DeleteNodePage(identity.Local, "alpha", page.ID)
 	if err != nil {
 		t.Fatalf("committed page delete returned an error: %v", err)
 	}
@@ -100,7 +102,7 @@ func TestPageCleanupSurvivesParentNodeDeletionAndNestedFolder(t *testing.T) {
 	if err := st.MoveNodesToFolder([]string{"alpha"}, "chapter"); err != nil {
 		t.Fatal(err)
 	}
-	page, _, _, err := st.CreateNodePage("alpha", "Notes", PageFormatMarkdown)
+	page, _, _, err := st.CreateNodePage(identity.Local, "alpha", "Notes", PageFormatMarkdown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,11 +113,11 @@ func TestPageCleanupSurvivesParentNodeDeletionAndNestedFolder(t *testing.T) {
 		}
 		return nil
 	}
-	if outcome, err := st.DeleteNodePage("alpha", page.ID); err != nil || !outcome.CleanupPending {
+	if outcome, err := st.DeleteNodePage(identity.Local, "alpha", page.ID); err != nil || !outcome.CleanupPending {
 		t.Fatalf("page delete = %+v, %v", outcome, err)
 	}
 	st.deleteCleanupFault = nil
-	if _, err := st.DeleteNode("alpha"); err != nil {
+	if _, err := st.DeleteNode(identity.Local, "alpha"); err != nil {
 		t.Fatalf("delete parent node: %v", err)
 	}
 	if _, err := os.Stat(source); err != nil {
@@ -181,7 +183,7 @@ func TestUnsafeOrCorruptCleanupQueueFailsDeleteBeforeCommit(t *testing.T) {
 			source := st.NodePath("alpha")
 			arrange(t, st)
 
-			_, err := st.DeleteNode("alpha")
+			_, err := st.DeleteNode(identity.Local, "alpha")
 			var unavailable *DeleteCleanupUnavailableError
 			if !errors.As(err, &unavailable) || err.Error() != "delete cleanup is temporarily unavailable" {
 				t.Fatalf("delete error = %v, want sanitized typed queue error", err)
@@ -210,7 +212,7 @@ func TestCleanupQueueBoundsFailClosedAndLargeBatchRecordsStaySmall(t *testing.T)
 		}
 		writeCleanupFixture(t, st, fmt.Sprintf("delete-%032x.json", index), append(data, '\n'))
 	}
-	if _, err := st.DeleteNode("alpha"); err == nil {
+	if _, err := st.DeleteNode(identity.Local, "alpha"); err == nil {
 		t.Fatal("saturated cleanup queue allowed a new delete")
 	}
 	graph, _, err := st.LoadGraph()

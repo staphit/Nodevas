@@ -21,15 +21,16 @@ import (
 // by the person whose board it is.
 
 type createNodeInput struct {
-	Title     string   `json:"title" jsonschema:"what the task is, in a few words"`
-	Body      string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
-	Kind      string   `json:"kind,omitempty" jsonschema:"task, scene, choice, gate, start or end (default task)"`
-	Priority  string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
-	Assignee  string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
-	Deadline  string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
-	Tags      []string `json:"tags,omitempty"`
-	Requires  string   `json:"requires,omitempty" jsonschema:"a condition that must hold before this is actionable, e.g. \"design and flag(approved)\""`
-	DependsOn []string `json:"dependsOn,omitempty" jsonschema:"node ids that must finish before this one can start"`
+	Title       string   `json:"title" jsonschema:"what the task is, in a few words"`
+	Body        string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
+	Kind        string   `json:"kind,omitempty" jsonschema:"task, scene, choice, gate, start or end (default task)"`
+	Priority    string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
+	Assignee    string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
+	Deadline    string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
+	Tags        []string `json:"tags,omitempty"`
+	Requires    string   `json:"requires,omitempty" jsonschema:"a condition that must hold before this is actionable, e.g. \"design and flag(approved)\""`
+	DependsOn   []string `json:"dependsOn,omitempty" jsonschema:"node ids that must finish before this one can start"`
+	WriteAccess string   `json:"writeAccess,omitempty" jsonschema:"who may modify this node: all|worker|orchestrator|human-only"`
 }
 
 type createNodeOutput struct {
@@ -50,13 +51,14 @@ type updateBodyOutput struct {
 }
 
 type updateMetaInput struct {
-	ID       string   `json:"id" jsonschema:"the node id"`
-	Title    *string  `json:"title,omitempty"`
-	Kind     *string  `json:"kind,omitempty"`
-	Priority *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
-	Assignee *string  `json:"assignee,omitempty"`
-	Deadline *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`
-	Tags     []string `json:"tags,omitempty" jsonschema:"replaces the whole tag list"`
+	ID          string   `json:"id" jsonschema:"the node id"`
+	Title       *string  `json:"title,omitempty"`
+	Kind        *string  `json:"kind,omitempty"`
+	Priority    *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
+	Assignee    *string  `json:"assignee,omitempty"`
+	Deadline    *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"replaces the whole tag list"`
+	WriteAccess *string  `json:"writeAccess,omitempty" jsonschema:"who may modify this node: all|worker|orchestrator|human-only"`
 }
 
 type updateMetaOutput struct {
@@ -108,21 +110,24 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 		Name: "create_node",
 		Description: "Add a task to the board. " +
 			"Put the actual instructions in `body` — a title alone is not a ticket anyone, including you later, can act on. " +
-			"Use `dependsOn` to say what must finish first; that is what keeps the new task out of the ready queue until it is really actionable.",
+			"Use `dependsOn` to say what must finish first; that is what keeps the new task out of the ready queue until it is really actionable. " +
+			"`writeAccess` says who may modify the node afterwards: all, worker, orchestrator or human-only, " +
+			"ranked human > orchestrator > worker — each level can change its own nodes and everything below it.",
 		Annotations: &mcp.ToolAnnotations{Title: "Create a node"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createNodeInput) (*mcp.CallToolResult, createNodeOutput, error) {
 		if strings.TrimSpace(in.Title) == "" {
 			return nil, createNodeOutput{}, &APIError{Code: CodeInvalidArgument, Message: "title is required"}
 		}
 		id, err := client.CreateNode(ctx, NewNode{
-			Title:    in.Title,
-			Kind:     in.Kind,
-			Priority: in.Priority,
-			Assignee: in.Assignee,
-			Deadline: in.Deadline,
-			Tags:     in.Tags,
-			Requires: in.Requires,
-			Body:     in.Body,
+			Title:       in.Title,
+			Kind:        in.Kind,
+			Priority:    in.Priority,
+			Assignee:    in.Assignee,
+			Deadline:    in.Deadline,
+			Tags:        in.Tags,
+			Requires:    in.Requires,
+			Body:        in.Body,
+			WriteAccess: in.WriteAccess,
 		})
 		if err != nil {
 			return nil, createNodeOutput{}, err
@@ -173,8 +178,10 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "update_node_meta",
-		Description: "Change a node's fields — title, kind, priority, assignee, deadline, tags. " +
+		Description: "Change a node's fields — title, kind, priority, assignee, deadline, tags, writeAccess. " +
 			"Only the fields you send are touched, so this is safe to use while somebody else is editing a different field of the same node. " +
+			"`writeAccess` (all, worker, orchestrator or human-only, ranked human > orchestrator > worker) says who may modify the node; " +
+			"a node whose writeAccess outranks your role refuses your writes. " +
 			"To change the body, use update_node_body.",
 		Annotations: &mcp.ToolAnnotations{Title: "Edit a node's fields"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateMetaInput) (*mcp.CallToolResult, updateMetaOutput, error) {
@@ -182,13 +189,14 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 			return nil, updateMetaOutput{}, &APIError{Code: CodeInvalidArgument, Message: "id is required"}
 		}
 		op := store.GraphOp{
-			Kind:     "node-metadata",
-			NodeID:   in.ID,
-			Title:    in.Title,
-			Kind_:    in.Kind,
-			Priority: in.Priority,
-			Assignee: in.Assignee,
-			Deadline: in.Deadline,
+			Kind:        "node-metadata",
+			NodeID:      in.ID,
+			Title:       in.Title,
+			Kind_:       in.Kind,
+			Priority:    in.Priority,
+			Assignee:    in.Assignee,
+			Deadline:    in.Deadline,
+			WriteAccess: in.WriteAccess,
 		}
 		changed := namedFields(in)
 		if in.Tags != nil {
@@ -325,6 +333,9 @@ func namedFields(in updateMetaInput) []string {
 	}
 	if in.Tags != nil {
 		changed = append(changed, "tags")
+	}
+	if in.WriteAccess != nil {
+		changed = append(changed, "writeAccess")
 	}
 	return changed
 }

@@ -14,6 +14,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/identity"
 )
 
 func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
@@ -59,6 +60,10 @@ func (s *Store) CreateNode(n *engine.Node, body string) (string, error) {
 	if n.Kind == "" {
 		n.Kind = "task"
 	}
+	// Normalized before SyncFrontmatter below, or "all" would land in the
+	// document's frontmatter while the graph stores "". The enum itself is
+	// checked by ValidateGraphForStorage once the node has joined the graph.
+	n.WriteAccess = normalizeWriteAccess(n.WriteAccess)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, graphRev, err := s.loadGraphLocked()
@@ -463,8 +468,8 @@ func detachRemovedNodes(g *engine.Graph, kept []*engine.Node, removing map[strin
 
 // DeleteNode soft-deletes one node. It is the single-node case of
 // DeleteNodes, which is where the actual work lives.
-func (s *Store) DeleteNode(id string) (DeleteNodeOutcome, error) {
-	trashed, err := s.DeleteNodes([]string{id})
+func (s *Store) DeleteNode(actor identity.Actor, id string) (DeleteNodeOutcome, error) {
+	trashed, err := s.DeleteNodes(actor, []string{id})
 	if err != nil {
 		return DeleteNodeOutcome{}, err
 	}
@@ -482,7 +487,7 @@ func (s *Store) DeleteNode(id string) (DeleteNodeOutcome, error) {
 //
 // The returned trash file names line up with ids; a node with no document on
 // disk yields an empty name.
-func (s *Store) DeleteNodes(ids []string) (DeleteNodesOutcome, error) {
+func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutcome, error) {
 	var zero DeleteNodesOutcome
 	if len(ids) == 0 {
 		return zero, fmt.Errorf("no node ids given")
@@ -511,6 +516,9 @@ func (s *Store) DeleteNodes(ids []string) (DeleteNodesOutcome, error) {
 	found := make(map[string]bool, len(removing))
 	for _, node := range g.Nodes {
 		if node != nil && removing[node.ID] {
+			if err := checkNodeWrite(actor, node); err != nil {
+				return zero, err
+			}
 			found[node.ID] = true
 			continue
 		}

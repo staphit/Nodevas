@@ -71,6 +71,15 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 		default:
 			return fmt.Errorf("node %q has invalid priority %q", node.ID, node.Priority)
 		}
+		// Every write path funnels through here, so "all" arriving from any
+		// client normalizes to the stored zero value before the enum check.
+		node.WriteAccess = normalizeWriteAccess(node.WriteAccess)
+		switch node.WriteAccess {
+		case engine.WriteAccessAll, engine.WriteAccessWorker,
+			engine.WriteAccessOrchestrator, engine.WriteAccessHumanOnly:
+		default:
+			return fmt.Errorf("node %q has invalid write_access %q", node.ID, node.WriteAccess)
+		}
 		if len(node.Tags) > 64 {
 			return fmt.Errorf("node %q has too many tags", node.ID)
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 func TestACreatedTaskWaitsForWhatItDependsOn(t *testing.T) {
@@ -195,7 +196,7 @@ func TestTheOutlineLeavesOutEverythingVisual(t *testing.T) {
 		Positions:  map[string]engine.Position{"design": {X: 3, Y: 4}},
 		NodeStyles: map[string]engine.NodeStyle{"design": {Color: "#ff0000"}},
 	}
-	if _, err := pm.Store().SaveGraph(graph, rev); err != nil {
+	if _, err := pm.Store().SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatalf("SaveGraph: %v", err)
 	}
 	session := mcpSession(t, url, "")
@@ -232,7 +233,7 @@ func TestAnOversizedBoardIsSummarisedRatherThanDumped(t *testing.T) {
 			Title: "Bulk task",
 		})
 	}
-	if _, err := pm.Store().SaveGraph(graph, rev); err != nil {
+	if _, err := pm.Store().SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatalf("SaveGraph: %v", err)
 	}
 	session := mcpSession(t, url, "")
