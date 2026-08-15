@@ -166,6 +166,11 @@ func (a *SessionAuth) CurrentActor(ctx context.Context, id string) (identity.Act
 	return a.users.ActorRevision(ctx, id)
 }
 
+// Authenticate resolves the session cookie to an account. The
+// X-Nodevas-Agent-Role header is deliberately ignored here: it is only
+// trustworthy on a loopback server, where the OS account is the boundary. The
+// MCP sidecar refuses to talk to non-loopback servers, so no legitimate agent
+// request ever reaches a session-authenticated deployment with that header.
 func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil || cookie.Value == "" {

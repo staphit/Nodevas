@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"nodevas/internal/auth"
 )
 
 // Error codes an agent can act on. A tool that fails hands back one of these
@@ -39,6 +41,7 @@ const (
 	CodeConflict          = "CONFLICT"
 	CodeRateLimited       = "RATE_LIMITED"
 	CodeAuthRequired      = "AUTH_REQUIRED"
+	CodePermissionDenied  = "PERMISSION_DENIED"
 	CodeServerError       = "SERVER_ERROR"
 )
 
@@ -77,8 +80,14 @@ func codeFor(status int) string {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity,
 		http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType:
 		return CodeInvalidArgument
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return CodeAuthRequired
+	case http.StatusForbidden:
+		// Distinct from CodeAuthRequired on purpose: a 403 means the server
+		// knows who is asking and said no — a node's write_access outranks this
+		// agent's role. Presenting it as an authentication problem would send
+		// the agent chasing credentials it already has.
+		return CodePermissionDenied
 	case http.StatusConflict:
 		return CodeConflict
 	case http.StatusTooManyRequests:
@@ -92,10 +101,11 @@ func codeFor(status int) string {
 
 // Client talks to one Nodevas server about one project.
 type Client struct {
-	base    *url.URL
-	project string
-	actor   string
-	http    *http.Client
+	base      *url.URL
+	project   string
+	actor     string
+	agentRole string
+	http      *http.Client
 }
 
 // ClientOptions configures a Client. Project is fixed for the process: tools
@@ -105,7 +115,12 @@ type ClientOptions struct {
 	Server  string
 	Project string
 	Actor   string
-	Timeout time.Duration
+	// AgentRole is the write-permission class every request declares:
+	// "worker" or "orchestrator". Empty sends no header, which the server
+	// reads as a human session. Like Actor it is fixed for the process, so a
+	// tool call cannot talk the agent into a stronger role mid-session.
+	AgentRole string
+	Timeout   time.Duration
 }
 
 // LoopbackOnlyError is returned when --server names something this process
@@ -142,10 +157,11 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		timeout = 30 * time.Second
 	}
 	return &Client{
-		base:    base,
-		project: strings.TrimSpace(opts.Project),
-		actor:   strings.TrimSpace(opts.Actor),
-		http:    &http.Client{Timeout: timeout},
+		base:      base,
+		project:   strings.TrimSpace(opts.Project),
+		actor:     strings.TrimSpace(opts.Actor),
+		agentRole: strings.TrimSpace(opts.AgentRole),
+		http:      &http.Client{Timeout: timeout},
 	}, nil
 }
 
@@ -156,6 +172,10 @@ func (c *Client) Project() string { return c.project }
 // Actor is the name written into the `by` field of everything this client
 // changes. It is attribution, never authentication.
 func (c *Client) Actor() string { return c.actor }
+
+// AgentRole is the write-permission class this client declares on every
+// request; empty means it presents as a human session.
+func (c *Client) AgentRole() string { return c.agentRole }
 
 // BaseURL is the server this client talks to, for diagnostics.
 func (c *Client) BaseURL() string { return c.base.String() }
@@ -266,6 +286,12 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 	// protections key on those headers being present and wrong; a client that
 	// is not a browser passes by not claiming to be one.
 	request.Header.Set("Accept", "application/json")
+	// Every request declares the role, reads included: which class of agent is
+	// asking is part of who is asking, and a node's write_access is enforced
+	// against it server-side.
+	if c.agentRole != "" {
+		request.Header.Set(auth.AgentRoleHeaderName, c.agentRole)
+	}
 
 	response, err := c.http.Do(request)
 	if err != nil {

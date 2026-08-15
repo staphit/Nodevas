@@ -4,7 +4,7 @@ This guide covers building Nodevas from source, running it locally, and configur
 
 ## Requirements
 
-- Go 1.25.12
+- Go 1.25.13
 - Node.js 22 and npm
 - Git
 

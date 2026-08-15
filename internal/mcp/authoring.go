@@ -24,6 +24,10 @@ type NewNode struct {
 	Tags     []string `json:"tags,omitempty"`
 	Requires string   `json:"requires,omitempty"`
 	Body     string   `json:"body,omitempty"`
+	// WriteAccess is who may modify the node once it exists: "" (everyone),
+	// "worker", "orchestrator" or "human-only". The server accepts "all" as a
+	// spelled-out synonym for "".
+	WriteAccess string `json:"writeAccess,omitempty"`
 }
 
 // CreateNode adds a node and returns the id the server gave it.

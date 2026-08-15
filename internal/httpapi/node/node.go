@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/store"
 	"os"
@@ -53,8 +54,12 @@ func (a *API) putNode(c *gin.Context) {
 		httpx.Err(c, http.StatusUnprocessableEntity, err)
 		return
 	}
-	saved, rev, err := httpx.StoreFor(c.Request, a.pm).SaveNodeContent(id, body.Content, body.BaseRev)
+	saved, rev, err := httpx.StoreFor(c.Request, a.pm).SaveNodeContent(
+		auth.ActorFrom(c.Request), id, body.Content, body.BaseRev)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
 			httpx.Conflict(c, conflict)
@@ -103,8 +108,11 @@ func (a *API) postNodeDuplicate(c *gin.Context) {
 }
 
 func (a *API) deleteNode(c *gin.Context) {
-	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNode(c.Param("id"))
+	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNode(auth.ActorFrom(c.Request), c.Param("id"))
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var cleanupUnavailable *store.DeleteCleanupUnavailableError
 		if errors.As(err, &cleanupUnavailable) {
 			httpx.Err(c, http.StatusServiceUnavailable, cleanupUnavailable)
@@ -144,8 +152,11 @@ func (a *API) postNodesDelete(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, errors.New("too many nodes in one request"))
 		return
 	}
-	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNodes(body.IDs)
+	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNodes(auth.ActorFrom(c.Request), body.IDs)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var cleanupUnavailable *store.DeleteCleanupUnavailableError
 		if errors.As(err, &cleanupUnavailable) {
 			httpx.Err(c, http.StatusServiceUnavailable, cleanupUnavailable)
@@ -196,9 +207,12 @@ func (a *API) postStatus(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	rs, err := st.ReportStatus(id, engine.Status(body.Status),
+	rs, err := st.ReportStatus(auth.ActorFrom(c.Request), id, engine.Status(body.Status),
 		body.By, body.Note, body.Owner, body.RequestID)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		respondClaimError(c, err)
 		return
 	}
@@ -235,8 +249,11 @@ func (a *API) postEventMove(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	rs, err := st.MoveEvent(body.ID, body.T, body.By, body.Note)
+	rs, err := st.MoveEvent(auth.ActorFrom(c.Request), body.ID, body.T, body.By, body.Note)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		httpx.Err(c, 400, err)
 		return
 	}
@@ -329,7 +346,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 	var trashFiles []string
 	cleanupPending := false
 	if mode == "cut" {
-		deleteOutcome, deleteErr := source.DeleteNodes(body.IDs)
+		deleteOutcome, deleteErr := source.DeleteNodes(auth.ActorFrom(c.Request), body.IDs)
 		err = deleteErr
 		if err != nil {
 			// The copy is already committed. Saying "move failed" would be a

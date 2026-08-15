@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/store"
@@ -52,9 +53,12 @@ func (a *API) postClaim(c *gin.Context) {
 	}
 
 	st := httpx.StoreFor(c.Request, a.pm)
-	result, err := st.ClaimNode(id, body.Owner,
+	result, err := st.ClaimNode(auth.ActorFrom(c.Request), id, body.Owner,
 		time.Duration(body.LeaseSeconds)*time.Second, body.RequestID)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		respondClaimError(c, err)
 		return
 	}

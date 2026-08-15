@@ -42,7 +42,7 @@ export function useNodeCreation({
 }: {
   planStatusDefinitions: PlanStatusDefinition[];
   createNode: (
-    node: { title: string; kind: string },
+    node: { title: string; kind: string; writeAccess?: string },
     options: {
       openDocument: boolean;
       position: { x: number; y: number };
@@ -66,6 +66,8 @@ export function useNodeCreation({
   // Empty means "leave the node at its default state", which is what pressing
   // Enter on a title alone must keep doing.
   const [nodeCreateStatus, setNodeCreateStatus] = useState<Status | "">("");
+  // Empty means "everyone may write", the default a new node keeps.
+  const [nodeCreateWriteAccess, setNodeCreateWriteAccess] = useState("");
   const [nodeCreateStyle, setNodeCreateStyle] = useState<NodeStyle>({});
   const [nodePlanDates, setNodePlanDates] = useState<
     Partial<Record<PlanStatus, string>>
@@ -132,7 +134,11 @@ export function useNodeCreation({
       plans.sort((a, b) => a.date.localeCompare(b.date));
 
       const id = await createNode(
-        { title: nodeCreateTitle.trim(), kind: "task" },
+        {
+          title: nodeCreateTitle.trim(),
+          kind: "task",
+          ...(nodeCreateWriteAccess ? { writeAccess: nodeCreateWriteAccess } : {}),
+        },
         {
           openDocument: false,
           position: { x: menu.col, y: menu.row },
@@ -165,6 +171,7 @@ export function useNodeCreation({
       // A form that keeps the last node's colours would make the next node
       // inherit them by accident, so the draft resets with the form.
       setNodeCreateStatus("");
+      setNodeCreateWriteAccess("");
       setNodeCreateStyle({});
       setContextMenu(null);
     } catch (error) {
@@ -182,6 +189,8 @@ export function useNodeCreation({
     nodeCreateBusy,
     nodeCreateStatus,
     setNodeCreateStatus,
+    nodeCreateWriteAccess,
+    setNodeCreateWriteAccess,
     nodeCreateStyle,
     setNodeCreateStyle,
     nodePlanDates,

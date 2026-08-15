@@ -17,6 +17,10 @@ type Options struct {
 	Server  string
 	Project string
 	Actor   string
+	// AgentRole is the write-permission class this process declares on every
+	// request: "worker" or "orchestrator". Empty presents as a human session.
+	// Nodes whose write_access outranks it refuse this agent's writes.
+	AgentRole string
 	// Stderr receives every diagnostic. Nothing may write to stdout but the
 	// JSON-RPC transport: one stray line there and the client's parser gives up
 	// on the session, usually with an error that names neither the line nor
@@ -48,9 +52,10 @@ func Serve(ctx context.Context, opts Options) error {
 // rather than only through a subprocess.
 func NewServer(ctx context.Context, opts Options) (*mcp.Server, error) {
 	client, err := NewClient(ClientOptions{
-		Server:  opts.Server,
-		Project: opts.Project,
-		Actor:   opts.Actor,
+		Server:    opts.Server,
+		Project:   opts.Project,
+		Actor:     opts.Actor,
+		AgentRole: opts.AgentRole,
 	})
 	if err != nil {
 		return nil, err
@@ -62,8 +67,9 @@ func NewServer(ctx context.Context, opts Options) (*mcp.Server, error) {
 		return nil, err
 	}
 	if opts.Stderr != nil {
-		fmt.Fprintf(opts.Stderr, "nodevas mcp: %s, project %q, acting as %q\n",
-			client.BaseURL(), displayProject(client.Project()), client.Actor())
+		fmt.Fprintf(opts.Stderr, "nodevas mcp: %s, project %q, acting as %q, role %s\n",
+			client.BaseURL(), displayProject(client.Project()), client.Actor(),
+			displayRole(client.AgentRole()))
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{
@@ -85,6 +91,13 @@ func displayProject(name string) string {
 		return "(the server's active project)"
 	}
 	return name
+}
+
+func displayRole(role string) string {
+	if role == "" {
+		return "(none: presents as a human session)"
+	}
+	return role
 }
 
 // instructions is what the client shows the model about this server as a whole,

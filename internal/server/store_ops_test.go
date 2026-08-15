@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 func opsTestServer(t *testing.T) (*Server, *store.Store) {
@@ -28,7 +29,7 @@ func opsTestServer(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SaveGraph(graph, rev); err != nil {
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatalf("seed graph: %v", err)
 	}
 	return server, st
@@ -76,7 +77,7 @@ func TestGraphOpsMoveAndEdge(t *testing.T) {
 	if requires, exists := nodeFile.Meta["requires"]; !exists || requires != "alpha" {
 		t.Fatalf("beta frontmatter requires = %#v, want alpha", requires)
 	}
-	if _, err := st.ClaimNode("beta", "agent-before-remove", time.Minute, ""); err == nil {
+	if _, err := st.ClaimNode(identity.Local, "beta", "agent-before-remove", time.Minute, ""); err == nil {
 		t.Fatal("agent claimed beta while its required edge was blocked")
 	} else {
 		var notClaimable *store.ErrNotClaimable
@@ -107,7 +108,7 @@ func TestGraphOpsMoveAndEdge(t *testing.T) {
 	if _, blocked := engine.Blocked(graph, nil)["beta"]; blocked {
 		t.Fatal("Go readiness still blocks beta after its required edge was removed")
 	}
-	if _, err := st.ClaimNode("beta", "agent-after-remove", time.Minute, ""); err != nil {
+	if _, err := st.ClaimNode(identity.Local, "beta", "agent-after-remove", time.Minute, ""); err != nil {
 		t.Fatalf("agent could not claim beta after required edge removal: %v", err)
 	}
 	content, _, err = st.LoadNodeContent("beta")
@@ -135,12 +136,12 @@ func TestGraphOpsRelationChangesRewriteOnlyTheirRequirement(t *testing.T) {
 		{From: "alpha", To: "beta"},
 		{From: "gamma", To: "beta"},
 	}
-	if _, err := st.SaveGraph(graph, rev); err != nil {
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatal(err)
 	}
 
 	optional := engine.RelationOptional
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
 		Kind: "set-edge-style", From: "alpha", To: "beta", Relation: &optional,
 	}}); err != nil {
 		t.Fatal(err)
@@ -157,7 +158,7 @@ func TestGraphOpsRelationChangesRewriteOnlyTheirRequirement(t *testing.T) {
 	}
 
 	required := engine.RelationRequired
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
 		Kind: "set-edge-style", From: "alpha", To: "beta", Relation: &required,
 	}}); err != nil {
 		t.Fatal(err)
@@ -183,11 +184,11 @@ func TestGraphOpsRelationRemovalLeavesRequiresAlone(t *testing.T) {
 			// must not parse or rewrite the executable condition at all.
 			graph.NodeByID("beta").Requires = "alpha and"
 			graph.Edges = []*engine.Edge{{From: "alpha", To: "beta", Relation: relation}}
-			if _, err := st.SaveGraph(graph, rev); err != nil {
+			if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 				t.Fatal(err)
 			}
 
-			if _, _, err := st.ApplyGraphOps([]store.GraphOp{{
+			if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
 				Kind: "remove-edge", From: "alpha", To: "beta",
 			}}); err != nil {
 				t.Fatalf("remove %s edge: %v", relation, err)
@@ -217,17 +218,17 @@ func TestGraphOpsRejectDirectChangesToGateOwnedEdges(t *testing.T) {
 	graph.UI.LogicGates = []engine.LogicGate{{
 		ID: "gate-1", Operator: "must", Inputs: []string{"alpha"}, Output: "beta",
 	}}
-	if _, err := st.SaveGraph(graph, rev); err != nil {
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
 		Kind: "remove-edge", From: "alpha", To: "beta",
 	}}); err == nil || !strings.Contains(err.Error(), "gate-1") {
 		t.Fatalf("gate-owned removal error = %v", err)
 	}
 	optional := engine.RelationOptional
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{
 		Kind: "set-edge-style", From: "alpha", To: "beta", Relation: &optional,
 	}}); err == nil || !strings.Contains(err.Error(), "gate-1") {
 		t.Fatalf("gate-owned relation error = %v", err)
@@ -248,13 +249,13 @@ func TestGraphOpsMetadataLeavesOtherFieldsAlone(t *testing.T) {
 	_, st := opsTestServer(t)
 
 	title := "改過的標題"
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{
 		{Kind: "node-metadata", NodeID: "alpha", Title: &title},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	priority := "high"
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{
 		{Kind: "node-metadata", NodeID: "alpha", Priority: &priority},
 	}); err != nil {
 		t.Fatal(err)
@@ -285,7 +286,7 @@ func TestConcurrentGraphOpsAllLand(t *testing.T) {
 				id = "beta"
 			}
 			x, y := offset, offset*2
-			if _, _, err := st.ApplyGraphOps([]store.GraphOp{
+			if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{
 				{Kind: "move", NodeID: id, X: &x, Y: &y},
 			}); err != nil {
 				t.Errorf("move %s: %v", id, err)
@@ -309,11 +310,11 @@ func TestConcurrentGraphOpsAllLand(t *testing.T) {
 func TestGraphOpsRejectUnknownKindAndNode(t *testing.T) {
 	_, st := opsTestServer(t)
 
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{{Kind: "explode"}}); err == nil {
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{{Kind: "explode"}}); err == nil {
 		t.Fatal("an unknown operation was accepted")
 	}
 	x, y := 1.0, 1.0
-	if _, _, err := st.ApplyGraphOps([]store.GraphOp{
+	if _, _, err := st.ApplyGraphOps(identity.Local, []store.GraphOp{
 		{Kind: "move", NodeID: "ghost", X: &x, Y: &y},
 	}); err == nil {
 		t.Fatal("a move of a node that does not exist was accepted")

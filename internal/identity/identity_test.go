@@ -82,6 +82,49 @@ func TestLocalActorAdministersAndWrites(t *testing.T) {
 	}
 }
 
+func TestOnlyAgentsReadAsAgents(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		actor Actor
+		want  bool
+	}{
+		{"human", Actor{ID: "u1", Agent: AgentHuman}, false},
+		{"zero actor", Actor{}, false},
+		{"worker", Actor{ID: "local", Agent: AgentWorker}, true},
+		{"orchestrator", Actor{ID: "local", Agent: AgentOrchestrator}, true},
+	} {
+		if got := tc.actor.IsAgent(); got != tc.want {
+			t.Errorf("%s: IsAgent() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestAgentClassRoundTripsThroughJSON(t *testing.T) {
+	actor := Actor{ID: "local", Name: "local", Role: RoleAdmin, Agent: AgentWorker}
+	data, err := json.Marshal(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), `{"id":"local","name":"local","role":"admin","agent":"worker"}`; got != want {
+		t.Fatalf("marshalled to %s, want %s", got, want)
+	}
+	var back Actor
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back != actor {
+		t.Fatalf("round-trip gave %+v, want %+v", back, actor)
+	}
+	// A human actor must not persist `"agent":""`, which old records lack.
+	data, err = json.Marshal(Actor{ID: "u1", Name: "Ada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), `{"id":"u1","name":"Ada"}`; got != want {
+		t.Fatalf("human actor marshalled to %s, want %s", got, want)
+	}
+}
+
 func TestActorRoundTripsThroughJSON(t *testing.T) {
 	// Actors are persisted in the audit trail, so a field renamed on the Go
 	// side must not change what old records decode to.

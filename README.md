@@ -54,7 +54,7 @@ The interface defaults to English and can switch to Traditional Chinese (`zh-TW`
 
 ## Quick start
 
-Requirements: Go 1.25.12, Node.js 22 with npm, and Git.
+Requirements: Go 1.25.13, Node.js 22 with npm, and Git.
 
 ```bash
 git clone https://github.com/staphit/Nodevas.git

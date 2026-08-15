@@ -42,6 +42,7 @@ cover.out
 
 # Local workspaces
 /examples/
+/demo/日程/
 
 # Per-project recovery state
 **/.vised/

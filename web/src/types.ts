@@ -53,6 +53,12 @@ export interface GraphNode {
   /** "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD" (end of that day), local time. */
   deadline?: string;
   requires?: string;
+  /**
+   * Minimum caller rank allowed to write this node. Absent means everyone.
+   * Hierarchy: human > orchestrator > worker, so "worker" admits humans,
+   * orchestrators and workers alike. Browser humans are never blocked.
+   */
+  writeAccess?: "worker" | "orchestrator" | "human-only";
   tags?: string[];
   effects?: { set?: string }[];
   links?: NodeLinkRef[];

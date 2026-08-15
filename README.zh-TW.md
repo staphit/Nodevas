@@ -54,7 +54,7 @@ Nodevas 將分散的筆記與任務整理成一個可以看見、編輯並持續
 
 ## 快速開始
 
-必要環境：Go 1.25.12、Node.js 22 與 npm、Git。
+必要環境：Go 1.25.13、Node.js 22 與 npm、Git。
 
 ```bash
 git clone https://github.com/staphit/Nodevas.git

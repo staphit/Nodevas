@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // transferTestProject makes an empty project directory with a graph in it.
@@ -17,7 +18,7 @@ func transferTestProject(t *testing.T, workspace, name string, nodes ...*engine.
 		t.Fatal(err)
 	}
 	st := NewStore(dir)
-	if _, err := st.SaveGraph(&engine.Graph{Version: 1, Nodes: nodes}, ""); err != nil {
+	if _, err := st.SaveGraph(identity.Local, &engine.Graph{Version: 1, Nodes: nodes}, ""); err != nil {
 		t.Fatal(err)
 	}
 	return st
@@ -52,7 +53,7 @@ func TestImportNodesRewritesNodeLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := source.SaveNodeContent("node-1", transferLinkDocument, rev); err != nil {
+	if _, _, err := source.SaveNodeContent(identity.Local, "node-1", transferLinkDocument, rev); err != nil {
 		t.Fatal(err)
 	}
 

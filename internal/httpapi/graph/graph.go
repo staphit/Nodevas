@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/store"
 
@@ -56,8 +57,11 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	issues := engine.Validate(body.Graph)
-	rev, err := httpx.StoreFor(c.Request, a.pm).SaveGraph(body.Graph, body.BaseRev)
+	rev, err := httpx.StoreFor(c.Request, a.pm).SaveGraph(auth.ActorFrom(c.Request), body.Graph, body.BaseRev)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
 			httpx.Conflict(c, conflict)
@@ -136,8 +140,11 @@ func (a *API) postGraphOps(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	graph, rev, err := st.ApplyGraphOps(body.Ops)
+	graph, rev, err := st.ApplyGraphOps(auth.ActorFrom(c.Request), body.Ops)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
 			httpx.Conflict(c, conflict)

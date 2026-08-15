@@ -17,6 +17,7 @@ vi.mock("../api", async (importOriginal) => {
       getTrash: vi.fn(),
       getProjects: vi.fn(),
       checkDSL: vi.fn(),
+      createNode: vi.fn(),
     },
   };
 });
@@ -90,6 +91,48 @@ describe("runGraphCommand", () => {
     });
     expect(useApp.getState().canUndo).toBe(true);
     expect(useApp.getState().undoLabel).toBe("修改節點資料");
+  });
+
+  it("routes a write-access edit through ops", async () => {
+    const merged = baseGraph();
+    merged.nodes![0].writeAccess = "human-only";
+    vi.mocked(api.graphOps).mockResolvedValue(opsResponse(merged));
+
+    const result = await useApp
+      .getState()
+      .updateNodeMetadata("a", { writeAccess: "human-only" });
+
+    expect(result.ok).toBe(true);
+    expect(api.putGraph).not.toHaveBeenCalled();
+    expect(vi.mocked(api.graphOps).mock.calls[0][0]).toEqual([
+      { kind: "node-metadata", nodeId: "a", writeAccess: "human-only" },
+    ]);
+    expect(useApp.getState().graph!.nodes![0].writeAccess).toBe("human-only");
+  });
+
+  it("clears write access with an empty value on the op", async () => {
+    const restricted = baseGraph();
+    restricted.nodes![0].writeAccess = "worker";
+    resetStore(restricted);
+    vi.mocked(api.graphOps).mockResolvedValue(opsResponse(baseGraph()));
+
+    const result = await useApp.getState().updateNodeMetadata("a", { writeAccess: "" });
+
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(api.graphOps).mock.calls[0][0]).toEqual([
+      { kind: "node-metadata", nodeId: "a", writeAccess: "" },
+    ]);
+    expect(useApp.getState().graph!.nodes![0].writeAccess).toBeUndefined();
+  });
+
+  it("rejects a write-access value outside the hierarchy before the network", async () => {
+    const result = await useApp
+      .getState()
+      .updateNodeMetadata("a", { writeAccess: "admin" });
+
+    expect(result.ok).toBe(false);
+    expect(api.graphOps).not.toHaveBeenCalled();
+    expect(api.putGraph).not.toHaveBeenCalled();
   });
 
   it("keeps whole-file writes on PUT /api/graph for non-op-able commands", async () => {
@@ -225,6 +268,25 @@ describe("runGraphCommand", () => {
     const result = await useApp.getState().updateNodeMetadata("a", { title: "x" });
     expect(result.ok).toBe(false);
     expect(api.putGraph).not.toHaveBeenCalled();
+  });
+});
+
+describe("createNode", () => {
+  it("carries writeAccess in the create payload", async () => {
+    vi.mocked(api.createNode).mockResolvedValue({ ok: true, id: "n1" });
+
+    await useApp
+      .getState()
+      .createNode(
+        { title: "限制節點", kind: "task", writeAccess: "orchestrator" },
+        { openDocument: false },
+      );
+
+    expect(api.createNode).toHaveBeenCalledWith({
+      title: "限制節點",
+      kind: "task",
+      writeAccess: "orchestrator",
+    });
   });
 });
 

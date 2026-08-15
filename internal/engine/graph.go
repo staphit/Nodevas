@@ -72,10 +72,13 @@ type Node struct {
 	Assignee string `yaml:"assignee,omitempty" json:"assignee,omitempty"`
 	// Deadline is a local time "2006-01-02T15:04" or date "2006-01-02"
 	// (interpreted as end of that day). Empty = no deadline.
-	Deadline string   `yaml:"deadline,omitempty" json:"deadline,omitempty"`
-	Requires string   `yaml:"requires,omitempty" json:"requires,omitempty"`
-	Tags     []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Effects  []Effect `yaml:"effects,omitempty" json:"effects,omitempty"`
+	Deadline string `yaml:"deadline,omitempty" json:"deadline,omitempty"`
+	// WriteAccess is who may modify this node: "" (everyone), "worker",
+	// "orchestrator" (humans + orchestrator agents), or "human-only".
+	WriteAccess string   `yaml:"write_access,omitempty" json:"writeAccess,omitempty"`
+	Requires    string   `yaml:"requires,omitempty" json:"requires,omitempty"`
+	Tags        []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+	Effects     []Effect `yaml:"effects,omitempty" json:"effects,omitempty"`
 	// Links are named references to other nodes in the same workspace. They
 	// are not dependencies: nothing waits on them. Documents insert them by
 	// label with `/`, and the editor writes `[[…]]` into the markdown.
