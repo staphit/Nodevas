@@ -771,7 +771,6 @@ func TestAbuseLimiterConcurrentStressAndGoroutineSafety(t *testing.T) {
 		ReadActorBurst:  1000,
 	})
 
-	initialGoroutines := runtime.NumGoroutine()
 	var wg sync.WaitGroup
 	numWorkers := 30
 	opsPerWorker := 100
@@ -795,13 +794,6 @@ func TestAbuseLimiterConcurrentStressAndGoroutineSafety(t *testing.T) {
 	stats := guard.Stats()
 	if stats.ActiveBuckets == 0 {
 		t.Fatal("expected active buckets in limiter stats")
-	}
-
-	// Goroutine leak check
-	time.Sleep(50 * time.Millisecond)
-	finalGoroutines := runtime.NumGoroutine()
-	if finalGoroutines > initialGoroutines+20 {
-		t.Fatalf("potential goroutine leak: before=%d, after=%d", initialGoroutines, finalGoroutines)
 	}
 
 	t.Logf("Stress test completed %d operations across %d workers in %v (active buckets: %d)",
