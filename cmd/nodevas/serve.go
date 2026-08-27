@@ -236,6 +236,50 @@ func serve(args []string) {
 	logLevel := fs.String("log-level", serveConfig.Logging.Level, "debug, info, warn, or error")
 	logFormat := fs.String("log-format", serveConfig.Logging.Format,
 		"json for a log shipper (Elastic Common Schema field names), text for a terminal")
+
+	abusePreAuthGlobalRate := fs.Float64("abuse-pre-auth-global-rate", serveConfig.Abuse.PreAuthGlobalRate, "pre-auth global rate limit (req/s)")
+	abusePreAuthGlobalBurst := fs.Float64("abuse-pre-auth-global-burst", serveConfig.Abuse.PreAuthGlobalBurst, "pre-auth global burst capacity")
+	abusePreAuthIPRate := fs.Float64("abuse-pre-auth-ip-rate", serveConfig.Abuse.PreAuthIPRate, "pre-auth per-IP rate limit (req/s)")
+	abusePreAuthIPBurst := fs.Float64("abuse-pre-auth-ip-burst", serveConfig.Abuse.PreAuthIPBurst, "pre-auth per-IP burst capacity")
+
+	abuseReadGlobalRate := fs.Float64("abuse-read-global-rate", serveConfig.Abuse.ReadGlobalRate, "read global rate limit (req/s)")
+	abuseReadGlobalBurst := fs.Float64("abuse-read-global-burst", serveConfig.Abuse.ReadGlobalBurst, "read global burst capacity")
+	abuseReadIPRate := fs.Float64("abuse-read-ip-rate", serveConfig.Abuse.ReadIPRate, "read per-IP rate limit (req/s)")
+	abuseReadIPBurst := fs.Float64("abuse-read-ip-burst", serveConfig.Abuse.ReadIPBurst, "read per-IP burst capacity")
+	abuseReadActorRate := fs.Float64("abuse-read-actor-rate", serveConfig.Abuse.ReadActorRate, "read per-actor rate limit (req/s)")
+	abuseReadActorBurst := fs.Float64("abuse-read-actor-burst", serveConfig.Abuse.ReadActorBurst, "read per-actor burst capacity")
+
+	abuseWriteGlobalRate := fs.Float64("abuse-write-global-rate", serveConfig.Abuse.WriteGlobalRate, "write global rate limit (req/s)")
+	abuseWriteGlobalBurst := fs.Float64("abuse-write-global-burst", serveConfig.Abuse.WriteGlobalBurst, "write global burst capacity")
+	abuseWriteIPRate := fs.Float64("abuse-write-ip-rate", serveConfig.Abuse.WriteIPRate, "write per-IP rate limit (req/s)")
+	abuseWriteIPBurst := fs.Float64("abuse-write-ip-burst", serveConfig.Abuse.WriteIPBurst, "write per-IP burst capacity")
+	abuseWriteActorRate := fs.Float64("abuse-write-actor-rate", serveConfig.Abuse.WriteActorRate, "write per-actor rate limit (req/s)")
+	abuseWriteActorBurst := fs.Float64("abuse-write-actor-burst", serveConfig.Abuse.WriteActorBurst, "write per-actor burst capacity")
+
+	abuseExpensiveGlobalRate := fs.Float64("abuse-expensive-global-rate", serveConfig.Abuse.ExpensiveGlobalRate, "expensive routes global rate limit (req/s)")
+	abuseExpensiveGlobalBurst := fs.Float64("abuse-expensive-global-burst", serveConfig.Abuse.ExpensiveGlobalBurst, "expensive routes global burst capacity")
+	abuseExpensiveIPRate := fs.Float64("abuse-expensive-ip-rate", serveConfig.Abuse.ExpensiveIPRate, "expensive routes per-IP rate limit (req/s)")
+	abuseExpensiveIPBurst := fs.Float64("abuse-expensive-ip-burst", serveConfig.Abuse.ExpensiveIPBurst, "expensive routes per-IP burst capacity")
+	abuseExpensiveActorRate := fs.Float64("abuse-expensive-actor-rate", serveConfig.Abuse.ExpensiveActorRate, "expensive routes per-actor rate limit (req/s)")
+	abuseExpensiveActorBurst := fs.Float64("abuse-expensive-actor-burst", serveConfig.Abuse.ExpensiveActorBurst, "expensive routes per-actor burst capacity")
+
+	abuseHeavyGlobalRate := fs.Float64("abuse-heavy-global-rate", serveConfig.Abuse.HeavyGlobalRate, "heavy routes global rate limit (req/s)")
+	abuseHeavyGlobalBurst := fs.Float64("abuse-heavy-global-burst", serveConfig.Abuse.HeavyGlobalBurst, "heavy routes global burst capacity")
+	abuseHeavyIPRate := fs.Float64("abuse-heavy-ip-rate", serveConfig.Abuse.HeavyIPRate, "heavy routes per-IP rate limit (req/s)")
+	abuseHeavyIPBurst := fs.Float64("abuse-heavy-ip-burst", serveConfig.Abuse.HeavyIPBurst, "heavy routes per-IP burst capacity")
+	abuseHeavyActorRate := fs.Float64("abuse-heavy-actor-rate", serveConfig.Abuse.HeavyActorRate, "heavy routes per-actor rate limit (req/s)")
+	abuseHeavyActorBurst := fs.Float64("abuse-heavy-actor-burst", serveConfig.Abuse.HeavyActorBurst, "heavy routes per-actor burst capacity")
+
+	abuseWSUpgradeGlobalRate := fs.Float64("abuse-ws-upgrade-global-rate", serveConfig.Abuse.WSUpgradeGlobalRate, "ws upgrade global rate limit (req/s)")
+	abuseWSUpgradeGlobalBurst := fs.Float64("abuse-ws-upgrade-global-burst", serveConfig.Abuse.WSUpgradeGlobalBurst, "ws upgrade global burst capacity")
+	abuseWSUpgradeIPRate := fs.Float64("abuse-ws-upgrade-ip-rate", serveConfig.Abuse.WSUpgradeIPRate, "ws upgrade per-IP rate limit (req/s)")
+	abuseWSUpgradeIPBurst := fs.Float64("abuse-ws-upgrade-ip-burst", serveConfig.Abuse.WSUpgradeIPBurst, "ws upgrade per-IP burst capacity")
+	abuseWSUpgradeActorRate := fs.Float64("abuse-ws-upgrade-actor-rate", serveConfig.Abuse.WSUpgradeActorRate, "ws upgrade per-actor rate limit (req/s)")
+	abuseWSUpgradeActorBurst := fs.Float64("abuse-ws-upgrade-actor-burst", serveConfig.Abuse.WSUpgradeActorBurst, "ws upgrade per-actor burst capacity")
+
+	abuseMaxConcurrentHeavy := fs.Int("abuse-max-concurrent-heavy", serveConfig.Abuse.MaxConcurrentHeavy, "max concurrent heavy operations")
+	abuseMaxConcurrentDOCX := fs.Int("abuse-max-concurrent-docx", serveConfig.Abuse.MaxConcurrentDOCX, "max concurrent DOCX operations")
+	abuseMaxConcurrentRemote := fs.Int("abuse-max-concurrent-remote", serveConfig.Abuse.MaxConcurrentRemote, "max concurrent remote sync operations")
 	_ = fs.Parse(args)
 
 	// The flag values now represent the complete precedence chain:
@@ -256,6 +300,44 @@ func serve(args []string) {
 	serveConfig.SMTP.Security = *smtpSecurity
 	serveConfig.Logging.Level = *logLevel
 	serveConfig.Logging.Format = *logFormat
+
+	serveConfig.Abuse.PreAuthGlobalRate = *abusePreAuthGlobalRate
+	serveConfig.Abuse.PreAuthGlobalBurst = *abusePreAuthGlobalBurst
+	serveConfig.Abuse.PreAuthIPRate = *abusePreAuthIPRate
+	serveConfig.Abuse.PreAuthIPBurst = *abusePreAuthIPBurst
+	serveConfig.Abuse.ReadGlobalRate = *abuseReadGlobalRate
+	serveConfig.Abuse.ReadGlobalBurst = *abuseReadGlobalBurst
+	serveConfig.Abuse.ReadIPRate = *abuseReadIPRate
+	serveConfig.Abuse.ReadIPBurst = *abuseReadIPBurst
+	serveConfig.Abuse.ReadActorRate = *abuseReadActorRate
+	serveConfig.Abuse.ReadActorBurst = *abuseReadActorBurst
+	serveConfig.Abuse.WriteGlobalRate = *abuseWriteGlobalRate
+	serveConfig.Abuse.WriteGlobalBurst = *abuseWriteGlobalBurst
+	serveConfig.Abuse.WriteIPRate = *abuseWriteIPRate
+	serveConfig.Abuse.WriteIPBurst = *abuseWriteIPBurst
+	serveConfig.Abuse.WriteActorRate = *abuseWriteActorRate
+	serveConfig.Abuse.WriteActorBurst = *abuseWriteActorBurst
+	serveConfig.Abuse.ExpensiveGlobalRate = *abuseExpensiveGlobalRate
+	serveConfig.Abuse.ExpensiveGlobalBurst = *abuseExpensiveGlobalBurst
+	serveConfig.Abuse.ExpensiveIPRate = *abuseExpensiveIPRate
+	serveConfig.Abuse.ExpensiveIPBurst = *abuseExpensiveIPBurst
+	serveConfig.Abuse.ExpensiveActorRate = *abuseExpensiveActorRate
+	serveConfig.Abuse.ExpensiveActorBurst = *abuseExpensiveActorBurst
+	serveConfig.Abuse.HeavyGlobalRate = *abuseHeavyGlobalRate
+	serveConfig.Abuse.HeavyGlobalBurst = *abuseHeavyGlobalBurst
+	serveConfig.Abuse.HeavyIPRate = *abuseHeavyIPRate
+	serveConfig.Abuse.HeavyIPBurst = *abuseHeavyIPBurst
+	serveConfig.Abuse.HeavyActorRate = *abuseHeavyActorRate
+	serveConfig.Abuse.HeavyActorBurst = *abuseHeavyActorBurst
+	serveConfig.Abuse.WSUpgradeGlobalRate = *abuseWSUpgradeGlobalRate
+	serveConfig.Abuse.WSUpgradeGlobalBurst = *abuseWSUpgradeGlobalBurst
+	serveConfig.Abuse.WSUpgradeIPRate = *abuseWSUpgradeIPRate
+	serveConfig.Abuse.WSUpgradeIPBurst = *abuseWSUpgradeIPBurst
+	serveConfig.Abuse.WSUpgradeActorRate = *abuseWSUpgradeActorRate
+	serveConfig.Abuse.WSUpgradeActorBurst = *abuseWSUpgradeActorBurst
+	serveConfig.Abuse.MaxConcurrentHeavy = *abuseMaxConcurrentHeavy
+	serveConfig.Abuse.MaxConcurrentDOCX = *abuseMaxConcurrentDOCX
+	serveConfig.Abuse.MaxConcurrentRemote = *abuseMaxConcurrentRemote
 	if err := serveConfig.Validate(); err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -299,6 +381,53 @@ func serve(args []string) {
 		log.Print("frontend build not embedded; use the Vite dev server for the UI")
 	}
 	srv := server.New(pm, hub, distFS)
+	srv.SetAbuseOptions(server.AbuseGuardOptions{
+		PreAuthGlobalRate:    serveConfig.Abuse.PreAuthGlobalRate,
+		PreAuthGlobalBurst:   serveConfig.Abuse.PreAuthGlobalBurst,
+		PreAuthIPRate:        serveConfig.Abuse.PreAuthIPRate,
+		PreAuthIPBurst:       serveConfig.Abuse.PreAuthIPBurst,
+		ReadGlobalRate:       serveConfig.Abuse.ReadGlobalRate,
+		ReadGlobalBurst:      serveConfig.Abuse.ReadGlobalBurst,
+		ReadIPRate:           serveConfig.Abuse.ReadIPRate,
+		ReadIPBurst:          serveConfig.Abuse.ReadIPBurst,
+		ReadActorRate:        serveConfig.Abuse.ReadActorRate,
+		ReadActorBurst:       serveConfig.Abuse.ReadActorBurst,
+		WriteGlobalRate:      serveConfig.Abuse.WriteGlobalRate,
+		WriteGlobalBurst:     serveConfig.Abuse.WriteGlobalBurst,
+		WriteIPRate:          serveConfig.Abuse.WriteIPRate,
+		WriteIPBurst:         serveConfig.Abuse.WriteIPBurst,
+		WriteActorRate:       serveConfig.Abuse.WriteActorRate,
+		WriteActorBurst:      serveConfig.Abuse.WriteActorBurst,
+		ExpensiveGlobalRate:  serveConfig.Abuse.ExpensiveGlobalRate,
+		ExpensiveGlobalBurst: serveConfig.Abuse.ExpensiveGlobalBurst,
+		ExpensiveIPRate:      serveConfig.Abuse.ExpensiveIPRate,
+		ExpensiveIPBurst:     serveConfig.Abuse.ExpensiveIPBurst,
+		ExpensiveActorRate:   serveConfig.Abuse.ExpensiveActorRate,
+		ExpensiveActorBurst:  serveConfig.Abuse.ExpensiveActorBurst,
+		HeavyGlobalRate:      serveConfig.Abuse.HeavyGlobalRate,
+		HeavyGlobalBurst:     serveConfig.Abuse.HeavyGlobalBurst,
+		HeavyIPRate:          serveConfig.Abuse.HeavyIPRate,
+		HeavyIPBurst:         serveConfig.Abuse.HeavyIPBurst,
+		HeavyActorRate:       serveConfig.Abuse.HeavyActorRate,
+		HeavyActorBurst:      serveConfig.Abuse.HeavyActorBurst,
+		WSUpgradeGlobalRate:  serveConfig.Abuse.WSUpgradeGlobalRate,
+		WSUpgradeGlobalBurst: serveConfig.Abuse.WSUpgradeGlobalBurst,
+		WSUpgradeIPRate:      serveConfig.Abuse.WSUpgradeIPRate,
+		WSUpgradeIPBurst:     serveConfig.Abuse.WSUpgradeIPBurst,
+		WSUpgradeActorRate:   serveConfig.Abuse.WSUpgradeActorRate,
+		WSUpgradeActorBurst:  serveConfig.Abuse.WSUpgradeActorBurst,
+		MaxConcurrentHeavy:   serveConfig.Abuse.MaxConcurrentHeavy,
+		MaxConcurrentDOCX:    serveConfig.Abuse.MaxConcurrentDOCX,
+		MaxConcurrentRemote:  serveConfig.Abuse.MaxConcurrentRemote,
+	})
+	slog.Info("abuse limiters configured",
+		slog.Float64("pre_auth_rate", serveConfig.Abuse.PreAuthGlobalRate),
+		slog.Float64("read_rate", serveConfig.Abuse.ReadGlobalRate),
+		slog.Float64("write_rate", serveConfig.Abuse.WriteGlobalRate),
+		slog.Float64("expensive_rate", serveConfig.Abuse.ExpensiveGlobalRate),
+		slog.Float64("heavy_rate", serveConfig.Abuse.HeavyGlobalRate),
+		slog.Float64("ws_upgrade_rate", serveConfig.Abuse.WSUpgradeGlobalRate),
+	)
 	srv.UseAudit(audit.New(database))
 	// The wildcard-without-a-name case is refused above for a remote
 	// deployment; this catches the rest, and keeps the guarantee in the server

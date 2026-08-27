@@ -22,4 +22,5 @@ func (a *API) Register(api *gin.RouterGroup) {
 	admin.GET("/audit", a.getAudit)
 	admin.GET("/audit/health", a.getAuditHealth)
 	admin.POST("/audit/health/acknowledge", a.postAuditHealthAcknowledge)
+	admin.GET("/audit/limiter", a.getAuditLimiter)
 }

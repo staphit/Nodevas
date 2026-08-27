@@ -65,6 +65,9 @@ type SessionAuth struct {
 	attempts map[string]*loginBucket
 	// One live passcode per account, keyed by account ID. See otp.go.
 	otps map[string]*pendingOTP
+	// The last request time is kept separately from the pending code so that
+	// consuming or expiring a code cannot bypass the resend cooldown.
+	lastOTPRequest map[string]time.Time
 	// maxActiveUsers caps how many distinct accounts may hold a session at
 	// once; zero means no cap. See SetMaxActiveUsers.
 	maxActiveUsers int
@@ -76,11 +79,12 @@ func NewSessionAuth(users *UserStore) *SessionAuth {
 		store.database = users.database
 	}
 	return &SessionAuth{
-		users:    users,
-		store:    store,
-		sessions: store.load(time.Now()),
-		attempts: map[string]*loginBucket{},
-		otps:     map[string]*pendingOTP{},
+		users:          users,
+		store:          store,
+		sessions:       store.load(time.Now()),
+		attempts:       map[string]*loginBucket{},
+		otps:           map[string]*pendingOTP{},
+		lastOTPRequest: map[string]time.Time{},
 	}
 }
 

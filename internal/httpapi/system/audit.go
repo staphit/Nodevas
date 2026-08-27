@@ -42,6 +42,16 @@ func (a *API) getAuditHealth(c *gin.Context) {
 	c.JSON(status, health)
 }
 
+// getAuditLimiter returns runtime limiter health and statistics.
+func (a *API) getAuditLimiter(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if a.limiter == nil {
+		c.JSON(http.StatusOK, map[string]any{"active_buckets": 0})
+		return
+	}
+	c.JSON(http.StatusOK, a.limiter())
+}
+
 // postAuditHealthAcknowledge is the operator's explicit statement that every
 // structured fallback through the supplied counter has been reconciled. The
 // route is admin-only, and POST makes the server's normal CSRF and audit

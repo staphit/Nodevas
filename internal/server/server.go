@@ -209,6 +209,19 @@ func (s *Server) UseListenAddress(host string, port int, extraHosts []string) er
 // Authenticator reports how the server identifies callers.
 func (s *Server) Authenticator() auth.Authenticator { return s.auth }
 
+// SetAbuseOptions configures custom rate limits, bursts, and concurrency bounds.
+func (s *Server) SetAbuseOptions(opts AbuseGuardOptions) {
+	s.abuse = newAbuseGuardWithOptions(opts)
+}
+
+// AbuseStats returns current rate limiter health and rejection counts.
+func (s *Server) AbuseStats() AbuseStats {
+	if s.abuse == nil {
+		return AbuseStats{}
+	}
+	return s.abuse.Stats()
+}
+
 // store returns the store this request targets: the project named by
 // ?project= / X-Nodevas-Project, or the active sub-project when neither is set.
 func (s *Server) store(r *http.Request) *store.Store {

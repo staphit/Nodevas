@@ -132,6 +132,14 @@ func TestRequestingAPasscodeRevokesExistingSessions(t *testing.T) {
 		t.Fatalf("sessions = %d, want 1", before)
 	}
 
+	// This test targets session revocation, so move the clock past the resend
+	// cooldown instead of waiting 30 seconds in the suite.
+	sessions.mu.Lock()
+	for userID := range sessions.lastOTPRequest {
+		sessions.lastOTPRequest[userID] = time.Now().Add(-otpResendCooldown)
+	}
+	sessions.mu.Unlock()
+
 	if _, err := sessions.RequestOTP(nil, "ann-pin-long-enough"); err != nil {
 		t.Fatalf("second RequestOTP: %v", err)
 	}
@@ -158,13 +166,17 @@ func TestAnUnknownPinYieldsTheSwallowedError(t *testing.T) {
 func TestPasscodeRequestsAreThrottledPerAccount(t *testing.T) {
 	sessions, _ := otpStoreForTest(t)
 
-	for i := 0; i < otpRequestLimit; i++ {
-		if _, err := sessions.RequestOTP(nil, "ann-pin-long-enough"); err != nil {
-			t.Fatalf("request %d: %v", i, err)
-		}
+	if _, err := sessions.RequestOTP(nil, "ann-pin-long-enough"); err != nil {
+		t.Fatalf("first request: %v", err)
 	}
 	if _, err := sessions.RequestOTP(nil, "ann-pin-long-enough"); !errors.Is(err, ErrTooManyOTPRequests) {
-		t.Fatalf("err = %v, want ErrTooManyOTPRequests", err)
+		t.Fatalf("immediate resend err = %v, want ErrTooManyOTPRequests", err)
+	}
+}
+
+func TestPasscodeRequestCooldownIsThirtySeconds(t *testing.T) {
+	if otpResendCooldown != 30*time.Second {
+		t.Fatalf("otp resend cooldown = %s, want 30s", otpResendCooldown)
 	}
 }
 

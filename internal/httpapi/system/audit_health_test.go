@@ -93,3 +93,27 @@ func TestAuditHealthEndpointReportsDatabaseFallback(t *testing.T) {
 		t.Fatalf("acknowledged response = %+v", health)
 	}
 }
+
+func TestAuditLimiterEndpoint(t *testing.T) {
+	api := &API{}
+	api.UseLimiter(func() any {
+		return map[string]any{
+			"active_buckets": 15,
+			"rejected_total": 3,
+		}
+	})
+
+	response := httptest.NewRecorder()
+	api.getAuditLimiter(notifySecurityContext(response,
+		httptest.NewRequest(http.MethodGet, "/api/audit/limiter", nil)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("limiter stats status = %d, body = %s", response.Code, response.Body)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["active_buckets"] != float64(15) || body["rejected_total"] != float64(3) {
+		t.Fatalf("unexpected limiter response: %v", body)
+	}
+}

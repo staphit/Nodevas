@@ -242,8 +242,14 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		if !errors.As(err, &apiErr) || apiErr.Code != CodeRateLimited || attempt >= maxRateLimitRetries {
 			return err
 		}
-		// Retry-After is whole seconds; the server sends 1.
+		// Retry-After is whole seconds; default to 1 second if unspecified.
 		wait := time.Second
+		if apiErr.RetryAfter > 0 {
+			wait = apiErr.RetryAfter
+		}
+		if wait > 10*time.Second {
+			wait = 10 * time.Second
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

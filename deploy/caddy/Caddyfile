@@ -1,0 +1,68 @@
+# Nodevas Production Caddyfile
+# Place in /etc/caddy/Caddyfile or deploy via Caddy container
+
+{
+	admin off
+	# Set conservative global timeouts and limits
+	servers {
+		timeouts {
+			read_body 30s
+			read_header 15s
+			write 60s
+			idle 120s
+		}
+		max_header_size 16KB
+	}
+}
+
+nodevas.example.com {
+	# Automatic HTTPS via Let's Encrypt / ZeroSSL
+	encode zstd gzip
+
+	# Request body limit (32MB)
+	request_body {
+		max_size 32MB
+	}
+
+	# Rate Limiting & Connection Bounds
+	# When deployed with the caddy-ratelimit plugin or edge rate limiting:
+	# rate_limit {
+	# 	zone nodevas_api {
+	# 		key {remote_host}
+	# 		events 60
+	# 		window 1s
+	# 	}
+	# 	zone nodevas_heavy {
+	# 		match path /api/export* /api/projects/export* /api/projects/import* /api/remote/push* /api/remote/import*
+	# 		key {remote_host}
+	# 		events 10
+	# 		window 1s
+	# 	}
+	# }
+
+	# Security Headers
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Cross-Origin-Opener-Policy same-origin
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Reverse proxy to loopback Nodevas instance
+	reverse_proxy 127.0.0.1:5666 {
+		# Header forwarding is automatically configured by Caddy
+		# (X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host)
+
+		# Flush immediately for real-time responsiveness and WebSockets
+		flush_interval -1
+
+		# Transport timeouts
+		transport http {
+			response_header_timeout 60s
+			dial_timeout 10s
+			keep_alive 60s
+		}
+	}
+}

@@ -1,0 +1,21 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+https://nodevas.localhost {
+	tls internal
+
+	reverse_proxy nodevas:5666 {
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Cross-Origin-Opener-Policy same-origin
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

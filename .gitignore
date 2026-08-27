@@ -85,6 +85,12 @@ web/mobile-preview/
 # Cross-compiled binaries from deploy dry runs.
 /nodevas-linux-*
 
+# Docker security-lab credentials.
+/docker/secrets/
+
+# Security case workspace (scope, evidence): never part of a commit.
+/work/
+
 # Local iOS deployment project; keep it on the developer machine only.
 /ios/
 
