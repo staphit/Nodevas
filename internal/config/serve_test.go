@@ -129,4 +129,31 @@ func TestServeConfigValidate(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("a certificate without a key was accepted")
 	}
+	cfg = DefaultServeConfig()
+	cfg.Abuse.ReadGlobalRate = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("zero abuse rate was accepted")
+	}
+	cfg = DefaultServeConfig()
+	cfg.Abuse.MaxConcurrentHeavy = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("zero max concurrent was accepted")
+	}
+}
+
+func TestApplyEnvironmentAbuseOverrides(t *testing.T) {
+	values := map[string]string{
+		"NODEVAS_SERVE_ABUSE_READ_GLOBAL_RATE":     "500.5",
+		"NODEVAS_SERVE_ABUSE_MAX_CONCURRENT_HEAVY": "8",
+	}
+	cfg := DefaultServeConfig()
+	if err := ApplyEnvironment(&cfg, func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Abuse.ReadGlobalRate != 500.5 || cfg.Abuse.MaxConcurrentHeavy != 8 {
+		t.Fatalf("abuse environment overrides not applied: %+v", cfg.Abuse)
+	}
 }

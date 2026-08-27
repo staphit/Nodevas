@@ -182,10 +182,13 @@ describe("SignIn", () => {
   });
 
   it("asks for another passcode when 寄送驗證碼 is pressed again", async () => {
+    let now = 1000000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     const user = userEvent.setup();
     render(<SignIn onSignedIn={vi.fn()} />);
 
     await requestPasscode(user, "4821");
+    now += 35000;
     await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
     await user.click(screen.getByRole("button", { name: "寄送驗證碼" }));
 

@@ -185,6 +185,10 @@ export function SignOutButton({ className = "icon-btn" }: { className?: string }
  * user can see whether it is still worth typing the one in their inbox. */
 const OTP_TTL_MS = 5 * 60 * 1000;
 
+/** The server also refuses a resend for this long; keep the UI from offering
+ * a request that is guaranteed to receive HTTP 429. */
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
+
 /** The passcode is a fixed-width alphanumeric string. This is the only shape
  * check done here: everything else about validity is the server's call. */
 const OTP_LENGTH = 8;
@@ -240,6 +244,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [expiresAt, setExpiresAt] = useState(0);
+  const [nextSendAt, setNextSendAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const otpField = useRef<HTMLInputElement>(null);
 
@@ -253,8 +258,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     return () => window.clearInterval(timer);
   }, [expiresAt]);
 
+  const resendBlocked = nextSendAt !== 0 && nextSendAt > Date.now();
+
   const sendOtp = useCallback(async () => {
-    if (busy !== "" || pin.trim() === "") return;
+    if (busy !== "" || pin.trim() === "" || (nextSendAt !== 0 && nextSendAt > Date.now())) return;
     setBusy("send");
     setError("");
     // A fresh passcode invalidates the previous one and every session opened
@@ -263,7 +270,9 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     setOtp("");
     try {
       await api.requestOtp(pin.trim());
-      setExpiresAt(Date.now() + OTP_TTL_MS);
+      const sentAt = Date.now();
+      setExpiresAt(sentAt + OTP_TTL_MS);
+      setNextSendAt(sentAt + OTP_RESEND_COOLDOWN_MS);
       setNotice(t("auth.codeSent"));
       otpField.current?.focus();
     } catch (failure) {
@@ -271,7 +280,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     } finally {
       setBusy("");
     }
-  }, [busy, pin, t]);
+  }, [busy, pin, resendBlocked, t]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -340,7 +349,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
           <button
             type="button"
             onClick={sendOtp}
-            disabled={busy !== "" || pin.trim() === ""}
+            disabled={busy !== "" || pin.trim() === "" || resendBlocked}
           >
             {busy === "send" ? t("auth.sendingCode") : t("auth.sendCode")}
           </button>

@@ -48,6 +48,10 @@ const (
 	otpRequestLimit  = 3
 	otpDailyWindow   = 1 * time.Hour
 	otpDailyLimit    = 12
+	// otpResendCooldown is deliberately separate from the broader budgets:
+	// one account may receive at most one newly generated passcode every 30
+	// seconds, while global and per-source limits still absorb wider abuse.
+	otpResendCooldown = 30 * time.Second
 
 	// MaxPinBytes bounds what reaches the Argon2 verifier. A PIN is short; a
 	// megabyte of one is somebody probing for a memory-cost amplifier.
@@ -68,7 +72,7 @@ var ErrNoSuchPin = errors.New("no account for that pin")
 var ErrNoMailer = errors.New("this server cannot send passcodes: outgoing mail is not configured")
 
 // ErrTooManyOTPRequests is returned when the passcode request budget is spent.
-var ErrTooManyOTPRequests = errors.New("too many passcode requests; wait a minute and try again")
+var ErrTooManyOTPRequests = errors.New("too many passcode requests; wait before trying again")
 
 // pendingOTP is the one live passcode an account may have.
 //
@@ -310,10 +314,17 @@ func (a *SessionAuth) allowOTPForAccount(userID string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.chargeLocked([]rateCharge{
+	if last, ok := a.lastOTPRequest[userID]; ok && now.Sub(last) < otpResendCooldown {
+		return false
+	}
+	if !a.chargeLocked([]rateCharge{
 		{key: "otp-user:" + userID, window: otpRequestWindow, limit: otpRequestLimit},
 		{key: "otp-user-hour:" + userID, window: otpDailyWindow, limit: otpDailyLimit},
-	}, now)
+	}, now) {
+		return false
+	}
+	a.lastOTPRequest[userID] = now
+	return true
 }
 
 // RevokeUser signs out every session belonging to an account. The CLI calls it

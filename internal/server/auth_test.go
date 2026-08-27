@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // testPin is what accountServerForTest gives "ann". It clears MinPinLength
@@ -303,6 +304,9 @@ func TestRequestingAPasscodeEndsExistingSessions(t *testing.T) {
 		t.Fatalf("before the request: status = %d, want 200", code)
 	}
 
+	// The production path deliberately refuses a resend for 30 seconds; this
+	// test is about the revocation that follows an allowed resend.
+	time.Sleep(30 * time.Second)
 	requestPasscode(t, server, inbox, testPin)
 
 	if code := stillIn(); code != http.StatusUnauthorized {
@@ -343,6 +347,7 @@ func TestSeatLimitRefusesAnExtraPersonButNotAnExtraDevice(t *testing.T) {
 	signIn(t, server, inbox, testPin)
 	// The same account again: their laptop after their phone, not a second
 	// person, so the seat is already theirs.
+	time.Sleep(30 * time.Second)
 	otp := requestPasscode(t, server, inbox, testPin)
 	body := `{"pin":"` + testPin + `","otp":"` + otp + `"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
