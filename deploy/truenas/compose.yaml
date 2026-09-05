@@ -1,0 +1,129 @@
+name: nodevas
+
+services:
+  bootstrap:
+    image: ghcr.io/staphit/nodevas:latest
+    pull_policy: always
+    user: "568:568"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        marker=/data/.nodevas-bootstrap-complete
+        if [ -f "$${marker}" ]; then
+          echo "Nodevas account bootstrap already complete"
+          exit 0
+        fi
+        if ! /usr/local/bin/nodevas user list --project /data |
+          cut -f1 | grep -Fxq "$${NODEVAS_ADMIN_USER}"; then
+          /usr/local/bin/nodevas user add --project /data \
+            --user "$${NODEVAS_ADMIN_USER}" --role admin --password-stdin \
+            < /run/secrets/nodevas_admin_password
+        fi
+        /usr/local/bin/nodevas user pin --project /data \
+          --user "$${NODEVAS_ADMIN_USER}" --email "$${NODEVAS_ADMIN_EMAIL}"
+        umask 077
+        touch "$${marker}"
+    environment:
+      NODEVAS_ADMIN_USER: admin
+      NODEVAS_ADMIN_EMAIL: admin@example.com
+      XDG_CONFIG_HOME: /data/.config
+    volumes:
+      - /mnt/tank/apps/nodevas/workspace:/data
+    secrets:
+      - source: nodevas_admin_password
+        target: nodevas_admin_password
+        uid: "568"
+        gid: "568"
+        mode: 0400
+    networks:
+      nodevas:
+        ipv4_address: 172.31.250.4
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
+  nodevas:
+    image: ghcr.io/staphit/nodevas:latest
+    pull_policy: always
+    user: "568:568"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      XDG_CONFIG_HOME: /data/.config
+      NODEVAS_SERVE_LISTEN: 0.0.0.0
+      NODEVAS_SERVE_PORT: "5666"
+      NODEVAS_SERVE_HOSTNAME: nodevas.example.com
+      NODEVAS_SERVE_BEHIND_PROXY: "true"
+      NODEVAS_SERVE_TRUSTED_PROXY: 172.31.250.3/32
+      NODEVAS_SERVE_ALLOW_PLAINTEXT: "true"
+      NODEVAS_SERVE_SMTP_HOST: smtp.example.com
+      NODEVAS_SERVE_SMTP_PORT: "587"
+      NODEVAS_SERVE_SMTP_USER: nodevas@example.com
+      NODEVAS_SERVE_SMTP_FROM: Nodevas <nodevas@example.com>
+      NODEVAS_SERVE_SMTP_SECURITY: starttls
+      NODEVAS_SMTP_PASSWORD_FILE: /run/secrets/nodevas_smtp_password
+    volumes:
+      - /mnt/tank/apps/nodevas/workspace:/data
+    secrets:
+      - source: nodevas_smtp_password
+        target: nodevas_smtp_password
+        uid: "568"
+        gid: "568"
+        mode: 0400
+    expose:
+      - "5666"
+    networks:
+      nodevas:
+        ipv4_address: 172.31.250.2
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    pull_policy: always
+    user: "568:568"
+    command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflare_tunnel_token
+    depends_on:
+      nodevas:
+        condition: service_healthy
+    secrets:
+      - source: cloudflare_tunnel_token
+        target: cloudflare_tunnel_token
+        uid: "568"
+        gid: "568"
+        mode: 0400
+    networks:
+      nodevas:
+        ipv4_address: 172.31.250.3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    restart: unless-stopped
+
+networks:
+  nodevas:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+secrets:
+  nodevas_admin_password:
+    file: /mnt/tank/apps/nodevas/secrets/admin-password
+  nodevas_smtp_password:
+    file: /mnt/tank/apps/nodevas/secrets/smtp-password
+  cloudflare_tunnel_token:
+    file: /mnt/tank/apps/nodevas/secrets/cloudflare-tunnel-token

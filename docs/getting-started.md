@@ -103,7 +103,7 @@ logging:
   format: json
 ```
 
-Keep the SMTP password out of YAML. Set `NODEVAS_SMTP_PASSWORD` through a secret store or the process environment. Deployment environments can use `NODEVAS_SERVE_*` variables to override YAML values.
+Keep the SMTP password out of YAML. Set `NODEVAS_SMTP_PASSWORD` through a secret store or the process environment. Containers can instead set `NODEVAS_SMTP_PASSWORD_FILE` to a mounted secret file. Do not set both variables. Deployment environments can use `NODEVAS_SERVE_*` variables to override YAML values.
 
 ## Allow network access
 
@@ -129,3 +129,4 @@ Use a secure stdin mechanism and do not put a real password in shell history. Fo
 - [MCP integration](./mcp.md) — connect an AI agent.
 - [Storage and collaboration](./collaboration.md) — share a workspace safely.
 - [OCI deployment](../deploy/oci/README.md) — run a shared cloud server.
+- [TrueNAS and Cloudflare Tunnel deployment](../deploy/truenas/README.md) — run containers without opening an inbound port.

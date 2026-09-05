@@ -1,6 +1,8 @@
 # Copy this file to the workspace root as nodevas.yaml.
 # Command-line flags override this file; NODEVAS_SERVE_* environment variables
 # are applied between the file and command-line flags.
+# Keep SMTP passwords outside YAML. Use NODEVAS_SMTP_PASSWORD or the
+# file-backed NODEVAS_SMTP_PASSWORD_FILE variable.
 
 listen: 127.0.0.1
 port: 5666

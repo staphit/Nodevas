@@ -47,6 +47,26 @@ beforeEach(() => {
 });
 
 describe("project-wide save", () => {
+  it("serializes subpage saves and drains the latest edit with its new revision", async () => {
+    let finish!: (result: { ok: boolean; rev: string }) => void;
+    vi.mocked(api.putNodePage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    vi.mocked(api.putNodePage).mockResolvedValueOnce({ ok: true, rev: "page-3" });
+    useApp.getState().setPageDoc("a", { nodeId: "a", id: "notes", content: "first", rev: "page-1", format: "md", dirty: true, loading: false, conflict: null });
+    const first = useApp.getState().savePageDoc("a");
+    await vi.waitFor(() => expect(api.putNodePage).toHaveBeenCalledTimes(1));
+    useApp.getState().setPageDoc("a", (page) => ({ ...page!, content: "second", dirty: true }));
+    const second = useApp.getState().savePageDoc("a");
+    let drained = false;
+    const drain = drainWrites().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    expect(api.putNodePage).toHaveBeenCalledTimes(1);
+    finish({ ok: true, rev: "page-2" });
+    await Promise.all([first, second, drain]);
+    expect(api.putNodePage).toHaveBeenLastCalledWith("a", "notes", "second", "page-2");
+    expect(useApp.getState().pageDocs.a).toMatchObject({ content: "second", dirty: false, rev: "page-3" });
+  });
+
   it("writes dirty documents and dirty subpages, and counts what landed", async () => {
     vi.mocked(api.putNode).mockResolvedValue({ ok: true, rev: "rev-2" });
     vi.mocked(api.getNode).mockResolvedValue({

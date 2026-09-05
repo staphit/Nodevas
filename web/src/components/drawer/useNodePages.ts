@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
   type Dispatch,
@@ -78,14 +77,15 @@ export function useNodePages({
 }): NodePages {
   const { t } = useI18n();
   const refreshTrash = useApp((s) => s.refreshTrash);
+  // Keep each node's open subpage in the project store. Unmount must not erase
+  // it before autosave reads it; failed saves are recovered when it is reopened.
+  // Workspace switches save these buffers before clearing them.
+  const editorKey = id;
+  const pageDoc = useApp((s) => s.pageDocs[editorKey] ?? null);
   const [pages, setPages] = useState<NodePageInfo[]>([]);
   const [pagesLoading, setPagesLoading] = useState(true);
-  const [activePageID, setActivePageID] = useState<string | null>(null);
-  const initialPageApplied = useRef(false);
-  // The open subpage lives in the store, keyed by this editor instance, so a
-  // project-wide save reaches it too. Unmount drops the entry.
-  const editorKey = useId();
-  const pageDoc = useApp((s) => s.pageDocs[editorKey] ?? null);
+  const [activePageID, setActivePageID] = useState<string | null>(() => pageDoc?.dirty ? pageDoc.id : null);
+  const initialPageApplied = useRef(Boolean(pageDoc?.dirty));
   const setPageDocInStore = useApp((s) => s.setPageDoc);
   const savePageDoc = useApp((s) => s.savePageDoc);
   const setPageDoc = useCallback(
@@ -99,10 +99,17 @@ export function useNodePages({
     },
     [editorKey, id, setPageDocInStore],
   );
-  useEffect(
-    () => () => setPageDocInStore(editorKey, null),
-    [editorKey, setPageDocInStore],
-  );
+  useEffect(() => {
+    // A clean buffer is not a cache: reopening must read current disk content.
+    // A dirty one stays available to the unmount save and to recovery on reopen.
+    const dropCleanBuffer = () => {
+      if (!useApp.getState().pageDocs[editorKey]?.dirty) {
+        setPageDocInStore(editorKey, null);
+      }
+    };
+    dropCleanBuffer();
+    return dropCleanBuffer;
+  }, [editorKey, setPageDocInStore]);
   const [pageError, setPageError] = useState<string | null>(null);
   const [pageCreateOpen, setPageCreateOpen] = useState(false);
   const [pageTitle, setPageTitle] = useState("");

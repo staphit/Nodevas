@@ -74,6 +74,11 @@ export function setProjectOverride(name: string): void {
   projectOverride = name;
 }
 
+/** The project selected by this browser when the shared active project differs. */
+export function getProjectOverride(): string {
+  return projectOverride;
+}
+
 /**
  * `verify` is opt-in per endpoint. The Go structs and `types.ts` are hand-synced
  * with nothing that fails a build when they drift, so the responses the whole

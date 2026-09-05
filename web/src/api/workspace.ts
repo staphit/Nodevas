@@ -1,5 +1,5 @@
 import type { StatusDefinition } from "../types";
-import { csrfToken, notifyUnauthorized, req, UnauthorizedError } from "./http";
+import { csrfToken, getProjectOverride, notifyUnauthorized, req, UnauthorizedError } from "./http";
 import { verifyProjectsResponse, type ProjectsResponse } from "./verify";
 
 /** File formats a document can be saved as, beyond the stored Markdown. */
@@ -191,6 +191,8 @@ export const workspaceApi = {
     };
     const token = csrfToken();
     if (token) headers["X-CSRF-Token"] = token;
+    const project = getProjectOverride();
+    if (project) headers["X-Nodevas-Project"] = project;
     const response = await fetch("/api/export", {
       method: "POST",
       headers,

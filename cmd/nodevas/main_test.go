@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"nodevas/internal/auth"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +137,23 @@ func TestDeprecatedPasswordFlagStillWins(t *testing.T) {
 	secret, err = readPassword("", false)
 	if err != nil || secret != "from-env" {
 		t.Fatalf("environment fallback = %q, %v", secret, err)
+	}
+}
+
+func TestSecretEnvironmentReadsFileAndRejectsAmbiguousInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "smtp-password")
+	if err := os.WriteFile(path, []byte("from-file\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NODEVAS_SMTP_PASSWORD_FILE", path)
+	secret, err := secretEnvironment("NODEVAS_SMTP_PASSWORD")
+	if err != nil || secret != "from-file" {
+		t.Fatalf("secretEnvironment file = %q, %v", secret, err)
+	}
+
+	t.Setenv("NODEVAS_SMTP_PASSWORD", "from-environment")
+	if _, err := secretEnvironment("NODEVAS_SMTP_PASSWORD"); err == nil {
+		t.Fatal("direct and file-backed SMTP passwords were accepted together")
 	}
 }
 
