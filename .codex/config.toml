@@ -1,0 +1,7 @@
+[mcp_servers.nodevas-documents]
+command = "H:/visual-editor/.local/nodevas-rag.exe"
+args = ["mcp", "--server", "http://127.0.0.1:5666", "--project", "ai-harness-engineering", "--chroma-url", "http://127.0.0.1:8000", "--rag-python", "H:/visual-editor/.local/rag-venv/Scripts/python.exe"]
+cwd = "H:/visual-editor"
+startup_timeout_sec = 30
+tool_timeout_sec = 600
+enabled_tools = ["index_documents", "search_documents", "get_node", "list_projects"]
