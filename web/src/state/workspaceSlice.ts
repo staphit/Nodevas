@@ -7,7 +7,7 @@
  * tabs, undo history and operation badges are cleared.
  */
 
-import { api, AuthError, setProjectOverride } from "../api";
+import { api, AuthError, getProjectOverride, setProjectOverride } from "../api";
 import { coalesceRequest } from "./coalesce";
 import { describeFailure, operationScope } from "./operations";
 import { drainWrites, generations, invalidateGenerations } from "./internals";
@@ -16,11 +16,29 @@ import type { AppSlice, AppState, WorkspaceSlice } from "./types";
 
 /** Never lose unsaved text on a switch: park it as a draft first. */
 async function parkDirtyTabs(get: () => AppState): Promise<void> {
-  const dirtyTabs = get().tabs.filter((tab) => tab.dirty);
+  // Let autosaves finish before drafting: a successful save removes its draft.
+  await drainWrites();
   await Promise.all(
-    dirtyTabs.map((tab) => api.putDraft(tab.id, tab.content).catch(() => undefined)),
+    Object.entries(get().pageDocs)
+      .filter(([, page]) => page.dirty && !page.loading)
+      .map(async ([key]) => {
+        if (!(await get().savePageDoc(key)).ok) {
+          throw new Error("子頁尚未儲存，已保留內容並取消切換。");
+        }
+      }),
+  );
+  const dirtyTabs = get().tabs.filter((tab) => tab.dirty);
+  const drafted = new Map(dirtyTabs.map((tab) => [tab.id, tab.content]));
+  await Promise.all(
+    dirtyTabs.map((tab) => api.putDraft(tab.id, tab.content)),
   );
   await drainWrites();
+  if (
+    get().tabs.some((tab) => tab.dirty && drafted.get(tab.id) !== tab.content) ||
+    Object.values(get().pageDocs).some((page) => page.dirty)
+  ) {
+    throw new Error("儲存期間內容已變更，已保留編輯並取消切換。請重試。");
+  }
 }
 
 export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
@@ -47,7 +65,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       set({
         workspace: p.workspace,
         workspaces: p.workspaces,
-        activeProject: p.active,
+        activeProject: getProjectOverride() || p.active,
         projects: p.projects,
       });
       // The manual order belongs to the workspace the list just came from, so it
@@ -110,10 +128,12 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
   addWorkspace: async (path) => {
     await parkDirtyTabs(get);
     const result = await api.addWorkspace(path);
+    setProjectOverride("");
     clearUndo();
     invalidateGenerations();
     set({
       tabs: [],
+      pageDocs: {},
       activeTab: null,
       workspace: result.path,
       activeProject: "",
@@ -126,9 +146,10 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
   switchWorkspace: async (path) => {
     await parkDirtyTabs(get);
     await api.openWorkspace(path);
+    setProjectOverride("");
     clearUndo();
     invalidateGenerations();
-    set({ tabs: [], activeTab: null, workspace: path, activeProject: "", operations: {} });
+    set({ tabs: [], pageDocs: {}, activeTab: null, workspace: path, activeProject: "", operations: {} });
     await Promise.all([get().loadAll(), get().refreshTrash(), get().refreshProjects()]);
   },
 
@@ -140,10 +161,12 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       await get().refreshProjects();
       return { workspace: result.workspace };
     }
+    setProjectOverride("");
     clearUndo();
     invalidateGenerations();
     set({
       tabs: [],
+      pageDocs: {},
       activeTab: null,
       workspace: result.workspace,
       activeProject: "",
@@ -156,10 +179,12 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
   moveProjectToWorkspace: async (name, path) => {
     await parkDirtyTabs(get);
     const result = await api.moveProject(name, "", "", path);
+    setProjectOverride("");
     clearUndo();
     invalidateGenerations();
     set({
       tabs: [],
+      pageDocs: {},
       activeTab: null,
       workspace: result.workspace ?? path,
       activeProject: result.active ?? "",
@@ -194,7 +219,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       // Different project: tabs belong to the old one, and so does every
       // in-flight operation badge.
       invalidateGenerations();
-      set({ tabs: [], activeTab: null, activeProject: name, operations: {} });
+      set({ tabs: [], pageDocs: {}, activeTab: null, activeProject: name, operations: {} });
       await Promise.all([get().loadAll(), get().refreshTrash(), get().refreshProjects()]);
       get().settleOperation(scope, {
         status: "saved",

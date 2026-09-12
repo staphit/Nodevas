@@ -15,6 +15,7 @@
 // Environment variables remain available as a server deployment fallback:
 //
 //	NODEVAS_GOOGLE_CLIENT_ID / NODEVAS_GOOGLE_CLIENT_SECRET  OAuth client
+//	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE        SMTP secret
 //	NODEVAS_SECRET_KEY  base64 32-byte key encrypting the stored Drive token
 //	                    (a machine-local secrets/master.key is generated if unset)
 //
@@ -58,7 +59,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    [--max-active-users N]")
 	fmt.Fprintln(os.Stderr,
-		"                    [--smtp-host h --smtp-port 587 --smtp-from addr --smtp-user u]  (password: NODEVAS_SMTP_PASSWORD)")
+		"                    [--smtp-host h --smtp-port 587 --smtp-from addr --smtp-user u]  (password: NODEVAS_SMTP_PASSWORD or NODEVAS_SMTP_PASSWORD_FILE)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas user add|passwd|pin|pin-clear|remove|role|list --project <dir> [--user <name>] [--role admin|member]")
 	fmt.Fprintln(os.Stderr,

@@ -15,12 +15,28 @@
 
 import type { CommandTarget } from "../domain";
 import { operationScope, type OperationScope } from "./operations";
-import type { Tab } from "./types";
+import type { PageSaveResult, Tab } from "./types";
 
 export const queues = {
   graphSave: Promise.resolve() as Promise<void>,
   tabSave: new Map<string, Promise<void>>(),
+  pageSave: new Map<string, Promise<PageSaveResult>>(),
 };
+
+/** Serialize autosave, manual save and project-switch writes to each subpage. */
+export function enqueuePageSave(
+  key: string,
+  save: () => Promise<PageSaveResult>,
+): Promise<PageSaveResult> {
+  const previous = queues.pageSave.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => undefined).then(save);
+  queues.pageSave.set(key, operation);
+  const cleanup = () => {
+    if (queues.pageSave.get(key) === operation) queues.pageSave.delete(key);
+  };
+  void operation.then(cleanup, cleanup);
+  return operation;
+}
 
 export const generations = { load: 0, state: 0 };
 
@@ -32,7 +48,10 @@ export function invalidateGenerations(): void {
 
 /** Waits for pending writes so a project switch cannot cut one in half. */
 export async function drainWrites(): Promise<void> {
-  await Promise.all([...queues.tabSave.values()].map((save) => save.catch(() => undefined)));
+  await Promise.all(
+    [...queues.tabSave.values(), ...queues.pageSave.values()]
+      .map((save) => save.catch(() => undefined)),
+  );
   await queues.graphSave.catch(() => undefined);
 }
 

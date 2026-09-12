@@ -67,6 +67,26 @@ func hostList(value string) []string {
 	return names
 }
 
+// secretEnvironment reads a secret directly or from the file named by the
+// conventional NAME_FILE variable. File-backed secrets keep credentials out
+// of container definitions and process listings.
+func secretEnvironment(name string) (string, error) {
+	value, valueSet := os.LookupEnv(name)
+	fileName, fileSet := os.LookupEnv(name + "_FILE")
+	fileName = strings.TrimSpace(fileName)
+	if valueSet && fileSet && fileName != "" {
+		return "", fmt.Errorf("%s and %s_FILE are mutually exclusive", name, name)
+	}
+	if !fileSet || fileName == "" {
+		return value, nil
+	}
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE %q: %w", name, fileName, err)
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(string(data), "\n"), "\r"), nil
+}
+
 // validateServeFlags refuses the flag combinations that would put a workspace
 // on the network without the protections a networked deployment needs.
 //
@@ -494,11 +514,15 @@ func serve(args []string) {
 		} else {
 			// The password comes from the environment, never a flag: a flag is
 			// in the process list of every other user on the machine.
+			smtpPassword, err := secretEnvironment("NODEVAS_SMTP_PASSWORD")
+			if err != nil {
+				log.Fatalf("smtp password: %v", err)
+			}
 			sender, err := mail.New(mail.Config{
 				Host:     *smtpHost,
 				Port:     *smtpPort,
 				Username: *smtpUser,
-				Password: os.Getenv("NODEVAS_SMTP_PASSWORD"),
+				Password: smtpPassword,
 				From:     *smtpFrom,
 				Security: *smtpSecurity,
 			})

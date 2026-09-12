@@ -20,7 +20,7 @@
 
 import { api, ConflictError } from "../api";
 import { describeFailure, operationScope } from "./operations";
-import { patchTab, queues } from "./internals";
+import { enqueuePageSave, patchTab, queues } from "./internals";
 import type { AppSlice, DocumentSlice } from "./types";
 
 /**
@@ -60,7 +60,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
     });
   },
 
-  savePageDoc: async (key) => {
+  savePageDoc: (key) => enqueuePageSave(key, async () => {
     const snapshot = get().pageDocs[key];
     if (!snapshot || !snapshot.dirty || snapshot.loading) return { ok: true };
     // A subpage save reports on the node's document scope, the same badge the
@@ -128,7 +128,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
       });
       return { ok: false, error: message };
     }
-  },
+  }),
 
   openNodeLink: async ({ project, nodeId }) => {
     const state = get();

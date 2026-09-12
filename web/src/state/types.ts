@@ -210,7 +210,7 @@ export interface SaveTabOptions {
 export interface DocumentSlice {
   tabs: Tab[];
   activeTab: string | null; // null = drawer closed
-  /** Open subpages, keyed by editor instance. */
+  /** Retained subpage buffers, keyed by node within the current project. */
   pageDocs: Record<string, PageDoc>;
   setPageDoc: (
     key: string,
