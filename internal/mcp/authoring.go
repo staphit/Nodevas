@@ -88,8 +88,7 @@ type Outline struct {
 	Nodes []OutlineNode `json:"nodes"`
 	Edges []OutlineEdge `json:"edges"`
 	Total int           `json:"total"`
-	// Cursor continues the node listing; edges are only included on the last
-	// page, where the whole node set is known.
+	// Cursor continues the node listing; edges connect nodes on this page only.
 	Cursor  string `json:"cursor,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
@@ -107,7 +106,7 @@ const outlineThreshold = 200
 // annotations, saved views — is dropped. It is most of the file by weight on a
 // large board and none of it means anything to a caller that cannot see.
 func (c *Client) GraphOutline(ctx context.Context, filter OutlineFilter) (*Outline, error) {
-	snapshot, err := c.Graph(ctx)
+	snapshot, err := c.graph(ctx, url.Values{"view": {"outline"}})
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +201,9 @@ func (f OutlineFilter) keeps(node *engine.Node, status string) bool {
 // pageOutline walks the node list from the id after the cursor.
 func pageOutline(nodes []OutlineNode, cursor string, limit int) ([]OutlineNode, string) {
 	if limit <= 0 {
-		limit = outlineThreshold
+		limit = 25
 	}
+	limit = min(limit, outlineThreshold)
 	start := 0
 	if cursor != "" {
 		for index, node := range nodes {

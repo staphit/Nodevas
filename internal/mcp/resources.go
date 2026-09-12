@@ -34,14 +34,14 @@ func registerResources(server *mcp.Server, client *Client) {
 	server.AddResource(&mcp.Resource{
 		URI:         outlineURI,
 		Name:        "board outline",
-		Description: "Every node on the board with its status, and the dependencies between them. Layout and styling are left out.",
+		Description: "First page of node summaries and dependencies. Continue with get_graph_outline and the returned cursor.",
 		MIMEType:    "application/json",
 	}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		outline, err := client.GraphOutline(ctx, OutlineFilter{})
 		if err != nil {
 			return nil, err
 		}
-		encoded, err := json.MarshalIndent(outline, "", "  ")
+		encoded, err := json.Marshal(outline)
 		if err != nil {
 			return nil, err
 		}
@@ -129,27 +129,10 @@ func registerPrompt(server *mcp.Server, client *Client) {
 	})
 }
 
-const workTheQueuePrompt = `Work through this board's ready queue.
-
-Repeat:
-  1. get_ready_tasks. If nothing is ready, stop and report — see below.
-  2. Take the first task with claim_task. If it is already claimed, take the next one.
-  3. get_node to read the ticket in full.
-  4. Do the work.
-  5. set_node_status with done, failed or skipped, and a note saying what you actually did.
-     If you could not make progress, release_task instead so somebody else can pick it up.
-
-Stop when get_ready_tasks comes back empty, and say which of these it was:
-
-  - Nothing ready and nothing waiting: the board is finished.
-  - Nothing ready but tasks still waiting: people are the blockers. Name what is
-    waiting and on whom. Do not work on blocked tasks, and do not invent tasks to fill
-    the gap — an empty queue is information, not a problem to route around.
-
-Two things to hold to while you work:
-
-Report what happened, not what you hoped. The note goes into a timeline people read
-to reconstruct events. "failed" with an honest reason is worth far more than "done".
-
-Read the ticket before starting, and if it does not say enough to act on, say so and
-skip it rather than guessing at what somebody meant.`
+const workTheQueuePrompt = `Work the ready queue:
+1. get_ready_tasks; stop if empty.
+2. claim_task; if already claimed, try another ready task.
+3. get_node; read all pages before working or replacing the file.
+4. Do the work; set_node_status to done, failed or skipped with an accurate note.
+5. release_task if unfinished.
+When nothing is ready, report waiting and busy counts. If tasks still wait, people are the blockers: name them. Do not start blocked work or invent tasks. Ask for clarification when the ticket is insufficient.`
