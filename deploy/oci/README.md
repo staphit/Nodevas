@@ -91,7 +91,7 @@ sudo -u nodevas env XDG_CONFIG_HOME=/var/lib/nodevas/config \
   --role admin --password-stdin
 
 sudo -u nodevas env XDG_CONFIG_HOME=/var/lib/nodevas/config \
-  /usr/local/bin/nodevas user pin \
+  /usr/local/bin/nodevas user email \
   --project /var/lib/nodevas/workspace --user ann \
   --email ann@example.com
 
@@ -99,7 +99,7 @@ sudo systemctl start nodevas
 sudo systemctl status nodevas caddy --no-pager
 ```
 
-PIN 只顯示一次。不要用同一個 email 傳 PIN；否則 PIN 與一次性驗證碼落在同一信箱，失去第二因素。
+登入時在網頁輸入該 email，收到一次性驗證碼後輸入即可。網頁登入只有一個因素：持有該信箱。請保護好信箱，並使用已啟用兩步驟驗證的信箱。
 
 ## 4. 從 macOS App 連接 OCI
 

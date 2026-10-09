@@ -170,6 +170,7 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/ws", ClassWSUpgrade, 1.0},
 		{http.MethodPost, "/api/auth/login", ClassPublicAuth, 1.0},
 		{http.MethodPost, "/api/auth/otp/request", ClassPublicAuth, 1.0},
+		{http.MethodPost, "/api/auth/visitor", ClassPublicAuth, 1.0},
 		{http.MethodGet, "/api/auth/status", ClassPublicAuth, 1.0},
 		{http.MethodGet, "/api/remote/drive/callback", ClassPublicAuth, 1.0},
 

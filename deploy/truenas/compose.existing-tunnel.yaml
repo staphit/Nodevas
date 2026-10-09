@@ -27,7 +27,7 @@ services:
             --user "$${NODEVAS_ADMIN_USER}" --role admin --password-stdin \
             < /run/secrets/nodevas_admin_password
         fi
-        /usr/local/bin/nodevas user pin --project /data \
+        /usr/local/bin/nodevas user email --project /data \
           --user "$${NODEVAS_ADMIN_USER}" --email "$${NODEVAS_ADMIN_EMAIL}"
         umask 077
         touch "$${marker}"

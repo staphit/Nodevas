@@ -437,7 +437,7 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 	if path == "/ws" {
 		return ClassWSUpgrade, 1.0
 	}
-	if path == "/api/auth/login" || path == "/api/auth/otp/request" ||
+	if auth.SignInPaths[path] ||
 		path == "/api/auth/status" || path == "/api/remote/drive/callback" {
 		return ClassPublicAuth, 1.0
 	}

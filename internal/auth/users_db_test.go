@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -62,8 +63,8 @@ func TestAccountEditedInTheDatabaseTakesEffectAtOnce(t *testing.T) {
 	}
 }
 
-// Rotating the PIN or the address its passcodes go to has to end the sessions
-// the old pair authorised.
+// Changing or clearing the sign-in address has to end the sessions the old
+// address authorised.
 func TestRevisionChangesWithEveryCredentialField(t *testing.T) {
 	users, _ := storeForTest(t)
 	if err := users.Add(context.Background(), "ann", "correct-horse-battery"); err != nil {
@@ -78,14 +79,17 @@ func TestRevisionChangesWithEveryCredentialField(t *testing.T) {
 		name   string
 		change func() error
 	}{
-		{"pin and email", func() error {
-			return users.SetPin(context.Background(), "ann", "ann-pin-long-enough", "ann@example.test")
+		{"email set", func() error {
+			return users.SetEmail(context.Background(), "ann", "ann@example.test")
 		}},
-		{"email only", func() error {
-			return users.SetPin(context.Background(), "ann", "ann-pin-long-enough", "elsewhere@example.test")
+		{"email changed", func() error {
+			return users.SetEmail(context.Background(), "ann", "elsewhere@example.test")
 		}},
-		{"pin cleared", func() error { return users.ClearPin(context.Background(), "ann") }},
+		// The password goes before the clear: clearing the address otherwise
+		// returns the row to exactly how it started, and so to the starting
+		// revision — which is correct, but not what this step is testing.
 		{"password", func() error { return users.SetPassword(context.Background(), "ann", "another-long-password") }},
+		{"email cleared", func() error { return users.ClearEmail(context.Background(), "ann") }},
 	}
 	for _, step := range steps {
 		if err := step.change(); err != nil {
@@ -107,14 +111,14 @@ func TestRecordsCarryNoCredentialHashes(t *testing.T) {
 	if err := users.Add(context.Background(), "ann", "correct-horse-battery"); err != nil {
 		t.Fatal(err)
 	}
-	if err := users.SetPin(context.Background(), "ann", "ann-pin-long-enough", "ann@example.test"); err != nil {
+	if err := users.SetEmail(context.Background(), "ann", "ann@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	records := users.Records(context.Background())
 	if len(records) != 1 {
 		t.Fatalf("records = %+v", records)
 	}
-	if records[0].Hash != "" || records[0].PinHash != "" {
+	if records[0].Hash != "" {
 		t.Fatalf("Records leaked a credential hash: %+v", records[0])
 	}
 	if records[0].Email != "ann@example.test" || records[0].Role != identity.RoleAdmin {
@@ -244,33 +248,126 @@ func TestNewUserStoreDBUsesTheCallersHandle(t *testing.T) {
 	}
 }
 
-// VerifyPin has no name to look up, so it verifies against every account that
-// carries a PIN. The ceiling that keeps that bounded has to be enforced by the
-// query, not after the whole table is already in memory.
-func TestPinCandidateReadStopsAtTheCeiling(t *testing.T) {
+// The address is how an account is found, so two accounts must never share
+// one — compared as a mailbox is, without regard to case — whether the clash
+// comes from setting an address or from creating an account with one.
+func TestSignInAddressesAreUniqueCaseInsensitively(t *testing.T) {
 	users, _ := storeForTest(t)
 	ctx := context.Background()
-	// Rows written directly: the point is how many the SELECT returns, and
-	// hashing a hundred PINs would cost minutes for no extra coverage.
-	for i := 0; i < maxPinAccounts+10; i++ {
-		if _, err := users.database.ExecContext(ctx,
-			`INSERT INTO accounts (id, name, role, password_hash, pin_hash, email, created_at)
-			 VALUES (?, ?, 'member', '', 'not-a-real-hash', '', ?)`,
-			fmt.Sprintf("id-%d", i), fmt.Sprintf("user%d", i), db.Now()); err != nil {
-			t.Fatal(err)
-		}
+	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "Ann@Example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.Add(ctx, "bob", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
 	}
 
-	candidates, err := users.accounts(ctx, accountsWithPins, maxPinAccounts+1)
+	if err := users.SetEmail(ctx, "bob", "ann@example.TEST"); !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("SetEmail with a clashing address = %v, want ErrEmailTaken", err)
+	}
+	if err := users.AddWithEmail(ctx, "cat", "correct-horse-battery", "", " ANN@EXAMPLE.TEST "); !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("AddWithEmail with a clashing address = %v, want ErrEmailTaken", err)
+	}
+	if got := users.Count(ctx); got != 2 {
+		t.Fatalf("Count = %d, want the clashing account not to have been created", got)
+	}
+	// Several accounts with no address at all are fine: the uniqueness is only
+	// about addresses somebody can sign in with.
+	if err := users.Add(ctx, "dan", "correct-horse-battery"); err != nil {
+		t.Fatalf("a second account without an address: %v", err)
+	}
+	// Re-registering an account's own address, in another case, is not a clash.
+	if err := users.SetEmail(ctx, "ann", "ANN@example.test"); err != nil {
+		t.Fatalf("re-registering ann's own address: %v", err)
+	}
+}
+
+// The lookup the sign-in uses: case-insensitive, returning the stored form,
+// and never matching the accounts that have no address.
+func TestAccountByEmailFindsTheRegisteredAccount(t *testing.T) {
+	users, _ := storeForTest(t)
+	ctx := context.Background()
+	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "Ann@Example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.Add(ctx, "bob", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
+	}
+
+	actor, revision, stored, ok := users.AccountByEmail(ctx, "  ann@example.test")
+	if !ok || actor.Name != "ann" || stored != "Ann@Example.test" || revision == "" {
+		t.Fatalf("AccountByEmail = %+v %q %q %v", actor, revision, stored, ok)
+	}
+	for _, address := range []string{"", "nobody@example.test", "not an address", strings.Repeat("a", maxEmailBytes) + "@x.test"} {
+		if _, _, _, ok := users.AccountByEmail(ctx, address); ok {
+			t.Fatalf("%q resolved to an account", address)
+		}
+	}
+}
+
+// The migration that retired the PIN must leave no PIN hash behind, and must
+// not refuse to start on a workspace where two accounts already share an
+// address in different case: the oldest keeps it, the other loses it.
+func TestTheEmailMigrationClearsPinsAndSettlesSharedAddresses(t *testing.T) {
+	workspace := t.TempDir()
+	ctx := context.Background()
+	database, err := db.Open(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != maxPinAccounts+1 {
-		t.Fatalf("read %d candidates, want the ceiling plus one", len(candidates))
+	// Wind the workspace back to how 0005 left it, then fill it the way the
+	// PIN sign-in could have.
+	for _, stmt := range []string{
+		`DROP INDEX accounts_email_nocase`,
+		`DELETE FROM schema_migrations WHERE name = '0006_email_sign_in'`,
+	} {
+		if _, err := database.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
 	}
-	// One past the ceiling is what makes the refusal below reachable at all.
-	if _, _, _, ok := users.VerifyPin(context.Background(), "whatever-pin-value"); ok {
-		t.Fatal("a workspace past the PIN ceiling still authenticated")
+	for i, row := range []struct{ name, email string }{
+		{"ann", "Shared@Example.test"},
+		{"bob", "shared@example.test"},
+		{"cat", "cat@example.test"},
+	} {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO accounts (id, name, role, password_hash, pin_hash, email, created_at)
+			 VALUES (?, ?, ?, '', 'an-old-pin-hash', ?, ?)`,
+			fmt.Sprintf("id-%d", i), row.name, map[bool]string{true: "admin", false: "member"}[i == 0],
+			row.email, db.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	users, err := NewUserStore(workspace)
+	if err != nil {
+		t.Fatalf("reopening after the migration: %v", err)
+	}
+	t.Cleanup(func() { _ = users.Close() })
+
+	var pins int
+	if err := users.database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM accounts WHERE pin_hash != ''`).Scan(&pins); err != nil {
+		t.Fatal(err)
+	}
+	if pins != 0 {
+		t.Fatalf("%d accounts still carry a PIN hash", pins)
+	}
+	emails := map[string]string{}
+	for _, record := range users.Records(ctx) {
+		emails[record.Name] = record.Email
+	}
+	want := map[string]string{"ann": "Shared@Example.test", "bob": "", "cat": "cat@example.test"}
+	for name, address := range want {
+		if emails[name] != address {
+			t.Fatalf("after migration %s has %q, want %q (all: %v)", name, emails[name], address, emails)
+		}
+	}
+	// And the index is in place from here on.
+	if err := users.SetEmail(ctx, "bob", "SHARED@example.test"); !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("after migration a clashing address = %v, want ErrEmailTaken", err)
 	}
 }
 
@@ -314,13 +411,13 @@ func TestAccountLookupRefusesAnUnusableIdentifier(t *testing.T) {
 
 // net/mail parses an address of any length, so without a bound of its own the
 // email column takes whatever the caller hands over.
-func TestSettingAPinRefusesAnUnusableEmailAddress(t *testing.T) {
+func TestSettingAnEmailRefusesAnUnusableAddress(t *testing.T) {
 	users, _ := storeForTest(t)
 	if err := users.Add(context.Background(), "ann", "correct-horse-battery"); err != nil {
 		t.Fatal(err)
 	}
 	huge := strings.Repeat("a", maxEmailBytes) + "@example.test"
-	if err := users.SetPin(context.Background(), "ann", "ann-pin-long-enough", huge); err == nil {
+	if err := users.SetEmail(context.Background(), "ann", huge); err == nil {
 		t.Fatal("an oversized address was accepted")
 	}
 	// Refused, not truncated: a passcode sent to half an address goes nowhere,

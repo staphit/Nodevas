@@ -609,7 +609,7 @@ func protectHTTPTransport(next http.Handler) http.Handler {
 			next.ServeHTTP(writer, request)
 			return
 		}
-		if request.URL.Path == "/api/auth/login" && request.Body != nil {
+		if auth.SignInPaths[request.URL.Path] && request.Body != nil {
 			request.Body = http.MaxBytesReader(writer, request.Body, auth.MaxLoginBodyBytes)
 		}
 		controller := http.NewResponseController(writer)

@@ -3,8 +3,12 @@
 //	nodevas serve --project <dir> [--port 5666] [--listen 127.0.0.1]
 //	              [--hostname name[,name...]] [--behind-proxy]
 //	              [--trusted-proxy ip-or-cidr[,ip-or-cidr...]]
-//	nodevas user  add|passwd|remove|role|list --project <dir> [--user <name>]
-//	              [--password-stdin]
+//	nodevas user  add|passwd|email|remove|role|list --project <dir> [--user <name>]
+//	              [--email addr | --clear] [--password-stdin]
+//
+// Web sign-in is an email address and a passcode mailed to it, so
+// `nodevas user email --user X --email Y` is what lets somebody in, and
+// `--clear` is what stops them.
 //
 // Pass the password on stdin (--password-stdin) rather than with --password:
 // a command line is readable by every process on the machine and lands in the
@@ -61,11 +65,13 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    [--smtp-host h --smtp-port 587 --smtp-from addr --smtp-user u]  (password: NODEVAS_SMTP_PASSWORD or NODEVAS_SMTP_PASSWORD_FILE)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas user add|passwd|pin|pin-clear|remove|role|list --project <dir> [--user <name>] [--role admin|member]")
+		"       nodevas user add|passwd|email|remove|role|list --project <dir> [--user <name>] [--role admin|member]")
 	fmt.Fprintln(os.Stderr,
-		"                    [--email addr]  (required by `pin`; where one-time passcodes are sent)")
+		"                    [--email addr]  (the web sign-in address; passcodes are mailed there. Required by `email`, optional for `add`)")
 	fmt.Fprintln(os.Stderr,
-		"                    [--password-stdin]  (--password and --pin are deprecated: they are visible in the process list)")
+		"                    [--clear]  (with `email`: remove web sign-in for the account)")
+	fmt.Fprintln(os.Stderr,
+		"                    [--password-stdin]  (--password is deprecated: it is visible in the process list)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas visitor show|on|off --project <dir> [--pin 777] [--passcode CODE]")
 	fmt.Fprintln(os.Stderr,

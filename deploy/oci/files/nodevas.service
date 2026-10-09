@@ -172,8 +172,8 @@ RestrictSUIDSGID=yes
 
 # Other processes on the box become invisible in /proc. Useful specifically
 # because credentials do end up in command lines elsewhere — the `nodevas
-# user pin` warnings exist for that reason — and this process should not be
-# the thing that reads them.
+# user --password` warning exists for that reason — and this process should
+# not be the thing that reads them.
 ProtectProc=invisible
 ProcSubset=pid
 

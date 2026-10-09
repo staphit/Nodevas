@@ -16,21 +16,31 @@ import (
 	"time"
 )
 
-// testPin is what accountServerForTest gives "ann". It clears MinPinLength
-// because a PIN short enough to be guessed is refused at the door.
-const testPin = "test-pin-correct-horse"
+// testEmail is the address accountServerForTest registers for "ann".
+const testEmail = "ann@example.test"
 
-// mailbox stands in for the SMTP relay. Passcodes are the second factor, so a
-// test that wants to sign in has to go and read one, exactly as a person does.
-type mailbox struct {
-	mu       sync.Mutex
-	messages []string
+// sentMail is one message the relay was handed.
+type sentMail struct {
+	to   string
+	body string
 }
 
-func (m *mailbox) Send(_ context.Context, _, _, body string) error {
+// mailbox stands in for the SMTP relay. The passcode is the whole sign-in, so
+// a test that wants to sign in has to go and read one, exactly as a person
+// does.
+//
+// Delivery is asynchronous — the request endpoint answers before the relay is
+// dialled, so its timing cannot say whether an address is registered — which
+// is why reading the mailbox waits for a message rather than assuming one.
+type mailbox struct {
+	mu       sync.Mutex
+	messages []sentMail
+}
+
+func (m *mailbox) Send(_ context.Context, to, _, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages = append(m.messages, body)
+	m.messages = append(m.messages, sentMail{to: to, body: body})
 	return nil
 }
 
@@ -40,17 +50,40 @@ func (m *mailbox) count() int {
 	return len(m.messages)
 }
 
-// code returns the passcode from the most recent message. The body is written
-// for a person, so this finds the one line that is nothing but the alphabet
-// passcodes are drawn from.
-func (m *mailbox) code(t *testing.T) string {
+// waitFor blocks until at least n messages have arrived.
+func (m *mailbox) waitFor(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for m.count() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d messages arrived, want %d", m.count(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// settle gives any delivery still in flight time to land, for the tests that
+// assert a message did not arrive.
+func (m *mailbox) settle() { time.Sleep(200 * time.Millisecond) }
+
+// last returns the most recent message.
+func (m *mailbox) last(t *testing.T) sentMail {
 	t.Helper()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.messages) == 0 {
 		t.Fatal("no passcode was sent")
 	}
-	for _, line := range strings.Split(m.messages[len(m.messages)-1], "\n") {
+	return m.messages[len(m.messages)-1]
+}
+
+// code returns the passcode from the most recent message. The body is written
+// for a person, so this finds the one line that is nothing but the alphabet
+// passcodes are drawn from.
+func (m *mailbox) code(t *testing.T) string {
+	t.Helper()
+	message := m.last(t)
+	for _, line := range strings.Split(message.body, "\n") {
 		line = strings.TrimSpace(line)
 		if len(line) != auth.OTPLength {
 			continue
@@ -61,7 +94,7 @@ func (m *mailbox) code(t *testing.T) string {
 			return line
 		}
 	}
-	t.Fatalf("no passcode in %q", m.messages[len(m.messages)-1])
+	t.Fatalf("no passcode in %q", message.body)
 	return ""
 }
 
@@ -74,6 +107,14 @@ func accountServerForTest(t *testing.T) (*Server, *project.ProjectManager, *mail
 // must deterministically toggle SQLite write availability. Product code never
 // swaps or reaches through the audit store's database.
 func accountServerWithAuditDBForTest(t *testing.T) (*Server, *project.ProjectManager, *mailbox, *db.DB) {
+	t.Helper()
+	server, pm, inbox, database, _ := accountServerPartsForTest(t)
+	return server, pm, inbox, database
+}
+
+// accountServerPartsForTest also hands back the account store, for the tests
+// that need a second person on the server.
+func accountServerPartsForTest(t *testing.T) (*Server, *project.ProjectManager, *mailbox, *db.DB, *auth.UserStore) {
 	t.Helper()
 	pm := projectManagerForTest(t)
 	database, err := db.Open(pm.Workspace())
@@ -95,42 +136,58 @@ func accountServerWithAuditDBForTest(t *testing.T) (*Server, *project.ProjectMan
 	if err := users.Add(context.Background(), "ann", "correct-horse-battery"); err != nil {
 		t.Fatalf("add user: %v", err)
 	}
-	if err := users.SetPin(context.Background(), "ann", testPin, "ann@example.test"); err != nil {
-		t.Fatalf("set pin: %v", err)
+	if err := users.SetEmail(context.Background(), "ann", testEmail); err != nil {
+		t.Fatalf("set email: %v", err)
 	}
 	inbox := &mailbox{}
 	server := serverForTest(t, pm, realtime.NewHub(), nil)
 	server.UseAccounts(users)
 	server.UseAudit(audit.New(database))
 	server.UseMailer(inbox)
-	return server, pm, inbox, database
+	return server, pm, inbox, database, users
 }
 
-// requestPasscode asks for a passcode and returns the one that was delivered.
-func requestPasscode(t *testing.T, server *Server, inbox *mailbox, pin string) string {
-	t.Helper()
-	body := `{"pin":"` + pin + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/otp/request", strings.NewReader(body))
+// postAuth sends one unauthenticated JSON request and returns the response.
+func postAuth(server *Server, path, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
+	return response
+}
+
+// askForPasscode posts to the request endpoint and checks for the 202 every
+// address gets, without waiting for any mail.
+func askForPasscode(t *testing.T, server *Server, email string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := postAuth(server, "/api/auth/otp/request", `{"email":"`+email+`"}`)
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("passcode request status = %d, body = %s", response.Code, response.Body)
 	}
+	return response
+}
+
+// requestPasscode asks for a passcode and returns the one that was delivered.
+func requestPasscode(t *testing.T, server *Server, inbox *mailbox, email string) string {
+	t.Helper()
+	before := inbox.count()
+	askForPasscode(t, server, email)
+	inbox.waitFor(t, before+1)
 	return inbox.code(t)
 }
 
-// signIn runs the whole two-factor flow — ask for a passcode, read it out of
-// the mailbox, present it with the PIN — and returns the cookies plus the CSRF
-// token the browser would echo back.
-func signIn(t *testing.T, server *Server, inbox *mailbox, pin string) ([]*http.Cookie, string) {
+// login presents an address and a passcode to the sign-in endpoint.
+func login(server *Server, email, otp string) *httptest.ResponseRecorder {
+	return postAuth(server, "/api/auth/login", `{"email":"`+email+`","otp":"`+otp+`"}`)
+}
+
+// signIn runs the whole flow — ask for a passcode, read it out of the mailbox,
+// present it with the address — and returns the cookies plus the CSRF token the
+// browser would echo back.
+func signIn(t *testing.T, server *Server, inbox *mailbox, email string) ([]*http.Cookie, string) {
 	t.Helper()
-	otp := requestPasscode(t, server, inbox, pin)
-	body := `{"pin":"` + pin + `","otp":"` + otp + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
+	otp := requestPasscode(t, server, inbox, email)
+	response := login(server, email, otp)
 	if response.Code != http.StatusOK {
 		t.Fatalf("login status = %d, body = %s", response.Code, response.Body)
 	}
@@ -196,7 +253,7 @@ func TestAccountsServerRefusesAnonymousAPI(t *testing.T) {
 
 func TestAccountsServerAcceptsSignedInReads(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	cookies, _ := signIn(t, server, inbox, testPin)
+	cookies, _ := signIn(t, server, inbox, testEmail)
 
 	request := withCookies(httptest.NewRequest(http.MethodGet, "/api/graph", nil), cookies)
 	response := httptest.NewRecorder()
@@ -210,7 +267,7 @@ func TestAccountsServerAcceptsSignedInReads(t *testing.T) {
 // cross-site form post would carry.
 func TestAccountsServerRequiresCSRFTokenForWrites(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	cookies, csrf := signIn(t, server, inbox, testPin)
+	cookies, csrf := signIn(t, server, inbox, testEmail)
 
 	body := `{"id":"added","title":"Added","body":""}`
 	request := withCookies(
@@ -233,24 +290,15 @@ func TestAccountsServerRequiresCSRFTokenForWrites(t *testing.T) {
 	}
 }
 
-// A wrong PIN and a wrong passcode fail the same way, and guessing runs out of
-// budget. There is no per-account bucket here on purpose: until the PIN
-// verifies there is no account to charge, so the source and global budgets are
-// what bound the guessing.
+// An unknown address and a wrong passcode fail the same way, and guessing runs
+// out of budget. The per-address bucket is charged for addresses nobody
+// registered too, so being throttled says nothing about whether one exists.
 func TestLoginRejectsWrongCredentialsAndThrottles(t *testing.T) {
 	server, _, _ := accountServerForTest(t)
 
-	attempt := func() int {
-		request := httptest.NewRequest(http.MethodPost, "/api/auth/login",
-			strings.NewReader(`{"pin":"wrong-pin-entirely-different","otp":"AAAAAAAA"}`))
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		server.Handler().ServeHTTP(response, request)
-		return response.Code
-	}
 	refused := 0
 	for i := 0; i < 40; i++ {
-		switch code := attempt(); code {
+		switch code := login(server, "nobody@example.test", "AAAAAAAA").Code; code {
 		case http.StatusUnauthorized:
 			continue
 		case http.StatusTooManyRequests:
@@ -269,99 +317,127 @@ func TestLoginRejectsWrongCredentialsAndThrottles(t *testing.T) {
 // though it was correct a moment ago.
 func TestPasscodeCannotBeUsedTwice(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	otp := requestPasscode(t, server, inbox, testPin)
+	otp := requestPasscode(t, server, inbox, testEmail)
 
-	login := func() int {
-		body := `{"pin":"` + testPin + `","otp":"` + otp + `"}`
-		request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		server.Handler().ServeHTTP(response, request)
-		return response.Code
-	}
-	if code := login(); code != http.StatusOK {
+	if code := login(server, testEmail, otp).Code; code != http.StatusOK {
 		t.Fatalf("first use: status = %d, want 200", code)
 	}
-	if code := login(); code != http.StatusUnauthorized {
+	if code := login(server, testEmail, otp).Code; code != http.StatusUnauthorized {
 		t.Fatalf("replay: status = %d, want 401", code)
 	}
 }
 
-// Asking for a passcode signs out whoever was already in on that PIN. That is
-// the whole point: the person who still has the mailbox can cut off somebody
-// who has only the PIN, without needing to get back in first.
-func TestRequestingAPasscodeEndsExistingSessions(t *testing.T) {
+// The two halves of the session rule, end to end. Asking for a passcode needs
+// nothing secret, so it must not sign anybody out; completing a sign-in does,
+// leaving the new device the only one signed in. The seat limit is set to one
+// on purpose: the person's own second sign-in is not a second person, and the
+// revocation must not cost them the seat they are signing in with.
+//
+// One test rather than two because the production path refuses a resend for
+// 30 seconds, and this is the one place the suite pays that wait.
+func TestRequestingKeepsSessionsAndSigningInEndsTheOthers(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	cookies, _ := signIn(t, server, inbox, testPin)
+	server.SetMaxActiveUsers(1)
+	oldCookies, _ := signIn(t, server, inbox, testEmail)
 
-	stillIn := func() int {
+	status := func(cookies []*http.Cookie) int {
 		request := withCookies(httptest.NewRequest(http.MethodGet, "/api/graph", nil), cookies)
 		response := httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, request)
 		return response.Code
 	}
-	if code := stillIn(); code != http.StatusOK {
+	if code := status(oldCookies); code != http.StatusOK {
 		t.Fatalf("before the request: status = %d, want 200", code)
 	}
 
-	// The production path deliberately refuses a resend for 30 seconds; this
-	// test is about the revocation that follows an allowed resend.
 	time.Sleep(30 * time.Second)
-	requestPasscode(t, server, inbox, testPin)
+	otp := requestPasscode(t, server, inbox, testEmail)
+	if code := status(oldCookies); code != http.StatusOK {
+		t.Fatalf("after a passcode request: status = %d, want 200 — requesting signed the session out", code)
+	}
 
-	if code := stillIn(); code != http.StatusUnauthorized {
-		t.Fatalf("after the request: status = %d, want 401", code)
+	response := login(server, testEmail, otp)
+	if response.Code != http.StatusOK {
+		t.Fatalf("second sign-in on a full server: status = %d, body = %s", response.Code, response.Body)
+	}
+	newCookies := response.Result().Cookies()
+	if code := status(oldCookies); code != http.StatusUnauthorized {
+		t.Fatalf("earlier session after a new sign-in: status = %d, want 401", code)
+	}
+	if code := status(newCookies); code != http.StatusOK {
+		t.Fatalf("new session: status = %d, want 200", code)
 	}
 }
 
-// An unknown PIN must be indistinguishable from a known one, or the endpoint
-// becomes a way to find valid PINs without ever holding a mailbox.
-func TestPasscodeRequestSaysNothingAboutWhetherThePinExists(t *testing.T) {
+// An unregistered address must be indistinguishable from a registered one, or
+// the endpoint becomes a directory of who has an account.
+func TestPasscodeRequestSaysNothingAboutWhetherTheAddressExists(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
 
-	ask := func(pin string) (int, string) {
-		request := httptest.NewRequest(http.MethodPost, "/api/auth/otp/request",
-			strings.NewReader(`{"pin":"`+pin+`"}`))
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		server.Handler().ServeHTTP(response, request)
-		return response.Code, response.Body.String()
+	// Three requests in all: the per-source budget allows exactly that many a
+	// minute, and a 429 here would be the budget talking, not the address.
+	known := askForPasscode(t, server, testEmail)
+	for _, other := range []string{"nobody@example.test", "not an address"} {
+		unknown := askForPasscode(t, server, other)
+		if known.Code != unknown.Code || known.Body.String() != unknown.Body.String() {
+			t.Fatalf("known: %d %s; %q: %d %s",
+				known.Code, known.Body, other, unknown.Code, unknown.Body)
+		}
+	}
+	inbox.waitFor(t, 1)
+	inbox.settle()
+	if sent := inbox.count(); sent != 1 {
+		t.Fatalf("messages sent = %d, want 1 (only the registered address gets mail)", sent)
+	}
+}
+
+// The recipient is the address on the account, never the string in the
+// request: however the person types it at the door, the mail goes where the
+// administrator registered it.
+func TestThePasscodeIsMailedToTheRegisteredAddress(t *testing.T) {
+	server, _, inbox, _, users := accountServerPartsForTest(t)
+	if err := users.AddWithEmail(context.Background(),
+		"bea", "correct-horse-battery", "", "Bea.Mixed@Example.test"); err != nil {
+		t.Fatal(err)
 	}
 
-	knownCode, knownBody := ask(testPin)
-	unknownCode, unknownBody := ask("no-account-holds-this-pin")
-	if knownCode != unknownCode || knownBody != unknownBody {
-		t.Fatalf("known: %d %s; unknown: %d %s", knownCode, knownBody, unknownCode, unknownBody)
+	otp := requestPasscode(t, server, inbox, "  bea.mixed@EXAMPLE.TEST ")
+	if to := inbox.last(t).to; to != "Bea.Mixed@Example.test" {
+		t.Fatalf("recipient = %q, want the registered address", to)
 	}
-	if sent := inbox.count(); sent != 1 {
-		t.Fatalf("messages sent = %d, want 1 (only the real pin gets mail)", sent)
+	if code := login(server, "BEA.MIXED@example.test", otp).Code; code != http.StatusOK {
+		t.Fatalf("sign-in with the address in another case: status = %d", code)
+	}
+
+	// And Ann's passcode goes to Ann.
+	requestPasscode(t, server, inbox, testEmail)
+	if to := inbox.last(t).to; to != testEmail {
+		t.Fatalf("recipient = %q, want %q", to, testEmail)
 	}
 }
 
 // The seat limit counts people. A second person is refused while the seats are
-// taken; the person already in may still open another device.
-func TestSeatLimitRefusesAnExtraPersonButNotAnExtraDevice(t *testing.T) {
-	server, _, inbox := accountServerForTest(t)
+// taken, with the 409 that says the server is full rather than that the
+// credentials were wrong. (The same person signing in again is covered by
+// TestRequestingKeepsSessionsAndSigningInEndsTheOthers.)
+func TestSeatLimitRefusesAnExtraPerson(t *testing.T) {
+	server, _, inbox, _, users := accountServerPartsForTest(t)
+	if err := users.AddWithEmail(context.Background(),
+		"bea", "correct-horse-battery", "", "bea@example.test"); err != nil {
+		t.Fatal(err)
+	}
 	server.SetMaxActiveUsers(1)
 
-	signIn(t, server, inbox, testPin)
-	// The same account again: their laptop after their phone, not a second
-	// person, so the seat is already theirs.
-	time.Sleep(30 * time.Second)
-	otp := requestPasscode(t, server, inbox, testPin)
-	body := `{"pin":"` + testPin + `","otp":"` + otp + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("same account, second device: status = %d, want 200", response.Code)
+	signIn(t, server, inbox, testEmail)
+	otp := requestPasscode(t, server, inbox, "bea@example.test")
+	if code := login(server, "bea@example.test", otp).Code; code != http.StatusConflict {
+		t.Fatalf("second person on a full server: status = %d, want 409", code)
 	}
 }
 
 func TestLogoutInvalidatesTheSession(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	cookies, csrf := signIn(t, server, inbox, testPin)
+	cookies, csrf := signIn(t, server, inbox, testEmail)
 
 	logout := withCookies(httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil), cookies)
 	logout.Header.Set(auth.CSRFHeaderName, csrf)
@@ -382,7 +458,7 @@ func TestLogoutInvalidatesTheSession(t *testing.T) {
 // An account is permission to edit projects, not to browse the server's disk.
 func TestNetworkedServerRefusesFilesystemBrowsing(t *testing.T) {
 	server, _, inbox := accountServerForTest(t)
-	cookies, csrf := signIn(t, server, inbox, testPin)
+	cookies, csrf := signIn(t, server, inbox, testEmail)
 
 	dirs := withCookies(httptest.NewRequest(http.MethodGet, "/api/fs/dirs?path=", nil), cookies)
 	dirsResponse := httptest.NewRecorder()
@@ -405,7 +481,7 @@ func TestNetworkedServerRefusesFilesystemBrowsing(t *testing.T) {
 
 func TestWritesRecordTheActor(t *testing.T) {
 	server, pm, inbox := accountServerForTest(t)
-	cookies, csrf := signIn(t, server, inbox, testPin)
+	cookies, csrf := signIn(t, server, inbox, testEmail)
 
 	body := `{"id":"audited","title":"Audited","body":""}`
 	request := withCookies(

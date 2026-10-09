@@ -221,33 +221,49 @@ END`); err != nil {
 	}
 }
 
-func TestFailedPasscodeRevocationKeepsSessionAndAuditIdentity(t *testing.T) {
+// A sign-in that cannot durably sign out the account's other sessions must not
+// open a new one beside them: a restart would bring the old ones back, and the
+// person would believe they had cut them off. It fails whole — the old session
+// stays live everywhere, no new one exists, and the passcode is still good for
+// the retry.
+func TestFailedLoginRevocationOpensNothingAndKeepsThePasscode(t *testing.T) {
 	sessions, users := otpStoreForTest(t)
 	token := signedIn(t, sessions)
-	actorID := accountID(t, users, "ann")
-	sessions.otps[actorID] = &pendingOTP{
-		digest: digestOTP("OLD-CODE"), expires: time.Now().Add(time.Minute),
+	challenge, err := sessions.RequestOTP(nil, annEmail)
+	if err != nil {
+		t.Fatalf("RequestOTP: %v", err)
 	}
-	injected := errors.New("injected passcode revocation failure")
+	injected := errors.New("injected sign-in revocation failure")
 	sessions.store.runTx = func(context.Context, func(*sql.Tx) error) error {
 		return injected
 	}
 
-	challenge, err := sessions.RequestOTP(nil, "ann-pin-long-enough")
+	_, newToken, _, err := sessions.LoginWithOTP(nil, annEmail, challenge.Code)
 	if !errors.Is(err, ErrSessionPersistence) || !errors.Is(err, injected) {
-		t.Fatalf("RequestOTP error = %v, want wrapped persistence failure", err)
+		t.Fatalf("LoginWithOTP error = %v, want wrapped persistence failure", err)
 	}
-	if challenge.Actor != "ann" {
-		t.Fatalf("audit actor = %q, want ann", challenge.Actor)
+	if newToken != "" {
+		t.Fatal("a failed sign-in still handed out a session token")
 	}
-	if _, exists := sessions.otps[actorID]; exists {
-		t.Fatal("failed resend left the previous passcode usable")
+	if got := len(sessions.sessions); got != 1 {
+		t.Fatalf("sessions = %d, want only the original", got)
 	}
 	if _, err := sessions.Authenticate(requestWith(token)); err != nil {
 		t.Fatalf("process session after failed revocation: %v", err)
 	}
 	if _, err := NewSessionAuth(users).Authenticate(requestWith(token)); err != nil {
 		t.Fatalf("session after restart: %v", err)
+	}
+
+	sessions.store.runTx = nil
+	if _, _, _, err := sessions.LoginWithOTP(nil, annEmail, challenge.Code); err != nil {
+		t.Fatalf("retry with the same passcode: %v", err)
+	}
+	if _, err := sessions.Authenticate(requestWith(token)); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("old session after the retried sign-in = %v, want unauthenticated", err)
+	}
+	if _, err := NewSessionAuth(users).Authenticate(requestWith(token)); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("old session after restart = %v, want unauthenticated", err)
 	}
 }
 

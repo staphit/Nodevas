@@ -1,9 +1,18 @@
-// One-time passcodes for the two-factor sign-in.
+// One-time passcodes: the whole of the web sign-in.
 //
-// A networked server asks for two things: a PIN, which an administrator
-// creates and hands over out of band, and a passcode emailed to the address
-// bound to that PIN. Neither alone gets in. The PIN proves you were given
-// access; the passcode proves you still hold the mailbox it was granted to.
+// A networked server asks for an email address and a passcode mailed to it.
+// The address finds the account; the passcode proves the person at the
+// keyboard can read that account's mailbox right now. That is one factor —
+// possession of the mailbox — and it is the owner's deliberate choice: the
+// PIN that used to stand in front of it is gone, so an account is exactly as
+// safe as the inbox registered for it. See email.go.
+//
+// Because the address is public, everything reachable without signing in is
+// built not to say whether an address is registered: the request answers the
+// same way for every address, is throttled the same way for every address,
+// and does not wait on mail delivery. And because requesting a passcode needs
+// nothing secret, requesting one changes nothing about anybody's existing
+// sessions; only completing a sign-in does.
 //
 // Passcodes are single use, expire in five minutes, and live only in memory —
 // a restart invalidates every outstanding one, which is the safe direction.
@@ -40,31 +49,29 @@ const (
 	// not unlimited tries against a live one.
 	maxOTPAttempts = 5
 
-	// Requesting a passcode signs out every session for that PIN, so the
-	// request endpoint is itself an attack: someone holding only the PIN could
-	// keep the rightful holder logged out. These budgets are what makes that
+	// Anyone who knows an address can ask for a passcode to be sent to it, so
+	// the request endpoint is a way to fill somebody's inbox, and every request
+	// is a fresh passcode to guess at. These budgets are what makes both
 	// expensive rather than free.
 	otpRequestWindow = 1 * time.Minute
 	otpRequestLimit  = 3
 	otpDailyWindow   = 1 * time.Hour
 	otpDailyLimit    = 12
 	// otpResendCooldown is deliberately separate from the broader budgets:
-	// one account may receive at most one newly generated passcode every 30
+	// one address may receive at most one newly generated passcode every 30
 	// seconds, while global and per-source limits still absorb wider abuse.
 	otpResendCooldown = 30 * time.Second
 
-	// MaxPinBytes bounds what reaches the Argon2 verifier. A PIN is short; a
-	// megabyte of one is somebody probing for a memory-cost amplifier.
-	MaxPinBytes = 256
-	// MaxOTPBytes is likewise a bound, not a format check — the server decides
-	// what a passcode looks like after it is compared, not before.
+	// MaxOTPBytes is a bound, not a format check — the server decides what a
+	// passcode looks like after it is compared, not before.
 	MaxOTPBytes = 64
 )
 
-// ErrNoSuchPin means no account carries that PIN. Handlers must not pass it
-// to the client: answering "that PIN does not exist" turns the request
-// endpoint into an oracle that finds valid PINs without ever needing an inbox.
-var ErrNoSuchPin = errors.New("no account for that pin")
+// ErrNoSuchAccount means no account signs in with that address, or the
+// address is not one at all. Handlers must not pass it to the client:
+// answering "that address is not registered" turns the request endpoint into a
+// directory of who has an account.
+var ErrNoSuchAccount = errors.New("no account for that email address")
 
 // ErrNoMailer is returned when passcodes cannot be delivered because the
 // operator has not configured outgoing mail. It is safe to show: it describes
@@ -88,7 +95,11 @@ type pendingOTP struct {
 // Challenge is what the caller needs to deliver a passcode: where to send it
 // and what to send. It is returned once and never stored.
 type Challenge struct {
-	Code    string
+	Code string
+	// Email is the address registered on the account, read from its row. It is
+	// never the string the client typed: the two match case-insensitively and
+	// may differ in every other way, and mail goes only where the
+	// administrator said it should.
 	Email   string
 	Expires time.Time
 	// Actor names the account, for the audit line the caller writes. The
@@ -133,18 +144,22 @@ func digestOTP(code string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(normalizeOTP(code)))
 }
 
-// RequestOTP issues a passcode for the account holding this PIN and, as the
-// same step, signs out every session that account already had.
+// RequestOTP issues a passcode for the account registered with this address.
 //
-// Revoking here rather than at the next successful sign-in is deliberate: it
-// means one request from the real holder cuts off an intruder who already has
-// a session, without the holder needing to get back in first. The cost is that
-// the request endpoint can be used to log someone out, which is why the
-// budgets above are tight.
+// It does not touch the account's sessions. It used to sign every one of them
+// out, back when asking needed a PIN and asking was therefore a statement that
+// you held it; an address is not a secret, and revoking here would let anyone
+// who knows somebody's address log them out every thirty seconds. Ending the
+// other sessions happens when a sign-in completes instead — see LoginWithOTP.
+//
+// Every budget is charged before the account is looked up, keyed on what the
+// caller sent rather than on what it found, so a registered address and an
+// unregistered one run out of budget identically and the 429 says nothing
+// about which it was.
 //
 // The returned Challenge is the caller's to deliver and then forget. An
-// unknown PIN gives ErrNoSuchPin, which the HTTP layer swallows.
-func (a *SessionAuth) RequestOTP(r *http.Request, pin string) (Challenge, error) {
+// unknown address gives ErrNoSuchAccount, which the HTTP layer swallows.
+func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, error) {
 	source := ""
 	if r != nil {
 		source = ClientIP(r)
@@ -153,42 +168,30 @@ func (a *SessionAuth) RequestOTP(r *http.Request, pin string) (Challenge, error)
 	if !a.allowOTPRequest(source) {
 		return Challenge{}, ErrTooManyOTPRequests
 	}
-	if len(pin) == 0 || len(pin) > MaxPinBytes {
-		return Challenge{}, ErrNoSuchPin
+	address, err := normalizeEmail(email)
+	if err != nil {
+		// Not an address, so not one anybody could have registered: refusing it
+		// before the per-address budget reveals nothing.
+		return Challenge{}, ErrNoSuchAccount
 	}
-	// The visitor's passcode is fixed, so there is nothing to mint, mail, or
-	// revoke — and nothing to revoke is the point: one visitor pressing "send"
-	// must not sign out every other visitor, which is what the per-account
-	// revocation below would do to a credential everybody shares. The caller
-	// answers 202 for this error exactly as it does for an unknown PIN, so
-	// pressing the button still tells the client nothing.
-	if a.visitorPinMatches(ctx, pin) {
-		return Challenge{Actor: VisitorActor.Name}, ErrVisitorFixedPasscode
+	// Charged per address rather than per source, so an attacker who moves
+	// between source addresses still cannot fill one person's inbox or mint
+	// them an endless supply of passcodes to guess at.
+	if !a.allowOTPForAddress(emailKey(address)) {
+		return Challenge{}, ErrTooManyOTPRequests
 	}
 
-	actor, _, email, ok := a.users.VerifyPin(ctx, pin)
+	actor, _, registered, ok := a.users.AccountByEmail(ctx, address)
 	if !ok {
-		// A caller who hung up did not offer a PIN that failed, so say so
-		// rather than ErrNoSuchPin. The HTTP layer answers 202 either way, so
-		// this changes nothing an unauthenticated client can see; what it
+		// A caller who hung up did not offer an address that failed, so say so
+		// rather than ErrNoSuchAccount. The HTTP layer answers 202 either way,
+		// so this changes nothing an unauthenticated client can see; what it
 		// changes is the audit line, which should not record a probe that
 		// nobody made.
 		if err := contextFailure(ctx); err != nil {
 			return Challenge{}, err
 		}
-		return Challenge{}, ErrNoSuchPin
-	}
-	if strings.TrimSpace(email) == "" {
-		// An account with a PIN but no address can never receive a passcode,
-		// so it can never sign in. Say nothing here — this is the same shape
-		// of fact as "no such PIN" and must not be distinguishable.
-		return Challenge{}, ErrNoSuchPin
-	}
-	// A second budget, charged per account rather than per source, so an
-	// attacker who moves between addresses still cannot hold one person's
-	// sessions open-ended hostage.
-	if !a.allowOTPForAccount(actor.ID) {
-		return Challenge{}, ErrTooManyOTPRequests
+		return Challenge{}, ErrNoSuchAccount
 	}
 
 	code, err := newOTP()
@@ -200,70 +203,77 @@ func (a *SessionAuth) RequestOTP(r *http.Request, pin string) (Challenge, error)
 
 	a.mu.Lock()
 	a.sweepOTPsLocked(now)
-	// Revocation is part of issuing a new passcode. Commit it before exposing
-	// the passcode or changing the live maps, otherwise a failed DB delete
-	// would let old sessions return after a restart.
-	if err := a.store.removeUser(actor.ID); err != nil {
-		// A resend is also an invalidation request. Even when durable session
-		// revocation is unavailable, never leave the previous in-memory code
-		// usable after telling the caller this attempt did not issue a new one.
-		delete(a.otps, actor.ID)
-		a.mu.Unlock()
-		return Challenge{Actor: actor.Name}, err
-	}
 	// One live passcode per account: issuing a second would leave the first
 	// usable, and "the last one wins" is what a person expects after pressing
 	// resend.
 	a.otps[actor.ID] = &pendingOTP{digest: digestOTP(code), expires: expires}
-	a.revokeUserLocked(actor.ID)
 	a.mu.Unlock()
 
-	return Challenge{Code: code, Email: email, Expires: expires, Actor: actor.Name}, nil
+	return Challenge{Code: code, Email: registered, Expires: expires, Actor: actor.Name}, nil
 }
 
-// LoginWithOTP completes the sign-in. Both factors are checked; either one
-// wrong gives the same ErrBadCredentials, so a caller cannot learn which half
-// it got right.
-func (a *SessionAuth) LoginWithOTP(r *http.Request, pin, otp string) (identity.Actor, string, string, error) {
+// LoginWithOTP completes the sign-in and, as the same step, signs out every
+// other session the account had, so the device that just proved it holds the
+// mailbox is the only one left signed in.
+//
+// That revocation is what replaces the one RequestOTP used to do. Here it is
+// earned: only somebody who read the passcode can trigger it. It is also how
+// the account holder cuts off an intruder who got in through their mailbox —
+// sign in again — and why a durable revocation failure fails the sign-in
+// rather than opening a session beside sessions that a restart would bring
+// back.
+//
+// An unknown address, no passcode outstanding, and a wrong passcode all give
+// the same ErrBadCredentials, after the same throttle charges, without a hash
+// pass on any of them, so neither the answer nor its timing says which.
+func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity.Actor, string, string, error) {
 	source := ""
 	if r != nil {
 		source = ClientIP(r)
 	}
 	ctx := requestContext(r)
-	// Charged before Argon2 runs, under the same budgets a password login
-	// uses. The account key is unknown until the PIN verifies, so only the
-	// global and per-source budgets apply here.
-	if !a.allowLogin("", source) {
+	address, addressErr := normalizeEmail(email)
+	key := ""
+	if addressErr == nil {
+		key = emailKey(address)
+	}
+	// Charged before anything is looked up, under the same budgets a password
+	// login uses, with the address taking the place of the account name. It is
+	// keyed on what was typed, not on what was found, so an unregistered
+	// address throttles exactly like a registered one.
+	if !a.allowEmailLogin(key, source) {
 		return identity.Actor{}, "", "", ErrTooManyLogins
 	}
-	if len(pin) == 0 || len(pin) > MaxPinBytes || len(otp) == 0 || len(otp) > MaxOTPBytes {
+	if addressErr != nil || len(otp) == 0 || len(otp) > MaxOTPBytes {
 		return identity.Actor{}, "", "", ErrBadCredentials
 	}
-	// Checked before the accounts, so the shared credential can never reach a
-	// real account's hash. Half-right falls through to the account path and
-	// fails there as anything else would, which is also what keeps the timing
-	// of a wrong visitor passcode from standing out.
-	if a.visitorLogin(ctx, pin, otp) {
-		return a.openSession(VisitorActor, visitorRevision)
-	}
 
-	actor, revision, _, ok := a.users.VerifyPin(ctx, pin)
+	actor, revision, _, ok := a.users.AccountByEmail(ctx, address)
 	if !ok {
 		// Same reasoning as the password path: a cancelled read is not a wrong
-		// PIN, and recording it as one would put a failed sign-in in the trail
-		// for a person who simply closed the tab.
+		// address, and recording it as one would put a failed sign-in in the
+		// trail for a person who simply closed the tab.
 		if err := contextFailure(ctx); err != nil {
 			return identity.Actor{}, "", "", err
 		}
 		return identity.Actor{}, "", "", ErrBadCredentials
 	}
 
+	token, csrf, err := newSessionTokens()
+	if err != nil {
+		return identity.Actor{}, "", "", err
+	}
+
+	// Everything from here to the new session is one critical section: the
+	// passcode check, the seat check, the revocation, spending the passcode and
+	// recording the session. Split up, a second sign-in could slip a session
+	// in between this one's revocation and its insert and survive both.
 	now := time.Now()
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	pending := a.otps[actor.ID]
 	if pending == nil || now.After(pending.expires) {
 		delete(a.otps, actor.ID)
-		a.mu.Unlock()
 		return identity.Actor{}, "", "", ErrBadCredentials
 	}
 	offered := digestOTP(otp)
@@ -274,22 +284,34 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, pin, otp string) (identity.A
 			// and which the account holder sees arrive in their inbox.
 			delete(a.otps, actor.ID)
 		}
-		a.mu.Unlock()
 		return identity.Actor{}, "", "", ErrBadCredentials
 	}
-	// The seat limit is checked before the passcode is spent. Spending it
-	// first would mean a full server costs the person their passcode, and the
-	// only way to get another is a request that signs out their other devices.
+	if err := a.sweepSessionsLocked(now); err != nil {
+		return identity.Actor{}, "", "", err
+	}
+	// The seat limit is checked before anything is spent or revoked, while the
+	// account's own sessions still count as its seat. Checking after the
+	// revocation would let a full server sign the person out of their other
+	// devices and then refuse them this one.
 	if !a.seatAvailableLocked(actor.ID, now) {
-		a.mu.Unlock()
 		return identity.Actor{}, "", "", ErrTooManyActiveUsers
 	}
-	// Single use: gone before the session exists, so a replay cannot race the
-	// first use.
+	// Durable first, as everywhere sessions are destroyed: if the delete does
+	// not commit, nothing is forgotten in memory, the passcode is still good
+	// for a retry, and no session is opened beside the ones a restart would
+	// resurrect.
+	if err := a.store.removeUser(actor.ID); err != nil {
+		return identity.Actor{}, "", "", err
+	}
+	a.revokeUserLocked(actor.ID)
+	if err := a.openSessionLocked(actor, revision, token, now); err != nil {
+		return identity.Actor{}, "", "", err
+	}
+	// Single use. Spent only once the session exists, which is safe because
+	// the lock is still held: no replay can run between the check above and
+	// this delete.
 	delete(a.otps, actor.ID)
-	a.mu.Unlock()
-
-	return a.openSession(actor, revision)
+	return actor, token, csrf, nil
 }
 
 // allowOTPRequest charges the global and per-source budgets for a passcode
@@ -308,27 +330,40 @@ func (a *SessionAuth) allowOTPRequest(source string) bool {
 	return a.chargeLocked(charges, now)
 }
 
-// allowOTPForAccount charges the per-account budget, which is what bounds how
-// often one person's sessions can be cut by somebody who has only their PIN.
-func (a *SessionAuth) allowOTPForAccount(userID string) bool {
+// allowOTPForAddress charges the per-address budget and the resend cooldown.
+//
+// It is keyed on the address rather than the account ID so it can be charged
+// before the lookup, for addresses that exist and addresses that do not alike.
+// An address names at most one account, so for a registered one this is the
+// per-account budget it always was.
+func (a *SessionAuth) allowOTPForAddress(key string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if last, ok := a.lastOTPRequest[userID]; ok && now.Sub(last) < otpResendCooldown {
+	// Anyone can put an address in this map now, so it is swept rather than
+	// trusted to stay small. An entry older than the cooldown decides nothing,
+	// and the global request budget bounds how many younger ones can exist.
+	for seen, last := range a.lastOTPRequest {
+		if now.Sub(last) >= otpResendCooldown {
+			delete(a.lastOTPRequest, seen)
+		}
+	}
+	if last, ok := a.lastOTPRequest[key]; ok && now.Sub(last) < otpResendCooldown {
 		return false
 	}
 	if !a.chargeLocked([]rateCharge{
-		{key: "otp-user:" + userID, window: otpRequestWindow, limit: otpRequestLimit},
-		{key: "otp-user-hour:" + userID, window: otpDailyWindow, limit: otpDailyLimit},
+		{key: "otp-user:" + key, window: otpRequestWindow, limit: otpRequestLimit},
+		{key: "otp-user-hour:" + key, window: otpDailyWindow, limit: otpDailyLimit},
 	}, now) {
 		return false
 	}
-	a.lastOTPRequest[userID] = now
+	a.lastOTPRequest[key] = now
 	return true
 }
 
 // RevokeUser signs out every session belonging to an account. The CLI calls it
-// when a PIN is changed or an account is removed.
+// when an account is removed; changing the sign-in address does the same
+// through the account revision.
 func (a *SessionAuth) RevokeUser(userID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

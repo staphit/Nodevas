@@ -59,9 +59,11 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
 2. App name 輸入 `nodevas`。
 3. 貼上調整後的 [`compose.yaml`](./compose.yaml)。
 4. 儲存並等待 `bootstrap` 完成、`nodevas` healthy、`cloudflared` running。
-5. 從 `bootstrap` service log 取出首次產生的 PIN。PIN 只顯示一次，請透過可信任管道保存。
+5. 開啟 Public Hostname，在登入頁輸入 `NODEVAS_ADMIN_EMAIL` 設定的信箱，收到 8 碼一次性驗證碼（5 分鐘內有效、只能使用一次）後輸入，即完成登入。
 
-首次初始化成功後，`/data/.nodevas-bootstrap-complete` 會避免更新或重啟時重設 PIN。若需重設，請使用 `nodevas user pin`，不要刪除 marker 後盲目重啟。
+網頁登入只有一個因素：持有該信箱。能讀取信箱的人就能登入，請保護好管理員信箱，並使用已啟用兩步驟驗證的信箱。登入成功會登出該帳號其他工作階段，只保留最新的裝置。
+
+首次初始化成功後，`/data/.nodevas-bootstrap-complete` 會避免更新或重啟時再次設定帳號。日後修改 `NODEVAS_ADMIN_EMAIL` 不會自動套用；若需更換信箱，請使用 `nodevas user email`（會結束該帳號現有工作階段），不要刪除 marker 後盲目重啟。
 
 ### 已有 cloudflared App 時
 
@@ -89,6 +91,8 @@ curl -fsS https://nodevas.example.com/ >/dev/null
 備份整個 `/mnt/tank/apps/nodevas/workspace` dataset。它包含專案、SQLite/WAL、歷史、CRDT sidecar、通知 secret 與 `/data/.config` 下的加密 master key。
 
 更新固定 image tag 後重新部署 App。Nodevas 收到 `SIGTERM` 時會先 graceful shutdown；Compose 提供 45 秒停止期限。
+
+從 PIN 登入版本升級時，遷移會清除所有 PIN，並登出所有現有工作階段一次。已設定 email 的帳號可立即改用 email 登入；若多個帳號使用相同 email（不分大小寫），只有最早建立的帳號保留該 email，其餘需以 `nodevas user email` 重新設定。
 
 參考：
 

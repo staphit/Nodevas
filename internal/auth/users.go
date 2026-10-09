@@ -45,13 +45,10 @@ type UserRecord struct {
 	Hash      string        `json:"hash"` // PHC-format argon2id string
 	Role      identity.Role `json:"role"`
 	CreatedAt string        `json:"createdAt"`
-	// PinHash is the argon2id hash of the sign-in PIN, in the same PHC format
-	// as Hash. Empty means the account cannot sign in to the web UI. The PIN
-	// itself is never stored, here or anywhere else — see pin.go.
-	PinHash string `json:"pinHash,omitempty"`
-	// Email is where this account's one-time passcodes are sent. It is not a
-	// contact field: changing it changes who can complete a sign-in, which is
-	// why SetPin rotates the two together.
+	// Email is the address this account signs in to the web UI with, and the
+	// only place its one-time passcodes are sent. Empty means the account
+	// cannot sign in to the web UI. It is not a contact field: changing it
+	// changes who can sign in — see email.go.
 	Email string `json:"email,omitempty"`
 }
 
@@ -106,7 +103,11 @@ func NewUserStoreDB(database *db.DB) *UserStore {
 }
 
 // accountColumns is the row shape scanAccount reads, in order.
-const accountColumns = `id, name, role, password_hash, pin_hash, email, created_at`
+//
+// pin_hash is deliberately absent. The column survives from the PIN sign-in,
+// emptied by migration 0006; nothing reads it, so nothing can come to depend
+// on it again by accident.
+const accountColumns = `id, name, role, password_hash, email, created_at`
 
 // Accounts are ordered by rowid throughout: it is the order they were created
 // in, which is what "the first account" means when a role has to be repaired,
@@ -121,9 +122,12 @@ const orderByCreation = ` ORDER BY rowid`
 type accountFilter string
 
 const (
-	accountByName    accountFilter = ` WHERE name = ? COLLATE NOCASE`
-	accountByID      accountFilter = ` WHERE id = ?`
-	accountsWithPins accountFilter = ` WHERE pin_hash != ''`
+	accountByName accountFilter = ` WHERE name = ? COLLATE NOCASE`
+	accountByID   accountFilter = ` WHERE id = ?`
+	// The empty-address guard repeats the partial index's predicate, so the
+	// query can use it and so an empty argument can never match the accounts
+	// that have no address at all.
+	accountByEmail accountFilter = ` WHERE email = ? COLLATE NOCASE AND email != ''`
 )
 
 // accountAssignment is the SET list of an account update, under the same rule
@@ -132,8 +136,8 @@ type accountAssignment string
 
 const (
 	setPasswordHash accountAssignment = `password_hash = ?`
-	setPinAndEmail  accountAssignment = `pin_hash = ?, email = ?`
-	clearPinHash    accountAssignment = `pin_hash = ''`
+	setEmail        accountAssignment = `email = ?`
+	clearEmail      accountAssignment = `email = ''`
 )
 
 // maxAccountIDBytes bounds what a session cookie or a stored OAuth capability
@@ -152,7 +156,7 @@ type rowScanner interface {
 func scanAccount(row rowScanner) (UserRecord, error) {
 	var user UserRecord
 	var role string
-	if err := row.Scan(&user.ID, &user.Name, &role, &user.Hash, &user.PinHash,
+	if err := row.Scan(&user.ID, &user.Name, &role, &user.Hash,
 		&user.Email, &user.CreatedAt); err != nil {
 		return UserRecord{}, err
 	}
@@ -242,8 +246,8 @@ func (u *UserStore) List(ctx context.Context) []string {
 }
 
 // Records returns the accounts for account-management UIs and the CLI. The
-// password and PIN hashes are not selected at all: an offline guessing attack
-// starts with a copy of one, so they do not leave this file.
+// password hash is not selected at all: an offline guessing attack starts with
+// a copy of one, so it does not leave this file.
 func (u *UserStore) Records(ctx context.Context) []UserRecord {
 	if !u.ready() {
 		return nil
@@ -280,7 +284,25 @@ func (u *UserStore) Add(ctx context.Context, name, password string) error {
 // admin for the first account and member thereafter. The first account is
 // always an admin even if a caller asks for member.
 func (u *UserStore) AddWithRole(ctx context.Context, name, password string, role identity.Role) error {
+	return u.AddWithEmail(ctx, name, password, role, "")
+}
+
+// AddWithEmail creates an account that can sign in to the web UI from the
+// start. An empty email creates one that cannot until SetEmail is run.
+//
+// The address goes in with the row rather than in a second step, so a
+// duplicate address refuses the whole account instead of leaving one behind
+// that nobody can sign in to.
+func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, role identity.Role, email string) error {
 	name = strings.TrimSpace(name)
+	address := ""
+	if strings.TrimSpace(email) != "" {
+		normalized, err := normalizeEmail(email)
+		if err != nil {
+			return err
+		}
+		address = normalized
+	}
 	if !userNamePattern.MatchString(name) {
 		return fmt.Errorf("invalid user name %q", name)
 	}
@@ -324,8 +346,8 @@ func (u *UserStore) AddWithRole(ctx context.Context, name, password string, role
 			role = identity.RoleMember
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, '', '', ?)`,
-			id[:16], name, string(role), hash, db.Now())
+			`INSERT INTO accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?)`,
+			id[:16], name, string(role), hash, address, db.Now())
 		if err != nil {
 			return insertError(name, err)
 		}
@@ -337,6 +359,9 @@ func (u *UserStore) AddWithRole(ctx context.Context, name, password string, role
 // so the CLI and the API keep saying the same thing about a duplicate. The
 // index is the real check: the SELECT above loses a race that this cannot.
 func insertError(name string, err error) error {
+	if isEmailConflict(err) {
+		return ErrEmailTaken
+	}
 	if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return fmt.Errorf("user %q already exists", name)
 	}
@@ -403,8 +428,21 @@ func (u *UserStore) SetPassword(ctx context.Context, name, password string) erro
 	return nil
 }
 
+// isEmailConflict reports whether a write was refused by the unique index on
+// the sign-in address. SQLite names the column for a column index, partial or
+// not; the index name is matched as well so the check does not hang on which
+// of the two a driver version chooses to print.
+func isEmailConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "UNIQUE constraint failed") &&
+		(strings.Contains(message, "accounts.email") || strings.Contains(message, "accounts_email_nocase"))
+}
+
 // errNoAccount says the name matched no row. Callers word it for their own
-// audience: the account commands and the PIN commands have always phrased a
+// audience: the account commands and the email commands have always phrased a
 // missing account differently, and their output is documented.
 var errNoAccount = errors.New("no such account")
 
@@ -416,6 +454,9 @@ func (u *UserStore) updateAccount(ctx context.Context, name string, assignments 
 	args = append(args, name)
 	result, err := u.database.ExecContext(ctx,
 		`UPDATE accounts SET `+string(assignments)+` WHERE name = ? COLLATE NOCASE`, args...)
+	if isEmailConflict(err) {
+		return ErrEmailTaken
+	}
 	if err != nil {
 		return fmt.Errorf("update account: %w", err)
 	}
@@ -532,12 +573,12 @@ func (u *UserStore) ActorRevision(ctx context.Context, id string) (identity.Acto
 	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, userRevision(user), true
 }
 
-// userRevision binds a session to the credential that opened it. The PIN and
-// the passcode address are part of it: rotating either must end the sessions
-// that the old ones authorised, which is the point of rotating them.
+// userRevision binds a session to the credential that opened it. The sign-in
+// address is part of it: changing or clearing it must end the sessions the old
+// address authorised, which is the point of changing it.
 func userRevision(user UserRecord) string {
 	digest := sha256.Sum256([]byte(user.ID + "\x00" + user.Name + "\x00" + user.Hash +
-		"\x00" + string(user.Role) + "\x00" + user.PinHash + "\x00" + user.Email))
+		"\x00" + string(user.Role) + "\x00" + user.Email))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
