@@ -69,12 +69,8 @@ var reportableStatuses = map[string]bool{
 
 func registerWriteTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "claim_task",
-		Description: "Take a task before working on it. This is what stops two agents doing the same one: " +
-			"the check and the claim happen together on the server, so exactly one caller wins. " +
-			"The task moves to in_progress and anyone looking at the board sees it change. " +
-			"Claiming again extends your hold rather than failing, so a long task is safe. " +
-			"Report the outcome with set_node_status when you finish, or give it back with release_task.",
+		Name:        "claim_task",
+		Description: "Claim an actionable task before working. Ownership lasts until release or lease expiry. If claimed elsewhere, choose another task.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:          "Claim a task",
 			IdempotentHint: true,
@@ -100,11 +96,8 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "set_node_status",
-		Description: "Record what happened to a task you claimed: done, failed, or skipped. " +
-			"The note is written into the project's timeline, which people read to reconstruct what happened — " +
-			"say what you actually did, and on failure say what stopped you. " +
-			"Reporting releases the task and may unblock the ones waiting on it.",
+		Name:        "set_node_status",
+		Description: "Report done, failed or skipped for your claimed task, with an accurate note. Use release_task if unfinished.",
 		Annotations: &mcp.ToolAnnotations{Title: "Report an outcome", IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setStatusInput) (*mcp.CallToolResult, setStatusOutput, error) {
 		id := strings.TrimSpace(in.ID)
@@ -129,10 +122,8 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "release_task",
-		Description: "Give a claimed task back unfinished, so it returns to the ready queue for someone else. " +
-			"Use this when you cannot make progress — it is better than holding a task until the lease runs out, " +
-			"and better than reporting a result you did not achieve.",
+		Name:        "release_task",
+		Description: "Release your claimed task unfinished so another agent can take it.",
 		Annotations: &mcp.ToolAnnotations{Title: "Give a task back", IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in releaseTaskInput) (*mcp.CallToolResult, releaseTaskOutput, error) {
 		id := strings.TrimSpace(in.ID)

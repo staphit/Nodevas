@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/rag"
 )
 
 // The typed calls the tools are built from. Each one is a projection: the
@@ -98,15 +99,14 @@ type Snapshot struct {
 	Issues   []engine.Issue           `json:"issues"`
 }
 
-// Graph fetches the whole graph.
-//
-// This is the fat call — a large board's UI state alone runs to tens of
-// thousands of tokens — and it never reaches the agent. It is read here, inside
-// a process with no context window, and only the handful of fields a tool
-// promised are passed on.
+// Graph fetches the whole graph for callers that explicitly need a snapshot.
 func (c *Client) Graph(ctx context.Context) (*Snapshot, error) {
+	return c.graph(ctx, nil)
+}
+
+func (c *Client) graph(ctx context.Context, query url.Values) (*Snapshot, error) {
 	snapshot := &Snapshot{}
-	if err := c.get(ctx, "/api/graph", nil, snapshot); err != nil {
+	if err := c.get(ctx, "/api/graph", query, snapshot); err != nil {
 		return nil, err
 	}
 	if snapshot.Graph == nil {
@@ -131,6 +131,35 @@ func (c *Client) NodeContent(ctx context.Context, id string) (*NodeContent, erro
 		return nil, err
 	}
 	return body, nil
+}
+
+type NodeContext struct {
+	Node *engine.Node `json:"node"`
+	NodeContent
+	Status     string   `json:"status"`
+	Upstream   []string `json:"upstream"`
+	Downstream []string `json:"downstream"`
+}
+
+func (c *Client) NodeContext(ctx context.Context, id string) (*NodeContext, error) {
+	out := &NodeContext{}
+	if err := c.get(ctx, "/api/nodes/"+url.PathEscape(id)+"/context", nil, out); err != nil {
+		return nil, err
+	}
+	if out.Node == nil || out.Node.ID != id {
+		return nil, &APIError{Code: CodeServerError, Message: "server returned no matching node context"}
+	}
+	return out, nil
+}
+
+func (c *Client) DocumentSources(ctx context.Context) ([]rag.Source, error) {
+	var out struct {
+		Documents []rag.Source `json:"documents"`
+	}
+	if err := c.get(ctx, "/api/documents", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Documents, nil
 }
 
 // SearchHit is one match.

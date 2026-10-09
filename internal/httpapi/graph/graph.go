@@ -30,6 +30,14 @@ func (a *API) getGraph(c *gin.Context) {
 		httpx.Err(c, 500, err)
 		return
 	}
+	if c.Query("view") == "outline" {
+		// Agent outlines need topology and status, not UI state or validation.
+		c.JSON(200, map[string]any{
+			"graph": &engine.Graph{Version: g.Version, Nodes: g.Nodes, Edges: g.Edges},
+			"rev":   rev, "statuses": engine.ComputeStatuses(g, rs),
+		})
+		return
+	}
 	c.JSON(200, map[string]any{
 		"graph":    g,
 		"rev":      rev,

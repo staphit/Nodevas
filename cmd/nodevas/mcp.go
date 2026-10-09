@@ -31,6 +31,8 @@ func mcpServe(args []string) {
 		"the name recorded against everything this agent changes; attribution, not authentication")
 	agentRole := fs.String("agent-role", "worker",
 		"the write-permission class this agent acts as: worker or orchestrator")
+	chromaURL := fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project")
+	ragPython := fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings")
 	_ = fs.Parse(args)
 
 	// Every diagnostic goes to stderr, without exception. stdout carries the
@@ -62,6 +64,8 @@ func mcpServe(args []string) {
 		Project:   strings.TrimSpace(*projectName),
 		Actor:     name,
 		AgentRole: role,
+		ChromaURL: *chromaURL,
+		RAGPython: *ragPython,
 		Stderr:    os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
