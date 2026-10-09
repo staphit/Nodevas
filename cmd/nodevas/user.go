@@ -32,9 +32,10 @@ func user(args []string) {
 	passwordStdin := fs.Bool("password-stdin", false,
 		"read the password from stdin (the whole of it, so `printf %s pw | nodevas user add ...` works)")
 	email := fs.String("email", "",
-		"where this account's one-time passcodes are sent (required by `user pin`)")
-	pinValue := fs.String("pin", "",
-		"DEPRECATED: pin on the command line, visible to every process on this machine; omit it to have one generated")
+		"the address this account signs in to the web UI with; its one-time passcodes go there "+
+			"(required by `user email` unless --clear; optional for `user add`)")
+	clearEmail := fs.Bool("clear", false,
+		"with `user email`: remove the address, so the account can no longer sign in to the web UI")
 	_ = fs.Parse(args[1:])
 	if *password != "" {
 		fmt.Fprintln(os.Stderr,
@@ -57,8 +58,8 @@ func user(args []string) {
 	// server on its next query rather than at its next restart.
 	//
 	// Keeping the lock would have kept the restart under a different name, and
-	// the restart is the expensive part: rotating one person's PIN should not
-	// cost everybody else their editing session.
+	// the restart is the expensive part: changing one person's sign-in address
+	// should not cost everybody else their editing session.
 	users, err := auth.NewUserStore(root)
 	if err != nil {
 		log.Fatalf("accounts: %v", err)
@@ -72,9 +73,7 @@ func user(args []string) {
 
 	switch action {
 	case "list":
-		for _, account := range users.Records(ctx) {
-			fmt.Printf("%s\t%s\n", account.Name, account.Role)
-		}
+		printAccounts(os.Stdout, users.Records(ctx))
 	case "add", "passwd":
 		if strings.TrimSpace(*name) == "" {
 			log.Fatal("--user is required")
@@ -84,7 +83,8 @@ func user(args []string) {
 			log.Fatal(err)
 		}
 		if action == "add" {
-			err = users.AddWithRole(ctx, *name, secret, identity.Role(strings.ToLower(strings.TrimSpace(*role))))
+			err = users.AddWithEmail(ctx, *name, secret,
+				identity.Role(strings.ToLower(strings.TrimSpace(*role))), *email)
 		} else {
 			err = users.SetPassword(ctx, *name, secret)
 		}
@@ -92,49 +92,38 @@ func user(args []string) {
 			log.Fatal(err)
 		}
 		fmt.Printf("%s: ok\n", *name)
-	case "pin":
-		// The PIN is half of what signs somebody in to the web UI, and it is
-		// shown here exactly once: nothing stores it in a form anyone,
-		// including this program, can read back.
+	case "email":
+		// The address is the whole of a web sign-in: whoever can read that
+		// mailbox can sign in as this account. There is nothing to print once
+		// and hand over any more — registering the address is the grant.
 		if strings.TrimSpace(*name) == "" {
 			log.Fatal("--user is required")
+		}
+		if *clearEmail {
+			if strings.TrimSpace(*email) != "" {
+				log.Fatal("--email and --clear are mutually exclusive")
+			}
+			if err := users.ClearEmail(ctx, *name); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("%s: email cleared; this account can no longer sign in to the web UI\n", *name)
+			fmt.Fprintln(os.Stderr,
+				"Any web session this account had is now invalid.")
+			return
 		}
 		if strings.TrimSpace(*email) == "" {
-			log.Fatal("--email is required: without an address the account can never receive a passcode")
+			log.Fatal("--email is required (or --clear to remove web sign-in)")
 		}
-		secret := strings.TrimSpace(*pinValue)
-		generated := secret == ""
-		if generated {
-			secret, err = auth.GeneratePin()
-			if err != nil {
-				log.Fatalf("generate pin: %v", err)
-			}
-		} else {
-			fmt.Fprintln(os.Stderr,
-				"warning: --pin puts the pin in this machine's process list and shell history; "+
-					"omit it to have one generated instead")
-		}
-		if err := users.SetPin(ctx, *name, secret, *email); err != nil {
+		if err := users.SetEmail(ctx, *name, *email); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("%s: pin set, passcodes go to %s\n", *name, *email)
-		if generated {
-			fmt.Printf("\n  pin: %s\n\n", secret)
-			fmt.Fprintln(os.Stderr,
-				"Give this to the account holder over a channel you trust, and not by email — "+
-					"a mailbox that holds both the pin and the passcodes is one factor, not two. "+
-					"It cannot be shown again; run this command to issue a new one.")
-		}
+		fmt.Printf("%s: signs in with %s\n", *name, strings.TrimSpace(*email))
+		// Revocation rides on the account revision, which includes the address:
+		// the server refuses an old session on its next request, without a
+		// restart. Re-registering the address it already had changes nothing.
 		fmt.Fprintln(os.Stderr,
-			"Any session this account had is now invalid: changing a pin ends the sessions it authorised.")
-	case "pin-clear":
-		if strings.TrimSpace(*name) == "" {
-			log.Fatal("--user is required")
-		}
-		if err := users.ClearPin(ctx, *name); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%s: pin cleared; this account can no longer sign in to the web UI\n", *name)
+			"Any session this account opened under a different address is now invalid. "+
+				"Whoever can read this mailbox can sign in as this account: it is the only factor.")
 	case "remove":
 		if strings.TrimSpace(*name) == "" {
 			log.Fatal("--user is required")
@@ -161,6 +150,16 @@ func user(args []string) {
 	default:
 		usage()
 		os.Exit(2)
+	}
+}
+
+// printAccounts writes one account per line as name, role and sign-in address,
+// tab-separated, the address empty when the account cannot sign in to the web
+// UI. Scripts read this — the deploy bootstrap does `cut -f1` on it — so the
+// name stays the first field and nothing but tabs separates them.
+func printAccounts(w io.Writer, records []auth.UserRecord) {
+	for _, account := range records {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", account.Name, account.Role, account.Email)
 	}
 }
 

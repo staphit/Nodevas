@@ -12,8 +12,7 @@ import (
 )
 
 // The shared read-only credential these tests sign in with. The PIN is short
-// on purpose — that is the point of a visitor PIN — and it is nowhere near any
-// account PIN, which must be at least auth.MinPinLength characters.
+// on purpose — that is the point of a visitor PIN.
 const (
 	visitorPin = "777"
 	visitorOTP = "LOOKONLY"
@@ -29,16 +28,17 @@ func visitorServer(t *testing.T) (*Server, *mailbox) {
 	return server, inbox
 }
 
+// visitorLogin presents a PIN and passcode at the visitor's own door.
+func visitorLogin(server *Server, pin, passcode string) *httptest.ResponseRecorder {
+	return postAuth(server, "/api/auth/visitor", `{"pin":"`+pin+`","passcode":"`+passcode+`"}`)
+}
+
 // signInAsVisitor presents both halves of the shared credential directly. No
 // passcode is requested, because none is ever sent — which is the behaviour
 // under test as much as it is a shortcut.
 func signInAsVisitor(t *testing.T, server *Server) ([]*http.Cookie, string) {
 	t.Helper()
-	body := `{"pin":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
+	response := visitorLogin(server, visitorPin, visitorOTP)
 	if response.Code != http.StatusOK {
 		t.Fatalf("visitor login status = %d, body = %s", response.Code, response.Body)
 	}
@@ -101,38 +101,39 @@ func actorRole(t *testing.T, server *Server, cookies []*http.Cookie) string {
 	return payload.Actor.Role
 }
 
-// Pressing the send button with the visitor PIN must look like pressing it
-// with any other PIN. A different status, or a passcode arriving in a mailbox,
-// would tell an unauthenticated caller which kind of PIN they just typed.
-func TestVisitorPasscodeRequestIsIndistinguishable(t *testing.T) {
+// The account doors do not know the visitor credential. Offered there it is a
+// wrong address: the request endpoint answers the 202 every address gets and
+// sends nothing, and the sign-in endpoint refuses it.
+func TestAccountEndpointsDoNotAcceptTheVisitorCredential(t *testing.T) {
 	server, inbox := visitorServer(t)
 
-	for _, pin := range []string{visitorPin, "no-such-pin-at-all"} {
-		body := `{"pin":"` + pin + `"}`
-		request := httptest.NewRequest(http.MethodPost, "/api/auth/otp/request", strings.NewReader(body))
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		server.Handler().ServeHTTP(response, request)
-		if response.Code != http.StatusAccepted {
-			t.Fatalf("pin %q: status = %d, want 202", pin, response.Code)
-		}
+	for _, email := range []string{visitorPin, "nobody@example.test"} {
+		askForPasscode(t, server, email)
 	}
+	inbox.settle()
 	if inbox.count() != 0 {
-		t.Fatalf("%d messages sent; neither PIN has a mailbox", inbox.count())
+		t.Fatalf("%d messages sent; neither has a mailbox", inbox.count())
+	}
+
+	body := `{"email":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
+	if code := postAuth(server, "/api/auth/login", body).Code; code != http.StatusUnauthorized {
+		t.Fatalf("account login with the visitor credential: status = %d, want 401", code)
+	}
+	// The old request shape is not a back door either: the decoder refuses the
+	// field it no longer knows, before anything is compared.
+	legacy := `{"pin":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
+	if code := postAuth(server, "/api/auth/login", legacy).Code; code != http.StatusBadRequest {
+		t.Fatalf("account login with the old pin shape: status = %d, want 400", code)
 	}
 }
 
-// One visitor asking for a passcode must not sign the others out. The account
-// path revokes every session for the PIN as part of issuing a new passcode,
-// and a credential everybody shares cannot go through that.
-func TestVisitorPasscodeRequestKeepsOtherVisitorsSignedIn(t *testing.T) {
+// One visitor signing in must not sign the others out. The account path ends
+// an account's other sessions on every sign-in, and a credential everybody
+// shares cannot go through that.
+func TestAVisitorSignInKeepsOtherVisitorsSignedIn(t *testing.T) {
 	server, _ := visitorServer(t)
 	cookies, _ := signInAsVisitor(t, server)
-
-	body := `{"pin":"` + visitorPin + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/otp/request", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+	signInAsVisitor(t, server)
 
 	read := withCookies(httptest.NewRequest(http.MethodGet, "/api/graph", nil), cookies)
 	response := httptest.NewRecorder()
@@ -142,18 +143,57 @@ func TestVisitorPasscodeRequestKeepsOtherVisitorsSignedIn(t *testing.T) {
 	}
 }
 
+// The sign-in screen offers the visitor door only when it leads somewhere.
+func TestAuthStatusSaysWhetherVisitorAccessIsOn(t *testing.T) {
+	server, _, _ := accountServerForTest(t)
+
+	visitor := func() bool {
+		request := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		var payload struct {
+			Visitor *bool `json:"visitor"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || payload.Visitor == nil {
+			t.Fatalf("auth status = %s, want a visitor field", response.Body)
+		}
+		return *payload.Visitor
+	}
+	if visitor() {
+		t.Fatal("visitor reported on before it was configured")
+	}
+	if err := server.SetVisitor(visitorPin, visitorOTP); err != nil {
+		t.Fatal(err)
+	}
+	if !visitor() {
+		t.Fatal("visitor reported off after it was configured")
+	}
+}
+
+// Guessing at the visitor door runs into the same throttle as the account
+// door does.
+func TestVisitorGuessingIsThrottled(t *testing.T) {
+	server, _ := visitorServer(t)
+	for i := 0; i < 80; i++ {
+		switch code := visitorLogin(server, visitorPin, "WRONGONE").Code; code {
+		case http.StatusUnauthorized:
+			continue
+		case http.StatusTooManyRequests:
+			return
+		default:
+			t.Fatalf("attempt %d: status = %d, want 401 or 429", i, code)
+		}
+	}
+	t.Fatal("visitor guessing was never throttled")
+}
+
 // The credential is off unless the operator configures it, and half of one is
 // refused rather than accepted as a one-factor door.
 func TestVisitorIsOffByDefault(t *testing.T) {
 	server, _, _ := accountServerForTest(t)
 
-	body := `{"pin":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 with no visitor configured", response.Code)
+	if code := visitorLogin(server, visitorPin, visitorOTP).Code; code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 with no visitor configured", code)
 	}
 
 	if err := server.SetVisitor(visitorPin, ""); err == nil {
@@ -169,23 +209,16 @@ func TestVisitorIsOffByDefault(t *testing.T) {
 func TestVisitorPinAloneDoesNotSignIn(t *testing.T) {
 	server, _ := visitorServer(t)
 
-	body := `{"pin":"` + visitorPin + `","otp":"WRONGONE"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.Code)
+	if code := visitorLogin(server, visitorPin, "WRONGONE").Code; code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", code)
 	}
 }
 
-// The visitor credential must not shadow a real account. It is checked first,
-// so this asserts the account path still runs when the PIN is not the
-// visitor's.
+// Visitor access being on must not change what an account sign-in produces.
 func TestVisitorCredentialDoesNotDisplaceAccounts(t *testing.T) {
 	server, inbox := visitorServer(t)
 
-	cookies, _ := signIn(t, server, inbox, testPin)
+	cookies, _ := signIn(t, server, inbox, testEmail)
 	request := withCookies(httptest.NewRequest(http.MethodGet, "/api/graph", nil), cookies)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -340,13 +373,8 @@ func TestVisitorCanBeTurnedOffWhileTheServerRuns(t *testing.T) {
 	}
 
 	// And nobody new gets in either.
-	body := `{"pin":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
-	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	login.Header.Set("Content-Type", "application/json")
-	loginResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(loginResponse, login)
-	if loginResponse.Code != http.StatusUnauthorized {
-		t.Fatalf("login status = %d, want 401", loginResponse.Code)
+	if code := visitorLogin(server, visitorPin, visitorOTP).Code; code != http.StatusUnauthorized {
+		t.Fatalf("login status = %d, want 401", code)
 	}
 }
 
@@ -355,13 +383,8 @@ func TestVisitorCanBeTurnedOffWhileTheServerRuns(t *testing.T) {
 func TestVisitorCanBeTurnedOnWhileTheServerRuns(t *testing.T) {
 	server, _, _ := accountServerForTest(t)
 
-	body := `{"pin":"` + visitorPin + `","otp":"` + visitorOTP + `"}`
-	first := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
-	first.Header.Set("Content-Type", "application/json")
-	firstResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(firstResponse, first)
-	if firstResponse.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 before the credential exists", firstResponse.Code)
+	if code := visitorLogin(server, visitorPin, visitorOTP).Code; code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 before the credential exists", code)
 	}
 
 	if err := server.SetVisitor(visitorPin, visitorOTP); err != nil {

@@ -10,8 +10,8 @@
 # source address, per account), and burns a passcode after five wrong guesses.
 # That bounds how fast one attacker can go; it does not stop them from spending
 # the next month going at exactly that speed, and every one of those attempts
-# costs an Argon2 verification against every account holding a PIN. This jail
-# is what turns "slow forever" into "an hour, then come back".
+# is another guess at a live passcode. This jail is what turns "slow forever"
+# into "an hour, then come back".
 #
 # It is not a substitute for the throttles and it cannot be. fail2ban reacts to
 # a log line, so the request it bans on has already been served.
@@ -43,8 +43,8 @@ backend = systemd
 # --------------------------------------------------------------------------
 #
 # Ten refusals in ten minutes, then an hour off. Sized against a person, not
-# against an attacker: someone typing a PIN from a phone screen and a passcode
-# from an email gets several goes at each, and a passcode legitimately expires
+# against an attacker: someone copying a passcode out of an email onto a phone
+# screen gets several goes at it, and a passcode legitimately expires
 # under them while they look for it. Ten is comfortably past that and nowhere
 # near what a script does in a second.
 [nodevas-auth]

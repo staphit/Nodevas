@@ -90,7 +90,7 @@ func NewSessionAuth(users *UserStore) *SessionAuth {
 
 // ErrTooManyActiveUsers is returned when the operator's seat limit is already
 // taken by other people. It is deliberately distinguishable from bad
-// credentials: the person got both factors right, and telling them the server
+// credentials: the person got the passcode right, and telling them the server
 // is full is not a fact an attacker did not already have.
 var ErrTooManyActiveUsers = errors.New(
 	"the maximum number of people are already signed in; ask one of them to sign out")
@@ -316,34 +316,48 @@ func contextFailure(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// openSession mints the cookie pair and records the session. Both sign-in
-// paths end here, so the seat limit and the eviction rules cannot drift apart
-// between them.
+// openSession mints the cookie pair and records the session. Every sign-in
+// path ends in openSessionLocked, so the seat limit and the eviction rules
+// cannot drift apart between them.
 func (a *SessionAuth) openSession(actor identity.Actor, revision string) (identity.Actor, string, string, error) {
-	token, err := RandomToken()
-	if err != nil {
-		return identity.Actor{}, "", "", err
-	}
-	csrf, err := RandomToken()
+	token, csrf, err := newSessionTokens()
 	if err != nil {
 		return identity.Actor{}, "", "", err
 	}
 	a.mu.Lock()
-	now := time.Now()
-	if err := a.sweepSessionsLocked(now); err != nil {
-		a.mu.Unlock()
+	defer a.mu.Unlock()
+	if err := a.openSessionLocked(actor, revision, token, time.Now()); err != nil {
 		return identity.Actor{}, "", "", err
 	}
+	return actor, token, csrf, nil
+}
 
-	if !a.seatAvailableLocked(actor.ID, now) {
-		a.mu.Unlock()
-		return identity.Actor{}, "", "", ErrTooManyActiveUsers
+// newSessionTokens draws the session cookie and its CSRF partner. Drawn before
+// the lock is taken: crypto/rand can block, and nothing about the tokens
+// depends on the state the lock protects.
+func newSessionTokens() (token, csrf string, err error) {
+	if token, err = RandomToken(); err != nil {
+		return "", "", err
 	}
+	if csrf, err = RandomToken(); err != nil {
+		return "", "", err
+	}
+	return token, csrf, nil
+}
 
+// openSessionLocked records a session for token. It must be called with a.mu
+// held, which is what lets LoginWithOTP revoke an account's other sessions and
+// open the new one without another sign-in landing in between.
+func (a *SessionAuth) openSessionLocked(actor identity.Actor, revision, token string, now time.Time) error {
+	if err := a.sweepSessionsLocked(now); err != nil {
+		return err
+	}
+	if !a.seatAvailableLocked(actor.ID, now) {
+		return ErrTooManyActiveUsers
+	}
 	for len(a.sessions) >= maxSessions {
 		if err := a.evictOldestSessionLocked(); err != nil {
-			a.mu.Unlock()
-			return identity.Actor{}, "", "", err
+			return err
 		}
 	}
 	key := sessionKey(token)
@@ -355,8 +369,7 @@ func (a *SessionAuth) openSession(actor identity.Actor, revision string) (identi
 	// If save ran after unlocking, a concurrent account revoke could commit its
 	// DELETE before this INSERT and the delayed row would resurrect on restart.
 	a.store.save(key, session)
-	a.mu.Unlock()
-	return actor, token, csrf, nil
+	return nil
 }
 
 // Logout removes persistence before the in-memory session. An error therefore
@@ -373,6 +386,27 @@ func (a *SessionAuth) Logout(token string) error {
 // Argon2 starts. Rotating names cannot bypass the global/IP budgets, and every
 // map and timestamp slice is bounded.
 func (a *SessionAuth) allowLogin(name, source string) bool {
+	account := ""
+	if userNamePattern.MatchString(name) {
+		account = "user:" + strings.ToLower(name)
+	}
+	return a.chargeLogin(account, source)
+}
+
+// allowEmailLogin is allowLogin for the email sign-in: the address, already
+// reduced to its throttle key, stands where the account name does. An empty
+// key charges only the global and per-source budgets.
+func (a *SessionAuth) allowEmailLogin(key, source string) bool {
+	account := ""
+	if key != "" {
+		account = "email:" + key
+	}
+	return a.chargeLogin(account, source)
+}
+
+// chargeLogin charges the global and per-source sign-in budgets, plus the
+// per-account one when account is not empty.
+func (a *SessionAuth) chargeLogin(account, source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -382,8 +416,8 @@ func (a *SessionAuth) allowLogin(name, source string) bool {
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "ip:" + source, window: loginIPWindow, limit: loginIPLimit})
 	}
-	if userNamePattern.MatchString(name) {
-		charges = append(charges, rateCharge{key: "user:" + strings.ToLower(name), window: loginUserWindow, limit: LoginFailureLimit})
+	if account != "" {
+		charges = append(charges, rateCharge{key: account, window: loginUserWindow, limit: LoginFailureLimit})
 	}
 	return a.chargeLocked(charges, now)
 }

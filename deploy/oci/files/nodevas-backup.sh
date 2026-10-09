@@ -123,9 +123,10 @@ fi
 
 # --------------------------------------------------------------------------
 # Scratch space, removed on every exit path including a failure and including a
-# signal. The snapshot is a byte-for-byte copy of a file holding password and
-# PIN hashes, so leaving it behind on the boot volume after a crash would be a
-# credential left on disk, not just clutter.
+# signal. The snapshot is a byte-for-byte copy of a file holding password
+# hashes, the accounts' sign-in email addresses and session hashes, so leaving
+# it behind on the boot volume after a crash would be a credential left on
+# disk, not just clutter.
 #
 # The rm targets only the directory mktemp created, and only after checking the
 # variable is non-empty and is in fact a directory. It is never built from

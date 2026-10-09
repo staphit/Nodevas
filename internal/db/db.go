@@ -186,9 +186,10 @@ func OpenAt(path string) (*DB, error) {
 		return nil, err
 	}
 
-	// The file holds password and PIN hashes. On a shared machine it must not
-	// be world-readable, like the other workspace credentials. Done after the
-	// migration so the WAL sidecars exist to be tightened too.
+	// The file holds password hashes, sign-in addresses and session hashes. On a
+	// shared machine it must not be world-readable, like the other workspace
+	// credentials. Done after the migration so the WAL sidecars exist to be
+	// tightened too.
 	if err := restrictPermissions(path); err != nil {
 		database.Close()
 		return nil, err
@@ -335,6 +336,43 @@ CREATE TABLE sessions (
 ) STRICT;
 CREATE INDEX sessions_user ON sessions (user_id);
 CREATE INDEX sessions_expires ON sessions (expires_at);
+`,
+	},
+	{
+		name: "0006_email_sign_in",
+		stmt: `
+-- Web sign-in is now an email address and a mailed passcode. The PIN is gone,
+-- so its hashes are cleared rather than left behind as a credential nothing
+-- checks: a hash nobody verifies is still something a stolen backup can be
+-- guessed against. The column stays because dropping one rewrites the table,
+-- and an empty column costs nothing.
+--
+-- Clearing it also changes every account's revision, which signs out every
+-- session opened under the old two-factor rule. That is the intended
+-- direction: a session should not outlive the rule that admitted it.
+--
+-- An account with an address but no PIN is one an administrator shut out with
+-- ` + "`nodevas user pin-clear`" + `: that cleared the PIN and left the address, and
+-- sign-in only ever looked at accounts holding a PIN. Now the address alone
+-- signs in, so the leftover would quietly re-admit the account. Its address
+-- goes first, before the PINs that tell the two cases apart are cleared, and
+-- that also keeps the duplicate step below choosing only among accounts that
+-- could actually sign in.
+UPDATE accounts SET email = '' WHERE pin_hash = '';
+UPDATE accounts SET pin_hash = '';
+
+-- The address is now how an account is found, so two accounts must not share
+-- one, compared the way a person types it — Ann@Example.test and
+-- ann@example.test are one mailbox. A workspace that already holds such a pair
+-- would fail the index below and refuse to start, so the later account loses
+-- its address first and the oldest keeps it; an operator re-registers the
+-- other with ` + "`nodevas user email`" + `. Refusing to start over it would leave a
+-- server down for something one command fixes.
+UPDATE accounts SET email = ''
+ WHERE email != ''
+   AND rowid NOT IN (
+       SELECT MIN(rowid) FROM accounts WHERE email != '' GROUP BY email COLLATE NOCASE);
+CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
 `,
 	},
 }

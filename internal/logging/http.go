@@ -81,8 +81,9 @@ func MiddlewareWithOptions(opts Options) func(http.Handler) http.Handler {
 				}
 				// Only the path is logged. A query string is where session
 				// tokens, reset links and API keys end up, and the request body
-				// of the passcode endpoint is a PIN; neither belongs in a log
-				// that is shipped off the host and retained for months.
+				// of a sign-in endpoint is an address and a passcode; neither
+				// belongs in a log that is shipped off the host and retained for
+				// months.
 				logger.LogAttrs(r.Context(), levelForStatus(status), "http request",
 					HTTPRequest(r.Method, r.URL.Path, status),
 					ClientIP(clientIP(r)),

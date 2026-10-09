@@ -1,3 +1,11 @@
+# Variant for a TrueNAS host that already runs the community "cloudflared"
+# app. Nodevas joins that app's bridge network instead of bundling its own
+# cloudflared, and still publishes no host port. In the Cloudflare dashboard,
+# point the Public Hostname at http://nodevas:5666.
+#
+# Before installing: load or pull the image, adjust every /mnt/tank path, and
+# confirm the network name and subnet with
+#   docker network inspect ix-cloudflared_default
 name: nodevas
 
 services:
@@ -35,9 +43,7 @@ services:
         uid: "568"
         gid: "568"
         mode: 0400
-    networks:
-      nodevas:
-        ipv4_address: 172.31.250.4
+    network_mode: none
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -57,8 +63,11 @@ services:
       NODEVAS_SERVE_PORT: "5666"
       NODEVAS_SERVE_HOSTNAME: nodevas.example.com
       NODEVAS_SERVE_BEHIND_PROXY: "true"
-      NODEVAS_SERVE_TRUSTED_PROXY: 172.31.250.3/32
+      # cloudflared gets a dynamic address on the app network, so trust the
+      # network rather than one IP. Only cloudflared and Nodevas sit on it.
+      NODEVAS_SERVE_TRUSTED_PROXY: 172.16.1.0/24
       NODEVAS_SERVE_ALLOW_PLAINTEXT: "true"
+      # Without SMTP the server starts, but nobody can sign in.
       NODEVAS_SERVE_SMTP_HOST: smtp.example.com
       NODEVAS_SERVE_SMTP_PORT: "587"
       NODEVAS_SERVE_SMTP_USER: nodevas@example.com
@@ -76,8 +85,9 @@ services:
     expose:
       - "5666"
     networks:
-      nodevas:
-        ipv4_address: 172.31.250.2
+      cloudflared:
+        aliases:
+          - nodevas
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -88,42 +98,13 @@ services:
     stop_grace_period: 45s
     restart: unless-stopped
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    pull_policy: always
-    user: "568:568"
-    command: tunnel --no-autoupdate run --token-file /run/secrets/cloudflare_tunnel_token
-    depends_on:
-      nodevas:
-        condition: service_healthy
-    secrets:
-      - source: cloudflare_tunnel_token
-        target: cloudflare_tunnel_token
-        uid: "568"
-        gid: "568"
-        mode: 0400
-    networks:
-      nodevas:
-        ipv4_address: 172.31.250.3
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    restart: unless-stopped
-
 networks:
-  nodevas:
-    ipam:
-      config:
-        - subnet: 172.31.250.0/24
+  cloudflared:
+    external: true
+    name: ix-cloudflared_default
 
 secrets:
   nodevas_admin_password:
     file: /mnt/tank/apps/nodevas/secrets/admin-password
   nodevas_smtp_password:
     file: /mnt/tank/apps/nodevas/secrets/smtp-password
-  cloudflare_tunnel_token:
-    file: /mnt/tank/apps/nodevas/secrets/cloudflare-tunnel-token

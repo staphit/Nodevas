@@ -17,6 +17,7 @@ vi.mock("../api", async () => {
     api: {
       requestOtp: vi.fn(),
       login: vi.fn(),
+      visitorLogin: vi.fn(),
       logout: vi.fn(),
       getAuthStatus: vi.fn(),
     },
@@ -24,23 +25,39 @@ vi.mock("../api", async () => {
 });
 
 const mocked = vi.mocked(api as unknown as {
-  requestOtp: (pin: string) => Promise<{ ok: boolean }>;
-  login: (pin: string, otp: string) => Promise<{ ok: boolean; actor: unknown }>;
+  requestOtp: (email: string) => Promise<{ ok: boolean }>;
+  login: (email: string, otp: string) => Promise<{ ok: boolean; actor: unknown }>;
+  visitorLogin: (
+    pin: string,
+    passcode: string,
+  ) => Promise<{ ok: boolean; actor: unknown }>;
   logout: () => Promise<{ ok: boolean }>;
   getAuthStatus: () => Promise<{
     mode: "local" | "accounts";
     authenticated: boolean;
     actor: unknown;
+    visitor?: boolean;
   }>;
 });
 
-/** Types a PIN and asks for a passcode. */
+/** Types an address and asks for a passcode. */
 async function requestPasscode(
   user: ReturnType<typeof userEvent.setup>,
-  pin = "4821",
+  email = "ming@example.com",
 ) {
-  await user.type(screen.getByLabelText("PIN"), pin);
+  await user.type(screen.getByLabelText("Email"), email);
   await user.click(screen.getByRole("button", { name: "寄送驗證碼" }));
+}
+
+/** Opens the visitor form and submits a credential with Enter. */
+async function visitorSubmit(
+  user: ReturnType<typeof userEvent.setup>,
+  pin: string,
+  passcode: string,
+) {
+  await user.click(screen.getByRole("button", { name: "訪客登入" }));
+  await user.type(screen.getByLabelText("訪客 PIN"), pin);
+  await user.type(screen.getByLabelText("通行碼"), `${passcode}{Enter}`);
 }
 
 describe("SignIn", () => {
@@ -50,27 +67,31 @@ describe("SignIn", () => {
     });
     mocked.requestOtp.mockResolvedValue({ ok: true });
     mocked.login.mockResolvedValue({ ok: true, actor: { name: "阿明" } });
+    mocked.visitorLogin.mockResolvedValue({
+      ok: true,
+      actor: { id: "visitor", name: "訪客", role: "visitor" },
+    });
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     localStorage.clear();
     sessionStorage.clear();
   });
 
-  /**
-   * The visitor credential has a fixed passcode that is never mailed, so its
-   * holder never presses 寄送驗證碼. A form that revealed the passcode field
-   * only after a successful send would have nowhere to put their code.
-   */
-  it("offers both fields before anything is sent", () => {
+  it("starts with an email field and no PIN", () => {
     render(<SignIn onSignedIn={vi.fn()} />);
 
-    expect(screen.getByLabelText("PIN")).toBeInTheDocument();
-    const field = screen.getByLabelText("驗證碼");
-    expect(field).toHaveAttribute("autocomplete", "one-time-code");
-    expect(field).toHaveAttribute("inputmode", "text");
-    expect(mocked.requestOtp).not.toHaveBeenCalled();
+    const field = screen.getByLabelText("Email");
+    expect(field).toHaveAttribute("type", "email");
+    expect(field).toHaveAttribute("autocomplete", "email");
+    expect(field).toHaveAttribute("inputmode", "email");
+    expect(field).toHaveFocus();
+    expect(screen.queryByText(/PIN/)).toBeNull();
+    // The passcode only exists after a send, so its field waits for one.
+    expect(screen.queryByLabelText("驗證碼")).toBeNull();
+    expect(screen.getByRole("button", { name: "寄送驗證碼" })).toBeDisabled();
   });
 
   it("switches the sign-in screen language and persists the choice", async () => {
@@ -79,92 +100,108 @@ describe("SignIn", () => {
 
     await user.selectOptions(screen.getByRole("combobox", { name: "語系" }), "en");
 
-    expect(screen.getByText(/Enter the PIN provided/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter your email/)).toBeInTheDocument();
     expect(useApp.getState().preferences.language).toBe("en");
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Language" }), "zh-TW");
-    expect(screen.getByText(/請輸入管理員提供的 PIN/)).toBeInTheDocument();
+    expect(screen.getByText(/請輸入你的 email/)).toBeInTheDocument();
   });
 
-  it("requests a passcode for the PIN and focuses the passcode field", async () => {
+  it("requests a passcode for the trimmed email and focuses the passcode field", async () => {
     const user = userEvent.setup();
     render(<SignIn onSignedIn={vi.fn()} />);
 
-    await requestPasscode(user, "4821");
+    await requestPasscode(user, "  ming@example.com ");
 
-    expect(mocked.requestOtp).toHaveBeenCalledWith("4821");
+    expect(mocked.requestOtp).toHaveBeenCalledWith("ming@example.com");
+    const field = screen.getByLabelText("驗證碼");
+    expect(field).toHaveAttribute("autocomplete", "one-time-code");
     // Focus follows the send, or the keyboard user has to hunt for the field
     // the code they were just sent belongs in.
-    expect(screen.getByLabelText("驗證碼")).toHaveFocus();
+    expect(field).toHaveFocus();
   });
 
   /**
-   * The server answers 202 for an unknown PIN precisely so the form cannot be
-   * used to enumerate PINs. Any difference in wording here would undo that, so
-   * the two renders are compared character for character.
+   * The server answers 202 for an unregistered address precisely so the form
+   * cannot be used to enumerate accounts. Any difference in wording here would
+   * undo that, so the two renders are compared character for character.
    */
-  it("says the same thing for a known and an unknown PIN", async () => {
+  it("says the same thing for a registered and an unknown email", async () => {
     const user = userEvent.setup();
     const first = render(<SignIn onSignedIn={vi.fn()} />);
-    await requestPasscode(user, "4821");
+    await requestPasscode(user, "ming@example.com");
     const knownWording = screen.getByRole("status").textContent;
     first.unmount();
 
     render(<SignIn onSignedIn={vi.fn()} />);
-    await requestPasscode(user, "0000");
+    await requestPasscode(user, "nobody@example.com");
     const unknownWording = screen.getByRole("status").textContent;
 
     expect(unknownWording).toBe(knownWording);
-    expect(knownWording).toBe("若這組 PIN 有效，驗證碼已寄出");
+    expect(knownWording).toBe("若此 email 已註冊，驗證碼已寄出");
   });
 
-  it("signs in with the trimmed passcode the user typed", async () => {
+  it("signs in with the email and the passcode, whitespace dropped", async () => {
     const user = userEvent.setup();
     const onSignedIn = vi.fn();
     render(<SignIn onSignedIn={onSignedIn} />);
 
-    await requestPasscode(user, "4821");
-    await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
+    await requestPasscode(user, "ming@example.com");
+    await user.type(screen.getByLabelText("驗證碼"), "a7k2 m9p4");
     await user.click(screen.getByRole("button", { name: "登入" }));
 
-    // Displayed uppercase for legibility, but the server is case-insensitive
-    // and gets exactly what was typed.
-    expect(mocked.login).toHaveBeenCalledWith("4821", "a7k2m9p4");
+    // Displayed uppercase for legibility, but the server normalises case and
+    // gets what was typed, minus the space a pasted code often carries.
+    expect(mocked.login).toHaveBeenCalledWith("ming@example.com", "a7k2m9p4");
     expect(onSignedIn).toHaveBeenCalledWith({ name: "阿明" });
   });
 
-  /**
-   * A visitor types a passcode nobody sent them. Nothing in the form may
-   * require a send first, or the shared credential cannot be used at all.
-   */
-  it("signs in with a passcode that was never requested", async () => {
+  it("sends with Enter in the email field and signs in with Enter in the passcode field", async () => {
     const user = userEvent.setup();
     const onSignedIn = vi.fn();
     render(<SignIn onSignedIn={onSignedIn} />);
 
-    await user.type(screen.getByLabelText("PIN"), "777");
-    await user.type(screen.getByLabelText("驗證碼"), "LOOKONLY");
-    await user.click(screen.getByRole("button", { name: "登入" }));
+    await user.type(screen.getByLabelText("Email"), "ming@example.com{Enter}");
+    expect(mocked.requestOtp).toHaveBeenCalledWith("ming@example.com");
 
-    expect(mocked.requestOtp).not.toHaveBeenCalled();
-    expect(mocked.login).toHaveBeenCalledWith("777", "LOOKONLY");
+    await user.keyboard("a7k2m9p4{Enter}");
+
+    expect(mocked.login).toHaveBeenCalledWith("ming@example.com", "a7k2m9p4");
     expect(onSignedIn).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a rejected passcode as an alert and keeps the PIN", async () => {
+  it("goes back to change the email", async () => {
+    const user = userEvent.setup();
+    render(<SignIn onSignedIn={vi.fn()} />);
+
+    await requestPasscode(user, "mign@example.com");
+    expect(screen.getByLabelText("Email")).toHaveAttribute("readonly");
+
+    await user.click(screen.getByRole("button", { name: "更換 email" }));
+    const field = screen.getByLabelText("Email");
+    expect(field).not.toHaveAttribute("readonly");
+    expect(screen.queryByLabelText("驗證碼")).toBeNull();
+
+    await user.clear(field);
+    // A corrected address is a different account, so the first address's
+    // cooldown must not block it.
+    await requestPasscode(user, "ming@example.com");
+    expect(mocked.requestOtp).toHaveBeenCalledTimes(2);
+    expect(mocked.requestOtp).toHaveBeenLastCalledWith("ming@example.com");
+  });
+
+  it("shows a rejected passcode as an alert and keeps the email", async () => {
     const user = userEvent.setup();
     const onSignedIn = vi.fn();
     mocked.login.mockRejectedValue(new AuthError(401, "驗證碼不正確或已過期"));
     render(<SignIn onSignedIn={onSignedIn} />);
 
-    await requestPasscode(user, "4821");
+    await requestPasscode(user, "ming@example.com");
     await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
     await user.click(screen.getByRole("button", { name: "登入" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("驗證碼不正確或已過期");
-    // Clearing the PIN would make the user retype it for what is very often a
-    // mistyped passcode.
-    expect(screen.getByLabelText("PIN")).toHaveValue("4821");
+    expect(screen.getByLabelText("Email")).toHaveValue("ming@example.com");
     expect(onSignedIn).not.toHaveBeenCalled();
   });
 
@@ -174,64 +211,128 @@ describe("SignIn", () => {
     mocked.requestOtp.mockRejectedValue(new AuthError(429, "rate limited"));
     render(<SignIn onSignedIn={vi.fn()} />);
 
-    await requestPasscode(user, "4821");
+    await requestPasscode(user, "ming@example.com");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "嘗試次數過多，請稍後再試",
+    );
+    // Nothing was sent, so there is no passcode to type.
+    expect(screen.queryByLabelText("驗證碼")).toBeNull();
+  });
+
+  it("explains a server with no mail transport", async () => {
+    const user = userEvent.setup();
+    mocked.requestOtp.mockRejectedValue(new AuthError(503, "mailer not configured"));
+    render(<SignIn onSignedIn={vi.fn()} />);
+
+    await requestPasscode(user, "ming@example.com");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "此伺服器尚未設定郵件服務",
+    );
+  });
+
+  it("holds a resend for the cooldown, then asks for another passcode", async () => {
+    let now = 1000000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const user = userEvent.setup();
+    render(<SignIn onSignedIn={vi.fn()} />);
+
+    await requestPasscode(user, "ming@example.com");
+    expect(screen.getByRole("button", { name: /秒後可重新寄送/ })).toBeDisabled();
+
+    now += 35000;
+    await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
+    await user.click(screen.getByRole("button", { name: "重新寄送" }));
+
+    expect(mocked.requestOtp).toHaveBeenCalledTimes(2);
+    expect(mocked.requestOtp).toHaveBeenLastCalledWith("ming@example.com");
+    // The old code is dead the moment a new one is issued, so leaving it in the
+    // field would invite the user to submit something guaranteed to fail.
+    expect(screen.getByLabelText("驗證碼")).toHaveValue("");
+  });
+
+  // The server revokes the account's other sessions on a successful sign-in;
+  // the user has to be told before pressing the button, not after.
+  it("warns that signing in signs out other devices", () => {
+    render(<SignIn onSignedIn={vi.fn()} />);
+    expect(screen.getByText(/其他裝置.*登出/)).toBeInTheDocument();
+  });
+
+  it("offers no visitor entry when visitor access is off", () => {
+    render(<SignIn onSignedIn={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "訪客登入" })).toBeNull();
+  });
+
+  /**
+   * The visitor credential is a shared PIN and a fixed passcode that is never
+   * mailed, so it has its own form and never touches the email flow.
+   */
+  it("signs a visitor in with the visitor PIN and passcode", async () => {
+    const user = userEvent.setup();
+    const onSignedIn = vi.fn();
+    render(<SignIn onSignedIn={onSignedIn} visitor />);
+
+    await user.click(screen.getByRole("button", { name: "訪客登入" }));
+    expect(screen.getByLabelText("訪客 PIN")).toHaveFocus();
+    await user.type(screen.getByLabelText("訪客 PIN"), "777");
+    await user.type(screen.getByLabelText("通行碼"), "LOOKONLY");
+    await user.click(screen.getByRole("button", { name: "登入" }));
+
+    expect(mocked.visitorLogin).toHaveBeenCalledWith("777", "LOOKONLY");
+    expect(mocked.requestOtp).not.toHaveBeenCalled();
+    expect(mocked.login).not.toHaveBeenCalled();
+    expect(onSignedIn).toHaveBeenCalledWith({
+      id: "visitor",
+      name: "訪客",
+      role: "visitor",
+    });
+  });
+
+  it("shows a rejected visitor credential and links back to the email form", async () => {
+    const user = userEvent.setup();
+    mocked.visitorLogin.mockRejectedValue(
+      new AuthError(401, "訪客 PIN 或通行碼不正確"),
+    );
+    render(<SignIn onSignedIn={vi.fn()} visitor />);
+
+    await visitorSubmit(user, "777", "WRONG");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("訪客 PIN 或通行碼不正確");
+
+    await user.click(screen.getByRole("button", { name: "改用 email 登入" }));
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.queryByLabelText("訪客 PIN")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("rewrites a visitor 429 into readable advice", async () => {
+    const user = userEvent.setup();
+    mocked.visitorLogin.mockRejectedValue(new AuthError(429, "rate limited"));
+    render(<SignIn onSignedIn={vi.fn()} visitor />);
+
+    await visitorSubmit(user, "777", "LOOKONLY");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "嘗試次數過多，請稍後再試",
     );
   });
 
-  it("asks for another passcode when 寄送驗證碼 is pressed again", async () => {
-    let now = 1000000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    const user = userEvent.setup();
-    render(<SignIn onSignedIn={vi.fn()} />);
-
-    await requestPasscode(user, "4821");
-    now += 35000;
-    await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
-    await user.click(screen.getByRole("button", { name: "寄送驗證碼" }));
-
-    expect(mocked.requestOtp).toHaveBeenCalledTimes(2);
-    expect(mocked.requestOtp).toHaveBeenLastCalledWith("4821");
-    // The old code is dead the moment a new one is issued, so leaving it in the
-    // field would invite the user to submit something guaranteed to fail.
-    expect(screen.getByLabelText("驗證碼")).toHaveValue("");
-    // Every existing session for the PIN dies with the old passcode; the user
-    // has to be told before pressing it, not after.
-    expect(screen.getByText(/登出/)).toBeInTheDocument();
-  });
-
-  it("sends from the PIN field and signs in from the passcode field", async () => {
-    const user = userEvent.setup();
-    const onSignedIn = vi.fn();
-    render(<SignIn onSignedIn={onSignedIn} />);
-
-    // Enter with no passcode typed means "send it": submitting the form there
-    // would be refused by the submit guard and look like a dead key.
-    await user.type(screen.getByLabelText("PIN"), "4821{Enter}");
-    expect(mocked.requestOtp).toHaveBeenCalledWith("4821");
-
-    await user.keyboard("a7k2m9p4{Enter}");
-
-    expect(mocked.login).toHaveBeenCalledWith("4821", "a7k2m9p4");
-    expect(onSignedIn).toHaveBeenCalledTimes(1);
-  });
-
   /**
-   * The PIN is a long-lived administrator-issued secret with no rotation story,
-   * so it must not survive the tab. Both stores are checked wholesale rather
-   * than by key: a future refactor could persist it under any name.
+   * Nothing typed here may survive the tab. Both stores are checked wholesale
+   * rather than by key: a future refactor could persist it under any name.
    */
-  it("leaves no trace of the PIN in web storage", async () => {
+  it("leaves no trace of credentials in web storage", async () => {
     const user = userEvent.setup();
-    render(<SignIn onSignedIn={vi.fn()} />);
+    render(<SignIn onSignedIn={vi.fn()} visitor />);
 
-    await requestPasscode(user, "4821");
+    await requestPasscode(user, "ming@example.com");
     await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
     await user.click(screen.getByRole("button", { name: "登入" }));
+    await visitorSubmit(user, "777", "LOOKONLY");
 
     expect(mocked.login).toHaveBeenCalled();
+    expect(mocked.visitorLogin).toHaveBeenCalled();
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(window.location.search).toBe("");
@@ -290,7 +391,7 @@ describe("AuthGate", () => {
     await user.click(button);
 
     expect(mocked.logout).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("PIN")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.queryByText("app")).toBeNull();
   });
 
@@ -318,7 +419,51 @@ describe("AuthGate", () => {
     expect(screen.queryByText("app")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "重試" }));
-    expect(await screen.findByLabelText("PIN")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+  });
+
+  it("offers the visitor entry when the server enables it", async () => {
+    const user = userEvent.setup();
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "accounts",
+      authenticated: false,
+      actor: null,
+      visitor: true,
+    });
+    mocked.visitorLogin.mockResolvedValue({
+      ok: true,
+      actor: { id: "visitor", name: "訪客", role: "visitor" },
+    });
+
+    render(
+      <AuthGate>
+        <VisitorBadge />
+      </AuthGate>,
+    );
+
+    await screen.findByRole("button", { name: "訪客登入" });
+    await visitorSubmit(user, "777", "LOOKONLY");
+
+    expect(mocked.visitorLogin).toHaveBeenCalledWith("777", "LOOKONLY");
+    expect(await screen.findByText("訪客 · 唯讀")).toBeInTheDocument();
+  });
+
+  // An older server sends no visitor field at all; that must read as "off".
+  it("hides the visitor entry when status omits it", async () => {
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "accounts",
+      authenticated: false,
+      actor: null,
+    });
+
+    render(
+      <AuthGate>
+        <p>app</p>
+      </AuthGate>,
+    );
+
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "訪客登入" })).toBeNull();
   });
 
   /** The read-only rule is permanent, worn as a topbar pill rather than a strip. */

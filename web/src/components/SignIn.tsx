@@ -55,6 +55,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     "loading",
   );
   const [actor, setActor] = useState<Actor | null>(null);
+  const [visitorEnabled, setVisitorEnabled] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setMode(status.mode === "accounts" ? "accounts" : "local");
         setActor(status.authenticated ? status.actor : null);
+        setVisitorEnabled(status.visitor === true);
       })
       .catch(() => {
         // A failure here says nothing about who is signed in, so it must not be
@@ -118,7 +120,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
   if (mode === "accounts" && actor === null) {
-    return <SignIn onSignedIn={setActor} />;
+    return <SignIn onSignedIn={setActor} visitor={visitorEnabled} />;
   }
   return (
     <ViewerContext.Provider value={actor}>
@@ -185,21 +187,19 @@ export function SignOutButton({ className = "icon-btn" }: { className?: string }
  * user can see whether it is still worth typing the one in their inbox. */
 const OTP_TTL_MS = 5 * 60 * 1000;
 
-/** The server also refuses a resend for this long; keep the UI from offering
- * a request that is guaranteed to receive HTTP 429. */
+/** The server also refuses a resend for this long per account; keep the UI
+ * from offering a request that is guaranteed to receive HTTP 429. */
 const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
 
-/** The passcode is a fixed-width alphanumeric string. This is the only shape
- * check done here: everything else about validity is the server's call. */
+/** The passcode is a fixed-width alphanumeric string. Whitespace is dropped
+ * before counting, since a code copied out of a mail often carries some; case
+ * and everything else about validity are the server's call. */
 const OTP_LENGTH = 8;
 
-/**
- * The same sentence is shown whether or not the PIN exists. The server answers
- * 202 either way for exactly this reason — a message that distinguished the two
- * would turn the form into a PIN oracle. It is also what a visitor sees, whose
- * passcode is fixed and was never mailed; saying anything else here would tell
- * an unauthenticated caller which kind of PIN they just typed.
- */
+function compactCode(value: string): string {
+  return value.replace(/\s+/g, "");
+}
+
 /** Turns a failure into something worth reading. Throttling and a missing mail
  * transport get their own wording because the server's raw text for those is
  * often an English identifier that means nothing to the person reading it. */
@@ -225,26 +225,43 @@ function formatRemaining(ms: number): string {
 }
 
 /**
- * Two-factor sign-in on one screen: a PIN the administrator handed over out of
- * band, and a one-time passcode mailed to the address bound to it. There is no
- * signup, no password and no recovery path — an administrator issues both
- * halves.
+ * Passwordless sign-in: an email address, then a one-time passcode mailed to
+ * it. There is no signup, no password and no recovery path — an administrator
+ * registers the address, and the mailbox is the credential.
  *
- * Both fields are present from the start rather than in sequence. The visitor
- * credential is the reason: its passcode is fixed and never mailed, so a form
- * that only revealed the passcode field after a successful send would have no
- * way to show it to the one person who does not need a send. Everyone else
- * loses nothing — the passcode field simply sits empty until the mail lands.
+ * The form has two steps, because the passcode only exists once it has been
+ * sent: the email step asks for an address, the code step takes the passcode
+ * and lets the user go back to fix a mistyped address. The same sentence is
+ * shown after a send whether or not the address is registered — the server
+ * answers 202 either way, and a message that distinguished the two would turn
+ * the form into an account oracle.
+ *
+ * The shared visitor credential (a visitor PIN plus a fixed passcode that is
+ * never mailed) has its own form behind a separate entry, offered only when the
+ * server says visitor access is enabled.
  */
-export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
+export function SignIn({
+  onSignedIn,
+  visitor = false,
+}: {
+  onSignedIn: (actor: Actor) => void;
+  /** Whether the server has visitor access enabled. */
+  visitor?: boolean;
+}) {
   const { language, setLanguage, t } = useI18n();
-  const [pin, setPin] = useState("");
+  const [view, setView] = useState<"email" | "code" | "visitor">("email");
+  const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [visitorPin, setVisitorPin] = useState("");
+  const [visitorPasscode, setVisitorPasscode] = useState("");
   const [busy, setBusy] = useState<"" | "send" | "login">("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [expiresAt, setExpiresAt] = useState(0);
-  const [nextSendAt, setNextSendAt] = useState(0);
+  // The server's cooldown is per account, so it is remembered together with
+  // the address it applies to: going back to fix a typo must not block the
+  // first send to the corrected address.
+  const [cooldown, setCooldown] = useState({ email: "", until: 0 });
   const [now, setNow] = useState(() => Date.now());
   const otpField = useRef<HTMLInputElement>(null);
 
@@ -258,41 +275,45 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     return () => window.clearInterval(timer);
   }, [expiresAt]);
 
-  const resendBlocked = nextSendAt !== 0 && nextSendAt > Date.now();
+  // Focus follows every send, or the keyboard user has to hunt for the field
+  // the code they were just sent belongs in.
+  useEffect(() => {
+    if (view === "code") otpField.current?.focus();
+  }, [view, expiresAt]);
 
-  const sendOtp = useCallback(async () => {
-    if (busy !== "" || pin.trim() === "" || (nextSendAt !== 0 && nextSendAt > Date.now())) return;
+  const address = email.trim();
+  const resendWait =
+    cooldown.email === address ? cooldown.until - Date.now() : 0;
+  const resendBlocked = resendWait > 0;
+
+  const sendOtp = async () => {
+    if (busy !== "" || address === "" || resendBlocked) return;
     setBusy("send");
     setError("");
-    // A fresh passcode invalidates the previous one and every session opened
-    // with it, so anything already typed is cleared rather than left looking
-    // usable.
+    // A fresh passcode invalidates the previous one, so anything already typed
+    // is cleared rather than left looking usable.
     setOtp("");
     try {
-      await api.requestOtp(pin.trim());
+      await api.requestOtp(address);
       const sentAt = Date.now();
       setExpiresAt(sentAt + OTP_TTL_MS);
-      setNextSendAt(sentAt + OTP_RESEND_COOLDOWN_MS);
+      setCooldown({ email: address, until: sentAt + OTP_RESEND_COOLDOWN_MS });
       setNotice(t("auth.codeSent"));
-      otpField.current?.focus();
+      setView("code");
     } catch (failure) {
       setError(describe(failure, t));
     } finally {
       setBusy("");
     }
-  }, [busy, pin, resendBlocked, t]);
+  };
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const code = otp.trim();
-    if (busy !== "" || pin.trim() === "" || code.length !== OTP_LENGTH) return;
+  const login = async () => {
+    const code = compactCode(otp);
+    if (busy !== "" || address === "" || code.length !== OTP_LENGTH) return;
     setBusy("login");
     setError("");
     try {
-      const result = await api.login(pin.trim(), code);
-      // Nothing needs the PIN after this, and holding it in memory only widens
-      // what a later bug could leak. It is never written to storage or the URL.
-      setPin("");
+      const result = await api.login(address, code);
       setOtp("");
       onSignedIn(result.actor);
     } catch (failure) {
@@ -300,6 +321,57 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
     } finally {
       setBusy("");
     }
+  };
+
+  const visitorSignIn = async () => {
+    const pin = visitorPin.trim();
+    const passcode = visitorPasscode.trim();
+    if (busy !== "" || pin === "" || passcode === "") return;
+    setBusy("login");
+    setError("");
+    try {
+      const result = await api.visitorLogin(pin, passcode);
+      // Nothing needs the shared secrets after this, and holding them in
+      // memory only widens what a later bug could leak. They are never written
+      // to storage or the URL.
+      setVisitorPin("");
+      setVisitorPasscode("");
+      onSignedIn(result.actor);
+    } catch (failure) {
+      setError(describe(failure, t));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /** Enter submits whichever step is on screen: on the email step that is the
+   * send, so the key never silently does nothing. */
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (view === "email") void sendOtp();
+    else if (view === "code") void login();
+    else void visitorSignIn();
+  };
+
+  const changeEmail = () => {
+    setView("email");
+    setOtp("");
+    setNotice("");
+    setError("");
+    setExpiresAt(0);
+  };
+
+  const openVisitor = () => {
+    setView("visitor");
+    setError("");
+    setNotice("");
+  };
+
+  const backToEmail = () => {
+    setVisitorPin("");
+    setVisitorPasscode("");
+    setView(expiresAt !== 0 ? "code" : "email");
+    setError("");
   };
 
   const remaining = expiresAt - now;
@@ -323,62 +395,113 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
           </select>
         </label>
         <h1>Nodevas</h1>
-        <p className="signin-hint">
-          {t("auth.signInHint")}
-        </p>
 
-        <label htmlFor="signin-pin">PIN</label>
-        <div className="signin-pin-row">
-          <input
-            id="signin-pin"
-            type="password"
-            value={pin}
-            autoComplete="off"
-            autoFocus
-            onChange={(event) => setPin(event.target.value)}
-            /* Enter in the PIN field means "send it" while there is no
-             * passcode to submit. Letting it submit the form instead would do
-             * nothing at all — the submit guard requires a full passcode — and
-             * a key that silently does nothing reads as a broken form. */
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || otp.trim() !== "") return;
-              event.preventDefault();
-              void sendOtp();
-            }}
-          />
-          <button
-            type="button"
-            onClick={sendOtp}
-            disabled={busy !== "" || pin.trim() === "" || resendBlocked}
-          >
-            {busy === "send" ? t("auth.sendingCode") : t("auth.sendCode")}
-          </button>
-        </div>
+        {view === "visitor" ? (
+          <>
+            <p className="signin-hint">{t("auth.visitorHint")}</p>
+            <label htmlFor="signin-visitor-pin">{t("auth.visitorPin")}</label>
+            <input
+              id="signin-visitor-pin"
+              type="password"
+              value={visitorPin}
+              autoComplete="off"
+              autoFocus
+              onChange={(event) => setVisitorPin(event.target.value)}
+            />
+            <label htmlFor="signin-visitor-passcode">
+              {t("auth.visitorPasscode")}
+            </label>
+            <input
+              id="signin-visitor-passcode"
+              type="password"
+              value={visitorPasscode}
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(event) => setVisitorPasscode(event.target.value)}
+            />
+          </>
+        ) : (
+          <>
+            <p className="signin-hint">{t("auth.signInHint")}</p>
+            <label htmlFor="signin-email">{t("auth.email")}</label>
+            {view === "email" ? (
+              <div className="signin-pin-row">
+                <input
+                  id="signin-email"
+                  type="email"
+                  value={email}
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoFocus
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={busy !== "" || address === "" || resendBlocked}
+                >
+                  {busy === "send" ? t("auth.sendingCode") : t("auth.sendCode")}
+                </button>
+              </div>
+            ) : (
+              <div className="signin-pin-row">
+                {/* Read-only rather than gone: the user checks the address the
+                 * code went to, and leaves it through the button beside it. */}
+                <input id="signin-email" type="email" value={email} readOnly />
+                <button type="button" onClick={changeEmail} disabled={busy !== ""}>
+                  {t("auth.changeEmail")}
+                </button>
+              </div>
+            )}
 
-        <label htmlFor="signin-otp">{t("auth.verificationCode")}</label>
-        <input
-          id="signin-otp"
-          ref={otpField}
-          className="signin-otp"
-          /* Uppercased for display by text-transform in .signin-otp rather
-           * than here: rewriting the value would also rewrite the state, and
-           * the server is to receive what was typed, only trimmed. */
-          value={otp}
-          inputMode="text"
-          autoComplete="one-time-code"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          maxLength={OTP_LENGTH}
-          onChange={(event) => setOtp(event.target.value)}
-        />
+            {view === "code" && (
+              <>
+                <label htmlFor="signin-otp">{t("auth.verificationCode")}</label>
+                <div className="signin-pin-row">
+                  <input
+                    id="signin-otp"
+                    ref={otpField}
+                    className="signin-otp"
+                    /* Uppercased for display by text-transform in .signin-otp
+                     * rather than here: the server normalises case itself. */
+                    value={otp}
+                    inputMode="text"
+                    autoComplete="one-time-code"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    /* Room for a code pasted with spaces in it; the length that
+                     * matters is counted with whitespace dropped. */
+                    maxLength={OTP_LENGTH * 2}
+                    onChange={(event) => setOtp(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void sendOtp()}
+                    disabled={busy !== "" || resendBlocked}
+                  >
+                    {busy === "send"
+                      ? t("auth.sendingCode")
+                      : resendBlocked
+                        ? t("auth.resendIn", { seconds: Math.ceil(resendWait / 1000) })
+                        : t("auth.resendCode")}
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
 
-        {notice && (
+        {notice && view === "code" && (
           <p className="signin-notice" role="status">
             {notice}
           </p>
         )}
-        {expiresAt !== 0 && (
+        {view === "code" && expiresAt !== 0 && (
           <p className="signin-countdown">
             {expired
               ? t("auth.codeExpired")
@@ -391,17 +514,39 @@ export function SignIn({ onSignedIn }: { onSignedIn: (actor: Actor) => void }) {
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={
-            busy !== "" || pin.trim() === "" || otp.trim().length !== OTP_LENGTH
-          }
-        >
-          {busy === "login" ? t("auth.signingIn") : t("auth.signIn")}
-        </button>
-        <p className="signin-warning">
-          {t("auth.signInWarning")}
-        </p>
+        {view === "code" && (
+          <button
+            type="submit"
+            disabled={busy !== "" || compactCode(otp).length !== OTP_LENGTH}
+          >
+            {busy === "login" ? t("auth.signingIn") : t("auth.signIn")}
+          </button>
+        )}
+        {view === "visitor" && (
+          <button
+            type="submit"
+            disabled={
+              busy !== "" || visitorPin.trim() === "" || visitorPasscode.trim() === ""
+            }
+          >
+            {busy === "login" ? t("auth.signingIn") : t("auth.signIn")}
+          </button>
+        )}
+        {view !== "visitor" && (
+          <p className="signin-warning">{t("auth.signInWarning")}</p>
+        )}
+
+        {view === "visitor" ? (
+          <button type="button" className="signin-switch" onClick={backToEmail}>
+            {t("auth.backToEmail")}
+          </button>
+        ) : (
+          visitor && (
+            <button type="button" className="signin-switch" onClick={openVisitor}>
+              {t("auth.visitorEntry")}
+            </button>
+          )
+        )}
       </form>
     </div>
   );
