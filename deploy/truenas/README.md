@@ -63,6 +63,14 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
 
 首次初始化成功後，`/data/.nodevas-bootstrap-complete` 會避免更新或重啟時重設 PIN。若需重設，請使用 `nodevas user pin`，不要刪除 marker 後盲目重啟。
 
+### 已有 cloudflared App 時
+
+若 TrueNAS 已安裝社群版 `cloudflared` App，改用 [`compose.existing-tunnel.yaml`](./compose.existing-tunnel.yaml)：Nodevas 加入該 App 的 `ix-cloudflared_default` bridge network，不另跑 `cloudflared`，也不需要 `cloudflare-tunnel-token`。
+
+- 以 `docker network inspect ix-cloudflared_default` 確認 subnet，`NODEVAS_SERVE_TRUSTED_PROXY` 設為該 subnet（`cloudflared` IP 不固定）。
+- Cloudflare Tunnel 的 Published application route：`HTTP`、`nodevas:5666`。
+- 此網路由 `cloudflared` App 建立；該 App 停止或重建網路後，需重新啟動 Nodevas App。
+
 ## 5. 驗證
 
 ```bash
