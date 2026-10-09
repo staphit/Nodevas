@@ -350,6 +350,15 @@ CREATE INDEX sessions_expires ON sessions (expires_at);
 -- Clearing it also changes every account's revision, which signs out every
 -- session opened under the old two-factor rule. That is the intended
 -- direction: a session should not outlive the rule that admitted it.
+--
+-- An account with an address but no PIN is one an administrator shut out with
+-- ` + "`nodevas user pin-clear`" + `: that cleared the PIN and left the address, and
+-- sign-in only ever looked at accounts holding a PIN. Now the address alone
+-- signs in, so the leftover would quietly re-admit the account. Its address
+-- goes first, before the PINs that tell the two cases apart are cleared, and
+-- that also keeps the duplicate step below choosing only among accounts that
+-- could actually sign in.
+UPDATE accounts SET email = '' WHERE pin_hash = '';
 UPDATE accounts SET pin_hash = '';
 
 -- The address is now how an account is found, so two accounts must not share

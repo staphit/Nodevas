@@ -90,6 +90,11 @@ type pendingOTP struct {
 	digest   [sha256.Size]byte
 	expires  time.Time
 	attempts int
+	// revision is the account's revision when the passcode was mailed. The
+	// address is part of it, so a passcode sent to an address the account no
+	// longer has stops working: moving a compromised account to a new mailbox
+	// must not leave the old mailbox holding a way in for five more minutes.
+	revision string
 }
 
 // Challenge is what the caller needs to deliver a passcode: where to send it
@@ -181,7 +186,7 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 		return Challenge{}, ErrTooManyOTPRequests
 	}
 
-	actor, _, registered, ok := a.users.AccountByEmail(ctx, address)
+	actor, revision, registered, ok := a.users.AccountByEmail(ctx, address)
 	if !ok {
 		// A caller who hung up did not offer an address that failed, so say so
 		// rather than ErrNoSuchAccount. The HTTP layer answers 202 either way,
@@ -206,7 +211,7 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 	// One live passcode per account: issuing a second would leave the first
 	// usable, and "the last one wins" is what a person expects after pressing
 	// resend.
-	a.otps[actor.ID] = &pendingOTP{digest: digestOTP(code), expires: expires}
+	a.otps[actor.ID] = &pendingOTP{digest: digestOTP(code), expires: expires, revision: revision}
 	a.mu.Unlock()
 
 	return Challenge{Code: code, Email: registered, Expires: expires, Actor: actor.Name}, nil
@@ -272,7 +277,10 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	pending := a.otps[actor.ID]
-	if pending == nil || now.After(pending.expires) {
+	// A changed revision means the address, password or role moved since the
+	// passcode was mailed. The CLI makes those changes from another process and
+	// cannot reach this map, so the check has to happen here.
+	if pending == nil || now.After(pending.expires) || pending.revision != revision {
 		delete(a.otps, actor.ID)
 		return identity.Actor{}, "", "", ErrBadCredentials
 	}

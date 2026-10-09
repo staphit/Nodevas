@@ -100,6 +100,27 @@ func TestThePasscodeGoesToTheRegisteredAddressNotTheTypedOne(t *testing.T) {
 	}
 }
 
+// An administrator moving a compromised account to a new mailbox expects the
+// old mailbox to lose access at once. A passcode already sitting in it must not
+// open the account under its new address.
+func TestAPasscodeMailedToAnOldAddressDiesWhenTheAddressChanges(t *testing.T) {
+	sessions, users := otpStoreForTest(t)
+	challenge, err := sessions.RequestOTP(nil, annEmail)
+	if err != nil {
+		t.Fatalf("RequestOTP: %v", err)
+	}
+	const moved = "ann.new@example.test"
+	if err := users.SetEmail(context.Background(), "ann", moved); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := sessions.LoginWithOTP(nil, moved, challenge.Code); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("old passcode under the new address: err = %v, want ErrBadCredentials", err)
+	}
+	if liveSessions(sessions) != 0 {
+		t.Fatal("a session opened from a passcode mailed to the old address")
+	}
+}
+
 // A passcode read off a phone screen arrives with the case mangled and often
 // with a space in the middle. Refusing those would make the sign-in a
 // transcription test.

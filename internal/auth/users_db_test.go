@@ -324,16 +324,22 @@ func TestTheEmailMigrationClearsPinsAndSettlesSharedAddresses(t *testing.T) {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
-	for i, row := range []struct{ name, email string }{
-		{"ann", "Shared@Example.test"},
-		{"bob", "shared@example.test"},
-		{"cat", "cat@example.test"},
+	// dan and eve-old were shut out with `pin-clear`, which left their address
+	// behind. eve-old is older than eve, who holds the same mailbox and could
+	// still sign in.
+	for i, row := range []struct{ name, pin, email string }{
+		{"ann", "an-old-pin-hash", "Shared@Example.test"},
+		{"bob", "an-old-pin-hash", "shared@example.test"},
+		{"cat", "an-old-pin-hash", "cat@example.test"},
+		{"dan", "", "dan@example.test"},
+		{"eve-old", "", "eve@example.test"},
+		{"eve", "an-old-pin-hash", "Eve@example.test"},
 	} {
 		if _, err := database.ExecContext(ctx,
 			`INSERT INTO accounts (id, name, role, password_hash, pin_hash, email, created_at)
-			 VALUES (?, ?, ?, '', 'an-old-pin-hash', ?, ?)`,
+			 VALUES (?, ?, ?, '', ?, ?, ?)`,
 			fmt.Sprintf("id-%d", i), row.name, map[bool]string{true: "admin", false: "member"}[i == 0],
-			row.email, db.Now()); err != nil {
+			row.pin, row.email, db.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -359,7 +365,12 @@ func TestTheEmailMigrationClearsPinsAndSettlesSharedAddresses(t *testing.T) {
 	for _, record := range users.Records(ctx) {
 		emails[record.Name] = record.Email
 	}
-	want := map[string]string{"ann": "Shared@Example.test", "bob": "", "cat": "cat@example.test"}
+	want := map[string]string{
+		"ann": "Shared@Example.test", "bob": "", "cat": "cat@example.test",
+		// A revoked account stays revoked, and does not take the address from
+		// the account that could actually use it.
+		"dan": "", "eve-old": "", "eve": "Eve@example.test",
+	}
 	for name, address := range want {
 		if emails[name] != address {
 			t.Fatalf("after migration %s has %q, want %q (all: %v)", name, emails[name], address, emails)
