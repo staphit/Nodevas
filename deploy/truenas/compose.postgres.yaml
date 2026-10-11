@@ -7,6 +7,9 @@
 # Before installing, create the data directory and the password file:
 #   install -d -m 0700 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets
 #   (umask 077; openssl rand -hex 24 > /mnt/tank/apps/postgres/secrets/password)
+#   chown 999:999 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets/password
+# The image runs PostgreSQL as uid 999; a root-owned data directory makes the
+# container restart with "mkdir: cannot create directory ... Permission denied".
 # and give Nodevas the matching URL in /mnt/tank/apps/nodevas/secrets/database-url:
 #   postgres://nodevas:<password>@postgres:5432/nodevas?sslmode=disable
 name: postgres

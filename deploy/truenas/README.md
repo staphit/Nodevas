@@ -83,6 +83,7 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
    install -d -m 0700 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets
    pw=$(openssl rand -hex 24)
    (umask 077; printf '%s' "$pw" > /mnt/tank/apps/postgres/secrets/password)
+   chown 999:999 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets/password
    (umask 077; printf 'postgres://nodevas:%s@postgres:5432/nodevas?sslmode=disable' "$pw" \
      > /mnt/tank/apps/nodevas/secrets/database-url)
    chown 568:568 /mnt/tank/apps/nodevas/secrets/database-url
