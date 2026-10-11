@@ -73,6 +73,66 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
 - Cloudflare Tunnel 的 Published application route：`HTTP`、`nodevas:5666`。
 - 此網路由 `cloudflared` App 建立；該 App 停止或重建網路後，需重新啟動 Nodevas App。
 
+### 改用 PostgreSQL（選用）
+
+帳號、工作階段、設定與稽核紀錄可移到 PostgreSQL；搜尋索引仍留在 workspace 的 SQLite 檔。PostgreSQL 在 `NODEVAS_DATABASE_WAIT`（預設 30 秒）內連不上時，Nodevas 會改用 SQLite 繼續啟動並記錄 `db.postgres_fallback` 警告；等 PostgreSQL 恢復後要重啟 Nodevas 才會切回，降級期間寫入 SQLite 的資料不會同步回去。
+
+1. 建立目錄與密碼，並把連線字串寫成 Nodevas 的 secret（密碼不經過畫面或 shell history）：
+
+   ```bash
+   install -d -m 0700 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets
+   pw=$(openssl rand -hex 24)
+   (umask 077; printf '%s' "$pw" > /mnt/tank/apps/postgres/secrets/password)
+   (umask 077; printf 'postgres://nodevas:%s@postgres:5432/nodevas?sslmode=disable' "$pw" \
+     > /mnt/tank/apps/nodevas/secrets/database-url)
+   chown 568:568 /mnt/tank/apps/nodevas/secrets/database-url
+   unset pw
+   ```
+
+2. 以 [`compose.postgres.yaml`](./compose.postgres.yaml) 安裝 Custom App，名稱 `postgres`，等它 healthy。
+3. 在 Nodevas 的 compose 加上：
+
+   ```yaml
+   services:
+     nodevas:
+       environment:
+         NODEVAS_DATABASE_URL_FILE: /run/secrets/nodevas_database_url
+       secrets:
+         - source: nodevas_database_url
+           target: nodevas_database_url
+           uid: "568"
+           gid: "568"
+           mode: 0400
+       networks:
+         postgres: {}
+   networks:
+     postgres:
+       external: true
+       name: ix-postgres_default
+   secrets:
+     nodevas_database_url:
+       file: /mnt/tank/apps/nodevas/secrets/database-url
+   ```
+
+   `bootstrap` 服務若還要建立帳號，也需同樣的 secret、環境變數與 network（並移除 `network_mode: none`），否則帳號會建在 SQLite。
+
+4. 停止 Nodevas，把既有資料搬到 PostgreSQL，再更新 App：
+
+   ```bash
+   docker run --rm --network ix-postgres_default \
+     -v /mnt/tank/apps/nodevas/workspace:/data \
+     -v /mnt/tank/apps/nodevas/secrets/database-url:/run/secrets/database-url:ro \
+     -e NODEVAS_DATABASE_URL_FILE=/run/secrets/database-url \
+     --user 568:568 --entrypoint /usr/local/bin/nodevas \
+     ghcr.io/staphit/nodevas:latest db copy-to-postgres --project /data
+   ```
+
+   目標資料庫已有資料時會拒絕；確定要覆蓋才加 `--replace`。
+
+5. 啟動後 log 應有 `"workspace database ready"` 且 `backend` 為 `postgres`；`nodevas db status --project /data` 也會顯示目前使用的後端。
+
+PostgreSQL 的資料在 `/mnt/tank/apps/postgres/data`，請一併納入 snapshot／備份。
+
 ## 5. 驗證
 
 ```bash
@@ -88,7 +148,7 @@ curl -fsS https://nodevas.example.com/ >/dev/null
 
 ## 備份與更新
 
-備份整個 `/mnt/tank/apps/nodevas/workspace` dataset。它包含專案、SQLite/WAL、歷史、CRDT sidecar、通知 secret 與 `/data/.config` 下的加密 master key。
+備份整個 `/mnt/tank/apps/nodevas/workspace` dataset。它包含專案、SQLite/WAL、歷史、CRDT sidecar、通知 secret 與 `/data/.config` 下的加密 master key。使用 PostgreSQL 時，另需備份 `/mnt/tank/apps/postgres/data`。
 
 更新固定 image tag 後重新部署 App。Nodevas 收到 `SIGTERM` 時會先 graceful shutdown；Compose 提供 45 秒停止期限。
 
