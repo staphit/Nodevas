@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
 )
 
 func storeForTest(t *testing.T) (*UserStore, string) {
 	t.Helper()
+	dbtest.UsePostgres(t)
 	workspace := t.TempDir()
 	users, err := NewUserStore(workspace)
 	if err != nil {

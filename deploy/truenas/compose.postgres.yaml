@@ -1,0 +1,42 @@
+# PostgreSQL for Nodevas, as its own TrueNAS custom app named "postgres".
+#
+# Nodevas reaches it by joining this app's network (ix-postgres_default) and
+# connecting to host "postgres". No host port is published: nothing outside
+# the two apps can reach the database.
+#
+# Before installing, create the data directory and the password file:
+#   install -d -m 0700 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets
+#   (umask 077; openssl rand -hex 24 > /mnt/tank/apps/postgres/secrets/password)
+#   chown 999:999 /mnt/tank/apps/postgres/data /mnt/tank/apps/postgres/secrets/password
+# The image runs PostgreSQL as uid 999; a root-owned data directory makes the
+# container restart with "mkdir: cannot create directory ... Permission denied".
+# and give Nodevas the matching URL in /mnt/tank/apps/nodevas/secrets/database-url:
+#   postgres://nodevas:<password>@postgres:5432/nodevas?sslmode=disable
+name: postgres
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: nodevas
+      POSTGRES_DB: nodevas
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - /mnt/tank/apps/postgres/data:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodevas -d nodevas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+secrets:
+  postgres_password:
+    file: /mnt/tank/apps/postgres/secrets/password

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nodevas/internal/db/dbtest"
 )
 
 // annEmail is the address otpStoreForTest registers for "ann".
@@ -15,6 +17,7 @@ const annEmail = "ann@example.test"
 
 func userStoreForTest(t *testing.T) *UserStore {
 	t.Helper()
+	dbtest.UsePostgres(t)
 	users, err := NewUserStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewUserStore: %v", err)

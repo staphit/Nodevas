@@ -362,7 +362,7 @@ func insertError(name string, err error) error {
 	if isEmailConflict(err) {
 		return ErrEmailTaken
 	}
-	if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+	if db.IsUniqueViolation(err, "") {
 		return fmt.Errorf("user %q already exists", name)
 	}
 	return fmt.Errorf("create account: %w", err)
@@ -431,14 +431,13 @@ func (u *UserStore) SetPassword(ctx context.Context, name, password string) erro
 // isEmailConflict reports whether a write was refused by the unique index on
 // the sign-in address. SQLite names the column for a column index, partial or
 // not; the index name is matched as well so the check does not hang on which
-// of the two a driver version chooses to print.
+// of the two a driver version chooses to print. PostgreSQL always names the
+// index.
 func isEmailConflict(err error) bool {
-	if err == nil {
-		return false
+	if db.IsUniqueViolation(err, "accounts_email_nocase") {
+		return true
 	}
-	message := err.Error()
-	return strings.Contains(message, "UNIQUE constraint failed") &&
-		(strings.Contains(message, "accounts.email") || strings.Contains(message, "accounts_email_nocase"))
+	return db.IsUniqueViolation(err, "") && strings.Contains(err.Error(), "accounts.email")
 }
 
 // errNoAccount says the name matched no row. Callers word it for their own

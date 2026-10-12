@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"nodevas/internal/db"
 )
 
 // signedIn opens a real session and returns its cookie value.
@@ -143,17 +145,27 @@ func TestFailedSessionDeletionKeepsProcessAndRestartConsistent(t *testing.T) {
 			name: "delete statement",
 			inject: func(t *testing.T, _ *SessionAuth, users *UserStore) func() {
 				t.Helper()
-				if _, err := users.database.ExecContext(context.Background(), `
+				create, drop := `
 CREATE TRIGGER fail_session_delete
 BEFORE DELETE ON sessions
 BEGIN
     SELECT RAISE(ABORT, 'injected session delete failure');
-END`); err != nil {
+END`, `DROP TRIGGER fail_session_delete`
+				if users.database.Backend() == db.Postgres {
+					create = `
+CREATE FUNCTION fail_session_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'injected session delete failure';
+END $$;
+CREATE TRIGGER fail_session_delete BEFORE DELETE ON sessions
+    FOR EACH ROW EXECUTE FUNCTION fail_session_delete();`
+					drop = `DROP TRIGGER fail_session_delete ON sessions; DROP FUNCTION fail_session_delete();`
+				}
+				if _, err := users.database.ExecContext(context.Background(), create); err != nil {
 					t.Fatalf("create failure trigger: %v", err)
 				}
 				return func() {
-					if _, err := users.database.ExecContext(context.Background(),
-						`DROP TRIGGER fail_session_delete`); err != nil {
+					if _, err := users.database.ExecContext(context.Background(), drop); err != nil {
 						t.Fatalf("drop failure trigger: %v", err)
 					}
 				}
