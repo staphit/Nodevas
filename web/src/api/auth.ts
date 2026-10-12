@@ -14,16 +14,27 @@ export interface Actor {
   role: "admin" | "member" | "visitor";
 }
 
+/** What /api/auth/status says about this server and this browser. */
+export interface AuthStatus {
+  mode: "local" | "accounts";
+  authenticated: boolean;
+  actor: Actor;
+  /** True when the shared visitor credential is enabled, so the sign-in form
+   * can offer its entry. An older server omits it; treat that as false. */
+  visitor?: boolean;
+}
+
 export const authApi = {
-  getAuthStatus: () =>
-    req<{ mode: "local" | "accounts"; authenticated: boolean; actor: Actor }>(
-      "/api/auth/status",
-    ),
-  /** Always resolves 202 whether or not the PIN exists, so the caller cannot
-   * turn it into an oracle for which PINs are real. */
-  requestOtp: (pin: string) =>
-    authPost<{ ok: boolean }>("/api/auth/otp/request", { pin }),
-  login: (pin: string, otp: string) =>
-    authPost<{ ok: boolean; actor: Actor }>("/api/auth/login", { pin, otp }),
+  getAuthStatus: () => req<AuthStatus>("/api/auth/status"),
+  /** Always resolves 202 whether or not the email is registered, so the caller
+   * cannot turn it into an oracle for which addresses have accounts. */
+  requestOtp: (email: string) =>
+    authPost<{ ok: boolean }>("/api/auth/otp/request", { email }),
+  login: (email: string, otp: string) =>
+    authPost<{ ok: boolean; actor: Actor }>("/api/auth/login", { email, otp }),
+  /** The shared read-only credential: a visitor PIN plus a fixed passcode that
+   * is never mailed. */
+  visitorLogin: (pin: string, passcode: string) =>
+    authPost<{ ok: boolean; actor: Actor }>("/api/auth/visitor", { pin, passcode }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 };

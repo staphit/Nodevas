@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, AuthError, setProjectOverride } from "../api";
 import { useApp } from "../store";
 import type { Graph, RunState } from "../types";
 import { pushUndo } from "./undo";
@@ -12,6 +12,7 @@ vi.mock("../api", async (importOriginal) => {
       openProject: vi.fn(),
       removeWorkspace: vi.fn(),
       putDraft: vi.fn(),
+      putNodePage: vi.fn(),
       getGraph: vi.fn(),
       getState: vi.fn(),
       getTrash: vi.fn(),
@@ -38,6 +39,9 @@ function dirtyTab(id: string) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  setProjectOverride("");
+  vi.mocked(api.putNodePage).mockResolvedValue({ ok: true, rev: "page-2" });
   vi.mocked(api.openProject).mockResolvedValue({ root: "/tmp/p2", active: "p2" });
   vi.mocked(api.removeWorkspace).mockResolvedValue({
     ok: true,
@@ -62,6 +66,7 @@ beforeEach(() => {
     graph: { version: 1, nodes: [{ id: "a" }], edges: [], ui: {} },
     graphRev: "rev-1",
     tabs: [dirtyTab("a")],
+    pageDocs: {},
     activeTab: "a",
     workspace: "/tmp/added",
     workspaces: [
@@ -95,6 +100,47 @@ describe("removeWorkspace", () => {
 });
 
 describe("switchProject", () => {
+  it("keeps the old project and text when its draft cannot be written", async () => {
+    vi.mocked(api.putDraft).mockRejectedValue(new Error("disk full"));
+    await expect(useApp.getState().switchProject("p2")).rejects.toThrow("disk full");
+    expect(api.openProject).not.toHaveBeenCalled();
+    expect(useApp.getState().activeProject).toBe("p1");
+    expect(useApp.getState().tabs[0].content).toBe("未存的內容");
+  });
+
+  it("refuses to discard edits made while the draft is being written", async () => {
+    vi.mocked(api.putDraft).mockImplementation(async () => {
+      useApp.getState().setTabContent("a", "newer text");
+      return { ok: true };
+    });
+    await expect(useApp.getState().switchProject("p2")).rejects.toThrow();
+    expect(api.openProject).not.toHaveBeenCalled();
+    expect(useApp.getState().tabs[0].content).toBe("newer text");
+  });
+
+  it("keeps a member's selection when the catalog reports the shared project", async () => {
+    vi.mocked(api.openProject).mockRejectedValue(new AuthError(403, "admin required"));
+    vi.mocked(api.getProjects).mockResolvedValue({ workspace: "/tmp", workspaces: [], active: "p1", projects: [] });
+    await useApp.getState().switchProject("p2");
+    await useApp.getState().refreshProjects();
+    expect(useApp.getState().activeProject).toBe("p2");
+    expect(useApp.getState().graph).toEqual(NEXT_GRAPH);
+  });
+
+  it.each([false, true])("saves subpages before switching; write failure=%s", async (fails) => {
+    useApp.getState().setPageDoc("a", { nodeId: "a", id: "notes", content: "page draft", rev: "page-1", format: "md", dirty: true, loading: false, conflict: null });
+    if (fails) vi.mocked(api.putNodePage).mockRejectedValue(new Error("disk full"));
+    if (fails) {
+      await expect(useApp.getState().switchProject("p2")).rejects.toThrow();
+      expect(api.openProject).not.toHaveBeenCalled();
+      expect(useApp.getState().pageDocs.a.content).toBe("page draft");
+    } else {
+      await useApp.getState().switchProject("p2");
+      expect(api.putNodePage).toHaveBeenCalledBefore(vi.mocked(api.openProject));
+      expect(useApp.getState().pageDocs).toEqual({});
+    }
+  });
+
   it("parks unsaved text as a draft before leaving", async () => {
     await useApp.getState().switchProject("p2");
     expect(api.putDraft).toHaveBeenCalledWith("a", "未存的內容");

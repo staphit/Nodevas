@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { freshProject } from "./fixture";
+import { type Page } from "@playwright/test";
+import { expect, freshProject, test } from "./fixture";
 
 async function openDocument(page: Page) {
   await freshProject(page, ["筆記"]);
@@ -276,7 +276,7 @@ test.describe("node card appearance", () => {
     await drawer.getByRole("tab", { name: "外觀" }).click();
     await drawer.getByRole("button", { name: "菱形" }).click();
     await expect(card.first()).toHaveClass(/shape-diamond/);
-    await drawer.getByRole("button", { name: "外框顏色 #ff9f9f" }).click();
+    await drawer.getByRole("button", { name: "外框 #ff9f9f" }).click();
 
     // The diamond paints its own edge: the element is the outline colour and
     // an inset copy of the shape carries the fill.
@@ -308,7 +308,7 @@ test.describe("node card appearance", () => {
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await drawer.getByRole("tab", { name: "外觀" }).click();
-    await drawer.getByRole("button", { name: "外框顏色 #8fd3ff" }).click();
+    await drawer.getByRole("button", { name: "外框 #8fd3ff" }).click();
 
     await expect
       .poll(() =>
@@ -612,7 +612,7 @@ test.describe("page formats", () => {
     await drawer.getByRole("button", { name: "建立頁面" }).click();
 
     // The tab says what the file is, and the path shows the extension.
-    await expect(drawer.getByRole("tab", { name: /備忘/ })).toContainText("TXT");
+    await expect(drawer.getByRole("tab", { name: /備忘/ })).toContainText("純文字");
     await expect(drawer.getByLabel("檔案位置")).toContainText(".txt");
     // Markdown-only tools are gone: plain text has no headings.
     await expect(drawer.getByRole("button", { name: "設為內文" })).toBeHidden();
@@ -667,10 +667,12 @@ test.describe("page formats", () => {
     await page.keyboard.press("Control+s");
     await expect(page.getByText("已儲存").first()).toBeVisible();
 
+    // Picking a format in the select starts the conversion; a dialog asks for
+    // confirmation before the file is rewritten.
     await drawer.getByLabel("子頁檔案格式").selectOption("html");
-    await page.getByRole("button", { name: "轉換格式" }).click();
+    await page.getByRole("button", { name: "轉換這一頁的檔案格式" }).click();
 
-    await expect(drawer.getByRole("tab", { name: /轉檔/ })).toContainText("HTML");
+    await expect(drawer.getByRole("tab", { name: /轉檔/ })).toContainText("網頁");
     await expect(drawer.getByLabel("檔案位置")).toContainText(".html");
     await editorText(page).press("Control+End");
     await expect(editorText(page)).toContainText("轉換前的內容");

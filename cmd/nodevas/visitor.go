@@ -31,7 +31,7 @@ func visitor(args []string) {
 	fs := flag.NewFlagSet("visitor", flag.ExitOnError)
 	projectFlag := fs.String("project", ".", "workspace directory")
 	pin := fs.String("pin", "",
-		"the shared pin visitors type. It is meant to be published, so unlike an account pin it may be short")
+		"the shared pin visitors type. It is meant to be published, so it may be short")
 	passcode := fs.String("passcode", "",
 		"the fixed second factor. Omit it to have a strong one generated, which is the intended path")
 	_ = fs.Parse(args[1:])

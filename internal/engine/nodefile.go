@@ -93,6 +93,7 @@ func SyncFrontmatter(nf *NodeFile, n *Node) {
 	setOrDelete(nf.Meta, "kind", n.Kind, n.Kind != "")
 	setOrDelete(nf.Meta, "priority", n.Priority, n.Priority != "")
 	setOrDelete(nf.Meta, "assignee", n.Assignee, n.Assignee != "")
+	setOrDelete(nf.Meta, "write_access", n.WriteAccess, n.WriteAccess != "")
 	setOrDelete(nf.Meta, "requires", n.Requires, n.Requires != "")
 	setOrDelete(nf.Meta, "tags", n.Tags, len(n.Tags) > 0)
 	if len(n.Effects) > 0 {

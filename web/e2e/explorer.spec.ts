@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { freshProject } from "./fixture";
+import { type Page } from "@playwright/test";
+import { expect, freshProject, test } from "./fixture";
 
 // Playwright's Control+click becomes a context click on macOS. Use the
 // platform's primary additive-selection modifier while keeping Shift as the

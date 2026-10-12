@@ -1,3 +1,4 @@
+import { notifyUnauthorized } from "./http";
 import type { Actor } from "./auth";
 import type { GraphOp } from "./graph";
 
@@ -184,8 +185,21 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
       // session as a new participant and will say whether to seed.
       for (const doc of openDocs.values()) post({ type: "doc-open", ...doc });
     };
-    ws.onclose = () => {
-      if (!closed) setTimeout(open, (retry = Math.min(retry * 2, 10000)));
+    ws.onclose = (event: CloseEvent) => {
+      // StatusPolicyViolation (1008). Policy violations are non-recoverable client
+      // misbehaviors or auth expirations; do not reconnect in a tight loop.
+      if (event.code === 1008) {
+        if (event.reason?.includes("authorization expired")) {
+          notifyUnauthorized();
+        }
+        return;
+      }
+      if (!closed) {
+        retry = Math.min(retry * 1.5, 10000);
+        const jitter = 0.8 + Math.random() * 0.4;
+        const delay = Math.round(retry * jitter);
+        setTimeout(open, delay);
+      }
     };
   };
   open();

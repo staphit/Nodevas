@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
 )
@@ -170,7 +171,7 @@ func TestTheQueuePagesWithoutRepeatingOrSkipping(t *testing.T) {
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
 		graph.Nodes = append(graph.Nodes, &engine.Node{ID: id, Title: id})
 	}
-	if _, err := pm.Store().SaveGraph(graph, rev); err != nil {
+	if _, err := pm.Store().SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatalf("SaveGraph: %v", err)
 	}
 

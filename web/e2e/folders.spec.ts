@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-import { declineTour } from "./fixture";
+import { type Page } from "@playwright/test";
+import { declineTour, expect, test } from "./fixture";
 
 // The whole suite shares one workspace, and earlier specs rename, delete and
 // restore the fixture nodes. These tests therefore create the nodes they file,
@@ -14,8 +14,11 @@ async function openApp(page: Page) {
 
 async function createNode(page: Page, title: string) {
   await page.getByRole("button", { name: /新增節點/ }).first().click();
-  await page.getByLabel("節點標題").fill(title);
-  await page.getByRole("button", { name: "建立節點" }).click();
+  // More than one create form can be mounted at once (canvas menu, sidebar),
+  // so every step stays inside the one form.
+  const form = page.locator(".node-create-form").first();
+  await form.getByLabel("節點標題").fill(title);
+  await form.getByRole("button", { name: "建立節點" }).click();
   await expect(nodeRow(page, title)).toBeVisible();
 }
 

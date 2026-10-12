@@ -1,0 +1,2 @@
+# Chroma server and its default local ONNX MiniLM embedding implementation.
+chromadb==1.5.9

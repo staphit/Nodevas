@@ -121,6 +121,28 @@
   flex: 0 0 auto;
   white-space: nowrap;
 }
+/* The address a code went to stays on screen but is not editable there; the
+ * button beside it is the way back. Dimmed so it does not read as a field
+ * waiting for input. */
+.signin-pin-row input[readonly] {
+  color: var(--text-dim, #888);
+}
+/* Switching between the email and visitor forms is a secondary path, so it is
+ * a quiet text button rather than a second primary action. */
+.signin-form button.signin-switch {
+  align-self: center;
+  margin-top: 4px;
+  border: 0;
+  background: none;
+  color: var(--text-dim, #888);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.signin-form button.signin-switch:hover {
+  color: var(--text, inherit);
+}
 
 /* Read-only sessions say so permanently — the fact does not stop being true
  * after a few seconds — but as a pill in the top bar rather than a strip above

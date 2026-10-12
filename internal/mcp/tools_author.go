@@ -21,15 +21,16 @@ import (
 // by the person whose board it is.
 
 type createNodeInput struct {
-	Title     string   `json:"title" jsonschema:"what the task is, in a few words"`
-	Body      string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
-	Kind      string   `json:"kind,omitempty" jsonschema:"task, scene, choice, gate, start or end (default task)"`
-	Priority  string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
-	Assignee  string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
-	Deadline  string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
-	Tags      []string `json:"tags,omitempty"`
-	Requires  string   `json:"requires,omitempty" jsonschema:"a condition that must hold before this is actionable, e.g. \"design and flag(approved)\""`
-	DependsOn []string `json:"dependsOn,omitempty" jsonschema:"node ids that must finish before this one can start"`
+	Title       string   `json:"title" jsonschema:"what the task is, in a few words"`
+	Body        string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
+	Kind        string   `json:"kind,omitempty" jsonschema:"task, scene, choice, gate, start or end (default task)"`
+	Priority    string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
+	Assignee    string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
+	Deadline    string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
+	Tags        []string `json:"tags,omitempty"`
+	Requires    string   `json:"requires,omitempty" jsonschema:"a condition that must hold before this is actionable, e.g. \"design and flag(approved)\""`
+	DependsOn   []string `json:"dependsOn,omitempty" jsonschema:"node ids that must finish before this one can start"`
+	WriteAccess string   `json:"writeAccess,omitempty" jsonschema:"who may modify this node: all|worker|orchestrator|human-only"`
 }
 
 type createNodeOutput struct {
@@ -50,13 +51,14 @@ type updateBodyOutput struct {
 }
 
 type updateMetaInput struct {
-	ID       string   `json:"id" jsonschema:"the node id"`
-	Title    *string  `json:"title,omitempty"`
-	Kind     *string  `json:"kind,omitempty"`
-	Priority *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
-	Assignee *string  `json:"assignee,omitempty"`
-	Deadline *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`
-	Tags     []string `json:"tags,omitempty" jsonschema:"replaces the whole tag list"`
+	ID          string   `json:"id" jsonschema:"the node id"`
+	Title       *string  `json:"title,omitempty"`
+	Kind        *string  `json:"kind,omitempty"`
+	Priority    *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
+	Assignee    *string  `json:"assignee,omitempty"`
+	Deadline    *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"replaces the whole tag list"`
+	WriteAccess *string  `json:"writeAccess,omitempty" jsonschema:"who may modify this node: all|worker|orchestrator|human-only"`
 }
 
 type updateMetaOutput struct {
@@ -92,7 +94,7 @@ type outlineInput struct {
 	Status   string `json:"status,omitempty" jsonschema:"only nodes in this status"`
 	Assignee string `json:"assignee,omitempty"`
 	Tag      string `json:"tag,omitempty"`
-	Limit    int    `json:"limit,omitempty" jsonschema:"how many nodes to return (default 200)"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"nodes per page (default 25, max 200)"`
 	Cursor   string `json:"cursor,omitempty" jsonschema:"continue after this node id"`
 }
 
@@ -105,24 +107,23 @@ type validateOutput struct {
 
 func registerAuthoringTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "create_node",
-		Description: "Add a task to the board. " +
-			"Put the actual instructions in `body` — a title alone is not a ticket anyone, including you later, can act on. " +
-			"Use `dependsOn` to say what must finish first; that is what keeps the new task out of the ready queue until it is really actionable.",
+		Name:        "create_node",
+		Description: "Create a node with actionable instructions in body. dependsOn lists prerequisites. writeAccess sets permission: human > orchestrator > worker.",
 		Annotations: &mcp.ToolAnnotations{Title: "Create a node"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createNodeInput) (*mcp.CallToolResult, createNodeOutput, error) {
 		if strings.TrimSpace(in.Title) == "" {
 			return nil, createNodeOutput{}, &APIError{Code: CodeInvalidArgument, Message: "title is required"}
 		}
 		id, err := client.CreateNode(ctx, NewNode{
-			Title:    in.Title,
-			Kind:     in.Kind,
-			Priority: in.Priority,
-			Assignee: in.Assignee,
-			Deadline: in.Deadline,
-			Tags:     in.Tags,
-			Requires: in.Requires,
-			Body:     in.Body,
+			Title:       in.Title,
+			Kind:        in.Kind,
+			Priority:    in.Priority,
+			Assignee:    in.Assignee,
+			Deadline:    in.Deadline,
+			Tags:        in.Tags,
+			Requires:    in.Requires,
+			Body:        in.Body,
+			WriteAccess: in.WriteAccess,
 		})
 		if err != nil {
 			return nil, createNodeOutput{}, err
@@ -149,9 +150,8 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "update_node_body",
-		Description: "Replace a node's markdown file. Pass the whole file, including its frontmatter — this is a replacement, not a patch. " +
-			"`baseRev` must be the rev get_node gave you: if somebody edited the node in between, the write is refused and you are handed their version rather than overwriting it.",
+		Name:        "update_node_body",
+		Description: "Replace the entire Markdown file, including frontmatter. Read every page first. baseRev from get_node prevents overwriting concurrent edits.",
 		Annotations: &mcp.ToolAnnotations{Title: "Rewrite a node's body"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateBodyInput) (*mcp.CallToolResult, updateBodyOutput, error) {
 		if strings.TrimSpace(in.ID) == "" {
@@ -172,23 +172,22 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "update_node_meta",
-		Description: "Change a node's fields — title, kind, priority, assignee, deadline, tags. " +
-			"Only the fields you send are touched, so this is safe to use while somebody else is editing a different field of the same node. " +
-			"To change the body, use update_node_body.",
+		Name:        "update_node_meta",
+		Description: "Update supplied metadata fields only. writeAccess enforces human > orchestrator > worker. Use update_node_body for text.",
 		Annotations: &mcp.ToolAnnotations{Title: "Edit a node's fields"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateMetaInput) (*mcp.CallToolResult, updateMetaOutput, error) {
 		if strings.TrimSpace(in.ID) == "" {
 			return nil, updateMetaOutput{}, &APIError{Code: CodeInvalidArgument, Message: "id is required"}
 		}
 		op := store.GraphOp{
-			Kind:     "node-metadata",
-			NodeID:   in.ID,
-			Title:    in.Title,
-			Kind_:    in.Kind,
-			Priority: in.Priority,
-			Assignee: in.Assignee,
-			Deadline: in.Deadline,
+			Kind:        "node-metadata",
+			NodeID:      in.ID,
+			Title:       in.Title,
+			Kind_:       in.Kind,
+			Priority:    in.Priority,
+			Assignee:    in.Assignee,
+			Deadline:    in.Deadline,
+			WriteAccess: in.WriteAccess,
 		}
 		changed := namedFields(in)
 		if in.Tags != nil {
@@ -208,10 +207,8 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "link_nodes",
-		Description: "Make `to` wait for `from`, or remove that dependency. " +
-			"This is what the ready queue reads: a node with an unfinished prerequisite is never offered as actionable. " +
-			"Only required dependencies can be set here; optional and deprecated wires are drawn by a person in the editor.",
+		Name:        "link_nodes",
+		Description: "Make to wait for from, or remove that required dependency. Optional/deprecated links require the editor.",
 		Annotations: &mcp.ToolAnnotations{Title: "Link two nodes"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in linkNodesInput) (*mcp.CallToolResult, linkNodesOutput, error) {
 		from, to := strings.TrimSpace(in.From), strings.TrimSpace(in.To)
@@ -265,10 +262,8 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_graph_outline",
-		Description: "The shape of the board: every node with its status, and the dependencies between them. " +
-			"Layout, colours and annotations are left out — they carry nothing you can use. " +
-			"On a large board this asks you to narrow first rather than returning everything.",
+		Name:        "get_graph_outline",
+		Description: "Page through node summaries and edges within the page. Large boards require status, assignee or tag filters.",
 		Annotations: readOnly("Board outline"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in outlineInput) (*mcp.CallToolResult, Outline, error) {
 		outline, err := client.GraphOutline(ctx, OutlineFilter{
@@ -285,9 +280,8 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "validate_graph",
-		Description: "Check the board for problems: dependency cycles, wires pointing at nodes that do not exist, " +
-			"duplicate ids, and conditions that do not parse. Worth calling after you have wired several nodes up.",
+		Name:        "validate_graph",
+		Description: "Check dependency cycles, missing nodes, duplicate IDs and invalid conditions. Run after changing dependencies.",
 		Annotations: readOnly("Check the board"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ validateInput) (*mcp.CallToolResult, validateOutput, error) {
 		issues, err := client.Validate(ctx)
@@ -325,6 +319,9 @@ func namedFields(in updateMetaInput) []string {
 	}
 	if in.Tags != nil {
 		changed = append(changed, "tags")
+	}
+	if in.WriteAccess != nil {
+		changed = append(changed, "writeAccess")
 	}
 	return changed
 }

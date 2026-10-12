@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // deleteTestServer builds a project whose nodes cover the cases a batch delete
@@ -309,7 +310,7 @@ func TestDeleteHandlersFailClosedWithSanitizedUnavailableQueue(t *testing.T) {
 			}
 		},
 		"page": func(t *testing.T, server *Server) (*httptest.ResponseRecorder, func()) {
-			page, _, _, err := server.store(nil).CreateNodePage("alpha", "Notes", "md")
+			page, _, _, err := server.store(nil).CreateNodePage(identity.Local, "alpha", "Notes", "md")
 			if err != nil {
 				t.Fatal(err)
 			}

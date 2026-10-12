@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/auth"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +141,23 @@ func TestDeprecatedPasswordFlagStillWins(t *testing.T) {
 	}
 }
 
+func TestSecretEnvironmentReadsFileAndRejectsAmbiguousInput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "smtp-password")
+	if err := os.WriteFile(path, []byte("from-file\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NODEVAS_SMTP_PASSWORD_FILE", path)
+	secret, err := secretEnvironment("NODEVAS_SMTP_PASSWORD")
+	if err != nil || secret != "from-file" {
+		t.Fatalf("secretEnvironment file = %q, %v", secret, err)
+	}
+
+	t.Setenv("NODEVAS_SMTP_PASSWORD", "from-environment")
+	if _, err := secretEnvironment("NODEVAS_SMTP_PASSWORD"); err == nil {
+		t.Fatal("direct and file-backed SMTP passwords were accepted together")
+	}
+}
+
 // Every case here is a refusal to start. They are the last thing between a
 // mistyped command line and a workspace on the open network, so each one is
 // asserted on its own rather than through a single "it errors" check.
@@ -200,5 +219,46 @@ func TestWildcardAndLoopbackClassification(t *testing.T) {
 	}
 	if !isRemoteDeployment("127.0.0.1", true) || isRemoteDeployment("127.0.0.1", false) {
 		t.Fatal("same-host reverse proxy did not force remote authentication")
+	}
+}
+
+// Every sign-in endpoint gets the same body cap, not just the one that was
+// there first.
+func TestProtectHTTPTransportCapsEverySignInBody(t *testing.T) {
+	for path := range auth.SignInPaths {
+		var readErr error
+		handler := protectHTTPTransport(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			_, readErr = io.ReadAll(request.Body)
+		}))
+		body := strings.NewReader(strings.Repeat("x", auth.MaxLoginBodyBytes+1))
+		handler.ServeHTTP(&deadlineWriter{}, httptest.NewRequest(http.MethodPost, path, body))
+		if readErr == nil {
+			t.Fatalf("oversized body at %s was accepted", path)
+		}
+	}
+}
+
+// `user list` is read by scripts — the deploy bootstrap cuts the first field —
+// so its shape is pinned: name, role and address, tab-separated, with the
+// address empty rather than missing for an account that cannot sign in.
+func TestUserListPrintsNameRoleAndEmail(t *testing.T) {
+	users, err := auth.NewUserStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = users.Close() })
+	ctx := context.Background()
+	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "Ann@Example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.Add(ctx, "bob", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	printAccounts(&out, users.Records(ctx))
+	want := "ann\tadmin\tAnn@Example.test\nbob\tmember\t\n"
+	if out.String() != want {
+		t.Fatalf("user list = %q, want %q", out.String(), want)
 	}
 }

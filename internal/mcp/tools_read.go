@@ -22,7 +22,7 @@ import (
 // ticket and small enough that reading three of them does not fill a context
 // window.
 const (
-	defaultBodyChars = 8_000
+	defaultBodyChars = 2_000
 	maxBodyChars     = 60_000
 )
 
@@ -56,23 +56,26 @@ type readyTasksOutput struct {
 
 type getNodeInput struct {
 	ID           string `json:"id" jsonschema:"the node id, as returned by get_ready_tasks"`
-	MaxBodyChars int    `json:"maxBodyChars,omitempty" jsonschema:"truncate the body to this many characters (default 8000)"`
+	MaxBodyChars int    `json:"maxBodyChars,omitempty" jsonschema:"body character limit (default 2000, max 60000)"`
 	Offset       int    `json:"offset,omitempty" jsonschema:"start the body at this character, to continue a truncated read"`
 }
 
 type getNodeOutput struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title,omitempty"`
-	Kind       string   `json:"kind,omitempty"`
-	Status     string   `json:"status"`
-	Priority   string   `json:"priority,omitempty"`
-	Assignee   string   `json:"assignee,omitempty"`
-	Deadline   string   `json:"deadline,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Requires   string   `json:"requires,omitempty"`
-	Upstream   []string `json:"upstream,omitempty"`
-	Downstream []string `json:"downstream,omitempty"`
-	Body       string   `json:"body"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Status   string   `json:"status"`
+	Priority string   `json:"priority,omitempty"`
+	Assignee string   `json:"assignee,omitempty"`
+	Deadline string   `json:"deadline,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Requires string   `json:"requires,omitempty"`
+	// WriteAccess is who may modify this node: absent means everyone; "worker",
+	// "orchestrator" and "human-only" each refuse anything below that rank.
+	WriteAccess string   `json:"writeAccess,omitempty"`
+	Upstream    []string `json:"upstream,omitempty"`
+	Downstream  []string `json:"downstream,omitempty"`
+	Body        string   `json:"body"`
 	// Rev is what a later write must present as its baseRev. Without it the
 	// write cannot tell a fresh document from one somebody edited in between.
 	Rev        string `json:"rev,omitempty"`
@@ -83,7 +86,7 @@ type getNodeOutput struct {
 func registerReadTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
-		Description: "List the projects on this Nodevas server. Every other tool acts on the one project this server was started with; this is only to see what exists.",
+		Description: "List projects. Other tools remain scoped to the startup project.",
 		Annotations: readOnly("List projects"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ listProjectsInput) (*mcp.CallToolResult, listProjectsOutput, error) {
 		projects, err := client.Projects(ctx)
@@ -99,11 +102,8 @@ func registerReadTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_ready_tasks",
-		Description: "What can be worked on right now. " +
-			"A task appears only when nobody has started it, its prerequisites are finished, and its stated condition holds — so this is a safe list to pick from. " +
-			"Bodies are not included; read one with get_node before starting. " +
-			"If the list is empty, look at `waiting`: tasks still blocked mean somebody else has to move first, and inventing work is the wrong response.",
+		Name:        "get_ready_tasks",
+		Description: "List unclaimed, unblocked tasks without bodies. Empty with waiting > 0 means blocked work; do not start it.",
 		Annotations: readOnly("Ready tasks"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in readyTasksInput) (*mcp.CallToolResult, readyTasksOutput, error) {
 		result, err := client.Ready(ctx, ReadyQuery{
@@ -128,9 +128,8 @@ func registerReadTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_node",
-		Description: "Read one node in full: its metadata, its markdown body, and which nodes lead into and out of it. " +
-			"Returns a `rev`; keep it, because writing the body back requires it.",
+		Name:        "get_node",
+		Description: "Read node metadata, dependencies and a body page. Follow nextOffset when truncated. Keep rev for body writes.",
 		Annotations: readOnly("Read a node"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getNodeInput) (*mcp.CallToolResult, getNodeOutput, error) {
 		out, err := readNode(ctx, client, in)
@@ -169,44 +168,26 @@ func readNode(ctx context.Context, client *Client, in getNodeInput) (getNodeOutp
 	if id == "" {
 		return getNodeOutput{}, &APIError{Code: CodeInvalidArgument, Message: "id is required"}
 	}
-	snapshot, err := client.Graph(ctx)
+	content, err := client.NodeContext(ctx, id)
 	if err != nil {
 		return getNodeOutput{}, err
 	}
-	node := snapshot.Graph.NodeByID(id)
-	if node == nil {
-		return getNodeOutput{}, &APIError{
-			Code:    CodeNotFound,
-			Message: fmt.Sprintf("no node %q in this project", id),
-		}
-	}
-	content, err := client.NodeContent(ctx, id)
-	if err != nil {
-		return getNodeOutput{}, err
-	}
+	node := content.Node
 
 	out := getNodeOutput{
-		ID:       node.ID,
-		Title:    node.Title,
-		Kind:     node.Kind,
-		Priority: node.Priority,
-		Assignee: node.Assignee,
-		Deadline: node.Deadline,
-		Tags:     node.Tags,
-		Requires: node.Requires,
-		Rev:      content.Rev,
-		Status:   string(statusOrReady(snapshot.Statuses, node.ID)),
-	}
-	for _, edge := range snapshot.Graph.Edges {
-		if !edge.IsPrerequisite() {
-			continue
-		}
-		if edge.To == node.ID {
-			out.Upstream = append(out.Upstream, edge.From)
-		}
-		if edge.From == node.ID {
-			out.Downstream = append(out.Downstream, edge.To)
-		}
+		ID:          node.ID,
+		Title:       node.Title,
+		Kind:        node.Kind,
+		Priority:    node.Priority,
+		Assignee:    node.Assignee,
+		Deadline:    node.Deadline,
+		Tags:        node.Tags,
+		Requires:    node.Requires,
+		WriteAccess: node.WriteAccess,
+		Rev:         content.Rev,
+		Status:      content.Status,
+		Upstream:    content.Upstream,
+		Downstream:  content.Downstream,
 	}
 	out.Body, out.Truncated, out.NextOffset = sliceBody(content.Content, in.Offset, in.MaxBodyChars)
 	return out, nil

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/store"
 	"os"
@@ -34,8 +35,12 @@ func (a *API) postNodePage(c *gin.Context) {
 		return
 	}
 	nodeID := c.Param("id")
-	page, content, rev, err := httpx.StoreFor(c.Request, a.pm).CreateNodePage(nodeID, body.Title, body.Format)
+	page, content, rev, err := httpx.StoreFor(c.Request, a.pm).CreateNodePage(
+		auth.ActorFrom(c.Request), nodeID, body.Title, body.Format)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
 	}
@@ -70,6 +75,7 @@ func (a *API) postNodePageImport(c *gin.Context) {
 		return
 	}
 	page, content, rev, err := httpx.StoreFor(c.Request, a.pm).ImportNodePage(
+		auth.ActorFrom(c.Request),
 		nodeID,
 		c.Request.FormValue("title"),
 		header.Filename,
@@ -77,6 +83,9 @@ func (a *API) postNodePageImport(c *gin.Context) {
 	)
 	if err != nil {
 		if page.ID == "" {
+			if httpx.WriteDenied(c, err) {
+				return
+			}
 			httpx.Err(c, http.StatusBadRequest, err)
 			return
 		}
@@ -122,12 +131,16 @@ func (a *API) putNodePage(c *gin.Context) {
 	}
 	nodeID := c.Param("id")
 	rev, err := httpx.StoreFor(c.Request, a.pm).SaveNodePage(
+		auth.ActorFrom(c.Request),
 		nodeID,
 		c.Param("page"),
 		body.Content,
 		body.BaseRev,
 	)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
 			httpx.Conflict(c, conflict)
@@ -165,8 +178,12 @@ func (a *API) patchNodePage(c *gin.Context) {
 		response["rev"] = rev
 	}
 	if strings.TrimSpace(body.Title) != "" || body.Index != nil {
-		pages, err := httpx.StoreFor(c.Request, a.pm).UpdateNodePage(nodeID, pageID, body.Title, body.Index)
+		pages, err := httpx.StoreFor(c.Request, a.pm).UpdateNodePage(
+			auth.ActorFrom(c.Request), nodeID, pageID, body.Title, body.Index)
 		if err != nil {
+			if httpx.WriteDenied(c, err) {
+				return
+			}
 			httpx.Err(c, http.StatusBadRequest, err)
 			return
 		}
@@ -186,8 +203,12 @@ func (a *API) patchNodePage(c *gin.Context) {
 
 func (a *API) deleteNodePage(c *gin.Context) {
 	nodeID := c.Param("id")
-	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNodePage(nodeID, c.Param("page"))
+	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNodePage(
+		auth.ActorFrom(c.Request), nodeID, c.Param("page"))
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var cleanupUnavailable *store.DeleteCleanupUnavailableError
 		if errors.As(err, &cleanupUnavailable) {
 			httpx.Err(c, http.StatusServiceUnavailable, cleanupUnavailable)

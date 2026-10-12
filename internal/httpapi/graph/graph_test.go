@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/store"
 )
 
@@ -19,7 +20,7 @@ func seedGraph(t *testing.T, st *store.Store, nodes ...*engine.Node) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rev, err = st.SaveGraph(&engine.Graph{Version: 1, Nodes: nodes}, rev)
+	rev, err = st.SaveGraph(identity.Local, &engine.Graph{Version: 1, Nodes: nodes}, rev)
 	if err != nil {
 		t.Fatalf("seed graph: %v", err)
 	}

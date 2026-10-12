@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // claimClock is time.Now, replaced in tests that need a lease to expire
@@ -209,7 +210,7 @@ type ClaimResult struct {
 // in_progress has no claim record, so it is never taken out from under them.
 // When a record is eventually pruned the node stops being reclaimable, which is
 // the safe direction to fail in.
-func (s *Store) ClaimNode(nodeID, owner string, lease time.Duration, requestID string) (*ClaimResult, error) {
+func (s *Store) ClaimNode(actor identity.Actor, nodeID, owner string, lease time.Duration, requestID string) (*ClaimResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -235,6 +236,9 @@ func (s *Store) ClaimNode(nodeID, owner string, lease time.Duration, requestID s
 	}
 	if g.NodeByID(nodeID) == nil {
 		return nil, fmt.Errorf("node %q not found", nodeID)
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return nil, err
 	}
 	rs, err := s.LoadState()
 	if err != nil {
@@ -325,6 +329,10 @@ func reasonNotClaimable(readiness engine.Readiness, nodeID string) string {
 }
 
 // ReleaseClaim gives a node back without finishing it.
+//
+// It takes no actor and applies no write-access check on purpose: if the
+// node's access is tightened while an agent holds it, the agent must still be
+// able to hand the node back rather than wedge it until the lease expires.
 func (s *Store) ReleaseClaim(nodeID, owner string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -384,10 +392,18 @@ func (s *Store) LiveClaims() []*Claim {
 // lock a person out of their own board. The override is recorded rather than
 // refused, so nothing happens silently.
 func (s *Store) ReportStatus(
-	nodeID string, status engine.Status, by, note, owner, requestID string,
+	actor identity.Actor, nodeID string, status engine.Status, by, note, owner, requestID string,
 ) (*engine.RunState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	g, _, err := s.loadGraphLocked()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
 
 	now := claimClock()
 	file := s.loadClaimsLocked()

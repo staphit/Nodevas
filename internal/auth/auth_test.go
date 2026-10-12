@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/db/dbtest"
 )
 
 func TestPasswordHashRoundTrip(t *testing.T) {
@@ -35,6 +36,7 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 }
 
 func TestUserStoreRejectsWeakAndDuplicateAccounts(t *testing.T) {
+	dbtest.UsePostgres(t)
 	workspace := t.TempDir()
 	users, err := NewUserStore(workspace)
 	if err != nil {
@@ -170,6 +172,7 @@ func TestStillAuthorizedUsesLiveRevalidator(t *testing.T) {
 }
 
 func TestSessionRevokedAfterExternalRoleChange(t *testing.T) {
+	dbtest.UsePostgres(t)
 	workspace := t.TempDir()
 	users, err := NewUserStore(workspace)
 	if err != nil {

@@ -1,11 +1,10 @@
 // The visitor credential: one shared, read-only way in.
 //
 // Everything else in this package is built around the opposite assumption —
-// a credential belongs to one named person, is verified against an argon2 hash,
-// and admits its holder to a second factor delivered somewhere only they can
-// reach. The visitor is deliberately none of that. It is a fixed PIN and a
-// fixed passcode, configured by the operator, and shared by everyone who is
-// meant to be able to look.
+// a sign-in belongs to one named person and is completed with a passcode
+// delivered to a mailbox only they can read. The visitor is deliberately none
+// of that. It is a fixed PIN and a fixed passcode, configured by the operator,
+// and shared by everyone who is meant to be able to look.
 //
 // That makes it a published password, and it is treated as one:
 //
@@ -16,9 +15,10 @@
 //     here for the same reason there is no default administrator password: a
 //     credential that exists without anyone deciding it should is a credential
 //     nobody knows is there.
-//   - It is checked before the account path, so a real account is never
-//     reached by it. Real PINs are at least MinPinLength characters, so a
-//     usefully short visitor PIN cannot collide with one.
+//   - It has its own endpoint, POST /api/auth/visitor, and the account
+//     endpoints never consult it. A real account cannot be reached with it,
+//     and an account sign-in cannot accidentally become a visitor one: the two
+//     share the login throttles and the session machinery, and nothing else.
 //
 // It lives in the settings table rather than in this process, and is read on
 // every attempt rather than cached, for the same reason UserStore caches
@@ -26,8 +26,7 @@
 // `nodevas visitor off` on a machine where the site is under a link somebody
 // posted cannot be told to restart the service and take everyone's editing
 // session with it. The cost is one indexed primary-key lookup on a local
-// SQLite file per sign-in attempt, which is nothing beside the argon2 pass
-// that follows it, and which the rate limits are charged before in any case.
+// SQLite file per sign-in attempt, which the rate limits are charged before.
 //
 // The stored values are not hashed. Hashing a credential the operator
 // publishes protects nothing — anyone who can read it from the database can
@@ -42,6 +41,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"nodevas/internal/identity"
@@ -62,12 +62,17 @@ const (
 	visitorOTPKey = "auth.visitor.otp"
 )
 
-// MinVisitorPinLength is far below MinPinLength on purpose. A visitor PIN is
-// meant to be told to a room, printed on a slide, or typed from memory, and it
-// guards nothing that a write could damage. It is still not allowed to be
-// empty or one character, because the throttles are the only thing between it
-// and exhaustive guessing.
+// MinVisitorPinLength is short on purpose. A visitor PIN is meant to be told
+// to a room, printed on a slide, or typed from memory, and it guards nothing
+// that a write could damage. It is still not allowed to be empty or one
+// character, because the throttles are the only thing between it and
+// exhaustive guessing.
 const MinVisitorPinLength = 3
+
+// MaxVisitorPinBytes bounds what a sign-in attempt may offer as the visitor
+// PIN, before it is compared with anything. A PIN is short; a megabyte of one
+// is somebody probing, not somebody typing.
+const MaxVisitorPinBytes = 256
 
 // MinVisitorOTPLength is where the credential's strength actually lives. The
 // PIN is published; the passcode is what a stranger has to guess, so it is
@@ -82,12 +87,6 @@ var VisitorActor = identity.Actor{
 	Name: "visitor",
 	Role: identity.RoleVisitor,
 }
-
-// ErrVisitorFixedPasscode reports that the PIN offered was the visitor's, so
-// there is no passcode to mint or mail. The HTTP layer must treat it exactly
-// like every other RequestOTP failure — a 202 and nothing else — or the
-// endpoint tells an unauthenticated caller which PIN it just guessed.
-var ErrVisitorFixedPasscode = errors.New("the visitor passcode is fixed and is not mailed")
 
 // ValidateVisitorCredential checks a proposed credential without storing it,
 // so the CLI can refuse a bad one before it writes anything.
@@ -110,7 +109,7 @@ func ValidateVisitorCredential(pin, otp string) error {
 			"a visitor passcode must be at least %d characters: the pin is published, "+
 				"so this is the only half that has to be guessed", MinVisitorOTPLength)
 	}
-	if len(pin) > MaxPinBytes || len(otp) > MaxOTPBytes {
+	if len(pin) > MaxVisitorPinBytes || len(otp) > MaxOTPBytes {
 		return errors.New("the visitor pin or passcode is too long")
 	}
 	return nil
@@ -194,13 +193,38 @@ func (a *SessionAuth) VisitorEnabled(ctx context.Context) bool {
 	return err == nil && pin != ""
 }
 
-// visitorPinMatches reports whether this PIN is the visitor's.
-func (a *SessionAuth) visitorPinMatches(ctx context.Context, pin string) bool {
-	stored, _, err := a.users.VisitorCredential(ctx)
-	if err != nil || stored == "" {
-		return false
+// LoginVisitor signs in with the shared read-only credential.
+//
+// It is charged against the same global and per-source budgets an account
+// sign-in uses, so the two endpoints cannot be played off against each other.
+// There is no per-credential budget: the credential is shared, and a bucket
+// for it would let one stranger lock every visitor out by spending it.
+//
+// A wrong PIN, a wrong passcode and visitor access being off all give the same
+// ErrBadCredentials. A visitor session never ends anybody else's — the account
+// path signs out an account's other devices, and a credential everybody shares
+// cannot go through that.
+func (a *SessionAuth) LoginVisitor(r *http.Request, pin, passcode string) (identity.Actor, string, string, error) {
+	source := ""
+	if r != nil {
+		source = ClientIP(r)
 	}
-	return subtle.ConstantTimeCompare([]byte(stored), []byte(pin)) == 1
+	ctx := requestContext(r)
+	if !a.allowLogin("", source) {
+		return identity.Actor{}, "", "", ErrTooManyLogins
+	}
+	if len(pin) == 0 || len(pin) > MaxVisitorPinBytes || len(passcode) == 0 || len(passcode) > MaxOTPBytes {
+		return identity.Actor{}, "", "", ErrBadCredentials
+	}
+	if !a.visitorLogin(ctx, pin, passcode) {
+		// The settings read is the one thing here that can fail for a reason
+		// other than a wrong credential, and a closed tab is that reason.
+		if err := contextFailure(ctx); err != nil {
+			return identity.Actor{}, "", "", err
+		}
+		return identity.Actor{}, "", "", ErrBadCredentials
+	}
+	return a.openSession(VisitorActor, visitorRevision)
 }
 
 // visitorLogin reports whether both halves of the visitor credential were

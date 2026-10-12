@@ -11,6 +11,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/auth/status", a.getAuthStatus)
 	api.POST("/auth/otp/request", a.postRequestOTP)
 	api.POST("/auth/login", a.postLogin)
+	api.POST("/auth/visitor", a.postVisitorLogin)
 	api.POST("/auth/logout", a.postLogout)
 	api.POST("/export", a.postExport)
 
@@ -22,4 +23,5 @@ func (a *API) Register(api *gin.RouterGroup) {
 	admin.GET("/audit", a.getAudit)
 	admin.GET("/audit/health", a.getAuditHealth)
 	admin.POST("/audit/health/acknowledge", a.postAuditHealthAcknowledge)
+	admin.GET("/audit/limiter", a.getAuditLimiter)
 }

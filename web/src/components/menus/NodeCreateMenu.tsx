@@ -41,6 +41,8 @@ export interface NodeCreateMenuProps {
   nodeCreateBusy: boolean;
   nodeCreateStatus: Status | "";
   setNodeCreateStatus: (status: Status | "") => void;
+  nodeCreateWriteAccess: string;
+  setNodeCreateWriteAccess: (writeAccess: string) => void;
   nodeCreateStyle: NodeStyle;
   setNodeCreateStyle: (update: (current: NodeStyle) => NodeStyle) => void;
   nodePlanDates: Partial<Record<PlanStatus, string>>;
@@ -73,6 +75,8 @@ export function NodeCreateMenu({
   nodeCreateBusy,
   nodeCreateStatus,
   setNodeCreateStatus,
+  nodeCreateWriteAccess,
+  setNodeCreateWriteAccess,
   nodeCreateStyle,
   setNodeCreateStyle,
   nodePlanDates,
@@ -260,6 +264,19 @@ export function NodeCreateMenu({
                   {localizedStatusLabel(candidate, customStatuses)}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="lane-context-field node-create-field">
+            {t("node.meta.writeAccess")}
+            <select
+              value={nodeCreateWriteAccess}
+              disabled={nodeCreateBusy}
+              onChange={(event) => setNodeCreateWriteAccess(event.target.value)}
+            >
+              <option value="">{t("node.writeAccess.everyone")}</option>
+              <option value="worker">{t("node.writeAccess.worker")}</option>
+              <option value="orchestrator">{t("node.writeAccess.orchestrator")}</option>
+              <option value="human-only">{t("node.writeAccess.humanOnly")}</option>
             </select>
           </label>
           <div className="node-create-status-preview">

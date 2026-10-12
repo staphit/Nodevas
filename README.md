@@ -54,7 +54,7 @@ The interface defaults to English and can switch to Traditional Chinese (`zh-TW`
 
 ## Quick start
 
-Requirements: Go 1.25.12, Node.js 22 with npm, and Git.
+Requirements: Go 1.26.9, Node.js 22 with npm, and Git.
 
 ```bash
 git clone https://github.com/staphit/Nodevas.git
@@ -74,6 +74,7 @@ Open <http://127.0.0.1:5666>. For production builds, development mode, configura
 - [MCP integration](./docs/mcp.md): connect Claude Code, Codex, or another MCP client.
 - [Storage and collaboration](./docs/collaboration.md): project files, shared servers, WebSocket, and CRDT behavior.
 - [OCI deployment](./deploy/oci/README.md): provision and operate a shared cloud deployment.
+- [TrueNAS deployment](./deploy/truenas/README.md): run Nodevas behind Cloudflare Tunnel without publishing an origin port.
 - [Contributing](./docs/contributing.md): development checks and repository locations.
 
 ## Code signing

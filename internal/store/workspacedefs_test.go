@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 func TestWorkspaceStatusesMergeAndStrip(t *testing.T) {
@@ -27,7 +28,7 @@ func TestWorkspaceStatusesMergeAndStrip(t *testing.T) {
 		return LoadWorkspaceStatuses(workspace)
 	})
 	graph := &engine.Graph{Version: 1, Nodes: []*engine.Node{{ID: "a", Title: "A"}}}
-	if _, err := st.SaveGraph(graph, ""); err != nil {
+	if _, err := st.SaveGraph(identity.Local, graph, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,7 +42,7 @@ func TestWorkspaceStatusesMergeAndStrip(t *testing.T) {
 	}
 
 	// Saving the merged graph must not copy the shared state into the file.
-	if _, err := st.SaveGraph(loaded, rev); err != nil {
+	if _, err := st.SaveGraph(identity.Local, loaded, rev); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(st.GraphPath())
@@ -68,7 +69,7 @@ func TestSetStatusAcceptsWorkspaceStatus(t *testing.T) {
 	st.SetSharedStatuses(func() []engine.StatusDefinition {
 		return LoadWorkspaceStatuses(workspace)
 	})
-	if _, err := st.SaveGraph(&engine.Graph{
+	if _, err := st.SaveGraph(identity.Local, &engine.Graph{
 		Version: 1, Nodes: []*engine.Node{{ID: "a", Title: "A"}},
 	}, ""); err != nil {
 		t.Fatal(err)

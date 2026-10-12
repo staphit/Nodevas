@@ -8,12 +8,14 @@ import (
 
 // routeNodes serves single nodes and bulk node operations. See node_http.go.
 func (a *API) Register(api *gin.RouterGroup) {
+	api.GET("/documents", httpx.ETag(a.getDocuments))
 	api.POST("/nodes", a.postNode)
 	// Static siblings of :id must stay distinct from any node id.
 	api.POST("/nodes/delete", a.postNodesDelete)
 	api.POST("/nodes/transfer", a.postNodesTransfer)
 	api.POST("/nodes/folder", a.postNodesFolder)
 	api.GET("/nodes/:id", httpx.ETag(a.getNode))
+	api.GET("/nodes/:id/context", httpx.ETag(a.getNodeContext))
 	api.PUT("/nodes/:id", a.putNode)
 	api.DELETE("/nodes/:id", a.deleteNode)
 	api.POST("/nodes/:id/duplicate", a.postNodeDuplicate)

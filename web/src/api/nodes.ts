@@ -132,10 +132,15 @@ export const nodesApi = {
       { method: "POST", body },
     );
   },
-  createNode: (node: { id?: string; title?: string; kind?: string }, body = "") =>
+  createNode: (
+    node: { id?: string; title?: string; kind?: string; writeAccess?: string },
+    body = "",
+  ) =>
     req<{ ok: boolean; id: string }>("/api/nodes", {
       method: "POST",
-      body: JSON.stringify({ ...node, body }),
+      // An empty writeAccess is the default (everyone) and is omitted rather
+      // than sent as "".
+      body: JSON.stringify({ ...node, writeAccess: node.writeAccess || undefined, body }),
     }),
   duplicateNode: (id: string) =>
     req<{ ok: boolean; id: string }>(

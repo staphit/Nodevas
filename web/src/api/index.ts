@@ -16,6 +16,7 @@ import { workspaceApi } from "./workspace";
 export {
   AuthError,
   ConflictError,
+  getProjectOverride,
   onUnauthorized,
   setProjectOverride,
   UnauthorizedError,

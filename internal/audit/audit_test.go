@@ -11,18 +11,14 @@ import (
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/db/dbtest"
 )
 
 // newStore opens a throwaway workspace database. Every test gets its own file
 // so nothing here depends on the order the tests run in.
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { database.Close() })
-	return New(database)
+	return New(dbtest.Open(t))
 }
 
 func TestRecordAndQueryReturnTheNewestEventFirst(t *testing.T) {

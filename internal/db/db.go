@@ -1,5 +1,6 @@
-// Package db is the workspace's SQLite database: the operational data a
-// workspace needs that is not the user's content.
+// Package db is the workspace's database: the operational data a workspace
+// needs that is not the user's content. It is a SQLite file by default, or a
+// PostgreSQL server when URLEnv names one (see postgres.go).
 //
 // The line this package draws matters. Node bodies stay Markdown files and the
 // graph stays YAML, because being readable in a text editor, diffable in git
@@ -20,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,6 +62,33 @@ type DB struct {
 	write *sql.DB
 	read  *sql.DB
 	path  string
+	// backend is SQLite unless the workspace was pointed at a PostgreSQL
+	// server with URLEnv.
+	backend Backend
+	// local is the workspace's SQLite file when backend is Postgres: the
+	// search index stays there (see Local). Nil on SQLite, where the file is
+	// this DB.
+	local *DB
+}
+
+// Backend reports which engine this handle talks to.
+func (d *DB) Backend() Backend {
+	if d.backend == "" {
+		return SQLite
+	}
+	return d.backend
+}
+
+// Local is the workspace's own SQLite database. It is this DB on SQLite; on
+// PostgreSQL it is the file beside the workspace, which keeps the search
+// index: that index is derived from the Markdown, is rebuilt when it is
+// missing, and is built on SQLite's FTS5, so moving it to the server would buy
+// nothing but a second full-text dialect to maintain.
+func (d *DB) Local() *DB {
+	if d.local != nil {
+		return d.local
+	}
+	return d
 }
 
 // Writer is the single write connection, for a caller that needs the handle
@@ -102,18 +131,20 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 	return d.write.BeginTx(ctx, opts)
 }
 
-// Close shuts both handles, reporting the first failure.
+// Close shuts both handles, and the local file on PostgreSQL, reporting every
+// failure.
 func (d *DB) Close() error {
 	readErr := d.read.Close()
 	writeErr := d.write.Close()
-	if writeErr != nil {
-		return writeErr
+	var localErr error
+	if d.local != nil {
+		localErr = d.local.Close()
 	}
-	return readErr
+	return errors.Join(writeErr, readErr, localErr)
 }
 
-// Path returns the database file, for an operator being told where to point
-// their tools.
+// Path returns the database file, or the PostgreSQL server without its
+// credentials, for an operator being told where to point their tools.
 func (d *DB) Path() string { return d.path }
 
 // PathFor returns where a workspace's database lives.
@@ -123,12 +154,53 @@ func PathFor(root string) string {
 
 // Open opens (creating if needed) the database for a workspace and brings its
 // schema up to date.
+//
+// With URLEnv set the operational data lives on that PostgreSQL server and the
+// workspace's SQLite file keeps only the search index. A server that cannot be
+// reached within WaitEnv is not fatal: the workspace falls back to its SQLite
+// file for everything, as it ran before the server existed, and says so in the
+// log. Nothing is copied back when the server returns — rows written during a
+// fallback stay in the file.
 func Open(root string) (*DB, error) {
+	return openWith(root, os.LookupEnv)
+}
+
+func openWith(root string, lookup func(string) (string, bool)) (*DB, error) {
 	path := PathFor(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("database directory: %w", err)
 	}
-	return OpenAt(path)
+	local, err := OpenAt(path)
+	if err != nil {
+		return nil, err
+	}
+	rawURL, err := URLFromEnv(lookup)
+	if err != nil {
+		local.Close()
+		return nil, err
+	}
+	if rawURL == "" {
+		return local, nil
+	}
+	wait, err := waitFromEnv(lookup)
+	if err != nil {
+		local.Close()
+		return nil, err
+	}
+	remote, err := OpenPostgres(rawURL, wait)
+	if errors.Is(err, ErrUnreachable) {
+		slog.Warn("PostgreSQL is unreachable; using the workspace SQLite database until the next restart",
+			slog.String("event.code", "db.postgres_fallback"),
+			slog.String("path", local.Path()),
+			slog.String("error", err.Error()))
+		return local, nil
+	}
+	if err != nil {
+		local.Close()
+		return nil, err
+	}
+	remote.local = local
+	return remote, nil
 }
 
 // OpenAt opens a database by path. Tests use it; Open is what the server calls.
@@ -176,7 +248,7 @@ func OpenAt(path string) (*DB, error) {
 	reader.SetMaxIdleConns(maxReaders)
 	reader.SetConnMaxLifetime(0)
 
-	database := &DB{write: writer, read: reader, path: path}
+	database := &DB{write: writer, read: reader, path: path, backend: SQLite}
 
 	// The writer runs first: it is what creates the file and puts it in WAL
 	// mode, and a reader opened against a database that does not exist yet
@@ -186,9 +258,10 @@ func OpenAt(path string) (*DB, error) {
 		return nil, err
 	}
 
-	// The file holds password and PIN hashes. On a shared machine it must not
-	// be world-readable, like the other workspace credentials. Done after the
-	// migration so the WAL sidecars exist to be tightened too.
+	// The file holds password hashes, sign-in addresses and session hashes. On a
+	// shared machine it must not be world-readable, like the other workspace
+	// credentials. Done after the migration so the WAL sidecars exist to be
+	// tightened too.
 	if err := restrictPermissions(path); err != nil {
 		database.Close()
 		return nil, err
@@ -337,15 +410,56 @@ CREATE INDEX sessions_user ON sessions (user_id);
 CREATE INDEX sessions_expires ON sessions (expires_at);
 `,
 	},
+	{
+		name: "0006_email_sign_in",
+		stmt: `
+-- Web sign-in is now an email address and a mailed passcode. The PIN is gone,
+-- so its hashes are cleared rather than left behind as a credential nothing
+-- checks: a hash nobody verifies is still something a stolen backup can be
+-- guessed against. The column stays because dropping one rewrites the table,
+-- and an empty column costs nothing.
+--
+-- Clearing it also changes every account's revision, which signs out every
+-- session opened under the old two-factor rule. That is the intended
+-- direction: a session should not outlive the rule that admitted it.
+--
+-- An account with an address but no PIN is one an administrator shut out with
+-- ` + "`nodevas user pin-clear`" + `: that cleared the PIN and left the address, and
+-- sign-in only ever looked at accounts holding a PIN. Now the address alone
+-- signs in, so the leftover would quietly re-admit the account. Its address
+-- goes first, before the PINs that tell the two cases apart are cleared, and
+-- that also keeps the duplicate step below choosing only among accounts that
+-- could actually sign in.
+UPDATE accounts SET email = '' WHERE pin_hash = '';
+UPDATE accounts SET pin_hash = '';
+
+-- The address is now how an account is found, so two accounts must not share
+-- one, compared the way a person types it — Ann@Example.test and
+-- ann@example.test are one mailbox. A workspace that already holds such a pair
+-- would fail the index below and refuse to start, so the later account loses
+-- its address first and the oldest keeps it; an operator re-registers the
+-- other with ` + "`nodevas user email`" + `. Refusing to start over it would leave a
+-- server down for something one command fixes.
+UPDATE accounts SET email = ''
+ WHERE email != ''
+   AND rowid NOT IN (
+       SELECT MIN(rowid) FROM accounts WHERE email != '' GROUP BY email COLLATE NOCASE);
+CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.
 func (d *DB) migrate(ctx context.Context) error {
-	if _, err := d.ExecContext(ctx, `
+	bootstrap, steps := `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
-) STRICT`); err != nil {
+) STRICT`, migrations
+	if d.Backend() == Postgres {
+		bootstrap, steps = pgSchemaMigrations, pgMigrations
+	}
+	if _, err := d.ExecContext(ctx, bootstrap); err != nil {
 		return fmt.Errorf("schema_migrations: %w", err)
 	}
 
@@ -367,11 +481,27 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		return err
 	}
 
-	for _, step := range migrations {
+	for _, step := range steps {
 		if applied[step.name] {
 			continue
 		}
 		if err := d.inTx(ctx, func(tx *sql.Tx) error {
+			if d.Backend() == Postgres {
+				// Another process may have applied this step since the read
+				// above; the lock orders the two and the recheck skips it.
+				if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
+					return err
+				}
+				var done int
+				err := tx.QueryRowContext(ctx,
+					`SELECT 1 FROM schema_migrations WHERE name = ?`, step.name).Scan(&done)
+				if err == nil {
+					return nil
+				}
+				if !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+			}
 			if _, err := tx.ExecContext(ctx, step.stmt); err != nil {
 				return err
 			}

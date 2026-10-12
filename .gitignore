@@ -42,6 +42,7 @@ cover.out
 
 # Local workspaces
 /examples/
+/demo/日程/
 
 # Per-project recovery state
 **/.vised/
@@ -83,6 +84,14 @@ web/mobile-preview/
 
 # Cross-compiled binaries from deploy dry runs.
 /nodevas-linux-*
+
+# Security case workspace (scope, evidence): never part of a commit.
+/work/
+
+# Local deployment configurations and security guides.
+/deploy/caddy/
+/deploy/nginx/
+/docs/security-deployment.md
 
 # Local iOS deployment project; keep it on the developer machine only.
 /ios/

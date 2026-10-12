@@ -20,8 +20,8 @@ export class UnauthorizedError extends Error {
 
 /**
  * A sign-in failure carries the status code because the form reacts to it:
- * 401 means the PIN or the passcode was wrong, 429 means throttled, 503 means
- * the server has no mail transport and no passcode can ever arrive.
+ * 401 means the email, PIN or passcode was wrong, 429 means throttled, 503
+ * means the server has no mail transport and no passcode can ever arrive.
  */
 export class AuthError extends Error {
   status: number;
@@ -72,6 +72,11 @@ let projectOverride = "";
 
 export function setProjectOverride(name: string): void {
   projectOverride = name;
+}
+
+/** The project selected by this browser when the shared active project differs. */
+export function getProjectOverride(): string {
+  return projectOverride;
 }
 
 /**

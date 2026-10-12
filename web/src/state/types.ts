@@ -210,7 +210,7 @@ export interface SaveTabOptions {
 export interface DocumentSlice {
   tabs: Tab[];
   activeTab: string | null; // null = drawer closed
-  /** Open subpages, keyed by editor instance. */
+  /** Retained subpage buffers, keyed by node within the current project. */
   pageDocs: Record<string, PageDoc>;
   setPageDoc: (
     key: string,
@@ -340,7 +340,7 @@ export interface GraphSlice {
 
   commitRequires: (id: string, requires: string) => Promise<void>;
   createNode: (
-    node: { id?: string; title?: string; kind?: string },
+    node: { id?: string; title?: string; kind?: string; writeAccess?: string },
     options?: {
       openDocument?: boolean;
       position?: { x: number; y: number };

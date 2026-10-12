@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/export"
+	"nodevas/internal/identity"
 	"nodevas/internal/store"
 	"os"
 	"path/filepath"
@@ -117,7 +118,7 @@ func TestConvertPageRewritesTheFileAndKeepsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.store(nil).SaveNodePage("alpha", page.ID,
+	if _, err := server.store(nil).SaveNodePage(identity.Local, "alpha", page.ID,
 		"# 轉檔\n\n內文一行\n", rev); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestDeletedDocxPageRestoresIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleteOutcome, err := server.store(nil).DeleteNodePage("alpha", page.ID)
+	deleteOutcome, err := server.store(nil).DeleteNodePage(identity.Local, "alpha", page.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func TestExportOfHtmlPageBecomesText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.store(nil).SaveNodePage("alpha", page.ID,
+	if _, err := server.store(nil).SaveNodePage(identity.Local, "alpha", page.ID,
 		"<h1>網頁</h1><p>段落 <b>粗</b></p>", rev); err != nil {
 		t.Fatal(err)
 	}

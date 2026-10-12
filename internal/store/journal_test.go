@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // newJournalTestStore writes a tiny graph and returns a store for it.
@@ -179,7 +180,7 @@ func TestCheckpointCoversMoveEventsAcrossRotation(t *testing.T) {
 	// inside the checkpoint, so resumed replay has to find it there.
 	first := rs.History[0]
 	moved := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).Format(time.RFC3339)
-	if _, err := st.MoveEvent(first.ID, moved, "tester", "改時間"); err != nil {
+	if _, err := st.MoveEvent(identity.Local, first.ID, moved, "tester", "改時間"); err != nil {
 		t.Fatalf("MoveEvent: %v", err)
 	}
 	driveUntilRotation(t, st, "a")

@@ -29,6 +29,10 @@ func mcpServe(args []string) {
 		"which project in that server's workspace to act on; empty means whichever one it has open")
 	actor := fs.String("actor", mcp.DefaultActor,
 		"the name recorded against everything this agent changes; attribution, not authentication")
+	agentRole := fs.String("agent-role", "worker",
+		"the write-permission class this agent acts as: worker or orchestrator")
+	chromaURL := fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project")
+	ragPython := fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings")
 	_ = fs.Parse(args)
 
 	// Every diagnostic goes to stderr, without exception. stdout carries the
@@ -39,14 +43,30 @@ func mcpServe(args []string) {
 		name = mcp.DefaultActor
 	}
 
+	// Refused here, before the transport starts: a bad role sent to the server
+	// would fail every single call with a 401, which reads as a broken server
+	// rather than a mistyped flag.
+	role := strings.TrimSpace(*agentRole)
+	switch role {
+	case "worker", "orchestrator":
+	default:
+		fmt.Fprintf(os.Stderr,
+			"nodevas mcp: --agent-role %q is not a role this server knows: use \"worker\" or \"orchestrator\"\n",
+			*agentRole)
+		os.Exit(2)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	err := mcp.Serve(ctx, mcp.Options{
-		Server:  *server,
-		Project: strings.TrimSpace(*projectName),
-		Actor:   name,
-		Stderr:  os.Stderr,
+		Server:    *server,
+		Project:   strings.TrimSpace(*projectName),
+		Actor:     name,
+		AgentRole: role,
+		ChromaURL: *chromaURL,
+		RAGPython: *ragPython,
+		Stderr:    os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
 		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)

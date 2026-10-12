@@ -59,7 +59,7 @@ export function NodeMetaForm({ id }: { id: string }) {
   }, []);
 
   const commitMeta = useCallback(
-    (field: "title" | "kind" | "priority", value: string) => {
+    (field: "title" | "kind" | "priority" | "writeAccess", value: string) => {
       reportCommand(updateNodeMetadata(id, { [field]: value } as NodeMetadataPatch));
     },
     [id, reportCommand, updateNodeMetadata],
@@ -187,6 +187,17 @@ export function NodeMetaForm({ id }: { id: string }) {
             <option value="high">{t("node.priority.high")}</option>
             <option value="medium">{t("node.priority.medium")}</option>
             <option value="low">{t("node.priority.low")}</option>
+          </select>
+          <label htmlFor={`write-access-${id}`}>{t("node.meta.writeAccess")}</label>
+          <select
+            id={`write-access-${id}`}
+            value={node?.writeAccess ?? ""}
+            onChange={(event) => commitMeta("writeAccess", event.target.value)}
+          >
+            <option value="">{t("node.writeAccess.everyone")}</option>
+            <option value="worker">{t("node.writeAccess.worker")}</option>
+            <option value="orchestrator">{t("node.writeAccess.orchestrator")}</option>
+            <option value="human-only">{t("node.writeAccess.humanOnly")}</option>
           </select>
         </div>
         <div className="meta-row">

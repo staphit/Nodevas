@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/graph"
+	"nodevas/internal/identity"
 	"nodevas/internal/realtime"
 	"strings"
 	"testing"
@@ -83,7 +84,7 @@ func liveOpsServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SaveGraph(&engine.Graph{
+	if _, err := st.SaveGraph(identity.Local, &engine.Graph{
 		Version: 1,
 		Nodes:   []*engine.Node{{ID: "alpha", Title: "Alpha"}},
 	}, rev); err != nil {

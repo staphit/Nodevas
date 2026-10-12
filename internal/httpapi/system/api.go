@@ -24,6 +24,7 @@ type API struct {
 	auth     auth.Authenticator
 	mailer   PasscodeMailer
 	audit    *audit.Store
+	limiter  func() any
 }
 
 // New builds the handler set.
@@ -42,4 +43,9 @@ func (a *API) UseMailer(mailer PasscodeMailer) {
 // requests are recorded there and nowhere else: they belong to no project.
 func (a *API) UseAudit(store *audit.Store) {
 	a.audit = store
+}
+
+// UseLimiter wires the limiter stats reporter callback.
+func (a *API) UseLimiter(reporter func() any) {
+	a.limiter = reporter
 }

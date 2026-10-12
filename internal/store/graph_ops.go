@@ -21,6 +21,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/identity"
 )
 
 // maxGraphOps bounds one request. A drag emits one op per selected node, so
@@ -41,12 +42,13 @@ type GraphOp struct {
 
 	// Metadata fields; a nil pointer means "leave alone", which is what makes
 	// two people editing different fields of one node safe.
-	Title    *string   `json:"title,omitempty"`
-	Kind_    *string   `json:"nodeKind,omitempty"`
-	Priority *string   `json:"priority,omitempty"`
-	Assignee *string   `json:"assignee,omitempty"`
-	Deadline *string   `json:"deadline,omitempty"`
-	Tags     *[]string `json:"tags,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+	Kind_       *string   `json:"nodeKind,omitempty"`
+	Priority    *string   `json:"priority,omitempty"`
+	Assignee    *string   `json:"assignee,omitempty"`
+	Deadline    *string   `json:"deadline,omitempty"`
+	WriteAccess *string   `json:"writeAccess,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
 
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
@@ -64,7 +66,7 @@ type GraphOp struct {
 // The batch is all-or-nothing: a request that is half-applied would leave the
 // user looking at a board that matches neither what they did nor what they
 // had.
-func (s *Store) ApplyGraphOps(ops []GraphOp) (*engine.Graph, string, error) {
+func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, error) {
 	if len(ops) == 0 {
 		return nil, "", fmt.Errorf("no operations given")
 	}
@@ -83,7 +85,7 @@ func (s *Store) ApplyGraphOps(ops []GraphOp) (*engine.Graph, string, error) {
 	}
 	touched := map[string]bool{}
 	for _, op := range ops {
-		if err := applyGraphOp(graph, op, touched); err != nil {
+		if err := applyGraphOp(actor, graph, op, touched); err != nil {
 			return nil, "", err
 		}
 	}
@@ -117,8 +119,11 @@ func (s *Store) ApplyGraphOps(ops []GraphOp) (*engine.Graph, string, error) {
 	return graph, Rev(data), nil
 }
 
-func applyGraphOp(graph *engine.Graph, op GraphOp, touched map[string]bool) error {
+func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool) error {
 	switch op.Kind {
+	// move, node-size and timeline-order stay ungated: they change how the
+	// board is drawn, not what the node says, so a restricted node can still
+	// be arranged by anyone.
 	case "move":
 		node := graph.NodeByID(op.NodeID)
 		if node == nil {
@@ -150,6 +155,19 @@ func applyGraphOp(graph *engine.Graph, op GraphOp, touched map[string]bool) erro
 		if node == nil {
 			return fmt.Errorf("node %q not found", op.NodeID)
 		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if op.WriteAccess != nil {
+			access := normalizeWriteAccess(*op.WriteAccess)
+			switch access {
+			case engine.WriteAccessAll, engine.WriteAccessWorker,
+				engine.WriteAccessOrchestrator, engine.WriteAccessHumanOnly:
+			default:
+				return fmt.Errorf("invalid write_access %q", *op.WriteAccess)
+			}
+			node.WriteAccess = access
+		}
 		if op.Title != nil {
 			node.Title = *op.Title
 		}
@@ -172,6 +190,11 @@ func applyGraphOp(graph *engine.Graph, op GraphOp, touched map[string]bool) erro
 	case "add-edge":
 		if graph.NodeByID(op.From) == nil || graph.NodeByID(op.To) == nil {
 			return fmt.Errorf("edge %s->%s names a node that does not exist", op.From, op.To)
+		}
+		// The dependency lands in the To node's requires, so that node's
+		// access is the one that matters.
+		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
+			return err
 		}
 		if op.From == op.To {
 			return fmt.Errorf("a node cannot depend on itself")
@@ -207,6 +230,9 @@ func applyGraphOp(graph *engine.Graph, op GraphOp, touched map[string]bool) erro
 	case "remove-edge":
 		if graph.NodeByID(op.From) == nil || graph.NodeByID(op.To) == nil {
 			return fmt.Errorf("edge %s->%s names a node that does not exist", op.From, op.To)
+		}
+		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
+			return err
 		}
 		if gateID := logicGateOwningEdge(graph, op.From, op.To); gateID != "" {
 			return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
@@ -264,6 +290,9 @@ func applyGraphOp(graph *engine.Graph, op GraphOp, touched map[string]bool) erro
 		}
 		if selected == nil {
 			return fmt.Errorf("edge %s->%s not found", op.From, op.To)
+		}
+		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
+			return err
 		}
 		nextRelation := selected.Relation
 		if op.Relation != nil {

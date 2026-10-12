@@ -10,6 +10,7 @@ import (
 	"reflect"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // ---------- graph ----------
@@ -43,7 +44,7 @@ func (s *Store) loadGraphLocked() (*engine.Graph, string, error) {
 
 // SaveGraph writes graph.yaml (optimistic-locked) and
 // refreshes every node file's frontmatter snapshot.
-func (s *Store) SaveGraph(g *engine.Graph, baseRev string) (string, error) {
+func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ValidateGraphForStorage(g); err != nil {
@@ -67,8 +68,16 @@ func (s *Store) SaveGraph(g *engine.Graph, baseRev string) (string, error) {
 	}
 	updates := make([]fileUpdate, 0, len(g.Nodes)+1)
 	for _, n := range g.Nodes {
-		if reflect.DeepEqual(currentGraph.NodeByID(n.ID), n) {
+		existing := currentGraph.NodeByID(n.ID)
+		if reflect.DeepEqual(existing, n) {
 			continue
+		}
+		// A changed node is gated by the access it had before this save, so an
+		// agent cannot lift a restriction by rewriting the whole file. A node
+		// the save leaves untouched needs no permission, and a new node
+		// (existing == nil) is anyone's to add.
+		if err := checkNodeWrite(actor, existing); err != nil {
+			return "", err
 		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {
@@ -143,7 +152,7 @@ func (s *Store) LoadNodeContent(id string) (string, string, error) {
 // what the caller sent, and the caller has to adopt it or its next save starts
 // from a revision that never existed. Handing it back with the revision is what
 // lets an auto-saving editor stay in step without a GET after every save.
-func (s *Store) SaveNodeContent(id, content, baseRev string) (string, string, error) {
+func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev string) (string, string, error) {
 	if !engine.ValidNodeID(id) {
 		return "", "", fmt.Errorf("invalid node id")
 	}
@@ -159,6 +168,9 @@ func (s *Store) SaveNodeContent(id, content, baseRev string) (string, string, er
 	n := g.NodeByID(id)
 	if n == nil {
 		return "", "", fmt.Errorf("node %q not found in graph", id)
+	}
+	if err := checkNodeWrite(actor, n); err != nil {
+		return "", "", err
 	}
 	nf, err := engine.ParseNodeFile([]byte(content))
 	if err != nil {

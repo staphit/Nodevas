@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // A snapshot must be readable without restoring it, so the UI can show what a
@@ -69,18 +70,18 @@ func TestStoreSubpageHistoryRoundTrip(t *testing.T) {
 	}
 	store := NewStore(root)
 
-	page, _, rev, err := store.CreateNodePage("alpha", "設計稿", PageFormatMarkdown)
+	page, _, rev, err := store.CreateNodePage(identity.Local, "alpha", "設計稿", PageFormatMarkdown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rev, err = store.SaveNodePage("alpha", page.ID, "first\n", rev)
+	rev, err = store.SaveNodePage(identity.Local, "alpha", page.ID, "first\n", rev)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The second save lands inside historyCoalesceWindow and overwrites nothing
 	// but this store's own previous write, which is what an auto-saving editor
 	// does all day. It must not add a version of its own; see snapshotHistory.
-	if _, err := store.SaveNodePage("alpha", page.ID, "second\n", rev); err != nil {
+	if _, err := store.SaveNodePage(identity.Local, "alpha", page.ID, "second\n", rev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,11 +134,11 @@ func TestStoreHistoryAlwaysSnapshotsForeignContent(t *testing.T) {
 	}
 	store := NewStore(root)
 
-	page, _, rev, err := store.CreateNodePage("alpha", "設計稿", PageFormatMarkdown)
+	page, _, rev, err := store.CreateNodePage(identity.Local, "alpha", "設計稿", PageFormatMarkdown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SaveNodePage("alpha", page.ID, "mine\n", rev); err != nil {
+	if _, err := store.SaveNodePage(identity.Local, "alpha", page.ID, "mine\n", rev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,7 +154,7 @@ func TestStoreHistoryAlwaysSnapshotsForeignContent(t *testing.T) {
 	if err := os.WriteFile(pagePath, []byte("theirs\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SaveNodePage("alpha", page.ID, "mine again\n", Rev([]byte("theirs\n"))); err != nil {
+	if _, err := store.SaveNodePage(identity.Local, "alpha", page.ID, "mine again\n", Rev([]byte("theirs\n"))); err != nil {
 		t.Fatal(err)
 	}
 

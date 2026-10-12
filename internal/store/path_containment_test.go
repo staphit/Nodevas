@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nodevas/internal/identity"
 )
 
 func requireSymlink(t *testing.T, target, link string) {
@@ -138,7 +140,7 @@ func TestNodeAndAttachmentOperationsFailClosedOnSymlinks(t *testing.T) {
 	if _, err := st.ExportNodes([]string{"alpha"}, false); err == nil {
 		t.Fatal("ExportNodes followed a node symlink")
 	}
-	if _, err := st.DeleteNode("alpha"); err == nil {
+	if _, err := st.DeleteNode(identity.Local, "alpha"); err == nil {
 		t.Fatal("DeleteNode accepted a node symlink")
 	}
 
@@ -148,7 +150,7 @@ func TestNodeAndAttachmentOperationsFailClosedOnSymlinks(t *testing.T) {
 	if err := os.WriteFile(st.NodePath("alpha"), []byte("# alpha\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	page, pageContent, pageRev, err := st.CreateNodePage("alpha", "Page", PageFormatMarkdown)
+	page, pageContent, pageRev, err := st.CreateNodePage(identity.Local, "alpha", "Page", PageFormatMarkdown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +162,7 @@ func TestNodeAndAttachmentOperationsFailClosedOnSymlinks(t *testing.T) {
 	if _, _, _, err := st.LoadNodePage("alpha", page.ID); err == nil {
 		t.Fatal("LoadNodePage followed a page symlink")
 	}
-	if _, err := st.SaveNodePage("alpha", page.ID, "escape", pageRev); err == nil {
+	if _, err := st.SaveNodePage(identity.Local, "alpha", page.ID, "escape", pageRev); err == nil {
 		t.Fatal("SaveNodePage accepted a page symlink")
 	}
 	if err := os.Remove(pagePath); err != nil {

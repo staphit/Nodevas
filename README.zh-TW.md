@@ -54,7 +54,7 @@ Nodevas 將分散的筆記與任務整理成一個可以看見、編輯並持續
 
 ## 快速開始
 
-必要環境：Go 1.25.12、Node.js 22 與 npm、Git。
+必要環境：Go 1.26.9、Node.js 22 與 npm、Git。
 
 ```bash
 git clone https://github.com/staphit/Nodevas.git
@@ -74,6 +74,7 @@ go run ./cmd/nodevas serve -project ./workspace -port 5666
 - [MCP 整合](./docs/mcp.md)：連接 Claude Code、Codex 或其他 MCP client。
 - [儲存與協作](./docs/collaboration.md)：專案檔案、共享 server、WebSocket 與 CRDT 行為。
 - [OCI 部署](./deploy/oci/README.md)：建立與維運共享雲端部署。
+- [TrueNAS 部署](./deploy/truenas/README.md)：透過 Cloudflare Tunnel 公開 Nodevas，不開放 origin port。
 - [協助開發](./docs/contributing.md)：開發檢查與程式位置。
 
 ## 程式碼簽章

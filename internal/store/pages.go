@@ -27,6 +27,7 @@ import (
 	"nodevas/internal/document/docx"
 	dochtml "nodevas/internal/document/html"
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 type NodePageInfo struct {
@@ -120,7 +121,7 @@ func (s *Store) ListNodePages(nodeID string) ([]NodePageInfo, error) {
 
 // CreateNodePage adds a page stored in the requested format; an empty format
 // means Markdown.
-func (s *Store) CreateNodePage(nodeID, title, format string) (NodePageInfo, string, string, error) {
+func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format string) (NodePageInfo, string, string, error) {
 	var zero NodePageInfo
 	if !engine.ValidNodeID(nodeID) {
 		return zero, "", "", fmt.Errorf("invalid node id")
@@ -141,6 +142,9 @@ func (s *Store) CreateNodePage(nodeID, title, format string) (NodePageInfo, stri
 	}
 	if g.NodeByID(nodeID) == nil {
 		return zero, "", "", fmt.Errorf("node %q not found in graph", nodeID)
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return zero, "", "", err
 	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
@@ -190,7 +194,7 @@ func (s *Store) CreateNodePage(nodeID, title, format string) (NodePageInfo, stri
 
 // ImportNodePage turns an uploaded file into a subpage, keeping the original
 // bytes so nothing is lost before the first edit.
-func (s *Store) ImportNodePage(nodeID, title, filename string, data []byte) (NodePageInfo, string, string, error) {
+func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename string, data []byte) (NodePageInfo, string, string, error) {
 	var zero NodePageInfo
 	format, ok := PageFormatFromFilename(filename)
 	if !ok {
@@ -200,7 +204,7 @@ func (s *Store) ImportNodePage(nodeID, title, filename string, data []byte) (Nod
 		base := filepath.Base(filename)
 		title = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	page, _, _, err := s.CreateNodePage(nodeID, title, format)
+	page, _, _, err := s.CreateNodePage(actor, nodeID, title, format)
 	if err != nil {
 		return zero, "", "", err
 	}
@@ -337,7 +341,7 @@ func findManifestPage(manifest nodePagesManifest, pageID string) (NodePageInfo, 
 	return NodePageInfo{}, false
 }
 
-func (s *Store) SaveNodePage(nodeID, pageID, content, baseRev string) (string, error) {
+func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, baseRev string) (string, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
 		return "", fmt.Errorf("invalid node or page id")
 	}
@@ -352,6 +356,9 @@ func (s *Store) SaveNodePage(nodeID, pageID, content, baseRev string) (string, e
 	}
 	if g.NodeByID(nodeID) == nil {
 		return "", fmt.Errorf("node %q not found in graph", nodeID)
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return "", err
 	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
@@ -377,7 +384,7 @@ func (s *Store) SaveNodePage(nodeID, pageID, content, baseRev string) (string, e
 }
 
 // UpdateNodePage changes page metadata without changing its stable ID or content.
-func (s *Store) UpdateNodePage(nodeID, pageID, title string, targetIndex *int) ([]NodePageInfo, error) {
+func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title string, targetIndex *int) ([]NodePageInfo, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
 		return nil, fmt.Errorf("invalid node or page id")
 	}
@@ -393,6 +400,9 @@ func (s *Store) UpdateNodePage(nodeID, pageID, title string, targetIndex *int) (
 	}
 	if g.NodeByID(nodeID) == nil {
 		return nil, fmt.Errorf("node %q not found in graph", nodeID)
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return nil, err
 	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
@@ -441,13 +451,22 @@ func (s *Store) UpdateNodePage(nodeID, pageID, title string, targetIndex *int) (
 }
 
 // DeleteNodePage removes a page from its node and keeps a restorable trash record.
-func (s *Store) DeleteNodePage(nodeID, pageID string) (DeleteNodePageOutcome, error) {
+func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (DeleteNodePageOutcome, error) {
 	var zero DeleteNodePageOutcome
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
 		return zero, fmt.Errorf("invalid node or page id")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	g, _, err := s.loadGraphLocked()
+	if err != nil {
+		return zero, err
+	}
+	// checkNodeWrite passes a nil node, so a page orphaned by a removed node
+	// stays deletable.
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return zero, err
+	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
 		return zero, err

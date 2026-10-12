@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // transferFixture builds a workspace with a populated "main" project and an
@@ -289,7 +290,7 @@ func TestTransferCutRefusesWhenSourceStillDependsOnTheSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	graph.NodeByID("node-0003").Requires = "node-0002"
-	if _, err := st.SaveGraph(graph, rev); err != nil {
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
 		t.Fatal(err)
 	}
 

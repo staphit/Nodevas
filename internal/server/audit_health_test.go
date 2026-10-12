@@ -14,7 +14,7 @@ import (
 
 func TestAuditFallbackAcknowledgementRequiresCSRFAndAuditsItsOwnOutcome(t *testing.T) {
 	server, _, inbox, database := accountServerWithAuditDBForTest(t)
-	cookies, csrf := signIn(t, server, inbox, testPin)
+	cookies, csrf := signIn(t, server, inbox, testEmail)
 	handler := server.Handler()
 	t.Cleanup(func() { _, _ = database.Writer().Exec("PRAGMA query_only = OFF") })
 

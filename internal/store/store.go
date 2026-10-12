@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/workspace"
 )
 
@@ -439,7 +440,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 
 // MoveEvent retargets a stamp's display time by appending a move event —
 // the journal stays append-only; the move is its own audit record.
-func (s *Store) MoveEvent(id, newT, by, note string) (*engine.RunState, error) {
+func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*engine.RunState, error) {
 	movedAt, err := time.Parse(time.RFC3339, newT)
 	if err != nil {
 		return nil, fmt.Errorf("invalid event time: %w", err)
@@ -462,6 +463,13 @@ func (s *Store) MoveEvent(id, newT, by, note string) (*engine.RunState, error) {
 	}
 	if target == nil {
 		return nil, fmt.Errorf("event %q not found", id)
+	}
+	g, _, err := s.loadGraphLocked()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(target.Node)); err != nil {
+		return nil, err
 	}
 	for i := targetIndex - 1; i >= 0; i-- {
 		previous := rs.History[i]

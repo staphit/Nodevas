@@ -55,6 +55,11 @@ func Validate(g *Graph) []Issue {
 		default:
 			add("error", n.ID, "priority", -1, "invalid priority %q", n.Priority)
 		}
+		switch n.WriteAccess {
+		case WriteAccessAll, WriteAccessWorker, WriteAccessOrchestrator, WriteAccessHumanOnly:
+		default:
+			add("error", n.ID, "write_access", -1, "invalid write_access %q", n.WriteAccess)
+		}
 		ids[n.ID] = true
 		for i, effect := range n.Effects {
 			if err := ValidateEffect(effect.Set); err != nil {

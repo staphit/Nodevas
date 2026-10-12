@@ -77,6 +77,7 @@ export function graphCommandToOps(
       if ("kind" in patch) op.nodeKind = patch.kind ?? "";
       if ("priority" in patch) op.priority = patch.priority ?? "";
       if ("deadline" in patch) op.deadline = patch.deadline ?? "";
+      if ("writeAccess" in patch) op.writeAccess = patch.writeAccess ?? "";
       if ("tags" in patch) op.tags = patch.tags ?? [];
       return [op];
     }
