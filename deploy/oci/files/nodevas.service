@@ -48,7 +48,7 @@ EnvironmentFile=/etc/nodevas/nodevas.env
 # $XDG_CONFIG_HOME or $HOME/.config and returns an *error* when neither is
 # set. A systemd service has neither, so without this line the server fails at
 # startup with "user config directory". Pointing it at the block volume also
-# puts the encrypted secrets store (the Drive OAuth token, the master key) on
+# puts the encrypted secrets store (the SMTP password, the master key) on
 # the volume that gets backed up and snapshotted, rather than on the
 # throwaway boot disk.
 Environment=XDG_CONFIG_HOME=/var/lib/nodevas/config
@@ -58,8 +58,8 @@ Environment=XDG_CONFIG_HOME=/var/lib/nodevas/config
 #   firewalld are then belt and braces rather than the only defence.
 # --behind-proxy makes the server trust X-Forwarded-Proto. Without it the
 #   server believes every request arrived over plain HTTP: session cookies
-#   lose their Secure attribute and the "OAuth credentials require HTTPS"
-#   check refuses configuration that is in fact protected. It also marks this
+#   lose their Secure attribute and HTTPS-only checks refuse configuration
+#   that is in fact protected. It also marks this
 #   deployment as remote, which is what turns on mandatory accounts even
 #   though the listener is loopback.
 # --trusted-proxy names who is allowed to make that claim. Caddy is on this

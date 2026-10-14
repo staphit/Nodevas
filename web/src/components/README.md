@@ -75,8 +75,7 @@ Sidebar.tsx  ──擁有──▶ explorer/                 ─┘
    父元件留在扁平層。反過來，資料夾只剩一個檔案就攤回去。
 
 尚未跨過門檻、因此仍在扁平層的私有檔：`BoardToolbar.tsx`、`GraphBatchToolbar.tsx`、
-`GraphToolsPanel.tsx`（三者只有 `LaneView` 用）、`DriveCredentialsPanel.tsx`
-（只有 `BackupModal` 用）。它們不是共用原語，只是還不值得一個資料夾。
+`GraphToolsPanel.tsx`（三者只有 `LaneView` 用）。它們不是共用原語，只是還不值得一個資料夾。
 
 ## 4. 測試
 

@@ -55,16 +55,13 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	}
 
 	underAPI := strings.HasPrefix(r.URL.Path, "/api/")
-	// A GET that changes state is a write wearing a safe method's clothes, so
-	// it gets the same cross-origin treatment even though the method check
-	// would wave it through.
-	if underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r)) {
+	if underAPI && isUnsafeMethod(r.Method) {
 		if origin := r.Header.Get("Origin"); origin != "" && !s.isAllowedOrigin(origin, r.Host) {
 			httpx.Err(c, http.StatusForbidden, errors.New("cross-origin API request rejected"))
 			return
 		}
-		// Origin is absent on a top-level cross-site navigation, which is
-		// exactly how a state-changing GET gets attacked. Sec-Fetch-Site is
+		// Origin can be absent on a top-level cross-site form submission,
+		// which is exactly how a CSRF write gets attempted. Sec-Fetch-Site is
 		// set by the browser and unforgeable by page script, so it catches
 		// what Origin cannot. It is missing entirely on non-browser clients
 		// (agents, curl), which are not subject to CSRF in the first place.
@@ -199,8 +196,8 @@ var visitorDeniedPaths = map[string]bool{
 
 // visitorDeniedPrefixes are whole subtrees a visitor has no business in. The
 // filesystem browser enumerates the host's directories, and the remote
-// endpoints reach Google Drive with the operator's credentials; neither is
-// part of the document a visitor came to read.
+// endpoints read and write the operator's backups; neither is part of the
+// document a visitor came to read.
 var visitorDeniedPrefixes = []string{
 	"/api/fs/",
 	"/api/remote/",
@@ -263,25 +260,6 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 			ClientIP:  auth.ClientIP(r),
 		})
 	}
-}
-
-// stateChangingGETPaths are the GET routes that mutate server state. They are
-// listed rather than inferred because the method is the only signal the
-// transport layer has, and it lies about these.
-//
-// /api/remote/drive/auth mints a single-use OAuth state entry and redirects to
-// Google's consent screen, so a cross-site page that can reach it can both
-// exhaust that table and drive an administrator into an unexpected consent
-// flow. It stays a GET because the browser has to follow the 302 as a
-// navigation — a fetch cannot read a cross-origin redirect target, and a form
-// POST cannot carry the CSRF header a networked deployment requires.
-var stateChangingGETPaths = map[string]bool{
-	"/api/remote/drive/auth": true,
-}
-
-func stateChangingGET(r *http.Request) bool {
-	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-		stateChangingGETPaths[r.URL.Path]
 }
 
 // allowsFetchSite reports whether a Sec-Fetch-Site value belongs to this

@@ -109,10 +109,6 @@ var PublicPaths = map[string]bool{
 	"/api/auth/otp/request": true,
 	// The shared read-only credential's own door. See visitor.go.
 	"/api/auth/visitor": true,
-	// The Drive OAuth callback is a cross-site redirect from Google; the
-	// SameSite=Strict Session cookie is not sent on it, so the request cannot
-	// carry an identity. The single-use state token authenticates it instead.
-	"/api/remote/drive/callback": true,
 }
 
 // SignInPaths are the public endpoints that accept a credential from a
