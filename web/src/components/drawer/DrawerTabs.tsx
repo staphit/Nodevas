@@ -8,12 +8,15 @@ import {
 
 import { api } from "../../api";
 import {
+  IconClipboard,
   IconClose,
+  IconCloseOthers,
+  IconCloseRight,
   IconCopy,
   IconDoc,
   IconFolderOpen,
-  IconPages,
   IconPin,
+  IconPinOff,
 } from "../../icons";
 import { nodeById, reportError, useApp } from "../../store";
 import { useI18n } from "../../i18n";
@@ -255,7 +258,7 @@ export function DrawerTabs({
             disabled={closeOtherIDs.length === 0}
             onClick={() => closeFromMenu(closeOtherIDs)}
           >
-            <IconPages size={14} />
+            <IconCloseOthers size={14} />
             <span>{t("drawer.tabs.closeOther")}</span>
           </button>
           <button
@@ -264,7 +267,7 @@ export function DrawerTabs({
             disabled={closeRightIDs.length === 0}
             onClick={() => closeFromMenu(closeRightIDs)}
           >
-            <IconPages size={14} />
+            <IconCloseRight size={14} />
             <span>{t("drawer.tabs.closeRight")}</span>
           </button>
           <button
@@ -273,7 +276,7 @@ export function DrawerTabs({
             disabled={closeUnpinnedIDs.length === 0}
             onClick={() => closeFromMenu(closeUnpinnedIDs)}
           >
-            <IconClose size={14} />
+            <IconPinOff size={14} />
             <span>{t("drawer.tabs.closeUnpinned")}</span>
           </button>
           <div className="tab-context-separator" role="separator" />
@@ -297,7 +300,7 @@ export function DrawerTabs({
               void copyText(contextFullPath).catch(reportError);
             }}
           >
-            <IconCopy size={14} />
+            <IconClipboard size={14} />
             <span>{t("drawer.tabs.copyFull")}</span>
           </button>
           <button

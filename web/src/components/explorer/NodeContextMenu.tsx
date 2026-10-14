@@ -6,7 +6,12 @@
  */
 
 import { useEffect, useState } from "react";
-import { IconDoc, IconPages, IconTrash } from "../../icons";
+import {
+  IconDoc,
+  IconPages,
+  IconPencil,
+  IconTrash,
+} from "../../icons";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
@@ -120,7 +125,7 @@ export function NodeContextMenu({
             }}
           >
             <span className="project-context-icon">
-              <IconDoc size={14} />
+              <IconPencil size={14} />
             </span>
             <span>
               <b>{t("explorer.open")}</b>

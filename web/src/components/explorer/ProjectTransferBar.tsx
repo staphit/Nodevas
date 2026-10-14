@@ -241,7 +241,7 @@ export function ProjectTransferBar({
                 role="menuitem"
                 disabled={projectTransferBusy || !activeProject}
                 onClick={() => {
-                  exportProjectArchive();
+                  void exportProjectArchive();
                   closeTransferMenus();
                 }}
               >
@@ -253,7 +253,7 @@ export function ProjectTransferBar({
                 role="menuitem"
                 disabled={projectTransferBusy}
                 onClick={() => {
-                  exportProjectArchive({ name: ".", label: t("explorer.entireWorkspace") });
+                  void exportProjectArchive({ name: ".", label: t("explorer.entireWorkspace") });
                   closeTransferMenus();
                 }}
               >
