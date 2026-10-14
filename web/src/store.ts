@@ -191,7 +191,7 @@ export { editableGateOperator, topLevelOp } from "./domain";
 // ---------------------------------------------------------------------------
 
 export { operationScope } from "./state/operations";
-export { driveReady, hasEverBackedUp, remoteScope, sortBundles } from "./state/remoteSlice";
+export { hasEverBackedUp, remoteScope, sortBundles } from "./state/remoteSlice";
 export type { RemoteConfigInput } from "./state/types";
 export type {
   CommandResult,

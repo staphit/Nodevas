@@ -12,7 +12,7 @@
 | `documentSlice` | 分頁、dirty、draft、conflict、手動存檔 | `document` |
 | `runSlice` | 實際狀態、journal append | `lifecycle` |
 | `graphSlice` | `graph.yaml` 全部寫入；`saveGraph` 與 typed command | `node-metadata`、`plan-milestone`、`workflow`、`project-layout` |
-| `remoteSlice` | 備份設定、Drive 憑證與連線、備份清單、同步狀態、截止提醒設定 | — |
+| `remoteSlice` | 備份設定、備份清單、同步狀態、截止提醒設定 | — |
 | `undoSlice` | 還原與重做；`canUndo`、`undoLabel`、`canRedo`、`redoLabel` | — |
 
 `internals.ts` 放共用管線：graph 寫入佇列（同一 `baseRev` 不併發）、每份文件的存檔佇列、

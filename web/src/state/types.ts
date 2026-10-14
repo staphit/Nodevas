@@ -8,7 +8,6 @@
 
 import type { StateCreator } from "zustand";
 import type {
-  DriveCredentialStatus,
   DragGhost,
   GraphOp,
   LiveConnection,
@@ -437,7 +436,6 @@ export interface CollabSlice {
 export interface RemoteConfigInput {
   kind: RemoteKind;
   folder?: string;
-  driveFolderId?: string;
   autoBackup?: boolean;
   intervalHours?: number;
   /** -1 keeps every bundle forever; otherwise the number kept. */
@@ -456,7 +454,6 @@ export interface RemoteSlice {
   remoteBundles: RemoteBundle[] | null;
   /** How the workspace compares to its newest cloud snapshot. */
   remoteSyncStatus: RemoteSyncStatus | null;
-  driveCredentials: DriveCredentialStatus | null;
   notifySettings: NotifySettings | null;
   /** The server never returns the stored SMTP password, only whether it has one. */
   notifyHasPassword: boolean;
@@ -464,7 +461,6 @@ export interface RemoteSlice {
   refreshRemoteConfig: () => Promise<void>;
   refreshRemoteBundles: () => Promise<void>;
   refreshRemoteSyncStatus: () => Promise<void>;
-  refreshDriveCredentials: () => Promise<void>;
   refreshNotifySettings: () => Promise<void>;
 
   /** Resolves with the *effective* config: the server clamps what it must. */
@@ -475,17 +471,6 @@ export interface RemoteSlice {
   flushRemoteSync: () => Promise<CommandResult>;
   /** Installs a bundle as a new project and switches to it; resolves with its name. */
   importRemoteBundle: (bundleId: string) => Promise<CommandResult<string>>;
-  connectDriveWorkspace: (
-    folderId: string,
-    bundleId: string,
-    name?: string,
-  ) => Promise<CommandResult<string>>;
-  saveDriveCredentials: (
-    clientId: string,
-    clientSecret: string,
-  ) => Promise<CommandResult>;
-  clearDriveCredentials: () => Promise<CommandResult>;
-  disconnectDrive: () => Promise<CommandResult>;
   saveNotifySettings: (settings: NotifySettings) => Promise<CommandResult>;
   /** Saves, then asks the server to send one mail to the default recipient. */
   sendNotifyTest: (settings: NotifySettings) => Promise<CommandResult>;

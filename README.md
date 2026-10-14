@@ -24,7 +24,7 @@ The following capabilities are available today but still in beta, and may change
 
 - [MCP integration](./docs/mcp.md): AI agent tools, resources, and prompts.
 - [Real-time co-editing](./docs/collaboration.md): shared servers, WebSocket presence, and CRDT document sessions.
-- Cloud backup: Google Drive sync, backup, and restore.
+- Backup: scheduled snapshots to a local folder, and restore.
 - Version history: document drafts, past revisions, and restore.
 
 ## Use cases

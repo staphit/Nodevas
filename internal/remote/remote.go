@@ -30,7 +30,7 @@ import (
 // RemoteRef identifies one bundle a Remote holds.
 type RemoteRef struct {
 	// ID is the backend-specific handle used to Pull the bundle back. For the
-	// folder backend it is the file name; for Drive it is the file id.
+	// folder backend it is the file name.
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
 	Size     int64     `json:"size"`
@@ -49,10 +49,10 @@ type RemoteRef struct {
 
 // RemoteStore is a place bundles can be pushed to and pulled from.
 type RemoteStore interface {
-	// Kind is the stable backend identifier ("folder", "drive").
+	// Kind is the stable backend identifier ("folder").
 	Kind() string
 	// Push uploads a bundle under a display name and returns its ref. size is
-	// the byte length when known (>=0) so backends that need it (Drive) can set
+	// the byte length when known (>=0) so backends that need it can set
 	// Content-Length; pass -1 when unknown.
 	Push(ctx context.Context, name string, data io.Reader, size int64) (RemoteRef, error)
 	// Pull opens a bundle by id for reading. The caller closes it.
@@ -68,11 +68,11 @@ type RemoteStore interface {
 
 const RemoteBundleExt = ".veproj"
 
-// folderBundleMarker is how the folder backend recognises its own uploads. The
-// Drive backend has appProperties for this; a directory has nothing but names,
-// so Push writes the marker into the file name and List reads it back. Bundles
-// written before this marker existed simply never match, which means retention
-// leaves them alone forever — the safe direction to be wrong in.
+// folderBundleMarker is how the folder backend recognises its own uploads. A
+// directory has nothing but names, so Push writes the marker into the file
+// name and List reads it back. Bundles written before this marker existed
+// simply never match, which means retention leaves them alone forever — the
+// safe direction to be wrong in.
 const folderBundleMarker = "nvb"
 
 // folderBundlePattern matches exactly what folderRemote.Push produces: a
@@ -312,9 +312,9 @@ func (f folderRemote) Pull(ctx context.Context, id string) (io.ReadCloser, error
 	return &contextReadCloser{ctx: ctx, ReadCloser: file}, nil
 }
 
-// Delete removes one bundle from the backup directory. Unlike Drive, a
-// directory gives the process no protection at all — it can unlink anything the
-// server user can reach — so the guard has to be here: the id must survive
+// Delete removes one bundle from the backup directory. A directory gives the
+// process no protection at all — it can unlink anything the server user can
+// reach — so the guard has to be here: the id must survive
 // safeBundleID (no traversal, no absolute path) *and* carry the marker Push
 // writes into the name. A .veproj the user copied into the folder by hand has
 // no marker and is refused, not deleted.

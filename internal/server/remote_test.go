@@ -179,19 +179,13 @@ func TestRemoteConfigRejectsUnknownBackend(t *testing.T) {
 	}
 }
 
-func TestOAuthStateIsSingleUse(t *testing.T) {
-	manager := remote.NewManager(projectManagerForTest(t))
-	state, _, err := manager.NewOAuthState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := manager.ConsumeOAuthState(state); !ok {
-		t.Fatal("a freshly issued state should validate")
-	}
-	if _, ok := manager.ConsumeOAuthState(state); ok {
-		t.Fatal("a state must not validate twice")
-	}
-	if _, ok := manager.ConsumeOAuthState("never-issued"); ok {
-		t.Fatal("an unknown state must not validate")
+// The Google Drive backend is gone; a client that still asks for it gets a
+// plain validation error rather than a half-configured backend.
+func TestRemoteConfigRejectsRetiredDriveBackend(t *testing.T) {
+	server := serverForTest(t, projectManagerForTest(t), realtime.NewHub(), nil)
+	rec := doJSON(t, server.Handler(), http.MethodPut, "/api/remote/config",
+		map[string]string{"kind": "drive"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("drive backend = %d, want 400", rec.Code)
 	}
 }
