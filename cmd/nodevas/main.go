@@ -20,8 +20,11 @@
 //	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE  SMTP secret
 //	NODEVAS_SECRET_KEY  base64 32-byte key encrypting stored secrets
 //	                    (a machine-local secrets/master.key is generated if unset)
+//	NODEVAS_DATABASE_URL  postgres://… to keep accounts, sessions, settings and
+//	                    the audit trail on a PostgreSQL server instead of the
+//	                    workspace's SQLite file (the search index stays local)
 //
-// A subcommand per file: serve.go, user.go, visitor.go. This one is the
+// A subcommand per file: serve.go, user.go, visitor.go, db.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
 // reading what any of it does.
 package main
@@ -45,6 +48,8 @@ func main() {
 		visitor(os.Args[2:])
 	case "mcp":
 		mcpServe(os.Args[2:])
+	case "db":
+		database(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -78,4 +83,8 @@ func usage() {
 		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas db status|copy-to-postgres --project <dir> [--replace]")
+	fmt.Fprintln(os.Stderr,
+		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
 }

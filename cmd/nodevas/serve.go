@@ -185,7 +185,9 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 	if err != nil {
 		log.Fatalf("workspace database: %v", err)
 	}
-	slog.Info("workspace database ready", slog.String("path", database.Path()))
+	slog.Info("workspace database ready",
+		slog.String("backend", string(database.Backend())),
+		slog.String("path", database.Path()))
 
 	// The search index lives in the database now, so it outlives a restart.
 	pm.UseDatabase(database)

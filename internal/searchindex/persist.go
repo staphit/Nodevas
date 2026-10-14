@@ -82,9 +82,12 @@ type storedDoc struct {
 // line, a newline, then the markdown and the text subpages.
 func (d *storedDoc) text() string { return d.meta + "\n" + d.body }
 
-// newDocStore wraps the workspace database.
+// newDocStore wraps the workspace database. The index is FTS5, so it always
+// lives in the workspace's SQLite file, even when accounts and the audit trail
+// have moved to a PostgreSQL server.
 func newDocStore(database *db.DB) *docStore {
-	return &docStore{sql: database.Writer(), read: database.Reader()}
+	local := database.Local()
+	return &docStore{sql: local.Writer(), read: local.Reader()}
 }
 
 // newMemoryDocStore backs the index with a private in-memory database, so a
