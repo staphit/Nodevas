@@ -61,4 +61,4 @@ Signed Windows binaries can additionally be verified with
 
 Nodevas does not collect telemetry. The desktop app checks GitHub Releases for
 updates; no other network calls are made without explicit user configuration
-(for example Google Drive backup).
+(for example mail notifications).

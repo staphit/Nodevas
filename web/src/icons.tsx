@@ -295,6 +295,143 @@ export const IconExport = (p: P) => (
   </svg>
 );
 
+// ---- action icons: one glyph per action, so menus never show twins ----
+
+export const IconUndo = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
+
+export const IconRedo = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+  </svg>
+);
+
+export const IconRefresh = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M20 11a8 8 0 0 0-14.5-4.5L4 8" />
+    <path d="M4 3.5V8h4.5" />
+    <path d="M4 13a8 8 0 0 0 14.5 4.5L20 16" />
+    <path d="M20 20.5V16h-4.5" />
+  </svg>
+);
+
+export const IconSave = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z" />
+    <path d="M8 4v5h7V4M8 20v-6h8v6" />
+  </svg>
+);
+
+export const IconSaveAll = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M7 7V3.5h9.5l3 3V17H16" />
+    <path d="M4 7h9.5l2.5 2.5v10a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5z" />
+    <path d="M7 7v3.5h5.5M7 20v-4h6v4" />
+  </svg>
+);
+
+export const IconSidebar = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
+    <path d="M9.5 4.5v15M5.5 8.5h2M5.5 11.5h2" />
+  </svg>
+);
+
+export const IconCompass = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m15.5 8.5-2 5-5 2 2-5z" />
+  </svg>
+);
+
+export const IconFolderPlus = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3.5 6.5h6l2 2h9v10.5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z" />
+    <path d="M12 11.5v6M9 14.5h6" />
+  </svg>
+);
+
+export const IconMove = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3.5 6.5h6l2 2h9v10.5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19z" />
+    <path d="M8.5 14.5h7M13 12l2.5 2.5L13 17" />
+  </svg>
+);
+
+export const IconLayers = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z" />
+    <path d="m3.5 12 8.5 4.5 8.5-4.5M3.5 16l8.5 4.5 8.5-4.5" />
+  </svg>
+);
+
+export const IconLayersPlus = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m11 3.5 8 4.2-8 4.3-8-4.3z" />
+    <path d="m3 12 8 4.3 3-1.6M3 16l8 4.3 2.5-1.3" />
+    <path d="M19 14v6M16 17h6" />
+  </svg>
+);
+
+/** A packed project bundle (.veproj): a box with a lid. */
+export const IconArchive = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="4.5" width="17" height="4" rx="1" />
+    <path d="M5 8.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8.5" />
+    <path d="M10 12.5h4" />
+  </svg>
+);
+
+export const IconMarkdown = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+    <path d="M6 15V9l2.5 3L11 9v6M16.5 9v6M14.5 13l2 2 2-2" />
+  </svg>
+);
+
+/** A JSON Canvas board: cards joined by an edge. */
+export const IconCanvas = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="8" height="6" rx="1.2" />
+    <rect x="13" y="14" width="8" height="6" rx="1.2" />
+    <path d="M7 10v3.5a1.5 1.5 0 0 0 1.5 1.5H13" />
+  </svg>
+);
+
+export const IconCloseOthers = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="6" width="12" height="13" rx="1.5" />
+    <path d="M8 6V4.5h12.5V16H15.5" />
+    <path d="m7.5 10.5 4 4M11.5 10.5l-4 4" />
+  </svg>
+);
+
+export const IconCloseRight = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 5v14" />
+    <path d="M8 12h11M15 8l4 4-4 4" />
+  </svg>
+);
+
+export const IconPinOff = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m9 3 6 6M8 8l8-4 4 4-4 8-3-3-5 5" />
+    <path d="m3.5 20.5 6-6M3 3l18 18" />
+  </svg>
+);
+
+export const IconClipboard = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="5" y="4.5" width="14" height="16" rx="1.5" />
+    <path d="M9 4.5V3h6v1.5M8.5 10h7M8.5 13.5h7M8.5 17h4" />
+  </svg>
+);
+
 export const IconOutline = (p: P) => (
   <svg {...base(p)}>
     <path d="M4 6h16M7 12h13M10 18h10" />

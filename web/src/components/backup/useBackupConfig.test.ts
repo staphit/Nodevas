@@ -32,13 +32,9 @@ vi.mock("../../api", async (importOriginal) => {
 const CONFIG: RemoteConfig = {
   kind: "folder",
   folder: "/backups",
-  driveFolderId: "",
   autoBackup: true,
   intervalHours: 24,
   retainBundles: 14,
-  driveAvailable: false,
-  driveConnected: false,
-  driveNeedsReauth: false,
   lastBackupAt: "2026-01-02T03:04:05Z",
 };
 
@@ -91,16 +87,6 @@ describe("draft arithmetic", () => {
       ...CONFIG,
       intervalHours: 0,
     })).toBe(false);
-  });
-
-  // Finishing the OAuth round trip leaves Drive connected but not chosen. The
-  // form preselects it, and that showing as unsaved is the point: the user
-  // still has to press 儲存設定.
-  it("preselects a freshly connected Drive as an unsaved change", () => {
-    const config = { ...CONFIG, kind: "" as const, driveConnected: true, driveAvailable: true };
-    const draft = draftFromConfig(config);
-    expect(draft.kind).toBe("drive");
-    expect(draftIsDirty(draft, config)).toBe(true);
   });
 
   it("counts an untouched draft as clean", () => {
@@ -180,7 +166,7 @@ describe("useBackupConfig", () => {
     await act(() => result.current.pushWorkspace());
 
     expect(result.current.note?.kind).toBe("error");
-    expect(result.current.note?.text).toContain("從 Drive 匯入");
+    expect(result.current.note?.text).toContain("備份清單");
   });
 
   it("passes a plain flush failure through unchanged", async () => {

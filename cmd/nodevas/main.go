@@ -14,13 +14,11 @@
 // a command line is readable by every process on the machine and lands in the
 // shell history. --password still works and warns.
 //
-// Google Drive backup (optional) accepts OAuth credentials from the App UI.
-// They are encrypted in the app secrets directory, outside the workspace.
+// Secrets are encrypted in the app secrets directory, outside the workspace.
 // Environment variables remain available as a server deployment fallback:
 //
-//	NODEVAS_GOOGLE_CLIENT_ID / NODEVAS_GOOGLE_CLIENT_SECRET  OAuth client
-//	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE        SMTP secret
-//	NODEVAS_SECRET_KEY  base64 32-byte key encrypting the stored Drive token
+//	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE  SMTP secret
+//	NODEVAS_SECRET_KEY  base64 32-byte key encrypting stored secrets
 //	                    (a machine-local secrets/master.key is generated if unset)
 //	NODEVAS_DATABASE_URL  postgres://… to keep accounts, sessions, settings and
 //	                    the audit trail on a PostgreSQL server instead of the

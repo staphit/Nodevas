@@ -313,8 +313,8 @@ func TestAPushThatIsNotInTheListingPrunesNothing(t *testing.T) {
 }
 
 func TestABundleWithoutTheAppsMarkerIsNeverDeleted(t *testing.T) {
-	// The backup folder is a directory, and a Drive folder is a Drive folder:
-	// both can hold files this app did not write. Those must survive, and they
+	// The backup folder is a directory: it can hold files this app did not
+	// write. Those must survive, and they
 	// must not consume a retention slot either, or their presence would push
 	// out one of our own backups.
 	now := time.Now()

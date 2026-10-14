@@ -8,11 +8,15 @@
 
 import { useEffect, useState } from "react";
 import {
+  IconArchive,
+  IconCanvas,
   IconClose,
   IconExport,
   IconFolder,
   IconFolderOpen,
-  IconImport,
+  IconFolderPlus,
+  IconMarkdown,
+  IconMove,
   IconPlus,
   IconTrash,
 } from "../../icons";
@@ -302,7 +306,7 @@ export function ProjectContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconFolderOpen size={14} />
+          <IconFolderPlus size={14} />
         </span>
         <span>
           <b>{t("explorer.newWorkspaceFolder")}</b>
@@ -321,7 +325,7 @@ export function ProjectContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconArchive size={14} />
         </span>
         <span>
           <b>{t("explorer.importArchive")}</b>
@@ -339,7 +343,7 @@ export function ProjectContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconMarkdown size={14} />
         </span>
         <span>
           <b>{t("explorer.importMarkdown")}</b>
@@ -357,7 +361,7 @@ export function ProjectContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconCanvas size={14} />
         </span>
         <span>
           <b>{t("explorer.importCanvas")}</b>
@@ -376,7 +380,7 @@ export function ProjectContextMenu({
         onClick={() => onMove(menu)}
       >
         <span className="project-context-icon">
-          <IconFolder size={14} />
+          <IconMove size={14} />
         </span>
         <span>
           <b>

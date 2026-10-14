@@ -6,9 +6,11 @@
  * here because both the transfer bar and the workspace context menu open them.
  */
 
-import { useRef, useState } from "react";
+import { createElement, useRef, useState } from "react";
 import { api, type ExportFormat } from "../../api";
 import { downloadExport, printExport } from "../../editor/documentExport";
+import { IconExport } from "../../icons";
+import { confirmAction } from "../ConfirmDialog";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
@@ -51,6 +53,12 @@ export function useProjectTransfer({
   const loadAll = useApp((state) => state.loadAll);
   const runGraphCommand = useApp((state) => state.runGraphCommand);
   const { t } = useI18n();
+  const projectLabel = useApp(
+    (state) =>
+      state.projects.find((project) => project.name === activeProject)?.label ||
+      activeProject ||
+      t("explorer.currentProject"),
+  );
   const importInputRef = useRef<HTMLInputElement>(null);
   const markdownImportInputRef = useRef<HTMLInputElement>(null);
   const jsonCanvasImportInputRef = useRef<HTMLInputElement>(null);
@@ -71,20 +79,34 @@ export function useProjectTransfer({
     manifest: BundleManifest;
   } | null>(null);
 
+  // Every export names what is about to leave and in which format, and waits
+  // for a yes: the menus list several look-alike targets side by side, and a
+  // misclick used to start the download straight away.
+  const confirmExport = (description: string) =>
+    confirmAction({
+      title: t("explorer.confirmExport.title"),
+      description,
+      confirmLabel: t("explorer.export"),
+      icon: createElement(IconExport, { size: 17 }),
+    });
+
   // A folder, or a project with sub-projects, comes back as a bundle holding
   // the whole subtree; the server decides, the caller only names the root.
-  const exportProjectArchive = (target?: { name: string; label: string }) => {
+  const exportProjectArchive = async (target?: { name: string; label: string }) => {
+    const label = target?.label || projectLabel;
+    const confirmed = await confirmExport(
+      target?.name === "."
+        ? t("explorer.confirmExport.workspace")
+        : t("explorer.confirmExport.archive", { target: label }),
+    );
+    if (!confirmed) return;
     const anchor = document.createElement("a");
     anchor.href = api.projectExportURL(target?.name);
     anchor.download = "";
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    setProjectTransferNotice(
-      t("explorer.exportingArchive", {
-        target: target?.label || activeProject || t("explorer.currentProject"),
-      }),
-    );
+    setProjectTransferNotice(t("explorer.exportingArchive", { target: label }));
   };
 
   const closeTransferMenus = () => {
@@ -135,6 +157,13 @@ export function useProjectTransfer({
   // — the editor toolbar only reaches the node it has open.
   const exportProjectDocument = async (choice: ExportFormat | "pdf") => {
     if (documentExportBusy) return;
+    const confirmed = await confirmExport(
+      t("explorer.confirmExport.document", {
+        target: projectLabel,
+        format: `${t(`explorer.documentExport.${choice}`)} (.${choice})`,
+      }),
+    );
+    if (!confirmed) return;
     setDocumentExportBusy(true);
     setProjectTransferNotice(t("explorer.exportingDocuments"));
     try {
@@ -259,6 +288,12 @@ export function useProjectTransfer({
 
   const exportJSONCanvas = async () => {
     if (!graph || jsonCanvasBusy) return;
+    const confirmed = await confirmExport(
+      t("explorer.confirmExport.canvas", {
+        target: projectLabel,
+      }),
+    );
+    if (!confirmed) return;
     setJsonCanvasBusy(true);
     try {
       const positions = graph.ui?.positions ?? {};

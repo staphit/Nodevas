@@ -12,11 +12,6 @@ import (
 // getRemoteSyncStatus compares the current local workspace snapshot with the
 // last successful remote snapshot. It is read-only and safe to call at startup.
 func (a *API) getRemoteSyncStatus(c *gin.Context) {
-	if a.remotes.Load().Kind == "drive" {
-		if !a.ensureDriveOwner(c) {
-			return
-		}
-	}
 	status, err := a.remotes.SyncStatus(c.Request.Context())
 	if err != nil {
 		httpx.Err(c, http.StatusBadGateway, err)
@@ -28,11 +23,6 @@ func (a *API) getRemoteSyncStatus(c *gin.Context) {
 // postRemoteSyncFlush explicitly uploads the current local snapshot when the
 // sync status says it is safe. Conflict decisions stay explicit in the UI.
 func (a *API) postRemoteSyncFlush(c *gin.Context) {
-	if a.remotes.Load().Kind == "drive" {
-		if !a.ensureDriveOwner(c) {
-			return
-		}
-	}
 	ref, err := a.remotes.FlushBackup(c.Request.Context())
 	if err != nil {
 		status := http.StatusBadGateway

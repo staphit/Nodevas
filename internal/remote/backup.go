@@ -22,7 +22,7 @@ import (
 // A background loop pushes the whole workspace to the configured Remote on an
 // interval. It reuses the same bundle build and Push the manual button uses, so
 // it stays off the write Path. Each push is a fresh timestamped file, so the
-// Remote (Drive especially) keeps every version rather than overwriting one.
+// Remote keeps every version rather than overwriting one.
 //
 // Because every run adds a file and nothing used to remove one, the history was
 // unbounded: at a one-hour interval that is 8760 full copies of the workspace a
@@ -45,8 +45,8 @@ const (
 	// Retention is deliberately a count and not a duration, even though the
 	// schedule next to it is expressed in hours. A window ("delete anything
 	// older than a day") has a failure mode a count does not: if the scheduler
-	// was down longer than the window — machine off over a weekend, expired
-	// Drive token failing every push — then on the next successful run every
+	// was down longer than the window — machine off over a weekend, backup
+	// disk unplugged so every push fails — then on the next successful run every
 	// surviving bundle is older than the window and a literal reading of the
 	// rule deletes all of them, leaving one backup taken seconds ago at exactly
 	// the moment the history was most likely to be wanted. Fourteen bundles are
@@ -134,7 +134,7 @@ var (
 )
 
 // SyncStatus is safe to expose to the UI: it contains hashes and opaque bundle
-// IDs, never OAuth credentials.
+// IDs, never credentials.
 type SyncStatus struct {
 	State              SyncState  `json:"state"`
 	LocalHash          string     `json:"localHash,omitempty"`
@@ -285,8 +285,7 @@ func pruneBundles(ctx context.Context, store RemoteStore, keep int, pushed Remot
 	ours := make([]RemoteRef, 0, len(refs))
 	for _, ref := range refs {
 		// A bundle that is not ours survives and does not count towards keep.
-		// The folder backend may hold anything a person copied in; a Drive
-		// folder may hold anything at all.
+		// The folder backend may hold anything a person copied in.
 		if !ref.AppOwned {
 			continue
 		}

@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useApp } from "../store";
 import type { RemoteConfig, RemoteSyncStatus } from "../api";
 import { resetCoalescing } from "./coalesce";
-import { driveReady, hasEverBackedUp, remoteScope, sortBundles } from "./remoteSlice";
+import { hasEverBackedUp, remoteScope, sortBundles } from "./remoteSlice";
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
@@ -17,11 +17,6 @@ vi.mock("../api", async (importOriginal) => {
       flushRemoteSync: vi.fn(),
       pushRemote: vi.fn(),
       importRemote: vi.fn(),
-      connectDriveWorkspace: vi.fn(),
-      getDriveCredentials: vi.fn(),
-      putDriveCredentials: vi.fn(),
-      deleteDriveCredentials: vi.fn(),
-      disconnectDrive: vi.fn(),
       getNotifySettings: vi.fn(),
       putNotifySettings: vi.fn(),
       testNotify: vi.fn(),
@@ -30,15 +25,11 @@ vi.mock("../api", async (importOriginal) => {
 });
 
 const CONFIG: RemoteConfig = {
-  kind: "drive",
-  folder: "",
-  driveFolderId: "",
+  kind: "folder",
+  folder: "/backups",
   autoBackup: true,
   intervalHours: 24,
   retainBundles: 14,
-  driveAvailable: true,
-  driveConnected: true,
-  driveNeedsReauth: false,
   lastBackupAt: "2026-01-02T03:04:05Z",
 };
 
@@ -74,21 +65,11 @@ beforeEach(() => {
   resetCoalescing();
   vi.mocked(api.getRemoteConfig).mockResolvedValue(CONFIG);
   vi.mocked(api.putRemoteConfig).mockResolvedValue(CONFIG);
-  vi.mocked(api.listRemoteBundles).mockResolvedValue({ backend: "drive", bundles: [BUNDLE] });
+  vi.mocked(api.listRemoteBundles).mockResolvedValue({ backend: "folder", bundles: [BUNDLE] });
   vi.mocked(api.getRemoteSyncStatus).mockResolvedValue(SYNC);
   vi.mocked(api.flushRemoteSync).mockResolvedValue({ state: "synced", bundle: BUNDLE });
-  vi.mocked(api.pushRemote).mockResolvedValue({ backend: "drive", bundle: BUNDLE });
+  vi.mocked(api.pushRemote).mockResolvedValue({ backend: "folder", bundle: BUNDLE });
   vi.mocked(api.importRemote).mockResolvedValue({ active: "還原的專案", root: "/ws" });
-  vi.mocked(api.connectDriveWorkspace).mockResolvedValue({
-    active: "雲端專案",
-    root: "/ws",
-    folderId: "f1",
-    bundle: BUNDLE,
-  });
-  vi.mocked(api.getDriveCredentials).mockResolvedValue({ configured: true, source: "app" });
-  vi.mocked(api.putDriveCredentials).mockResolvedValue({ configured: true, source: "app" });
-  vi.mocked(api.deleteDriveCredentials).mockResolvedValue({ configured: false, source: "none" });
-  vi.mocked(api.disconnectDrive).mockResolvedValue({ ok: true });
   vi.mocked(api.getNotifySettings).mockResolvedValue({
     settings: NOTIFY,
     hasPassword: false,
@@ -99,7 +80,6 @@ beforeEach(() => {
     remoteConfig: null,
     remoteBundles: null,
     remoteSyncStatus: null,
-    driveCredentials: null,
     notifySettings: null,
     notifyHasPassword: false,
     operations: {},
@@ -140,7 +120,7 @@ describe("saveRemoteConfig", () => {
   it("adopts the effective config the server replies with", async () => {
     vi.mocked(api.putRemoteConfig).mockResolvedValue({ ...CONFIG, retainBundles: 3 });
 
-    const result = await useApp.getState().saveRemoteConfig({ kind: "drive", retainBundles: 1 });
+    const result = await useApp.getState().saveRemoteConfig({ kind: "folder", retainBundles: 1 });
 
     expect(result.ok).toBe(true);
     expect(useApp.getState().remoteConfig?.retainBundles).toBe(3);
@@ -220,42 +200,6 @@ describe("restores", () => {
     expect(result).toMatchObject({ ok: true, value: "還原的專案" });
     expect(useApp.getState().switchProject).toHaveBeenCalledWith("還原的專案");
   });
-
-  it("opens the project a Drive snapshot was imported into", async () => {
-    const result = await useApp.getState().connectDriveWorkspace("f1", "b1", "快照");
-
-    expect(api.connectDriveWorkspace).toHaveBeenCalledWith("f1", "b1", "快照");
-    expect(result).toMatchObject({ ok: true, value: "雲端專案" });
-    expect(useApp.getState().switchProject).toHaveBeenCalledWith("雲端專案");
-  });
-});
-
-describe("drive credentials", () => {
-  // Credentials decide `driveAvailable`, which the backend picker reads off the
-  // config — so the config is stale the moment they change.
-  it("re-reads the config after credentials are stored", async () => {
-    await useApp.getState().saveDriveCredentials("id", "secret");
-
-    expect(api.putDriveCredentials).toHaveBeenCalledWith("id", "secret");
-    expect(useApp.getState().driveCredentials).toEqual({ configured: true, source: "app" });
-    expect(api.getRemoteConfig).toHaveBeenCalled();
-  });
-
-  it("re-reads the config after credentials are cleared", async () => {
-    await useApp.getState().clearDriveCredentials();
-
-    expect(useApp.getState().driveCredentials).toEqual({ configured: false, source: "none" });
-    expect(api.getRemoteConfig).toHaveBeenCalled();
-  });
-
-  it("re-reads the config after disconnecting", async () => {
-    vi.mocked(api.getRemoteConfig).mockResolvedValue({ ...CONFIG, driveConnected: false });
-
-    const result = await useApp.getState().disconnectDrive();
-
-    expect(result.ok).toBe(true);
-    expect(useApp.getState().remoteConfig?.driveConnected).toBe(false);
-  });
 });
 
 describe("notify settings", () => {
@@ -301,14 +245,6 @@ describe("selectors", () => {
     expect(hasEverBackedUp(null)).toBe(false);
     expect(hasEverBackedUp({ ...CONFIG, lastBackupAt: "0001-01-01T00:00:00Z" })).toBe(false);
     expect(hasEverBackedUp(CONFIG)).toBe(true);
-  });
-
-  it("calls Drive ready only when consent is current", () => {
-    expect(driveReady(CONFIG)).toBe(true);
-    expect(driveReady({ ...CONFIG, driveNeedsReauth: true })).toBe(false);
-    expect(driveReady({ ...CONFIG, driveConnected: false })).toBe(false);
-    expect(driveReady({ ...CONFIG, driveAvailable: false })).toBe(false);
-    expect(driveReady(null)).toBe(false);
   });
 
   it("orders bundles newest first whatever the backend returned", () => {

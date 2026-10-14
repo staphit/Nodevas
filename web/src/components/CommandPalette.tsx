@@ -2,14 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import {
   IconBell,
+  IconClock,
+  IconCompass,
   IconDoc,
   IconGear,
-  IconLayout,
+  IconHelp,
   IconMoon,
   IconPlus,
-  IconRestore,
+  IconRedo,
+  IconRefresh,
+  IconSave,
+  IconSaveAll,
+  IconSidebar,
   IconSun,
   IconTree,
+  IconUndo,
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
@@ -207,7 +214,7 @@ export function CommandPalette() {
         title: paneOpen.timeline ? t("palette.hideTimeline") : t("palette.showTimeline"),
         detail: t("palette.toggleTimeline"),
         keywords: "timeline 時間軸 里程碑 切換",
-        icon: <IconLayout size={15} />,
+        icon: <IconClock size={15} />,
         run: () => togglePane("timeline"),
       },
       {
@@ -215,7 +222,7 @@ export function CommandPalette() {
         title: explorerCollapsed ? t("palette.expandExplorer") : t("palette.collapseExplorer"),
         detail: t("palette.toggleExplorer"),
         keywords: "sidebar explorer 側邊欄 專案總管",
-        icon: <IconLayout size={15} />,
+        icon: <IconSidebar size={15} />,
         run: () => updateUIPreference("explorerCollapsed", !explorerCollapsed),
       },
       {
@@ -251,7 +258,7 @@ export function CommandPalette() {
           detail: t("palette.saveTabDetail"),
           keywords: "save 儲存",
           hint: `${MOD} S`,
-          icon: <IconDoc size={15} />,
+          icon: <IconSave size={15} />,
           run: async () => {
             await saveTab(activeTab);
           },
@@ -261,7 +268,7 @@ export function CommandPalette() {
           title: t("palette.saveAll"),
           detail: t("palette.saveAllDetail"),
           keywords: "save all 全部 儲存",
-          icon: <IconDoc size={15} />,
+          icon: <IconSaveAll size={15} />,
           run: async () => {
             await saveAllTabs();
           },
@@ -275,7 +282,7 @@ export function CommandPalette() {
         detail: t("palette.undoDetail"),
         keywords: "undo 復原 還原",
         hint: `${MOD} Z`,
-        icon: <IconRestore size={15} />,
+        icon: <IconUndo size={15} />,
         run: async () => {
           await undoLast();
         },
@@ -286,7 +293,7 @@ export function CommandPalette() {
         detail: t("palette.redoDetail"),
         keywords: "redo 重做 重新",
         hint: `${MOD} ⇧ Z`,
-        icon: <IconRestore size={15} />,
+        icon: <IconRedo size={15} />,
         run: async () => {
           await redoLast();
         },
@@ -296,7 +303,7 @@ export function CommandPalette() {
         title: t("palette.reload"),
         detail: t("palette.reloadDetail"),
         keywords: "reload refresh 重新整理 同步",
-        icon: <IconRestore size={15} />,
+        icon: <IconRefresh size={15} />,
         run: async () => {
           await Promise.all([loadAll(), refreshProjects(), refreshTrash()]);
         },
@@ -307,7 +314,7 @@ export function CommandPalette() {
         detail: t("palette.helpDetail"),
         keywords: "help shortcut keys 說明 幫助 快捷鍵 教學",
         hint: "?",
-        icon: <IconDoc size={15} />,
+        icon: <IconHelp size={15} />,
         run: () => setView("help"),
       },
       {
@@ -315,7 +322,7 @@ export function CommandPalette() {
         title: t("palette.tour"),
         detail: t("palette.tourDetail"),
         keywords: "tour onboarding guide 導覽 教學 新手 引導",
-        icon: <IconDoc size={15} />,
+        icon: <IconCompass size={15} />,
         run: () => {
           window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
         },

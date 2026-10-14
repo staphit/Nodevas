@@ -62,6 +62,7 @@ export function EditorToolbar({
   setEditorMode,
   nodeId,
   pageId,
+  pageTitle,
   content,
 }: {
   markdownTools: boolean;
@@ -77,6 +78,7 @@ export function EditorToolbar({
   setEditorMode: (mode: EditorMode) => void;
   nodeId: string;
   pageId: string;
+  pageTitle?: string;
   content: string;
 }) {
   const { t } = useI18n();
@@ -352,7 +354,7 @@ export function EditorToolbar({
       </details>
 
       <span className="tool-flex" />
-      <ExportMenu nodeId={nodeId} pageId={pageId} content={content} />
+      <ExportMenu nodeId={nodeId} pageId={pageId} pageTitle={pageTitle} content={content} />
       <button
         type="button"
         className={`tool-btn${outlineOpen ? " on" : ""}`}
