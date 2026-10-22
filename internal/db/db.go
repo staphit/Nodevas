@@ -447,6 +447,51 @@ UPDATE accounts SET email = ''
 CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
 `,
 	},
+	{
+		name: "0007_copilot",
+		stmt: `
+-- The voice copilot's conversations and transcripts (see COPILOT.md). They
+-- belong to the account that held them, never to the project's content: a
+-- transcript is not a node, and a project shared with others must not show
+-- one person's dictation to the rest.
+--
+-- Timestamps here are Unix milliseconds rather than the RFC3339 text the other
+-- tables use. A conversation produces several entries a second, and a
+-- transcript is ordered by seq, not by time; the millisecond value is what
+-- the browser shows and sorts conversations by without parsing anything.
+CREATE TABLE copilot_conversations (
+    id          TEXT PRIMARY KEY,
+    -- Not a foreign key to accounts: on a loopback server the account is the
+    -- built-in "local" actor, which has no row.
+    account_id  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'default',
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT;
+CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
+
+CREATE TABLE copilot_entries (
+    id               TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    seq              INTEGER NOT NULL,
+    kind             TEXT NOT NULL,             -- user | assistant | tool | notice
+    source           TEXT NOT NULL DEFAULT '',  -- voice | text (user entries)
+    text             TEXT NOT NULL DEFAULT '',
+    tool_name        TEXT NOT NULL DEFAULT '',
+    tool_input       TEXT NOT NULL DEFAULT '',
+    tool_output      TEXT NOT NULL DEFAULT '',
+    tool_status      TEXT NOT NULL DEFAULT '',  -- ok | error | denied
+    -- provider.Message JSON, replayed to the model on the next turn. The
+    -- columns above are what the panel reads, so a transcript renders without
+    -- decoding a vendor payload.
+    message          TEXT NOT NULL DEFAULT '',
+    created_at       INTEGER NOT NULL,
+    UNIQUE (conversation_id, seq)
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

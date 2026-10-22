@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -29,6 +30,9 @@ type Options struct {
 	// on the session, usually with an error that names neither the line nor
 	// this program.
 	Stderr io.Writer
+	// HTTPClient replaces the socket client; see ClientOptions.HTTPClient.
+	// Only the in-process copilot bridge sets it.
+	HTTPClient *http.Client
 }
 
 // DefaultActor names an agent when the operator did not.
@@ -61,13 +65,24 @@ func NewServer(ctx context.Context, opts Options) (*mcp.Server, error) {
 	return server, err
 }
 
+// NewServerWithClose is NewServer for a caller that outlives one session in a
+// long-running process — the copilot bridge. With ChromaURL set the server
+// owns an embedding worker subprocess; NewServer leaves it to die with ctx,
+// which is fine for a test but leaks one per turn in `nodevas serve` if ctx
+// outlives the turn. The returned close stops it; it is safe to call more than
+// once and is a no-op without RAG.
+func NewServerWithClose(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
+	return newServer(ctx, opts)
+}
+
 func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	closeWorker := func() {}
 	client, err := NewClient(ClientOptions{
-		Server:    opts.Server,
-		Project:   opts.Project,
-		Actor:     opts.Actor,
-		AgentRole: opts.AgentRole,
+		Server:     opts.Server,
+		Project:    opts.Project,
+		Actor:      opts.Actor,
+		AgentRole:  opts.AgentRole,
+		HTTPClient: opts.HTTPClient,
 	})
 	if err != nil {
 		return nil, nil, err

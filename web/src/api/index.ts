@@ -4,6 +4,7 @@
  * nor cares which file an endpoint now lives in.
  */
 import { authApi } from "./auth";
+import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
 import { graphApi } from "./graph";
 import { historyApi } from "./history";
@@ -39,6 +40,32 @@ export type {
   ProjectImportMode,
 } from "./workspace";
 export type { Actor } from "./auth";
+export {
+  COPILOT_MODES,
+  NdjsonParser,
+  parseTurnEventLine,
+  readTurnEvents,
+  streamTurn,
+} from "./copilot";
+export type {
+  CopilotClientTool,
+  CopilotConversation,
+  CopilotConversationDetail,
+  CopilotDecision,
+  CopilotEntry,
+  CopilotEntryKind,
+  CopilotMode,
+  CopilotSettings,
+  CopilotSettingsInput,
+  CopilotSource,
+  CopilotStatus,
+  CopilotToolKind,
+  CopilotTurnContext,
+  CopilotTurnEvent,
+  CopilotTurnEventType,
+  CopilotTurnRequest,
+  CopilotView,
+} from "./copilot";
 export type { AuditEntry } from "./history";
 export type { NotifySettings } from "./notify";
 export type {
@@ -64,4 +91,5 @@ export const api = {
   ...authApi,
   ...historyApi,
   ...remoteApi,
+  ...copilotApi,
 };

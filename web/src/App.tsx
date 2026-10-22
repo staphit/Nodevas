@@ -18,6 +18,7 @@ import { ConfirmDialogHost } from "./components/ConfirmDialog";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
+import { CopilotRoot } from "./copilot/CopilotRoot";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -616,6 +617,7 @@ function MainApp() {
       <ProjectPickerHost />
       <CommandPalette />
       <OnboardingTour />
+      <CopilotRoot />
     </div>
   );
 }

@@ -48,10 +48,16 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	sys.Register(api)
+	if s.copilot != nil {
+		s.copilot.Register(api)
+	}
 
 	router.GET("/ws", s.hub.Handle)
 	// Unmatched: JSON 404 under /api/, the SPA everywhere else.
 	router.NoRoute(s.notFound)
 
+	// Kept so the copilot's tool bridge can serve its calls through this same
+	// router, middleware and all, without a socket.
+	s.router.Store(&builtRouter{handler: router})
 	return router
 }
