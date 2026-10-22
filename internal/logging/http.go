@@ -158,6 +158,13 @@ func (s *statusRecorder) Flush() {
 	}
 }
 
+// Unwrap lets http.ResponseController reach the connection underneath, so a
+// long-lived response (the copilot's turn stream, the 10-minute write
+// deadline in cmd/nodevas) can move its write deadline through this wrapper.
+func (s *statusRecorder) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
+}
+
 func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hijacker, ok := s.ResponseWriter.(http.Hijacker)
 	if !ok {

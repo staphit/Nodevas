@@ -121,6 +121,13 @@ type ClientOptions struct {
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
 	Timeout   time.Duration
+	// HTTPClient, when set, carries every request instead of a socket client,
+	// and Timeout is left to it. It exists for the copilot's tool bridge,
+	// whose client serves requests with the server's own handler inside this
+	// process. Such a client never leaves the process, so the loopback-only
+	// check on Server — which is about where a socket would connect — has
+	// nothing to guard and is skipped.
+	HTTPClient *http.Client
 }
 
 // LoopbackOnlyError is returned when --server names something this process
@@ -148,20 +155,24 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if base.Scheme != "http" && base.Scheme != "https" {
 		return nil, fmt.Errorf("--server %q: expected an http:// or https:// URL", raw)
 	}
-	if !isLoopbackURL(base) {
+	if opts.HTTPClient == nil && !isLoopbackURL(base) {
 		return nil, &LoopbackOnlyError{Host: base.Host}
 	}
 	base.Path = strings.TrimSuffix(base.Path, "/")
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	httpClient := opts.HTTPClient
+	if httpClient == nil {
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		httpClient = &http.Client{Timeout: timeout}
 	}
 	return &Client{
 		base:      base,
 		project:   strings.TrimSpace(opts.Project),
 		actor:     strings.TrimSpace(opts.Actor),
 		agentRole: strings.TrimSpace(opts.AgentRole),
-		http:      &http.Client{Timeout: timeout},
+		http:      httpClient,
 	}, nil
 }
 

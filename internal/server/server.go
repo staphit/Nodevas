@@ -18,6 +18,9 @@ import (
 	"nodevas/internal/store"
 	"strconv"
 	"sync"
+	"sync/atomic"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
@@ -44,6 +47,39 @@ type Server struct {
 	// listenPort is set only once UseListenAddress has run, and is what tells
 	// the origin check that it may insist on a port.
 	listenPort string
+	// copilot serves /api/copilot when set; see UseCopilot.
+	copilot RouteRegistrar
+	// router is the last router Handler built, read by the copilot's tool
+	// bridge from request goroutines while startup may still be writing it.
+	router atomic.Pointer[builtRouter]
+}
+
+// builtRouter boxes the router for the atomic pointer.
+type builtRouter struct{ handler http.Handler }
+
+// RouteRegistrar is a handler package that adds its own routes under /api.
+type RouteRegistrar interface {
+	Register(api *gin.RouterGroup)
+}
+
+// UseCopilot enables the voice copilot's API (internal/httpapi/copilot).
+// Call it before Handler. The copilot service's tool bridge should be given
+// BuiltHandler, which is how its tool calls reach this server's own routes.
+//
+// It takes the handler set as an interface rather than importing it because
+// the copilot reaches the MCP tools, and the MCP package's tests build this
+// server: a direct import here would be a cycle.
+func (s *Server) UseCopilot(api RouteRegistrar) {
+	s.copilot = api
+}
+
+// BuiltHandler returns the router Handler built, or nil before Handler has
+// run. Unlike Handler it builds nothing, so it is safe to call per request.
+func (s *Server) BuiltHandler() http.Handler {
+	if built := s.router.Load(); built != nil {
+		return built.handler
+	}
+	return nil
 }
 
 func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {

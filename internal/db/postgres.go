@@ -353,6 +353,39 @@ CREATE INDEX sessions_user ON sessions (user_id);
 CREATE INDEX sessions_expires ON sessions (expires_at);
 `,
 	},
+	{
+		// BIGINT where SQLite says INTEGER: SQLite's INTEGER is 64-bit, and a
+		// Unix millisecond timestamp does not fit PostgreSQL's 32-bit one.
+		name: "0007_copilot",
+		stmt: `
+CREATE TABLE copilot_conversations (
+    id          TEXT COLLATE "C" PRIMARY KEY,
+    account_id  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'default',
+    created_at  BIGINT NOT NULL,
+    updated_at  BIGINT NOT NULL
+);
+CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
+
+CREATE TABLE copilot_entries (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    conversation_id  TEXT COLLATE "C" NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    seq              BIGINT NOT NULL,
+    kind             TEXT NOT NULL,
+    source           TEXT NOT NULL DEFAULT '',
+    text             TEXT NOT NULL DEFAULT '',
+    tool_name        TEXT NOT NULL DEFAULT '',
+    tool_input       TEXT NOT NULL DEFAULT '',
+    tool_output      TEXT NOT NULL DEFAULT '',
+    tool_status      TEXT NOT NULL DEFAULT '',
+    message          TEXT NOT NULL DEFAULT '',
+    created_at       BIGINT NOT NULL,
+    UNIQUE (conversation_id, seq)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

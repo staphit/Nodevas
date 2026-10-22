@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
 )
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
@@ -113,7 +114,24 @@ func (s *Server) withAuth(c *gin.Context) {
 		httpx.Err(c, http.StatusUnauthorized, err)
 		return
 	}
-	if s.auth.NeedsCSRF() && isUnsafeMethod(r.Method) {
+	// The copilot's tool bridge serves its calls with this handler in-process,
+	// marked by a context value no network request can carry (see
+	// auth.WithInProcessAgent). It authenticated above with the person's own
+	// cookie, so who it is stays theirs; what changes is that it is an agent —
+	// node write_access applies to it on every authenticator, including the
+	// ones that ignore the agent-role header — and that there is no browser in
+	// the loop for a CSRF token to protect. Visitor read-only, abuse limits
+	// and the audit trail run after this as for any request.
+	inProcess := false
+	if class, ok := auth.InProcessAgent(r.Context()); ok {
+		if class != identity.AgentWorker && class != identity.AgentOrchestrator {
+			httpx.Err(c, http.StatusUnauthorized, auth.ErrUnknownAgentRole)
+			return
+		}
+		actor.Agent = class
+		inProcess = true
+	}
+	if s.auth.NeedsCSRF() && isUnsafeMethod(r.Method) && !inProcess {
 		if err := auth.CheckCSRF(r); err != nil {
 			httpx.Err(c, http.StatusForbidden, err)
 			return

@@ -67,6 +67,11 @@ type Options struct {
 	// server is fine; that server authenticates nobody.
 	Host   string
 	Cookie string
+	// RemoteAddr is the person's address (auth.ClientIP of the copilot
+	// request, or its RemoteAddr), given to every in-process request so abuse
+	// limits and the audit trail bucket the copilot's calls with the person
+	// who asked for them. Empty is 127.0.0.1.
+	RemoteAddr string
 	// Project pins every tool to one project; empty is the active project.
 	Project string
 	// Actor is written into `by`/`owner` fields, e.g. "copilot:alice".

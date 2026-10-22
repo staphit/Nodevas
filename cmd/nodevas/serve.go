@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,11 +22,17 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/config"
+	"nodevas/internal/copilot"
+	"nodevas/internal/copilot/provider"
+	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/db"
+	copilotapi "nodevas/internal/httpapi/copilot"
+	"nodevas/internal/identity"
 	"nodevas/internal/logging"
 	"nodevas/internal/mail"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
+	"nodevas/internal/secrets"
 	"nodevas/internal/server"
 	"nodevas/web"
 )
@@ -258,6 +266,8 @@ func serve(args []string) {
 	logLevel := fs.String("log-level", serveConfig.Logging.Level, "debug, info, warn, or error")
 	logFormat := fs.String("log-format", serveConfig.Logging.Format,
 		"json for a log shipper (Elastic Common Schema field names), text for a terminal")
+	copilotEnabled := fs.Bool("copilot", serveConfig.Copilot.Enabled,
+		"offer the voice copilot; it also needs a model API key (NODEVAS_COPILOT_API_KEY) or a local OpenAI-compatible base URL")
 
 	abusePreAuthGlobalRate := fs.Float64("abuse-pre-auth-global-rate", serveConfig.Abuse.PreAuthGlobalRate, "pre-auth global rate limit (req/s)")
 	abusePreAuthGlobalBurst := fs.Float64("abuse-pre-auth-global-burst", serveConfig.Abuse.PreAuthGlobalBurst, "pre-auth global burst capacity")
@@ -322,6 +332,7 @@ func serve(args []string) {
 	serveConfig.SMTP.Security = *smtpSecurity
 	serveConfig.Logging.Level = *logLevel
 	serveConfig.Logging.Format = *logFormat
+	serveConfig.Copilot.Enabled = *copilotEnabled
 
 	serveConfig.Abuse.PreAuthGlobalRate = *abusePreAuthGlobalRate
 	serveConfig.Abuse.PreAuthGlobalBurst = *abusePreAuthGlobalBurst
@@ -451,6 +462,11 @@ func serve(args []string) {
 		slog.Float64("ws_upgrade_rate", serveConfig.Abuse.WSUpgradeGlobalRate),
 	)
 	srv.UseAudit(audit.New(database))
+	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
+	if err != nil {
+		log.Fatalf("copilot: %v", err)
+	}
+	srv.UseCopilot(copilotapi.New(copilotService))
 	// The wildcard-without-a-name case is refused above for a remote
 	// deployment; this catches the rest, and keeps the guarantee in the server
 	// package rather than only in this one call site.
@@ -595,6 +611,75 @@ func serve(args []string) {
 		}
 		backupCancel()
 	}
+}
+
+// newCopilotService wires the voice copilot from its configuration.
+//
+// The key's precedence is: what an administrator saved in the settings (the
+// encrypted secrets file), then NODEVAS_COPILOT_API_KEY, then the vendor's own
+// variable for whichever provider is in effect. None of them is a flag or a
+// YAML key, for the reason the SMTP password is not: both are readable by
+// people who should not hold the credential.
+func newCopilotService(
+	cfg config.CopilotConfig,
+	remote bool,
+	pm *project.ProjectManager,
+	database *db.DB,
+	router func() http.Handler,
+) (*copilot.Service, error) {
+	apiKey, err := secretEnvironment("NODEVAS_COPILOT_API_KEY")
+	if err != nil {
+		return nil, err
+	}
+	// Bypass is the copilot changing anything without asking. On loopback
+	// the person at the keyboard owns everything it could touch; with
+	// accounts, an administrator has to opt in.
+	allowBypass := !remote
+	if cfg.AllowBypass != nil {
+		allowBypass = *cfg.AllowBypass
+	}
+	// Beside the Drive credentials, under the machine key, and named per
+	// workspace: the settings it pairs with live in that workspace's database.
+	sum := sha256.Sum256([]byte(filepath.Clean(pm.Workspace())))
+	secretDir := filepath.Join(pm.CatalogRoot(), "secrets")
+	keys := secrets.New(
+		filepath.Join(secretDir, "copilot-"+hex.EncodeToString(sum[:])[:16]+".enc"),
+		filepath.Join(secretDir, "master.key"))
+
+	service := copilot.New(copilot.Options{
+		Database: database,
+		Keys:     keys,
+		Defaults: copilot.Defaults{
+			Enabled:     cfg.Enabled,
+			Provider:    cfg.Provider,
+			Model:       cfg.Model,
+			BaseURL:     cfg.BaseURL,
+			Effort:      cfg.Effort,
+			AllowBypass: allowBypass,
+			APIKey:      strings.TrimSpace(apiKey),
+			VendorKeys: map[string]string{
+				"anthropic": strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")),
+				"openai":    strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+			},
+		},
+		NewProvider:         provider.New,
+		DefaultModel:        provider.DefaultModel,
+		OpenBridge:          toolbridge.Open,
+		Handler:             router,
+		AgentRole:           identity.AgentClass(cfg.AgentRole),
+		MaxToolCallsPerTurn: cfg.MaxToolCallsPerTurn,
+	})
+	if status, err := service.Status(context.Background(), identity.Local); err != nil {
+		slog.Warn("copilot settings could not be read", logging.Err(err))
+	} else if status.Enabled {
+		slog.Info("copilot ready",
+			slog.String("provider", status.Provider),
+			slog.String("model", status.Model),
+			slog.Bool("allow_bypass", status.AllowBypass))
+	} else {
+		slog.Info("copilot unavailable", slog.String("reason", status.Reason))
+	}
+	return service, nil
 }
 
 const (

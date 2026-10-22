@@ -23,6 +23,7 @@
 @import "./styles/12-timeline.css"; /* timeline lanes, snapshots, split panes */
 @import "./styles/13-tour.css"; /* onboarding tour overlay and tooltips */
 @import "./styles/14-touch.css"; /* touch gestures, coarse-pointer targets, phone layout, safe areas */
+@import "./styles/15-copilot.css"; /* voice copilot button, panel, transcript */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {
