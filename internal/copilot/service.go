@@ -138,19 +138,12 @@ func (s *Service) Status(ctx context.Context, actor identity.Actor) (Status, err
 		return Status{}, err
 	}
 	reason := s.unavailableReason(settings, key)
-	// A visitor shares one credential with everyone holding the link, so a
-	// conversation stored under it would be readable by all of them, and the
-	// middleware refuses its POSTs anyway. Saying so here hides the button
-	// instead of offering a panel whose every turn fails.
-	if reason == "" && !actor.CanWrite() {
-		reason = "the copilot is not available to read-only sessions"
-	}
 	return Status{
 		Enabled:     reason == "",
 		Provider:    settings.Provider,
 		Model:       settings.Model,
-		Modes:       availableModes(actor, settings.AllowBypass),
-		AllowBypass: settings.AllowBypass && actor.CanWrite(),
+		Modes:       availableModes(settings.AllowBypass),
+		AllowBypass: settings.AllowBypass,
 		Reason:      reason,
 	}, nil
 }

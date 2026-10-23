@@ -12,7 +12,7 @@
 | 遠端能力 | 第一版只看 + 核准；架構保留遠端派工，之後以開關開啟 |
 | 改動處理 | 每次 run 一個 worktree + branch，完成後**自動開 PR** |
 | 模型 | 多 agent CLI、多模型並存，每次 run 可選，可設路由規則 |
-| Agent 間溝通 | 使用 [reason-network](https://github.com/reason-machines/reason-network)（P2P、E2E 加密）；Nodevas 透過 runner 橋接 |
+| Agent 間溝通 | Nodevas 內建 network（經 Hub）；[reason-network](https://github.com/reason-machines/reason-network) 只作為設計參考，不用它的網路和帳號 |
 | 對外存取 | 這版上線後，`nodevas.cola-stone.com` 前面加 Cloudflare Zero Trust（Access） |
 
 ## 架構：Hub + Runner
@@ -30,9 +30,6 @@ flowchart LR
   C1 & C2 & C3 -->|MCP| P["runner loopback proxy 127.0.0.1"]
   P -->|bearer runner token| T
   R -->|git push + gh pr create| GH["GitHub"]
-  R <-->|who / send / listen| RN["reason-network daemon"]
-  RN <-->|iroh P2P, E2E| RN2["隊友電腦的 reason-network"]
-  C1 & C2 & C3 -->|MCP reason-network| RN
 ```
 
 **原則：Hub 永遠不執行程式。** NAS 上的 server 只排程、存紀錄、推 UI。程式碼、CLI 登入憑證、`gh` token 都留在 runner 機器上。
@@ -65,39 +62,24 @@ Nodevas runner 兩種模式都支援：
 
 兩種模式共用 worktree、branch、PR 流程與 run 紀錄；只有 adapter 的啟動方式和事件來源不同。
 
-## Agent 間溝通：reason-network
+## Agent 間溝通：Nodevas 內建 network（借鑑 reason-network 的設計）
 
-agent 彼此之間的訊息、roster 和 `ask_user` 彈窗都交給 reason-network。每台電腦跑一個 daemon，經 iroh P2P 互連並端對端加密；連不上時改走只看得到密文的 relay。Nodevas 不重做這部分，改當它的使用者和觀察者。
+**決定（2026-10-23）**：[reason-network](https://github.com/reason-machines/reason-network) 只作為設計參考，**不使用**它的 P2P 網路、relay 和 Reason 帳號，避免把信任交給第三方。agent 之間的溝通沿用 PR #10 的內建 network：訊息、roster 和 `ask_user` 都經過 Hub，Hub 前面有 Cloudflare Access 保護，跨機器時由 runner 連線。
 
-**分工**
+**要借鑑的設計**（排在 W1.5）
 
-| 功能 | 由誰負責 |
+| reason-network 的做法 | 在 Nodevas 的做法 |
 | --- | --- |
-| agent ↔ agent 訊息、跨機器與跨人 roster、session 命名 | reason-network（MCP server `reason-network` + 它自己的 hooks） |
-| 任務、claim、狀態、run、diff、PR | Nodevas（MCP server `nodevas`） |
-| 人在電腦前的核准 | reason-network `ask_user`（OS 彈窗） |
-| 人在手機或遠端的核准 | Nodevas `request_approval`（掛在 node 上，經網頁核准） |
-| 從 Nodevas UI 發訊息給 agent | runner 用 `reason-network send` 轉發 |
+| 訊息即時送進執行中的 session，閒置的 session 會被喚醒 | runner 透過 Claude Code 的 messaging socket（`CLAUDE_CODE_MESSAGING_SOCKET`）推送；不支援的 agent 沿用 hook 和 `check_inbox` |
+| inbound `hold` 搭配 `held`、`approve`、`reject` | 每個 session 可設定收信政策（立即收或先暫存），暫存的訊息在 UI 上核准；手機也能操作 |
+| 訊息可附小型文字檔（最多 10 個，每個 256 KB） | `send_message` 加 `files`；檔案存在 Hub，收件端存成不可執行的副本 |
+| 某些資料夾的 session 不加入網路（`folder <path> off`） | runner 和 `setup-agent` 提供 folder 排除清單，hook 在這些資料夾裡不回報 |
+| `notify`：訊息同時彈出在對方的螢幕上 | 用 WS toast 加上 desktop 版的系統通知 |
+| session 名稱跟著對話走，resume 後同名，名稱保留一天 | 已部分完成（`/clear` 會沿用名稱）；再加名稱保留期 |
+| `ask_user` 的答案以本人身分回傳，不是一般訊息 | 已完成（`<nodevas-approval>` 為 verified） |
+| CLI：`who`、`send`、`listen --as` | 新增 `nodevas agents who`/`send`/`listen`，讓 runner 和終端機都能用 |
 
-**避免兩套系統打架**（PR #10 內建的 agent network 改為後備）
-
-- `nodevas mcp --network reason`：MCP 不註冊 `list_team`、`send_message`、`check_inbox`，`ask_user` 改名為 `request_approval`，避免和 reason-network 的同名 tool 混淆。
-- `nodevas hook` 在 reason 模式下只回報 busy/idle、doing 和改動檔案，**不注入信件**，因為注入由 reason-network 的 hook 負責。
-- `nodevas setup-agent --network reason`：偵測到 `reason-network` 時預設用這個模式，並提示先跑 `reason-network setup`。
-- 沒有安裝 reason-network 時，沿用 PR #10 的內建 network（`--network builtin`）。
-
-**Runner 橋接**（runner 是本機 daemon 的一般 client，經 named pipe 或 Unix socket 連線）
-
-- roster：定期執行 `reason-network who --json`，送給 Hub。board 會顯示全隊的 session（誰、repo@branch、busy/idle、doing），並依 claim 和 branch 對應到 node。
-- 從 UI 發訊息：Hub 交給 runner，runner 執行 `reason-network send <to> --from nodevas "<msg>"`；回覆由 `reason-network listen --as nodevas` 收下，再送回 Hub 顯示在 Agent panel 和 node 上。
-- 掛在 node 上的討論：由 Nodevas 發出的訊息帶 `[node:<id>]` 前綴，回覆沿用同一個 thread。agent 之間的私訊是端對端加密，**Nodevas 看不到**；這是刻意的，不去繞過。
-- held 訊息：如果把 inbound 設成 `hold`，runner 會把 `reason-network held` 的清單送到 UI，你在手機上核准後，由 runner 執行 `approve` 或 `reject`。
-- runner 啟動的 run 會同時掛上兩個 MCP server，加入 reason-network 後，其他 agent 就找得到它。
-
-**相依與隱私**
-
-- reason-network 需要 Reason 帳號（Google、GitHub、Apple 或 email 登入）。預設經 Reason 的 relay 和 n0 的位址查詢；可以改用自架的 relay（`reason-network relay <url>`），之後評估在 NAS 上架。
-- 版本更新快：adapter 和橋接只依賴它公開的 CLI 和 `--json` 輸出，並在 runner 啟動時檢查版本。
+**跨機器**：所有通訊都經過 Hub（TLS、Access、Nodevas 登入、runner token），**沒有任何第三方 relay 或帳號**。
 
 ## 多模型設計
 
@@ -246,7 +228,7 @@ SQLite 和 Postgres 都要有，migration 編號接在現有的 6 之後。
 | **Z0 Zero Trust** | Access application 與 policy、service token、Nodevas 端 JWT 驗證（`access.*` 設定）、`cf_audit` 規則 | 不過 Access 就進不了 Nodevas，runner 用 service token 連線 |
 | **W0 Runner 基礎** | `nodevas runner` daemon、token、outbound 連線、回報 agent 與模型目錄、Runners 頁 | 網頁上看到你的電腦在線，以及它有哪些 agent 和模型 |
 | **W1 執行 Claude** | runs 資料表、派工（runner 端本機接受）、worktree、Claude adapter、事件串流、取消、MCP proxy | 從 node 派一次 Claude run 並即時看進度 |
-| **W1.5 reason-network 橋接** | `--network reason` 模式、`request_approval`、runner 呼叫 `who`/`send`/`listen`/`held`、roster 對應到 node | 看到全隊 agent 在做什麼，從手機發訊息給 agent |
+| **W1.5 Network 強化** | 借鑑 reason-network：即時推送（messaging socket）、hold/approve、附件、folder 排除、`nodevas agents who`/`send`/`listen` | 訊息立刻送進執行中的 agent，從手機管理收信 |
 | **W2 多模型** | Codex、Gemini adapter，正規化事件，每次 run 選模型，用量與成本 | 同一個 node 可以選不同 agent 和模型 |
 | **W2.5 互動模式** | runner PTY（Windows 用 ConPTY）經 WSS 轉成網頁上的 xterm.js；OSC 7501 狀態解析 | 在網頁裡操作完整的 Claude Code / Codex TUI |
 | **W3 改動與 PR** | commit、push、自動開 PR，diff 摘要與 viewer，CI 狀態 | 程式碼改動出現在 node 上，PR 也自動開好 |
@@ -266,7 +248,7 @@ SQLite 和 Postgres 都要有，migration 編號接在現有的 6 之後。
 5. Repo 管理參考 Orca：在 UI 加入本機 repo 資料夾，但需要在 runner 那台機器上確認，也可以用 `nodevas runner repo add <path>`。
 6. Visitor 功能：**刪除**。
 7. Access SSO 取代 email passcode：不採用，兩層都保留。
-8. reason-network relay：先用 Reason 預設的 relay（relay 只看得到密文），之後有需要再自架。
+8. reason-network：只參考設計，不使用它的網路和帳號。
 
 ## 驗證
 

@@ -26,7 +26,7 @@
 //	                    the audit trail on a PostgreSQL server instead of the
 //	                    workspace's SQLite file (the search index stays local)
 //
-// A subcommand per file: serve.go, user.go, visitor.go, db.go. This one is the
+// A subcommand per file: serve.go, user.go, db.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
 // reading what any of it does.
 package main
@@ -46,8 +46,6 @@ func main() {
 		serve(os.Args[2:])
 	case "user":
 		user(os.Args[2:])
-	case "visitor":
-		visitor(os.Args[2:])
 	case "mcp":
 		mcpServe(os.Args[2:])
 	case "db":
@@ -81,10 +79,6 @@ func usage() {
 		"                    [--clear]  (with `email`: remove web sign-in for the account)")
 	fmt.Fprintln(os.Stderr,
 		"                    [--password-stdin]  (--password is deprecated: it is visible in the process list)")
-	fmt.Fprintln(os.Stderr,
-		"       nodevas visitor show|on|off --project <dir> [--pin 777] [--passcode CODE]")
-	fmt.Fprintln(os.Stderr,
-		"                    (one shared read-only credential; takes effect without a restart)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,

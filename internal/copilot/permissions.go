@@ -2,7 +2,6 @@ package copilot
 
 import (
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/identity"
 )
 
 // Mode is how much the copilot may do without asking, modelled on Claude
@@ -53,15 +52,10 @@ func (d Decision) Valid() bool {
 	return false
 }
 
-// effectiveMode is the mode a turn actually runs in. A person who cannot
-// write gets plan whatever they asked for: the tools would refuse their
-// writes anyway, and plan says so up front instead of failing call by call.
-// Bypass the server does not allow degrades to acceptEdits, the strongest
-// mode that still asks before a wholesale replacement.
-func effectiveMode(requested Mode, actor identity.Actor, allowBypass bool) Mode {
-	if !actor.CanWrite() {
-		return ModePlan
-	}
+// effectiveMode is the mode a turn actually runs in. Bypass the server does
+// not allow degrades to acceptEdits, the strongest mode that still asks before
+// a wholesale replacement.
+func effectiveMode(requested Mode, allowBypass bool) Mode {
 	if requested == ModeBypass && !allowBypass {
 		return ModeAcceptEdits
 	}
@@ -102,11 +96,8 @@ func gate(mode Mode, kind toolbridge.Kind) verdict {
 	}
 }
 
-// availableModes is what the panel may offer this person.
-func availableModes(actor identity.Actor, allowBypass bool) []Mode {
-	if !actor.CanWrite() {
-		return []Mode{ModePlan}
-	}
+// availableModes is what the panel may offer.
+func availableModes(allowBypass bool) []Mode {
 	modes := make([]Mode, 0, len(AllModes))
 	for _, mode := range AllModes {
 		if mode == ModeBypass && !allowBypass {

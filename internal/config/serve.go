@@ -122,6 +122,36 @@ type ServeConfig struct {
 	Logging        LoggingConfig `yaml:"logging"`
 	Abuse          AbuseConfig   `yaml:"abuse"`
 	Copilot        CopilotConfig `yaml:"copilot"`
+	Access         AccessConfig  `yaml:"access"`
+}
+
+// AccessConfig puts Cloudflare Access in front of the server. With
+// TeamDomain and AUD set, every request's Access token is verified; Required
+// refuses the ones without a valid token, and without it failures are only
+// logged, which is how a deployment checks its Access setup first.
+type AccessConfig struct {
+	TeamDomain string `yaml:"team_domain"`
+	AUD        string `yaml:"aud"`
+	Required   bool   `yaml:"required"`
+}
+
+// Enabled reports whether Access tokens are checked at all.
+func (a AccessConfig) Enabled() bool {
+	return strings.TrimSpace(a.TeamDomain) != "" || strings.TrimSpace(a.AUD) != ""
+}
+
+// Validate refuses half a configuration: a team domain without an audience
+// (or the reverse) would verify nothing, and required with neither would
+// lock everyone out.
+func (a AccessConfig) Validate() error {
+	team, aud := strings.TrimSpace(a.TeamDomain), strings.TrimSpace(a.AUD)
+	if (team == "") != (aud == "") {
+		return errors.New("access team_domain and aud must be given together")
+	}
+	if a.Required && team == "" {
+		return errors.New("access required needs team_domain and aud")
+	}
+	return nil
 }
 
 // DefaultServeConfig returns the same defaults that the serve command used
@@ -258,6 +288,8 @@ func ApplyEnvironment(cfg *ServeConfig, lookup func(string) (string, bool)) erro
 		{"NODEVAS_COPILOT_PROVIDER", func(value string) { cfg.Copilot.Provider = value }},
 		{"NODEVAS_COPILOT_MODEL", func(value string) { cfg.Copilot.Model = value }},
 		{"NODEVAS_COPILOT_BASE_URL", func(value string) { cfg.Copilot.BaseURL = value }},
+		{"NODEVAS_SERVE_ACCESS_TEAM_DOMAIN", func(value string) { cfg.Access.TeamDomain = value }},
+		{"NODEVAS_SERVE_ACCESS_AUD", func(value string) { cfg.Access.AUD = value }},
 	}
 	for _, field := range stringsToSet {
 		if value, ok := lookup(field.name); ok && strings.TrimSpace(value) != "" {
@@ -346,6 +378,7 @@ func ApplyEnvironment(cfg *ServeConfig, lookup func(string) (string, bool)) erro
 		{"NODEVAS_SERVE_BEHIND_PROXY", func(value bool) { cfg.BehindProxy = value }},
 		{"NODEVAS_SERVE_ALLOW_PLAINTEXT", func(value bool) { cfg.AllowPlaintext = value }},
 		{"NODEVAS_COPILOT_ENABLED", func(value bool) { cfg.Copilot.Enabled = value }},
+		{"NODEVAS_SERVE_ACCESS_REQUIRED", func(value bool) { cfg.Access.Required = value }},
 	}
 	for _, field := range bools {
 		value, ok := lookup(field.name)
@@ -378,6 +411,9 @@ func (c ServeConfig) Validate() error {
 		return errors.New("tls_cert and tls_key must be given together")
 	}
 	if err := c.Copilot.Validate(); err != nil {
+		return err
+	}
+	if err := c.Access.Validate(); err != nil {
 		return err
 	}
 

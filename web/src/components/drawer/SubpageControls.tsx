@@ -15,18 +15,9 @@ import { useI18n } from "../../i18n";
 export function SubpageControls({
   pages: subpages,
   onPopout,
-  canEdit = true,
 }: {
   pages: NodePages;
   onPopout: () => void;
-  /**
-   * False for a read-only session. The page tabs stay — switching pages is
-   * reading — while everything that renames, reorders, converts, creates,
-   * imports or deletes a page is not rendered. Not rendered rather than
-   * disabled, because a strip of dead buttons next to live tabs reads as
-   * broken, not as read-only.
-   */
-  canEdit?: boolean;
 }) {
   const { t } = useI18n();
   const {
@@ -92,36 +83,32 @@ export function SubpageControls({
           ))}
           {pagesLoading && <span className="content-page-loading">{t("subpage.loading")}</span>}
         </div>
-        {canEdit && (
-          <>
-            <button
-              type="button"
-              className="content-page-action"
-              aria-label={t("subpage.add")}
-              title={t("subpage.add")}
-              onClick={() => setPageCreateOpen((open) => !open)}
-            >
-              <IconPlus size={15} />
-            </button>
-            <button
-              type="button"
-              className="content-page-action"
-              aria-label={t("subpage.import")}
-              title={t("subpage.importTitle")}
-              disabled={pageBusy}
-              onClick={() => pageImportInputRef.current?.click()}
-            >
-              <IconImport size={15} />
-            </button>
-            <input
-              ref={pageImportInputRef}
-              type="file"
-              hidden
-              accept=".md,.markdown,.txt,.html,.htm,.docx"
-              onChange={(event) => void importPage(event.target.files)}
-            />
-          </>
-        )}
+        <button
+          type="button"
+          className="content-page-action"
+          aria-label={t("subpage.add")}
+          title={t("subpage.add")}
+          onClick={() => setPageCreateOpen((open) => !open)}
+        >
+          <IconPlus size={15} />
+        </button>
+        <button
+          type="button"
+          className="content-page-action"
+          aria-label={t("subpage.import")}
+          title={t("subpage.importTitle")}
+          disabled={pageBusy}
+          onClick={() => pageImportInputRef.current?.click()}
+        >
+          <IconImport size={15} />
+        </button>
+        <input
+          ref={pageImportInputRef}
+          type="file"
+          hidden
+          accept=".md,.markdown,.txt,.html,.htm,.docx"
+          onChange={(event) => void importPage(event.target.files)}
+        />
         <button
           type="button"
           className="content-page-action"
@@ -133,7 +120,7 @@ export function SubpageControls({
         </button>
       </div>
 
-      {canEdit && activePageID && (
+      {activePageID && (
         <div className="content-page-manage">
           <input
             value={pageRename}
@@ -195,7 +182,7 @@ export function SubpageControls({
         </div>
       )}
 
-      {canEdit && pageCreateOpen && (
+      {pageCreateOpen && (
         <form
           className="content-page-create"
           onSubmit={(event) => {

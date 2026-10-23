@@ -461,6 +461,19 @@ func serve(args []string) {
 		slog.Float64("heavy_rate", serveConfig.Abuse.HeavyGlobalRate),
 		slog.Float64("ws_upgrade_rate", serveConfig.Abuse.WSUpgradeGlobalRate),
 	)
+	if serveConfig.Access.Enabled() {
+		verifier, err := auth.NewAccessVerifier(auth.AccessOptions{
+			TeamDomain: serveConfig.Access.TeamDomain,
+			AUD:        serveConfig.Access.AUD,
+		})
+		if err != nil {
+			log.Fatalf("access: %v", err)
+		}
+		srv.UseAccess(verifier, serveConfig.Access.Required)
+		slog.Info("cloudflare access",
+			slog.String("team_domain", serveConfig.Access.TeamDomain),
+			slog.Bool("required", serveConfig.Access.Required))
+	}
 	srv.UseAudit(audit.New(database))
 	srv.UseAgentsDB(database)
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
@@ -505,22 +518,6 @@ func serve(args []string) {
 		log.Printf("accounts enabled (%d users)", users.Count(accountCtx))
 		if *maxActiveUsers > 0 {
 			log.Printf("at most %d people may be signed in at once", *maxActiveUsers)
-		}
-
-		// The visitor credential lives in the workspace database and is read on
-		// every sign-in attempt, so `nodevas visitor on|off` changes it without
-		// a restart. Nothing is configured here; this only reports what the
-		// database already says.
-		//
-		// Said loudly on purpose. One shared credential means everyone who has
-		// it can read everything on this server, and an operator who turned it
-		// on months ago should be reminded it is still on.
-		if pin, _, err := users.VisitorCredential(accountCtx); err == nil && pin != "" {
-			log.Printf(
-				"WARNING: visitor access is ON (pin %q). Anyone who knows it can read every "+
-					"project and attachment on this server, and may copy or save anything visible. "+
-					"It grants no writes, uploads, bulk exports, administration or host access. "+
-					"Turn it off with `nodevas visitor off --project %q`.", pin, root)
 		}
 
 		// Sign-in needs two factors, and the second one arrives by mail. A

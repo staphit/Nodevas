@@ -92,7 +92,6 @@ server never offers a tool the client cannot run.
   posts a decision or 120 s pass (timeout = deny). Decisions: `allow`,
   `allow_session` (this tool, no more asking for the rest of the conversation),
   `deny` (optional message to the model).
-- Visitors and read-only actors are forced to `plan`.
 - `bypassPermissions` is available only when the server config allows it
   (`copilot.allow_bypass`, default true on a loopback-only server, false with
   accounts).

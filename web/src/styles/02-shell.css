@@ -813,17 +813,6 @@
   font-size: 11px;
   text-align: center;
 }
-/* An invisible fence: groups controls so `disabled` reaches all of them at
- * once, without changing how anything lays out. Used to switch whole panels
- * off for read-only sessions. */
-.readonly-gate {
-  display: contents;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-}
-
 /* The tab strip inside the cloud dialog. Buttons rather than links because
  * the tabs swap content in place; the active one reads as pressed. */
 .backup-tabs {
