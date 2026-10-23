@@ -38,7 +38,9 @@ func TestAgentPayloadMeasurements(t *testing.T) {
 	}
 	raw, _ := json.Marshal(list)
 	t.Logf("tools/list: %d bytes; instructions: %d bytes", len(raw), len(instructions("fixture")))
-	if len(raw) > 17500 || len(instructions("fixture")) > 600 {
+	// 18000: W1.5 added save_attachment and attachment fields to the network
+	// tools, with their descriptions already cut to the bone.
+	if len(raw) > 18000 || len(instructions("fixture")) > 600 {
 		t.Fatal("agent catalog exceeded its context budget")
 	}
 	for _, name := range []string{"get_node", "get_graph_outline"} {
