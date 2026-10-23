@@ -38,10 +38,16 @@ func (f *fakeTerm) emit(s string) { f.out <- []byte(s) }
 
 func (f *fakeTerm) Read(p []byte) (int, error) {
 	if len(f.left) == 0 {
+		// Buffered output first, as a real pipe delivers it before EOF;
+		// a bare select would pick closed over waiting data half the time.
 		select {
 		case f.left = <-f.out:
-		case <-f.closed:
-			return 0, io.EOF
+		default:
+			select {
+			case f.left = <-f.out:
+			case <-f.closed:
+				return 0, io.EOF
+			}
 		}
 	}
 	n := copy(p, f.left)

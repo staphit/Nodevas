@@ -468,8 +468,11 @@ func (s *termSession) finish(readerDone <-chan struct{}) {
 	s.mu.Unlock()
 	close(s.stop)
 	// A pseudo-terminal does not report end of output when its program exits
-	// (the runner holds it open), so wait for the output to go quiet.
-	deadline := time.Now().Add(termDrainMax)
+	// (the runner holds it open), so wait for the output to go quiet — for at
+	// least one quiet period from now, not from the last output: the program's
+	// final screen can still be in flight when Wait returns.
+	start := time.Now()
+	deadline := start.Add(termDrainMax)
 	for time.Now().Before(deadline) {
 		select {
 		case <-readerDone:
@@ -477,7 +480,11 @@ func (s *termSession) finish(readerDone <-chan struct{}) {
 			continue
 		case <-time.After(termDrainQuiet / 3):
 		}
-		if time.Since(time.Unix(0, s.lastOutput.Load())) >= termDrainQuiet {
+		last := time.Unix(0, s.lastOutput.Load())
+		if last.Before(start) {
+			last = start
+		}
+		if time.Since(last) >= termDrainQuiet {
 			break
 		}
 	}
