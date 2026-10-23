@@ -548,6 +548,13 @@ CREATE TABLE run_budgets (
 );
 `,
 	},
+	{
+		// 0014 belongs to another step's branch.
+		name: "0015_run_mode",
+		stmt: `
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

@@ -59,6 +59,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
 	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
 }
@@ -143,6 +144,10 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "base is not a valid branch name")
 		return
 	}
+	if !validMode(body.Mode) {
+		invalid(c, "mode must be \"\" or %q", runnerwire.ModeInteractive)
+		return
+	}
 
 	// The runner must be the caller's own, administrators included: a run
 	// executes on the owner's machine with the owner's logins, and nobody
@@ -160,6 +165,11 @@ func (a *API) create(c *gin.Context) {
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
 			errors.New("this runner does not take runs; update nodevas on it"), nil)
+		return
+	}
+	if !modeSupported(runner.Info, body.Mode) {
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
+			errors.New("this runner cannot run interactive sessions"), nil)
 		return
 	}
 	// The budget is the runner owner's: runs spend their subscription.
@@ -196,7 +206,7 @@ func (a *API) create(c *gin.Context) {
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
 		Prompt: body.Prompt, JobPrompt: BuildPrompt(title, content, body.Prompt),
-		CreatedBy: actor.ID, CreatedByName: name,
+		CreatedBy: actor.ID, CreatedByName: name, Mode: body.Mode,
 	})
 	if err != nil {
 		fail(c, err)

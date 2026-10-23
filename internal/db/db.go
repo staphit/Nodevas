@@ -697,6 +697,15 @@ CREATE TABLE run_budgets (
 ) STRICT;
 `,
 	},
+	{
+		// 0014 belongs to another step's branch.
+		name: "0015_run_mode",
+		stmt: `
+-- Interactive runs (W2.5): the agent runs as its TUI in a pseudo-terminal on
+-- the runner, relayed to the browser. '' is headless.
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

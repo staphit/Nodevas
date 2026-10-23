@@ -74,7 +74,7 @@ func (r Record) Job() runnerwire.Job {
 	return runnerwire.Job{
 		RunID: r.ID, Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
 		Prompt: r.JobPrompt, Agent: r.Agent, Model: r.Model, RepoID: r.RepoID,
-		Base: r.Base, RequestedBy: r.CreatedByName,
+		Base: r.Base, RequestedBy: r.CreatedByName, Mode: r.Mode,
 	}
 }
 
@@ -145,6 +145,8 @@ type New struct {
 	// task the runner is offered.
 	Prompt, JobPrompt        string
 	CreatedBy, CreatedByName string
+	// Mode is runnerwire.ModeHeadless or ModeInteractive (W2.5).
+	Mode string
 }
 
 // Create records a queued run.
@@ -153,6 +155,9 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 		if strings.TrimSpace(required) == "" {
 			return Record{}, fmt.Errorf("%w: missing field", ErrInvalid)
 		}
+	}
+	if in.Mode != runnerwire.ModeHeadless && in.Mode != runnerwire.ModeInteractive {
+		return Record{}, fmt.Errorf("%w: unknown mode", ErrInvalid)
 	}
 	if len(in.JobPrompt) > runnerwire.MaxPromptBytes {
 		return Record{}, fmt.Errorf("%w: prompt over %d bytes", ErrInvalid, runnerwire.MaxPromptBytes)
@@ -165,11 +170,11 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
-                  created_by, created_by_name, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  created_by, created_by_name, created_at, mode)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
-		in.CreatedBy, in.CreatedByName, now)
+		in.CreatedBy, in.CreatedByName, now, in.Mode)
 	if err != nil {
 		return Record{}, err
 	}
@@ -180,7 +185,7 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
        started_at, finished_at, commit_sha, files_changed, additions, deletions,
-       pr_number, pr_state, pr_error, pr_head_sha`
+       pr_number, pr_state, pr_error, pr_head_sha, mode`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -190,7 +195,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
 		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
-		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA); err != nil {
+		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA, &r.Mode); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)

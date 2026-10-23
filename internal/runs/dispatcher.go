@@ -35,6 +35,10 @@ type Dispatcher struct {
 	audit  func(AuditEntry)
 
 	locks sync.Map // runner ID → *sync.Mutex
+
+	// terms relays interactive runs' terminals (terminal.go).
+	termsOnce sync.Once
+	terms     *Terminals
 }
 
 // NewDispatcher builds a dispatcher. changed and events are the realtime
@@ -82,6 +86,7 @@ func (d *Dispatcher) finished(r Record) {
 func (d *Dispatcher) Store() *Store { return d.store }
 
 func (d *Dispatcher) notifyChanged(r Record) {
+	d.termStatus(r)
 	if d.changed != nil {
 		d.changed(r.Project, r.NodeID)
 	}
