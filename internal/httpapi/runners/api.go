@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 )
 
 const maxCreateBody = 4 << 10
@@ -36,11 +37,14 @@ var (
 // API exposes a runners.Registry over HTTP.
 type API struct {
 	reg *runners.Registry
+	// runs applies what a runner reports about its runs. Nil means the
+	// socket speaks W0 only: hello and ping.
+	runs *runs.Dispatcher
 }
 
-// New builds the handler set.
-func New(reg *runners.Registry) *API {
-	return &API{reg: reg}
+// New builds the handler set. dispatcher may be nil.
+func New(reg *runners.Registry, dispatcher *runs.Dispatcher) *API {
+	return &API{reg: reg, runs: dispatcher}
 }
 
 // Register wires /api/runners and /api/runner/connect. The server's auth
@@ -124,6 +128,12 @@ func (s *session) send(ctx context.Context, env runnerwire.Envelope) error {
 	return s.conn.Write(ctx, websocket.MessageText, raw)
 }
 
+// Send writes one message, bounded by writeTimeout. It is how the dispatcher
+// reaches the runner from other requests; writeMu keeps their frames whole.
+func (s *session) Send(env runnerwire.Envelope) error {
+	return s.send(context.Background(), env)
+}
+
 // Bye tells the runner why and closes the socket. It returns at once: the
 // registry calls it from a request that should not wait on a slow runner.
 func (s *session) Bye(reason string) {
@@ -177,14 +187,22 @@ func (a *API) connect(c *gin.Context) {
 		return
 	}
 
+	// Welcome goes out before the connection is attached: once attached, the
+	// dispatcher may send offers from other requests, and the runner must
+	// hear who it is first.
 	s := &session{conn: conn}
-	detach := a.reg.Attach(runner.ID, s)
-	defer detach()
 	welcome := runnerwire.Envelope{Type: runnerwire.TypeWelcome, Welcome: &runnerwire.Welcome{
 		RunnerID: runner.ID, Name: runner.Name, Owner: runner.OwnerName,
 	}}
 	if err := s.send(ctx, welcome); err != nil {
 		return
+	}
+	detach := a.reg.Attach(runner.ID, s)
+	defer detach()
+	// Past the hello, run traffic (event batches, finishes) is larger.
+	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	if a.runs != nil {
+		a.runs.Attached(ctx, runner.ID, first.Active)
 	}
 
 	for {
@@ -212,11 +230,68 @@ func (a *API) connect(c *gin.Context) {
 				_ = conn.Close(websocket.StatusPolicyViolation, closeReason(err))
 				return
 			}
+			// It may now take more at once, or newly take runs at all.
+			if a.runs != nil {
+				a.runs.Pump(ctx, runner.ID)
+			}
+		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish:
+			if a.runs == nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
+				return
+			}
+			if err := a.runMessage(ctx, runner.ID, env); err != nil {
+				// A message about a run that is not this runner's, or that has
+				// moved on (a finish after a hub-side cancel), is dropped, not
+				// fatal: the socket stays up for the runs that are fine.
+				slog.Warn("runner run message dropped",
+					slog.String("runner", runner.ID), slog.String("type", env.Type),
+					slog.String("run", runID(env)), slog.Any("error", err))
+			}
 		default:
 			_ = conn.Close(websocket.StatusPolicyViolation, "unknown message type")
 			return
 		}
 	}
+}
+
+// errMalformed is a run message missing the part its type requires.
+var errMalformed = errors.New("malformed run message")
+
+// runMessage applies one run message. The runner's ID comes from its
+// authenticated socket, never from the message: the dispatcher refuses any
+// run that is not that runner's.
+func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.Envelope) error {
+	switch env.Type {
+	case runnerwire.TypeAccept:
+		if env.Accept == nil || env.Accept.RunID == "" {
+			return errMalformed
+		}
+		return a.runs.Accept(ctx, runnerID, *env.Accept)
+	case runnerwire.TypeDecline:
+		if env.RunID == "" {
+			return errMalformed
+		}
+		return a.runs.Decline(ctx, runnerID, env.RunID, env.Reason)
+	case runnerwire.TypeEvents:
+		if env.RunID == "" {
+			return errMalformed
+		}
+		// Over MaxEventsPerMessage, the dispatcher keeps the first ones.
+		return a.runs.Events(ctx, runnerID, env.RunID, env.Events)
+	case runnerwire.TypeFinish:
+		if env.RunID == "" || env.Result == nil {
+			return errMalformed
+		}
+		return a.runs.Finish(ctx, runnerID, env.RunID, *env.Result)
+	}
+	return errMalformed
+}
+
+func runID(env runnerwire.Envelope) string {
+	if env.Accept != nil {
+		return env.Accept.RunID
+	}
+	return env.RunID
 }
 
 // closeReason fits an error into a close frame, whose reason is capped at 123

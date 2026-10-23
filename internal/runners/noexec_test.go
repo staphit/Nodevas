@@ -16,7 +16,7 @@ import (
 // one convenient import at a time.
 func TestHubRunnerPackagesDoNotExec(t *testing.T) {
 	forbidden := map[string]bool{"os/exec": true, "syscall": true, "golang.org/x/sys/execabs": true}
-	for _, dir := range []string{".", "../httpapi/runners", "../runnerwire"} {
+	for _, dir := range []string{".", "../httpapi/runners", "../runnerwire", "../runs", "../httpapi/runs"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)

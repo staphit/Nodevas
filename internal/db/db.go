@@ -566,6 +566,66 @@ CREATE TABLE runner_tokens (
 CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
 `,
 	},
+	{
+		name: "0010_runs",
+		stmt: `
+-- Runs: one agent CLI invocation on a runner for one board node. The hub
+-- records and relays them; only the runner executes anything.
+CREATE TABLE runs (
+    id               TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it ("." for the workspace root),
+    -- not its path: the name is what a runner's agent sends back through the
+    -- proxy, and a path on the hub is none of the runner's business.
+    project          TEXT NOT NULL,
+    node_id          TEXT NOT NULL,
+    -- Not foreign keys: a run outlives its runner being revoked, and its
+    -- record must not vanish with it.
+    runner_id        TEXT NOT NULL,
+    runner_name      TEXT NOT NULL DEFAULT '',
+    -- The runner's owner when the run was made. Who may see and cancel a run
+    -- is decided from this, not from a join that a revoked runner breaks.
+    owner_id         TEXT NOT NULL,
+    agent            TEXT NOT NULL,
+    model            TEXT NOT NULL DEFAULT '',
+    repo_id          TEXT NOT NULL,
+    repo_name        TEXT NOT NULL DEFAULT '',
+    base             TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    -- The dispatcher's extra instructions as typed.
+    prompt           TEXT NOT NULL DEFAULT '',
+    -- What the runner is offered: the node as it read when the run was made,
+    -- so a run that waits in the queue still does what was asked.
+    node_title       TEXT NOT NULL DEFAULT '',
+    job_prompt       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
+    error            TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    exit_code        INTEGER NOT NULL DEFAULT 0,
+    -- runnerwire.Usage as JSON, or '' before the first usage report.
+    usage            TEXT NOT NULL DEFAULT '',
+    pr_url           TEXT NOT NULL DEFAULT '',
+    ci_status        TEXT NOT NULL DEFAULT '',
+    created_by       TEXT NOT NULL,
+    created_by_name  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    started_at       TEXT NOT NULL DEFAULT '',
+    finished_at      TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runs_node ON runs (project, node_id, created_at);
+CREATE INDEX runs_runner ON runs (runner_id, status);
+
+CREATE TABLE run_events (
+    run_id   TEXT NOT NULL REFERENCES runs(id),
+    -- The runner's own 1, 2, 3… for the run; a resent batch collides here.
+    seq      INTEGER NOT NULL,
+    type     TEXT NOT NULL,
+    at       TEXT NOT NULL DEFAULT '',
+    -- The whole runnerwire.RunEvent as JSON, as the API returns it.
+    payload  TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

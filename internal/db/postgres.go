@@ -449,6 +449,51 @@ CREATE TABLE runner_tokens (
 CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
 `,
 	},
+	{
+		name: "0010_runs",
+		stmt: `
+CREATE TABLE runs (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    project          TEXT COLLATE "C" NOT NULL,
+    node_id          TEXT COLLATE "C" NOT NULL,
+    runner_id        TEXT COLLATE "C" NOT NULL,
+    runner_name      TEXT NOT NULL DEFAULT '',
+    owner_id         TEXT COLLATE "C" NOT NULL,
+    agent            TEXT NOT NULL,
+    model            TEXT NOT NULL DEFAULT '',
+    repo_id          TEXT NOT NULL,
+    repo_name        TEXT NOT NULL DEFAULT '',
+    base             TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    prompt           TEXT NOT NULL DEFAULT '',
+    node_title       TEXT NOT NULL DEFAULT '',
+    job_prompt       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
+    error            TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    exit_code        INTEGER NOT NULL DEFAULT 0,
+    usage            TEXT NOT NULL DEFAULT '',
+    pr_url           TEXT NOT NULL DEFAULT '',
+    ci_status        TEXT NOT NULL DEFAULT '',
+    created_by       TEXT COLLATE "C" NOT NULL,
+    created_by_name  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT COLLATE "C" NOT NULL,
+    started_at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    finished_at      TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX runs_node ON runs (project, node_id, created_at);
+CREATE INDEX runs_runner ON runs (runner_id, status);
+
+CREATE TABLE run_events (
+    run_id   TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    seq      BIGINT NOT NULL,
+    type     TEXT NOT NULL,
+    at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    payload  TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
