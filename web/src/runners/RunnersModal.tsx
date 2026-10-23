@@ -5,6 +5,7 @@ import { IconClose, IconComputer, IconCopy, IconTrash } from "../icons";
 import { languageLocale, useI18n } from "../i18n";
 import { BudgetSettings } from "../runs/BudgetSettings";
 import { useBudget } from "../runs/budgetStore";
+import { RoutingSettings } from "../runs/RoutingSettings";
 import { RunNotifySettings } from "../runs/RunToasts";
 import { useRunners } from "./runnerStore";
 
@@ -173,6 +174,7 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     useBudget.getState().requestShow(false);
   }, []);
+  const [routingOpen, setRoutingOpen] = useState(false);
   const [name, setName] = useState("");
   // The token lives only in this dialog's state: closing it is the last time
   // anyone sees it, which is the point.
@@ -319,6 +321,16 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
           >
             <summary>{t("budget.title")}</summary>
             {budgetOpen && <BudgetSettings />}
+          </details>
+          <details
+            className="runner-settings"
+            // Mounted from the first open on, so closing it keeps a draft.
+            onToggle={(event) => {
+              if (event.currentTarget.open) setRoutingOpen(true);
+            }}
+          >
+            <summary>{t("routing.title")}</summary>
+            {routingOpen && <RoutingSettings />}
           </details>
           <RunNotifySettings />
         </div>

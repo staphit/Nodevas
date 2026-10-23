@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Run } from "../api";
 import { reportError, useApp } from "../store";
 import { DispatchDialog } from "./DispatchDialog";
+import { useRouting } from "./routingStore";
 import { RunToasts } from "./RunToasts";
 import { useRuns } from "./runStore";
 
@@ -24,6 +25,8 @@ export function RunsRoot() {
     if (previousProject.current !== activeProject) {
       previousProject.current = activeProject;
       useRuns.getState().reset();
+      // "This project" in a rule, and the hub's answer to a GET, follow it.
+      useRouting.getState().reset();
     }
     // One request per project feeds every graph card's run badge; after it,
     // runs-changed pushes keep the badges current node by node.

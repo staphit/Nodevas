@@ -1,9 +1,10 @@
 import { create } from "zustand";
-import { api, type Run } from "../api";
+import { api, pipelineEnded, type PipelineState, type Run } from "../api";
 import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
 import { useApp } from "../store";
 import { openNodeRuns } from "./openRuns";
+import { useRuns } from "./runStore";
 
 /**
  * run-notify: the hub says a run finished, its CI turned red, or its merge
@@ -11,7 +12,24 @@ import { openNodeRuns } from "./openRuns";
  * those that has not been told yet; each is told once per (run, kind) — per
  * merge request and per PR head where those can recur.
  */
-export type RunNotifyKind = "succeeded" | "failed" | "ci-failed" | "merged" | "merge-failed";
+export type RunNotifyKind =
+  | "succeeded"
+  | "failed"
+  | "ci-failed"
+  | "merged"
+  | "merge-failed"
+  // W5: a pipeline (implement → review) ended; told instead of its last run.
+  | "pipeline-approved"
+  | "pipeline-changes-left"
+  | "pipeline-failed"
+  | "pipeline-cancelled";
+
+const PIPELINE_KINDS: Record<string, RunNotifyKind> = {
+  approved: "pipeline-approved",
+  changes_left: "pipeline-changes-left",
+  failed: "pipeline-failed",
+  cancelled: "pipeline-cancelled",
+};
 
 export interface RunToast {
   id: number;
@@ -37,10 +55,12 @@ function fresh(iso: string | undefined, now: number): boolean {
 
 /** What a run-notify for this run is about, and the dedupe key for it, or
  * null when the run shows nothing worth telling. Newest lifecycle step first:
- * a merge outcome, then a red CI, then the run's own end. */
+ * a merge outcome, then a red CI, then the end of the pipeline the run is a
+ * step of (when `pipeline` says it ended), then the run's own end. */
 export function runNotifyKind(
   run: Run,
   now = Date.now(),
+  pipeline: PipelineState | null = null,
 ): { kind: RunNotifyKind; key: string } | null {
   const merge = run.merge;
   const mergeEnded =
@@ -54,6 +74,18 @@ export function runNotifyKind(
   if (run.prUrl && run.prState === "open" && run.ciStatus === "failure") {
     return { kind: "ci-failed", key: `${run.id}:ci-failed:${run.prHeadSha ?? ""}` };
   }
+  if (
+    pipeline &&
+    run.pipelineId === pipeline.id &&
+    pipelineEnded(pipeline.status) &&
+    PIPELINE_KINDS[pipeline.status] &&
+    fresh(run.finishedAt, now)
+  ) {
+    return {
+      kind: PIPELINE_KINDS[pipeline.status],
+      key: `pipeline:${pipeline.id}:${pipeline.status}`,
+    };
+  }
   if ((run.status === "succeeded" || run.status === "failed") && fresh(run.finishedAt, now)) {
     return { kind: run.status, key: `${run.id}:${run.status}` };
   }
@@ -66,7 +98,11 @@ function nodeTitle(nodeId: string): string {
 }
 
 /** The toast's two lines, in the reader's language. */
-export function runNotifyText(run: Run, kind: RunNotifyKind): { title: string; body: string } {
+export function runNotifyText(
+  run: Run,
+  kind: RunNotifyKind,
+  pipeline: PipelineState | null = null,
+): { title: string; body: string } {
   const t = (key: string, values?: Record<string, string | number>) =>
     translate(key, undefined, values);
   const name = nodeTitle(run.nodeId);
@@ -80,6 +116,26 @@ export function runNotifyText(run: Run, kind: RunNotifyKind): { title: string; b
       return { title: t("runNotify.ciFailed", { number: run.prNumber ?? "" }), body: name };
     case "merged":
       return { title: t("runNotify.merged", { number: run.prNumber ?? "" }), body: name };
+    case "pipeline-approved":
+    case "pipeline-changes-left":
+    case "pipeline-failed":
+    case "pipeline-cancelled": {
+      const key = {
+        "pipeline-approved": "runNotify.pipelineApproved",
+        "pipeline-changes-left": "runNotify.pipelineChangesLeft",
+        "pipeline-failed": "runNotify.pipelineFailed",
+        "pipeline-cancelled": "runNotify.pipelineCancelled",
+      }[kind];
+      const rounds =
+        pipeline && pipeline.round > 0
+          ? t("pipeline.round", {
+              round: pipeline.round,
+              max: pipeline.pipeline?.maxRounds || pipeline.round,
+            })
+          : "";
+      const detail = kind === "pipeline-failed" ? (run.error ?? "") : pr;
+      return { title: t(key, { name }), body: [rounds, detail].filter(Boolean).join(" · ") };
+    }
     case "merge-failed": {
       const reason =
         run.merge?.status === "expired"
@@ -124,10 +180,22 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
       // A run this viewer may not read, or the hub went away: nothing to say.
       return;
     }
-    const what = runNotifyKind(run);
+    // A pipeline step: whether the pipeline ended decides what to tell.
+    let pipeline: PipelineState | null = null;
+    if (run.pipelineId) {
+      try {
+        pipeline = await api.getPipeline(run.pipelineId);
+        if (pipeline?.id) useRuns.getState().putPipeline(pipeline);
+        else pipeline = null;
+      } catch {
+        pipeline = null;
+      }
+    }
+    const what = runNotifyKind(run, Date.now(), pipeline);
     if (!what || told.has(what.key)) return;
     told.add(what.key);
-    const { title, body } = runNotifyText(run, what.kind);
+    const { title, body } = runNotifyText(run, what.kind, pipeline);
+
     const toast: RunToast = {
       id: nextId++,
       runId: run.id,

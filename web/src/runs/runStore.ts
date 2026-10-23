@@ -3,8 +3,10 @@ import {
   api,
   AuthError,
   ConflictError,
+  pipelineEnded,
   runFinal,
   type CreateRunRequest,
+  type PipelineState,
   type Run,
   type RunChanges,
   type RunEvent,
@@ -50,6 +52,10 @@ export interface RunStoreState {
   merging: Record<string, boolean>;
   /** Why the hub refused a run's merge approval. */
   mergeErrors: Record<string, MergeRefusal>;
+  /** Pipelines by id (W5), fetched when a run view shows one of their runs
+   * and refreshed by runs-changed for their node until they end. */
+  pipelines: Record<string, PipelineState>;
+  pipelineErrors: Record<string, string>;
   /** The node the dispatch dialog is open for, or null. */
   dispatchNodeId: string | null;
   /** A request for the node's detail view to switch to its Runs tab. */
@@ -63,6 +69,10 @@ export interface RunStoreState {
   loadChanges: (runId: string, commit: string | undefined) => Promise<void>;
   /** Reloads one run from GET /api/runs/:id. */
   refreshRun: (runId: string) => Promise<void>;
+  /** Fetches a pipeline unless it is held already (or `force`). */
+  loadPipeline: (id: string, force?: boolean) => Promise<void>;
+  /** Holds a pipeline fetched elsewhere (the run-notify handler). */
+  putPipeline: (pipeline: PipelineState) => void;
   /** Fetches the events after the last one held, page by page. */
   loadEvents: (runId: string) => Promise<void>;
   /** Merges events in, dropping any seq already held. */
@@ -177,6 +187,9 @@ const nodesInFlight = new Map<string, Promise<void>>();
 const nodesDirty = new Set<string>();
 // One changes fetch per run at a time.
 const changesInFlight = new Map<string, Promise<void>>();
+// One pipeline fetch at a time, going round once more if a push lands mid-way.
+const pipelinesInFlight = new Map<string, Promise<void>>();
+const pipelinesDirty = new Set<string>();
 let projectRunsInFlight: Promise<void> | null = null;
 // Bumped by reset(): a response for the previous project is dropped.
 let generation = 0;
@@ -199,6 +212,8 @@ const initial = {
   stopRequested: {},
   merging: {},
   mergeErrors: {},
+  pipelines: {},
+  pipelineErrors: {},
   dispatchNodeId: null,
   showRunsRequest: null,
 } satisfies Partial<RunStoreState>;
@@ -339,6 +354,42 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       // second message for the same outage.
     }
   },
+
+  loadPipeline: (id, force = false) => {
+    if (!id) return Promise.resolve();
+    const running = pipelinesInFlight.get(id);
+    if (running) {
+      if (force) pipelinesDirty.add(id);
+      return running;
+    }
+    if (!force && id in get().pipelines) return Promise.resolve();
+    const gen = generation;
+    const work = (async () => {
+      do {
+        pipelinesDirty.delete(id);
+        try {
+          const pipeline = await api.getPipeline(id);
+          if (gen !== generation) return;
+          if (pipeline?.id) get().putPipeline(pipeline);
+        } catch (error) {
+          if (gen !== generation) return;
+          set((state) => ({ pipelineErrors: { ...state.pipelineErrors, [id]: message(error) } }));
+          return;
+        }
+      } while (pipelinesDirty.has(id) && gen === generation);
+    })().finally(() => {
+      if (pipelinesInFlight.get(id) === work) pipelinesInFlight.delete(id);
+    });
+    pipelinesInFlight.set(id, work);
+    return work;
+  },
+
+  putPipeline: (pipeline) =>
+    set((state) => {
+      const pipelineErrors = { ...state.pipelineErrors };
+      delete pipelineErrors[pipeline.id];
+      return { pipelines: { ...state.pipelines, [pipeline.id]: pipeline }, pipelineErrors };
+    }),
 
   loadEvents: (runId) => {
     const running = eventsInFlight.get(runId);
@@ -503,6 +554,12 @@ export const useRuns = create<RunStoreState>((set, get) => ({
   onRunsChanged: (nodeId) => {
     if (!nodeId) return;
     const state = get();
+    // A pipeline's next step or its end arrives as a change on its node.
+    for (const pipeline of Object.values(state.pipelines)) {
+      if (pipeline.nodeId === nodeId && !pipelineEnded(pipeline.status)) {
+        void state.loadPipeline(pipeline.id, true);
+      }
+    }
     // Once the board asked for the project's runs, every node has a card
     // that may show a badge: a node nobody opened gets its list loaded here,
     // so a PR or CI change long after its run finished reaches the badge.
@@ -519,6 +576,9 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     const state = get();
     for (const nodeId of Object.keys(state.runsByNode)) void state.loadRuns(nodeId);
     if (state.projectRunsLoaded) void state.loadProjectRuns(true);
+    for (const pipeline of Object.values(state.pipelines)) {
+      if (!pipelineEnded(pipeline.status)) void state.loadPipeline(pipeline.id, true);
+    }
     for (const runId of Object.keys(state.watched)) {
       const run = findRun(state, runId);
       if (!run || !runFinal(run.status)) void state.loadEvents(runId);
@@ -532,7 +592,10 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     nodesInFlight.clear();
     nodesDirty.clear();
     changesInFlight.clear();
+    pipelinesInFlight.clear();
+    pipelinesDirty.clear();
     projectRunsInFlight = null;
+
     // Live views keep their watch counts; they re-register on remount.
     set({ ...initial, watched: get().watched });
   },

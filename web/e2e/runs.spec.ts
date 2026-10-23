@@ -385,3 +385,139 @@ for (const [name, viewport] of Object.entries({
     await expect(detail.getByText("等 runner 合併中…")).toBeVisible();
   });
 }
+
+// W5: routing rules in the Runners dialog, and a dispatch pre-filled by them.
+const savedRule = {
+  id: "rule-review",
+  project: "",
+  match: "tag",
+  value: "review",
+  target: { agent: "codex", model: "gpt-5" },
+  fallbacks: [{ agent: "claude", model: "opus" }],
+  pipeline: {
+    implement: { agent: "claude", model: "opus" },
+    review: { agent: "codex", model: "gpt-5" },
+    maxRounds: 2,
+  },
+};
+
+async function mockRouting(page: Page) {
+  const status = await (await page.request.get("/api/auth/status")).json();
+  const twoAgents = {
+    ...runner,
+    ownerId: status.actor?.id ?? "",
+    info: {
+      ...runner.info,
+      agents: [
+        ...runner.info.agents,
+        { kind: "codex", installed: true, version: "0.40.0", models: [{ id: "gpt-5", default: true }] },
+      ],
+    },
+  };
+  const puts: unknown[] = [];
+  let rules: unknown[] = [savedRule];
+  await page.route("**/api/runners", (route) => route.fulfill({ json: { runners: [twoAgents] } }));
+  await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [] } }));
+  await page.route(/\/api\/runs\/routing/, async (route) => {
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON();
+      puts.push(body);
+      rules = body.rules;
+    }
+    await route.fulfill({ json: { rules } });
+  });
+  // The hub names the rule, not its tag: the dialog reads the tag from the rules.
+  await page.route(/\/api\/runs\/route\?/, (route) =>
+    route.fulfill({
+      json: {
+        ruleId: savedRule.id,
+        match: "tag",
+        target: savedRule.target,
+        fallbacks: savedRule.fallbacks,
+        pipeline: savedRule.pipeline,
+      },
+    }),
+  );
+  return puts;
+}
+
+async function expectInside(page: Page, box: { x: number; width: number } | null, width: number) {
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+  await expectNoHorizontalOverflow(page);
+}
+
+for (const [name, viewport] of Object.entries({
+  desktop: { width: 1440, height: 900 },
+  phone: { width: 390, height: 844 },
+})) {
+  test(`routing rules editor fits on ${name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const puts = await mockRouting(page);
+    await freshProject(page, ["設計稿"]);
+
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
+    const dialog = page.getByRole("dialog", { name: "Runner" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByText("路由規則", { exact: true }).click();
+
+    const first = dialog.getByRole("listitem", { name: "規則 1" });
+    await expect(first).toBeVisible();
+    await expect(first.getByText("標籤 = review → codex/gpt-5")).toBeVisible();
+    await expect(first.getByRole("checkbox", { name: "管線：實作 → 審查" })).toBeChecked();
+    await expectInside(page, await dialog.boundingBox(), viewport.width);
+
+    await dialog.getByRole("button", { name: "新增規則" }).click();
+    const second = dialog.getByRole("listitem", { name: "規則 2" });
+    await second.getByRole("combobox", { name: "比對" }).selectOption("kind");
+    await second.getByRole("combobox", { name: "類型" }).fill("chore");
+    await second.getByRole("combobox", { name: "目標 agent" }).selectOption("claude");
+    await second.getByText("Fallback 鏈（0）").click();
+    await second.getByRole("button", { name: "新增 fallback" }).click();
+    await second.getByRole("combobox", { name: "Fallback 1 agent" }).selectOption("codex");
+    await second.getByRole("button", { name: "上移規則 2" }).click();
+    await expectInside(page, await dialog.boundingBox(), viewport.width);
+
+    await dialog.getByRole("button", { name: "儲存規則" }).click();
+    await expect(dialog.getByText("已儲存")).toBeVisible();
+    expect(puts).toHaveLength(1);
+    const sent = (puts[0] as { rules: { id: string; match: string; value?: string }[] }).rules;
+    expect(sent.map((rule) => [rule.match, rule.value])).toEqual([
+      ["kind", "chore"],
+      ["tag", "review"],
+    ]);
+    expect(sent[0]).toMatchObject({
+      target: { agent: "claude", model: "default" },
+      fallbacks: [{ agent: "codex", model: "gpt-5" }],
+    });
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test(`dispatch pre-filled from a routing rule fits on ${name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockRouting(page);
+    await freshProject(page, ["設計稿"]);
+    await page.getByText("設計稿").first().click();
+
+    const drawer = page.getByRole("dialog", { name: "節點編輯" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("button", { name: "派給 agent…" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "派給 agent" });
+    await expect(dialog.getByTestId("dispatch-rule-note")).toHaveText("來自規則：標籤 = review");
+    // A pipeline's implementer is the form's own agent and model.
+    await expect(dialog.getByRole("combobox", { name: "Agent", exact: true })).toHaveValue("claude");
+    await expect(dialog.getByRole("combobox", { name: "模型", exact: true })).toHaveValue("opus");
+    await expect(dialog.getByRole("checkbox", { name: "管線：實作 → 審查" })).toBeChecked();
+    await expect(dialog.getByRole("combobox", { name: "審查 agent" })).toHaveValue("codex");
+    await expect(dialog.getByRole("combobox", { name: "輪數" })).toHaveValue("2");
+
+    const chain = dialog.getByTestId("dispatch-fallbacks");
+    await expect(chain).not.toHaveAttribute("open", "");
+    await chain.getByText("Fallback 鏈（1）").click();
+    await expect(chain.getByRole("combobox", { name: "Fallback 1模型" })).toHaveValue("opus");
+    await expectInside(page, await dialog.boundingBox(), viewport.width);
+  });
+}
