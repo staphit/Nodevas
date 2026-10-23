@@ -3,8 +3,9 @@
 // the runner around it (worktree, acceptance, process tree, streaming to the
 // hub) is the same for all of them.
 //
-// See docs/nodevas-workstation-plan.md, "Agent adapter". Every flag here was
-// checked against the CLI's own --help, because these CLIs change quickly.
+// See docs/nodevas-workstation-plan.md, "Agent adapter". The Claude and Codex
+// flags were checked against the CLIs' own --help, because these CLIs change
+// quickly; the Gemini adapter follows the CLI's docs only (see gemini.go).
 package adapter
 
 import (
@@ -40,9 +41,15 @@ type RunEnv struct {
 	TempDir string
 	// MCP is the nodevas MCP server the agent should be given.
 	MCP MCPServer
-	// PermissionMode and AllowedTools are the runner owner's settings.
+	// PermissionMode is the owner's setting for how freely this kind of agent
+	// may act: Claude Code's --permission-mode, Codex's --sandbox, Gemini
+	// CLI's --approval-mode. "" is the adapter's safe default.
 	PermissionMode string
-	AllowedTools   []string
+	// AllowedTools is Claude Code's --allowedTools; other adapters ignore it.
+	AllowedTools []string
+	// IgnoreUserConfig runs Codex with --ignore-user-config: without the
+	// owner's config.toml (their own MCP servers, hooks, model), auth only.
+	IgnoreUserConfig bool
 }
 
 // MCPServer is a stdio MCP server: a command and its arguments.
@@ -76,6 +83,10 @@ func For(kind string) Adapter {
 	switch kind {
 	case "claude":
 		return Claude{}
+	case "codex":
+		return Codex{}
+	case "gemini":
+		return Gemini{}
 	}
 	return nil
 }

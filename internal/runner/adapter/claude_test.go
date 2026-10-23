@@ -15,12 +15,17 @@ import (
 
 func parseFixture(t *testing.T, name string) ([]runnerwire.RunEvent, Outcome) {
 	t.Helper()
+	return parseWith(t, Claude{}.NewParser(), name)
+}
+
+// parseWith feeds a fixture to a parser a line at a time, as the runner does.
+func parseWith(t *testing.T, parser Parser, name string) ([]runnerwire.RunEvent, Outcome) {
+	t.Helper()
 	f, err := os.Open(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	parser := Claude{}.NewParser()
 	var events []runnerwire.RunEvent
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
@@ -205,7 +210,12 @@ func TestClaudeCommand(t *testing.T) {
 }
 
 func TestForAndTruncate(t *testing.T) {
-	if For("claude") == nil || For("codex") != nil || For("") != nil {
+	for _, kind := range []string{"claude", "codex", "gemini"} {
+		if a := For(kind); a == nil || a.Kind() != kind {
+			t.Errorf("For(%q) = %v", kind, a)
+		}
+	}
+	if For("opencode") != nil || For("") != nil {
 		t.Error("For")
 	}
 	if got := Truncate("héllo", 2); got != "h" {

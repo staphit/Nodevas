@@ -356,8 +356,10 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 		Branch:         wt.Branch,
 		TempDir:        tmp,
 		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
-		PermissionMode: cfg.ClaudePermissionMode(),
-		AllowedTools:   cfg.AllowedTools,
+		PermissionMode: cfg.PermissionModeFor(job.Agent),
+		// Each adapter reads only the settings meant for it.
+		AllowedTools:     cfg.AllowedTools,
+		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -380,7 +382,7 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	tree := attachTree(cmd)
 	defer tree.close()
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: fmt.Sprintf("started %s (model %s, permission mode %s)", job.Agent, orDash(job.Model), cfg.ClaudePermissionMode())})
+		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), permissionText(cfg, job.Agent))})
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -433,6 +435,21 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 		result.Error = adapter.Truncate(result.Error, runnerwire.MaxSummaryBytes)
 	}
 	return result
+}
+
+// permissionText says how freely the agent may act, for the run's log.
+func permissionText(cfg *Config, kind string) string {
+	switch kind {
+	case "codex":
+		text := "sandbox " + cfg.CodexSandboxMode()
+		if cfg.CodexIgnoreUserConfig {
+			text += ", without the owner's config.toml"
+		}
+		return text
+	case "gemini":
+		return "approval mode " + cfg.GeminiApproval()
+	}
+	return "permission mode " + cfg.ClaudePermissionMode()
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this

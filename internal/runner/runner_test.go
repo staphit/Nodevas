@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,11 +130,83 @@ func TestDetect(t *testing.T) {
 	if !claude.Installed || claude.Version != "2.1.0 (Claude Code)" || len(claude.Models) != 4 || claude.Models[0].ID != "default" {
 		t.Errorf("claude = %+v", claude)
 	}
-	if codex.Installed || !strings.Contains(codex.Error, "exit status 1") || len(codex.Models) != 1 {
+	if codex.Installed || !strings.Contains(codex.Error, "exit status 1") || len(codex.Models) != 3 ||
+		codex.Models[0].ID != "default" || slices.Contains(cmds.calls, "/bin/codex debug models --bundled") {
 		t.Errorf("codex = %+v", codex)
 	}
 	if gemini.Installed || gemini.Error != "" || gemini.Models[0].ID != "gemini-x" {
 		t.Errorf("gemini = %+v", gemini)
+	}
+}
+
+// An installed Codex is asked for its bundled catalog; only the models its
+// own picker lists count, best first. A config list or a catalog that does
+// not parse leaves it alone.
+func TestDetectCodexCatalog(t *testing.T) {
+	catalog := `{"models":[` +
+		`{"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list","priority":12},` +
+		`{"slug":"gpt-6-astra","display_name":"GPT-6-Astra","visibility":"list","priority":1},` +
+		`{"slug":"codex-auto-review","display_name":"Codex Auto Review","visibility":"hide","priority":43},` +
+		`{"slug":"bad id; rm","display_name":"x","visibility":"list","priority":2}]}`
+	cmds := &fakeCommands{
+		paths: map[string]string{"codex": "/bin/codex"},
+		outputs: map[string]string{
+			"/bin/codex --version":              "codex-cli 0.156.0\n",
+			"/bin/codex debug models --bundled": "\ufeff" + catalog + "\n",
+		},
+	}
+	codex := Detect(context.Background(), cmds, nil)[1]
+	var ids []string
+	for _, m := range codex.Models {
+		ids = append(ids, m.ID)
+	}
+	if !codex.Installed || !slices.Equal(ids, []string{"default", "gpt-6-astra", "gpt-5.5"}) ||
+		!codex.Models[0].Default || codex.Models[1].Label != "GPT-6-Astra" {
+		t.Fatalf("codex = %+v", codex)
+	}
+
+	cfg := &Config{Models: map[string][]runnerwire.Model{"codex": {{ID: "o4", Default: true}}}}
+	cmds.calls = nil
+	if codex := Detect(context.Background(), cmds, cfg)[1]; len(codex.Models) != 1 || codex.Models[0].ID != "o4" ||
+		slices.Contains(cmds.calls, "/bin/codex debug models --bundled") {
+		t.Errorf("config list: %+v, calls %v", codex.Models, cmds.calls)
+	}
+
+	cmds.outputs["/bin/codex debug models --bundled"] = "error: unknown subcommand"
+	if codex := Detect(context.Background(), cmds, nil)[1]; !slices.EqualFunc(codex.Models, DefaultModels("codex"),
+		func(a, b runnerwire.Model) bool { return a == b }) {
+		t.Errorf("unparsable catalog: %+v", codex.Models)
+	}
+}
+
+func TestPermissionModeFor(t *testing.T) {
+	cfg := &Config{}
+	if cfg.PermissionModeFor("claude") != "acceptEdits" || cfg.PermissionModeFor("codex") != "workspace-write" ||
+		cfg.PermissionModeFor("gemini") != "auto_edit" {
+		t.Errorf("defaults: %q %q %q", cfg.PermissionModeFor("claude"), cfg.PermissionModeFor("codex"),
+			cfg.PermissionModeFor("gemini"))
+	}
+	for key, value := range map[string]string{"permissionMode": "PLAN", "codexSandbox": "danger-full-access",
+		"geminiApprovalMode": "YOLO", "codexIgnoreUserConfig": "true"} {
+		if err := cfg.Set(key, []string{value}); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+	if cfg.PermissionModeFor("claude") != "plan" || cfg.PermissionModeFor("codex") != "danger-full-access" ||
+		cfg.PermissionModeFor("gemini") != "yolo" || !cfg.CodexIgnoreUserConfig {
+		t.Errorf("set: %+v", cfg)
+	}
+	for _, key := range []string{"codexSandbox", "geminiApprovalMode", "codexIgnoreUserConfig"} {
+		if err := cfg.Set(key, []string{"default"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cfg.CodexSandbox != "" || cfg.GeminiApprovalMode != "" || cfg.CodexIgnoreUserConfig {
+		t.Errorf("reset: %+v", cfg)
+	}
+	if err := cfg.Set("codexSandbox", []string{"workspace"}); err == nil ||
+		!strings.Contains(err.Error(), "read-only, workspace-write, danger-full-access") {
+		t.Errorf("bad sandbox: %v", err)
 	}
 }
 
