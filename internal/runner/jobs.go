@@ -34,9 +34,30 @@ type jobs struct {
 	seenOrder []string
 	declines  []runnerwire.Envelope
 	agents    []runnerwire.Agent
+	// hubName is what the hub calls this runner, from its welcome.
+	hubName string
+
+	// Pull requests being watched (see prwatch.go) and their unsent updates,
+	// latest per run.
+	watched    map[string]*watchedPR
+	watchOrder []string
+	watchErrs  map[string]string
+	prPending  map[string]runnerwire.PRInfo
+	prOrder    []string
+
+	// Remote merges (see merge.go): answers kept to dedupe re-sent requests,
+	// requests being worked on, and answers not yet written. mergeMu lets one
+	// merge at a time talk to gh.
+	merges        map[string]mergeRecord
+	mergeInFlight map[string]bool
+	mergeResults  []runnerwire.Envelope
+	mergeMu       sync.Mutex
 
 	proxy    *Proxy
 	proxyErr error
+
+	// terms holds interactive runs' terminals (W2.5, see interactive.go).
+	terms termRelay
 
 	wg sync.WaitGroup
 }
@@ -51,13 +72,18 @@ type run struct {
 	// finish is delivered, the run is listed as active in every hello.
 	accepted bool
 	started  time.Time
+	// publishing: the agent is done and its work is being committed and
+	// pushed; a cancel no longer applies.
+	publishing bool
 
-	// Outbound, unsent. events is bounded: a run that talks a lot while the
-	// socket is down loses its oldest events, never its finish.
+	// Outbound, unsent, in this order. events is bounded: a run that talks a
+	// lot while the socket is down loses its oldest events, never its finish.
 	accept  *runnerwire.Accept
 	seq     int64
 	events  []runnerwire.RunEvent
 	dropped int
+	changes *runnerwire.RunChanges
+	pr      *runnerwire.PRInfo
 	finish  *runnerwire.RunResult
 }
 
@@ -91,6 +117,13 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 		notify: make(chan struct{}, 1),
 		runs:   map[string]*run{},
 		seen:   map[string]bool{},
+
+		watched:   map[string]*watchedPR{},
+		watchErrs: map[string]string{},
+		prPending: map[string]runnerwire.PRInfo{},
+
+		merges:        map[string]mergeRecord{},
+		mergeInFlight: map[string]bool{},
 	}
 }
 
@@ -209,6 +242,10 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
+	// W2.5: interactive runs (interactive.go).
+	if reason := j.checkMode(job); reason != "" {
+		return repo, reason
+	}
 	var agent *runnerwire.Agent
 	for i := range j.agents {
 		if j.agents[i].Kind == job.Agent {
@@ -254,9 +291,14 @@ func (j *jobs) cancelRun(runID, reason string) {
 	j.mu.Lock()
 	r := j.runs[runID]
 	ended := r == nil || r.finish != nil
+	publishing := !ended && r.publishing
 	j.mu.Unlock()
 	if ended {
 		j.c.logf("run %s: cancel for a run that is not running here; ignored", runID)
+		return
+	}
+	if publishing {
+		j.c.logf("run %s: cancel after the agent finished; its changes are being published; ignored", runID)
 		return
 	}
 	if reason == "" {
@@ -306,7 +348,18 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, wt.BaseRef)})
 
-	j.finish(r, j.runAgent(ctx, r, wt))
+	result := j.runAgent(ctx, r, wt)
+	if result.Status == runnerwire.RunCancelled {
+		// Stopped on purpose: nothing is committed or pushed, and the
+		// worktree stays as the agent left it.
+		j.finish(r, result)
+		return
+	}
+	j.mu.Lock()
+	r.publishing = true
+	j.mu.Unlock()
+	changes, pr := j.publish(r, wt, result)
+	j.finishWith(r, result, changes, pr)
 }
 
 func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
@@ -324,6 +377,10 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 // timeout, whichever comes first.
 func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.RunResult {
 	job := r.job
+	// W2.5: the agent's TUI in a terminal instead (interactive.go).
+	if job.Mode == runnerwire.ModeInteractive {
+		return j.runInteractive(ctx, r, wt)
+	}
 	fail := func(format string, args ...any) runnerwire.RunResult {
 		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}
@@ -356,8 +413,10 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 		Branch:         wt.Branch,
 		TempDir:        tmp,
 		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
-		PermissionMode: cfg.ClaudePermissionMode(),
-		AllowedTools:   cfg.AllowedTools,
+		PermissionMode: cfg.PermissionModeFor(job.Agent),
+		// Each adapter reads only the settings meant for it.
+		AllowedTools:     cfg.AllowedTools,
+		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 	})
 	if err != nil {
 		return fail("%v", err)
@@ -380,7 +439,7 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	tree := attachTree(cmd)
 	defer tree.close()
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: fmt.Sprintf("started %s (model %s, permission mode %s)", job.Agent, orDash(job.Model), cfg.ClaudePermissionMode())})
+		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), permissionText(cfg, job.Agent))})
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -433,6 +492,21 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 		result.Error = adapter.Truncate(result.Error, runnerwire.MaxSummaryBytes)
 	}
 	return result
+}
+
+// permissionText says how freely the agent may act, for the run's log.
+func permissionText(cfg *Config, kind string) string {
+	switch kind {
+	case "codex":
+		text := "sandbox " + cfg.CodexSandboxMode()
+		if cfg.CodexIgnoreUserConfig {
+			text += ", without the owner's config.toml"
+		}
+		return text
+	case "gemini":
+		return "approval mode " + cfg.GeminiApproval()
+	}
+	return "permission mode " + cfg.ClaudePermissionMode()
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
@@ -514,7 +588,14 @@ func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 }
 
 func (j *jobs) finish(r *run, result runnerwire.RunResult) {
+	j.finishWith(r, result, nil, nil)
+}
+
+// finishWith queues a run's changes, PR and finish together, so they go out in
+// that order after its last events.
+func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	j.mu.Lock()
+	r.changes, r.pr = changes, pr
 	r.finish = &result
 	dropped := r.dropped
 	j.mu.Unlock()
@@ -594,6 +675,10 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 	if len(j.declines) > 0 {
 		return j.declines[0], func() { j.declines = j.declines[1:] }
 	}
+	// A merge's answer goes before the PR update that shows it merged.
+	if len(j.mergeResults) > 0 {
+		return j.mergeResults[0], func() { j.mergeResults = j.mergeResults[1:] }
+	}
 	for _, id := range j.order {
 		r := j.runs[id]
 		if r.accept != nil {
@@ -612,10 +697,33 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 				r.events = r.events[i:]
 			}
 		}
-		if r.finish != nil {
-			result := *r.finish
-			return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
-				func() { j.forgetLocked(id) }
+		if r.finish == nil {
+			continue
+		}
+		if r.changes != nil {
+			changes := *r.changes
+			return runnerwire.Envelope{Type: runnerwire.TypeChanges, RunID: id, Changes: &changes},
+				func() { r.changes = nil }
+		}
+		if r.pr != nil {
+			pr := *r.pr
+			return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr},
+				func() { r.pr = nil }
+		}
+		result := *r.finish
+		return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
+			func() { j.forgetLocked(id) }
+	}
+	// PR updates from the watcher, after every run's own messages.
+	if len(j.prOrder) > 0 {
+		id := j.prOrder[0]
+		pr := j.prPending[id]
+		return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr}, func() {
+			// A newer update queued while this one was being written stays.
+			if now, ok := j.prPending[id]; ok && now == pr {
+				delete(j.prPending, id)
+				j.prOrder = j.prOrder[1:]
+			}
 		}
 	}
 	return runnerwire.Envelope{}, nil

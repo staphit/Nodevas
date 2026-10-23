@@ -4,10 +4,29 @@ import type { Verifier } from "./verify";
 export class ConflictError extends Error {
   diskRev: string;
   diskContent: string;
-  constructor(diskRev: string, diskContent: string) {
+  /** The server's own `error` text, for the 409s that are not about a file
+   * (a failed precondition, say); "" when it sent none. */
+  serverMessage: string;
+  /** The server's error `code` (e.g. "FAILED_PRECONDITION"), or "". */
+  code: string;
+  constructor(diskRev: string, diskContent: string, serverMessage = "", code = "") {
     super("conflict");
     this.diskRev = diskRev;
     this.diskContent = diskContent;
+    this.serverMessage = serverMessage;
+    this.code = code;
+  }
+}
+
+/** Any other failed request: the server's message, plus its status and code
+ * for the callers that react to one (a 429 budget refusal, say). */
+export class RequestError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, message: string, code = "") {
+    super(message);
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -129,13 +148,20 @@ export async function req<T>(
   }
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
-    throw new ConflictError(body.diskRev ?? "", body.diskContent ?? "");
+    throw new ConflictError(
+      body.diskRev ?? "",
+      body.diskContent ?? "",
+      typeof body.error === "string" ? body.error : "",
+      typeof body.code === "string" ? body.code : "",
+    );
   }
   if (!res.ok) {
     let msg = `${res.status}`;
+    let code = "";
     try {
       const body = await res.json();
       if (body.error) msg = body.error;
+      if (typeof body.code === "string") code = body.code;
     } catch {
       /* keep status text */
     }
@@ -143,7 +169,7 @@ export async function req<T>(
     // on — the project switch falls back to per-request scoping on it — and a
     // bare message string cannot be told apart from any other failure.
     if (res.status === 403) throw new AuthError(403, msg);
-    throw new Error(msg);
+    throw new RequestError(res.status, msg, code);
   }
   const body = await res.json();
   return verify ? verify(body, url) : (body as T);

@@ -437,7 +437,7 @@ func newAbuseGuardWithOptions(opts AbuseGuardOptions) *abuseGuard {
 func ClassifyRoute(method, path string) (RouteClass, float64) {
 	// A runner's socket is charged once, at the upgrade, like the browser's:
 	// what flows over it afterwards is not a request.
-	if path == "/ws" || path == runnerwire.ConnectPath {
+	if path == "/ws" || path == runnerwire.ConnectPath || runTerminalPath(path) {
 		return ClassWSUpgrade, 1.0
 	}
 	if auth.SignInPaths[path] ||

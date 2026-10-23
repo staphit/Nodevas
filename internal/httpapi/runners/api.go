@@ -24,6 +24,12 @@ import (
 
 const maxCreateBody = 4 << 10
 
+// maxRunMessageBytes is the socket's read limit once hello is done: the
+// largest message is a changes report, which the runner keeps under
+// runnerwire.MaxChangesMessageBytes. What a message may hold is checked by
+// type after reading.
+const maxRunMessageBytes = runnerwire.MaxChangesMessageBytes
+
 // Timeouts on the connect socket. Variables so tests need not wait a minute.
 var (
 	// helloTimeout is how long a new connection has to say who it is.
@@ -199,8 +205,8 @@ func (a *API) connect(c *gin.Context) {
 	}
 	detach := a.reg.Attach(runner.ID, s)
 	defer detach()
-	// Past the hello, run traffic (event batches, finishes) is larger.
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	// Past the hello, run traffic (event batches, changes) is larger.
+	conn.SetReadLimit(maxRunMessageBytes)
 	if a.runs != nil {
 		a.runs.Attached(ctx, runner.ID, first.Active)
 	}
@@ -234,7 +240,8 @@ func (a *API) connect(c *gin.Context) {
 			if a.runs != nil {
 				a.runs.Pump(ctx, runner.ID)
 			}
-		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish:
+		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish,
+			runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeMergeResult:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
 				return
@@ -247,6 +254,12 @@ func (a *API) connect(c *gin.Context) {
 					slog.String("runner", runner.ID), slog.String("type", env.Type),
 					slog.String("run", runID(env)), slog.Any("error", err))
 			}
+		case runnerwire.TypeTermOut:
+			if a.runs == nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
+				return
+			}
+			a.termOut(ctx, runner.ID, env)
 		default:
 			_ = conn.Close(websocket.StatusPolicyViolation, "unknown message type")
 			return
@@ -283,6 +296,24 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 			return errMalformed
 		}
 		return a.runs.Finish(ctx, runnerID, env.RunID, *env.Result)
+	case runnerwire.TypeChanges:
+		if env.RunID == "" || env.Changes == nil {
+			return errMalformed
+		}
+		// Out of limits, for another runner's run, or for a run that never
+		// ran: dropped. A resend after the first report is ignored.
+		return a.runs.Changes(ctx, runnerID, env.RunID, *env.Changes)
+	case runnerwire.TypePR:
+		if env.RunID == "" || env.PR == nil {
+			return errMalformed
+		}
+		return a.runs.PR(ctx, runnerID, env.RunID, *env.PR)
+	case runnerwire.TypeMergeResult:
+		if env.MergeResult == nil || env.MergeResult.ID == "" || env.MergeResult.RunID == "" {
+			return errMalformed
+		}
+		// For a merge that is not this runner's, or already answered: dropped.
+		return a.runs.MergeResult(ctx, runnerID, *env.MergeResult)
 	}
 	return errMalformed
 }
@@ -290,6 +321,9 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 func runID(env runnerwire.Envelope) string {
 	if env.Accept != nil {
 		return env.Accept.RunID
+	}
+	if env.MergeResult != nil {
+		return env.MergeResult.RunID
 	}
 	return env.RunID
 }

@@ -4,6 +4,7 @@ import {
   ConflictError,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
+  RequestError,
   type Actor,
   type Run,
   type Runner,
@@ -14,7 +15,10 @@ import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
+import { budgetExceededText } from "./BudgetSettings";
+import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
+import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "./RunModePicker";
 
 const HEADLESS = "headless";
 
@@ -91,12 +95,21 @@ export function DispatchDialog({
   const [repoChoice, setRepoId] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [modeChoice, setMode] = useState<DispatchMode>("headless");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshRunners();
   }, [refreshRunners]);
+
+  // Today's budget, so the dialog can say up front that the hub would refuse.
+  const budgetStatus = useBudget((s) => s.status);
+  const loadBudget = useBudget((s) => s.load);
+  useEffect(() => {
+    void loadBudget();
+  }, [loadBudget]);
+  const budgetWarning = budgetExceededText(t, budgetStatus);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -120,6 +133,7 @@ export function DispatchDialog({
     : defaultModel(agent);
   const repos = runner?.info?.repos ?? [];
   const repoId = repos.some((repo) => repo.id === repoChoice) ? repoChoice : (repos[0]?.id ?? "");
+  const mode = effectiveDispatchMode(modeChoice, runner);
 
   // The hub's own checks, so a bad value is caught while typing rather than
   // as a 400 after the click.
@@ -148,19 +162,24 @@ export function DispatchDialog({
         repoId,
         ...(baseValue ? { base: baseValue } : {}),
         ...(promptValue ? { prompt: promptValue } : {}),
+        ...(mode === "interactive" ? { mode } : {}),
       });
       onCreated(run);
     } catch (caught) {
       const text = caught instanceof Error ? caught.message : String(caught);
+      const overBudget = caught instanceof RequestError && caught.status === 429;
       setError(
         caught instanceof AuthError && caught.status === 403
           ? t("runs.permissionDenied", { message: text })
-          : // req() turns every 409 into a ConflictError and drops the body;
-            // on this route a 409 only ever means the runner cannot take runs.
+          : // On this route a 409 only ever means the runner cannot take runs.
             caught instanceof ConflictError
-            ? t("runs.runnerCannotRun")
-            : text,
+            ? t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
+            : overBudget
+              ? t("runs.overBudget", { message: text })
+              : text,
       );
+      // The refusal names the limit; the warning line catches up with it.
+      if (overBudget) void useBudget.getState().load();
     } finally {
       setSubmitting(false);
     }
@@ -220,6 +239,22 @@ export function DispatchDialog({
             <div className="notify-message error" role="status">
               {runnersError}
             </div>
+          )}
+
+          {budgetWarning && (
+            <p className="run-budget-warning" role="status">
+              {budgetWarning}{" "}
+              <button
+                type="button"
+                className="run-inline-link"
+                onClick={() => {
+                  useBudget.getState().requestShow(true);
+                  openRunners();
+                }}
+              >
+                {t("budget.adjust")}
+              </button>
+            </p>
           )}
 
           {loadingRunners ? (
@@ -363,6 +398,8 @@ export function DispatchDialog({
                       </small>
                     )}
                   </label>
+
+                  <RunModePicker runner={runner} value={mode} onChange={setMode} />
 
                   <p className="run-note">{t("runs.acceptNote")}</p>
                 </>

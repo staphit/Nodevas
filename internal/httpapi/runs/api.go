@@ -56,7 +56,12 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs", a.list)
 	api.GET("/runs/:id", a.get)
 	api.GET("/runs/:id/events", a.events)
+	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/:id/terminal", a.terminal)
+	api.GET("/runs/budget", a.budget)
+	api.PUT("/runs/budget", a.setBudget)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -73,7 +78,7 @@ func fail(c *gin.Context, err error) {
 		notFound(c, "run")
 	case errors.Is(err, runs.ErrInvalid):
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
-	case errors.Is(err, runs.ErrTransition):
+	case errors.Is(err, runs.ErrPrecondition), errors.Is(err, runs.ErrTransition):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -139,6 +144,10 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "base is not a valid branch name")
 		return
 	}
+	if !validMode(body.Mode) {
+		invalid(c, "mode must be \"\" or %q", runnerwire.ModeInteractive)
+		return
+	}
 
 	// The runner must be the caller's own, administrators included: a run
 	// executes on the owner's machine with the owner's logins, and nobody
@@ -156,6 +165,22 @@ func (a *API) create(c *gin.Context) {
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
 			errors.New("this runner does not take runs; update nodevas on it"), nil)
+		return
+	}
+	if !modeSupported(runner.Info, body.Mode) {
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
+			errors.New("this runner cannot run interactive sessions"), nil)
+		return
+	}
+	// The budget is the runner owner's: runs spend their subscription.
+	budget, err := a.d.Store().BudgetStatus(c.Request.Context(), runner.OwnerID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if budget.Exceeded != "" {
+		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
+			errors.New(runs.BudgetMessage(budget)), map[string]any{"exceeded": budget.Exceeded})
 		return
 	}
 
@@ -181,7 +206,7 @@ func (a *API) create(c *gin.Context) {
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
 		Prompt: body.Prompt, JobPrompt: BuildPrompt(title, content, body.Prompt),
-		CreatedBy: actor.ID, CreatedByName: name,
+		CreatedBy: actor.ID, CreatedByName: name, Mode: body.Mode,
 	})
 	if err != nil {
 		fail(c, err)
@@ -361,6 +386,23 @@ func (a *API) events(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, runnerwire.RunEventsResponse{Events: events, More: more})
+}
+
+// changes returns what the run committed: files, counts and the patch. Changes
+// is null until the runner reports them, and stays null for a run that never
+// got that far.
+func (a *API) changes(c *gin.Context) {
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	changes, err := a.d.Store().Changes(c.Request.Context(), r.ID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.RunChangesResponse{Changes: changes})
 }
 
 func queryInt(c *gin.Context, key string, fallback int64) (int64, error) {

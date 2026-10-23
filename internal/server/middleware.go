@@ -278,7 +278,7 @@ var stateChangingGETPaths = map[string]bool{
 
 func stateChangingGET(r *http.Request) bool {
 	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-		stateChangingGETPaths[r.URL.Path]
+		(stateChangingGETPaths[r.URL.Path] || runTerminalPath(r.URL.Path))
 }
 
 // allowsFetchSite reports whether a Sec-Fetch-Site value belongs to this

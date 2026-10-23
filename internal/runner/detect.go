@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,38 +51,115 @@ var Kinds = []string{"claude", "codex", "gemini"}
 // start; a hung check must not hold up the hello.
 const versionTimeout = 5 * time.Second
 
-// DefaultModels is the built-in model list for an agent kind. Only Claude
-// Code's aliases are stable enough to ship; everything else is "default",
-// i.e. no model flag, until the owner lists models in the config.
+// DefaultModels is the built-in model list for an agent kind: "default" (no
+// model flag: whatever the CLI itself picks) first, then a few current IDs.
+// Claude Code's aliases are stable; the Codex and Gemini IDs date, which is
+// why the owner can replace any list in the config, and why Detect asks the
+// installed Codex for its own catalog first.
 func DefaultModels(kind string) []runnerwire.Model {
 	models := []runnerwire.Model{{ID: "default", Label: "CLI default", Default: true}}
-	if kind == "claude" {
+	switch kind {
+	case "claude":
 		models = append(models,
 			runnerwire.Model{ID: "opus", Label: "Opus"},
 			runnerwire.Model{ID: "sonnet", Label: "Sonnet"},
 			runnerwire.Model{ID: "haiku", Label: "Haiku"},
 		)
+	case "codex":
+		models = append(models,
+			runnerwire.Model{ID: "gpt-5.5", Label: "GPT-5.5"},
+			runnerwire.Model{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini"},
+		)
+	case "gemini":
+		models = append(models,
+			runnerwire.Model{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro"},
+			runnerwire.Model{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash"},
+		)
 	}
 	return models
+}
+
+// codexCatalog asks the installed Codex for the models it ships with:
+// `codex debug models --bundled` prints its built-in catalog without going
+// online. Only the ones Codex itself lists in its picker count. nil means
+// the command failed or said nothing usable; the built-in list stands.
+func codexCatalog(ctx context.Context, cmds CommandRunner, bin string) []runnerwire.Model {
+	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
+	defer cancel()
+	out, err := cmds.Run(ctx, bin, "debug", "models", "--bundled")
+	if err != nil {
+		return nil
+	}
+	var catalog struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			DisplayName string `json:"display_name"`
+			Visibility  string `json:"visibility"`
+			Priority    int    `json:"priority"`
+		} `json:"models"`
+	}
+	if json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(out), "\ufeff")), &catalog) != nil {
+		return nil
+	}
+	sort.SliceStable(catalog.Models, func(i, j int) bool { return catalog.Models[i].Priority < catalog.Models[j].Priority })
+	models := []runnerwire.Model{{ID: "default", Label: "CLI default", Default: true}}
+	for _, m := range catalog.Models {
+		if m.Visibility != "list" || !validModelID(m.Slug) || len(models) >= runnerwire.MaxModels {
+			continue
+		}
+		label := m.DisplayName
+		if label == "" {
+			label = m.Slug
+		}
+		models = append(models, runnerwire.Model{ID: m.Slug, Label: truncate(label, 100)})
+	}
+	if len(models) == 1 {
+		return nil
+	}
+	return models
+}
+
+// validModelID keeps a catalog entry to what a model flag plausibly takes.
+func validModelID(id string) bool {
+	if id == "" || len(id) > 100 || id == "default" {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-:/", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 // ModelsFor is the model list the runner reports for kind: the config's list
 // when it has one, the built-in one otherwise.
 func ModelsFor(kind string, cfg *Config) []runnerwire.Model {
-	if cfg != nil {
-		if models, ok := cfg.Models[kind]; ok && len(models) > 0 {
-			out := append([]runnerwire.Model(nil), models...)
-			if len(out) > runnerwire.MaxModels {
-				out = out[:runnerwire.MaxModels]
-			}
-			return out
-		}
+	if models, ok := cfg.modelsFor(kind); ok {
+		return models
 	}
 	return DefaultModels(kind)
 }
 
+// modelsFor is the config's own model list for kind, if it has one.
+func (c *Config) modelsFor(kind string) ([]runnerwire.Model, bool) {
+	if c == nil {
+		return nil, false
+	}
+	models, ok := c.Models[kind]
+	if !ok || len(models) == 0 {
+		return nil, false
+	}
+	out := append([]runnerwire.Model(nil), models...)
+	if len(out) > runnerwire.MaxModels {
+		out = out[:runnerwire.MaxModels]
+	}
+	return out, true
+}
+
 // Detect reports each agent CLI: whether it is on PATH, its version, and the
-// models runs may ask it for.
+// models runs may ask it for: the config's list, else (for Codex) the CLI's
+// own catalog, else the built-in list.
 func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.Agent {
 	agents := make([]runnerwire.Agent, 0, len(Kinds))
 	for _, kind := range Kinds {
@@ -98,6 +177,11 @@ func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.A
 		} else {
 			agent.Installed = true
 			agent.Version = truncate(firstLine(out), 200)
+			if _, configured := cfg.modelsFor(kind); !configured && kind == "codex" {
+				if models := codexCatalog(ctx, cmds, bin); models != nil {
+					agent.Models = models
+				}
+			}
 		}
 		agents = append(agents, agent)
 	}
@@ -124,7 +208,7 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		Arch:          runtime.GOARCH,
 		Agents:        Detect(ctx, cmds, cfg),
 		Repos:         repos,
-		Capabilities:  []string{runnerwire.CapHeadless},
+		Capabilities:  capabilities(cfg),
 		MaxConcurrent: maxConcurrent,
 	}
 }

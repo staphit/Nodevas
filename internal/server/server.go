@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -213,6 +214,26 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	s.runs = runs.NewDispatcher(runs.NewStore(database), s.runners,
 		func(project, nodeID string) { s.broadcastProject(project, runnerwire.RunsChangedEvent, nodeID) },
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
+	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
+	s.runs.SetAudit(s.auditRun)
+}
+
+// auditRun records a merge approval or result. Results arrive from a runner's
+// socket, not a request, so the request audit trail never sees them.
+func (s *Server) auditRun(entry runs.AuditEntry) {
+	if s.audit == nil {
+		return
+	}
+	project := ""
+	if s.pm != nil {
+		if st, err := s.pm.StoreFor(entry.Project); err == nil {
+			project = st.Root()
+		}
+	}
+	s.audit.RecordOrLog(context.Background(), audit.Event{
+		At: time.Now(), Project: project, ActorID: entry.ActorID, ActorName: entry.ActorName,
+		Action: entry.Action, Target: entry.Target, Detail: entry.Detail,
+	})
 }
 
 // broadcastProject tells the clients watching a project, named as ?project=
