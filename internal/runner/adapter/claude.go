@@ -28,6 +28,10 @@ var ClaudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions",
 // not run arbitrary commands unless the owner allowed them (AllowedTools).
 const DefaultClaudePermissionMode = "acceptEdits"
 
+// NodevasMCPTools is the --allowedTools rule for every tool of the run's
+// nodevas MCP server.
+const NodevasMCPTools = "mcp__nodevas"
+
 func (Claude) Kind() string { return "claude" }
 
 func (Claude) NewParser() Parser { return &claudeParser{} }
@@ -68,11 +72,12 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		args = append(args, "--model", job.Model)
 	}
 	// Last, because the flag is variadic: every argument after it is a tool.
-	// Nothing positional follows; the prompt goes on stdin.
-	if len(env.AllowedTools) > 0 {
-		args = append(args, "--allowedTools")
-		args = append(args, env.AllowedTools...)
-	}
+	// Nothing positional follows; the prompt goes on stdin. The nodevas
+	// server's tools are always allowed: the preamble tells the agent to claim
+	// its node, headless nobody can approve that, and the hub limits what
+	// those tools reach to the agent routes anyway.
+	args = append(args, "--allowedTools", NodevasMCPTools)
+	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	// On stdin, not as an argument: no command-line length limit and no
@@ -116,11 +121,13 @@ type claudeLine struct {
 	Model          string `json:"model"`
 	PermissionMode string `json:"permissionMode"`
 
-	// assistant, user
-	Message *struct {
-		// A user message's content is a string (an echoed prompt) or blocks.
-		Content json.RawMessage `json:"content"`
-	} `json:"message"`
+	// assistant, user: an object with content. Raw because other line types
+	// reuse the name for a plain string (system/permission_denied), and one
+	// strict field must not cost the whole line.
+	Message json.RawMessage `json:"message"`
+
+	// system/permission_denied
+	ToolName string `json:"tool_name"`
 
 	// result
 	IsError      bool            `json:"is_error"`
@@ -164,6 +171,16 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 	}
 	switch msg.Type {
 	case "system":
+		if msg.Subtype == "permission_denied" {
+			// Headless, nobody can say yes: the owner widens allowedTools or
+			// the permission mode on the runner if this keeps happening.
+			text := "permission denied: " + msg.ToolName
+			var reason string
+			if json.Unmarshal(msg.Message, &reason) == nil && reason != "" {
+				text += " (" + reason + ")"
+			}
+			return []runnerwire.RunEvent{{Type: runnerwire.EventError, Text: clip(text)}}
+		}
 		if msg.Subtype != "init" {
 			return nil // hook chatter, retries: not progress
 		}
@@ -193,11 +210,18 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 }
 
 func blocksOf(msg claudeLine) []claudeBlock {
-	if msg.Message == nil || len(msg.Message.Content) == 0 || msg.Message.Content[0] != '[' {
+	var message struct {
+		// A user message's content is a string (an echoed prompt) or blocks.
+		Content json.RawMessage `json:"content"`
+	}
+	if len(msg.Message) == 0 || msg.Message[0] != '{' || json.Unmarshal(msg.Message, &message) != nil {
+		return nil
+	}
+	if len(message.Content) == 0 || message.Content[0] != '[' {
 		return nil
 	}
 	var blocks []claudeBlock
-	if json.Unmarshal(msg.Message.Content, &blocks) != nil {
+	if json.Unmarshal(message.Content, &blocks) != nil {
 		return nil
 	}
 	return blocks

@@ -155,7 +155,7 @@ func TestClaudeCommand(t *testing.T) {
 	mcpPath := filepath.Join(tmp, "mcp.json")
 	want := []string{"/usr/bin/claude", "-p", "--output-format", "stream-json", "--verbose",
 		"--permission-mode", "plan", "--mcp-config", mcpPath, "--strict-mcp-config",
-		"--model", "sonnet", "--allowedTools", "Edit", "Bash(git *)"}
+		"--model", "sonnet", "--allowedTools", "mcp__nodevas", "Edit", "Bash(git *)"}
 	if !slices.Equal(cmd.Args, want) {
 		t.Fatalf("args = %q\nwant %q", cmd.Args, want)
 	}
@@ -189,8 +189,8 @@ func TestClaudeCommand(t *testing.T) {
 		t.Errorf("mcp config = %s", raw)
 	}
 
-	// "default" means no --model flag; no allowed tools means no flag either;
-	// an unset permission mode is the safe default, never the job's say.
+	// "default" means no --model flag; no allowed tools still allows the
+	// nodevas server's tools, and nothing else; an unset permission mode is the safe default, never the job's say.
 	job.Model = "default"
 	env.PermissionMode, env.AllowedTools = "", nil
 	cmd, err = Claude{}.Command(job, env)
@@ -198,7 +198,7 @@ func TestClaudeCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Join(cmd.Args, " ")
-	if strings.Contains(args, "--model") || strings.Contains(args, "--allowedTools") ||
+	if strings.Contains(args, "--model") || !strings.HasSuffix(args, "--allowedTools mcp__nodevas") ||
 		!strings.Contains(args, "--permission-mode acceptEdits") {
 		t.Errorf("args = %s", args)
 	}
@@ -213,5 +213,18 @@ func TestForAndTruncate(t *testing.T) {
 	}
 	if got := Truncate("abc", 5); got != "abc" {
 		t.Errorf("Truncate = %q", got)
+	}
+}
+
+// A permission_denied line reuses "message" for a plain string; it must
+// become an error event, not fail to parse and land as raw JSON.
+func TestClaudeParserPermissionDenied(t *testing.T) {
+	line := `{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"toolu_1",` +
+		`"decision_reason_type":"other","decision_reason":"This command requires approval",` +
+		`"message":"This command requires approval","uuid":"u","session_id":"s"}`
+	events := Claude{}.NewParser().Parse([]byte(line))
+	if len(events) != 1 || events[0].Type != runnerwire.EventError ||
+		events[0].Text != "permission denied: Bash (This command requires approval)" {
+		t.Fatalf("events = %+v", events)
 	}
 }
