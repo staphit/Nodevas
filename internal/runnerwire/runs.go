@@ -170,8 +170,15 @@ type Run struct {
 	Summary  string `json:"summary,omitempty"`
 	ExitCode int    `json:"exitCode"`
 	Usage    *Usage `json:"usage,omitempty"`
-	// PRURL and CIStatus are filled from W3 on.
+	// Changes and pull request (W3; see changes.go).
+	Commit        string `json:"commit,omitempty"`
+	FilesChanged  int    `json:"filesChanged"`
+	Additions     int    `json:"additions"`
+	Deletions     int    `json:"deletions"`
 	PRURL         string `json:"prUrl,omitempty"`
+	PRNumber      int    `json:"prNumber,omitempty"`
+	PRState       string `json:"prState,omitempty"`
+	PRError       string `json:"prError,omitempty"`
 	CIStatus      string `json:"ciStatus,omitempty"`
 	CreatedBy     string `json:"createdBy"`
 	CreatedByName string `json:"createdByName"`
