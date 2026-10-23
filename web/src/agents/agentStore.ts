@@ -29,6 +29,8 @@ export interface AgentStoreState {
   setFilterNodeId: (nodeId: string) => void;
   setError: (error: string | null) => void;
   refreshAll: () => Promise<void>;
+  /** Messages bound to one board node; empty when they cannot be read. */
+  loadNodeMessages: (nodeId: string) => Promise<AgentMessage[]>;
   sendMessage: (params: {
     to: string;
     message: string;
@@ -95,6 +97,15 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
       });
     } catch {
       /* ignore transient fetch errors during background sync */
+    }
+  },
+
+  loadNodeMessages: async (nodeId) => {
+    try {
+      const res = await api.getAgentMessages(nodeId);
+      return res.messages ?? [];
+    } catch {
+      return [];
     }
   },
 

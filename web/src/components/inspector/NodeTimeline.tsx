@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { api, type AgentMessage } from "../../api";
+import type { AgentMessage } from "../../api/agents";
 import { useAgents } from "../../agents/agentStore";
 import { BUILTIN_PLAN_STATUSES } from "../../plan";
 import { operationScope, reportError, useApp, useOperation } from "../../store";
@@ -49,21 +49,17 @@ const AGENT_MESSAGE_PREVIEW_CHARS = 600;
  */
 function useNodeAgentMessages(id: string): AgentMessage[] {
   const storeMessages = useAgents((state) => state.messages);
+  const loadNodeMessages = useAgents((state) => state.loadNodeMessages);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   useEffect(() => {
     let cancelled = false;
-    api.getAgentMessages(id).then(
-      (res) => {
-        if (!cancelled) setMessages(res.messages ?? []);
-      },
-      () => {
-        if (!cancelled) setMessages([]);
-      },
-    );
+    void loadNodeMessages(id).then((loaded) => {
+      if (!cancelled) setMessages(loaded);
+    });
     return () => {
       cancelled = true;
     };
-  }, [id, storeMessages]);
+  }, [id, storeMessages, loadNodeMessages]);
   return messages;
 }
 
