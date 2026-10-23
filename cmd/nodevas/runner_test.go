@@ -167,6 +167,8 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		{"set", "runTimeoutMinutes", "30", "--config", cfgPath},
 		{"set", "permissionMode", "plan"},
 		{"set", "allowedTools", "Edit", "Bash(go test *)"},
+		{"set", "codexsandbox", "READ-ONLY"},
+		{"set", "codexIgnoreUserConfig", "true"},
 	} {
 		args = append(args, "--config", cfgPath)
 		if code, _, stderr := runRunner(t, "", args...); code != 0 {
@@ -177,7 +179,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	if code != 0 || !strings.Contains(stderr, "Anyone who can sign in to the hub as you") {
 		t.Fatalf("autoAccept: exit %d, stderr %q", code, stderr)
 	}
-	if !strings.Contains(stdout, "autoAccept         true") {
+	if !strings.Contains(stdout, "autoAccept             true") {
 		t.Fatalf("set output:\n%s", stdout)
 	}
 	cfg, err := runner.LoadConfig(cfgPath)
@@ -185,18 +187,27 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.MaxConcurrent != 2 || cfg.RunTimeoutMinutes != 30 || cfg.PermissionMode != "plan" ||
-		len(cfg.AllowedTools) != 2 || !cfg.AutoAccept {
+		len(cfg.AllowedTools) != 2 || !cfg.AutoAccept || cfg.CodexSandbox != "read-only" || !cfg.CodexIgnoreUserConfig ||
+		cfg.GeminiApprovalMode != "" {
 		t.Fatalf("config = %+v", cfg)
 	}
+	// The dangerous modes say so.
+	code, _, stderr = runRunner(t, "", "set", "geminiApprovalMode", "yolo", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, "yolo lets Gemini runs run any command") {
+		t.Fatalf("geminiApprovalMode yolo: exit %d, stderr %q", code, stderr)
+	}
 	_, stdout, _ = runRunner(t, "", "status", "--config", cfgPath)
-	for _, want := range []string{"maxConcurrent      2", "runTimeoutMinutes  30", "permissionMode     plan",
-		"allowedTools       Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data"} {
+	for _, want := range []string{"maxConcurrent          2", "runTimeoutMinutes      30", "permissionMode         plan",
+		"allowedTools           Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data",
+		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
+		"geminiApprovalMode     yolo"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)
 		}
 	}
 
-	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"}} {
+	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"},
+		{"set", "codexSandbox", "full"}, {"set", "codexIgnoreUserConfig", "maybe"}, {"set", "geminiApprovalMode", "plan"}} {
 		if code, _, _ := runRunner(t, "", append(bad, "--config", cfgPath)...); code == 0 {
 			t.Errorf("%v succeeded", bad)
 		}

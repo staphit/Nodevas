@@ -54,8 +54,15 @@ type Config struct {
 	DataDir string `json:"dataDir,omitempty"`
 	// PermissionMode is Claude Code's --permission-mode for every run.
 	PermissionMode string `json:"permissionMode,omitempty"`
-	// AllowedTools is passed as --allowedTools, e.g. "Bash(go test *)".
+	// AllowedTools is passed to Claude Code as --allowedTools, e.g. "Bash(go test *)".
 	AllowedTools []string `json:"allowedTools,omitempty"`
+	// CodexSandbox is Codex's --sandbox for every run.
+	CodexSandbox string `json:"codexSandbox,omitempty"`
+	// CodexIgnoreUserConfig runs Codex without the owner's config.toml (their
+	// MCP servers, hooks and default model); its sign-in is still used.
+	CodexIgnoreUserConfig bool `json:"codexIgnoreUserConfig,omitempty"`
+	// GeminiApprovalMode is Gemini CLI's --approval-mode for every run.
+	GeminiApprovalMode string `json:"geminiApprovalMode,omitempty"`
 	// AutoAccept takes every valid offer without asking at the terminal. Off
 	// by default: with it on, anyone who can sign in to the hub as the owner
 	// can run agents on this machine.
@@ -111,13 +118,42 @@ func (c *Config) ClaudePermissionMode() string {
 	return c.PermissionMode
 }
 
+// CodexSandboxMode is CodexSandbox with its default applied.
+func (c *Config) CodexSandboxMode() string {
+	if c.CodexSandbox == "" {
+		return adapter.DefaultCodexSandbox
+	}
+	return c.CodexSandbox
+}
+
+// GeminiApproval is GeminiApprovalMode with its default applied.
+func (c *Config) GeminiApproval() string {
+	if c.GeminiApprovalMode == "" {
+		return adapter.DefaultGeminiApprovalMode
+	}
+	return c.GeminiApprovalMode
+}
+
+// PermissionModeFor is the owner's permission setting for an agent kind, as
+// adapter.RunEnv.PermissionMode takes it.
+func (c *Config) PermissionModeFor(kind string) string {
+	switch kind {
+	case "codex":
+		return c.CodexSandboxMode()
+	case "gemini":
+		return c.GeminiApproval()
+	}
+	return c.ClaudePermissionMode()
+}
+
 // AutoAcceptWarning is printed whenever auto-accept is switched on or the
 // runner starts with it on.
 const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to the hub as you can now run " +
 	"agents on this machine, in the repositories you added, without anyone here saying yes."
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
-var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools", "autoAccept"}
+var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
@@ -177,13 +213,41 @@ func (c *Config) Set(key string, values []string) error {
 			c.PermissionMode = ""
 			return nil
 		}
-		for _, mode := range adapter.ClaudePermissionModes {
-			if strings.EqualFold(mode, value) {
-				c.PermissionMode = mode
-				return nil
-			}
+		mode, err := oneOf(canonical, value, adapter.ClaudePermissionModes)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("permissionMode must be one of %s", strings.Join(adapter.ClaudePermissionModes, ", "))
+		c.PermissionMode = mode
+	case "codexSandbox":
+		if reset {
+			c.CodexSandbox = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.CodexSandboxModes)
+		if err != nil {
+			return err
+		}
+		c.CodexSandbox = mode
+	case "codexIgnoreUserConfig":
+		if reset {
+			c.CodexIgnoreUserConfig = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("codexIgnoreUserConfig must be true or false")
+		}
+		c.CodexIgnoreUserConfig = on
+	case "geminiApprovalMode":
+		if reset {
+			c.GeminiApprovalMode = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.GeminiApprovalModes)
+		if err != nil {
+			return err
+		}
+		c.GeminiApprovalMode = mode
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
@@ -215,6 +279,17 @@ func (c *Config) Set(key string, values []string) error {
 		c.AutoAccept = on
 	}
 	return nil
+}
+
+// oneOf matches value to one of choices, ignoring case, and returns the
+// choice as the CLI spells it.
+func oneOf(key, value string, choices []string) (string, error) {
+	for _, choice := range choices {
+		if strings.EqualFold(choice, value) {
+			return choice, nil
+		}
+	}
+	return "", fmt.Errorf("%s must be one of %s", key, strings.Join(choices, ", "))
 }
 
 // splitTools splits at commas outside parentheses, so a rule like
