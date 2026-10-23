@@ -110,34 +110,7 @@ func (h *Hub) Handle(c *gin.Context) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "message rate limit exceeded")
 			return
 		}
-		// The HTTP gate cannot see this: the websocket is one upgraded GET, and
-		// everything after it arrives as frames. Claiming a node lock is a
-		// change to what other people can edit, so it is refused here on the
-		// same terms. Subscribing and presence stay — watching a room and
-		// showing a cursor in it is what a visitor is for.
-		if !client.actor.CanWrite() && mutatesSharedState(message.Type) {
-			_ = conn.Close(websocket.StatusPolicyViolation, "read-only session")
-			return
-		}
 		h.handleMessage(client, message)
-	}
-}
-
-// mutatesSharedState names the client messages that change something other
-// clients observe. Written as a list of what is refused rather than what is
-// allowed only because validClientMessage above already bounds the set.
-func mutatesSharedState(messageType string) bool {
-	switch messageType {
-	case "lock", "unlock", "graph-drag":
-		return true
-	case "doc-update", "doc-snapshot", "doc-flushed", "doc-compact-request", "doc-snapshot-start", "doc-snapshot-chunk", "doc-snapshot-commit", "doc-snapshot-abort":
-		// A visitor may open and close a live document — reading text that is
-		// being typed is what a read-only session is for — but everything that
-		// puts bytes into the shared log, or claims a file was written, is a
-		// change other people take as theirs.
-		return true
-	default:
-		return false
 	}
 }
 

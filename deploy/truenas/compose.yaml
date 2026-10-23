@@ -65,6 +65,12 @@ services:
       NODEVAS_SERVE_SMTP_FROM: Nodevas <nodevas@example.com>
       NODEVAS_SERVE_SMTP_SECURITY: starttls
       NODEVAS_SMTP_PASSWORD_FILE: /run/secrets/nodevas_smtp_password
+      # Cloudflare Access (Zero Trust) in front of Nodevas: team domain and the
+      # Access application's AUD tag. Start with REQUIRED "false" (failures
+      # are only logged), switch to "true" once sign-in through Access works.
+      # NODEVAS_SERVE_ACCESS_TEAM_DOMAIN: myteam.cloudflareaccess.com
+      # NODEVAS_SERVE_ACCESS_AUD: <application audience tag>
+      # NODEVAS_SERVE_ACCESS_REQUIRED: "false"
     volumes:
       - /mnt/tank/apps/nodevas/workspace:/data
     secrets:

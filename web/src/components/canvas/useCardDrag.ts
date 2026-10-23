@@ -35,7 +35,6 @@ export function useCardDrag({
   onMove,
   onReject,
   snapToGrid = false,
-  canMove = true,
   snapEnabled = false,
   snapBoxes = [],
 }: {
@@ -60,16 +59,6 @@ export function useCardDrag({
   snapEnabled?: boolean;
   /** Everything on the board that can be aligned to, cards and decorations. */
   snapBoxes?: readonly SnapBox[];
-  /**
-   * Whether a card may be dragged to a new cell. False for a read-only
-   * session, where the gesture still selects and still opens on a click, but
-   * the card never leaves its place.
-   *
-   * The move is stopped here rather than at the commit: a card that follows
-   * the pointer and then springs back reads as a failed save, and this one was
-   * never going to be attempted.
-   */
-  canMove?: boolean;
 }) {
   const { t } = useI18n();
   const dragStart = useRef({ x: 0, y: 0 });
@@ -99,9 +88,6 @@ export function useCardDrag({
   const onPointerMove = (event: PointerEvent<HTMLElement>) => {
     const current = dragRef.current;
     if (!current) return false;
-    // The gesture stays live so the pointer-up below can still open the card,
-    // but nothing about its position changes.
-    if (!canMove) return true;
     const screenDx = event.clientX - dragStart.current.x;
     const screenDy = event.clientY - dragStart.current.y;
     // Both snaps are resolved here rather than at the drop so the card previews

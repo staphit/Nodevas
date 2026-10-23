@@ -111,7 +111,7 @@ func TestCopyToPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := src.SetSetting(ctx, "visitor.pin", ""); err != nil {
+	if err := src.SetSetting(ctx, "copy.test", ""); err != nil {
 		t.Fatal(err)
 	}
 

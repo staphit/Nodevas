@@ -178,17 +178,3 @@ func TestCopilotBridgeWithoutASessionIsRefused(t *testing.T) {
 		}
 	}
 }
-
-func TestCopilotBridgeLeavesAVisitorReadOnly(t *testing.T) {
-	srv, _ := visitorServer(t)
-	cookies, _ := signInAsVisitor(t, srv)
-	bridge := openBridge(t, toolbridge.Options{Handler: srv.Handler(), Cookie: cookieHeader(cookies)})
-
-	if outline := callTool(t, bridge, "get_graph_outline", `{}`); outline.IsError {
-		t.Fatalf("visitor read failed: %s", outline.Output)
-	}
-	if result := callTool(t, bridge, "create_node", `{"title":"Visitor"}`); !result.IsError ||
-		!strings.Contains(result.Output, "read-only") {
-		t.Fatalf("visitor create_node = %+v, want the read-only refusal", result)
-	}
-}

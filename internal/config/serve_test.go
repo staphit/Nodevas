@@ -228,3 +228,68 @@ func TestCopilotConfigDefaultsAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestAccessConfigFromYAMLAndEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nodevas.yaml")
+	data := []byte("access:\n  team_domain: team.cloudflareaccess.com\n  aud: tag-1\n  required: true\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadServeConfig(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := AccessConfig{TeamDomain: "team.cloudflareaccess.com", AUD: "tag-1", Required: true}
+	if cfg.Access != want || !cfg.Access.Enabled() {
+		t.Fatalf("access = %+v, want %+v", cfg.Access, want)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	values := map[string]string{
+		"NODEVAS_SERVE_ACCESS_TEAM_DOMAIN": "other.cloudflareaccess.com",
+		"NODEVAS_SERVE_ACCESS_AUD":         "tag-2",
+		"NODEVAS_SERVE_ACCESS_REQUIRED":    "false",
+	}
+	if err := ApplyEnvironment(&cfg, func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want = AccessConfig{TeamDomain: "other.cloudflareaccess.com", AUD: "tag-2"}
+	if cfg.Access != want {
+		t.Fatalf("access after env = %+v, want %+v", cfg.Access, want)
+	}
+
+	bad := map[string]string{"NODEVAS_SERVE_ACCESS_REQUIRED": "maybe"}
+	if err := ApplyEnvironment(&cfg, func(key string) (string, bool) {
+		value, ok := bad[key]
+		return value, ok
+	}); err == nil {
+		t.Fatal("non-boolean NODEVAS_SERVE_ACCESS_REQUIRED accepted")
+	}
+}
+
+func TestAccessConfigValidate(t *testing.T) {
+	if DefaultServeConfig().Access.Enabled() {
+		t.Fatal("access enabled by default")
+	}
+	for _, bad := range []AccessConfig{
+		{TeamDomain: "team.cloudflareaccess.com"},
+		{AUD: "tag"},
+		{Required: true},
+	} {
+		cfg := DefaultServeConfig()
+		cfg.Access = bad
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("%+v accepted", bad)
+		}
+	}
+	cfg := DefaultServeConfig()
+	cfg.Access = AccessConfig{TeamDomain: "team.cloudflareaccess.com", AUD: "tag"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("audit-mode access refused: %v", err)
+	}
+}

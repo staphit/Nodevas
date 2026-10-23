@@ -29,7 +29,7 @@ import {
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
-import { AuthGate, SignOutButton, useSignOut, useViewer, VisitorBadge } from "./components/SignIn";
+import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
 import { ProjectSettings } from "./components/ProjectSettings";
 import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
@@ -437,8 +437,6 @@ function MainApp() {
           />
         )}
         <PresenceAvatars narrow={narrowTopbar} />
-        {/* Renders nothing unless the session is a visitor's. */}
-        <VisitorBadge />
         <div className="topbar-actions">
           <button
             className="command-trigger"

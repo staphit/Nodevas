@@ -180,7 +180,7 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 			return err
 		}
 	}
-	mode := effectiveMode(requested, req.Actor, settings.AllowBypass)
+	mode := effectiveMode(requested, settings.AllowBypass)
 
 	stored, err := s.store.Entries(storeCtx, conversation.ID)
 	if err != nil {

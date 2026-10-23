@@ -36,9 +36,12 @@ type Server struct {
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
 	agents   *agents.Hub
-	abuse    *abuseGuard
-	stop     chan struct{}
-	stopOnce sync.Once
+
+	accessVerifier *auth.AccessVerifier
+	accessRequired bool
+	abuse          *abuseGuard
+	stop           chan struct{}
+	stopOnce       sync.Once
 	// allowedHosts are the Host header names this server answers on, lowercased
 	// and without a port. A nil map means nobody has said where this server
 	// listens, so there is no name to judge a Host against: that is the zero
@@ -168,6 +171,14 @@ func (s *Server) UseAccounts(users *auth.UserStore) {
 	}
 }
 
+// UseAccess puts Cloudflare Access in front of every route: with required, a
+// request without a valid Access JWT is refused before anything else runs;
+// without it, failures are only logged. Call it before Handler.
+func (s *Server) UseAccess(verifier *auth.AccessVerifier, required bool) {
+	s.accessVerifier = verifier
+	s.accessRequired = required
+}
+
 // UseAudit points the audit trail at the workspace database. Servers with
 // accounts should configure it before building their handler.
 func (s *Server) UseAudit(store *audit.Store) {
@@ -197,21 +208,6 @@ func (s *Server) SetMaxActiveUsers(limit int) {
 	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
 		accounts.SetMaxActiveUsers(limit)
 	}
-}
-
-// SetVisitor configures the shared read-only credential. Both halves empty
-// turns it off, which is the default. Call it after UseAccounts; a server
-// without accounts has no sign-in for it to belong to.
-//
-// The credential is stored in the workspace database, not in this process, so
-// `nodevas visitor on|off` changes it while the server runs. This entry point
-// exists for tests and embedders that already hold a Server.
-func (s *Server) SetVisitor(pin, otp string) error {
-	accounts, ok := s.auth.(*auth.SessionAuth)
-	if !ok {
-		return nil
-	}
-	return accounts.SetVisitor(context.Background(), pin, otp)
 }
 
 // ErrWildcardNeedsHostName is returned when a wildcard bind arrives with no

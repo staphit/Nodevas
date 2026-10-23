@@ -63,7 +63,7 @@ Multiple MCP sessions connected to the same Nodevas server automatically registe
 - `check_inbox`: fetch unread messages (optionally long-polling with `waitSeconds`). Every tool response also appends an `[Unread mail: N message(s) waiting]` notice when unread mail is present.
 - `ask_user`: prompt a human in the Nodevas Agent Network panel (`Ctrl+Shift+A`) to approve or deny a question (blocking up to 10 minutes). When `about` references a peer message ID, the human's verified decision (`<nodevas-approval>`) is also forwarded to the original sender.
 
-Sessions are bound to the actor that first registered them: on a shared server another account cannot take over a session or read its inbox. Visitors cannot send messages or answer asks. Pass `--session-name` to `nodevas mcp` for a stable address; otherwise one is derived from the repo and agent (`visual-editor-claude`).
+Sessions are bound to the actor that first registered them: on a shared server another account cannot take over a session or read its inbox. Pass `--session-name` to `nodevas mcp` for a stable address; otherwise one is derived from the repo and agent (`visual-editor-claude`).
 
 ### Hooks: mail without polling
 

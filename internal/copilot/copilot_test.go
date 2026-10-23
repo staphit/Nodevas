@@ -16,9 +16,8 @@ import (
 )
 
 var (
-	alice   = identity.Actor{ID: "u-alice", Name: "alice", Role: identity.RoleMember}
-	bob     = identity.Actor{ID: "u-bob", Name: "bob", Role: identity.RoleMember}
-	visitor = identity.Actor{ID: "visitor", Name: "visitor", Role: identity.RoleVisitor}
+	alice = identity.Actor{ID: "u-alice", Name: "alice", Role: identity.RoleMember}
+	bob   = identity.Actor{ID: "u-bob", Name: "bob", Role: identity.RoleMember}
 )
 
 // step is one scripted model call. It sees the request it was given.
@@ -455,28 +454,6 @@ func TestPlanModeRefusesWrites(t *testing.T) {
 	}
 	if statuses := toolStatuses(t, h, conversation); strings.Join(statuses, ",") != "set_node_status:denied" {
 		t.Fatalf("statuses = %v", statuses)
-	}
-}
-
-func TestVisitorIsForcedToPlanMode(t *testing.T) {
-	h := newHarness(t, nil)
-	conversation := h.conversation(visitor, ModeBypass)
-	h.model.steps = []step{callTool("c1", "set_node_status"), expectResult("c1", true, "plan mode")}
-	h.start(TurnRequest{Actor: visitor, ConversationID: conversation.ID, Text: "edit", Mode: ModeBypass}).finish()
-	if len(h.bridge.called()) != 0 {
-		t.Fatal("a visitor's copilot ran a write")
-	}
-	status, err := h.service.Status(context.Background(), visitor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(status.Modes) != 1 || status.Modes[0] != ModePlan || status.AllowBypass {
-		t.Fatalf("visitor status = %+v", status)
-	}
-	// The middleware refuses a visitor's POSTs, so the panel is hidden rather
-	// than offered and then failing on every turn.
-	if status.Enabled || status.Reason == "" {
-		t.Fatalf("visitor status should be disabled with a reason: %+v", status)
 	}
 }
 

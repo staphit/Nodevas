@@ -28,7 +28,7 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(gin.Recovery(), s.secureHTTP, s.preAuthAbuseLimits, s.withAuth, s.withVisitorReadOnly, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
+	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)

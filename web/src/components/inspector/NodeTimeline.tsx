@@ -44,8 +44,7 @@ const AGENT_MESSAGE_PREVIEW_CHARS = 600;
 /**
  * Agent messages bound to this node. Refetched whenever the agent store
  * refreshes (it does on every `agents-changed` push), so a new message lands
- * here without its own subscription. A failed read (a visitor gets 403) simply
- * shows nothing.
+ * here without its own subscription. A failed read simply shows nothing.
  */
 function useNodeAgentMessages(id: string): AgentMessage[] {
   const storeMessages = useAgents((state) => state.messages);

@@ -134,6 +134,17 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
 
 PostgreSQL 的資料在 `/mnt/tank/apps/postgres/data`，請一併納入 snapshot／備份。
 
+### Cloudflare Access（Zero Trust，選用）
+
+在 Cloudflare Zero Trust 為 `nodevas.example.com` 建立 Self-hosted Access application，Allow policy 只放行需要的 email。Nodevas 會再驗一次 Access 簽的 JWT（`Cf-Access-Jwt-Assertion` header 或 `CF_Authorization` cookie），所以繞過 tunnel 直連 container 也進不來；Nodevas 自己的 email passcode 登入照舊，兩層都要過。
+
+1. 記下 Zero Trust team domain（`<team>.cloudflareaccess.com`）與 application 的 **Application Audience (AUD) Tag**。
+2. 在 compose 填入 `NODEVAS_SERVE_ACCESS_TEAM_DOMAIN`、`NODEVAS_SERVE_ACCESS_AUD`，先設 `NODEVAS_SERVE_ACCESS_REQUIRED: "false"`：驗證失敗只寫 warning log（`event.code=access.invalid`），不擋人。
+3. 經 Access 登入確認可用、log 沒有 `access.invalid` 後，改成 `"true"`：沒有有效 token 的請求一律 403，WebSocket 也一樣。
+4. 非互動的 client（runner）用 Access Service Token 加 `Service Auth` policy，送 `CF-Access-Client-Id` / `CF-Access-Client-Secret` header。
+
+container 內直接打 `127.0.0.1` 的請求（healthcheck、本機 `nodevas mcp`）不需要 token；經 proxy 轉來、帶 forwarding header 的請求仍要驗。
+
 ## 5. 驗證
 
 ```bash

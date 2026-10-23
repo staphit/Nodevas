@@ -5,7 +5,7 @@
 // over an in-memory MCP transport, and routes the MCP client's HTTP calls
 // straight into the server's own http.Handler. Every tool call therefore
 // passes the whole middleware chain — authentication as the signed-in person,
-// write_access, visitor read-only, abuse limits, the audit trail — and its
+// write_access, abuse limits, the audit trail — and its
 // writes reach the realtime hub exactly like an agent's or a browser's do.
 package toolbridge
 

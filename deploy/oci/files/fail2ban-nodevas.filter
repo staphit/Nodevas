@@ -22,7 +22,7 @@
 # unrelated change to what is logged. Each condition is stated independently
 # and the line has to satisfy all of them.
 #
-#   401  the email/passcode (or the visitor pin/passcode) was wrong
+#   401  the email/passcode was wrong
 #   403  refused by a transport guard — a cross-origin or cross-site POST at
 #        the login endpoint is not a person mistyping
 #   429  the throttle already fired; repeatedly reaching it is the behaviour
@@ -31,7 +31,7 @@
 # 202 is deliberately absent. The passcode endpoint answers 202 for an email
 # that is not registered precisely so it cannot be used to enumerate accounts,
 # and matching on it here would rebuild that oracle out of the ban list.
-failregex = ^(?=.*"url\.path":"/api/auth/(?:login|otp/request|visitor)")(?=.*"http\.response\.status_code":(?:401|403|429))(?=.*"client\.ip":"<HOST>").*$
+failregex = ^(?=.*"url\.path":"/api/auth/(?:login|otp/request)")(?=.*"http\.response\.status_code":(?:401|403|429))(?=.*"client\.ip":"<HOST>").*$
 
 # Nothing is ignored at the pattern level. Addresses that must never be banned
 # belong in ignoreip in the jail, where an operator can see the whole list in

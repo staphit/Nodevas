@@ -170,7 +170,6 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/ws", ClassWSUpgrade, 1.0},
 		{http.MethodPost, "/api/auth/login", ClassPublicAuth, 1.0},
 		{http.MethodPost, "/api/auth/otp/request", ClassPublicAuth, 1.0},
-		{http.MethodPost, "/api/auth/visitor", ClassPublicAuth, 1.0},
 		{http.MethodGet, "/api/auth/status", ClassPublicAuth, 1.0},
 		{http.MethodGet, "/api/remote/drive/callback", ClassPublicAuth, 1.0},
 
@@ -660,29 +659,6 @@ func TestAuthenticationRoleAbuseIntegration(t *testing.T) {
 	srv.abuse = guard
 	srv.auth = mockActorAuth{}
 	handler := srv.Handler()
-
-	t.Run("VisitorCannotPerformWrite", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/nodes", strings.NewReader(`{"title":"test"}`))
-		req.Header.Set("Content-Type", "application/json")
-		// Simulate visitor context
-		req = req.WithContext(auth.WithActor(req.Context(), identity.Actor{ID: "visitor-1", Name: "visitor", Role: identity.RoleVisitor}))
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("visitor write returned %d, want 403", rec.Code)
-		}
-	})
-
-	t.Run("VisitorCannotMessageAgents", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/agents/messages", strings.NewReader(`{"to":"*","message":"hi"}`))
-		req.Header.Set("Content-Type", "application/json")
-		req = req.WithContext(auth.WithActor(req.Context(), identity.Actor{ID: "visitor-1", Name: "visitor", Role: identity.RoleVisitor}))
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("visitor agent message returned %d, want 403", rec.Code)
-		}
-	})
 
 	t.Run("ActorRateLimitTracksDistinctRoles", func(t *testing.T) {
 		// User1 makes 3 read requests (allowed)

@@ -18,11 +18,6 @@ import (
 
 // authMode describes how the server identifies callers, so the UI can show a
 // login screen instead of a wall of 401s.
-//
-// "visitor" says whether the shared read-only credential is switched on, so
-// the sign-in screen offers that door only when it leads somewhere. It is not
-// a secret: the credential exists to be published, and a stranger learns
-// nothing from it they could not learn by trying it.
 func (a *API) getAuthStatus(c *gin.Context) {
 	mode := "local"
 	if a.auth.Remote() {
@@ -32,23 +27,18 @@ func (a *API) getAuthStatus(c *gin.Context) {
 		"mode":          mode,
 		"authenticated": true,
 		"actor":         identity.Local,
-		"visitor":       false,
 	}
 	if a.auth.Remote() {
 		actor, err := a.auth.Authenticate(c.Request)
 		payload["authenticated"] = err == nil
 		payload["actor"] = actor
-		if accounts, ok := a.auth.(*auth.SessionAuth); ok {
-			payload["visitor"] = accounts.VisitorEnabled(c.Request.Context())
-		}
 	}
 	c.JSON(http.StatusOK, payload)
 }
 
 // postLogin completes an account sign-in: the address and the passcode that
-// was mailed to it. There is deliberately no name-and-password branch here,
-// and no visitor branch either — the visitor has its own door, so this one
-// only ever opens onto a named account.
+// was mailed to it. There is deliberately no name-and-password branch here:
+// the only way in is a named account.
 func (a *API) postLogin(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
@@ -67,30 +57,8 @@ func (a *API) postLogin(c *gin.Context) {
 	a.finishSignIn(c, actor, token, csrf, err)
 }
 
-// postVisitorLogin signs in with the shared read-only credential. It answers
-// in exactly the shapes postLogin does, so the client handles both doors with
-// one piece of code and a stranger learns nothing from which shape came back.
-func (a *API) postVisitorLogin(c *gin.Context) {
-	accounts, ok := a.auth.(*auth.SessionAuth)
-	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
-		return
-	}
-	var body struct {
-		Pin      string `json:"pin"`
-		Passcode string `json:"passcode"`
-	}
-	if !httpx.DecodeJSONLimit(c, &body, auth.MaxLoginBodyBytes) {
-		return
-	}
-	actor, token, csrf, err := accounts.LoginVisitor(
-		c.Request, strings.TrimSpace(body.Pin), strings.TrimSpace(body.Passcode))
-	a.finishSignIn(c, actor, token, csrf, err)
-}
-
-// finishSignIn turns the outcome of either sign-in into the response, the
-// audit line and the cookie pair. One function, so the two doors cannot drift
-// apart in what they set or what they record.
+// finishSignIn turns the outcome of a sign-in into the response, the audit
+// line and the cookie pair.
 func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf string, err error) {
 	if err != nil {
 		status := http.StatusUnauthorized
