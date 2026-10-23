@@ -63,10 +63,26 @@ func TestHelperProcess(t *testing.T) {
 		}
 		_, _ = os.Stdout.Write(raw)
 	}
+	edit := func() {
+		for name, content := range map[string]string{"README": "hi\nmore\n", "hello.txt": "hello\n", "data.bin": "\x00\x01\x02bin"} {
+			if err := os.WriteFile(filepath.Join(wd, name), []byte(content), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(9)
+			}
+		}
+	}
 	switch mode {
 	case "ok":
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
+	case "edit":
+		edit()
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
+	case "edit-fail":
+		edit()
+		fixture("claude_error.jsonl")
+		os.Exit(3)
 	case "fail":
 		fixture("claude_error.jsonl")
 		fmt.Fprintln(os.Stderr, "boom on stderr")
@@ -155,7 +171,7 @@ func (h *jobHub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	conn.SetReadLimit(runnerwire.MaxChangesMessageBytes)
 	ctx := r.Context()
 	for {
 		var msg runnerwire.Envelope
@@ -318,10 +334,22 @@ func (e *jobEnv) recorded(t *testing.T, runID, name string) string {
 	return ""
 }
 
+// samePath compares two paths that may no longer exist (a run that changed
+// nothing has its worktree removed): symlinks resolve as far as they exist.
 func samePath(a, b string) bool {
-	ea, errA := filepath.EvalSymlinks(a)
-	eb, errB := filepath.EvalSymlinks(b)
-	return errA == nil && errB == nil && strings.EqualFold(filepath.Clean(ea), filepath.Clean(eb))
+	return strings.EqualFold(resolvePath(a), resolvePath(b))
+}
+
+func resolvePath(p string) string {
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(resolvePath(parent), filepath.Base(p))
 }
 
 func TestRunSucceeds(t *testing.T) {
@@ -336,16 +364,20 @@ func TestRunSucceeds(t *testing.T) {
 	finish := env.hub.wait("run-ok", runnerwire.TypeFinish)
 	msgs := env.hub.messages("run-ok")
 
-	// accept, then events, then finish; nothing else.
-	if msgs[0].Type != runnerwire.TypeAccept || msgs[len(msgs)-1].Type != runnerwire.TypeFinish {
+	// accept, then events, then changes (none), then finish; nothing else.
+	n := len(msgs)
+	if msgs[0].Type != runnerwire.TypeAccept || msgs[n-2].Type != runnerwire.TypeChanges || msgs[n-1].Type != runnerwire.TypeFinish {
 		t.Fatalf("message order: %+v", msgs)
+	}
+	if ch := msgs[n-2].Changes; ch == nil || ch.Commit != "" || len(ch.Files) != 0 || ch.Files == nil || ch.Patch != "" {
+		t.Fatalf("changes of a run that changed nothing = %+v", ch)
 	}
 	accept := msgs[0].Accept
 	if accept == nil || accept.RunID != "run-ok" || accept.Base != "main" || accept.Branch != "agent/n-1-run-ok" {
 		t.Fatalf("accept = %+v", accept)
 	}
 	var events []runnerwire.RunEvent
-	for _, msg := range msgs[1 : len(msgs)-1] {
+	for _, msg := range msgs[1 : n-2] {
 		if msg.Type != runnerwire.TypeEvents || len(msg.Events) == 0 || len(msg.Events) > runnerwire.MaxEventsPerMessage {
 			t.Fatalf("unexpected message %+v", msg)
 		}
@@ -367,8 +399,9 @@ func TestRunSucceeds(t *testing.T) {
 			t.Errorf("no %s event in %v", want, types)
 		}
 	}
-	if !strings.Contains(events[0].Text, "worktree") || !strings.Contains(events[len(events)-1].Text, "exited with code 0") {
-		t.Errorf("first/last events: %+v / %+v", events[0], events[len(events)-1])
+	if !strings.Contains(events[0].Text, "worktree") || !strings.Contains(events[len(events)-2].Text, "exited with code 0") ||
+		events[len(events)-1].Text != "no changes; worktree removed" {
+		t.Errorf("first/last events: %+v / %+v", events[0], events[len(events)-2:])
 	}
 
 	result := finish.Result
@@ -383,8 +416,12 @@ func TestRunSucceeds(t *testing.T) {
 	if cwd := env.recorded(t, "run-ok", "cwd"); !samePath(cwd, wtPath) {
 		t.Errorf("agent ran in %s, want %s", cwd, wtPath)
 	}
-	if got := gitT(t, wtPath, "branch", "--show-current"); got != "agent/n-1-run-ok" {
-		t.Errorf("worktree branch %q", got)
+	// It changed nothing, so its worktree and branch are gone.
+	if _, err := os.Stat(wtPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("worktree of a run with no changes left behind: %v", err)
+	}
+	if got := gitT(t, env.repo, "branch", "--list", "agent/*"); got != "" {
+		t.Errorf("branches left behind: %q", got)
 	}
 	stdin := env.recorded(t, "run-ok", "stdin")
 	if !strings.Contains(stdin, "ok: do the thing") || !strings.Contains(stdin, `claim_task with id "n-1"`) {

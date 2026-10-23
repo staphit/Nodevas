@@ -169,6 +169,10 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		{"set", "allowedTools", "Edit", "Bash(go test *)"},
 		{"set", "codexsandbox", "READ-ONLY"},
 		{"set", "codexIgnoreUserConfig", "true"},
+		{"set", "autoPR", "false"},
+		{"set", "prDraft", "true"},
+		{"set", "prLabels", "nodevas,agent:{agent}", "model:{model}"},
+		{"set", "prPollSeconds", "60"},
 	} {
 		args = append(args, "--config", cfgPath)
 		if code, _, stderr := runRunner(t, "", args...); code != 0 {
@@ -200,14 +204,16 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	for _, want := range []string{"maxConcurrent          2", "runTimeoutMinutes      30", "permissionMode         plan",
 		"allowedTools           Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data",
 		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
-		"geminiApprovalMode     yolo"} {
+		"geminiApprovalMode     yolo", "autoPR                 false (commit only", "prDraft                true",
+		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)
 		}
 	}
 
 	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"},
-		{"set", "codexSandbox", "full"}, {"set", "codexIgnoreUserConfig", "maybe"}, {"set", "geminiApprovalMode", "plan"}} {
+		{"set", "codexSandbox", "full"}, {"set", "codexIgnoreUserConfig", "maybe"}, {"set", "geminiApprovalMode", "plan"},
+		{"set", "autoPR", "maybe"}, {"set", "prPollSeconds", "10"}, {"set", "prDraft", "x", "y"}} {
 		if code, _, _ := runRunner(t, "", append(bad, "--config", cfgPath)...); code == 0 {
 			t.Errorf("%v succeeded", bad)
 		}

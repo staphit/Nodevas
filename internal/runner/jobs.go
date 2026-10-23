@@ -34,6 +34,16 @@ type jobs struct {
 	seenOrder []string
 	declines  []runnerwire.Envelope
 	agents    []runnerwire.Agent
+	// hubName is what the hub calls this runner, from its welcome.
+	hubName string
+
+	// Pull requests being watched (see prwatch.go) and their unsent updates,
+	// latest per run.
+	watched    map[string]*watchedPR
+	watchOrder []string
+	watchErrs  map[string]string
+	prPending  map[string]runnerwire.PRInfo
+	prOrder    []string
 
 	proxy    *Proxy
 	proxyErr error
@@ -51,13 +61,18 @@ type run struct {
 	// finish is delivered, the run is listed as active in every hello.
 	accepted bool
 	started  time.Time
+	// publishing: the agent is done and its work is being committed and
+	// pushed; a cancel no longer applies.
+	publishing bool
 
-	// Outbound, unsent. events is bounded: a run that talks a lot while the
-	// socket is down loses its oldest events, never its finish.
+	// Outbound, unsent, in this order. events is bounded: a run that talks a
+	// lot while the socket is down loses its oldest events, never its finish.
 	accept  *runnerwire.Accept
 	seq     int64
 	events  []runnerwire.RunEvent
 	dropped int
+	changes *runnerwire.RunChanges
+	pr      *runnerwire.PRInfo
 	finish  *runnerwire.RunResult
 }
 
@@ -91,6 +106,10 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 		notify: make(chan struct{}, 1),
 		runs:   map[string]*run{},
 		seen:   map[string]bool{},
+
+		watched:   map[string]*watchedPR{},
+		watchErrs: map[string]string{},
+		prPending: map[string]runnerwire.PRInfo{},
 	}
 }
 
@@ -254,9 +273,14 @@ func (j *jobs) cancelRun(runID, reason string) {
 	j.mu.Lock()
 	r := j.runs[runID]
 	ended := r == nil || r.finish != nil
+	publishing := !ended && r.publishing
 	j.mu.Unlock()
 	if ended {
 		j.c.logf("run %s: cancel for a run that is not running here; ignored", runID)
+		return
+	}
+	if publishing {
+		j.c.logf("run %s: cancel after the agent finished; its changes are being published; ignored", runID)
 		return
 	}
 	if reason == "" {
@@ -306,7 +330,18 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, wt.BaseRef)})
 
-	j.finish(r, j.runAgent(ctx, r, wt))
+	result := j.runAgent(ctx, r, wt)
+	if result.Status == runnerwire.RunCancelled {
+		// Stopped on purpose: nothing is committed or pushed, and the
+		// worktree stays as the agent left it.
+		j.finish(r, result)
+		return
+	}
+	j.mu.Lock()
+	r.publishing = true
+	j.mu.Unlock()
+	changes, pr := j.publish(r, wt, result)
+	j.finishWith(r, result, changes, pr)
 }
 
 func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
@@ -531,7 +566,14 @@ func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 }
 
 func (j *jobs) finish(r *run, result runnerwire.RunResult) {
+	j.finishWith(r, result, nil, nil)
+}
+
+// finishWith queues a run's changes, PR and finish together, so they go out in
+// that order after its last events.
+func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	j.mu.Lock()
+	r.changes, r.pr = changes, pr
 	r.finish = &result
 	dropped := r.dropped
 	j.mu.Unlock()
@@ -629,10 +671,33 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 				r.events = r.events[i:]
 			}
 		}
-		if r.finish != nil {
-			result := *r.finish
-			return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
-				func() { j.forgetLocked(id) }
+		if r.finish == nil {
+			continue
+		}
+		if r.changes != nil {
+			changes := *r.changes
+			return runnerwire.Envelope{Type: runnerwire.TypeChanges, RunID: id, Changes: &changes},
+				func() { r.changes = nil }
+		}
+		if r.pr != nil {
+			pr := *r.pr
+			return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr},
+				func() { r.pr = nil }
+		}
+		result := *r.finish
+		return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
+			func() { j.forgetLocked(id) }
+	}
+	// PR updates from the watcher, after every run's own messages.
+	if len(j.prOrder) > 0 {
+		id := j.prOrder[0]
+		pr := j.prPending[id]
+		return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr}, func() {
+			// A newer update queued while this one was being written stays.
+			if now, ok := j.prPending[id]; ok && now == pr {
+				delete(j.prPending, id)
+				j.prOrder = j.prOrder[1:]
+			}
 		}
 	}
 	return runnerwire.Envelope{}, nil

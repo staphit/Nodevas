@@ -46,6 +46,10 @@ const (
 	MaxPatchBytes = 1 << 20
 	// MaxChangedFiles caps RunChanges.Files.
 	MaxChangedFiles = 2000
+	// MaxChangesMessageBytes caps one changes message, in place of
+	// MaxMessageBytes: a full MaxPatchBytes patch escapes to well over 1 MiB
+	// of JSON (Go writes < > & as six bytes each), plus the file list.
+	MaxChangesMessageBytes = 8 << 20
 )
 
 // FileChange is one file in a run's commit.

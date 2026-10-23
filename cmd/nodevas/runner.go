@@ -79,7 +79,11 @@ func runnerUsage(w io.Writer) {
                                              (one per argument, or comma-separated; "none" clears);
                                              Codex: codexSandbox (read-only|workspace-write|
                                              danger-full-access), codexIgnoreUserConfig (true|false);
-                                             Gemini CLI: geminiApprovalMode (default|auto_edit|yolo)
+                                             Gemini CLI: geminiApprovalMode (default|auto_edit|yolo);
+                                             pull requests: autoPR (true|false), prDraft (true|false),
+                                             prLabels (one per argument, or comma-separated; {model}
+                                             and {agent} are filled in; "none" for no labels),
+                                             prPollSeconds (30 or more)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -283,6 +287,19 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("codexIgnoreUserConfig", fmt.Sprintf("%t (%s)", cfg.CodexIgnoreUserConfig, codexConfig))
 	fmt.Fprintln(w, "gemini runs:")
 	setting("geminiApprovalMode", cfg.GeminiApproval())
+	labels := "(none)"
+	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
+		labels = strings.Join(templates, ", ")
+	}
+	autoPR := "commit, push the run's branch and open a PR with your gh login"
+	if !cfg.AutoPROn() {
+		autoPR = "commit only; the branch stays in its worktree"
+	}
+	fmt.Fprintln(w, "pull requests:")
+	setting("autoPR", fmt.Sprintf("%t (%s)", cfg.AutoPROn(), autoPR))
+	setting("prDraft", cfg.PRDraft)
+	setting("prLabels", labels)
+	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at

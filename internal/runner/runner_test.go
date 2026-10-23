@@ -31,6 +31,19 @@ type fakeCommands struct {
 	outputs map[string]string
 	errs    map[string]error
 	calls   []string
+	// gh answers RunIn (gh's calls); nil fails every one.
+	gh func(dir, stdin string, args []string) (string, error)
+}
+
+func (f *fakeCommands) RunIn(_ context.Context, dir string, _ []string, stdin string, name string, args ...string) (string, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, strings.Join(append([]string{name}, args...), " "))
+	gh := f.gh
+	f.mu.Unlock()
+	if gh == nil {
+		return "", errors.New("RunIn not faked")
+	}
+	return gh(dir, stdin, args)
 }
 
 func (f *fakeCommands) LookPath(name string) (string, error) {
