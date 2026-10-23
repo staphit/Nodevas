@@ -24,12 +24,11 @@ import (
 
 const maxCreateBody = 4 << 10
 
-// maxRunMessageBytes is the socket's read limit once hello is done. It is
-// above runnerwire.MaxMessageBytes because a changes message carries a patch
-// of up to MaxPatchBytes plus up to MaxChangedFiles paths, and JSON escaping
-// (Go escapes <, > and & as <…) can grow the patch several times over.
-// What a message may hold is checked by type after reading.
-const maxRunMessageBytes = 8 << 20
+// maxRunMessageBytes is the socket's read limit once hello is done: the
+// largest message is a changes report, which the runner keeps under
+// runnerwire.MaxChangesMessageBytes. What a message may hold is checked by
+// type after reading.
+const maxRunMessageBytes = runnerwire.MaxChangesMessageBytes
 
 // Timeouts on the connect socket. Variables so tests need not wait a minute.
 var (
