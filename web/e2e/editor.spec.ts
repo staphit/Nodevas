@@ -572,11 +572,18 @@ test.describe("document export", () => {
       ["純文字", ".txt"],
       ["Word", ".docx"],
     ]) {
+      // Export is a dialog now: pick the format, then confirm. Nothing leaves
+      // on the format click alone.
       await drawer.getByRole("button", { name: "匯出檔案" }).click();
+      const dialog = page.getByRole("dialog", { name: /匯出/ });
+      await dialog.getByRole("radio", { name: new RegExp(format) }).click();
       const download = page.waitForEvent("download");
-      await drawer.getByRole("button", { name: format, exact: false }).click();
+      await dialog.getByRole("button", { name: "匯出", exact: true }).click();
       const file = await download;
       expect(file.suggestedFilename()).toContain(extension);
+      // The dialog stays open to report the result; close it for the next round.
+      await dialog.getByRole("button", { name: "關閉" }).first().click();
+      await expect(dialog).toBeHidden();
     }
   });
 
@@ -592,8 +599,10 @@ test.describe("document export", () => {
     await page.keyboard.type("尚未儲存的內容\n");
 
     await drawer.getByRole("button", { name: "匯出檔案" }).click();
+    const dialog = page.getByRole("dialog", { name: /匯出/ });
+    await dialog.getByRole("radio", { name: /純文字/ }).click();
     const download = page.waitForEvent("download");
-    await drawer.getByRole("button", { name: "純文字" }).click();
+    await dialog.getByRole("button", { name: "匯出", exact: true }).click();
     const file = await download;
     const stream = await file.createReadStream();
     const chunks: Buffer[] = [];
