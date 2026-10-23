@@ -129,6 +129,8 @@ type Hub struct {
 	memMessages []Message
 	memFiles    map[string][]storedFile // key: message ID
 	memAsks     map[string]*Ask
+	// memSessionChanges is keyed by project, node and session ID.
+	memSessionChanges map[string]*memSessionChange
 
 	// Waiters for inbox long-polling: key is project
 	inboxWaiters map[string]map[chan struct{}]struct{}

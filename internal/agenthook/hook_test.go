@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestParseInput(t *testing.T) {
 		{"empty", ``, Input{}},
 	}
 	for _, tc := range cases {
-		if got := ParseInput([]byte(tc.raw)); got != tc.want {
+		if got := ParseInput([]byte(tc.raw)); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: ParseInput = %+v, want %+v", tc.name, got, tc.want)
 		}
 	}

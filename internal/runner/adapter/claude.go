@@ -300,6 +300,7 @@ func (p *claudeParser) result(msg claudeLine) []runnerwire.RunEvent {
 	p.outcome.Done = true
 	p.outcome.IsError = msg.IsError
 	p.outcome.Summary = Truncate(msg.Result, runnerwire.MaxSummaryBytes)
+	p.outcome.Text = Truncate(msg.Result, MaxTextBytes)
 	var events []runnerwire.RunEvent
 	if msg.Usage != nil || msg.TotalCostUSD > 0 {
 		usage := &runnerwire.Usage{CostUSD: msg.TotalCostUSD}

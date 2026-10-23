@@ -124,6 +124,9 @@ type Client struct {
 	nodeID      string
 	doing       string
 	unreadCount int
+	// claimedNode is the node the server last said this session holds a live
+	// claim on (W6); "" for none or before the first heartbeat.
+	claimedNode string
 	// names remembers the server-given name of every session ID this process
 	// has acted as, so switching between them never renames one.
 	names map[string]string

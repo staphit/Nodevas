@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthError,
   ConflictError,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
+  MAX_PIPELINE_ROUNDS,
+  RequestError,
   type Actor,
+  type AgentModel,
+  type RouteSuggestion,
   type Run,
   type Runner,
   type RunnerAgent,
@@ -14,7 +18,23 @@ import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
+import {
+  agentCatalog,
+  agentModelProblem,
+  agentModelText,
+  defaultPipeline,
+  FallbackChainEditor,
+  PipelineFields,
+  trimAgentModel,
+} from "./AgentModelFields";
+import { budgetExceededText } from "./BudgetSettings";
+import { matchTakesValue, routeLabel } from "./RoutingSettings";
+import { fetchRouteSuggestion, useRouting } from "./routingStore";
+import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
+import { AutoAcceptNote } from "./AutoAcceptNote";
+import { StepUpDialog } from "../stepup/StepUpDialog";
+import { useStepUp } from "../stepup/stepUpStore";
 
 const HEADLESS = "headless";
 
@@ -93,10 +113,71 @@ export function DispatchDialog({
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // W5: the fallback chain and the implement → review pipeline.
+  const [fallbacks, setFallbacks] = useState<AgentModel[]>([]);
+  const [pipelineOn, setPipelineOn] = useState(false);
+  const [review, setReview] = useState<AgentModel>({ agent: "", model: "" });
+  const [rounds, setRounds] = useState(1);
+  // What the routing rules picked for this node; null when none matched.
+  const [suggestion, setSuggestion] = useState<RouteSuggestion | null>(null);
+  // What the user changed before the suggestion arrived keeps their choice.
+  const touched = useRef({ runner: false, agent: false, fallbacks: false, pipeline: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRouteSuggestion(nodeId).then((found) => {
+      if (cancelled || !found?.ruleId) return;
+      setSuggestion(found);
+      const mark = touched.current;
+      if (!mark.runner && found.runnerId) setRunnerId(found.runnerId);
+      const implement = found.pipeline?.implement ?? found.target;
+      if (!mark.agent && implement?.agent) {
+        setAgentKind(implement.agent);
+        setModel(implement.model ?? "");
+      }
+      if (!mark.fallbacks) {
+        setFallbacks((found.fallbacks ?? []).map((item) => ({ agent: item.agent, model: item.model })));
+      }
+      if (!mark.pipeline && found.pipeline) {
+        setPipelineOn(true);
+        setReview({ ...found.pipeline.review });
+        const max = Math.round(found.pipeline.maxRounds);
+        setRounds(Math.min(MAX_PIPELINE_ROUNDS, Math.max(1, Number.isFinite(max) ? max : 1)));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeId]);
+
+  // The suggestion names its rule, not the rule's tag or kind: when the hub
+  // does not send the value, it is looked up in the viewer's rules.
+  const routingRules = useRouting((s) => s.rules);
+  const needsRuleValue =
+    suggestion !== null && suggestion.value === undefined && matchTakesValue(suggestion.match);
+  useEffect(() => {
+    if (needsRuleValue) void useRouting.getState().load();
+  }, [needsRuleValue]);
 
   useEffect(() => {
     void refreshRunners();
   }, [refreshRunners]);
+
+  // W6: whether the dispatcher is stepped up decides if a runner that asks
+  // for it auto-accepts; asked afresh on every open.
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+  useEffect(() => {
+    void useStepUp.getState().load();
+  }, []);
+
+  // Today's budget, so the dialog can say up front that the hub would refuse.
+  const budgetStatus = useBudget((s) => s.status);
+  const loadBudget = useBudget((s) => s.load);
+  useEffect(() => {
+    void loadBudget();
+  }, [loadBudget]);
+  const budgetWarning = budgetExceededText(t, budgetStatus);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -118,6 +199,7 @@ export function DispatchDialog({
   const model = models.some((item) => item.id === modelChoice)
     ? modelChoice
     : defaultModel(agent);
+  const catalog = useMemo(() => agentCatalog(runner ? [runner] : []), [runner]);
   const repos = runner?.info?.repos ?? [];
   const repoId = repos.some((repo) => repo.id === repoChoice) ? repoChoice : (repos[0]?.id ?? "");
 
@@ -132,8 +214,44 @@ export function DispatchDialog({
       ? t("runs.promptTooLong", { max: Math.floor(MAX_RUN_PROMPT_BYTES / 1024) })
       : "";
 
+  const fallbackInvalid = fallbacks.some((item) => agentModelProblem(item) !== "");
+  const reviewInvalid = pipelineOn && agentModelProblem(review) !== "";
+
   const ready =
-    Boolean(runner && agent && model && repoId) && !baseError && !promptError && !submitting;
+    Boolean(runner && agent && model && repoId) &&
+    !baseError &&
+    !promptError &&
+    !fallbackInvalid &&
+    !reviewInvalid &&
+    !submitting;
+
+  // "From rule: tag = review", and what of it this runner could not honour.
+  const ruleValue =
+    suggestion?.value ??
+    routingRules?.find((rule) => rule.id === suggestion?.ruleId)?.value ??
+    "";
+  const ruleNote = suggestion
+    ? t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue) })
+    : "";
+  const wanted = suggestion ? (suggestion.pipeline?.implement ?? suggestion.target) : undefined;
+  const ruleMisses: string[] = [];
+  if (suggestion && runner) {
+    if (suggestion.runnerId && !touched.current.runner && runner.id !== suggestion.runnerId) {
+      ruleMisses.push(t("dispatch.ruleRunnerMissing", { runner: runner.name }));
+    }
+    if (
+      wanted?.agent &&
+      !touched.current.agent &&
+      (agent?.kind !== wanted.agent || (wanted.model && model !== wanted.model))
+    ) {
+      ruleMisses.push(
+        t("dispatch.ruleModelMissing", {
+          wanted: agentModelText(wanted),
+          used: agent ? agentModelText({ agent: agent.kind, model }) : "—",
+        }),
+      );
+    }
+  }
 
   const submit = async () => {
     if (!ready || !runner || !agent) return;
@@ -148,19 +266,33 @@ export function DispatchDialog({
         repoId,
         ...(baseValue ? { base: baseValue } : {}),
         ...(promptValue ? { prompt: promptValue } : {}),
+        ...(fallbacks.length > 0 ? { fallbacks: fallbacks.map(trimAgentModel) } : {}),
+        ...(pipelineOn
+          ? {
+              pipeline: {
+                implement: { agent: agent.kind, model },
+                review: trimAgentModel(review),
+                maxRounds: rounds,
+              },
+            }
+          : {}),
       });
       onCreated(run);
     } catch (caught) {
       const text = caught instanceof Error ? caught.message : String(caught);
+      const overBudget = caught instanceof RequestError && caught.status === 429;
       setError(
         caught instanceof AuthError && caught.status === 403
           ? t("runs.permissionDenied", { message: text })
-          : // req() turns every 409 into a ConflictError and drops the body;
-            // on this route a 409 only ever means the runner cannot take runs.
+          : // On this route a 409 only ever means the runner cannot take runs.
             caught instanceof ConflictError
             ? t("runs.runnerCannotRun")
-            : text,
+            : overBudget
+              ? t("runs.overBudget", { message: text })
+              : text,
       );
+      // The refusal names the limit; the warning line catches up with it.
+      if (overBudget) void useBudget.getState().load();
     } finally {
       setSubmitting(false);
     }
@@ -222,6 +354,22 @@ export function DispatchDialog({
             </div>
           )}
 
+          {budgetWarning && (
+            <p className="run-budget-warning" role="status">
+              {budgetWarning}{" "}
+              <button
+                type="button"
+                className="run-inline-link"
+                onClick={() => {
+                  useBudget.getState().requestShow(true);
+                  openRunners();
+                }}
+              >
+                {t("budget.adjust")}
+              </button>
+            </p>
+          )}
+
           {loadingRunners ? (
             <p className="run-empty">{t("common.loading")}</p>
           ) : mine.length === 0 ? (
@@ -233,11 +381,25 @@ export function DispatchDialog({
             </div>
           ) : (
             <>
+              {ruleNote && (
+                <p className="run-route-note" data-testid="dispatch-rule-note">
+                  {ruleNote}
+                  {ruleMisses.map((miss) => (
+                    <span key={miss} className="run-route-miss">
+                      {miss}
+                    </span>
+                  ))}
+                </p>
+              )}
               <label className="run-field">
                 <span>{t("runs.runner")}</span>
+
                 <select
                   value={runner?.id ?? ""}
-                  onChange={(event) => setRunnerId(event.target.value)}
+                  onChange={(event) => {
+                    touched.current.runner = true;
+                    setRunnerId(event.target.value);
+                  }}
                   disabled={eligible.length === 0}
                 >
                   {eligible.length === 0 && <option value="">{t("runs.noEligibleOption")}</option>}
@@ -267,7 +429,10 @@ export function DispatchDialog({
                       <span>{t("runs.agent")}</span>
                       <select
                         value={agent?.kind ?? ""}
-                        onChange={(event) => setAgentKind(event.target.value)}
+                        onChange={(event) => {
+                          touched.current.agent = true;
+                          setAgentKind(event.target.value);
+                        }}
                         disabled={agents.length === 0}
                       >
                         {agents.length === 0 && <option value="">{t("runs.noAgentsOption")}</option>}
@@ -282,7 +447,10 @@ export function DispatchDialog({
                       <span>{t("runs.model")}</span>
                       <select
                         value={model}
-                        onChange={(event) => setModel(event.target.value)}
+                        onChange={(event) => {
+                          touched.current.agent = true;
+                          setModel(event.target.value);
+                        }}
                         disabled={models.length === 0}
                       >
                         {models.length === 0 && <option value="">{t("runs.noModelsOption")}</option>}
@@ -295,6 +463,50 @@ export function DispatchDialog({
                     </label>
                   </div>
                   {agents.length === 0 && <p className="run-hint">{t("runs.noAgents")}</p>}
+
+                  <details className="run-advanced" data-testid="dispatch-fallbacks">
+                    <summary>{t("routing.fallbacks", { count: fallbacks.length })}</summary>
+                    <FallbackChainEditor
+                      value={fallbacks}
+                      catalog={catalog}
+                      onChange={(next) => {
+                        touched.current.fallbacks = true;
+                        setFallbacks(next);
+                      }}
+                    />
+                  </details>
+
+                  <label className="route-toggle">
+                    <input
+                      type="checkbox"
+                      checked={pipelineOn}
+                      onChange={(event) => {
+                        touched.current.pipeline = true;
+                        const on = event.target.checked;
+                        setPipelineOn(on);
+                        if (on && agentModelProblem(review)) {
+                          setReview(
+                            defaultPipeline({ agent: agent?.kind ?? "", model }, catalog).review,
+                          );
+                        }
+                      }}
+                    />
+                    <span>{t("routing.pipelineToggle")}</span>
+                  </label>
+                  {pipelineOn && agent && (
+                    <PipelineFields
+                      value={{ implement: { agent: agent.kind, model }, review, maxRounds: rounds }}
+                      catalog={catalog}
+                      implementNote={t("dispatch.implementIsAbove", {
+                        value: agentModelText({ agent: agent.kind, model }),
+                      })}
+                      onChange={(next) => {
+                        touched.current.pipeline = true;
+                        setReview(next.review);
+                        setRounds(next.maxRounds);
+                      }}
+                    />
+                  )}
 
                   <label className="run-field">
                     <span>{t("runs.repo")}</span>
@@ -364,7 +576,14 @@ export function DispatchDialog({
                     )}
                   </label>
 
-                  <p className="run-note">{t("runs.acceptNote")}</p>
+                  {runner && (
+                    <AutoAcceptNote
+                      runner={runner}
+                      repoId={repoId}
+                      agent={agent?.kind ?? ""}
+                      onVerify={() => setStepUpOpen(true)}
+                    />
+                  )}
                 </>
               )}
             </>
@@ -385,6 +604,9 @@ export function DispatchDialog({
             {submitting ? t("runs.dispatching") : t("runs.dispatch")}
           </button>
         </footer>
+        {/* Outside the form: a portal's submit still bubbles through React
+            to its ancestors, and must not send the run. */}
+        {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
       </div>
     </div>
   );

@@ -57,6 +57,8 @@ func (a *API) Register(api *gin.RouterGroup) {
 	group.GET("/asks", a.getAsks)
 	group.POST("/asks", a.postAsk)
 	group.POST("/asks/:id/answer", a.postAskAnswer)
+	group.POST("/sessions/:id/changes", a.postSessionChanges)
+	api.GET("/nodes/:id/session-changes", a.getNodeSessionChanges)
 }
 
 func (a *API) projectKey(r *http.Request) string {
@@ -206,10 +208,15 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		return
 	}
 	unread := a.hub.UnreadCount(c.Request.Context(), projectKey, session.Name, actorID)
+	// W6: the node this session holds, so `nodevas hook` reports its edits
+	// only while there is one to report them against.
+	claims, _ := a.liveClaimsAndUsers(c.Request)
+	_, claimed, _ := a.hub.ClaimedNode(projectKey, session.ID, claims)
 	c.JSON(http.StatusOK, map[string]any{
-		"ok":          true,
-		"session":     session,
-		"unreadCount": unread,
+		"ok":            true,
+		"session":       session,
+		"unreadCount":   unread,
+		"claimedNodeId": claimed,
 	})
 }
 

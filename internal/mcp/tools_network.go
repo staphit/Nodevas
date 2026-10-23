@@ -205,13 +205,15 @@ func (c *Client) Heartbeat(ctx context.Context, state, nodeID, doing string) err
 	c.mu.Unlock()
 
 	var resp struct {
-		Session     agents.Session `json:"session"`
-		UnreadCount int            `json:"unreadCount"`
+		Session       agents.Session `json:"session"`
+		UnreadCount   int            `json:"unreadCount"`
+		ClaimedNodeID string         `json:"claimedNodeId"`
 	}
 	if err := c.post(ctx, "/api/agents/heartbeat", nil, body, &resp); err != nil {
 		return err
 	}
 	c.mu.Lock()
+	c.claimedNode = resp.ClaimedNodeID
 	if resp.Session.Name != "" {
 		c.names[sessionID] = resp.Session.Name
 		// The session may have switched while the call was out; its name is

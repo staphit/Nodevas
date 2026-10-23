@@ -60,6 +60,8 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodGet, "/api/agents/messages/*/files/*"},
 	{http.MethodPost, "/api/agents/inbox"},
 	{http.MethodPost, "/api/agents/asks"},
+	// W6: `nodevas hook` reporting an external session's edits and snapshot.
+	{http.MethodPost, "/api/agents/sessions/*/changes"},
 	// Deliberately absent: holding a session's inbound mail and approving or
 	// rejecting held messages are a person's decisions about agents.
 }

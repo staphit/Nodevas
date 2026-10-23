@@ -386,6 +386,7 @@ func (a *SessionAuth) revokeUserLocked(userID string) {
 	for key, session := range a.sessions {
 		if session.actor.ID == userID {
 			delete(a.sessions, key)
+			delete(a.stepUps, key)
 		}
 	}
 }

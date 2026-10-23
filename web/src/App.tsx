@@ -23,8 +23,10 @@ import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
 import { useRunners } from "./runners/runnerStore";
+import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
 import { useRuns } from "./runs/runStore";
+import { useRunToasts } from "./runs/runNotify";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -315,6 +317,16 @@ function MainApp() {
           // last event.
           useRuns.getState().onRunEvents(ev.id);
           break;
+        case "session-changes":
+          // The id is a node: its external sessions are refetched if shown.
+          useSessions.getState().onChanged(ev.id);
+          break;
+        case "run-notify":
+          // The id is a run that finished, whose CI turned red or whose
+          // merge ended: toast it, and raise a system notification when the
+          // page is hidden and this browser allows one.
+          void useRunToasts.getState().handleRunNotify(ev.id ?? "");
+          break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
           // nothing else to reload.
@@ -334,6 +346,7 @@ function MainApp() {
           // Run pushes sent while the socket was down are gone; refetch
           // whatever run lists and live runs are on screen.
           useRuns.getState().resync();
+          useSessions.getState().resync();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);

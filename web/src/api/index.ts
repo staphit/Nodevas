@@ -22,6 +22,7 @@ export {
   ConflictError,
   getProjectOverride,
   onUnauthorized,
+  RequestError,
   setProjectOverride,
   UnauthorizedError,
 } from "./http";
@@ -42,7 +43,7 @@ export type {
   ExportScope,
   ProjectImportMode,
 } from "./workspace";
-export type { Actor } from "./auth";
+export type { Actor, StepUpStatus } from "./auth";
 export {
   COPILOT_MODES,
   NdjsonParser,
@@ -92,26 +93,60 @@ export type {
   Runner,
   RunnerAgent,
   RunnerCreateResponse,
+  AutoAcceptPolicy,
   RunnerInfo,
   RunnerListResponse,
   RunnerModel,
   RunnerRepo,
 } from "./runners";
 export {
+  MAX_SESSION_FILES,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
   runCancellable,
   runFinal,
 } from "./runs";
 export type {
+  CIStatus,
   CreateRunRequest,
+  FileChange,
+  FileChangeStatus,
+  MergeStatus,
+  PRState,
   Run,
+  RunBudget,
+  RunBudgetLimit,
+  RunBudgetStatus,
+  RunChanges,
+  RunChangesResponse,
   RunEvent,
   RunEventsResponse,
   RunEventType,
   RunListResponse,
+  RunMergeRequest,
   RunStatus,
   RunUsage,
+  SessionChange,
+  SessionChangesResponse,
+  AgentModel,
+  FailureKind,
+  PipelineState,
+  PipelineStatus,
+  ReviewVerdict,
+  RouteMatch,
+  RouteRule,
+  RouteSuggestion,
+  RoutingConfig,
+  RunKind,
+  RunPipeline,
+} from "./runs";
+export {
+  FAILURE_KINDS,
+  MAX_FALLBACKS,
+  MAX_PIPELINE_ROUNDS,
+  MAX_ROUTE_RULES,
+  pipelineEnded,
+  ROUTE_MATCHES,
 } from "./runs";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";

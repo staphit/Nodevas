@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"nodevas/internal/mail"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
+	"nodevas/internal/runnerwire"
 	"nodevas/internal/secrets"
 	"nodevas/internal/server"
 	"nodevas/web"
@@ -73,6 +75,21 @@ func hostList(value string) []string {
 		}
 	}
 	return names
+}
+
+// stepUpMinutesEnv sets --step-up-minutes' default.
+const stepUpMinutesEnv = "NODEVAS_STEP_UP_MINUTES"
+
+// stepUpMinutesDefault is --step-up-minutes' default: NODEVAS_STEP_UP_MINUTES
+// when it is a whole number, else runnerwire.StepUpWindowSeconds in minutes.
+func stepUpMinutesDefault() int {
+	if raw, ok := os.LookupEnv(stepUpMinutesEnv); ok {
+		if minutes, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			return minutes
+		}
+		log.Printf("ignoring %s=%q: not a whole number of minutes", stepUpMinutesEnv, raw)
+	}
+	return runnerwire.StepUpWindowSeconds / 60
 }
 
 // secretEnvironment reads a secret directly or from the file named by the
@@ -257,6 +274,8 @@ func serve(args []string) {
 		"serve a networked listener over plain HTTP (passwords and session cookies travel in the clear)")
 	maxActiveUsers := fs.Int("max-active-users", serveConfig.MaxActiveUsers,
 		"how many distinct accounts may be signed in at once; 0 means no limit. Counts people, not devices: one person on a phone and a laptop is one")
+	stepUpMinutes := fs.Int("step-up-minutes", stepUpMinutesDefault(),
+		"how long a step-up (a fresh passcode before remote dispatch) lasts, in minutes; env NODEVAS_STEP_UP_MINUTES")
 	smtpHost := fs.String("smtp-host", serveConfig.SMTP.Host, "SMTP host for one-time passcodes")
 	smtpPort := fs.Int("smtp-port", serveConfig.SMTP.Port, "SMTP port: 587 for STARTTLS, 465 for implicit TLS")
 	smtpUser := fs.String("smtp-user", serveConfig.SMTP.User, "SMTP username")
@@ -477,6 +496,10 @@ func serve(args []string) {
 	srv.UseAudit(audit.New(database))
 	srv.UseAgentsDB(database)
 	srv.UseRunnersDB(database)
+	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
+		log.Fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
+	}
+	srv.SetStepUpWindow(time.Duration(*stepUpMinutes) * time.Minute)
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
 	if err != nil {
 		log.Fatalf("copilot: %v", err)

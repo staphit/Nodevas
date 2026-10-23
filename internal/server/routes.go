@@ -45,7 +45,11 @@ func (s *Server) Handler() http.Handler {
 		runnersapi.New(s.runners, s.runs).Register(api)
 	}
 	if s.runs != nil {
-		runsapi.New(s.pm, s.runners, s.runs).Register(api)
+		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
+		s.configureStepUp(runsAPI)
+		runsAPI.Register(api)
+	} else {
+		s.configureStepUp(nil)
 	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {

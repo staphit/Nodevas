@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -42,11 +43,20 @@ type API struct {
 	pm  *project.ProjectManager
 	reg *runners.Registry
 	d   *runs.Dispatcher
+	// steppedUpAt reports the dispatcher's live step-up (W6); nil on a server
+	// without accounts, where the dispatcher vouches for everyone anyway.
+	steppedUpAt func(*http.Request) (time.Time, bool)
 }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
 	return &API{pm: pm, reg: reg, d: d}
+}
+
+// UseStepUp tells run creation how to read the dispatcher's step-up, which
+// each run records so its offers can vouch for the dispatcher while it lasts.
+func (a *API) UseStepUp(steppedUpAt func(*http.Request) (time.Time, bool)) {
+	a.steppedUpAt = steppedUpAt
 }
 
 // Register wires /api/runs. Every route takes a session as usual; none is
@@ -56,7 +66,15 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs", a.list)
 	api.GET("/runs/:id", a.get)
 	api.GET("/runs/:id/events", a.events)
+	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/budget", a.budget)
+	api.PUT("/runs/budget", a.setBudget)
+	api.GET("/runs/routing", a.routing)
+	api.PUT("/runs/routing", a.setRouting)
+	api.GET("/runs/route", a.route)
+	api.GET("/runs/pipelines/:id", a.pipeline)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -73,7 +91,7 @@ func fail(c *gin.Context, err error) {
 		notFound(c, "run")
 	case errors.Is(err, runs.ErrInvalid):
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
-	case errors.Is(err, runs.ErrTransition):
+	case errors.Is(err, runs.ErrPrecondition), errors.Is(err, runs.ErrTransition):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -139,6 +157,18 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "base is not a valid branch name")
 		return
 	}
+	if err := runs.ValidateChain(body.Fallbacks, false); err != nil {
+		fail(c, err)
+		return
+	}
+	if body.Pipeline != nil {
+		if err := runs.ValidatePipeline(*body.Pipeline, false); err != nil {
+			fail(c, err)
+			return
+		}
+		// The pipeline's implement step is the first run.
+		body.Agent, body.Model = body.Pipeline.Implement.Agent, body.Pipeline.Implement.Model
+	}
 
 	// The runner must be the caller's own, administrators included: a run
 	// executes on the owner's machine with the owner's logins, and nobody
@@ -153,9 +183,33 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "%s", problem)
 		return
 	}
+	var pipeline *runnerwire.Pipeline
+	if body.Pipeline != nil {
+		reviewModel, err := runs.ResolveAgentModel(runner.Info, body.Pipeline.Review)
+		if err != nil {
+			invalid(c, "pipeline review: %v", err)
+			return
+		}
+		pipeline = &runnerwire.Pipeline{
+			Implement: runnerwire.AgentModel{Agent: body.Agent, Model: model},
+			Review:    runnerwire.AgentModel{Agent: body.Pipeline.Review.Agent, Model: reviewModel},
+			MaxRounds: body.Pipeline.MaxRounds,
+		}
+	}
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
 			errors.New("this runner does not take runs; update nodevas on it"), nil)
+		return
+	}
+	// The budget is the runner owner's: runs spend their subscription.
+	budget, err := a.d.Store().BudgetStatus(c.Request.Context(), runner.OwnerID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if budget.Exceeded != "" {
+		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
+			errors.New(runs.BudgetMessage(budget)), map[string]any{"exceeded": budget.Exceeded})
 		return
 	}
 
@@ -176,14 +230,38 @@ func (a *API) create(c *gin.Context) {
 	if name == "" {
 		name = actor.ID
 	}
+	jobPrompt := BuildPrompt(title, content, body.Prompt)
+	steppedUpAt := ""
+	if a.steppedUpAt != nil {
+		if at, ok := a.steppedUpAt(c.Request); ok {
+			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	pipelineID := ""
+	if pipeline != nil {
+		p, err := a.d.Store().CreatePipeline(c.Request.Context(), runs.NewPipeline{
+			OwnerID: runner.OwnerID, CreatedBy: actor.ID, Project: projectName, NodeID: node.ID,
+			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
+		})
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		pipelineID = p.ID
+	}
 	record, err := a.d.Store().Create(c.Request.Context(), runs.New{
 		Project: projectName, NodeID: node.ID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		Prompt: body.Prompt, JobPrompt: BuildPrompt(title, content, body.Prompt),
+		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: actor.ID, CreatedByName: name,
+		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
+		SteppedUpAt: steppedUpAt,
 	})
 	if err != nil {
+		if pipelineID != "" {
+			_, _ = a.d.Store().EndPipeline(c.Request.Context(), pipelineID, runnerwire.PipelineFailed, err.Error())
+		}
 		fail(c, err)
 		return
 	}
@@ -196,25 +274,9 @@ func (a *API) create(c *gin.Context) {
 // the runner last reported. It returns the model to record and the repo, or a
 // reason the request does not fit.
 func checkAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, string) {
-	if info == nil {
-		return "", runnerwire.Repo{}, "the runner has not connected yet, so its agents are unknown"
-	}
-	i := slices.IndexFunc(info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == body.Agent })
-	if i < 0 || !info.Agents[i].Installed {
-		return "", runnerwire.Repo{}, fmt.Sprintf("agent %q is not installed on the runner", body.Agent)
-	}
-	agent := info.Agents[i]
-	model := body.Model
-	if model == "" {
-		model = "default"
-		for _, m := range agent.Models {
-			if m.Default {
-				model = m.ID
-				break
-			}
-		}
-	} else if !slices.ContainsFunc(agent.Models, func(m runnerwire.Model) bool { return m.ID == model }) {
-		return "", runnerwire.Repo{}, fmt.Sprintf("model %q is not offered by %s on the runner", model, agent.Kind)
+	model, err := runs.ResolveAgentModel(info, runnerwire.AgentModel{Agent: body.Agent, Model: body.Model})
+	if err != nil {
+		return "", runnerwire.Repo{}, err.Error()
 	}
 	r := slices.IndexFunc(info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == body.RepoID })
 	if body.RepoID == "" || r < 0 {
@@ -363,6 +425,23 @@ func (a *API) events(c *gin.Context) {
 	c.JSON(http.StatusOK, runnerwire.RunEventsResponse{Events: events, More: more})
 }
 
+// changes returns what the run committed: files, counts and the patch. Changes
+// is null until the runner reports them, and stays null for a run that never
+// got that far.
+func (a *API) changes(c *gin.Context) {
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	changes, err := a.d.Store().Changes(c.Request.Context(), r.ID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.RunChangesResponse{Changes: changes})
+}
+
 func queryInt(c *gin.Context, key string, fallback int64) (int64, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -380,6 +459,14 @@ func (a *API) cancel(c *gin.Context) {
 	name := actor.Name
 	if name == "" {
 		name = actor.ID
+	}
+	// Cancelling any run of a pipeline cancels the pipeline, and with it
+	// whichever of its runs has not ended.
+	if r.PipelineID != "" {
+		if err := a.d.CancelPipeline(c.Request.Context(), r.PipelineID, "cancelled by "+name); err != nil {
+			fail(c, err)
+			return
+		}
 	}
 	updated, err := a.d.Cancel(c.Request.Context(), r.ID, "cancelled by "+name)
 	if err != nil {
