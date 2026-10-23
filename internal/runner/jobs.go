@@ -267,6 +267,9 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if len(job.Prompt) > runnerwire.MaxPromptBytes {
 		return repo, "prompt is too long"
 	}
+	if reason := checkKind(job, cfg); reason != "" {
+		return repo, reason
+	}
 	busy := 0
 	for _, r := range j.runs {
 		if r.finish == nil {
@@ -307,6 +310,23 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	defer r.cancel(nil)
 	job := r.job
 
+	// Review and revise name an existing pull request: it must be this
+	// repository's, open, and on the branch the job names, before anyone is
+	// asked to accept.
+	var check prCheck
+	if job.Kind != runnerwire.JobImplement {
+		var reason string
+		check, reason = j.checkPR(ctx, r)
+		if ctx.Err() != nil {
+			j.finish(r, cancelled(ctx))
+			return
+		}
+		if reason != "" {
+			j.decline(r, reason)
+			return
+		}
+	}
+
 	ok, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
 		j.finish(r, cancelled(ctx))
@@ -314,6 +334,14 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	}
 	if !ok {
 		j.decline(r, reason)
+		return
+	}
+	switch job.Kind {
+	case runnerwire.JobReview:
+		j.executeReview(ctx, r, check)
+		return
+	case runnerwire.JobRevise:
+		j.executeRevise(ctx, r, check)
 		return
 	}
 
@@ -341,7 +369,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, wt.BaseRef)})
 
-	result := j.runAgent(ctx, r, wt)
+	result, _ := j.runAgent(ctx, r, wt, job)
 	if result.Status == runnerwire.RunCancelled {
 		// Stopped on purpose: nothing is committed or pushed, and the
 		// worktree stays as the agent left it.
@@ -367,48 +395,53 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 }
 
 // runAgent starts the agent in the worktree and waits for it, a cancel or the
-// timeout, whichever comes first.
-func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.RunResult {
-	job := r.job
-	fail := func(format string, args ...any) runnerwire.RunResult {
-		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
-			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}
+// timeout, whichever comes first. job is r.job, or for a review the job with
+// the PR's diff added to its prompt. text is the agent's whole final message
+// (adapter.Outcome.Text), which a review needs beyond the summary's cap.
+func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire.Job) (runnerwire.RunResult, string) {
+	fail := func(kind, format string, args ...any) (runnerwire.RunResult, string) {
+		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: kind,
+			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
 	}
 	ad := j.c.adapterFor(job.Agent)
 	bin, err := j.c.Commands.LookPath(job.Agent)
 	if err != nil {
-		return fail("%s is no longer on PATH", job.Agent)
+		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", job.Agent)
 	}
 	proxy, err := j.proxyFor()
 	if err != nil {
-		return fail("could not start the MCP proxy: %v", err)
+		return fail(runnerwire.FailureTask, "could not start the MCP proxy: %v", err)
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
 	tmp, err := os.MkdirTemp("", "nodevas-run-")
 	if err != nil {
-		return fail("could not make a temporary directory: %v", err)
+		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
 	}
 	defer os.RemoveAll(tmp)
 	exe, err := os.Executable()
 	if err != nil {
-		return fail("cannot find the nodevas executable for the MCP server: %v", err)
+		return fail(runnerwire.FailureTask, "cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
 	cfg := j.c.Config
+	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
+	if job.Kind == runnerwire.JobReview {
+		mode, modeText = reviewPermission(cfg, job.Agent)
+	}
 	cmd, err := ad.Command(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
 		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
-		PermissionMode: cfg.PermissionModeFor(job.Agent),
+		PermissionMode: mode,
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 	})
 	if err != nil {
-		return fail("%v", err)
+		return fail(runnerwire.FailureTask, "%v", err)
 	}
 	parser := ad.NewParser()
 	stdout := &lineWriter{fn: func(line []byte) {
@@ -423,12 +456,12 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	cmd.WaitDelay = waitDelay
 	prepareTree(cmd)
 	if err := cmd.Start(); err != nil {
-		return fail("could not start %s: %v", job.Agent, err)
+		return fail(runnerwire.FailureAgentAbsent, "could not start %s: %v", job.Agent, err)
 	}
 	tree := attachTree(cmd)
 	defer tree.close()
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), permissionText(cfg, job.Agent))})
+		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), modeText)})
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -464,13 +497,15 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	case stopped == "timeout":
 		result.Status = runnerwire.RunFailed
 		result.Error = "timed out after " + minutesText(timeout)
+		result.FailureKind = runnerwire.FailureTask
 	case exitCode == 0 && !outcome.IsError:
 		result.Status = runnerwire.RunSucceeded
 	default:
 		result.Status = runnerwire.RunFailed
+		errText := stderr.String()
 		result.Error = outcome.Error
 		if result.Error == "" {
-			result.Error = stderr.String()
+			result.Error = errText
 		}
 		if result.Error == "" && waitErr != nil {
 			result.Error = waitErr.Error()
@@ -479,8 +514,26 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 			result.Error = fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)
 		}
 		result.Error = adapter.Truncate(result.Error, runnerwire.MaxSummaryBytes)
+		// What the CLI said, then its stderr: a login problem often shows only
+		// on stderr while the stream says something generic.
+		result.FailureKind = ad.Classify(outcome.Error + "\n" + errText)
 	}
-	return result
+	return result, outcome.Text
+}
+
+// reviewPermission is how freely a review's agent may act: read only where
+// the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
+// approval mode, under which an edit needs an approval nobody can give
+// headless), the owner's setting otherwise. The prompt forbids edits either
+// way, and the review's worktree is thrown away after.
+func reviewPermission(cfg *Config, kind string) (mode, text string) {
+	switch kind {
+	case "codex":
+		return "read-only", "sandbox read-only for a review"
+	case "gemini":
+		return "default", "approval mode default for a review"
+	}
+	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
 
 // permissionText says how freely the agent may act, for the run's log.
@@ -583,6 +636,14 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 // finishWith queues a run's changes, PR and finish together, so they go out in
 // that order after its last events.
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
+	// Every failed run says why in a word the hub can route on; a failure
+	// nothing recognised (a worktree git refused, a push) is the task's.
+	switch {
+	case result.Status != runnerwire.RunFailed:
+		result.FailureKind = ""
+	case result.FailureKind == "":
+		result.FailureKind = runnerwire.FailureTask
+	}
 	j.mu.Lock()
 	r.changes, r.pr = changes, pr
 	r.finish = &result
@@ -590,6 +651,12 @@ func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwi
 	j.mu.Unlock()
 	j.wake()
 	line := fmt.Sprintf("run %s: %s", r.job.RunID, result.Status)
+	if result.FailureKind != "" && result.FailureKind != runnerwire.FailureTask {
+		line += " (" + result.FailureKind + ")"
+	}
+	if result.Verdict != "" {
+		line += ", verdict " + result.Verdict
+	}
 	if result.Error != "" {
 		line += ": " + firstLine(result.Error)
 	}

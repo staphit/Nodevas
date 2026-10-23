@@ -94,6 +94,47 @@ func TestHelperProcess(t *testing.T) {
 		fixture("codex_model_error.jsonl")
 		fmt.Fprintln(os.Stderr, "ERROR rmcp::transport::worker: worker quit")
 		os.Exit(1)
+	case "login-fail":
+		// Synthesized: Claude Code signed out.
+		fmt.Println(`{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}`)
+		os.Exit(1)
+	case "review-approve", "review-changes", "review-silent":
+		// A reviewer that also scribbles in its worktree, which is thrown away.
+		if err := os.WriteFile(filepath.Join(wd, "scratch.txt"), []byte("notes\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		text := "The change does what the node asks.\n\n**VERDICT: approve**"
+		switch mode {
+		case "review-changes":
+			text = "Missing the empty case in hello.\nVERDICT: approve? no.\n\nVERDICT: changes"
+		case "review-silent":
+			text = "Looks fine to me."
+		}
+		raw, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": false, "result": text,
+			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
+		fmt.Println(string(raw))
+		os.Exit(0)
+	case "race":
+		// Someone pushes to the PR branch while the agent works: the runner's
+		// push must then be refused, not forced.
+		_, rest, _ := strings.Cut(string(stdin), "race:")
+		branch := strings.Fields(rest)[0]
+		gitRun := func(args ...string) {
+			cmd := exec.Command("git", append([]string{"-c", "user.name=o", "-c", "user.email=o@example.test"}, args...)...)
+			cmd.Dir = wd
+			if out, err := cmd.CombinedOutput(); err != nil {
+				fmt.Fprintln(os.Stderr, string(out))
+				os.Exit(9)
+			}
+		}
+		_ = os.WriteFile(filepath.Join(wd, "race.txt"), []byte("theirs\n"), 0o644)
+		gitRun("add", "race.txt")
+		gitRun("commit", "-q", "-m", "someone else")
+		gitRun("push", "-q", "origin", "HEAD:refs/heads/"+branch)
+		gitRun("reset", "-q", "--hard", "HEAD~1")
+		edit()
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
 	case "hang":
 		fmt.Println(`{"type":"system","subtype":"init","session_id":"s-hang","model":"m"}`)
 		// A grandchild holding our stdout, like node's children do: killing
@@ -121,8 +162,9 @@ type fakeAgent struct {
 	record, fixtures string
 }
 
-func (f fakeAgent) Kind() string              { return f.real.Kind() }
-func (f fakeAgent) NewParser() adapter.Parser { return f.real.NewParser() }
+func (f fakeAgent) Kind() string                { return f.real.Kind() }
+func (f fakeAgent) NewParser() adapter.Parser   { return f.real.NewParser() }
+func (f fakeAgent) Classify(text string) string { return f.real.Classify(text) }
 
 // Command is the real adapter's command run by the helper, which gets the
 // real arguments after "--". The job's prompt picks the mode.
@@ -466,7 +508,8 @@ func TestRunFails(t *testing.T) {
 	env.hub.offer(testJob("run-fail", "fail:"))
 	result := env.hub.wait("run-fail", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.ExitCode != 3 ||
-		result.Error != "Reached maximum number of turns (50)" || result.Usage.CostUSD != 1.25 {
+		result.Error != "Reached maximum number of turns (50)" || result.Usage.CostUSD != 1.25 ||
+		result.FailureKind != runnerwire.FailureTask {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -551,7 +594,8 @@ func TestRunCodexFails(t *testing.T) {
 	env.hub.offer(job)
 	result := env.hub.wait("run-codex-fail", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.ExitCode != 1 || result.Usage != nil ||
-		result.Error != "The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account. (HTTP 400)" {
+		result.Error != "The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account. (HTTP 400)" ||
+		result.FailureKind != runnerwire.FailureModel {
 		t.Fatalf("result = %+v", result)
 	}
 	var args []string

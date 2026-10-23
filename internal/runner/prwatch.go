@@ -170,27 +170,42 @@ func (j *jobs) pollPRs() {
 		j.noteWatchError("", err)
 		return
 	}
+	// A revised PR is watched by its implement run and each revise run (W5):
+	// one look per PR a poll.
+	type viewed struct {
+		info runnerwire.PRInfo
+		err  error
+	}
+	seen := map[string]viewed{}
 	for _, w := range list {
 		if j.ctx.Err() != nil {
 			return
 		}
-		dir := w.Repo
-		if _, err := os.Stat(dir); err != nil {
-			dir = ""
+		v, ok := seen[w.URL]
+		if !ok {
+			dir := w.Repo
+			if _, err := os.Stat(dir); err != nil {
+				dir = ""
+			}
+			v.info, v.err = gh.view(j.ctx, dir, w.URL)
+			seen[w.URL] = v
 		}
-		info, err := gh.view(j.ctx, dir, w.URL)
-		if err != nil {
-			j.noteWatchError(w.RunID, err)
+		if v.err != nil {
+			j.noteWatchError(w.RunID, v.err)
 			continue
 		}
 		j.noteWatchError(w.RunID, nil)
-		j.updatePR(w, info)
+		j.updatePR(w, v.info)
 	}
 }
 
 // updatePR records a PR's new state and, when something the hub shows has
 // changed, queues it. A merged or closed PR ends its watch. The poller and a
 // remote merge may both see a PR end; the first one cleans up.
+//
+// Several runs may watch one PR (an implement run and the revise runs on its
+// branch). Each entry is its own: only an entry with a worktree removes one,
+// and a PR that ends ends every entry for it, so the hub hears it on each run.
 func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 	final := info.State == runnerwire.PRMerged || info.State == runnerwire.PRClosed
 	if final {
@@ -202,12 +217,15 @@ func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 		}
 		current.closing = true
 		j.mu.Unlock()
-		wt := Worktree{Path: w.Worktree, Branch: w.Branch}
-		if err := removeWorktree(j.ctx, w.Repo, wt, false); err != nil {
-			j.c.logf("run %s: PR %s; removing its worktree: %v", w.RunID, info.State, err)
-		} else {
-			j.c.logf("run %s: PR %s; worktree %s removed", w.RunID, info.State, w.Worktree)
+		if w.Worktree != "" {
+			wt := Worktree{Path: w.Worktree, Branch: w.Branch}
+			if err := removeWorktree(j.ctx, w.Repo, wt, false); err != nil {
+				j.c.logf("run %s: PR %s; removing its worktree: %v", w.RunID, info.State, err)
+			} else {
+				j.c.logf("run %s: PR %s; worktree %s removed", w.RunID, info.State, w.Worktree)
+			}
 		}
+		defer j.endSiblings(w, info)
 	}
 	j.mu.Lock()
 	current := j.watched[w.RunID]
@@ -233,6 +251,21 @@ func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 	j.mu.Unlock()
 	if changed || final {
 		j.wake()
+	}
+}
+
+// endSiblings ends the other entries watching a PR that just ended.
+func (j *jobs) endSiblings(w watchedPR, info runnerwire.PRInfo) {
+	j.mu.Lock()
+	var siblings []watchedPR
+	for _, id := range j.watchOrder {
+		if other := j.watched[id]; id != w.RunID && other.URL == w.URL && !other.closing {
+			siblings = append(siblings, *other)
+		}
+	}
+	j.mu.Unlock()
+	for _, other := range siblings {
+		j.updatePR(other, info)
 	}
 }
 

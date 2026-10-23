@@ -152,6 +152,7 @@ func (p *geminiParser) Outcome() Outcome {
 		summary = p.pending.String()
 	}
 	out.Summary = Truncate(summary, runnerwire.MaxSummaryBytes)
+	out.Text = Truncate(summary, MaxTextBytes)
 	if !out.Done && p.lastError != "" {
 		out.IsError = true
 		out.Error = Truncate(p.lastError, runnerwire.MaxSummaryBytes)

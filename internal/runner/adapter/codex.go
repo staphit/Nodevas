@@ -171,6 +171,7 @@ type codexItem struct {
 func (p *codexParser) Outcome() Outcome {
 	out := p.outcome
 	out.Summary = Truncate(p.lastMessage, runnerwire.MaxSummaryBytes)
+	out.Text = Truncate(p.lastMessage, MaxTextBytes)
 	if p.sawUsage {
 		usage := p.usage
 		out.Usage = &usage
