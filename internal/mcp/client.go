@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nodevas/internal/auth"
@@ -101,20 +102,46 @@ func codeFor(status int) string {
 
 // Client talks to one Nodevas server about one project.
 type Client struct {
-	base      *url.URL
-	project   string
-	actor     string
-	agentRole string
-	http      *http.Client
+	base       *url.URL
+	project    string
+	actor      string
+	agentRole  string
+	http       *http.Client
+	customHTTP bool
+
+	mu          sync.Mutex
+	sessionID   string
+	sessionName string
+	agentKind   string
+	repo        string
+	branch      string
+	cwd         string
+	state       string
+	nodeID      string
+	doing       string
+	unreadCount int
+	// names remembers the server-given name of every session ID this process
+	// has acted as, so switching between them never renames one.
+	names map[string]string
+	// follow says where the current session ID can change mid-process:
+	// "claude" re-reads Claude Code's session registry (/clear starts a new
+	// conversation in the same process), "codex" takes the sessionId Codex
+	// puts in each tool call's _meta (one MCP process serves every thread).
+	follow string
 }
 
 // ClientOptions configures a Client. Project is fixed for the process: tools
 // other than list_projects never accept a project argument, so an agent cannot
 // be talked into writing to a workspace the operator did not point it at.
 type ClientOptions struct {
-	Server  string
-	Project string
-	Actor   string
+	Server      string
+	Project     string
+	Actor       string
+	SessionID   string
+	SessionName string
+	AgentKind   string
+	Repo        string
+	Branch      string
 	// AgentRole is the write-permission class every request declares:
 	// "worker" or "orchestrator". Empty sends no header, which the server
 	// reads as a human session. Like Actor it is fixed for the process, so a
@@ -167,13 +194,56 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		}
 		httpClient = &http.Client{Timeout: timeout}
 	}
+	actor := strings.TrimSpace(opts.Actor)
+	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor)
+	if strings.TrimSpace(opts.SessionID) != "" {
+		sessionID = strings.TrimSpace(opts.SessionID)
+	}
+	if strings.TrimSpace(opts.AgentKind) != "" {
+		agentKind = strings.TrimSpace(opts.AgentKind)
+	}
+	if strings.TrimSpace(opts.Repo) != "" {
+		repo = strings.TrimSpace(opts.Repo)
+	}
+	if strings.TrimSpace(opts.Branch) != "" {
+		branch = strings.TrimSpace(opts.Branch)
+	}
 	return &Client{
-		base:      base,
-		project:   strings.TrimSpace(opts.Project),
-		actor:     strings.TrimSpace(opts.Actor),
-		agentRole: strings.TrimSpace(opts.AgentRole),
-		http:      httpClient,
+		base:        base,
+		project:     strings.TrimSpace(opts.Project),
+		actor:       actor,
+		agentRole:   strings.TrimSpace(opts.AgentRole),
+		http:        httpClient,
+		customHTTP:  opts.HTTPClient != nil,
+		sessionID:   sessionID,
+		sessionName: strings.TrimSpace(opts.SessionName),
+		agentKind:   agentKind,
+		repo:        repo,
+		branch:      branch,
+		cwd:         cwd,
+		state:       "idle",
+		names:       map[string]string{},
+		follow:      followMode(opts.SessionID, agentKind),
 	}, nil
+}
+
+// longPollClientKey carries a per-call *http.Client whose timeout outlasts a
+// long-poll; see doLongPoll.
+type longPollClientKey struct{}
+
+func (c *Client) httpFor(ctx context.Context) *http.Client {
+	if hc, ok := ctx.Value(longPollClientKey{}).(*http.Client); ok {
+		return hc
+	}
+	return c.http
+}
+
+// UnreadCount returns the most recently observed unread message count for this
+// session.
+func (c *Client) UnreadCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.unreadCount
 }
 
 // Project is the workspace this client is pinned to; empty means the server's
@@ -310,7 +380,7 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 		request.Header.Set(auth.AgentRoleHeaderName, c.agentRole)
 	}
 
-	response, err := c.http.Do(request)
+	response, err := c.httpFor(ctx).Do(request)
 	if err != nil {
 		return &APIError{
 			Code:    CodeServerUnavailable,

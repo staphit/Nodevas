@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	agentsapi "nodevas/internal/httpapi/agents"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
 	"nodevas/internal/httpapi/node"
@@ -35,6 +36,9 @@ func (s *Server) Handler() http.Handler {
 	project.New(s.pm).Register(api)
 	fsbrowse.New(s.auth, s.openDir).Register(api)
 	remoteapi.New(s.pm, s.remotes, s.auth).Register(api)
+	if s.agents != nil {
+		agentsapi.New(s.pm, s.agents).Register(api)
+	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {
 		sys.UseMailer(s.mailer)

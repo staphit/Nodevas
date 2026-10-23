@@ -19,6 +19,8 @@ import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { CopilotRoot } from "./copilot/CopilotRoot";
+import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
+import { useAgents } from "./agents/agentStore";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -308,6 +310,10 @@ function MainApp() {
         }
         case "state-changed":
           void refreshState().catch(reportError);
+          void useAgents.getState().refreshAll();
+          break;
+        case "agents-changed":
+          void useAgents.getState().refreshAll();
           break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
@@ -618,6 +624,7 @@ function MainApp() {
       <CommandPalette />
       <OnboardingTour />
       <CopilotRoot />
+      <AgentNetworkRoot />
     </div>
   );
 }

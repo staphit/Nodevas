@@ -85,6 +85,11 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 		if err != nil {
 			return nil, claimTaskOutput{}, guide(err)
 		}
+		doing := id
+		if result.Task != nil && result.Task.Title != "" {
+			doing = result.Task.Title
+		}
+		_ = client.Heartbeat(ctx, "busy", id, doing)
 		return nil, claimTaskOutput{
 			ID:      id,
 			Owner:   ownerOf(result.Claim),
@@ -114,6 +119,7 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 		if err := client.SetStatus(ctx, id, status, in.Note, in.RequestID); err != nil {
 			return nil, setStatusOutput{}, guide(err)
 		}
+		_ = client.Heartbeat(ctx, "idle", "", "")
 		return nil, setStatusOutput{
 			ID:     id,
 			Status: status,
@@ -133,6 +139,7 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 		if err := client.Release(ctx, id); err != nil {
 			return nil, releaseTaskOutput{}, guide(err)
 		}
+		_ = client.Heartbeat(ctx, "idle", "", "")
 		return nil, releaseTaskOutput{
 			ID:   id,
 			Note: "Given back. It is in the ready queue again.",

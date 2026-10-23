@@ -66,6 +66,7 @@ import {
   type Rect,
 } from "./geometry";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
+import { useAgents } from "../../agents/agentStore";
 
 type ConnectionHandlers = ReturnType<typeof useConnectionDrag>["handlers"];
 type CardResizeHandlers = ReturnType<typeof useCardResize>["handlers"];
@@ -214,6 +215,13 @@ export function GraphCanvas({
   setGraphNotice,
 }: GraphCanvasProps) {
   const { t } = useI18n();
+  const agentSessions = useAgents((s) => s.sessions);
+  const agentByNodeId = new Map<string, { name: string; agent: string }>();
+  for (const s of agentSessions) {
+    if (s.online && s.nodeId && !agentByNodeId.has(s.nodeId)) {
+      agentByNodeId.set(s.nodeId, { name: s.name, agent: s.agent });
+    }
+  }
   // A marquee grabs cards, but a wire between two grabbed cards belongs to the
   // same selection: it is drawn selected so the picked set reads as one shape.
   const selectedEdgeKeys = new Set<string>();
@@ -599,6 +607,14 @@ export function GraphCanvas({
             >
               {assigned}
             </span>
+            {agentByNodeId.has(n.id) && (
+              <span
+                className="col-card-agent"
+                title={`${agentByNodeId.get(n.id)!.name} (${agentByNodeId.get(n.id)!.agent})`}
+              >
+                ● {agentByNodeId.get(n.id)!.name}
+              </span>
+            )}
             {!!n.tags?.length && (
               <span className="col-card-tags">{n.tags.slice(0, 2).join(" · ")}</span>
             )}

@@ -462,6 +462,7 @@ func serve(args []string) {
 		slog.Float64("ws_upgrade_rate", serveConfig.Abuse.WSUpgradeGlobalRate),
 	)
 	srv.UseAudit(audit.New(database))
+	srv.UseAgentsDB(database)
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
 	if err != nil {
 		log.Fatalf("copilot: %v", err)

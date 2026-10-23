@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
+	"nodevas/internal/db"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
@@ -33,6 +35,7 @@ type Server struct {
 	auth     auth.Authenticator
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
+	agents   *agents.Hub
 	abuse    *abuseGuard
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -94,6 +97,16 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		abuse:    newAbuseGuard(),
 		stop:     make(chan struct{}),
 	}
+	s.agents = agents.NewHub(nil, func(projectRoot, _ string, _ any) {
+		if s.hub == nil {
+			return
+		}
+		if projectRoot == "" {
+			s.hub.Broadcast("agents-changed", "")
+			return
+		}
+		s.hub.BroadcastRoom(projectRoot, "agents-changed", "")
+	})
 	go s.notifier.Run(s.stop)
 	// The backup loop touches the workspace immediately at startup, so it only
 	// runs with a real project manager (a static-only server passes nil).
@@ -159,6 +172,14 @@ func (s *Server) UseAccounts(users *auth.UserStore) {
 // accounts should configure it before building their handler.
 func (s *Server) UseAudit(store *audit.Store) {
 	s.audit = store
+}
+
+// UseAgentsDB attaches the workspace database to the agent collaboration hub so
+// messages and ask_user requests persist across restarts.
+func (s *Server) UseAgentsDB(database *db.DB) {
+	if s.agents != nil {
+		s.agents.SetDatabase(database)
+	}
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.
