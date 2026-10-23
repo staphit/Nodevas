@@ -673,6 +673,17 @@ func TestAuthenticationRoleAbuseIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("VisitorCannotMessageAgents", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/messages", strings.NewReader(`{"to":"*","message":"hi"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(auth.WithActor(req.Context(), identity.Actor{ID: "visitor-1", Name: "visitor", Role: identity.RoleVisitor}))
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("visitor agent message returned %d, want 403", rec.Code)
+		}
+	})
+
 	t.Run("ActorRateLimitTracksDistinctRoles", func(t *testing.T) {
 		// User1 makes 3 read requests (allowed)
 		for i := 0; i < 3; i++ {

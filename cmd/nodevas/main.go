@@ -52,6 +52,10 @@ func main() {
 		mcpServe(os.Args[2:])
 	case "db":
 		database(os.Args[2:])
+	case "hook":
+		hookCmd(os.Args[2:])
+	case "setup-agent":
+		setupAgentCmd(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -87,6 +91,10 @@ func usage() {
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas db status|copy-to-postgres --project <dir> [--replace]")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas setup-agent [--agents claude,codex,gemini] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas hook <claude|codex|gemini> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
 		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
 }

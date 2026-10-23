@@ -31,6 +31,8 @@ func mcpServe(args []string) {
 		"the name recorded against everything this agent changes; attribution, not authentication")
 	agentRole := fs.String("agent-role", "worker",
 		"the write-permission class this agent acts as: worker or orchestrator")
+	sessionName := fs.String("session-name", "",
+		"the name other agents address this session by (send_message to); empty derives one from the agent and repo")
 	chromaURL := fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project")
 	ragPython := fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings")
 	_ = fs.Parse(args)
@@ -60,13 +62,14 @@ func mcpServe(args []string) {
 	defer stop()
 
 	err := mcp.Serve(ctx, mcp.Options{
-		Server:    *server,
-		Project:   strings.TrimSpace(*projectName),
-		Actor:     name,
-		AgentRole: role,
-		ChromaURL: *chromaURL,
-		RAGPython: *ragPython,
-		Stderr:    os.Stderr,
+		Server:      *server,
+		Project:     strings.TrimSpace(*projectName),
+		Actor:       name,
+		SessionName: strings.TrimSpace(*sessionName),
+		AgentRole:   role,
+		ChromaURL:   *chromaURL,
+		RAGPython:   *ragPython,
+		Stderr:      os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
 		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)

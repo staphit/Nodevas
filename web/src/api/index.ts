@@ -3,6 +3,7 @@
  * recomposed here: every caller imports `api` from `"../api"` and neither knows
  * nor cares which file an endpoint now lives in.
  */
+import { agentsApi } from "./agents";
 import { authApi } from "./auth";
 import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
@@ -78,6 +79,12 @@ export type {
   RemoteSyncState,
   RemoteSyncStatus,
 } from "./remote";
+export type {
+  AgentAsk,
+  AgentMessage,
+  AgentRosterResponse,
+  AgentSession,
+} from "./agents";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 
@@ -92,4 +99,5 @@ export const api = {
   ...historyApi,
   ...remoteApi,
   ...copilotApi,
+  ...agentsApi,
 };

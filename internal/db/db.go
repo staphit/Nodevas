@@ -492,6 +492,46 @@ CREATE TABLE copilot_entries (
 ) STRICT;
 `,
 	},
+	{
+		name: "0008_agent_network",
+		stmt: `
+-- Agent-to-agent messages and human-in-the-loop ask requests.
+CREATE TABLE agent_messages (
+    id              TEXT PRIMARY KEY,
+    project         TEXT NOT NULL,
+    sender_actor    TEXT NOT NULL,
+    sender_session  TEXT NOT NULL DEFAULT '',
+    sender_agent    TEXT NOT NULL DEFAULT '',
+    recipient       TEXT NOT NULL,
+    reply_to        TEXT NOT NULL DEFAULT '',
+    thread_id       TEXT NOT NULL DEFAULT '',
+    node_id         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    read_at         INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_messages_inbox ON agent_messages (project, recipient, read_at, created_at);
+CREATE INDEX agent_messages_project ON agent_messages (project, created_at);
+
+CREATE TABLE agent_asks (
+    id            TEXT PRIMARY KEY,
+    project       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL,
+    actor_id      TEXT NOT NULL,
+    agent         TEXT NOT NULL DEFAULT '',
+    question      TEXT NOT NULL,
+    about_msg_id  TEXT NOT NULL DEFAULT '',
+    node_id       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    decided_by    TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    decided_at    INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.
