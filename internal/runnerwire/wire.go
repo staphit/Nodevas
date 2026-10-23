@@ -106,6 +106,8 @@ type Info struct {
 	// MaxConcurrent is how many runs the runner takes at once; the hub keeps
 	// further jobs queued rather than offering them.
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
+	// AutoAccept is the runner's auto-accept allowlist (W6; remote.go).
+	AutoAccept *AutoAcceptPolicy `json:"autoAccept,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.

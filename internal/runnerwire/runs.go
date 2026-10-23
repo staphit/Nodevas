@@ -115,6 +115,11 @@ type Job struct {
 
 	// W2.5: ModeHeadless ("") or ModeInteractive; see terminal.go.
 	Mode string `json:"mode,omitempty"`
+
+	// W6: SteppedUp is the hub vouching that the dispatcher re-proved their
+	// identity within the step-up window when this job was offered. A runner
+	// may auto-accept only such jobs (AutoAcceptPolicy.RequireStepUp).
+	SteppedUp bool `json:"steppedUp,omitempty"`
 }
 
 // Accept reports an accepted job: the worktree and branch it runs in.
