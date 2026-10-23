@@ -161,13 +161,16 @@ function MainApp() {
     const onOpenSettings = () => setModal("settings");
     const onOpenNotify = () => setModal("notify");
     const onOpenDriveImport = () => setModal("drive-workspace");
+    const onOpenRunners = () => setModal("runners");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
     window.addEventListener("nodevas-drive-import", onOpenDriveImport);
+    window.addEventListener("nodevas-open-runners", onOpenRunners);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
       window.removeEventListener("nodevas-drive-import", onOpenDriveImport);
+      window.removeEventListener("nodevas-open-runners", onOpenRunners);
     };
   }, []);
 
@@ -504,15 +507,6 @@ function MainApp() {
             aria-label={t("topbar.cloudBackup")}
           >
             <IconCloud size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="runners"
-            onClick={() => setModal("runners")}
-            title={t("topbar.runnersTitle")}
-            aria-label={t("topbar.runners")}
-          >
-            <IconComputer size={16} />
           </button>
           <button
             className="icon-btn"

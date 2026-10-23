@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { formatLocalizedDateTime, useI18n } from "../i18n";
-import { IconClose } from "../icons";
+import { IconClose, IconComputer } from "../icons";
 import { useApp } from "../store";
 import { AskCard } from "./AskCard";
 import { useAgents } from "./agentStore";
@@ -89,6 +89,17 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
             />
             <span>{t("agents.showOffline")}</span>
           </label>
+          {/* Runners live here rather than in the top bar: they are where
+              agents run, and the top bar has no room left at narrow widths. */}
+          <button
+            type="button"
+            className="copilot-icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent("nodevas-open-runners"))}
+            aria-label={t("topbar.runners")}
+            title={t("topbar.runnersTitle")}
+          >
+            <IconComputer size={14} />
+          </button>
           <button
             type="button"
             className="copilot-icon-btn"
