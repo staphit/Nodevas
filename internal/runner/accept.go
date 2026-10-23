@@ -31,7 +31,7 @@ type Accepter interface {
 
 // Decline reasons the terminal accepter gives.
 const (
-	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner set autoAccept true`)"
+	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner autoaccept on`)"
 	ReasonTimedOut   = "nobody accepted at the runner"
 	ReasonDeclined   = "declined at the runner"
 	ReasonInputGone  = "the runner's terminal input closed"

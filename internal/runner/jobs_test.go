@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -678,17 +679,38 @@ func TestRunNoAccepterNoTerminal(t *testing.T) {
 }
 
 func TestRunAutoAccept(t *testing.T) {
+	policy := runnerwire.AutoAcceptPolicy{Enabled: true, RequireStepUp: true,
+		Repos: []string{"r1"}, Agents: []string{"claude"}}
 	env := startJobRunner(t, func(c *Client) {
-		c.Config.AutoAccept = true
+		c.Config.AutoAccept = &policy
 		c.Accepter = acceptFunc(func(context.Context, Offer) (bool, string) {
-			t.Error("asked despite autoAccept")
+			t.Error("asked despite auto-accept covering the offer")
 			return false, "asked"
 		})
 	})
-	env.hub.hello()
-	env.hub.offer(testJob("run-auto", "ok:"))
+	hello := env.hub.hello()
+	if got := hello.Hello.AutoAccept; got == nil || !reflect.DeepEqual(*got, policy) {
+		t.Fatalf("hello autoAccept = %+v, want %+v", got, policy)
+	}
+	job := testJob("run-auto", "ok:")
+	job.SteppedUp = true
+	env.hub.offer(job)
 	if r := env.hub.wait("run-auto", runnerwire.TypeFinish).Result; r.Status != runnerwire.RunSucceeded {
 		t.Fatalf("result = %+v", r)
+	}
+}
+
+func TestRunAutoAcceptNeedsStepUp(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) {
+		c.Config.AutoAccept = &runnerwire.AutoAcceptPolicy{Enabled: true, RequireStepUp: true,
+			Repos: []string{"r1"}, Agents: []string{"claude"}}
+		c.Accepter = &TerminalAccepter{In: strings.NewReader(""), Out: io.Discard}
+	})
+	env.hub.hello()
+	env.hub.offer(testJob("run-nostep", "ok:"))
+	msg := env.hub.wait("run-nostep", runnerwire.TypeDecline)
+	if !strings.HasPrefix(msg.Reason, ReasonNeedsStepUp) || !strings.Contains(msg.Reason, "nobody is at the runner's terminal") {
+		t.Fatalf("reason %q", msg.Reason)
 	}
 }
 

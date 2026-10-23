@@ -138,7 +138,7 @@ func TestTerminalAccepterOneQuestionAtATime(t *testing.T) {
 
 func TestConfigSet(t *testing.T) {
 	cfg := &Config{}
-	if cfg.MaxConcurrentRuns() != 1 || cfg.RunTimeoutMins() != 60 || cfg.ClaudePermissionMode() != "acceptEdits" || cfg.AutoAccept {
+	if cfg.MaxConcurrentRuns() != 1 || cfg.RunTimeoutMins() != 60 || cfg.ClaudePermissionMode() != "acceptEdits" || cfg.AutoAcceptOn() {
 		t.Fatalf("defaults: %+v", cfg)
 	}
 	if dir, err := cfg.RunDataDir(); err != nil || !strings.HasSuffix(dir, "runner-data") {
@@ -161,7 +161,7 @@ func TestConfigSet(t *testing.T) {
 		}
 	}
 	if cfg.MaxConcurrentRuns() != 3 || cfg.RunTimeout() != 90*time.Minute || cfg.PermissionMode != "dontAsk" ||
-		!slices.Equal(cfg.AllowedTools, []string{"Edit", "Bash(git diff, git log)", "Read"}) || !cfg.AutoAccept ||
+		!slices.Equal(cfg.AllowedTools, []string{"Edit", "Bash(git diff, git log)", "Read"}) || !cfg.AutoAcceptOn() ||
 		!strings.HasSuffix(cfg.DataDir, "dir") || !filepath.IsAbs(cfg.DataDir) {
 		t.Fatalf("after set: %+v", cfg)
 	}
@@ -175,7 +175,7 @@ func TestConfigSet(t *testing.T) {
 		}
 	}
 	if cfg.MaxConcurrent != 0 || cfg.RunTimeoutMinutes != 0 || cfg.PermissionMode != "" || cfg.AllowedTools != nil ||
-		cfg.AutoAccept || cfg.DataDir != "" {
+		cfg.AutoAccept != nil || cfg.DataDir != "" {
 		t.Fatalf("after reset: %+v", cfg)
 	}
 	bad := []struct {

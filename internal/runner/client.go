@@ -45,8 +45,8 @@ type Client struct {
 	// the proxy.
 	HTTPClient *http.Client
 
-	// Accepter asks whether to take an offer; nil declines every offer unless
-	// the config's AutoAccept is on.
+	// Accepter asks whether to take an offer the auto-accept policy does not
+	// cover; nil declines those.
 	Accepter Accepter
 	// Adapter returns the agent adapter for a kind; nil means adapter.For.
 	// Tests swap in a fake agent.
@@ -81,8 +81,18 @@ func (c *Client) Run(ctx context.Context) error {
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
 		return err
 	}
-	if c.Config.AutoAccept {
+	if c.Config.LegacyAutoAccept() {
+		// The CLI migrates and saves before this; a Config built elsewhere
+		// is migrated here, in memory.
+		if warning := c.Config.MigrateLegacyAutoAccept(InstalledKinds(ctx, c.Commands, c.Config)); warning != "" {
+			c.logf("%s", warning)
+		}
+	}
+	if c.Config.AutoAcceptOn() {
 		c.logf("%s", AutoAcceptWarning)
+		if !c.Config.AutoAcceptPolicy().RequireStepUp {
+			c.logf("%s", StepUpOptionalWarning)
+		}
 	}
 	c.jobs = newJobs(ctx, c)
 	defer c.jobs.shutdown()

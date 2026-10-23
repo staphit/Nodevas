@@ -194,7 +194,10 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 	host, _ := os.Hostname()
 	repos := []runnerwire.Repo{}
 	maxConcurrent := DefaultMaxConcurrent
+	autoAccept := &runnerwire.AutoAcceptPolicy{RequireStepUp: true}
 	if cfg != nil {
+		policy := cfg.AutoAcceptPolicy()
+		autoAccept = &policy
 		repos = append(repos, cfg.Repos...)
 		if len(repos) > runnerwire.MaxRepos {
 			repos = repos[:runnerwire.MaxRepos]
@@ -210,6 +213,7 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		Repos:         repos,
 		Capabilities:  []string{runnerwire.CapHeadless},
 		MaxConcurrent: maxConcurrent,
+		AutoAccept:    autoAccept,
 	}
 }
 
@@ -305,6 +309,7 @@ func (c *Config) RemoveRepo(idOrName string) (runnerwire.Repo, error) {
 	for i, repo := range c.Repos {
 		if repo.ID == idOrName {
 			c.Repos = append(c.Repos[:i], c.Repos[i+1:]...)
+			c.forgetRepo(repo.ID)
 			return repo, nil
 		}
 	}
@@ -322,6 +327,7 @@ func (c *Config) RemoveRepo(idOrName string) (runnerwire.Repo, error) {
 	}
 	repo := c.Repos[match]
 	c.Repos = append(c.Repos[:match], c.Repos[match+1:]...)
+	c.forgetRepo(repo.ID)
 	return repo, nil
 }
 

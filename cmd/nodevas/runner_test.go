@@ -189,10 +189,10 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		}
 	}
 	code, stdout, stderr = runRunner(t, "", "set", "autoAccept", "true", "--config", cfgPath)
-	if code != 0 || !strings.Contains(stderr, "Anyone who can sign in to the hub as you") {
+	if code != 0 || !strings.Contains(stderr, runner.AutoAcceptWarning) {
 		t.Fatalf("autoAccept: exit %d, stderr %q", code, stderr)
 	}
-	if !strings.Contains(stdout, "autoAccept             true") {
+	if !strings.Contains(stdout, "autoAccept             on") || !strings.Contains(stdout, "stepUp                 required") {
 		t.Fatalf("set output:\n%s", stdout)
 	}
 	cfg, err := runner.LoadConfig(cfgPath)
@@ -200,7 +200,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.MaxConcurrent != 2 || cfg.RunTimeoutMinutes != 30 || cfg.PermissionMode != "plan" ||
-		len(cfg.AllowedTools) != 2 || !cfg.AutoAccept || cfg.CodexSandbox != "read-only" || !cfg.CodexIgnoreUserConfig ||
+		len(cfg.AllowedTools) != 2 || !cfg.AutoAcceptOn() || cfg.CodexSandbox != "read-only" || !cfg.CodexIgnoreUserConfig ||
 		cfg.GeminiApprovalMode != "" {
 		t.Fatalf("config = %+v", cfg)
 	}
@@ -211,7 +211,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	}
 	_, stdout, _ = runRunner(t, "", "status", "--config", cfgPath)
 	for _, want := range []string{"maxConcurrent          2", "runTimeoutMinutes      30", "permissionMode         plan",
-		"allowedTools           Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data",
+		"allowedTools           Edit, Bash(go test *)", "agents                 claude", "runner-data",
 		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
 		"geminiApprovalMode     yolo", "autoPR                 false (commit only", "prDraft                true",
 		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60",

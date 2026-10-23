@@ -383,15 +383,25 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.finishWith(r, result, changes, pr)
 }
 
+// ask decides an offer: auto-accepted when the owner's policy covers it,
+// else asked at the terminal. With nobody there, the decline says what kept
+// auto-accept from applying.
 func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
-	if j.c.Config.AutoAccept {
-		j.c.logf("run %s: auto-accepted (autoAccept is on)", r.job.RunID)
+	offer := Offer{Job: r.job, Repo: r.repo}
+	auto, why := AutoAcceptDecision(j.c.Config.AutoAcceptPolicy(), offer)
+	if auto {
+		j.c.logf("run %s: auto-accepted: %s", r.job.RunID, why)
 		return true, ""
 	}
-	if j.c.Accepter == nil {
-		return false, ReasonNoTerminal
+	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
+	ok, reason := false, ReasonNoTerminal
+	if j.c.Accepter != nil {
+		ok, reason = j.c.Accepter.Accept(ctx, offer)
 	}
-	return j.c.Accepter.Accept(ctx, Offer{Job: r.job, Repo: r.repo})
+	if !ok && reason == ReasonNoTerminal && why != ReasonAutoAcceptOff {
+		reason = why + " (and nobody is at the runner's terminal to accept)"
+	}
+	return ok, reason
 }
 
 // runAgent starts the agent in the worktree and waits for it, a cancel or the

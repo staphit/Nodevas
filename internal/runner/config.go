@@ -64,10 +64,13 @@ type Config struct {
 	CodexIgnoreUserConfig bool `json:"codexIgnoreUserConfig,omitempty"`
 	// GeminiApprovalMode is Gemini CLI's --approval-mode for every run.
 	GeminiApprovalMode string `json:"geminiApprovalMode,omitempty"`
-	// AutoAccept takes every valid offer without asking at the terminal. Off
-	// by default: with it on, anyone who can sign in to the hub as the owner
-	// can run agents on this machine.
-	AutoAccept bool `json:"autoAccept,omitempty"`
+	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
+	// offers are taken without asking at the terminal. nil means off. W1's
+	// boolean form is migrated on load.
+	AutoAccept *runnerwire.AutoAcceptPolicy `json:"autoAccept,omitempty"`
+	// legacyAutoAccept: the file had W1's `"autoAccept": true`, and
+	// MigrateLegacyAutoAccept has not filled in the agents yet.
+	legacyAutoAccept bool
 
 	// Pull requests, from W3 on.
 
@@ -230,11 +233,6 @@ func (c *Config) PermissionModeFor(kind string) string {
 	return c.ClaudePermissionMode()
 }
 
-// AutoAcceptWarning is printed whenever auto-accept is switched on or the
-// runner starts with it on.
-const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to the hub as you can now run " +
-	"agents on this machine, in the repositories you added, without anyone here saying yes."
-
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept",
@@ -355,14 +353,16 @@ func (c *Config) Set(key string, values []string) error {
 		c.AllowedTools = tools
 	case "autoAccept":
 		if reset {
-			c.AutoAccept = false
+			c.AutoAccept, c.legacyAutoAccept = nil, false
 			return nil
 		}
 		on, err := strconv.ParseBool(value)
 		if err != nil {
 			return errors.New("autoAccept must be true or false")
 		}
-		c.AutoAccept = on
+		// Without detection at hand every kind is listed; the CLI calls
+		// SetAutoAccept itself with the agents installed here.
+		c.SetAutoAccept(on, Kinds)
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil
