@@ -277,3 +277,111 @@ for (const [name, viewport] of Object.entries({
     await expect(drawer).toBeVisible();
   });
 }
+
+// W4: approve merging the run's PR — the phone case: read the diff, merge.
+const headSha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+const greenRun = { ...finishedRun, prHeadSha: headSha };
+
+async function mockMergeableRun(page: Page) {
+  const posted: unknown[] = [];
+  let pending = false;
+  const current = (nodeId: string) => ({
+    ...greenRun,
+    nodeId,
+    ...(pending
+      ? {
+          merge: {
+            id: "m1",
+            runId: "run2",
+            headSha,
+            status: "pending",
+            requestedBy: "alice",
+            // Now: a pending merge older than 15 minutes reads as stale.
+            createdAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+  });
+  await page.route(/\/api\/runs$/, (route) => route.fulfill({ json: { runs: [] } }));
+  await page.route(/\/api\/runs\?/, (route) => {
+    const nodeId = new URL(route.request().url()).searchParams.get("nodeId") ?? "n";
+    return route.fulfill({ json: { runs: [current(nodeId)] } });
+  });
+  await page.route(/\/api\/runs\/run2\/events/, (route) =>
+    route.fulfill({ json: { events, more: false } }),
+  );
+  await page.route(/\/api\/runs\/run2\/changes/, (route) =>
+    route.fulfill({ json: { changes: runChanges } }),
+  );
+  await page.route(/\/api\/runs\/run2\/merge$/, async (route) => {
+    posted.push(route.request().postDataJSON());
+    pending = true;
+    const graph = await (await page.request.get("/api/graph")).json();
+    const node = (graph.graph?.nodes ?? []).find((item: { title?: string }) => item.title === "設計稿");
+    await route.fulfill({ status: 202, json: current(node?.id ?? "n") });
+  });
+  return posted;
+}
+
+for (const [name, viewport] of Object.entries({
+  desktop: { width: 1440, height: 900 },
+  phone: { width: 390, height: 844 },
+})) {
+  test(`merge approval from the diff fits on ${name}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const posted = await mockMergeableRun(page);
+    await freshProject(page, ["設計稿"]);
+
+    await page.getByText("設計稿").first().click();
+    const drawer = page.getByRole("dialog", { name: "節點編輯" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("tab", { name: "執行" }).click();
+
+    // The run's header offers the merge too.
+    const detail = drawer.getByRole("region", { name: "執行詳情" });
+    await expect(detail.getByRole("button", { name: "合併 PR #42" })).toBeEnabled();
+    await expectNoHorizontalOverflow(page);
+
+    await drawer.getByRole("button", { name: "查看改動" }).click();
+    const diff = page.getByRole("dialog", { name: "改動" });
+    await expect(diff).toBeVisible();
+    const mergeButton = diff.getByRole("button", { name: "合併 PR #42" });
+    await expect(mergeButton).toBeEnabled();
+    await expect(mergeButton).toBeInViewport();
+    const buttonBox = await mergeButton.boundingBox();
+    expect(buttonBox).not.toBeNull();
+    if (viewport.width < 640) expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+    await expectNoHorizontalOverflow(page);
+
+    await mergeButton.click();
+    const confirm = page.getByRole("alertdialog", { name: "合併 PR #42？" });
+    await expect(confirm).toBeVisible();
+    await expect(confirm.getByText("agent/a-very-long-node-identifier-that-should-wrap-run1 → main")).toBeVisible();
+    await expect(confirm.getByText("a1b2c3d", { exact: true })).toBeVisible();
+    await expect(confirm.getByText(/預設 squash/)).toBeVisible();
+    const box = await confirm.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    await expectNoHorizontalOverflow(page);
+
+    // Escape backs out of the confirmation only; the diff stays.
+    await page.keyboard.press("Escape");
+    await expect(confirm).toHaveCount(0);
+    await expect(diff).toBeVisible();
+    expect(posted).toHaveLength(0);
+
+    await mergeButton.click();
+    await confirm.getByRole("button", { name: "合併 PR #42" }).click();
+    await expect(confirm).toHaveCount(0);
+    expect(posted).toEqual([{ headSha }]);
+    await expect(diff.getByText("等 runner 合併中…")).toBeVisible();
+    await expect(diff.getByRole("button", { name: "合併 PR #42" })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+
+    await page.keyboard.press("Escape");
+    await expect(diff).toHaveCount(0);
+    await expect(detail.getByText("等 runner 合併中…")).toBeVisible();
+  });
+}

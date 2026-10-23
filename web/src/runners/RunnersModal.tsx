@@ -3,6 +3,9 @@ import type { Runner } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
 import { IconClose, IconComputer, IconCopy, IconTrash } from "../icons";
 import { languageLocale, useI18n } from "../i18n";
+import { BudgetSettings } from "../runs/BudgetSettings";
+import { useBudget } from "../runs/budgetStore";
+import { RunNotifySettings } from "../runs/RunToasts";
 import { useRunners } from "./runnerStore";
 
 /** "3 minutes ago" in the reader's language, or "" for an unparseable time. */
@@ -165,6 +168,11 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   const refresh = useRunners((s) => s.refresh);
   const create = useRunners((s) => s.create);
   const [adding, setAdding] = useState(false);
+  // Opened on the Budget section when an "adjust budget" link sent us here.
+  const [budgetOpen, setBudgetOpen] = useState(() => useBudget.getState().showRequested);
+  useEffect(() => {
+    useBudget.getState().requestShow(false);
+  }, []);
   const [name, setName] = useState("");
   // The token lives only in this dialog's state: closing it is the last time
   // anyone sees it, which is the point.
@@ -302,6 +310,17 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
               </div>
             </form>
           )}
+
+          {/* Fetched only when opened: most visits here are about runners. */}
+          <details
+            className="runner-settings"
+            open={budgetOpen || undefined}
+            onToggle={(event) => setBudgetOpen(event.currentTarget.open)}
+          >
+            <summary>{t("budget.title")}</summary>
+            {budgetOpen && <BudgetSettings />}
+          </details>
+          <RunNotifySettings />
         </div>
 
         <footer>

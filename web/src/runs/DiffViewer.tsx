@@ -11,6 +11,7 @@ import {
   type DiffHunk,
   type DiffLine,
 } from "./patch";
+import { MergeControl, mergeConfirmOpen } from "./MergeApproval";
 import { LineCounts, RunChangesSummary } from "./RunChanges";
 import { formatCount, safeExternalUrl } from "./runFormat";
 import { useRuns } from "./runStore";
@@ -307,7 +308,8 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
     // Captured first and stopped: the Drawer underneath closes on Escape too,
     // and one press should only close the diff.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      // A merge confirmation over the diff takes the Escape for itself.
+      if (event.key !== "Escape" || mergeConfirmOpen()) return;
       event.stopPropagation();
       onClose();
     };
@@ -452,6 +454,11 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
           </div>
         )}
         {content}
+        {/* Read the diff, then approve: the merge sits at the foot, where a
+            thumb reaches it on a phone. Empty (and hidden) without a PR. */}
+        <footer className="run-diff-foot">
+          <MergeControl run={run} />
+        </footer>
       </div>
     </div>,
     document.body,

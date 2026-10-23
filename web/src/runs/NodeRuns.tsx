@@ -15,6 +15,7 @@ import {
   totalTokens,
 } from "./runFormat";
 import { RunDiffDialog } from "./DiffViewer";
+import { MergeControl } from "./MergeApproval";
 import { RunChangesSummary } from "./RunChanges";
 import { useRuns } from "./runStore";
 
@@ -334,6 +335,7 @@ export function RunDetail({ run }: { run: Run }) {
           </button>
         )}
       </div>
+      <MergeControl run={run} className="run-detail-merge" />
 
       {(runHasChanges(run) || run.prUrl || run.prError) && (
         <div className="run-detail-changes">

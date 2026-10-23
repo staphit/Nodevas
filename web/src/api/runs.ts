@@ -91,11 +91,50 @@ export interface Run {
   /** Why no pull request could be opened; prUrl is then absent. */
   prError?: string;
   ciStatus?: CIStatus | string;
+  /** The PR head the CI status belongs to; a merge approval names it. */
+  prHeadSha?: string;
+  /** The latest merge request for the run, if any (W4). */
+  merge?: RunMergeRequest | null;
   createdBy: string;
   createdByName: string;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+/** Mirrors the runnerwire Merge* statuses. */
+export type MergeStatus = "pending" | "merged" | "failed" | "expired";
+
+/** Mirrors runnerwire.MergeRequest: one approval to merge a run's PR. The
+ * runner merges it with its owner's gh login and its own merge method. */
+export interface RunMergeRequest {
+  id: string;
+  runId: string;
+  /** The PR head the approver saw; the runner refuses a PR that moved on. */
+  headSha: string;
+  status: MergeStatus | string;
+  reason?: string;
+  requestedBy: string;
+  createdAt: string;
+  finishedAt?: string;
+}
+
+/** Mirrors runnerwire.Budget: per owner, per UTC day; 0 means no limit. */
+export interface RunBudget {
+  dailyRuns: number;
+  dailyCostUsd: number;
+  /** Input + output tokens. */
+  dailyTokens: number;
+}
+
+/** The limit that blocks a new run, or "" when none does. */
+export type RunBudgetLimit = "" | "runs" | "cost" | "tokens";
+
+/** Mirrors runnerwire.BudgetStatus: GET /api/runs/budget. */
+export interface RunBudgetStatus {
+  budget: RunBudget;
+  used: { runs: number; costUsd: number; tokens: number };
+  exceeded: RunBudgetLimit | string;
 }
 
 export type PRState = "open" | "merged" | "closed";
@@ -178,4 +217,11 @@ export const runsApi = {
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),
   getRunChanges: (id: string) => req<RunChangesResponse>(`${runPath(id)}/changes`),
   cancelRun: (id: string) => req<Run>(`${runPath(id)}/cancel`, { method: "POST" }),
+  /** Approves merging the run's PR at `headSha`; 202 with the run, its
+   * merge "pending" until the runner answers. */
+  mergeRun: (id: string, headSha: string) =>
+    req<Run>(`${runPath(id)}/merge`, { method: "POST", body: JSON.stringify({ headSha }) }),
+  getRunBudget: () => req<RunBudgetStatus>("/api/runs/budget"),
+  putRunBudget: (budget: RunBudget) =>
+    req<RunBudgetStatus>("/api/runs/budget", { method: "PUT", body: JSON.stringify(budget) }),
 };

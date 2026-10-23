@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import {
   api,
+  AuthError,
+  ConflictError,
   runFinal,
   type CreateRunRequest,
   type Run,
@@ -44,6 +46,10 @@ export interface RunStoreState {
   cancelErrors: Record<string, string>;
   /** Runs whose cancel the hub accepted while they were still running. */
   stopRequested: Record<string, boolean>;
+  /** Runs whose merge approval is being posted. */
+  merging: Record<string, boolean>;
+  /** Why the hub refused a run's merge approval. */
+  mergeErrors: Record<string, MergeRefusal>;
   /** The node the dispatch dialog is open for, or null. */
   dispatchNodeId: string | null;
   /** A request for the node's detail view to switch to its Runs tab. */
@@ -64,6 +70,9 @@ export interface RunStoreState {
   /** Creates a run; throws the API error so the dialog can show it. */
   createRun: (body: CreateRunRequest) => Promise<Run>;
   cancelRun: (runId: string) => Promise<boolean>;
+  /** Approves merging a run's PR at the head the approver saw. */
+  mergeRun: (runId: string, headSha: string) => Promise<boolean>;
+  clearMergeError: (runId: string) => void;
   /** Starts following a run live; returns the matching unwatch. */
   watchRun: (runId: string) => () => void;
   selectRun: (nodeId: string, runId: string | null) => void;
@@ -85,6 +94,24 @@ export interface RunStoreState {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A refused merge approval: "denied" is a 403 (an agent session may not
+ * approve merges), "precondition" a 409 with the hub's reason (CI not green,
+ * the PR changed since, no open PR, a merge already pending). */
+export interface MergeRefusal {
+  kind: "denied" | "precondition" | "other";
+  message: string;
+}
+
+export function mergeRefusal(error: unknown): MergeRefusal {
+  if (error instanceof ConflictError) {
+    return { kind: "precondition", message: error.serverMessage };
+  }
+  if (error instanceof AuthError && error.status === 403) {
+    return { kind: "denied", message: error.message };
+  }
+  return { kind: "other", message: message(error) };
 }
 
 /** Merges two seq-ordered event lists, keeping the first copy of each seq. */
@@ -170,6 +197,8 @@ const initial = {
   cancelling: {},
   cancelErrors: {},
   stopRequested: {},
+  merging: {},
+  mergeErrors: {},
   dispatchNodeId: null,
   showRunsRequest: null,
 } satisfies Partial<RunStoreState>;
@@ -396,6 +425,45 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       });
     }
   },
+
+  mergeRun: async (runId, headSha) => {
+    if (get().merging[runId]) return false;
+    get().clearMergeError(runId);
+    set((state) => ({ merging: { ...state.merging, [runId]: true } }));
+    const gen = generation;
+    try {
+      const run = await api.mergeRun(runId, headSha);
+      if (gen !== generation) return true;
+      if (run?.id) {
+        set((state) => ({
+          runsByNode: upsertRun(state.runsByNode, run),
+          latestByNode: foldLatest(state.latestByNode, [run]),
+        }));
+      }
+      return true;
+    } catch (error) {
+      if (gen !== generation) return false;
+      set((state) => ({ mergeErrors: { ...state.mergeErrors, [runId]: mergeRefusal(error) } }));
+      // A 409 often means the run moved on (a new head, a merge already
+      // pending): show what the hub knows now.
+      if (error instanceof ConflictError) void get().refreshRun(runId);
+      return false;
+    } finally {
+      set((state) => {
+        const merging = { ...state.merging };
+        delete merging[runId];
+        return { merging };
+      });
+    }
+  },
+
+  clearMergeError: (runId) =>
+    set((state) => {
+      if (!(runId in state.mergeErrors)) return {};
+      const mergeErrors = { ...state.mergeErrors };
+      delete mergeErrors[runId];
+      return { mergeErrors };
+    }),
 
   watchRun: (runId) => {
     set((state) => ({ watched: { ...state.watched, [runId]: (state.watched[runId] ?? 0) + 1 } }));

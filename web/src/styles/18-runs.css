@@ -1209,3 +1209,404 @@
     font-size: 11px;
   }
 }
+
+/* ---- W4: merge approval ---- */
+.run-merge {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.run-detail-merge {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.run-merge-text {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+}
+.run-merge-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.run-merge-status.is-pending {
+  color: var(--st-progress-fg);
+}
+.run-merge-status.is-merged {
+  color: var(--pr-merged-fg);
+  font-weight: 600;
+}
+.run-merge-status.is-failed {
+  color: var(--st-failed-fg);
+}
+.run-merge-reason {
+  color: var(--text-2);
+}
+.run-merge-spinner {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: run-merge-spin 0.9s linear infinite;
+}
+@keyframes run-merge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-merge-spinner {
+    animation: none;
+  }
+}
+.run-merge-button {
+  display: inline-flex;
+  min-height: 32px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.run-merge-button:disabled {
+  border-color: var(--border);
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: not-allowed;
+  font-weight: 500;
+}
+.run-merge-error {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+.run-merge-dialog {
+  width: min(440px, 100%);
+}
+.run-merge-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 12px;
+  margin: 0;
+  padding: 0 18px 10px;
+  font-size: 12px;
+}
+.run-merge-facts > div {
+  display: contents;
+}
+.run-merge-facts dt {
+  color: var(--text-2);
+}
+.run-merge-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-merge-facts .mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.confirm-dialog .run-merge-method {
+  margin: 0 18px 14px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--st-ready-fg);
+  border-radius: 2px 6px 6px 2px;
+  color: var(--text);
+  background: var(--st-ready-bg);
+  font-size: 11px;
+}
+.run-merge-dialog footer button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.run-diff-foot {
+  padding: 9px 14px 9px 18px;
+  padding-bottom: max(9px, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.run-diff-foot:empty {
+  display: none;
+}
+
+/* ---- W4: budget ---- */
+.run-budget-warning {
+  margin: 0;
+  padding: 7px 10px;
+  border-left: 2px solid var(--st-failed-fg);
+  border-radius: 2px 6px 6px 2px;
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.run-inline-link {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+.runner-settings {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.runner-settings > summary {
+  padding: 9px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.runner-settings[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.budget-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+.budget-settings .runner-hint,
+.budget-settings .run-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.budget-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.budget-usage-title {
+  font-size: 11px;
+}
+.budget-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.budget-meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+}
+.budget-meter-value {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.budget-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.budget-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.budget-meter.is-over .budget-bar > span {
+  background: var(--st-failed-fg);
+}
+.budget-meter.is-over .budget-meter-value {
+  color: var(--st-failed-fg);
+  font-weight: 600;
+}
+.budget-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.budget-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.budget-actions button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent);
+  cursor: pointer;
+  font-size: 11.5px;
+}
+.budget-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.budget-saved {
+  color: var(--st-done-fg);
+  font-size: 11.5px;
+}
+.run-notify-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 9px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+}
+.run-notify-settings p {
+  min-width: 0;
+  flex: 1 1 220px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ---- W4: run notification toasts (bottom left; the agent network's and
+   the copilot's buttons keep the bottom right) ---- */
+.run-toasts {
+  position: fixed;
+  bottom: max(18px, env(safe-area-inset-bottom, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  z-index: 70;
+  display: flex;
+  width: min(360px, calc(100vw - 96px));
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.run-toast {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--shadow) 70%, transparent);
+  pointer-events: auto;
+  animation: run-toast-in 180ms ease-out;
+}
+@keyframes run-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-toast {
+    animation: none;
+  }
+}
+.run-toast-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 6px 10px 12px;
+  border: 0;
+  color: var(--text);
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.run-toast-body:hover {
+  background: var(--hover);
+}
+.run-toast-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--st-done-fg);
+}
+.run-toast.is-failed .run-toast-dot,
+.run-toast.is-ci-failed .run-toast-dot,
+.run-toast.is-merge-failed .run-toast-dot {
+  background: var(--st-failed-fg);
+}
+.run-toast.is-merged .run-toast-dot {
+  background: var(--pr-merged-fg);
+}
+.run-toast-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.run-toast-text strong,
+.run-toast-text span {
+  overflow-wrap: anywhere;
+}
+.run-toast-text span {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.run-toast-close {
+  display: inline-flex;
+  width: 36px;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: var(--text-2);
+  background: none;
+  cursor: pointer;
+}
+.run-toast-close:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+@media (max-width: 640px) {
+  .run-merge-button {
+    min-height: 44px;
+    flex: 1 1 100%;
+    font-size: 13px;
+  }
+  .run-merge-dialog footer button {
+    min-height: 44px;
+    flex: 1;
+    font-size: 13px;
+  }
+  .run-merge-backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+  .budget-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .budget-actions button {
+    min-height: 40px;
+  }
+  .run-toast-body {
+    min-height: 44px;
+  }
+}

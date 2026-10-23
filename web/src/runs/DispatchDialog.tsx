@@ -4,6 +4,7 @@ import {
   ConflictError,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
+  RequestError,
   type Actor,
   type Run,
   type Runner,
@@ -14,6 +15,8 @@ import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
+import { budgetExceededText } from "./BudgetSettings";
+import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
 
 const HEADLESS = "headless";
@@ -98,6 +101,14 @@ export function DispatchDialog({
     void refreshRunners();
   }, [refreshRunners]);
 
+  // Today's budget, so the dialog can say up front that the hub would refuse.
+  const budgetStatus = useBudget((s) => s.status);
+  const loadBudget = useBudget((s) => s.load);
+  useEffect(() => {
+    void loadBudget();
+  }, [loadBudget]);
+  const budgetWarning = budgetExceededText(t, budgetStatus);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -152,15 +163,19 @@ export function DispatchDialog({
       onCreated(run);
     } catch (caught) {
       const text = caught instanceof Error ? caught.message : String(caught);
+      const overBudget = caught instanceof RequestError && caught.status === 429;
       setError(
         caught instanceof AuthError && caught.status === 403
           ? t("runs.permissionDenied", { message: text })
-          : // req() turns every 409 into a ConflictError and drops the body;
-            // on this route a 409 only ever means the runner cannot take runs.
+          : // On this route a 409 only ever means the runner cannot take runs.
             caught instanceof ConflictError
             ? t("runs.runnerCannotRun")
-            : text,
+            : overBudget
+              ? t("runs.overBudget", { message: text })
+              : text,
       );
+      // The refusal names the limit; the warning line catches up with it.
+      if (overBudget) void useBudget.getState().load();
     } finally {
       setSubmitting(false);
     }
@@ -220,6 +235,22 @@ export function DispatchDialog({
             <div className="notify-message error" role="status">
               {runnersError}
             </div>
+          )}
+
+          {budgetWarning && (
+            <p className="run-budget-warning" role="status">
+              {budgetWarning}{" "}
+              <button
+                type="button"
+                className="run-inline-link"
+                onClick={() => {
+                  useBudget.getState().requestShow(true);
+                  openRunners();
+                }}
+              >
+                {t("budget.adjust")}
+              </button>
+            </p>
           )}
 
           {loadingRunners ? (
