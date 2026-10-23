@@ -626,6 +626,38 @@ CREATE TABLE run_events (
 ) STRICT;
 `,
 	},
+	{
+		// 0011 belongs to the agent network's W1.5 step on another branch.
+		name: "0012_run_changes",
+		stmt: `
+-- What a run changed and the pull request it opened (W3). The runner commits,
+-- pushes and opens the PR with its owner's own gh login; the hub only records
+-- what it reports.
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT    NOT NULL DEFAULT '';
+-- Why no PR could be opened (no origin, gh not signed in, push refused).
+ALTER TABLE runs ADD COLUMN pr_error      TEXT    NOT NULL DEFAULT '';
+
+-- One row per run, written once: a resent changes message is ignored.
+CREATE TABLE run_changes (
+    run_id          TEXT PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    -- []runnerwire.FileChange as JSON.
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    -- The unified diff, at most runnerwire.MaxPatchBytes; '' when dropped.
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

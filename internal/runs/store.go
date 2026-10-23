@@ -176,19 +176,22 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agent, model,
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
-       started_at, finished_at`
+       started_at, finished_at, commit_sha, files_changed, additions, deletions,
+       pr_number, pr_state, pr_error`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var usage string
-	var exit int64
+	var exit, files, additions, deletions, prNumber int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
-		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt); err != nil {
+		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
+		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)
+	r.FilesChanged, r.Additions, r.Deletions, r.PRNumber = int(files), int(additions), int(deletions), int(prNumber)
 	if usage != "" {
 		var parsed runnerwire.Usage
 		if json.Unmarshal([]byte(usage), &parsed) == nil {

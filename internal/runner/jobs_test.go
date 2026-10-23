@@ -27,7 +27,8 @@ import (
 )
 
 // The fake agent: this test binary, re-run with helperEnv set, standing in
-// for claude. It records what it was given and prints stream-json fixtures.
+// for an agent CLI. It records what it was given and prints the CLI's
+// recorded output from the adapter fixtures.
 const helperEnv = "NODEVAS_RUNNER_TEST_HELPER"
 
 func TestHelperProcess(t *testing.T) {
@@ -40,6 +41,11 @@ func TestHelperProcess(t *testing.T) {
 	put := func(name, value string) { _ = os.WriteFile(filepath.Join(record, name), []byte(value), 0o600) }
 	wd, _ := os.Getwd()
 	put("cwd", wd)
+	// The adapter's arguments follow "--" (see fakeAgent.Command).
+	if i := slices.Index(os.Args, "--"); i >= 0 {
+		raw, _ := json.Marshal(os.Args[i+1:])
+		put("args", string(raw))
+	}
 	stdin, _ := io.ReadAll(os.Stdin)
 	put("stdin", string(stdin))
 	if path := os.Getenv("NODEVAS_TEST_MCP"); path != "" {
@@ -57,14 +63,37 @@ func TestHelperProcess(t *testing.T) {
 		}
 		_, _ = os.Stdout.Write(raw)
 	}
+	edit := func() {
+		for name, content := range map[string]string{"README": "hi\nmore\n", "hello.txt": "hello\n", "data.bin": "\x00\x01\x02bin"} {
+			if err := os.WriteFile(filepath.Join(wd, name), []byte(content), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(9)
+			}
+		}
+	}
 	switch mode {
 	case "ok":
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
+	case "edit":
+		edit()
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
+	case "edit-fail":
+		edit()
+		fixture("claude_error.jsonl")
+		os.Exit(3)
 	case "fail":
 		fixture("claude_error.jsonl")
 		fmt.Fprintln(os.Stderr, "boom on stderr")
 		os.Exit(3)
+	case "codex-ok":
+		fixture("codex_stream.jsonl")
+		os.Exit(0)
+	case "codex-fail":
+		fixture("codex_model_error.jsonl")
+		fmt.Fprintln(os.Stderr, "ERROR rmcp::transport::worker: worker quit")
+		os.Exit(1)
 	case "hang":
 		fmt.Println(`{"type":"system","subtype":"init","session_id":"s-hang","model":"m"}`)
 		// A grandchild holding our stdout, like node's children do: killing
@@ -85,21 +114,26 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(7)
 }
 
-type fakeAgent struct{ record, fixtures string }
+// fakeAgent wraps a real adapter: its command (arguments, MCP wiring, stdin
+// prompt, workdir) and its parser, with the program swapped for the helper.
+type fakeAgent struct {
+	real             adapter.Adapter
+	record, fixtures string
+}
 
-func (fakeAgent) Kind() string              { return "claude" }
-func (fakeAgent) NewParser() adapter.Parser { return adapter.Claude{}.NewParser() }
+func (f fakeAgent) Kind() string              { return f.real.Kind() }
+func (f fakeAgent) NewParser() adapter.Parser { return f.real.NewParser() }
 
-// Command is the real Claude command (MCP config file, stdin prompt, workdir)
-// with the program swapped for the helper. The job's prompt picks the mode.
+// Command is the real adapter's command run by the helper, which gets the
+// real arguments after "--". The job's prompt picks the mode.
 func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, error) {
-	cmd, err := adapter.Claude{}.Command(job, env)
+	cmd, err := f.real.Command(job, env)
 	if err != nil {
 		return nil, err
 	}
 	mode, _, _ := strings.Cut(job.Prompt, ":")
 	cmd.Path = os.Args[0]
-	cmd.Args = []string{os.Args[0], "-test.run=^TestHelperProcess$"}
+	cmd.Args = append([]string{os.Args[0], "-test.run=^TestHelperProcess$", "--"}, cmd.Args[1:]...)
 	cmd.Err = nil // the made-up claude path did not resolve; the helper does
 	cmd.Env = append(cmd.Env, helperEnv+"="+mode,
 		"NODEVAS_TEST_RECORD="+filepath.Join(f.record, job.RunID),
@@ -137,7 +171,7 @@ func (h *jobHub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	conn.SetReadLimit(runnerwire.MaxChangesMessageBytes)
 	ctx := r.Context()
 	for {
 		var msg runnerwire.Envelope
@@ -253,8 +287,8 @@ func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
 			},
 		},
 		Adapter: func(kind string) adapter.Adapter {
-			if kind == "claude" {
-				return fakeAgent{record: env.record, fixtures: fixtures}
+			if real := adapter.For(kind); real != nil {
+				return fakeAgent{real: real, record: env.record, fixtures: fixtures}
 			}
 			return nil
 		},
@@ -300,10 +334,22 @@ func (e *jobEnv) recorded(t *testing.T, runID, name string) string {
 	return ""
 }
 
+// samePath compares two paths that may no longer exist (a run that changed
+// nothing has its worktree removed): symlinks resolve as far as they exist.
 func samePath(a, b string) bool {
-	ea, errA := filepath.EvalSymlinks(a)
-	eb, errB := filepath.EvalSymlinks(b)
-	return errA == nil && errB == nil && strings.EqualFold(filepath.Clean(ea), filepath.Clean(eb))
+	return strings.EqualFold(resolvePath(a), resolvePath(b))
+}
+
+func resolvePath(p string) string {
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(resolvePath(parent), filepath.Base(p))
 }
 
 func TestRunSucceeds(t *testing.T) {
@@ -318,16 +364,20 @@ func TestRunSucceeds(t *testing.T) {
 	finish := env.hub.wait("run-ok", runnerwire.TypeFinish)
 	msgs := env.hub.messages("run-ok")
 
-	// accept, then events, then finish; nothing else.
-	if msgs[0].Type != runnerwire.TypeAccept || msgs[len(msgs)-1].Type != runnerwire.TypeFinish {
+	// accept, then events, then changes (none), then finish; nothing else.
+	n := len(msgs)
+	if msgs[0].Type != runnerwire.TypeAccept || msgs[n-2].Type != runnerwire.TypeChanges || msgs[n-1].Type != runnerwire.TypeFinish {
 		t.Fatalf("message order: %+v", msgs)
+	}
+	if ch := msgs[n-2].Changes; ch == nil || ch.Commit != "" || len(ch.Files) != 0 || ch.Files == nil || ch.Patch != "" {
+		t.Fatalf("changes of a run that changed nothing = %+v", ch)
 	}
 	accept := msgs[0].Accept
 	if accept == nil || accept.RunID != "run-ok" || accept.Base != "main" || accept.Branch != "agent/n-1-run-ok" {
 		t.Fatalf("accept = %+v", accept)
 	}
 	var events []runnerwire.RunEvent
-	for _, msg := range msgs[1 : len(msgs)-1] {
+	for _, msg := range msgs[1 : n-2] {
 		if msg.Type != runnerwire.TypeEvents || len(msg.Events) == 0 || len(msg.Events) > runnerwire.MaxEventsPerMessage {
 			t.Fatalf("unexpected message %+v", msg)
 		}
@@ -349,8 +399,9 @@ func TestRunSucceeds(t *testing.T) {
 			t.Errorf("no %s event in %v", want, types)
 		}
 	}
-	if !strings.Contains(events[0].Text, "worktree") || !strings.Contains(events[len(events)-1].Text, "exited with code 0") {
-		t.Errorf("first/last events: %+v / %+v", events[0], events[len(events)-1])
+	if !strings.Contains(events[0].Text, "worktree") || !strings.Contains(events[len(events)-2].Text, "exited with code 0") ||
+		events[len(events)-1].Text != "no changes; worktree removed" {
+		t.Errorf("first/last events: %+v / %+v", events[0], events[len(events)-2:])
 	}
 
 	result := finish.Result
@@ -365,8 +416,12 @@ func TestRunSucceeds(t *testing.T) {
 	if cwd := env.recorded(t, "run-ok", "cwd"); !samePath(cwd, wtPath) {
 		t.Errorf("agent ran in %s, want %s", cwd, wtPath)
 	}
-	if got := gitT(t, wtPath, "branch", "--show-current"); got != "agent/n-1-run-ok" {
-		t.Errorf("worktree branch %q", got)
+	// It changed nothing, so its worktree and branch are gone.
+	if _, err := os.Stat(wtPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("worktree of a run with no changes left behind: %v", err)
+	}
+	if got := gitT(t, env.repo, "branch", "--list", "agent/*"); got != "" {
+		t.Errorf("branches left behind: %q", got)
 	}
 	stdin := env.recorded(t, "run-ok", "stdin")
 	if !strings.Contains(stdin, "ok: do the thing") || !strings.Contains(stdin, `claim_task with id "n-1"`) {
@@ -416,6 +471,98 @@ func TestRunFails(t *testing.T) {
 	}
 }
 
+// A Codex run through the runner: the real Codex adapter's command and
+// parser, the helper printing a real codex --json recording.
+func TestRunCodexSucceeds(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.Config.CodexSandbox = "read-only" })
+	env.hub.hello()
+	job := testJob("run-codex", "codex-ok: add hello.txt")
+	job.Agent, job.Model = "codex", "gpt-5.5"
+	env.hub.offer(job)
+	finish := env.hub.wait("run-codex", runnerwire.TypeFinish)
+
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-codex") {
+		events = append(events, msg.Events...)
+	}
+	var types []string
+	for _, ev := range events {
+		types = append(types, ev.Type)
+	}
+	for _, want := range []string{runnerwire.EventToolCall, runnerwire.EventToolResult, runnerwire.EventText,
+		runnerwire.EventUsage} {
+		if !slices.Contains(types, want) {
+			t.Errorf("no %s event in %v", want, types)
+		}
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started codex") })
+	if started < 0 || !strings.Contains(events[started].Text, "model gpt-5.5, sandbox read-only") {
+		t.Errorf("no start line with the sandbox in %+v", events)
+	}
+	claim := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return ev.Tool == "mcp__nodevas__claim_task" })
+	if claim < 0 {
+		t.Errorf("no claim_task call in %v", types)
+	}
+
+	result := finish.Result
+	if result == nil || result.Status != runnerwire.RunSucceeded || result.ExitCode != 0 ||
+		!strings.HasPrefix(result.Summary, "Done. Added [hello.txt]") || result.Usage == nil ||
+		result.Usage.OutputTokens != 1703 || result.Usage.CacheReadTokens != 155648 {
+		t.Fatalf("result = %+v", result)
+	}
+
+	// The real codex command line: settings from the runner's config, the
+	// model from the job, the MCP server through the proxy, prompt on stdin.
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-codex", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(env.client.Config.DataDir, "worktrees", "run-codex")
+	if len(args) < 9 || !slices.Equal(args[:6], []string{"exec", "--json", "--color", "never", "-s", "read-only"}) ||
+		args[6] != "-C" || !samePath(args[7], wtPath) || args[len(args)-1] != "-" {
+		t.Fatalf("args = %q", args)
+	}
+	joined := strings.Join(args, " ")
+	exe, _ := os.Executable()
+	for _, want := range []string{"-m gpt-5.5", "-c approval_policy='never'",
+		"-c mcp_servers.nodevas.command='" + exe + "'",
+		"'--actor','run:codex','--session-name','demo-codex-gpt-5-5-run-co'",
+		"-c mcp_servers.nodevas.default_tools_approval_mode='approve'"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "--ignore-user-config") {
+		t.Errorf("ignored the user config unasked: %s", joined)
+	}
+	if cwd := env.recorded(t, "run-codex", "cwd"); !samePath(cwd, wtPath) {
+		t.Errorf("agent ran in %s, want %s", cwd, wtPath)
+	}
+	if stdin := env.recorded(t, "run-codex", "stdin"); !strings.Contains(stdin, "codex-ok: add hello.txt") {
+		t.Errorf("stdin = %q", stdin)
+	}
+}
+
+func TestRunCodexFails(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	job := testJob("run-codex-fail", "codex-fail:")
+	job.Agent, job.Model = "codex", "default"
+	env.hub.offer(job)
+	result := env.hub.wait("run-codex-fail", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunFailed || result.ExitCode != 1 || result.Usage != nil ||
+		result.Error != "The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account. (HTTP 400)" {
+		t.Fatalf("result = %+v", result)
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-codex-fail", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, "-m") || !slices.Contains(args, "workspace-write") {
+		t.Errorf("default model / default sandbox: args = %q", args)
+	}
+}
+
 func TestRunWorktreeFailure(t *testing.T) {
 	env := startJobRunner(t, nil)
 	env.hub.hello()
@@ -448,13 +595,15 @@ func TestRunDeclines(t *testing.T) {
 		mutate func(*runnerwire.Job)
 		reason string
 	}{
-		"d-repo":   {func(j *runnerwire.Job) { j.RepoID = "elsewhere" }, "not on this runner's allowlist"},
-		"d-codex":  {func(j *runnerwire.Job) { j.Agent = "codex" }, `agent "codex" not supported yet`},
-		"d-gemini": {func(j *runnerwire.Job) { j.Agent = "gemini" }, "not supported yet"},
-		"d-model":  {func(j *runnerwire.Job) { j.Model = "gpt-9" }, `model "gpt-9" is not one this runner offers`},
-		"d-base":   {func(j *runnerwire.Job) { j.Base = "--upload-pack=x" }, "not a plain branch name"},
-		"d-id/..":  {func(*runnerwire.Job) {}, "run id is not usable"},
-		"d-no":     {func(*runnerwire.Job) {}, ReasonDeclined},
+		"d-repo":     {func(j *runnerwire.Job) { j.RepoID = "elsewhere" }, "not on this runner's allowlist"},
+		"d-opencode": {func(j *runnerwire.Job) { j.Agent = "opencode" }, `agent "opencode" not supported yet`},
+		"d-gemini":   {func(j *runnerwire.Job) { j.Agent = "gemini" }, `agent "gemini" is not installed on this runner`},
+		// codex is supported and installed, but sonnet is not one of its models.
+		"d-codex": {func(j *runnerwire.Job) { j.Agent = "codex" }, `model "sonnet" is not one this runner offers for codex`},
+		"d-model": {func(j *runnerwire.Job) { j.Model = "gpt-9" }, `model "gpt-9" is not one this runner offers`},
+		"d-base":  {func(j *runnerwire.Job) { j.Base = "--upload-pack=x" }, "not a plain branch name"},
+		"d-id/..": {func(*runnerwire.Job) {}, "run id is not usable"},
+		"d-no":    {func(*runnerwire.Job) {}, ReasonDeclined},
 	}
 	for id, c := range cases {
 		job := testJob(id, "ok:")

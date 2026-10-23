@@ -73,10 +73,17 @@ func runnerUsage(w io.Writer) {
        nodevas runner repo list
        nodevas runner repo remove <id|name>
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
-                                             maxConcurrent, runTimeoutMinutes, dataDir,
-                                             permissionMode (acceptEdits|auto|bypassPermissions|
-                                             manual|dontAsk|plan), allowedTools (one per argument,
-                                             or comma-separated; "none" clears), autoAccept
+                                             maxConcurrent, runTimeoutMinutes, dataDir, autoAccept;
+                                             Claude Code: permissionMode (acceptEdits|auto|
+                                             bypassPermissions|manual|dontAsk|plan), allowedTools
+                                             (one per argument, or comma-separated; "none" clears);
+                                             Codex: codexSandbox (read-only|workspace-write|
+                                             danger-full-access), codexIgnoreUserConfig (true|false);
+                                             Gemini CLI: geminiApprovalMode (default|auto_edit|yolo);
+                                             pull requests: autoPR (true|false), prDraft (true|false),
+                                             prLabels (one per argument, or comma-separated; {model}
+                                             and {agent} are filled in; "none" for no labels),
+                                             prPollSeconds (30 or more)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -262,13 +269,37 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	if cfg.AutoAccept {
 		accept = "AUTO-ACCEPT: anyone who can sign in to the hub as you can run agents here"
 	}
+	codexConfig := "runs load your Codex config.toml: its model, MCP servers and hooks"
+	if cfg.CodexIgnoreUserConfig {
+		codexConfig = "runs skip your Codex config.toml; only its sign-in is used"
+	}
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
 	fmt.Fprintln(w, "runs:")
-	fmt.Fprintf(w, "  maxConcurrent      %d\n", cfg.MaxConcurrentRuns())
-	fmt.Fprintf(w, "  runTimeoutMinutes  %d\n", cfg.RunTimeoutMins())
-	fmt.Fprintf(w, "  dataDir            %s\n", dataDir)
-	fmt.Fprintf(w, "  permissionMode     %s\n", cfg.ClaudePermissionMode())
-	fmt.Fprintf(w, "  allowedTools       %s\n", tools)
-	fmt.Fprintf(w, "  autoAccept         %t (%s)\n", cfg.AutoAccept, accept)
+	setting("maxConcurrent", cfg.MaxConcurrentRuns())
+	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
+	setting("dataDir", dataDir)
+	setting("autoAccept", fmt.Sprintf("%t (%s)", cfg.AutoAccept, accept))
+	fmt.Fprintln(w, "claude runs:")
+	setting("permissionMode", cfg.ClaudePermissionMode())
+	setting("allowedTools", tools)
+	fmt.Fprintln(w, "codex runs:")
+	setting("codexSandbox", cfg.CodexSandboxMode())
+	setting("codexIgnoreUserConfig", fmt.Sprintf("%t (%s)", cfg.CodexIgnoreUserConfig, codexConfig))
+	fmt.Fprintln(w, "gemini runs:")
+	setting("geminiApprovalMode", cfg.GeminiApproval())
+	labels := "(none)"
+	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
+		labels = strings.Join(templates, ", ")
+	}
+	autoPR := "commit, push the run's branch and open a PR with your gh login"
+	if !cfg.AutoPROn() {
+		autoPR = "commit only; the branch stays in its worktree"
+	}
+	fmt.Fprintln(w, "pull requests:")
+	setting("autoPR", fmt.Sprintf("%t (%s)", cfg.AutoPROn(), autoPR))
+	setting("prDraft", cfg.PRDraft)
+	setting("prLabels", labels)
+	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at
@@ -295,6 +326,12 @@ func runnerSet(args []string, stdout, stderr io.Writer) error {
 	}
 	if cfg.PermissionMode == "bypassPermissions" {
 		fmt.Fprintln(stderr, "note: bypassPermissions lets agents run any command on this machine without asking.")
+	}
+	if cfg.CodexSandbox == "danger-full-access" {
+		fmt.Fprintln(stderr, "note: danger-full-access lets Codex runs run any command on this machine, outside any sandbox.")
+	}
+	if cfg.GeminiApprovalMode == "yolo" {
+		fmt.Fprintln(stderr, "note: yolo lets Gemini runs run any command on this machine without asking.")
 	}
 	fmt.Fprintln(stdout, "saved; restart a running runner for it to take effect")
 	return nil

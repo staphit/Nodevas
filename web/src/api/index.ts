@@ -103,8 +103,14 @@ export {
   runFinal,
 } from "./runs";
 export type {
+  CIStatus,
   CreateRunRequest,
+  FileChange,
+  FileChangeStatus,
+  PRState,
   Run,
+  RunChanges,
+  RunChangesResponse,
   RunEvent,
   RunEventsResponse,
   RunEventType,

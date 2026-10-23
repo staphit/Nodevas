@@ -5,8 +5,9 @@ import { DispatchDialog } from "./DispatchDialog";
 import { useRuns } from "./runStore";
 
 /**
- * Hosts the dispatch dialog for whichever node asked for it, and drops held
- * runs when the board switches project. The run view itself lives in the
+ * Hosts the dispatch dialog for whichever node asked for it, drops held runs
+ * when the board switches project, and asks once per project for its recent
+ * runs so graph cards can badge their latest one. The run view itself lives in the
  * node's detail view (Drawer → Runs).
  */
 export function RunsRoot() {
@@ -16,9 +17,13 @@ export function RunsRoot() {
   const previousProject = useRef(activeProject);
 
   useEffect(() => {
-    if (previousProject.current === activeProject) return;
-    previousProject.current = activeProject;
-    useRuns.getState().reset();
+    if (previousProject.current !== activeProject) {
+      previousProject.current = activeProject;
+      useRuns.getState().reset();
+    }
+    // One request per project feeds every graph card's run badge; after it,
+    // runs-changed pushes keep the badges current node by node.
+    if (activeProject) void useRuns.getState().loadProjectRuns();
   }, [activeProject]);
 
   const onCreated = useCallback(

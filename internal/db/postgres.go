@@ -494,6 +494,31 @@ CREATE TABLE run_events (
 );
 `,
 	},
+	{
+		// 0011 belongs to the agent network's W1.5 step on another branch.
+		name: "0012_run_changes",
+		stmt: `
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pr_error      TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE run_changes (
+    run_id          TEXT COLLATE "C" PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

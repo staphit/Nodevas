@@ -55,6 +55,9 @@ type Client struct {
 	FlushInterval time.Duration
 	// RunTimeout overrides the config's run timeout; tests shorten it.
 	RunTimeout time.Duration
+	// PRPollInterval overrides the config's PR polling interval; tests
+	// shorten it.
+	PRPollInterval time.Duration
 
 	jobs *jobs
 }
@@ -83,6 +86,9 @@ func (c *Client) Run(ctx context.Context) error {
 	}
 	c.jobs = newJobs(ctx, c)
 	defer c.jobs.shutdown()
+	c.jobs.loadPRs()
+	c.jobs.wg.Add(1)
+	go c.jobs.watchPRs(c.prPollInterval)
 	backoff := c.backoffMin()
 	for {
 		welcomed, err := c.session(ctx)
@@ -172,6 +178,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			case runnerwire.TypeWelcome:
 				welcomed = true
 				if msg.Welcome != nil {
+					c.jobs.setHubName(msg.Welcome.Name)
 					c.logf("connected to %s as %q (owner %s)", c.Config.Hub, msg.Welcome.Name, msg.Welcome.Owner)
 				} else {
 					c.logf("connected to %s", c.Config.Hub)
@@ -189,7 +196,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	flushTick := time.NewTicker(c.flushInterval())
 	defer flushTick.Stop()
 	lastHeard := time.Now()
-	// Whatever runs said while the runner was away goes out first.
+	// Whatever runs said while the runner was away goes out first, then the
+	// latest of every watched PR, once, in case the hub missed a change.
+	c.jobs.resendPRs()
 	flush := func() error {
 		return c.jobs.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) })
 	}
@@ -359,6 +368,13 @@ func (c *Client) runTimeout() time.Duration {
 		return c.RunTimeout
 	}
 	return c.Config.RunTimeout()
+}
+
+func (c *Client) prPollInterval() time.Duration {
+	if c.PRPollInterval > 0 {
+		return c.PRPollInterval
+	}
+	return c.Config.PRPollInterval()
 }
 
 func (c *Client) adapterFor(kind string) adapter.Adapter {

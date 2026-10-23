@@ -56,6 +56,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs", a.list)
 	api.GET("/runs/:id", a.get)
 	api.GET("/runs/:id/events", a.events)
+	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
 }
 
@@ -361,6 +362,23 @@ func (a *API) events(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, runnerwire.RunEventsResponse{Events: events, More: more})
+}
+
+// changes returns what the run committed: files, counts and the patch. Changes
+// is null until the runner reports them, and stays null for a run that never
+// got that far.
+func (a *API) changes(c *gin.Context) {
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	changes, err := a.d.Store().Changes(c.Request.Context(), r.ID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.RunChangesResponse{Changes: changes})
 }
 
 func queryInt(c *gin.Context, key string, fallback int64) (int64, error) {
