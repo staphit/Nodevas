@@ -61,7 +61,8 @@ export type WSEvent = {
     | "runners-changed"
     | "runs-changed"
     | "run-events"
-    | "run-notify";
+    | "run-notify"
+    | "session-changes";
   id?: string;
   project?: string;
   peers?: Peer[];

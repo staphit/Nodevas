@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Runner } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
-import { IconClose, IconComputer, IconCopy, IconTrash } from "../icons";
+import { IconClose, IconComputer, IconCopy, IconShield, IconTrash } from "../icons";
+import { MODE_INTERACTIVE } from "../runs/autoAccept";
+import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
+import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
 import { languageLocale, useI18n } from "../i18n";
 import { BudgetSettings } from "../runs/BudgetSettings";
 import { useBudget } from "../runs/budgetStore";
@@ -41,6 +44,131 @@ function CopyButton({ value, label }: { value: string; label: string }) {
       <IconCopy size={13} />
       <span>{copied ? t("runners.copied") : t("runners.copy")}</span>
     </button>
+  );
+}
+
+/** The runner CLI's auto-accept commands, as `nodevas runner` spells them. */
+export const AUTOACCEPT_COMMANDS = [
+  "nodevas runner autoaccept on|off|show",
+  "nodevas runner autoaccept step-up required|optional",
+  "nodevas runner autoaccept repo|agent|mode add|remove …",
+];
+
+function PolicyChips({ items, empty }: { items: string[]; empty: string }) {
+  if (items.length === 0) return <span className="runner-empty-inline">{empty}</span>;
+  return (
+    <span className="runner-models">
+      {items.map((item) => (
+        <span key={item} className="runner-model">
+          {item}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A runner's auto-accept allowlist (W6), read-only: the runner owns it and
+ * enforces it, so the way to change it is a command on that machine.
+ */
+export function AutoAcceptPolicyView({ runner }: { runner: Runner }) {
+  const { t } = useI18n();
+  // Step-up words are hidden on a hub that does not use step-up at all.
+  const stepUpShown = useStepUp((s) => s.status?.required !== false);
+  const policy = runner.info?.autoAccept;
+  const repoName = (id: string) => runner.info?.repos?.find((repo) => repo.id === id)?.name || id;
+  const modes = policy?.modes?.length ? policy.modes : [""];
+
+  let body: React.ReactNode;
+  if (!policy) {
+    body = <span className="runner-empty-inline">{t("runners.autoAcceptUnknown")}</span>;
+  } else if (!policy.enabled) {
+    body = <span className="runner-empty-inline">{t("runners.autoAcceptOff")}</span>;
+  } else {
+    body = (
+      <dl className="runner-policy">
+        <div>
+          <dt>{t("runners.repos")}</dt>
+          <dd>
+            <PolicyChips items={(policy.repos ?? []).map(repoName)} empty={t("runners.policyNone")} />
+          </dd>
+        </div>
+        <div>
+          <dt>{t("runners.agents")}</dt>
+          <dd>
+            <PolicyChips items={policy.agents ?? []} empty={t("runners.policyNone")} />
+          </dd>
+        </div>
+        <div>
+          <dt>{t("runners.policyModes")}</dt>
+          <dd>
+            <PolicyChips
+              items={modes.map((mode) =>
+                mode === "" || mode === "headless"
+                  ? t("runners.modeHeadless")
+                  : mode === MODE_INTERACTIVE
+                    ? t("runners.modeInteractive")
+                    : mode,
+              )}
+              empty={t("runners.policyNone")}
+            />
+          </dd>
+        </div>
+        {stepUpShown && (
+          <div>
+            <dt>{t("runners.policyStepUp")}</dt>
+            <dd className={policy.requireStepUp ? "" : "runner-policy-warn"}>
+              {policy.requireStepUp ? t("runners.stepUpRequired") : t("runners.stepUpNotRequired")}
+            </dd>
+          </div>
+        )}
+      </dl>
+    );
+  }
+
+  return (
+    <div className="runner-section runner-autoaccept" data-testid={`runner-policy-${runner.id}`}>
+      <span className="runner-section-label">
+        {t("runners.autoAccept")}
+        {policy && (
+          <span className={`runner-policy-state${policy.enabled ? " on" : ""}`}>
+            {policy.enabled ? t("runners.autoAcceptOn") : t("runners.autoAcceptOffShort")}
+          </span>
+        )}
+      </span>
+      {body}
+      <span className="runner-hint runner-policy-hint">
+        {t("runners.autoAcceptHint")}{" "}
+        {AUTOACCEPT_COMMANDS.map((command) => (
+          <code key={command}>{command}</code>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** The step-up line at the top of the Runners dialog: whether this browser
+ * is verified, and the way to verify. Nothing on a hub without step-up. */
+function StepUpRow({ onVerify }: { onVerify: () => void }) {
+  const { t } = useI18n();
+  const status = useStepUp((s) => s.status);
+  if (!status?.required) return null;
+  const active = stepUpActive(status);
+  const until = formatClock(status.until);
+  return (
+    <section className={`runner-stepup${active ? " is-active" : ""}`} aria-label={t("stepUp.title")}>
+      <IconShield size={15} />
+      <span className="runner-stepup-text">
+        {active
+          ? until
+            ? t("stepUp.verifiedUntil", { time: until })
+            : t("stepUp.verified")
+          : t("runners.stepUpInactive")}
+      </span>
+      <button type="button" className="runner-copy" onClick={onVerify}>
+        {active ? t("runners.verifyAgain") : t("runners.verifyIdentity")}
+      </button>
+    </section>
   );
 }
 
@@ -134,6 +262,8 @@ function RunnerCard({ runner }: { runner: Runner }) {
         </div>
       )}
 
+      {info && <AutoAcceptPolicyView runner={runner} />}
+
       {info && (
         <div className="runner-section">
           <span className="runner-section-label">{t("runners.repos")}</span>
@@ -183,6 +313,13 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // W6: whether this browser is stepped up, asked afresh on every open.
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+  useEffect(() => {
+    void useStepUp.getState().load();
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -276,6 +413,8 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
+          <StepUpRow onVerify={() => setStepUpOpen(true)} />
+
           {!loaded || (loading && runners.length === 0) ? (
             <p className="runner-empty">{t("common.loading")}</p>
           ) : runners.length === 0 ? (
@@ -347,6 +486,7 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
             </button>
           )}
         </footer>
+        {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
       </div>
     </div>
   );

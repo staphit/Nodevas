@@ -43,7 +43,7 @@ export type {
   ExportScope,
   ProjectImportMode,
 } from "./workspace";
-export type { Actor } from "./auth";
+export type { Actor, StepUpStatus } from "./auth";
 export {
   COPILOT_MODES,
   NdjsonParser,
@@ -92,12 +92,14 @@ export type {
   Runner,
   RunnerAgent,
   RunnerCreateResponse,
+  AutoAcceptPolicy,
   RunnerInfo,
   RunnerListResponse,
   RunnerModel,
   RunnerRepo,
 } from "./runners";
 export {
+  MAX_SESSION_FILES,
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
   runCancellable,
@@ -123,6 +125,8 @@ export type {
   RunMergeRequest,
   RunStatus,
   RunUsage,
+  SessionChange,
+  SessionChangesResponse,
   AgentModel,
   FailureKind,
   PipelineState,

@@ -23,6 +23,7 @@ import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
 import { useRunners } from "./runners/runnerStore";
+import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
@@ -338,6 +339,10 @@ function MainApp() {
           // last event.
           useRuns.getState().onRunEvents(ev.id);
           break;
+        case "session-changes":
+          // The id is a node: its external sessions are refetched if shown.
+          useSessions.getState().onChanged(ev.id);
+          break;
         case "run-notify":
           // The id is a run that finished, whose CI turned red or whose
           // merge ended: toast it, and raise a system notification when the
@@ -363,6 +368,7 @@ function MainApp() {
           // Run pushes sent while the socket was down are gone; refetch
           // whatever run lists and live runs are on screen.
           useRuns.getState().resync();
+          useSessions.getState().resync();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);

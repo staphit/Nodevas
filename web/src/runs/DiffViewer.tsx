@@ -12,7 +12,7 @@ import {
   type DiffLine,
 } from "./patch";
 import { MergeControl, mergeConfirmOpen } from "./MergeApproval";
-import { LineCounts, RunChangesSummary } from "./RunChanges";
+import { filesLabel, LineCounts, RunChangesSummary } from "./RunChanges";
 import { formatCount, safeExternalUrl } from "./runFormat";
 import { useRuns } from "./runStore";
 
@@ -231,17 +231,19 @@ function FileView({
   change,
   file,
   changes,
-  run,
+  prHref,
+  prNumber,
   layout,
 }: {
   change: FileChange;
   file: DiffFile | undefined;
   changes: RunChanges;
-  run: Run;
+  /** Where the whole diff can be read when the patch was too big. */
+  prHref: string;
+  prNumber?: number;
   layout: DiffLayout;
 }) {
   const { t } = useI18n();
-  const prHref = safeExternalUrl(run.prUrl);
   let body: React.ReactNode;
   if (changes.patchTruncated || !changes.patch) {
     body = (
@@ -251,7 +253,7 @@ function FileView({
           <>
             {" "}
             <a href={prHref} target="_blank" rel="noopener noreferrer">
-              {t("diff.openPr", { number: run.prNumber ?? "" })}
+              {t("diff.openPr", { number: prNumber ?? "" })}
             </a>
           </>
         )}
@@ -284,25 +286,55 @@ function FileView({
   );
 }
 
-/**
- * A finished run's changes, read-only: the file list and, for the chosen
- * file, its hunks — side by side on a wide screen (or unified, the reader's
- * choice), always unified on a phone. Fetches the changes when opened.
- */
-export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void }) {
+/** "+120 −8 · 5 files": the summary line of a diff with no run behind it. */
+export function ChangesSummary({ changes, files }: { changes: RunChanges; files: number }) {
   const { t } = useI18n();
-  const held = useRuns((s) => s.changesByRun[run.id]);
-  const loading = useRuns((s) => Boolean(s.changesLoading[run.id]));
-  const error = useRuns((s) => s.changesErrors[run.id]);
-  const loadChanges = useRuns((s) => s.loadChanges);
+  return (
+    <div className="run-changes">
+      <span className="run-changes-line">
+        <LineCounts additions={changes.additions} deletions={changes.deletions} />
+        <span className="run-changes-files">{filesLabel(t, files)}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A set of changes (RunChanges shape), read-only: the file list and, for the
+ * chosen file, its hunks — side by side on a wide screen (or unified, the
+ * reader's choice), always unified on a phone. Shows what it is given; the
+ * run and session wrappers below fetch or hold the changes.
+ */
+export function DiffDialog({
+  changes,
+  loading = false,
+  error,
+  title,
+  subtitle,
+  prHref = "",
+  prNumber,
+  summary,
+  footer,
+  onClose,
+}: {
+  /** undefined while not fetched yet; null for "nothing was reported". */
+  changes: RunChanges | null | undefined;
+  loading?: boolean;
+  error?: string;
+  title?: string;
+  subtitle: string;
+  prHref?: string;
+  prNumber?: number;
+  /** The line under the head; defaults to the counts and file total. */
+  summary?: (changes: RunChanges, files: number) => React.ReactNode;
+  footer?: React.ReactNode;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
   const wide = useMediaQuery(WIDE_QUERY);
   const [preferred, setPreferred] = useState<DiffLayout>(readDiffLayout);
   const layout: DiffLayout = wide ? preferred : "unified";
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    void loadChanges(run.id, run.commit);
-  }, [run.id, run.commit, loadChanges]);
 
   useEffect(() => {
     // Captured first and stopped: the Drawer underneath closes on Escape too,
@@ -317,12 +349,12 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
-  const changes = held?.changes ?? null;
+  const held = changes ?? null;
   const parsed = useMemo(
-    () => (changes?.patch && !changes.patchTruncated ? parsePatch(changes.patch) : []),
-    [changes],
+    () => (held?.patch && !held.patchTruncated ? parsePatch(held.patch) : []),
+    [held],
   );
-  const files = useMemo(() => (changes ? changedFiles(changes, parsed) : []), [changes, parsed]);
+  const files = useMemo(() => (held ? changedFiles(held, parsed) : []), [held, parsed]);
 
   // A wide screen always shows a file; a phone starts on the list.
   const selected =
@@ -334,7 +366,7 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
   };
 
   let content: React.ReactNode;
-  if (!held) {
+  if (changes === undefined) {
     content = error ? (
       <div className="notify-message error" role="alert">
         {error}
@@ -342,7 +374,7 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
     ) : (
       <p className="run-diff-note">{loading ? t("common.loading") : ""}</p>
     );
-  } else if (!changes) {
+  } else if (!held) {
     content = <p className="run-diff-note">{t("diff.none")}</p>;
   } else if (files.length === 0) {
     content = <p className="run-diff-note">{t("diff.empty")}</p>;
@@ -385,8 +417,9 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
             <FileView
               change={selected}
               file={findDiffFile(parsed, selected.path, selected.oldPath)}
-              changes={changes}
-              run={run}
+              changes={held}
+              prHref={prHref}
+              prNumber={prNumber}
               layout={layout}
             />
           </section>
@@ -395,7 +428,6 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
     );
   }
 
-  const branch = run.branch || run.base;
   // Portalled: the Drawer that opens it may be transformed (the phone sheet),
   // which would pin a fixed backdrop to the Drawer instead of the viewport.
   return createPortal(
@@ -409,15 +441,10 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
       >
         <header className="run-diff-head">
           <div className="run-diff-heading">
-            <h2 id="run-diff-title">{t("diff.title")}</h2>
-            <p className="mono">
-              {t("diff.subtitle", {
-                agent: run.model ? `${run.agent} · ${run.model}` : run.agent,
-                branch,
-              })}
-            </p>
+            <h2 id="run-diff-title">{title ?? t("diff.title")}</h2>
+            <p className="mono">{subtitle}</p>
           </div>
-          {wide && changes && files.length > 0 && (
+          {wide && held && files.length > 0 && (
             <div className="run-diff-layout" role="group" aria-label={t("diff.layout")}>
               {(["split", "unified"] as const).map((option) => (
                 <button
@@ -440,27 +467,65 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
             <IconClose size={14} />
           </button>
         </header>
-        {changes && files.length > 0 && (
+        {held && files.length > 0 && (
           <div className="run-diff-summary">
-            <RunChangesSummary
-              run={{
-                ...run,
-                additions: changes.additions,
-                deletions: changes.deletions,
-                filesChanged: files.length,
-                commit: changes.commit || run.commit,
-              }}
-            />
+            {summary ? summary(held, files.length) : <ChangesSummary changes={held} files={files.length} />}
           </div>
         )}
         {content}
-        {/* Read the diff, then approve: the merge sits at the foot, where a
-            thumb reaches it on a phone. Empty (and hidden) without a PR. */}
-        <footer className="run-diff-foot">
-          <MergeControl run={run} />
-        </footer>
+        {footer}
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * A finished run's changes: fetched when opened, with the run's PR to fall
+ * back on for a diff too big to carry and its merge approval at the foot.
+ */
+export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void }) {
+  const { t } = useI18n();
+  const held = useRuns((s) => s.changesByRun[run.id]);
+  const loading = useRuns((s) => Boolean(s.changesLoading[run.id]));
+  const error = useRuns((s) => s.changesErrors[run.id]);
+  const loadChanges = useRuns((s) => s.loadChanges);
+
+  useEffect(() => {
+    void loadChanges(run.id, run.commit);
+  }, [run.id, run.commit, loadChanges]);
+
+  const branch = run.branch || run.base;
+  return (
+    <DiffDialog
+      changes={held ? held.changes : undefined}
+      loading={loading}
+      error={error}
+      subtitle={t("diff.subtitle", {
+        agent: run.model ? `${run.agent} · ${run.model}` : run.agent,
+        branch,
+      })}
+      prHref={safeExternalUrl(run.prUrl) ?? ""}
+      prNumber={run.prNumber}
+      summary={(changes, files) => (
+        <RunChangesSummary
+          run={{
+            ...run,
+            additions: changes.additions,
+            deletions: changes.deletions,
+            filesChanged: files,
+            commit: changes.commit || run.commit,
+          }}
+        />
+      )}
+      footer={
+        // Read the diff, then approve: the merge sits at the foot, where a
+        // thumb reaches it on a phone. Empty (and hidden) without a PR.
+        <footer className="run-diff-foot">
+          <MergeControl run={run} />
+        </footer>
+      }
+      onClose={onClose}
+    />
   );
 }

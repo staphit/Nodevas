@@ -182,6 +182,35 @@ export interface RunChangesResponse {
   changes: RunChanges | null;
 }
 
+/** Mirrors runnerwire.SessionChange (W6): what an agent the owner runs in
+ * their own terminal (not through a runner) changed while it held a node. */
+export interface SessionChange {
+  id: string;
+  project: string;
+  nodeId: string;
+  sessionId: string;
+  /** The roster name, e.g. "visual-editor-claude". */
+  session: string;
+  /** The CLI, e.g. "claude". */
+  agent: string;
+  actorId: string;
+  repo?: string;
+  branch?: string;
+  /** Files its edits touched, repo-relative when known. */
+  files: string[] | null;
+  /** The diff taken at Stop, when one was. */
+  snapshot?: RunChanges | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionChangesResponse {
+  changes: SessionChange[] | null;
+}
+
+/** runnerwire.MaxSessionFiles: the hub keeps at most this many paths. */
+export const MAX_SESSION_FILES = 500;
+
 export interface CreateRunRequest {
   nodeId: string;
   runnerId: string;
@@ -320,6 +349,10 @@ export const runsApi = {
   getRun: (id: string) => req<Run>(runPath(id)),
   getRunEvents: (id: string, after = 0, limit = RUN_EVENTS_PAGE) =>
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),
+  /** External sessions' changes on a node (W6), project-scoped like every
+   * node route. */
+  getSessionChanges: (nodeId: string) =>
+    req<SessionChangesResponse>(`/api/nodes/${encodeURIComponent(nodeId)}/session-changes`),
   getRunChanges: (id: string) => req<RunChangesResponse>(`${runPath(id)}/changes`),
   cancelRun: (id: string) => req<Run>(`${runPath(id)}/cancel`, { method: "POST" }),
   /** Approves merging the run's PR at `headSha`; 202 with the run, its

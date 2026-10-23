@@ -82,6 +82,19 @@ describe("NodeRuns", () => {
     expect(within(rows[1]).getByText("codex · gpt-5")).toBeInTheDocument();
   });
 
+  it("shows a runner's decline reasons as they came (W6)", async () => {
+    const reason =
+      "auto-accept needs a recent step-up on the hub; repo nodevas is not on this runner's auto-accept list (and nobody is at the runner's terminal to accept)";
+    vi.spyOn(api, "listRuns").mockResolvedValue({
+      runs: [makeRun({ status: "declined", error: reason, finishedAt: "2026-10-24T08:01:00Z" })],
+    });
+    vi.spyOn(api, "getRunEvents").mockResolvedValue({ events: [], more: false });
+    vi.spyOn(api, "getSessionChanges").mockResolvedValue({ changes: [] });
+
+    render(<NodeRuns id="alpha" />);
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+  });
+
   it("shows an empty state and opens the dispatch dialog", async () => {
     vi.spyOn(api, "listRuns").mockResolvedValue({ runs: null });
     render(<NodeRuns id="alpha" />);

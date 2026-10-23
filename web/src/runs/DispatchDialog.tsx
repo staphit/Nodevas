@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthError,
   ConflictError,
@@ -32,6 +32,9 @@ import { matchTakesValue, routeLabel } from "./RoutingSettings";
 import { fetchRouteSuggestion, useRouting } from "./routingStore";
 import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
+import { AutoAcceptNote } from "./AutoAcceptNote";
+import { StepUpDialog } from "../stepup/StepUpDialog";
+import { useStepUp } from "../stepup/stepUpStore";
 
 const HEADLESS = "headless";
 
@@ -159,6 +162,14 @@ export function DispatchDialog({
   useEffect(() => {
     void refreshRunners();
   }, [refreshRunners]);
+
+  // W6: whether the dispatcher is stepped up decides if a runner that asks
+  // for it auto-accepts; asked afresh on every open.
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+  useEffect(() => {
+    void useStepUp.getState().load();
+  }, []);
 
   // Today's budget, so the dialog can say up front that the hub would refuse.
   const budgetStatus = useBudget((s) => s.status);
@@ -565,7 +576,14 @@ export function DispatchDialog({
                     )}
                   </label>
 
-                  <p className="run-note">{t("runs.acceptNote")}</p>
+                  {runner && (
+                    <AutoAcceptNote
+                      runner={runner}
+                      repoId={repoId}
+                      agent={agent?.kind ?? ""}
+                      onVerify={() => setStepUpOpen(true)}
+                    />
+                  )}
                 </>
               )}
             </>
@@ -586,6 +604,9 @@ export function DispatchDialog({
             {submitting ? t("runs.dispatching") : t("runs.dispatch")}
           </button>
         </footer>
+        {/* Outside the form: a portal's submit still bubbles through React
+            to its ancestors, and must not send the run. */}
+        {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
       </div>
     </div>
   );

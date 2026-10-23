@@ -17,6 +17,7 @@ import {
 } from "./runFormat";
 import { RunDiffDialog } from "./DiffViewer";
 import { MergeControl } from "./MergeApproval";
+import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
 import { useRuns } from "./runStore";
 
@@ -737,6 +738,8 @@ export function NodeRuns({ id }: { id: string }) {
           {selected && <RunDetail key={selected.id} run={selected} retry={retryOf(selected)} />}
         </>
       )}
+
+      <NodeSessions id={id} />
     </div>
   );
 }
