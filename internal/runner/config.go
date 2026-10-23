@@ -15,8 +15,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -38,6 +41,209 @@ type Config struct {
 	Repos []runnerwire.Repo `json:"repos,omitempty"`
 	// Models replaces the built-in model list for an agent kind.
 	Models map[string][]runnerwire.Model `json:"models,omitempty"`
+
+	// Run settings, from W1 on; zero values mean the defaults below. They live
+	// here and not in the job because how freely an agent may act on this
+	// machine is its owner's call, never the hub's.
+
+	// MaxConcurrent is how many runs (being asked about or running) at once.
+	MaxConcurrent int `json:"maxConcurrent,omitempty"`
+	// RunTimeoutMinutes stops a run that goes on longer.
+	RunTimeoutMinutes int `json:"runTimeoutMinutes,omitempty"`
+	// DataDir holds run worktrees, under DataDir/worktrees/<run id>.
+	DataDir string `json:"dataDir,omitempty"`
+	// PermissionMode is Claude Code's --permission-mode for every run.
+	PermissionMode string `json:"permissionMode,omitempty"`
+	// AllowedTools is passed as --allowedTools, e.g. "Bash(go test *)".
+	AllowedTools []string `json:"allowedTools,omitempty"`
+	// AutoAccept takes every valid offer without asking at the terminal. Off
+	// by default: with it on, anyone who can sign in to the hub as the owner
+	// can run agents on this machine.
+	AutoAccept bool `json:"autoAccept,omitempty"`
+}
+
+// Defaults and bounds for the run settings.
+const (
+	DefaultMaxConcurrent     = 1
+	MaxMaxConcurrent         = 16
+	DefaultRunTimeoutMinutes = 60
+	MaxRunTimeoutMinutes     = 24 * 60
+)
+
+// MaxConcurrentRuns is MaxConcurrent with its default applied.
+func (c *Config) MaxConcurrentRuns() int {
+	if c.MaxConcurrent <= 0 {
+		return DefaultMaxConcurrent
+	}
+	return min(c.MaxConcurrent, MaxMaxConcurrent)
+}
+
+// RunTimeout is RunTimeoutMinutes with its default applied.
+func (c *Config) RunTimeout() time.Duration {
+	minutes := c.RunTimeoutMinutes
+	if minutes <= 0 {
+		minutes = DefaultRunTimeoutMinutes
+	}
+	return time.Duration(min(minutes, MaxRunTimeoutMinutes)) * time.Minute
+}
+
+// RunTimeoutMins is the timeout in minutes, for messages.
+func (c *Config) RunTimeoutMins() int { return int(c.RunTimeout() / time.Minute) }
+
+// RunDataDir is DataDir with its default applied: next to the settings, in the
+// OS's user config directory.
+func (c *Config) RunDataDir() (string, error) {
+	if strings.TrimSpace(c.DataDir) != "" {
+		return c.DataDir, nil
+	}
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("user config directory: %w", err)
+	}
+	return filepath.Join(root, "nodevas", "runner-data"), nil
+}
+
+// ClaudePermissionMode is PermissionMode with its default applied.
+func (c *Config) ClaudePermissionMode() string {
+	if c.PermissionMode == "" {
+		return adapter.DefaultClaudePermissionMode
+	}
+	return c.PermissionMode
+}
+
+// AutoAcceptWarning is printed whenever auto-accept is switched on or the
+// runner starts with it on.
+const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to the hub as you can now run " +
+	"agents on this machine, in the repositories you added, without anyone here saying yes."
+
+// SettingKeys are the keys `nodevas runner set` takes, in display order.
+var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools", "autoAccept"}
+
+// Set changes one run setting from its command-line form. "default" resets
+// any of them. allowedTools takes one tool per value, or one value split at
+// top-level commas ("Edit,Bash(git diff, git log)" is two tools); "none"
+// clears it.
+func (c *Config) Set(key string, values []string) error {
+	canonical := ""
+	for _, k := range SettingKeys {
+		if strings.EqualFold(k, key) {
+			canonical = k
+		}
+	}
+	if canonical == "" {
+		return fmt.Errorf("unknown setting %q; settings are %s", key, strings.Join(SettingKeys, ", "))
+	}
+	if len(values) == 0 {
+		return fmt.Errorf("%s needs a value", canonical)
+	}
+	if canonical != "allowedTools" && len(values) != 1 {
+		return fmt.Errorf("%s takes one value", canonical)
+	}
+	value := strings.TrimSpace(values[0])
+	reset := strings.EqualFold(value, "default") && len(values) == 1
+	switch canonical {
+	case "maxConcurrent":
+		if reset {
+			c.MaxConcurrent = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxMaxConcurrent {
+			return fmt.Errorf("maxConcurrent must be a number from 1 to %d", MaxMaxConcurrent)
+		}
+		c.MaxConcurrent = n
+	case "runTimeoutMinutes":
+		if reset {
+			c.RunTimeoutMinutes = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxRunTimeoutMinutes {
+			return fmt.Errorf("runTimeoutMinutes must be a number from 1 to %d", MaxRunTimeoutMinutes)
+		}
+		c.RunTimeoutMinutes = n
+	case "dataDir":
+		if reset {
+			c.DataDir = ""
+			return nil
+		}
+		abs, err := filepath.Abs(value)
+		if err != nil || value == "" {
+			return fmt.Errorf("dataDir %q is not a usable path", value)
+		}
+		c.DataDir = abs
+	case "permissionMode":
+		if reset {
+			c.PermissionMode = ""
+			return nil
+		}
+		for _, mode := range adapter.ClaudePermissionModes {
+			if strings.EqualFold(mode, value) {
+				c.PermissionMode = mode
+				return nil
+			}
+		}
+		return fmt.Errorf("permissionMode must be one of %s", strings.Join(adapter.ClaudePermissionModes, ", "))
+	case "allowedTools":
+		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
+			c.AllowedTools = nil
+			return nil
+		}
+		var tools []string
+		if len(values) == 1 {
+			tools = splitTools(value)
+		} else {
+			for _, v := range values {
+				if v = strings.TrimSpace(v); v != "" {
+					tools = append(tools, v)
+				}
+			}
+		}
+		if len(tools) == 0 {
+			return errors.New("allowedTools: no tools given")
+		}
+		c.AllowedTools = tools
+	case "autoAccept":
+		if reset {
+			c.AutoAccept = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("autoAccept must be true or false")
+		}
+		c.AutoAccept = on
+	}
+	return nil
+}
+
+// splitTools splits at commas outside parentheses, so a rule like
+// "Bash(git diff, git log)" stays one tool.
+func splitTools(s string) []string {
+	var tools []string
+	depth, start := 0, 0
+	flush := func(end int) {
+		if tool := strings.TrimSpace(s[start:end]); tool != "" {
+			tools = append(tools, tool)
+		}
+	}
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				flush(i)
+				start = i + 1
+			}
+		}
+	}
+	flush(len(s))
+	return tools
 }
 
 // DefaultConfigPath is where the runner keeps its settings: next to the rest
