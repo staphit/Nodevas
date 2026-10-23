@@ -441,7 +441,7 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 		return ClassWSUpgrade, 1.0
 	}
 	if auth.SignInPaths[path] ||
-		path == "/api/auth/status" || path == "/api/remote/drive/callback" {
+		path == "/api/auth/status" {
 		return ClassPublicAuth, 1.0
 	}
 	if isHeavyPath(path) {
@@ -479,10 +479,7 @@ func isExpensivePath(path string) bool {
 	}
 	return strings.HasPrefix(path, "/api/remote/") &&
 		path != "/api/remote/config" &&
-		path != "/api/remote/sync/status" &&
-		path != "/api/remote/drive/credentials" &&
-		path != "/api/remote/drive/callback" &&
-		path != "/api/remote/drive/auth"
+		path != "/api/remote/sync/status"
 }
 
 func expensivePath(path string) bool {

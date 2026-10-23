@@ -21,10 +21,8 @@ let backend = null;
 let mainWindow = null;
 let backendURL = "";
 let remoteMode = false;
-let remoteOAuthInProgress = false;
 let quitting = false;
 let workspacePickerBusy = false;
-let driveAuthBusy = false;
 let backendStopPromise = null;
 let updateTimer = null;
 let manualUpdateCheck = false;
@@ -294,62 +292,6 @@ async function promptForInitialWorkspace() {
   }
 }
 
-async function startDriveAuth(authURL) {
-  if (driveAuthBusy) return;
-  driveAuthBusy = true;
-  try {
-    const consentURL = new URL(
-      authURL || "/api/remote/drive/auth",
-      backendURL,
-    );
-    const source = consentURL.searchParams.get("source") === "workspace"
-      ? "workspace"
-      : "";
-    let initialConfig = null;
-    try {
-      initialConfig = await backendRequest("GET", "/api/remote/config");
-    } catch (error) {
-      log.warn("Could not inspect Drive OAuth status", error);
-    }
-    await openExternalURL(consentURL.toString());
-    // A fully authorized account does not need another browser round trip.
-    // For a token without folder-browsing scope, wait until the callback
-    // replaces it with one that can browse existing projects.
-    if (initialConfig?.driveConnected && !initialConfig?.driveNeedsReauth) return;
-    const deadline = Date.now() + 5 * 60 * 1000;
-    while (Date.now() < deadline && !quitting) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      try {
-        const config = await backendRequest("GET", "/api/remote/config");
-        if (config?.driveConnected && !config?.driveNeedsReauth) {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            const destination = source
-              ? `${backendURL}/?drive=connected&source=${source}`
-              : `${backendURL}/?drive=connected`;
-            await mainWindow.loadURL(destination);
-          }
-          return;
-        }
-      } catch (error) {
-        log.warn("Drive OAuth status check failed", error);
-      }
-    }
-  } catch (error) {
-    log.error("Drive OAuth launch failed", error);
-    const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
-    const options = {
-      type: "error",
-      title: "無法連接 Google Drive",
-      message: "Nodevas 無法開啟 Google 授權頁面。",
-      detail: error instanceof Error ? error.message : String(error),
-    };
-    if (owner) await dialog.showMessageBox(owner, options);
-    else await dialog.showMessageBox(options);
-  } finally {
-    driveAuthBusy = false;
-  }
-}
-
 function stopBackend() {
   if (backendStopPromise) return backendStopPromise;
   if (!backend) return Promise.resolve();
@@ -420,15 +362,6 @@ function denyAllPermissions() {
 // of silently starting out unguarded.
 function applyNavigationPolicy(contents) {
   contents.setWindowOpenHandler(({ url }) => {
-    if (isDriveAuthURL(url) && !remoteMode) {
-      void startDriveAuth(url);
-      return { action: "deny" };
-    }
-    if (isDriveAuthURL(url) && remoteMode) {
-      remoteOAuthInProgress = true;
-      return { action: "allow" };
-    }
-    if (isRemoteOAuthURL(url)) return { action: "allow" };
     if (!isBackendURL(url)) void openExternalURL(url);
     return { action: "deny" };
   });
@@ -438,16 +371,6 @@ function applyNavigationPolicy(contents) {
     // left to decide, and re-running the side effects would open the browser
     // twice for the same click.
     if (event.defaultPrevented) return;
-    if (isDriveAuthURL(url) && !remoteMode) {
-      event.preventDefault();
-      void startDriveAuth(url);
-      return;
-    }
-    if (isDriveAuthURL(url) && remoteMode) {
-      remoteOAuthInProgress = true;
-      return;
-    }
-    if (isRemoteOAuthURL(url)) return;
     if (!isBackendURL(url)) {
       event.preventDefault();
       void openExternalURL(url);
@@ -487,30 +410,6 @@ async function openExternalURL(url) {
 function isBackendURL(url) {
   try {
     return new URL(url).origin === new URL(backendURL).origin;
-  } catch {
-    return false;
-  }
-}
-
-function isDriveAuthURL(url) {
-  try {
-    return isBackendURL(url) && new URL(url).pathname === "/api/remote/drive/auth";
-  } catch {
-    return false;
-  }
-}
-
-function isRemoteOAuthURL(url) {
-  if (!remoteMode || !remoteOAuthInProgress) return false;
-  try {
-    const parsed = new URL(url);
-    if (isBackendURL(url)) {
-      if (parsed.pathname === "/api/remote/drive/callback") {
-        remoteOAuthInProgress = false;
-      }
-      return true;
-    }
-    return parsed.protocol === "https:" && parsed.hostname === "accounts.google.com";
   } catch {
     return false;
   }

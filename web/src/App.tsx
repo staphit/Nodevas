@@ -99,15 +99,14 @@ function MainApp() {
     degradedDocumentsReducer,
     new Set<string>(),
   );
-  // One state for all four, rather than a boolean each.
+  // One state for all three, rather than a boolean each.
   //
   // Booleans let two of these be true at once, and the one that shows is
-  // whichever React renders last — so opening the backup dialog while the Drive
-  // workspace picker was still up did open it, underneath, and read as a button
-  // that did nothing. Making them one value makes that unrepresentable instead
+  // whichever React renders last — so opening one dialog while another was
+  // still up did open it, underneath, and read as a button that did nothing. Making them one value makes that unrepresentable instead
   // of relying on every opener remembering to close its neighbours.
   const [modal, setModal] = useState<
-    "" | "notify" | "backup" | "drive-workspace" | "settings" | "runners"
+    "" | "notify" | "backup" | "settings" | "runners"
   >("");
   const closeModal = useCallback(() => setModal(""), []);
   // Live width while dragging; the preference is written on commit so a drag
@@ -154,46 +153,19 @@ function MainApp() {
   }, [redoLast, undoLast]);
 
   // Anything that mentions Project Settings can open it, instead of telling
-  // the reader to hunt for the gear in the top bar. The Drive import event is
-  // how the sidebar's 連接工作區 flow reaches the cloud dialog now that the
-  // dialog is owned here: importing and backing up are two tabs of one thing,
-  // and a second mounted copy of it is exactly the two-dialogs-at-once problem
-  // the single modal state exists to prevent.
+  // the reader to hunt for the gear in the top bar.
   useEffect(() => {
     const onOpenSettings = () => setModal("settings");
     const onOpenNotify = () => setModal("notify");
-    const onOpenDriveImport = () => setModal("drive-workspace");
     const onOpenRunners = () => setModal("runners");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
-    window.addEventListener("nodevas-drive-import", onOpenDriveImport);
     window.addEventListener("nodevas-open-runners", onOpenRunners);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
-      window.removeEventListener("nodevas-drive-import", onOpenDriveImport);
       window.removeEventListener("nodevas-open-runners", onOpenRunners);
     };
-  }, []);
-
-  // OAuth returns through the local server. Re-open the originating Drive
-  // flow so the user can continue without hunting for a second menu.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("drive") !== "connected") return;
-    if (url.searchParams.get("source") === "workspace") {
-      setModal("drive-workspace");
-    } else {
-      setModal("backup");
-    }
-    url.searchParams.delete("drive");
-    url.searchParams.delete("source");
-    const query = url.searchParams.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${url.pathname}${query ? `?${query}` : ""}${url.hash}`,
-    );
   }, []);
 
   useEffect(() => {
@@ -590,13 +562,7 @@ function MainApp() {
       <DocumentPersistenceBanner documents={degradedDocuments} />
       <RemoteSyncBanner onOpenBackup={() => setModal("backup")} />
       {modal === "notify" && <NotifySettingsModal onClose={closeModal} />}
-      {/* Two names, one dialog: "drive-workspace" is the same BackupModal
-        * opened on its import tab, kept as a distinct state so the OAuth
-        * return and the sidebar land the user on the tab they came from. */}
       {modal === "backup" && <BackupModal onClose={closeModal} />}
-      {modal === "drive-workspace" && (
-        <BackupModal onClose={closeModal} initialTab="import" />
-      )}
       {modal === "settings" && <ProjectSettings onClose={closeModal} />}
       {modal === "runners" && <RunnersModal onClose={closeModal} />}
       {error && (

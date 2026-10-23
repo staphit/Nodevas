@@ -24,7 +24,7 @@ Nodevas 將分散的筆記與任務整理成一個可以看見、編輯並持續
 
 - [MCP 整合](./docs/mcp.md):AI agent 工具、資源與 prompts。
 - [即時共編](./docs/collaboration.md):共享 server、WebSocket 上線狀態與 CRDT 文件 session。
-- 雲端備份:Google Drive 同步、備份與還原。
+- 備份:排程快照至本機資料夾,並可還原。
 - 歷史紀錄:文件草稿、歷史版本與還原。
 
 ## 使用情境

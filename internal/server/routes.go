@@ -37,7 +37,7 @@ func (s *Server) Handler() http.Handler {
 	node.New(s.pm, s.hub).Register(api)
 	project.New(s.pm).Register(api)
 	fsbrowse.New(s.auth, s.openDir).Register(api)
-	remoteapi.New(s.pm, s.remotes, s.auth).Register(api)
+	remoteapi.New(s.pm, s.remotes).Register(api)
 	if s.agents != nil {
 		agentsapi.New(s.pm, s.agents).Register(api)
 	}

@@ -214,9 +214,9 @@ func TestWildcardBindWithHostNamesKeepsWorking(t *testing.T) {
 	}
 }
 
-// A GET that mints OAuth state is a write, and a cross-site navigation to it
-// carries no Origin at all — Sec-Fetch-Site is what catches it.
-func TestStateChangingGETRejectsACrossSiteNavigation(t *testing.T) {
+// A cross-site form submission can arrive without an Origin header, so
+// Sec-Fetch-Site is what catches it on an unsafe API call.
+func TestUnsafeAPICallRejectsACrossSiteRequest(t *testing.T) {
 	cases := []struct {
 		name      string
 		fetchSite string
@@ -234,7 +234,7 @@ func TestStateChangingGETRejectsACrossSiteNavigation(t *testing.T) {
 			server.UseListenAddress("127.0.0.1", 5666, nil)
 
 			request := hostRequest(
-				http.MethodGet, "/api/remote/drive/auth", "127.0.0.1:5666", "", "")
+				http.MethodPost, "/api/remote/sync/flush", "127.0.0.1:5666", "", "")
 			if testCase.fetchSite != "" {
 				request.Header.Set("Sec-Fetch-Site", testCase.fetchSite)
 			}

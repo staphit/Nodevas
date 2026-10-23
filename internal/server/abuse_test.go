@@ -171,7 +171,6 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodPost, "/api/auth/login", ClassPublicAuth, 1.0},
 		{http.MethodPost, "/api/auth/otp/request", ClassPublicAuth, 1.0},
 		{http.MethodGet, "/api/auth/status", ClassPublicAuth, 1.0},
-		{http.MethodGet, "/api/remote/drive/callback", ClassPublicAuth, 1.0},
 
 		// Heavy routes
 		{http.MethodPost, "/api/export", ClassHeavy, 2.0},
@@ -194,7 +193,6 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/api/audit", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit/health", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/remote/list", ClassExpensive, 2.0},
-		{http.MethodGet, "/api/remote/drive/folders", ClassExpensive, 2.0},
 
 		// Regular writes
 		{http.MethodPut, "/api/graph", ClassWrite, 1.0},

@@ -72,9 +72,6 @@ export type {
 export type { AuditEntry } from "./history";
 export type { NotifySettings } from "./notify";
 export type {
-  DriveCredentialSource,
-  DriveCredentialStatus,
-  DriveFolder,
   RemoteBundle,
   RemoteConfig,
   RemoteKind,
