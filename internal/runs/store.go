@@ -73,6 +73,10 @@ type Record struct {
 	JobBranch string
 	JobPRURL  string
 	Review    string
+	// SteppedUpAt is when the dispatcher's session stepped up, if it was
+	// stepped up when the run was made ("" not). W6: offers vouch for the
+	// dispatcher only within the step-up window from it (Dispatcher.SteppedUp).
+	SteppedUpAt string
 }
 
 // Job is the offer for this run.
@@ -159,6 +163,10 @@ type New struct {
 	Review              string
 	RetryOf, PipelineID string
 	Fallbacks           []runnerwire.AgentModel
+	// SteppedUpAt is the dispatcher's step-up (W6), "" for none. Follow-up
+	// runs (fallbacks, pipeline steps) carry their parent's, so they are bound
+	// by the same window.
+	SteppedUpAt string
 }
 
 // Create records a queued run.
@@ -187,13 +195,15 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
-                  kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
+                  stepped_up_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
 		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
-		Truncate(in.Review, runnerwire.MaxSummaryBytes), in.RetryOf, in.PipelineID, fallbacks)
+		Truncate(in.Review, runnerwire.MaxSummaryBytes), in.RetryOf, in.PipelineID, fallbacks,
+		Truncate(in.SteppedUpAt, 64))
 	if err != nil {
 		return Record{}, err
 	}
@@ -205,7 +215,8 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
        started_at, finished_at, commit_sha, files_changed, additions, deletions,
        pr_number, pr_state, pr_error, pr_head_sha,
-       kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review`
+       kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
+       stepped_up_at`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
@@ -217,7 +228,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
 		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA,
 		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
-		&r.JobBranch, &r.JobPRURL, &r.Review); err != nil {
+		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)

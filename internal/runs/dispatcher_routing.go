@@ -95,6 +95,7 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			Prompt: r.Prompt, JobPrompt: r.JobPrompt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
 			Kind: r.Kind, JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
 			RetryOf: r.ID, PipelineID: r.PipelineID, Fallbacks: chain,
+			SteppedUpAt: r.SteppedUpAt,
 		})
 		if err != nil {
 			d.note(ctx, r, "not falling back: "+err.Error())
@@ -230,6 +231,7 @@ func (d *Dispatcher) step(ctx context.Context, p PipelineRecord, from Record, ki
 		Prompt: p.Prompt, JobPrompt: jobPrompt, CreatedBy: from.CreatedBy, CreatedByName: from.CreatedByName,
 		Kind: kind, JobBranch: p.Branch, JobPRURL: p.PRURL, Review: review,
 		PipelineID: p.ID, Fallbacks: fallbacks,
+		SteppedUpAt: from.SteppedUpAt,
 	})
 	if err != nil {
 		fail("cannot start the next step: " + err.Error())

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -34,13 +35,57 @@ type Dispatcher struct {
 	notify func(project, runID string)
 	audit  func(AuditEntry)
 
+	// W6 step-up: whether this server has accounts to step up (a loopback
+	// server does not, and vouches for everyone), how long a step-up lasts,
+	// and the clock offers are judged by.
+	stepUpRequired bool
+	stepUpWindow   time.Duration
+	now            func() time.Time
+
 	locks sync.Map // runner ID → *sync.Mutex
 }
 
 // NewDispatcher builds a dispatcher. changed and events are the realtime
-// hooks; see Dispatcher.
+// hooks; see Dispatcher. Offers vouch for no dispatcher until SetStepUp says
+// how: failing closed, a runner's auto-accept waits for a person.
 func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(project, runID string)) *Dispatcher {
-	return &Dispatcher{store: store, reg: reg, changed: changed, events: events}
+	return &Dispatcher{
+		store: store, reg: reg, changed: changed, events: events,
+		stepUpRequired: true, stepUpWindow: runnerwire.StepUpWindowSeconds * time.Second, now: time.Now,
+	}
+}
+
+// SetStepUp says whether dispatchers must step up for offers to vouch for
+// them (Job.SteppedUp), and for how long a step-up lasts. A server without
+// accounts passes required false: the OS account is the boundary there, and
+// every offer vouches. Call it before serving.
+func (d *Dispatcher) SetStepUp(required bool, window time.Duration) {
+	d.stepUpRequired = required
+	if window > 0 {
+		d.stepUpWindow = window
+	}
+}
+
+// SteppedUp is what an offer of r says in Job.SteppedUp now: the dispatcher
+// was stepped up when the run was made and that step-up has not run out. A
+// run left queued past the window is offered without the vouch, so a runner
+// does not auto-accept it hours later.
+func (d *Dispatcher) SteppedUp(r Record) bool {
+	if !d.stepUpRequired {
+		return true
+	}
+	if r.SteppedUpAt == "" {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, r.SteppedUpAt)
+	if err != nil {
+		return false
+	}
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	return now().Before(at.Add(d.stepUpWindow))
 }
 
 // AuditEntry is a merge approval or result for the audit trail. Project is
@@ -170,6 +215,7 @@ func (d *Dispatcher) offer(ctx context.Context, r Record) bool {
 		return false
 	}
 	job := offered.Job()
+	job.SteppedUp = d.SteppedUp(offered)
 	if err := d.reg.Send(r.RunnerID, runnerwire.Envelope{Type: runnerwire.TypeOffer, Job: &job}); err != nil {
 		slog.Warn("runs: send offer", slog.String("run", r.ID), slog.Any("error", err))
 		if back, err := d.store.Transition(ctx, r.ID, runnerwire.RunQueued, Change{}); err == nil {

@@ -57,6 +57,8 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/agents/messages"},
 	{http.MethodPost, "/api/agents/inbox"},
 	{http.MethodPost, "/api/agents/asks"},
+	// W6: `nodevas hook` reporting an external session's edits and snapshot.
+	{http.MethodPost, "/api/agents/sessions/*/changes"},
 }
 
 // runnerProxyAllows reports whether the proxy forwards method on target, an

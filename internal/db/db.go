@@ -758,6 +758,46 @@ CREATE TABLE run_pipelines (
 CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
 `,
 	},
+	{
+		// 0015 is left to the W-step merged beside this one; the numbering is
+		// reconciled at merge.
+		name: "0016_w6",
+		stmt: `
+-- Remote dispatch and external sessions (W6).
+
+-- When this browser session last re-proved its identity with a mailed
+-- passcode ('' never). A step-up lasts a window from this moment; a new
+-- sign-in is a new row and starts without one.
+ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
+
+-- The dispatcher's step-up when the run was made ('' none). Offers vouch for
+-- the dispatcher (runnerwire.Job.SteppedUp) only within the window from it.
+ALTER TABLE runs ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
+
+-- What an agent in its owner's own terminal changed while it held a node, as
+-- its hook reported it: one row per project, node and session.
+CREATE TABLE session_changes (
+    id            TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it, as on runs.
+    project       TEXT NOT NULL,
+    node_id       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    actor_id      TEXT NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    -- []string as JSON, at most runnerwire.MaxSessionFiles.
+    files         TEXT NOT NULL DEFAULT '[]',
+    -- runnerwire.RunChanges as JSON, replaced at every Stop; '' none yet.
+    snapshot      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
+CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

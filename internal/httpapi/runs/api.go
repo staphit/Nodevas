@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -42,11 +43,20 @@ type API struct {
 	pm  *project.ProjectManager
 	reg *runners.Registry
 	d   *runs.Dispatcher
+	// steppedUpAt reports the dispatcher's live step-up (W6); nil on a server
+	// without accounts, where the dispatcher vouches for everyone anyway.
+	steppedUpAt func(*http.Request) (time.Time, bool)
 }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
 	return &API{pm: pm, reg: reg, d: d}
+}
+
+// UseStepUp tells run creation how to read the dispatcher's step-up, which
+// each run records so its offers can vouch for the dispatcher while it lasts.
+func (a *API) UseStepUp(steppedUpAt func(*http.Request) (time.Time, bool)) {
+	a.steppedUpAt = steppedUpAt
 }
 
 // Register wires /api/runs. Every route takes a session as usual; none is
@@ -221,6 +231,12 @@ func (a *API) create(c *gin.Context) {
 		name = actor.ID
 	}
 	jobPrompt := BuildPrompt(title, content, body.Prompt)
+	steppedUpAt := ""
+	if a.steppedUpAt != nil {
+		if at, ok := a.steppedUpAt(c.Request); ok {
+			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	pipelineID := ""
 	if pipeline != nil {
 		p, err := a.d.Store().CreatePipeline(c.Request.Context(), runs.NewPipeline{
@@ -240,6 +256,7 @@ func (a *API) create(c *gin.Context) {
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: actor.ID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
+		SteppedUpAt: steppedUpAt,
 	})
 	if err != nil {
 		if pipelineID != "" {

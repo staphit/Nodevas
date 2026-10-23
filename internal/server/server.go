@@ -45,6 +45,8 @@ type Server struct {
 	// runs serves /api/runs and the run traffic on the runner socket; nil
 	// until UseRunnersDB.
 	runs *runs.Dispatcher
+	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
+	stepUpWindow time.Duration
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -109,8 +111,19 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		abuse:    newAbuseGuard(),
 		stop:     make(chan struct{}),
 	}
-	s.agents = agents.NewHub(nil, func(projectRoot, _ string, _ any) {
+	s.agents = agents.NewHub(nil, func(projectRoot, eventType string, payload any) {
 		if s.hub == nil {
+			return
+		}
+		// An external session's changes are news for one node: the event
+		// names it, so only a browser showing that node refetches.
+		if eventType == agents.SessionChangesEvent {
+			nodeID, _ := payload.(string)
+			if projectRoot == "" {
+				s.hub.Broadcast(eventType, nodeID)
+				return
+			}
+			s.hub.BroadcastRoom(projectRoot, eventType, nodeID)
 			return
 		}
 		if projectRoot == "" {
@@ -216,6 +229,33 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
+}
+
+// SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).
+// Zero keeps the default. Call it before Handler.
+func (s *Server) SetStepUpWindow(window time.Duration) {
+	s.stepUpWindow = window
+}
+
+// configureStepUp applies the step-up setting to whoever needs it, once the
+// authenticator is settled: on a server with accounts, sessions step up and
+// runs record the dispatcher's step-up for their offers; on loopback there is
+// nothing to step up and every offer vouches for its dispatcher.
+func (s *Server) configureStepUp(runsAPI interface {
+	UseStepUp(func(*http.Request) (time.Time, bool))
+}) {
+	accounts, remote := s.auth.(*auth.SessionAuth)
+	window := s.stepUpWindow
+	if remote {
+		accounts.SetStepUpWindow(window)
+		window = accounts.StepUpWindow()
+	}
+	if s.runs != nil {
+		s.runs.SetStepUp(remote, window)
+	}
+	if remote && runsAPI != nil {
+		runsAPI.UseStepUp(accounts.SteppedUpAt)
+	}
 }
 
 // auditRun records a merge approval or result. Results arrive from a runner's

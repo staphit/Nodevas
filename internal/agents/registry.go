@@ -111,6 +111,8 @@ type Hub struct {
 	// In-memory fallback stores when database == nil (used in lightweight tests)
 	memMessages []Message
 	memAsks     map[string]*Ask
+	// memSessionChanges is keyed by project, node and session ID.
+	memSessionChanges map[string]*memSessionChange
 
 	// Waiters for inbox long-polling: key is project
 	inboxWaiters map[string]map[chan struct{}]struct{}

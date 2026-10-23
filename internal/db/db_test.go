@@ -45,7 +45,7 @@ func TestOpenCreatesEverySchemaObject(t *testing.T) {
 		"schema_migrations", "copilot_conversations", "copilot_entries",
 		"agent_messages", "agent_asks", "runners", "runner_tokens",
 		"runs", "run_events", "run_changes", "run_merges", "run_budgets",
-		"run_routes", "run_pipelines",
+		"run_routes", "run_pipelines", "session_changes",
 	} {
 		if !present[want] {
 			t.Fatalf("table %q missing; have %v", want, present)

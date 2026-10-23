@@ -591,6 +591,31 @@ CREATE TABLE run_pipelines (
 CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
 `,
 	},
+	{
+		name: "0016_w6",
+		stmt: `
+ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE session_changes (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    project       TEXT COLLATE "C" NOT NULL,
+    node_id       TEXT COLLATE "C" NOT NULL,
+    session_id    TEXT COLLATE "C" NOT NULL,
+    session_name  TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    actor_id      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    files         TEXT NOT NULL DEFAULT '[]',
+    snapshot      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT COLLATE "C" NOT NULL,
+    updated_at    TEXT COLLATE "C" NOT NULL
+);
+CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
+CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
