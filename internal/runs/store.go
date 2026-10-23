@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -81,6 +82,11 @@ func (r Record) Job() runnerwire.Job {
 type Store struct {
 	db  *db.DB
 	now func() time.Time
+
+	// last is the latest stamp handed out. Windows' clock can return the same
+	// instant twice, and two runs with one created_at would have no order.
+	mu   sync.Mutex
+	last time.Time
 }
 
 // NewStore builds a store over the workspace database.
@@ -92,7 +98,14 @@ func NewStore(database *db.DB) *Store {
 // order: the queue is served oldest first, and two runs made in the same
 // second still have an order.
 func (s *Store) stamp() string {
-	return s.now().UTC().Format("2006-01-02T15:04:05.000000Z07:00")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.now().UTC().Truncate(time.Microsecond)
+	if !t.After(s.last) {
+		t = s.last.Add(time.Microsecond)
+	}
+	s.last = t
+	return t.Format("2006-01-02T15:04:05.000000Z07:00")
 }
 
 func newID() (string, error) {
