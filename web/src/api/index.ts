@@ -22,6 +22,7 @@ export {
   ConflictError,
   getProjectOverride,
   onUnauthorized,
+  RequestError,
   setProjectOverride,
   UnauthorizedError,
 } from "./http";
@@ -103,14 +104,44 @@ export {
   runFinal,
 } from "./runs";
 export type {
+  CIStatus,
   CreateRunRequest,
+  FileChange,
+  FileChangeStatus,
+  MergeStatus,
+  PRState,
   Run,
+  RunBudget,
+  RunBudgetLimit,
+  RunBudgetStatus,
+  RunChanges,
+  RunChangesResponse,
   RunEvent,
   RunEventsResponse,
   RunEventType,
   RunListResponse,
+  RunMergeRequest,
   RunStatus,
   RunUsage,
+  AgentModel,
+  FailureKind,
+  PipelineState,
+  PipelineStatus,
+  ReviewVerdict,
+  RouteMatch,
+  RouteRule,
+  RouteSuggestion,
+  RoutingConfig,
+  RunKind,
+  RunPipeline,
+} from "./runs";
+export {
+  FAILURE_KINDS,
+  MAX_FALLBACKS,
+  MAX_PIPELINE_ROUNDS,
+  MAX_ROUTE_RULES,
+  pipelineEnded,
+  ROUTE_MATCHES,
 } from "./runs";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";

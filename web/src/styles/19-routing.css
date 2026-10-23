@@ -1,0 +1,435 @@
+/* ---------- W5: routing rules, fallback chains, pipelines ---------- */
+
+/* A field whose error sits outside its <label>, so the error is not read as
+   part of the field's name. */
+.run-field > .run-field-label {
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* One agent + model: two fields side by side, a select or free text. */
+.am-picker {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.am-input {
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  flex: 1 1 120px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 12px;
+}
+.am-input[aria-invalid="true"] {
+  border-color: var(--st-failed-fg);
+}
+.am-input:disabled {
+  opacity: 0.65;
+}
+.am-mode {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+}
+
+.reorder-buttons {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+.reorder-buttons button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: pointer;
+}
+.reorder-buttons button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--hover);
+}
+.reorder-buttons button.is-danger:hover:not(:disabled) {
+  color: var(--st-failed-fg);
+  border-color: var(--st-failed-fg);
+}
+.reorder-buttons button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.fallback-chain {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 2px;
+}
+.fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fallback-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.fallback-index {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.fallback-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fallback-actions .run-link-button,
+.routing-add .run-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.run-link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.route-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.route-toggle input {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.pipeline-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.pipeline-rounds {
+  max-width: 140px;
+}
+.pipeline-implement-note {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.route-sub > summary,
+.run-advanced > summary {
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* The Runners dialog's Routing section. */
+.routing-settings {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+.routing-settings .runner-hint {
+  margin: 0;
+  line-height: 1.5;
+}
+.route-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.route-rule {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.route-rule .am-input,
+.route-rule .run-field select,
+.route-rule .run-field input {
+  background: var(--surface);
+}
+.route-rule-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.route-rule-index {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--accent-text);
+  background: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.route-rule-summary {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.route-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+.routing-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.budget-actions button.routing-discard {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* Dispatch dialog: which rule pre-filled it. */
+.run-route-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 2px 6px 6px 2px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.run-route-miss {
+  color: var(--st-ready-fg);
+}
+
+/* Run rows: job kind, review verdict, failure kind, fallback lineage. */
+.run-row-tags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 6px;
+  font-size: 10.5px;
+}
+.run-kind,
+.run-verdict,
+.run-failure {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.run-kind {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.run-verdict-approve {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.run-verdict-changes {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-failure {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-retry {
+  min-width: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.run-detail-title .run-row-tags {
+  margin: 2px 0;
+}
+
+/* A pipeline's runs under one header. */
+.run-pipeline {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 8px;
+}
+.run-pipeline-head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  padding: 0 3px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.run-pipeline-head > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.run-pipeline-text {
+  min-width: 0;
+  flex: 1 1 160px;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.run-pipeline-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--st-locked-fg);
+  background: var(--st-locked-bg);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.run-pipeline-status.is-running {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.run-pipeline-status.is-approved {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.run-pipeline-status.is-changes_left {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-pipeline-status.is-failed {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-pipeline-status.is-cancelled {
+  color: var(--st-deprecated-fg);
+  background: var(--st-deprecated-bg);
+}
+.run-pipeline-error {
+  color: var(--text-2);
+  font-style: italic;
+}
+.run-list.run-pipeline-runs {
+  max-height: none;
+  overflow: visible;
+}
+
+/* The hub's own notes in a run's timeline: a fallback, a pipeline's end. */
+.run-ev-hub {
+  padding: 5px 9px;
+  border-left: 2px solid var(--accent);
+  border-radius: 2px 6px 6px 2px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.run-ev-hub b {
+  margin-right: 4px;
+  color: var(--accent);
+}
+
+.run-toast.is-pipeline-failed .run-toast-dot {
+  background: var(--st-failed-fg);
+}
+.run-toast.is-pipeline-changes-left .run-toast-dot {
+  background: var(--st-ready-fg);
+}
+.run-toast.is-pipeline-cancelled .run-toast-dot {
+  background: var(--st-deprecated-fg);
+}
+
+@media (max-width: 640px) {
+  .route-rule-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .am-input {
+    min-height: 36px;
+    /* 16px keeps iOS from zooming the page on focus. */
+    font-size: 16px;
+  }
+  .reorder-buttons button {
+    width: 36px;
+    height: 36px;
+  }
+  .fallback-item {
+    flex-wrap: wrap;
+  }
+  .fallback-item .am-picker {
+    flex: 1 1 calc(100% - 30px);
+  }
+  .fallback-item .reorder-buttons {
+    margin-left: auto;
+  }
+  .pipeline-rounds {
+    max-width: none;
+  }
+}

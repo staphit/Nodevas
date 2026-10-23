@@ -626,6 +626,138 @@ CREATE TABLE run_events (
 ) STRICT;
 `,
 	},
+	{
+		// 0011 belongs to the agent network's W1.5 step on another branch.
+		name: "0012_run_changes",
+		stmt: `
+-- What a run changed and the pull request it opened (W3). The runner commits,
+-- pushes and opens the PR with its owner's own gh login; the hub only records
+-- what it reports.
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT    NOT NULL DEFAULT '';
+-- Why no PR could be opened (no origin, gh not signed in, push refused).
+ALTER TABLE runs ADD COLUMN pr_error      TEXT    NOT NULL DEFAULT '';
+
+-- One row per run, written once: a resent changes message is ignored.
+CREATE TABLE run_changes (
+    run_id          TEXT PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    -- []runnerwire.FileChange as JSON.
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    -- The unified diff, at most runnerwire.MaxPatchBytes; '' when dropped.
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
+	{
+		name: "0013_run_merges_budgets",
+		stmt: `
+-- Remote merge approval and budgets (W4). The hub records approvals and
+-- relays them to the run's runner, which merges with its owner's own gh
+-- login; it never merges anything itself.
+
+-- The PR head the CI status belongs to; an approval must name it.
+ALTER TABLE runs ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT '';
+-- Run usage per owner and day, for budgets.
+CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
+
+CREATE TABLE run_merges (
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL REFERENCES runs(id),
+    -- The PR head the approver saw; the runner refuses if the PR moved on.
+    head_sha          TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
+    -- Why it failed or expired; '' when merged.
+    reason            TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    finished_at       TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
+-- At most one approval waits per run.
+CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
+
+-- Per-owner daily limits on new runs; zero means no limit.
+CREATE TABLE run_budgets (
+    owner_id        TEXT PRIMARY KEY,
+    daily_runs      INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd  REAL    NOT NULL DEFAULT 0,
+    daily_tokens    INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
+	{
+		name: "0014_run_routing",
+		stmt: `
+-- Routing, fallback and pipelines (W5). Every rule is the owner's own; the hub
+-- only picks what a run asks for, the runner still decides whether to take it.
+
+-- A run's job kind ('' implement, 'review', 'revise'), how it failed, a
+-- review's verdict, the run it falls back from and the pipeline it is a step
+-- of.
+ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_of     TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pipeline_id  TEXT NOT NULL DEFAULT '';
+-- The rest of the fallback chain, []runnerwire.AgentModel as JSON ('' none).
+ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
+-- What a review or revise job is offered: the PR branch, its pull request,
+-- and (revise) the review it addresses.
+ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
+
+-- One owner's routing rules, in order: a PUT replaces them all.
+CREATE TABLE run_routes (
+    owner_id    TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    -- runnerwire.RouteRule as JSON.
+    rule        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (owner_id, position)
+) STRICT;
+
+-- Implement → review (→ revise → review…) for one node.
+CREATE TABLE run_pipelines (
+    id          TEXT PRIMARY KEY,
+    -- The runner's owner, as on runs.
+    owner_id    TEXT NOT NULL,
+    created_by  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    node_id     TEXT NOT NULL,
+    -- runnerwire.Pipeline as JSON, models resolved when it was dispatched.
+    pipeline    TEXT NOT NULL,
+    -- The implement step's fallback chain, []runnerwire.AgentModel as JSON.
+    fallbacks   TEXT NOT NULL DEFAULT '',
+    -- The task as first offered and the dispatcher's extra instructions; every
+    -- step starts from them.
+    job_prompt  TEXT NOT NULL DEFAULT '',
+    prompt      TEXT NOT NULL DEFAULT '',
+    -- The pull request the implement step opened, which later steps work on.
+    branch      TEXT NOT NULL DEFAULT '',
+    pr_url      TEXT NOT NULL DEFAULT '',
+    round       INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+) STRICT;
+CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

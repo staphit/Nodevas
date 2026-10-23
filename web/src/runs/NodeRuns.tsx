@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { runCancellable, runFinal, type Run, type RunEvent } from "../api";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { runCancellable, runFinal, type PipelineState, type Run, type RunEvent } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
-import { IconSend, IconTerminal } from "../icons";
+import { IconFork, IconSend, IconTerminal } from "../icons";
+
 import { formatLocalizedDateTime, useI18n } from "../i18n";
 import { relativeTime } from "../runners/RunnersModal";
 import {
@@ -11,9 +12,16 @@ import {
   oneLine,
   paragraphs,
   prettyInput,
+  runHasChanges,
   totalTokens,
 } from "./runFormat";
+import { RunDiffDialog } from "./DiffViewer";
+import { MergeControl } from "./MergeApproval";
+import { RunChangesSummary } from "./RunChanges";
 import { useRuns } from "./runStore";
+
+/** The hub's cap on GET /api/runs. */
+const RUN_LIST_CAP = 50;
 
 const KNOWN_STATUSES = new Set([
   "queued",
@@ -49,19 +57,96 @@ function UsageText({ run }: { run: Run }) {
   );
 }
 
+/** The run a fallback run retried, as the list knows it. */
+export interface RetryInfo {
+  /** Its number in the list; 0 when unknown or not listed. */
+  number: number;
+  failureKind?: string;
+}
+
+const KNOWN_FAILURES = new Set([
+  "rate_limit",
+  "quota",
+  "model_unavailable",
+  "agent_unavailable",
+  "task",
+]);
+
+/** "Rate limited", "Quota used up"… for a run's failure kind. */
+export function failureLabel(t: (key: string) => string, kind: string): string {
+  return KNOWN_FAILURES.has(kind) ? t(`runs.failure.${kind}`) : kind;
+}
+
+export function RunKindBadge({ kind }: { kind?: string }) {
+  const { t } = useI18n();
+  if (kind !== "review" && kind !== "revise") return null;
+  return <span className={`run-kind run-kind-${kind}`}>{t(`runs.kind.${kind}`)}</span>;
+}
+
+export function VerdictChip({ verdict }: { verdict?: string }) {
+  const { t } = useI18n();
+  if (verdict !== "approve" && verdict !== "changes") return null;
+  return (
+    <span className={`run-verdict run-verdict-${verdict}`}>{t(`runs.verdict.${verdict}`)}</span>
+  );
+}
+
+/** "Fell back from #3 (rate limited)". */
+export function retryText(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  retry: RetryInfo,
+): string {
+  const reason = retry.failureKind ? failureLabel(t, retry.failureKind) : "";
+  if (retry.number > 0) {
+    return reason
+      ? t("runs.retryOfReason", { number: retry.number, reason })
+      : t("runs.retryOf", { number: retry.number });
+  }
+  return reason ? t("runs.retryOfUnknownReason", { reason }) : t("runs.retryOfUnknown");
+}
+
+/** The W5 line under a run: its job kind, a review's verdict, why it failed
+ * and which run it falls back from. Nothing for a plain W1 run. */
+function RunTags({ run, retry }: { run: Run; retry: RetryInfo | null }) {
+  const { t } = useI18n();
+  const failure = run.status === "failed" && run.failureKind ? run.failureKind : "";
+  const kind = run.kind === "review" || run.kind === "revise";
+  const verdict = run.verdict === "approve" || run.verdict === "changes";
+  if (!kind && !verdict && !failure && !retry) return null;
+  return (
+    <span className="run-row-tags">
+      <RunKindBadge kind={run.kind} />
+      <VerdictChip verdict={run.verdict} />
+      {failure && (
+        <span className={`run-failure run-failure-${failure}`}>{failureLabel(t, failure)}</span>
+      )}
+      {retry && <span className="run-retry">{retryText(t, retry)}</span>}
+    </span>
+  );
+}
+
 function RunRow({
   run,
+  number,
   selected,
   onSelect,
+  retry = null,
 }: {
   run: Run;
+  /** 1 for the node's first run; 0 when unknown. */
+  number: number;
   selected: boolean;
   onSelect: () => void;
+  retry?: RetryInfo | null;
 }) {
-  const { language } = useI18n();
+  const { t, language } = useI18n();
   const branch = run.branch || run.base;
+  // The PR chip is a link, which cannot live inside the row's button: it
+  // sits in a footer that reads as part of the same row.
+  const summary = <RunChangesSummary run={run} className="run-row-changes" />;
+  const hasSummary = runHasChanges(run) || Boolean(run.prUrl) || Boolean(run.prError);
   return (
-    <li>
+    <li className={`run-item${selected ? " selected" : ""}${hasSummary ? " has-changes" : ""}`}>
       <button
         type="button"
         className={`run-row${selected ? " selected" : ""}`}
@@ -71,6 +156,9 @@ function RunRow({
         <span className="run-row-top">
           <RunStatusBadge status={run.status} />
           <strong className="run-row-agent">
+            {number > 0 && (
+              <span className="run-row-number">{t("runs.number", { number })} </span>
+            )}
             {run.agent}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
@@ -81,6 +169,7 @@ function RunRow({
             {relativeTime(run.createdAt)}
           </time>
         </span>
+        <RunTags run={run} retry={retry} />
         <span className="run-row-meta">
           <span>{run.runnerName || run.runnerId}</span>
           <span>{run.repoName || run.repoId}</span>
@@ -88,6 +177,7 @@ function RunRow({
           <UsageText run={run} />
         </span>
       </button>
+      {hasSummary && summary}
     </li>
   );
 }
@@ -110,6 +200,8 @@ function Collapsible({
     </details>
   );
 }
+
+const HUB_PREFIX = "hub: ";
 
 export function RunEventItem({
   event,
@@ -219,6 +311,15 @@ export function RunEventItem({
         </li>
       );
     default:
+      // The hub's own notes on a run (W5: a fallback taken, a chain used up,
+      // a pipeline's end) arrive as log lines prefixed "hub: ".
+      if (event.type === "log" && text.startsWith(HUB_PREFIX)) {
+        return (
+          <li className="run-ev run-ev-hub" data-seq={event.seq}>
+            <b>{t("runs.hubNote")}</b> {text.slice(HUB_PREFIX.length)}
+          </li>
+        );
+      }
       // "log", and anything a newer runner sends that this page predates.
       return (
         <li className="run-ev run-ev-log mono" data-seq={event.seq}>
@@ -233,7 +334,7 @@ function atEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
 }
 
-export function RunDetail({ run }: { run: Run }) {
+export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo | null }) {
   const { t, language } = useI18n();
   const events = useRuns((s) => s.eventsByRun[run.id]);
   const eventError = useRuns((s) => s.eventErrors[run.id]);
@@ -279,7 +380,14 @@ export function RunDetail({ run }: { run: Run }) {
   const onCancel = async () => {
     const confirmed = await confirmAction({
       title: t("runs.cancelTitle"),
-      description: t(run.status === "running" ? "runs.cancelRunning" : "runs.cancelPending"),
+      description: [
+        t(run.status === "running" ? "runs.cancelRunning" : "runs.cancelPending"),
+        // The hub cancels every step of a pipeline when one is cancelled.
+        run.pipelineId ? t("runs.cancelPipeline") : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+
       confirmLabel: t("runs.cancel"),
       cancelLabel: t("runs.keep"),
       tone: "danger",
@@ -288,6 +396,8 @@ export function RunDetail({ run }: { run: Run }) {
   };
 
   const hintKey = KNOWN_STATUSES.has(run.status) ? `runs.statusHint.${run.status}` : "";
+  const [diffOpen, setDiffOpen] = useState(false);
+  const closeDiff = useCallback(() => setDiffOpen(false), []);
 
   return (
     <section className="run-detail" aria-label={t("runs.detail")}>
@@ -298,6 +408,7 @@ export function RunDetail({ run }: { run: Run }) {
             {run.agent}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
+          <RunTags run={run} retry={retry} />
           {stopRequested ? (
             <span>{t("runs.stopRequested")}</span>
           ) : (
@@ -315,6 +426,19 @@ export function RunDetail({ run }: { run: Run }) {
           </button>
         )}
       </div>
+      <MergeControl run={run} className="run-detail-merge" />
+
+      {(runHasChanges(run) || run.prUrl || run.prError) && (
+        <div className="run-detail-changes">
+          <RunChangesSummary run={run} />
+          {final && runHasChanges(run) && (
+            <button type="button" className="run-link-button" onClick={() => setDiffOpen(true)}>
+              {t("runs.viewChanges")}
+            </button>
+          )}
+        </div>
+      )}
+      {diffOpen && <RunDiffDialog run={run} onClose={closeDiff} />}
 
       <dl className="run-meta">
         <div>
@@ -439,6 +563,95 @@ export function RunDetail({ run }: { run: Run }) {
   );
 }
 
+const PIPELINE_STATUSES = new Set(["running", "approved", "changes_left", "failed", "cancelled"]);
+
+export function PipelineStatusChip({ status }: { status: string }) {
+  const { t } = useI18n();
+  const known = PIPELINE_STATUSES.has(status);
+  return (
+    <span className={`run-pipeline-status is-${known ? status : "unknown"}`}>
+      {known ? t(`pipeline.status.${status}`) : status}
+    </span>
+  );
+}
+
+/** "Pipeline · round 2/3 · implement claude/sonnet → review codex/gpt-5". */
+export function pipelineHeaderText(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  state: PipelineState | undefined,
+  runs: Run[],
+): string {
+  const parts = [t("pipeline.title")];
+  if (state && state.round > 0) {
+    parts.push(
+      t("pipeline.round", { round: state.round, max: state.pipeline?.maxRounds || state.round }),
+    );
+  }
+  // Until the pipeline is fetched, its runs say who implements and reviews.
+  const implement =
+    state?.pipeline?.implement ?? runs.find((run) => !run.kind || run.kind === "revise");
+  const review = state?.pipeline?.review ?? runs.find((run) => run.kind === "review");
+  const name = (step: { agent: string; model: string } | undefined) =>
+    step ? (step.model ? `${step.agent}/${step.model}` : step.agent) : "";
+  if (implement || review) {
+    parts.push(
+      t("pipeline.steps", { implement: name(implement) || "—", review: name(review) || "—" }),
+    );
+  }
+  return parts.join(" · ");
+}
+
+function PipelineGroup({ id, children, runs }: { id: string; children: React.ReactNode; runs: Run[] }) {
+  const { t } = useI18n();
+  const state = useRuns((s) => s.pipelines[id]);
+  const error = useRuns((s) => s.pipelineErrors[id]);
+  const loadPipeline = useRuns((s) => s.loadPipeline);
+  useEffect(() => {
+    void loadPipeline(id);
+  }, [id, loadPipeline]);
+  const text = pipelineHeaderText(t, state, runs);
+  return (
+    <li className="run-pipeline" data-pipeline-id={id}>
+      <div className="run-pipeline-head" role="group" aria-label={text}>
+        <IconFork size={13} />
+        <span className="run-pipeline-text">{text}</span>
+        {state ? (
+          <PipelineStatusChip status={state.status} />
+        ) : (
+          error && <span className="run-pipeline-error" title={error}>{t("pipeline.unknown")}</span>
+        )}
+      </div>
+      <ul className="run-list run-pipeline-runs">{children}</ul>
+    </li>
+  );
+}
+
+type ListItem =
+  | { type: "run"; run: Run; index: number }
+  | { type: "pipeline"; id: string; entries: { run: Run; index: number }[] };
+
+/** The list as shown: a pipeline's runs gathered under one header, placed
+ * where its newest run sits; every other run on its own. */
+export function groupRuns(list: Run[]): ListItem[] {
+  const items: ListItem[] = [];
+  const groups = new Map<string, Extract<ListItem, { type: "pipeline" }>>();
+  list.forEach((run, index) => {
+    const id = run.pipelineId;
+    if (!id) {
+      items.push({ type: "run", run, index });
+      return;
+    }
+    let group = groups.get(id);
+    if (!group) {
+      group = { type: "pipeline", id, entries: [] };
+      groups.set(id, group);
+      items.push(group);
+    }
+    group.entries.push({ run, index });
+  });
+  return items;
+}
+
 /**
  * A node's runs: the list, newest first, and the selected one live. It lives
  * in the node's detail view (the Drawer's Runs tab).
@@ -457,8 +670,28 @@ export function NodeRuns({ id }: { id: string }) {
     void loadRuns(id);
   }, [id, loadRuns]);
 
-  const list = runs ?? [];
+  const list = useMemo(() => runs ?? [], [runs]);
   const selected = list.find((run) => run.id === selectedId) ?? list[0];
+  const items = useMemo(() => groupRuns(list), [list]);
+  // The hub lists at most 50 runs: past that, counting from the oldest one
+  // shown would number them wrong.
+  const numberAt = (index: number) => (list.length < RUN_LIST_CAP ? list.length - index : 0);
+  const retryOf = (run: Run): RetryInfo | null => {
+    if (!run.retryOf) return null;
+    const index = list.findIndex((item) => item.id === run.retryOf);
+    if (index === -1) return { number: 0 };
+    return { number: numberAt(index), failureKind: list[index].failureKind };
+  };
+  const row = (run: Run, index: number) => (
+    <RunRow
+      key={run.id}
+      run={run}
+      number={numberAt(index)}
+      selected={run.id === selected?.id}
+      onSelect={() => selectRun(id, run.id)}
+      retry={retryOf(run)}
+    />
+  );
 
   return (
     <div className="node-runs">
@@ -487,16 +720,21 @@ export function NodeRuns({ id }: { id: string }) {
       ) : (
         <>
           <ul className="run-list" aria-label={t("runs.title")}>
-            {list.map((run) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                selected={run.id === selected?.id}
-                onSelect={() => selectRun(id, run.id)}
-              />
-            ))}
+            {items.map((item) =>
+              item.type === "run" ? (
+                row(item.run, item.index)
+              ) : (
+                <PipelineGroup
+                  key={`pipeline-${item.id}`}
+                  id={item.id}
+                  runs={item.entries.map((entry) => entry.run)}
+                >
+                  {item.entries.map((entry) => row(entry.run, entry.index))}
+                </PipelineGroup>
+              ),
+            )}
           </ul>
-          {selected && <RunDetail key={selected.id} run={selected} />}
+          {selected && <RunDetail key={selected.id} run={selected} retry={retryOf(selected)} />}
         </>
       )}
     </div>
