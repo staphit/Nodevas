@@ -80,6 +80,9 @@ type Envelope struct {
 	// Remote merge; see merge.go.
 	Merge       *MergeJob     `json:"merge,omitempty"`
 	MergeResult *MergeOutcome `json:"mergeResult,omitempty"`
+
+	// Interactive terminal; see terminal.go.
+	Term *TermChunk `json:"term,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
