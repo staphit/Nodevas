@@ -76,6 +76,10 @@ type Envelope struct {
 	// Changes and pull requests; see changes.go.
 	Changes *RunChanges `json:"changes,omitempty"`
 	PR      *PRInfo     `json:"pr,omitempty"`
+
+	// Remote merge; see merge.go.
+	Merge       *MergeJob     `json:"merge,omitempty"`
+	MergeResult *MergeOutcome `json:"mergeResult,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
