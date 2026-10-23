@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
 	"unicode/utf16"
 
 	"nodevas/internal/agents"
+	"nodevas/internal/agentsetup"
 	"nodevas/internal/mcp"
 )
 
@@ -56,6 +58,9 @@ type Options struct {
 	// Windows forces (or, false, suppresses) ASCII-only JSON output. Nil
 	// follows runtime.GOOS.
 	Windows *bool
+	// ExclusionFile overrides where the folder exclusion list is read from
+	// (tests); empty is agentsetup.NetworkConfigPath().
+	ExclusionFile string
 }
 
 // Input is the part of an agent's hook payload the hook reads.
@@ -63,6 +68,8 @@ type Input struct {
 	SessionID      string
 	Cwd            string
 	StopHookActive bool
+	// Model is the model the agent says it runs on, when its payload says.
+	Model string
 }
 
 // ParseInput reads an agent's hook payload leniently: a byte-order mark
@@ -79,6 +86,19 @@ func ParseInput(raw []byte) Input {
 		return strings.TrimSpace(s)
 	}
 	in := Input{Cwd: str("cwd")}
+	// Claude Code names the model as a string on some events and as
+	// {"id": …, "display_name": …} on others.
+	switch model := v["model"].(type) {
+	case string:
+		in.Model = strings.TrimSpace(model)
+	case map[string]any:
+		if id, ok := model["id"].(string); ok {
+			in.Model = strings.TrimSpace(id)
+		}
+	}
+	if len(in.Model) > agents.MaxModelLen {
+		in.Model = ""
+	}
 	for _, k := range []string{"session_id", "sessionId", "conversation_id"} {
 		if s := str(k); s != "" {
 			in.SessionID = s
@@ -120,6 +140,19 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 		return ""
 	}
 
+	// A session in an excluded folder is not on the network: nothing is
+	// reported, nothing printed, not even that it is excluded. The agent's
+	// own payload says where it runs; the hook's cwd is the fallback.
+	cwd := in.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if cwd != "" {
+		if folder, _ := agentsetup.ExcludedFolder(opts.ExclusionFile, cwd); folder != "" {
+			return ""
+		}
+	}
+
 	actor := strings.TrimSpace(opts.Actor)
 	if actor == "" {
 		actor = mcp.DefaultActor
@@ -130,6 +163,8 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 		Actor:      actor,
 		SessionID:  agent + ":" + in.SessionID,
 		AgentKind:  agent,
+		Model:      in.Model,
+		WorkDir:    cwd,
 		HTTPClient: opts.HTTPClient,
 		Timeout:    Timeout(event),
 	}
