@@ -6,13 +6,14 @@ import { languageLocale, useI18n } from "../i18n";
 import { stepUpActive, useStepUp } from "./stepUpStore";
 
 /** The step-up passcode's length; whitespace in a pasted code is dropped. */
-export const STEP_UP_CODE_LENGTH = 6;
+export const STEP_UP_CODE_LENGTH = 8;
 
 /** The server refuses another mail for this long; the button waits it out. */
 export const STEP_UP_RESEND_COOLDOWN_MS = 30 * 1000;
 
 export function compactStepUpCode(value: string): string {
-  return value.replace(/[\s-]+/g, "");
+  // Upper-cased like the sign-in passcode; the hub ignores case anyway.
+  return value.replace(/[\s-]+/g, "").toUpperCase();
 }
 
 /** "14:05" in the reader's language, or "" for an unparseable time. */

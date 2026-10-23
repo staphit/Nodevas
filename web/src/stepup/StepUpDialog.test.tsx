@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 function codeField(): HTMLInputElement {
-  return screen.getByRole("textbox", { name: "6-digit code" }) as HTMLInputElement;
+  return screen.getByRole("textbox", { name: "8-character code" }) as HTMLInputElement;
 }
 
 describe("step-up helpers", () => {
@@ -63,15 +63,15 @@ describe("StepUpDialog", () => {
     const submit = screen.getByRole("button", { name: "Verify" });
     fireEvent.change(codeField(), { target: { value: "123" } });
     expect(submit).toBeDisabled();
-    fireEvent.change(codeField(), { target: { value: "999 999" } });
+    fireEvent.change(codeField(), { target: { value: "WXYZ 2345" } });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("That code is wrong or has expired.");
-    expect(verify).toHaveBeenLastCalledWith("999999");
+    expect(verify).toHaveBeenLastCalledWith("WXYZ2345");
     expect(codeField()).toHaveAttribute("aria-invalid", "true");
 
-    fireEvent.change(codeField(), { target: { value: "123456" } });
+    fireEvent.change(codeField(), { target: { value: "ABCD2345" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     expect(await screen.findByTestId("stepup-done")).toHaveTextContent(
@@ -93,12 +93,12 @@ describe("StepUpDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");
     // Still on the first step: nothing was sent.
-    expect(screen.queryByRole("textbox", { name: "6-digit code" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "8-character code" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-    fireEvent.change(await screen.findByRole("textbox", { name: "6-digit code" }), {
-      target: { value: "123456" },
+    fireEvent.change(await screen.findByRole("textbox", { name: "8-character code" }), {
+      target: { value: "ABCD2345" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts");

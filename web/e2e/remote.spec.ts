@@ -67,7 +67,7 @@ async function mockStepUp(page: Page) {
     }
     const code = (route.request().postDataJSON() as { code: string }).code;
     codes.push(code);
-    if (code !== "246810") {
+    if (code !== "ABCD2468") {
       return route.fulfill({ status: 401, json: { error: "invalid code" } });
     }
     active = true;
@@ -112,19 +112,19 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await expectInside(dialog, viewport.width);
     await dialog.getByRole("button", { name: "寄送驗證碼" }).click();
 
-    const field = dialog.getByRole("textbox", { name: "6 位數驗證碼" });
+    const field = dialog.getByRole("textbox", { name: "8 碼驗證碼" });
     await expect(field).toBeFocused();
     await expect(dialog.getByRole("button", { name: /秒後可重寄/ })).toBeDisabled();
-    await field.fill("111111");
+    await field.fill("WWWW2222");
     await dialog.getByRole("button", { name: "驗證", exact: true }).click();
     await expect(dialog.getByRole("alert")).toHaveText("驗證碼錯誤或已過期。");
     await expectNoHorizontalOverflow(page);
     await expectInside(dialog, viewport.width);
 
-    await field.fill("246 810");
+    await field.fill("abcd 2468");
     await dialog.getByRole("button", { name: "驗證", exact: true }).click();
     await expect(dialog.getByTestId("stepup-done")).toContainText("已驗證，有效至");
-    expect(stepUp.codes).toEqual(["111111", "246810"]);
+    expect(stepUp.codes).toEqual(["WWWW2222", "ABCD2468"]);
     // A wrong code did not sign the browser out.
     await expect(dispatch).toBeVisible();
 
