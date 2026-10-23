@@ -1,0 +1,628 @@
+/* ---------- agent runs: dispatch dialog, node run list, live run view ---------- */
+
+/* Five tabs no longer fit a phone-width sheet in English; the strip scrolls
+   sideways on its own instead of pushing the page wider. */
+.node-view-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.node-view-tabs::-webkit-scrollbar {
+  display: none;
+}
+.node-view-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Node menu (graph canvas): the two run actions under open/duplicate/trash. */
+.node-menu-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.node-menu-run-actions button {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.node-menu-run-actions button:hover {
+  background: var(--hover);
+}
+
+/* ---- dispatch dialog ---- */
+.run-dispatch-dialog {
+  display: flex;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  flex-direction: column;
+}
+.run-dispatch-dialog footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.run-dispatch-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 16px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.run-field {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+.run-field > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.run-field select,
+.run-field input,
+.run-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 12px;
+}
+.run-field textarea {
+  min-height: 84px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.run-field [aria-invalid="true"] {
+  border-color: var(--st-failed-fg);
+}
+.run-field-error {
+  color: var(--st-failed-fg);
+  font-size: 11px;
+}
+.run-field select:disabled {
+  opacity: 0.65;
+}
+.run-field-row {
+  display: flex;
+  gap: 10px;
+}
+.run-count {
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.run-note,
+.run-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.run-note {
+  padding: 7px 10px;
+  border-left: 2px solid var(--st-ready-fg);
+  border-radius: 2px 6px 6px 2px;
+  background: var(--st-ready-bg);
+  color: var(--text);
+}
+.run-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  text-align: center;
+}
+.run-empty p {
+  margin: 0;
+}
+.run-empty-left {
+  align-items: stretch;
+  text-align: left;
+}
+.run-empty code {
+  padding: 4px 8px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.run-link-button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.run-link-button:hover {
+  background: var(--hover);
+}
+
+/* ---- node runs (Drawer → Runs) ---- */
+.node-runs {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+  background: var(--surface);
+  font-size: 12px;
+}
+.node-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.node-runs-head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.node-runs-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.run-dispatch-button {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+}
+.run-list {
+  display: flex;
+  max-height: 34vh;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.run-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.run-row:hover {
+  background: var(--hover);
+}
+.run-row.selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.run-row-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.run-row-agent {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-row-top time {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.run-row-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.run-row-meta > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-runs .mono,
+.run-ev .mono,
+.run-ev.mono {
+  font-family: var(--mono);
+}
+
+.run-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--st-locked-fg);
+  background: var(--st-locked-bg);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.run-status-offered {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-status-running {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.run-status-running::before {
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: run-pulse 1.4s ease-in-out infinite;
+  content: "";
+}
+.run-status-succeeded {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.run-status-failed {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-status-declined {
+  color: var(--st-skipped-fg);
+  background: var(--st-skipped-bg);
+}
+.run-status-cancelled {
+  color: var(--st-deprecated-fg);
+  background: var(--st-deprecated-bg);
+}
+@keyframes run-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-status-running::before {
+    animation: none;
+  }
+}
+.run-usage {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- one run, live ---- */
+.run-detail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.run-detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.run-detail-head .run-status {
+  margin-top: 1px;
+}
+.run-detail-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.run-detail-title strong {
+  overflow-wrap: anywhere;
+}
+.run-detail-title span {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.run-cancel {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--st-failed-fg);
+  border-radius: 6px;
+  color: var(--st-failed-fg);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.run-cancel:hover:not(:disabled) {
+  background: var(--st-failed-bg);
+}
+.run-cancel:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.run-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+}
+.run-meta > div {
+  min-width: 0;
+}
+.run-meta dt {
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.run-meta dd {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+}
+.run-prompt summary {
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.run-prompt p {
+  margin: 5px 0 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.run-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--st-done-fg);
+  border-radius: 3px 6px 6px 3px;
+  background: var(--st-done-bg);
+}
+.run-outcome.is-error {
+  border-left-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-outcome small {
+  color: var(--text-2);
+}
+
+.run-timeline-wrap {
+  position: relative;
+}
+.run-events {
+  display: flex;
+  max-height: min(58vh, 560px);
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  list-style: none;
+}
+.run-ev {
+  min-width: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.run-ev p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.run-ev p + p {
+  margin-top: 6px;
+}
+.run-ev pre,
+.run-outcome pre {
+  max-height: 320px;
+  margin: 5px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.run-ev-fold > summary {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+.run-ev-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.run-ev-fold > summary::before {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-size: 9px;
+  content: "▸";
+}
+.run-ev-fold[open] > summary::before {
+  content: "▾";
+}
+.run-ev-fold > summary b {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+.run-ev-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-ev-none {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.run-ev-thinking {
+  color: var(--text-2);
+  opacity: 0.85;
+}
+.run-ev-thinking .run-ev-prose {
+  margin-top: 4px;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+}
+.run-ev-tool,
+.run-ev-result {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+.run-ev-tool > .run-ev-fold > summary b {
+  color: var(--accent);
+}
+.run-ev-result.is-error {
+  border-color: color-mix(in srgb, var(--st-failed-fg) 55%, var(--border));
+  background: var(--st-failed-bg);
+}
+.run-ev-result.is-error > .run-ev-fold > summary b {
+  color: var(--st-failed-fg);
+}
+.run-ev-usage,
+.run-ev-log,
+.run-ev-empty {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.run-ev-usage {
+  font-variant-numeric: tabular-nums;
+}
+.run-ev-error {
+  padding: 6px 8px;
+  border-left: 3px solid var(--st-failed-fg);
+  border-radius: 3px 5px 5px 3px;
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-ev-error pre {
+  color: var(--text);
+}
+.run-jump {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 4px 14px var(--shadow);
+  cursor: pointer;
+  font-size: 11px;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 640px) {
+  .run-dispatch-backdrop {
+    padding: 16px;
+  }
+  .run-dispatch-dialog {
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+  }
+  .run-dispatch-body {
+    padding: 0 14px 14px;
+  }
+  .run-field-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .run-field select,
+  .run-field input,
+  .run-field textarea {
+    /* 16px keeps iOS from zooming the page on focus. */
+    font-size: 16px;
+  }
+  .node-runs {
+    padding: 14px 16px;
+  }
+  .run-meta {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .run-events {
+    max-height: 50vh;
+  }
+}

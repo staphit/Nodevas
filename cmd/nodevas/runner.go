@@ -30,7 +30,7 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var err error
 	switch sub {
 	case "start":
-		err = runnerStart(args, stderr)
+		err = runnerStart(args, stdin, stderr)
 	case "login":
 		err = runnerLogin(args, in, stdout, stderr)
 	case "logout":
@@ -39,6 +39,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerStatus(args, stdout)
 	case "repo":
 		err = runnerRepo(args, in, stdout, stderr)
+	case "set":
+		err = runnerSet(args, stdout, stderr)
 	case "help", "-h", "--help":
 		runnerUsage(stdout)
 		return 0
@@ -70,6 +72,11 @@ func runnerUsage(w io.Writer) {
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
        nodevas runner repo remove <id|name>
+       nodevas runner set <key> <value>      change a run setting ("default" resets it):
+                                             maxConcurrent, runTimeoutMinutes, dataDir,
+                                             permissionMode (acceptEdits|auto|bypassPermissions|
+                                             manual|dontAsk|plan), allowedTools (one per argument,
+                                             or comma-separated; "none" clears), autoAccept
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -114,7 +121,7 @@ func loadRunnerConfig(flagValue string) (string, *runner.Config, error) {
 	return path, cfg, err
 }
 
-func runnerStart(args []string, stderr io.Writer) error {
+func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	fs, configFlag := newRunnerFlags("start")
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
@@ -128,7 +135,11 @@ func runnerStart(args []string, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr}
+	// Offers are accepted here, at this terminal, by whoever started the
+	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
+	// offers are declined at once unless autoAccept is on.
+	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
+	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter}
 	return client.Run(ctx)
 }
 
@@ -234,6 +245,58 @@ func runnerStatus(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "  %-7s %s  [models: %s]\n", agent.Kind, state, strings.Join(models, ", "))
 	}
 	printRepos(stdout, cfg)
+	printRunSettings(stdout, cfg)
+	return nil
+}
+
+func printRunSettings(w io.Writer, cfg *runner.Config) {
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		dataDir = "(unknown: " + err.Error() + ")"
+	}
+	tools := "(none)"
+	if len(cfg.AllowedTools) > 0 {
+		tools = strings.Join(cfg.AllowedTools, ", ")
+	}
+	accept := "asked at the runner's terminal"
+	if cfg.AutoAccept {
+		accept = "AUTO-ACCEPT: anyone who can sign in to the hub as you can run agents here"
+	}
+	fmt.Fprintln(w, "runs:")
+	fmt.Fprintf(w, "  maxConcurrent      %d\n", cfg.MaxConcurrentRuns())
+	fmt.Fprintf(w, "  runTimeoutMinutes  %d\n", cfg.RunTimeoutMins())
+	fmt.Fprintf(w, "  dataDir            %s\n", dataDir)
+	fmt.Fprintf(w, "  permissionMode     %s\n", cfg.ClaudePermissionMode())
+	fmt.Fprintf(w, "  allowedTools       %s\n", tools)
+	fmt.Fprintf(w, "  autoAccept         %t (%s)\n", cfg.AutoAccept, accept)
+}
+
+// runnerSet changes one run setting. A running runner reads its settings at
+// start, so the change applies from the next start.
+func runnerSet(args []string, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("set")
+	rest, err := parseInterspersed(fs, args)
+	if err != nil || len(rest) < 2 {
+		return errUsage
+	}
+	path, cfg, err := loadRunnerConfig(*configFlag)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Set(rest[0], rest[1:]); err != nil {
+		return err
+	}
+	if err := runner.SaveConfig(path, cfg); err != nil {
+		return err
+	}
+	printRunSettings(stdout, cfg)
+	if cfg.AutoAccept {
+		fmt.Fprintln(stderr, runner.AutoAcceptWarning)
+	}
+	if cfg.PermissionMode == "bypassPermissions" {
+		fmt.Fprintln(stderr, "note: bypassPermissions lets agents run any command on this machine without asking.")
+	}
+	fmt.Fprintln(stdout, "saved; restart a running runner for it to take effect")
 	return nil
 }
 
@@ -344,6 +407,13 @@ func orNone(s string) string {
 		return "(not set)"
 	}
 	return s
+}
+
+// stdinIsTerminal reports whether r is a terminal someone can type answers
+// into; anything that is not an *os.File (a test's reader) is not.
+func stdinIsTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	return ok && isTerminal(f)
 }
 
 func isTerminal(f *os.File) bool {

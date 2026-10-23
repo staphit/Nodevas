@@ -674,6 +674,11 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 		c.Next()
 		return
 	}
+	// A request the runner proxy re-dispatched was charged on its way in.
+	if _, proxied := runnerProxiedFrom(c.Request.Context()); proxied {
+		c.Next()
+		return
+	}
 
 	ip := auth.ClientIP(c.Request)
 	now := time.Now()

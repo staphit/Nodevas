@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -39,14 +40,30 @@ type Client struct {
 	RedetectInterval time.Duration
 	BackoffMin       time.Duration
 	BackoffMax       time.Duration
-	// HTTPClient dials the hub; nil uses http.DefaultClient.
+	// HTTPClient dials the hub and carries the MCP proxy's requests; nil uses
+	// http.DefaultClient for the socket and a client without a timeout for
+	// the proxy.
 	HTTPClient *http.Client
+
+	// Accepter asks whether to take an offer; nil declines every offer unless
+	// the config's AutoAccept is on.
+	Accepter Accepter
+	// Adapter returns the agent adapter for a kind; nil means adapter.For.
+	// Tests swap in a fake agent.
+	Adapter func(kind string) adapter.Adapter
+	// FlushInterval batches run events; zero means 250ms.
+	FlushInterval time.Duration
+	// RunTimeout overrides the config's run timeout; tests shorten it.
+	RunTimeout time.Duration
+
+	jobs *jobs
 }
 
 const (
 	defaultRedetect   = 5 * time.Minute
 	defaultBackoffMin = time.Second
 	defaultBackoffMax = time.Minute
+	defaultFlush      = 250 * time.Millisecond
 	welcomeTimeout    = 15 * time.Second
 	writeTimeout      = 10 * time.Second
 )
@@ -61,6 +78,11 @@ func (c *Client) Run(ctx context.Context) error {
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
 		return err
 	}
+	if c.Config.AutoAccept {
+		c.logf("%s", AutoAcceptWarning)
+	}
+	c.jobs = newJobs(ctx, c)
+	defer c.jobs.shutdown()
 	backoff := c.backoffMin()
 	for {
 		welcomed, err := c.session(ctx)
@@ -106,10 +128,11 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		return false, dialError(resp, err)
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(runnerwire.MaxHelloBytes)
+	// Offers carry prompts of up to 64 KB; the hub caps every message at this.
+	conn.SetReadLimit(runnerwire.MaxMessageBytes)
 
 	info := BuildInfo(ctx, c.Commands, c.Config)
-	if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeHello, Hello: &info}); err != nil {
+	if err := c.hello(ctx, conn, info); err != nil {
 		return false, err
 	}
 
@@ -163,7 +186,16 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
 	defer redetect.Stop()
+	flushTick := time.NewTicker(c.flushInterval())
+	defer flushTick.Stop()
 	lastHeard := time.Now()
+	// Whatever runs said while the runner was away goes out first.
+	flush := func() error {
+		return c.jobs.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) })
+	}
+	if err := flush(); err != nil {
+		return true, err
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -173,8 +205,21 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			return true, readError(err)
 		case msg := <-incoming:
 			lastHeard = time.Now()
-			if msg.Type == runnerwire.TypeBye {
+			switch msg.Type {
+			case runnerwire.TypeBye:
 				return true, byeError(msg.Reason)
+			case runnerwire.TypeOffer:
+				c.jobs.offer(msg.Job)
+			case runnerwire.TypeCancel:
+				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			}
+		case <-c.jobs.notify:
+			if err := flush(); err != nil {
+				return true, err
+			}
+		case <-flushTick.C:
+			if err := flush(); err != nil {
+				return true, err
 			}
 		case <-ping.C:
 			if time.Since(lastHeard) > 3*c.pingInterval() {
@@ -190,11 +235,18 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			}
 			info = next
 			c.logf("agents or repositories changed; telling the hub")
-			if err := c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeHello, Hello: &info}); err != nil {
+			if err := c.hello(ctx, conn, info); err != nil {
 				return true, err
 			}
 		}
 	}
+}
+
+// hello describes the runner, with the runs it is still executing so the hub
+// fails only the ones that really died with a previous connection.
+func (c *Client) hello(ctx context.Context, conn *websocket.Conn, info runnerwire.Info) error {
+	c.jobs.setAgents(info.Agents)
+	return c.write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeHello, Hello: &info, Active: c.jobs.active()})
 }
 
 func (c *Client) write(ctx context.Context, conn *websocket.Conn, msg runnerwire.Envelope) error {
@@ -293,6 +345,27 @@ func (c *Client) redetectInterval() time.Duration {
 		return c.RedetectInterval
 	}
 	return defaultRedetect
+}
+
+func (c *Client) flushInterval() time.Duration {
+	if c.FlushInterval > 0 {
+		return c.FlushInterval
+	}
+	return defaultFlush
+}
+
+func (c *Client) runTimeout() time.Duration {
+	if c.RunTimeout > 0 {
+		return c.RunTimeout
+	}
+	return c.Config.RunTimeout()
+}
+
+func (c *Client) adapterFor(kind string) adapter.Adapter {
+	if c.Adapter != nil {
+		return c.Adapter(kind)
+	}
+	return adapter.For(kind)
 }
 
 func (c *Client) backoffMin() time.Duration {

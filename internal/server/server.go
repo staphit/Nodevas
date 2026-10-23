@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/remote"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 	"nodevas/internal/store"
 	"strconv"
 	"sync"
@@ -40,6 +41,9 @@ type Server struct {
 	agents   *agents.Hub
 	// runners serves /api/runners and /api/runner/*; nil until UseRunnersDB.
 	runners *runners.Registry
+	// runs serves /api/runs and the run traffic on the runner socket; nil
+	// until UseRunnersDB.
+	runs *runs.Dispatcher
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -206,6 +210,28 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 			s.hub.Broadcast(runnerwire.ChangedEvent, "")
 		}
 	})
+	s.runs = runs.NewDispatcher(runs.NewStore(database), s.runners,
+		func(project, nodeID string) { s.broadcastProject(project, runnerwire.RunsChangedEvent, nodeID) },
+		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
+}
+
+// broadcastProject tells the clients watching a project, named as ?project=
+// names it, about a change. Run changes arrive from a runner's socket, not a
+// request, so there is no request store to take the room from.
+func (s *Server) broadcastProject(name, evType, id string) {
+	if s.hub == nil {
+		return
+	}
+	if s.pm == nil {
+		s.hub.Broadcast(evType, id)
+		return
+	}
+	st, err := s.pm.StoreFor(name)
+	if err != nil {
+		// The project is gone; nobody is watching it.
+		return
+	}
+	s.hub.BroadcastRoom(st.Root(), evType, id)
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.

@@ -152,6 +152,57 @@ func TestRunnerRepoAddAsksFirst(t *testing.T) {
 	}
 }
 
+func TestRunnerSetAndStatus(t *testing.T) {
+	saved := runnerCommands
+	runnerCommands = stubCommands{}
+	t.Cleanup(func() { runnerCommands = saved })
+	cfgPath := filepath.Join(t.TempDir(), "runner.json")
+
+	code, _, stderr := runRunner(t, "", "status", "--config", cfgPath)
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	for _, args := range [][]string{
+		{"set", "maxConcurrent", "2"},
+		{"set", "runTimeoutMinutes", "30", "--config", cfgPath},
+		{"set", "permissionMode", "plan"},
+		{"set", "allowedTools", "Edit", "Bash(go test *)"},
+	} {
+		args = append(args, "--config", cfgPath)
+		if code, _, stderr := runRunner(t, "", args...); code != 0 {
+			t.Fatalf("%v: exit %d %s", args, code, stderr)
+		}
+	}
+	code, stdout, stderr := runRunner(t, "", "set", "autoAccept", "true", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, "Anyone who can sign in to the hub as you") {
+		t.Fatalf("autoAccept: exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "autoAccept         true") {
+		t.Fatalf("set output:\n%s", stdout)
+	}
+	cfg, err := runner.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxConcurrent != 2 || cfg.RunTimeoutMinutes != 30 || cfg.PermissionMode != "plan" ||
+		len(cfg.AllowedTools) != 2 || !cfg.AutoAccept {
+		t.Fatalf("config = %+v", cfg)
+	}
+	_, stdout, _ = runRunner(t, "", "status", "--config", cfgPath)
+	for _, want := range []string{"maxConcurrent      2", "runTimeoutMinutes  30", "permissionMode     plan",
+		"allowedTools       Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("status missing %q:\n%s", want, stdout)
+		}
+	}
+
+	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"}} {
+		if code, _, _ := runRunner(t, "", append(bad, "--config", cfgPath)...); code == 0 {
+			t.Errorf("%v succeeded", bad)
+		}
+	}
+}
+
 func TestRunnerStartNeedsLogin(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "runner.json")
 	code, _, stderr := runRunner(t, "", "--config", cfgPath)

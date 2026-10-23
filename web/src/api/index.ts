@@ -14,6 +14,7 @@ import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
 import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
+import { runsApi } from "./runs";
 import { workspaceApi } from "./workspace";
 
 export {
@@ -95,6 +96,22 @@ export type {
   RunnerModel,
   RunnerRepo,
 } from "./runners";
+export {
+  MAX_RUN_PROMPT_BYTES,
+  MAX_RUN_PROMPT_CHARS,
+  runCancellable,
+  runFinal,
+} from "./runs";
+export type {
+  CreateRunRequest,
+  Run,
+  RunEvent,
+  RunEventsResponse,
+  RunEventType,
+  RunListResponse,
+  RunStatus,
+  RunUsage,
+} from "./runs";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 
@@ -111,4 +128,5 @@ export const api = {
   ...copilotApi,
   ...agentsApi,
   ...runnersApi,
+  ...runsApi,
 };

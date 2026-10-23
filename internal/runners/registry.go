@@ -50,12 +50,19 @@ const (
 )
 
 // Conn is a live runner connection as the registry sees it: something it can
-// tell to go away.
+// send messages to and tell to go away.
 type Conn interface {
 	// Bye tells the runner why it is being disconnected and closes the
 	// connection. It must not block for long; the caller may hold no locks.
 	Bye(reason string)
+	// Send writes one message to the runner. It blocks at most for the
+	// connection's write timeout, so a stalled runner costs the caller
+	// seconds, not a hung request.
+	Send(env runnerwire.Envelope) error
 }
+
+// ErrOffline is Send to a runner with no live connection.
+var ErrOffline = errors.New("runner is offline")
 
 // Registry stores runners and their tokens and tracks which are connected.
 type Registry struct {
@@ -382,6 +389,18 @@ func (r *Registry) Attach(id string, conn Conn) (detach func()) {
 			}
 		})
 	}
+}
+
+// Send delivers a message to the runner's live connection. No lock is held
+// while it writes.
+func (r *Registry) Send(id string, env runnerwire.Envelope) error {
+	r.mu.Lock()
+	conn := r.live[id]
+	r.mu.Unlock()
+	if conn == nil {
+		return ErrOffline
+	}
+	return conn.Send(env)
 }
 
 // Online reports whether the runner has a live connection.

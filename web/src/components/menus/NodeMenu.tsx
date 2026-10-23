@@ -8,7 +8,9 @@
 
 import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
-import { IconPlus } from "../../icons";
+import { IconPlus, IconSend, IconTerminal } from "../../icons";
+import { openNodeRuns } from "../../runs/RunsRoot";
+import { useRuns } from "../../runs/runStore";
 import { confirmAction } from "../ConfirmDialog";
 import type { LaneContextMenu } from "../LaneView";
 import { localizedRelationLabel, useI18n } from "../../i18n";
@@ -112,6 +114,28 @@ export function NodeMenu({
           }}
         >
           {t("nodeMenu.trash")}
+        </button>
+      </div>
+      <div className="node-menu-run-actions">
+        <button
+          type="button"
+          onClick={() => {
+            setContextMenu(null);
+            useRuns.getState().openDispatch(contextMenu.nodeId);
+          }}
+        >
+          <IconSend size={13} />
+          <span>{t("nodeMenu.dispatch")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setContextMenu(null);
+            openNodeRuns(contextMenu.nodeId);
+          }}
+        >
+          <IconTerminal size={13} />
+          <span>{t("nodeMenu.runs")}</span>
         </button>
       </div>
       {assignableLogicGates.length > 0 && (

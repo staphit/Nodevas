@@ -1,0 +1,703 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
+	"nodevas/internal/runner/adapter"
+	"nodevas/internal/runnerwire"
+)
+
+// The fake agent: this test binary, re-run with helperEnv set, standing in
+// for claude. It records what it was given and prints stream-json fixtures.
+const helperEnv = "NODEVAS_RUNNER_TEST_HELPER"
+
+func TestHelperProcess(t *testing.T) {
+	mode := os.Getenv(helperEnv)
+	if mode == "" {
+		return
+	}
+	record := os.Getenv("NODEVAS_TEST_RECORD")
+	_ = os.MkdirAll(record, 0o700)
+	put := func(name, value string) { _ = os.WriteFile(filepath.Join(record, name), []byte(value), 0o600) }
+	wd, _ := os.Getwd()
+	put("cwd", wd)
+	stdin, _ := io.ReadAll(os.Stdin)
+	put("stdin", string(stdin))
+	if path := os.Getenv("NODEVAS_TEST_MCP"); path != "" {
+		mcp, _ := os.ReadFile(path)
+		put("mcp.json", string(mcp))
+		put("mcp-path", path)
+	}
+	put("pid", strconv.Itoa(os.Getpid()))
+
+	fixture := func(name string) {
+		raw, err := os.ReadFile(filepath.Join(os.Getenv("NODEVAS_TEST_FIXTURES"), name))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(9)
+		}
+		_, _ = os.Stdout.Write(raw)
+	}
+	switch mode {
+	case "ok":
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
+	case "fail":
+		fixture("claude_error.jsonl")
+		fmt.Fprintln(os.Stderr, "boom on stderr")
+		os.Exit(3)
+	case "hang":
+		fmt.Println(`{"type":"system","subtype":"init","session_id":"s-hang","model":"m"}`)
+		// A grandchild holding our stdout, like node's children do: killing
+		// only this process would leave it running and the pipe open.
+		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+		child.Env = append(os.Environ(), helperEnv+"=sleep", "NODEVAS_TEST_RECORD="+filepath.Join(record, "child"),
+			"NODEVAS_TEST_MCP=")
+		child.Stdout = os.Stdout
+		if err := child.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(8)
+		}
+		put("child-pid", strconv.Itoa(child.Process.Pid))
+		time.Sleep(time.Hour)
+	case "sleep":
+		time.Sleep(time.Hour)
+	}
+	os.Exit(7)
+}
+
+type fakeAgent struct{ record, fixtures string }
+
+func (fakeAgent) Kind() string              { return "claude" }
+func (fakeAgent) NewParser() adapter.Parser { return adapter.Claude{}.NewParser() }
+
+// Command is the real Claude command (MCP config file, stdin prompt, workdir)
+// with the program swapped for the helper. The job's prompt picks the mode.
+func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, error) {
+	cmd, err := adapter.Claude{}.Command(job, env)
+	if err != nil {
+		return nil, err
+	}
+	mode, _, _ := strings.Cut(job.Prompt, ":")
+	cmd.Path = os.Args[0]
+	cmd.Args = []string{os.Args[0], "-test.run=^TestHelperProcess$"}
+	cmd.Err = nil // the made-up claude path did not resolve; the helper does
+	cmd.Env = append(cmd.Env, helperEnv+"="+mode,
+		"NODEVAS_TEST_RECORD="+filepath.Join(f.record, job.RunID),
+		"NODEVAS_TEST_MCP="+filepath.Join(env.TempDir, "mcp.json"),
+		"NODEVAS_TEST_FIXTURES="+f.fixtures)
+	return cmd, nil
+}
+
+type acceptFunc func(context.Context, Offer) (bool, string)
+
+func (f acceptFunc) Accept(ctx context.Context, o Offer) (bool, string) { return f(ctx, o) }
+
+// jobHub is a hub that offers jobs and records what the runner says.
+type jobHub struct {
+	t      *testing.T
+	hellos chan runnerwire.Envelope
+
+	mu    sync.Mutex
+	conn  *websocket.Conn
+	ctx   context.Context
+	byRun map[string][]runnerwire.Envelope
+	all   []runnerwire.Envelope
+}
+
+func newJobHub(t *testing.T) (*jobHub, *httptest.Server) {
+	h := &jobHub{t: t, hellos: make(chan runnerwire.Envelope, 64), byRun: map[string][]runnerwire.Envelope{}}
+	srv := httptest.NewServer(http.HandlerFunc(h.serve))
+	t.Cleanup(srv.Close)
+	return h, srv
+}
+
+func (h *jobHub) serve(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	ctx := r.Context()
+	for {
+		var msg runnerwire.Envelope
+		if err := wsjson.Read(ctx, conn, &msg); err != nil {
+			return
+		}
+		switch msg.Type {
+		case runnerwire.TypeHello:
+			_ = wsjson.Write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypeWelcome,
+				Welcome: &runnerwire.Welcome{RunnerID: "r1", Name: "pc", Owner: "me"}})
+			h.mu.Lock()
+			h.conn, h.ctx = conn, ctx
+			h.mu.Unlock()
+			h.hellos <- msg
+		case runnerwire.TypePing:
+			_ = wsjson.Write(ctx, conn, runnerwire.Envelope{Type: runnerwire.TypePong})
+		default:
+			h.mu.Lock()
+			h.byRun[msg.RunID] = append(h.byRun[msg.RunID], msg)
+			h.all = append(h.all, msg)
+			h.mu.Unlock()
+		}
+	}
+}
+
+func (h *jobHub) send(msg runnerwire.Envelope) {
+	h.t.Helper()
+	h.mu.Lock()
+	conn, ctx := h.conn, h.ctx
+	h.mu.Unlock()
+	if conn == nil {
+		h.t.Fatal("no runner connected")
+	}
+	if err := wsjson.Write(ctx, conn, msg); err != nil {
+		h.t.Fatalf("send %s: %v", msg.Type, err)
+	}
+}
+
+func (h *jobHub) offer(job runnerwire.Job) {
+	h.t.Helper()
+	h.send(runnerwire.Envelope{Type: runnerwire.TypeOffer, Job: &job})
+}
+
+// kick drops the current connection, as a hub restart would.
+func (h *jobHub) kick() {
+	h.mu.Lock()
+	conn := h.conn
+	h.conn = nil
+	h.mu.Unlock()
+	_ = conn.Close(websocket.StatusGoingAway, "restarting")
+}
+
+func (h *jobHub) messages(runID string) []runnerwire.Envelope {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]runnerwire.Envelope(nil), h.byRun[runID]...)
+}
+
+// wait returns the first message of that type for the run.
+func (h *jobHub) wait(runID, typ string) runnerwire.Envelope {
+	h.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, msg := range h.messages(runID) {
+			if msg.Type == typ {
+				return msg
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	h.t.Fatalf("run %s: no %s; got %+v", runID, typ, h.messages(runID))
+	return runnerwire.Envelope{}
+}
+
+func (h *jobHub) hello() runnerwire.Envelope {
+	h.t.Helper()
+	select {
+	case msg := <-h.hellos:
+		return msg
+	case <-time.After(10 * time.Second):
+		h.t.Fatal("no hello")
+	}
+	return runnerwire.Envelope{}
+}
+
+type jobEnv struct {
+	hub    *jobHub
+	client *Client
+	repo   string
+	record string
+}
+
+func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
+	t.Helper()
+	repo := newTestRepo(t)
+	fixtures, err := filepath.Abs(filepath.Join("adapter", "testdata"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, srv := newJobHub(t)
+	env := &jobEnv{hub: hub, repo: repo, record: t.TempDir()}
+	env.client = &Client{
+		Config: &Config{
+			Hub: srv.URL, Token: testToken,
+			Repos:   []runnerwire.Repo{{ID: "r1", Name: "demo", Path: repo}},
+			DataDir: t.TempDir(),
+		},
+		Commands: &fakeCommands{
+			paths: map[string]string{"claude": "/bin/claude", "codex": "/bin/codex"},
+			outputs: map[string]string{
+				"/bin/claude --version": "2.1.299 (Claude Code)\n",
+				"/bin/codex --version":  "codex 0.1\n",
+			},
+		},
+		Adapter: func(kind string) adapter.Adapter {
+			if kind == "claude" {
+				return fakeAgent{record: env.record, fixtures: fixtures}
+			}
+			return nil
+		},
+		Accepter:      acceptFunc(func(context.Context, Offer) (bool, string) { return true, "" }),
+		PingInterval:  time.Second,
+		BackoffMin:    5 * time.Millisecond,
+		BackoffMax:    20 * time.Millisecond,
+		FlushInterval: 20 * time.Millisecond,
+	}
+	if tweak != nil {
+		tweak(env.client)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- env.client.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Error("runner did not stop")
+		}
+	})
+	return env
+}
+
+func testJob(runID, prompt string) runnerwire.Job {
+	return runnerwire.Job{RunID: runID, Project: "demo", NodeID: "n-1", NodeTitle: "Fix it", Prompt: prompt,
+		Agent: "claude", Model: "sonnet", RepoID: "r1", RequestedBy: "patrick"}
+}
+
+func (e *jobEnv) recorded(t *testing.T, runID, name string) string {
+	t.Helper()
+	path := filepath.Join(e.record, runID, name)
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
+			return string(raw)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("helper never recorded %s", path)
+	return ""
+}
+
+func samePath(a, b string) bool {
+	ea, errA := filepath.EvalSymlinks(a)
+	eb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && strings.EqualFold(filepath.Clean(ea), filepath.Clean(eb))
+}
+
+func TestRunSucceeds(t *testing.T) {
+	env := startJobRunner(t, nil)
+	hello := env.hub.hello()
+	if hello.Hello == nil || !slices.Contains(hello.Hello.Capabilities, runnerwire.CapHeadless) ||
+		hello.Hello.MaxConcurrent != 1 || len(hello.Active) != 0 {
+		t.Fatalf("hello = %+v", hello)
+	}
+
+	env.hub.offer(testJob("run-ok", "ok: do the thing"))
+	finish := env.hub.wait("run-ok", runnerwire.TypeFinish)
+	msgs := env.hub.messages("run-ok")
+
+	// accept, then events, then finish; nothing else.
+	if msgs[0].Type != runnerwire.TypeAccept || msgs[len(msgs)-1].Type != runnerwire.TypeFinish {
+		t.Fatalf("message order: %+v", msgs)
+	}
+	accept := msgs[0].Accept
+	if accept == nil || accept.RunID != "run-ok" || accept.Base != "main" || accept.Branch != "agent/n-1-run-ok" {
+		t.Fatalf("accept = %+v", accept)
+	}
+	var events []runnerwire.RunEvent
+	for _, msg := range msgs[1 : len(msgs)-1] {
+		if msg.Type != runnerwire.TypeEvents || len(msg.Events) == 0 || len(msg.Events) > runnerwire.MaxEventsPerMessage {
+			t.Fatalf("unexpected message %+v", msg)
+		}
+		events = append(events, msg.Events...)
+	}
+	var types []string
+	for i, ev := range events {
+		if ev.Seq != int64(i+1) {
+			t.Fatalf("event %d has seq %d", i, ev.Seq)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, ev.At); err != nil {
+			t.Fatalf("event at %q: %v", ev.At, err)
+		}
+		types = append(types, ev.Type)
+	}
+	for _, want := range []string{runnerwire.EventThinking, runnerwire.EventToolCall, runnerwire.EventToolResult,
+		runnerwire.EventText, runnerwire.EventUsage} {
+		if !slices.Contains(types, want) {
+			t.Errorf("no %s event in %v", want, types)
+		}
+	}
+	if !strings.Contains(events[0].Text, "worktree") || !strings.Contains(events[len(events)-1].Text, "exited with code 0") {
+		t.Errorf("first/last events: %+v / %+v", events[0], events[len(events)-1])
+	}
+
+	result := finish.Result
+	if result == nil || result.Status != runnerwire.RunSucceeded || result.ExitCode != 0 ||
+		result.Summary != `Content: "hello fixture"` || result.Usage == nil || result.Usage.OutputTokens != 130 {
+		t.Fatalf("result = %+v", result)
+	}
+
+	// The agent ran in the worktree, on its branch, with the prompt on stdin
+	// and the MCP server pointed at the proxy.
+	wtPath := filepath.Join(env.client.Config.DataDir, "worktrees", "run-ok")
+	if cwd := env.recorded(t, "run-ok", "cwd"); !samePath(cwd, wtPath) {
+		t.Errorf("agent ran in %s, want %s", cwd, wtPath)
+	}
+	if got := gitT(t, wtPath, "branch", "--show-current"); got != "agent/n-1-run-ok" {
+		t.Errorf("worktree branch %q", got)
+	}
+	stdin := env.recorded(t, "run-ok", "stdin")
+	if !strings.Contains(stdin, "ok: do the thing") || !strings.Contains(stdin, `claim_task with id "n-1"`) {
+		t.Errorf("stdin = %q", stdin)
+	}
+	var mcp struct {
+		MCPServers map[string]adapter.MCPServer `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-ok", "mcp.json")), &mcp); err != nil {
+		t.Fatal(err)
+	}
+	server := mcp.MCPServers["nodevas"]
+	exe, _ := os.Executable()
+	if server.Command != exe || len(server.Args) != 11 || server.Args[0] != "mcp" || server.Args[1] != "--server" {
+		t.Fatalf("mcp server = %+v", server)
+	}
+	proxyURL := server.Args[2]
+	if !strings.HasPrefix(proxyURL, "http://127.0.0.1:") || !strings.Contains(proxyURL, "/r/") {
+		t.Errorf("proxy url %q", proxyURL)
+	}
+	if want := []string{"--project", "demo", "--agent-role", "worker", "--actor", "run:claude",
+		"--session-name", "demo-claude-sonnet-run-ok"}; !slices.Equal(server.Args[3:11], want[:8]) {
+		t.Errorf("mcp args = %q", server.Args)
+	}
+	// The run's MCP config and its door through the proxy are gone.
+	if _, err := os.Stat(env.recorded(t, "run-ok", "mcp-path")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("mcp config left behind: %v", err)
+	}
+	resp, err := http.Get(proxyURL + "/api/auth/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("finished run's proxy secret answered %d", resp.StatusCode)
+	}
+}
+
+func TestRunFails(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	env.hub.offer(testJob("run-fail", "fail:"))
+	result := env.hub.wait("run-fail", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunFailed || result.ExitCode != 3 ||
+		result.Error != "Reached maximum number of turns (50)" || result.Usage.CostUSD != 1.25 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestRunWorktreeFailure(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	job := testJob("run-nobase", "ok:")
+	job.Base = "no-such-branch"
+	env.hub.offer(job)
+	result := env.hub.wait("run-nobase", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunFailed || !strings.Contains(result.Error, "could not create the worktree") ||
+		!strings.Contains(result.Error, "no-such-branch") {
+		t.Fatalf("result = %+v", result)
+	}
+	for _, msg := range env.hub.messages("run-nobase") {
+		if msg.Type == runnerwire.TypeAccept {
+			t.Fatal("accepted a run with no worktree")
+		}
+	}
+}
+
+func TestRunDeclines(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) {
+		c.Accepter = acceptFunc(func(_ context.Context, o Offer) (bool, string) {
+			if o.Job.RunID == "d-no" {
+				return false, ReasonDeclined
+			}
+			return true, ""
+		})
+	})
+	env.hub.hello()
+	cases := map[string]struct {
+		mutate func(*runnerwire.Job)
+		reason string
+	}{
+		"d-repo":   {func(j *runnerwire.Job) { j.RepoID = "elsewhere" }, "not on this runner's allowlist"},
+		"d-codex":  {func(j *runnerwire.Job) { j.Agent = "codex" }, `agent "codex" not supported yet`},
+		"d-gemini": {func(j *runnerwire.Job) { j.Agent = "gemini" }, "not supported yet"},
+		"d-model":  {func(j *runnerwire.Job) { j.Model = "gpt-9" }, `model "gpt-9" is not one this runner offers`},
+		"d-base":   {func(j *runnerwire.Job) { j.Base = "--upload-pack=x" }, "not a plain branch name"},
+		"d-id/..":  {func(*runnerwire.Job) {}, "run id is not usable"},
+		"d-no":     {func(*runnerwire.Job) {}, ReasonDeclined},
+	}
+	for id, c := range cases {
+		job := testJob(id, "ok:")
+		c.mutate(&job)
+		env.hub.offer(job)
+	}
+	for id, c := range cases {
+		msg := env.hub.wait(id, runnerwire.TypeDecline)
+		if !strings.Contains(msg.Reason, c.reason) {
+			t.Errorf("%s declined with %q, want %q", id, msg.Reason, c.reason)
+		}
+		if msgs := env.hub.messages(id); len(msgs) != 1 {
+			t.Errorf("%s: %+v", id, msgs)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(env.client.Config.DataDir, "worktrees")); len(entries) != 0 {
+		t.Errorf("declined runs made worktrees: %v", entries)
+	}
+}
+
+func TestRunNoAccepterNoTerminal(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.Accepter = &TerminalAccepter{In: strings.NewReader(""), Out: io.Discard} })
+	env.hub.hello()
+	env.hub.offer(testJob("run-x", "ok:"))
+	if msg := env.hub.wait("run-x", runnerwire.TypeDecline); msg.Reason != ReasonNoTerminal {
+		t.Fatalf("reason %q", msg.Reason)
+	}
+}
+
+func TestRunAutoAccept(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) {
+		c.Config.AutoAccept = true
+		c.Accepter = acceptFunc(func(context.Context, Offer) (bool, string) {
+			t.Error("asked despite autoAccept")
+			return false, "asked"
+		})
+	})
+	env.hub.hello()
+	env.hub.offer(testJob("run-auto", "ok:"))
+	if r := env.hub.wait("run-auto", runnerwire.TypeFinish).Result; r.Status != runnerwire.RunSucceeded {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
+// waitDead waits for the helper and its grandchild to be gone.
+func waitDead(t *testing.T, env *jobEnv, runID string) {
+	t.Helper()
+	for _, name := range []string{"pid", "child-pid"} {
+		pid, err := strconv.Atoi(env.recorded(t, runID, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for processAlive(pid) && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if processAlive(pid) {
+			t.Errorf("%s %d still running after the run ended", name, pid)
+		}
+	}
+}
+
+func TestRunCancelKillsTree(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	env.hub.offer(testJob("run-cancel", "hang:"))
+	env.hub.wait("run-cancel", runnerwire.TypeAccept)
+	env.recorded(t, "run-cancel", "child-pid")
+	start := time.Now()
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeCancel, RunID: "run-cancel", Reason: "changed my mind"})
+	result := env.hub.wait("run-cancel", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunCancelled || result.Error != "changed my mind" {
+		t.Fatalf("result = %+v", result)
+	}
+	if took := time.Since(start); took > waitDelay {
+		t.Errorf("cancel took %s: the tree was not killed, Wait waited out the pipe", took)
+	}
+	waitDead(t, env, "run-cancel")
+}
+
+func TestRunTimeout(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.RunTimeout = 500 * time.Millisecond })
+	env.hub.hello()
+	env.hub.offer(testJob("run-slow", "hang:"))
+	result := env.hub.wait("run-slow", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunFailed || result.Error != "timed out after 500ms" {
+		t.Fatalf("result = %+v", result)
+	}
+	waitDead(t, env, "run-slow")
+}
+
+func TestRunDedupeBusyAndReconnect(t *testing.T) {
+	release := make(chan struct{})
+	var asked atomic.Int32
+	env := startJobRunner(t, func(c *Client) {
+		c.Accepter = acceptFunc(func(ctx context.Context, o Offer) (bool, string) {
+			asked.Add(1)
+			select {
+			case <-release:
+				return true, ""
+			case <-ctx.Done():
+				return false, ReasonCancelled
+			}
+		})
+	})
+	if hello := env.hub.hello(); len(hello.Active) != 0 {
+		t.Fatalf("first hello active = %v", hello.Active)
+	}
+	job := testJob("run-a", "hang:")
+	env.hub.offer(job)
+	env.hub.offer(job) // while it is being asked about
+	time.Sleep(100 * time.Millisecond)
+	// Being asked about counts against the limit of one.
+	env.hub.offer(testJob("run-b", "ok:"))
+	if msg := env.hub.wait("run-b", runnerwire.TypeDecline); !strings.Contains(msg.Reason, "busy") {
+		t.Fatalf("run-b declined with %q", msg.Reason)
+	}
+	close(release)
+	env.hub.wait("run-a", runnerwire.TypeAccept)
+	env.recorded(t, "run-a", "child-pid")
+	env.hub.offer(job) // while it runs
+
+	// The hub restarts: the runner comes back and says run-a is still going.
+	env.hub.kick()
+	if hello := env.hub.hello(); !slices.Equal(hello.Active, []string{"run-a"}) {
+		t.Fatalf("hello after reconnect: active = %v", hello.Active)
+	}
+	env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeCancel, RunID: "run-a", Reason: "stop"})
+	if r := env.hub.wait("run-a", runnerwire.TypeFinish).Result; r.Status != runnerwire.RunCancelled {
+		t.Fatalf("result = %+v", r)
+	}
+	env.hub.offer(job) // after it finished: declined, never asked about again
+	if msg := env.hub.wait("run-a", runnerwire.TypeDecline); !strings.Contains(msg.Reason, "already") {
+		t.Fatalf("re-offer after finish declined with %q", msg.Reason)
+	}
+
+	if n := asked.Load(); n != 1 {
+		t.Errorf("asked %d times about run-a", n)
+	}
+	counts := map[string]int{}
+	var seqs []int64
+	for _, msg := range env.hub.messages("run-a") {
+		counts[msg.Type]++
+		for _, ev := range msg.Events {
+			seqs = append(seqs, ev.Seq)
+		}
+	}
+	if counts[runnerwire.TypeAccept] != 1 || counts[runnerwire.TypeFinish] != 1 || counts[runnerwire.TypeDecline] != 1 {
+		t.Errorf("run-a messages: %v", counts)
+	}
+	// Across the reconnect, seqs only go up.
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] <= seqs[i-1] {
+			t.Errorf("seq went from %d to %d", seqs[i-1], seqs[i])
+		}
+	}
+	if hello := env.hub.messages(""); len(hello) != 0 {
+		t.Errorf("messages without a run id: %+v", hello)
+	}
+	waitDead(t, env, "run-a")
+}
+
+func TestJobsBufferWhileDisconnected(t *testing.T) {
+	j := newJobs(context.Background(), &Client{Config: &Config{}})
+	r := &run{job: runnerwire.Job{RunID: "x"}, accepted: true, accept: &runnerwire.Accept{RunID: "x"}}
+	j.runs["x"], j.order = r, []string{"x"}
+	for i := 0; i < 2500; i++ {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventText, Text: "t"})
+	}
+	if len(r.events) > maxBufferedEvents || r.dropped < 500 {
+		t.Fatalf("buffered %d, dropped %d", len(r.events), r.dropped)
+	}
+	// Big events still fit a message.
+	for i := 0; i < 100; i++ {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventToolCall, Text: strings.Repeat("\"", runnerwire.MaxEventText+10),
+			Input: strings.Repeat("<", runnerwire.MaxEventText)})
+	}
+	j.finish(r, runnerwire.RunResult{Status: runnerwire.RunSucceeded})
+	if got := j.active(); !slices.Equal(got, []string{"x"}) {
+		t.Fatalf("active with an unsent finish = %v", got)
+	}
+
+	var sent []runnerwire.Envelope
+	writes := 0
+	collect := func(msg runnerwire.Envelope) error {
+		writes++
+		if writes == 3 {
+			return errors.New("socket down")
+		}
+		raw, _ := json.Marshal(msg)
+		if len(raw) > runnerwire.MaxMessageBytes {
+			t.Fatalf("message of %d bytes", len(raw))
+		}
+		sent = append(sent, msg)
+		return nil
+	}
+	if err := j.flush(collect); err == nil {
+		t.Fatal("flush hid a write error")
+	}
+	if err := j.flush(collect); err != nil {
+		t.Fatal(err)
+	}
+	if sent[0].Type != runnerwire.TypeAccept || sent[len(sent)-1].Type != runnerwire.TypeFinish {
+		t.Fatalf("first %s, last %s", sent[0].Type, sent[len(sent)-1].Type)
+	}
+	last := int64(0)
+	for _, msg := range sent[1 : len(sent)-1] {
+		if msg.Type != runnerwire.TypeEvents || len(msg.Events) > runnerwire.MaxEventsPerMessage {
+			t.Fatalf("message %s with %d events", msg.Type, len(msg.Events))
+		}
+		for _, ev := range msg.Events {
+			if ev.Seq <= last {
+				t.Fatalf("seq %d after %d", ev.Seq, last)
+			}
+			last = ev.Seq
+			if len(ev.Text) > runnerwire.MaxEventText {
+				t.Fatalf("event text %d bytes", len(ev.Text))
+			}
+		}
+	}
+	if last != 2600 {
+		t.Fatalf("last seq %d", last)
+	}
+	if len(j.active()) != 0 || len(j.runs) != 0 || !j.seen["x"] {
+		t.Fatalf("run not forgotten after its finish went out: %v %v", j.active(), j.runs)
+	}
+}
+
+func TestLineWriter(t *testing.T) {
+	var lines []string
+	w := &lineWriter{fn: func(line []byte) { lines = append(lines, string(line)) }}
+	for _, chunk := range []string{"a", "b\nc", "\n\n", "d\r\ne"} {
+		_, _ = w.Write([]byte(chunk))
+	}
+	w.flush()
+	if want := []string{"ab", "c", "d\r", "e"}; !slices.Equal(lines, want) {
+		t.Fatalf("lines = %q, want %q", lines, want)
+	}
+
+	tail := &tailBuffer{max: 8}
+	_, _ = tail.Write([]byte("0123456789"))
+	_, _ = tail.Write([]byte("ab "))
+	if got := tail.String(); got != "56789ab" {
+		t.Fatalf("tail = %q", got)
+	}
+}

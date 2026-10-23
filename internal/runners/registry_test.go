@@ -29,6 +29,8 @@ func (f *fakeConn) Bye(reason string) {
 	f.reasons = append(f.reasons, reason)
 }
 
+func (f *fakeConn) Send(runnerwire.Envelope) error { return nil }
+
 func (f *fakeConn) got() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

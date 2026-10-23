@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/runners"
+	"nodevas/internal/runnerwire"
 )
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
@@ -106,6 +107,16 @@ func (s *Server) secureHTTP(c *gin.Context) {
 func (s *Server) withAuth(c *gin.Context) {
 	r := c.Request
 	guarded := strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws"
+	// A request the runner proxy re-dispatched (runner_proxy.go) was
+	// authenticated by its runner token on the way in and acts as the
+	// runner's owner, marked as an agent. There is no session to check and no
+	// browser for a CSRF token to protect.
+	if proxied, ok := runnerProxiedFrom(r.Context()); ok {
+		ctx := auth.WithRevalidator(auth.WithActor(r.Context(), proxied.actor), proxied.still)
+		c.Request = r.WithContext(ctx)
+		c.Next()
+		return
+	}
 	if !guarded || auth.PublicPaths[r.URL.Path] {
 		c.Next()
 		return
@@ -178,6 +189,13 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 			return
 		}
 		httpx.Err(c, http.StatusUnauthorized, err)
+		return
+	}
+	// The proxy is served by running the request again as /api/<rest>; this
+	// request ends here and the rest of the chain applies to that one.
+	if strings.HasPrefix(r.URL.Path, runnerwire.ProxyPathPrefix) {
+		s.serveRunnerProxy(c, runner)
+		c.Abort()
 		return
 	}
 	ctx := runners.WithRunner(auth.WithActor(r.Context(), runners.ActorFor(runner)), runner)

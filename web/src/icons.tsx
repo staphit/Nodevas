@@ -350,6 +350,21 @@ export const IconSpark = (p: P) => (
   </svg>
 );
 
+/** Dispatch: hand a node to an agent on a runner. */
+export const IconSend = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5 21 3Z" />
+  </svg>
+);
+
+/** A run: one agent CLI working in a terminal on a runner. */
+export const IconTerminal = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+    <path d="m7 9.5 3 2.5-3 2.5M12.5 15h4.5" />
+  </svg>
+);
+
 export const IconFork = (p: P) => (
   <svg {...base(p)}>
     <path d="M12 4v6c0 2-1.5 3-3.5 3S5 14 5 16v4M12 10c0 2 1.5 3 3.5 3s3.5 1 3.5 3v4" />

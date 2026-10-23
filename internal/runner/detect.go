@@ -109,19 +109,23 @@ func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.A
 func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.Info {
 	host, _ := os.Hostname()
 	repos := []runnerwire.Repo{}
+	maxConcurrent := DefaultMaxConcurrent
 	if cfg != nil {
 		repos = append(repos, cfg.Repos...)
 		if len(repos) > runnerwire.MaxRepos {
 			repos = repos[:runnerwire.MaxRepos]
 		}
+		maxConcurrent = cfg.MaxConcurrentRuns()
 	}
 	return runnerwire.Info{
-		Version:  Version(),
-		Hostname: host,
-		OS:       runtime.GOOS,
-		Arch:     runtime.GOARCH,
-		Agents:   Detect(ctx, cmds, cfg),
-		Repos:    repos,
+		Version:       Version(),
+		Hostname:      host,
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		Agents:        Detect(ctx, cmds, cfg),
+		Repos:         repos,
+		Capabilities:  []string{runnerwire.CapHeadless},
+		MaxConcurrent: maxConcurrent,
 	}
 }
 
