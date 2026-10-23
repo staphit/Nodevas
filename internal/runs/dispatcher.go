@@ -29,6 +29,10 @@ type Dispatcher struct {
 	// changes; events when a run has new events. Either may be nil.
 	changed func(project, nodeID string)
 	events  func(project, runID string)
+	// notify is told when a run deserves a notification (RunNotifyEvent);
+	// audit records merge approvals and results. Either may be nil.
+	notify func(project, runID string)
+	audit  func(AuditEntry)
 
 	locks sync.Map // runner ID → *sync.Mutex
 }
@@ -37,6 +41,41 @@ type Dispatcher struct {
 // hooks; see Dispatcher.
 func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(project, runID string)) *Dispatcher {
 	return &Dispatcher{store: store, reg: reg, changed: changed, events: events}
+}
+
+// AuditEntry is a merge approval or result for the audit trail. Project is
+// the project's name as ?project= takes it.
+type AuditEntry struct {
+	Project, ActorID, ActorName, Action, Target string
+	Detail                                      map[string]any
+}
+
+// SetNotify sets the hook told when a run finishes (succeeded or failed), its
+// CI turns red, or its merge succeeds or fails. Call it before serving.
+func (d *Dispatcher) SetNotify(fn func(project, runID string)) { d.notify = fn }
+
+// SetAudit sets the hook that records merge approvals and results. Call it
+// before serving.
+func (d *Dispatcher) SetAudit(fn func(AuditEntry)) { d.audit = fn }
+
+func (d *Dispatcher) notifyRun(r Record) {
+	if d.notify != nil {
+		d.notify(r.Project, r.ID)
+	}
+}
+
+func (d *Dispatcher) record(entry AuditEntry) {
+	if d.audit != nil {
+		d.audit(entry)
+	}
+}
+
+// finished tells about a run that just reached an end state. Only success and
+// failure are worth a notification: a cancel or decline was someone's choice.
+func (d *Dispatcher) finished(r Record) {
+	if r.Status == runnerwire.RunSucceeded || r.Status == runnerwire.RunFailed {
+		d.notifyRun(r)
+	}
 }
 
 // Store is the run store the dispatcher writes to.
@@ -173,6 +212,7 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 		}
 		if err == nil {
 			d.notifyChanged(next)
+			d.finished(next)
 		}
 	}
 	for id := range listed {
@@ -185,6 +225,7 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 		}
 	}
 	d.Pump(ctx, runnerID)
+	d.sendPendingMerges(ctx, runnerID)
 }
 
 func (d *Dispatcher) sendCancel(r Record, reason string) bool {
@@ -264,12 +305,15 @@ func (d *Dispatcher) Changes(ctx context.Context, runnerID, runID string, change
 // runner reports the PR's state and CI until it is merged or closed. Only a
 // report that changes what the run shows is announced.
 func (d *Dispatcher) PR(ctx context.Context, runnerID, runID string, pr runnerwire.PRInfo) error {
-	r, changed, err := d.store.SetPR(ctx, runID, runnerID, pr)
+	before, r, changed, err := d.store.setPR(ctx, runID, runnerID, pr)
 	if err != nil {
 		return err
 	}
 	if changed {
 		d.notifyChanged(r)
+		if r.CIStatus == runnerwire.CIFailure && before.CIStatus != runnerwire.CIFailure {
+			d.notifyRun(r)
+		}
 	}
 	return nil
 }
@@ -281,6 +325,7 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 		return err
 	}
 	d.notifyChanged(r)
+	d.finished(r)
 	d.Pump(ctx, runnerID)
 	return nil
 }

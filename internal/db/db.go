@@ -658,6 +658,45 @@ CREATE TABLE run_changes (
 ) STRICT;
 `,
 	},
+	{
+		name: "0013_run_merges_budgets",
+		stmt: `
+-- Remote merge approval and budgets (W4). The hub records approvals and
+-- relays them to the run's runner, which merges with its owner's own gh
+-- login; it never merges anything itself.
+
+-- The PR head the CI status belongs to; an approval must name it.
+ALTER TABLE runs ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT '';
+-- Run usage per owner and day, for budgets.
+CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
+
+CREATE TABLE run_merges (
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL REFERENCES runs(id),
+    -- The PR head the approver saw; the runner refuses if the PR moved on.
+    head_sha          TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
+    -- Why it failed or expired; '' when merged.
+    reason            TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    finished_at       TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
+-- At most one approval waits per run.
+CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
+
+-- Per-owner daily limits on new runs; zero means no limit.
+CREATE TABLE run_budgets (
+    owner_id        TEXT PRIMARY KEY,
+    daily_runs      INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd  REAL    NOT NULL DEFAULT 0,
+    daily_tokens    INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

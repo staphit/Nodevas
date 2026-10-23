@@ -241,7 +241,7 @@ func (a *API) connect(c *gin.Context) {
 				a.runs.Pump(ctx, runner.ID)
 			}
 		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish,
-			runnerwire.TypeChanges, runnerwire.TypePR:
+			runnerwire.TypeChanges, runnerwire.TypePR, runnerwire.TypeMergeResult:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
 				return
@@ -302,6 +302,12 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 			return errMalformed
 		}
 		return a.runs.PR(ctx, runnerID, env.RunID, *env.PR)
+	case runnerwire.TypeMergeResult:
+		if env.MergeResult == nil || env.MergeResult.ID == "" || env.MergeResult.RunID == "" {
+			return errMalformed
+		}
+		// For a merge that is not this runner's, or already answered: dropped.
+		return a.runs.MergeResult(ctx, runnerID, *env.MergeResult)
 	}
 	return errMalformed
 }
@@ -309,6 +315,9 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 func runID(env runnerwire.Envelope) string {
 	if env.Accept != nil {
 		return env.Accept.RunID
+	}
+	if env.MergeResult != nil {
+		return env.MergeResult.RunID
 	}
 	return env.RunID
 }

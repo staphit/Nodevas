@@ -125,6 +125,9 @@ func ValidatePR(pr runnerwire.PRInfo) error {
 	if !ciStatuses[pr.CI] {
 		return invalidf("ci status %q", pr.CI)
 	}
+	if len(pr.HeadSHA) > maxCommitBytes || !isHex(pr.HeadSHA) {
+		return invalidf("pr head is not an object name")
+	}
 	return nil
 }
 
@@ -139,7 +142,7 @@ func (s *Store) acceptsChanges(r Record) bool {
 			return false // ended before it ever ran
 		}
 		finished, err := time.Parse(time.RFC3339Nano, r.FinishedAt)
-		return err == nil && s.now().Sub(finished) <= ChangesGrace
+		return err == nil && s.clock().Sub(finished) <= ChangesGrace
 	}
 	return false
 }
@@ -235,27 +238,34 @@ FROM run_changes WHERE run_id = ?`, runID).Scan(
 // status the run is: the runner keeps watching the PR long after the run
 // ends. It reports whether anything the API shows changed.
 func (s *Store) SetPR(ctx context.Context, runID, runnerID string, pr runnerwire.PRInfo) (Record, bool, error) {
+	_, latest, changed, err := s.setPR(ctx, runID, runnerID, pr)
+	return latest, changed, err
+}
+
+// setPR is SetPR that also returns the run as it was before, so the caller
+// can tell what moved (CI turning red).
+func (s *Store) setPR(ctx context.Context, runID, runnerID string, pr runnerwire.PRInfo) (Record, Record, bool, error) {
 	if err := ValidatePR(pr); err != nil {
-		return Record{}, false, err
+		return Record{}, Record{}, false, err
 	}
 	current, err := s.Get(ctx, runID)
 	if err != nil {
-		return Record{}, false, err
+		return Record{}, Record{}, false, err
 	}
 	if current.RunnerID != runnerID {
-		return Record{}, false, ErrNotFound
+		return Record{}, Record{}, false, ErrNotFound
 	}
 	prError := strings.ReplaceAll(Truncate(pr.Error, MaxErrorBytes), "\x00", "")
 	if current.PRURL == pr.URL && current.PRNumber == pr.Number && current.PRState == pr.State &&
-		current.CIStatus == pr.CI && current.PRError == prError {
-		return current, false, nil
+		current.CIStatus == pr.CI && current.PRError == prError && current.PRHeadSHA == pr.HeadSHA {
+		return current, current, false, nil
 	}
 	if _, err := s.db.ExecContext(ctx, `
-UPDATE runs SET pr_url = ?, pr_number = ?, pr_state = ?, ci_status = ?, pr_error = ?
+UPDATE runs SET pr_url = ?, pr_number = ?, pr_state = ?, ci_status = ?, pr_error = ?, pr_head_sha = ?
 WHERE id = ? AND runner_id = ?`,
-		pr.URL, int64(pr.Number), pr.State, pr.CI, prError, runID, runnerID); err != nil {
-		return Record{}, false, err
+		pr.URL, int64(pr.Number), pr.State, pr.CI, prError, pr.HeadSHA, runID, runnerID); err != nil {
+		return Record{}, Record{}, false, err
 	}
 	latest, err := s.Get(ctx, runID)
-	return latest, true, err
+	return current, latest, true, err
 }

@@ -175,8 +175,16 @@ func TestSetPRInAnyStatus(t *testing.T) {
 		updated.PRState != runnerwire.PROpen || updated.CIStatus != runnerwire.CIPending || updated.PRError != "" {
 		t.Fatalf("pr open: %+v %v %v", updated.Run, changed, err)
 	}
-	// The same report again is not a change. HeadSHA and Draft are not kept.
+	// A new head is a change (W4: an approval names it); Draft is not kept.
 	open.HeadSHA = "abc"
+	if updated, changed, err := s.SetPR(ctx, r.ID, "r1", open); err != nil || !changed || updated.PRHeadSHA != "abc" {
+		t.Fatalf("new head: %v %v %q", changed, err, updated.PRHeadSHA)
+	}
+	if got, err := s.Get(ctx, r.ID); err != nil || got.PRHeadSHA != "abc" {
+		t.Fatalf("head not persisted: %q %v", got.PRHeadSHA, err)
+	}
+	// The same report again is not a change.
+	open.Draft = true
 	if _, changed, err := s.SetPR(ctx, r.ID, "r1", open); err != nil || changed {
 		t.Fatalf("repeat pr: %v %v", changed, err)
 	}
@@ -208,6 +216,8 @@ func TestSetPRInAnyStatus(t *testing.T) {
 		"bad ci":        {URL: "https://github.com/o/r/pull/7", State: runnerwire.PROpen, CI: "green"},
 		"negative num":  {URL: "https://github.com/o/r/pull/7", State: runnerwire.PROpen, Number: -1},
 		"no url, state": {State: "weird"},
+		"bad head":      {URL: "https://github.com/o/r/pull/7", State: runnerwire.PROpen, HeadSHA: "HEAD~1"},
+		"long head":     {URL: "https://github.com/o/r/pull/7", State: runnerwire.PROpen, HeadSHA: strings.Repeat("a", 65)},
 	} {
 		if _, _, err := s.SetPR(ctx, r.ID, "r1", pr); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v, want ErrInvalid", name, err)

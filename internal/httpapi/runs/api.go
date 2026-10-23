@@ -58,6 +58,9 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/events", a.events)
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/budget", a.budget)
+	api.PUT("/runs/budget", a.setBudget)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -74,7 +77,7 @@ func fail(c *gin.Context, err error) {
 		notFound(c, "run")
 	case errors.Is(err, runs.ErrInvalid):
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
-	case errors.Is(err, runs.ErrTransition):
+	case errors.Is(err, runs.ErrPrecondition), errors.Is(err, runs.ErrTransition):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -157,6 +160,17 @@ func (a *API) create(c *gin.Context) {
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
 			errors.New("this runner does not take runs; update nodevas on it"), nil)
+		return
+	}
+	// The budget is the runner owner's: runs spend their subscription.
+	budget, err := a.d.Store().BudgetStatus(c.Request.Context(), runner.OwnerID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if budget.Exceeded != "" {
+		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
+			errors.New(runs.BudgetMessage(budget)), map[string]any{"exceeded": budget.Exceeded})
 		return
 	}
 
