@@ -61,6 +61,10 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/runs/:id/merge", a.merge)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
+	api.GET("/runs/routing", a.routing)
+	api.PUT("/runs/routing", a.setRouting)
+	api.GET("/runs/route", a.route)
+	api.GET("/runs/pipelines/:id", a.pipeline)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -143,6 +147,18 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "base is not a valid branch name")
 		return
 	}
+	if err := runs.ValidateChain(body.Fallbacks, false); err != nil {
+		fail(c, err)
+		return
+	}
+	if body.Pipeline != nil {
+		if err := runs.ValidatePipeline(*body.Pipeline, false); err != nil {
+			fail(c, err)
+			return
+		}
+		// The pipeline's implement step is the first run.
+		body.Agent, body.Model = body.Pipeline.Implement.Agent, body.Pipeline.Implement.Model
+	}
 
 	// The runner must be the caller's own, administrators included: a run
 	// executes on the owner's machine with the owner's logins, and nobody
@@ -156,6 +172,19 @@ func (a *API) create(c *gin.Context) {
 	if problem != "" {
 		invalid(c, "%s", problem)
 		return
+	}
+	var pipeline *runnerwire.Pipeline
+	if body.Pipeline != nil {
+		reviewModel, err := runs.ResolveAgentModel(runner.Info, body.Pipeline.Review)
+		if err != nil {
+			invalid(c, "pipeline review: %v", err)
+			return
+		}
+		pipeline = &runnerwire.Pipeline{
+			Implement: runnerwire.AgentModel{Agent: body.Agent, Model: model},
+			Review:    runnerwire.AgentModel{Agent: body.Pipeline.Review.Agent, Model: reviewModel},
+			MaxRounds: body.Pipeline.MaxRounds,
+		}
 	}
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
@@ -191,14 +220,31 @@ func (a *API) create(c *gin.Context) {
 	if name == "" {
 		name = actor.ID
 	}
+	jobPrompt := BuildPrompt(title, content, body.Prompt)
+	pipelineID := ""
+	if pipeline != nil {
+		p, err := a.d.Store().CreatePipeline(c.Request.Context(), runs.NewPipeline{
+			OwnerID: runner.OwnerID, CreatedBy: actor.ID, Project: projectName, NodeID: node.ID,
+			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
+		})
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		pipelineID = p.ID
+	}
 	record, err := a.d.Store().Create(c.Request.Context(), runs.New{
 		Project: projectName, NodeID: node.ID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		Prompt: body.Prompt, JobPrompt: BuildPrompt(title, content, body.Prompt),
+		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: actor.ID, CreatedByName: name,
+		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
 	})
 	if err != nil {
+		if pipelineID != "" {
+			_, _ = a.d.Store().EndPipeline(c.Request.Context(), pipelineID, runnerwire.PipelineFailed, err.Error())
+		}
 		fail(c, err)
 		return
 	}
@@ -211,25 +257,9 @@ func (a *API) create(c *gin.Context) {
 // the runner last reported. It returns the model to record and the repo, or a
 // reason the request does not fit.
 func checkAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, string) {
-	if info == nil {
-		return "", runnerwire.Repo{}, "the runner has not connected yet, so its agents are unknown"
-	}
-	i := slices.IndexFunc(info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == body.Agent })
-	if i < 0 || !info.Agents[i].Installed {
-		return "", runnerwire.Repo{}, fmt.Sprintf("agent %q is not installed on the runner", body.Agent)
-	}
-	agent := info.Agents[i]
-	model := body.Model
-	if model == "" {
-		model = "default"
-		for _, m := range agent.Models {
-			if m.Default {
-				model = m.ID
-				break
-			}
-		}
-	} else if !slices.ContainsFunc(agent.Models, func(m runnerwire.Model) bool { return m.ID == model }) {
-		return "", runnerwire.Repo{}, fmt.Sprintf("model %q is not offered by %s on the runner", model, agent.Kind)
+	model, err := runs.ResolveAgentModel(info, runnerwire.AgentModel{Agent: body.Agent, Model: body.Model})
+	if err != nil {
+		return "", runnerwire.Repo{}, err.Error()
 	}
 	r := slices.IndexFunc(info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == body.RepoID })
 	if body.RepoID == "" || r < 0 {
@@ -412,6 +442,14 @@ func (a *API) cancel(c *gin.Context) {
 	name := actor.Name
 	if name == "" {
 		name = actor.ID
+	}
+	// Cancelling any run of a pipeline cancels the pipeline, and with it
+	// whichever of its runs has not ended.
+	if r.PipelineID != "" {
+		if err := a.d.CancelPipeline(c.Request.Context(), r.PipelineID, "cancelled by "+name); err != nil {
+			fail(c, err)
+			return
+		}
 	}
 	updated, err := a.d.Cancel(c.Request.Context(), r.ID, "cancelled by "+name)
 	if err != nil {

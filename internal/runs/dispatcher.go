@@ -213,6 +213,7 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 		if err == nil {
 			d.notifyChanged(next)
 			d.finished(next)
+			d.afterEnd(ctx, next, true)
 		}
 	}
 	for id := range listed {
@@ -261,6 +262,7 @@ func (d *Dispatcher) Decline(ctx context.Context, runnerID, runID, reason string
 		return err
 	}
 	d.notifyChanged(r)
+	d.afterEnd(ctx, r, false)
 	d.Pump(ctx, runnerID)
 	return nil
 }
@@ -314,6 +316,11 @@ func (d *Dispatcher) PR(ctx context.Context, runnerID, runID string, pr runnerwi
 		if r.CIStatus == runnerwire.CIFailure && before.CIStatus != runnerwire.CIFailure {
 			d.notifyRun(r)
 		}
+		// A pipeline whose implement run ended before its PR was reported
+		// moves on now.
+		if before.PRURL == "" && before.PRError == "" {
+			d.prReported(ctx, r)
+		}
 	}
 	return nil
 }
@@ -326,6 +333,7 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 	}
 	d.notifyChanged(r)
 	d.finished(r)
+	d.afterEnd(ctx, r, r.Status == runnerwire.RunSucceeded || r.Status == runnerwire.RunFailed)
 	d.Pump(ctx, runnerID)
 	return nil
 }
@@ -359,6 +367,7 @@ func (d *Dispatcher) Cancel(ctx context.Context, runID, reason string) (Record, 
 				return Record{}, err
 			}
 			d.notifyChanged(next)
+			d.afterEnd(ctx, next, false)
 			return next, nil
 		default: // queued, offered
 			next, err := d.store.Transition(ctx, runID, runnerwire.RunCancelled, Change{})
@@ -372,6 +381,7 @@ func (d *Dispatcher) Cancel(ctx context.Context, runID, reason string) (Record, 
 				d.sendCancel(r, reason)
 			}
 			d.notifyChanged(next)
+			d.afterEnd(ctx, next, false)
 			d.Pump(ctx, r.RunnerID)
 			return next, nil
 		}

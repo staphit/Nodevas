@@ -697,6 +697,67 @@ CREATE TABLE run_budgets (
 ) STRICT;
 `,
 	},
+	{
+		name: "0014_run_routing",
+		stmt: `
+-- Routing, fallback and pipelines (W5). Every rule is the owner's own; the hub
+-- only picks what a run asks for, the runner still decides whether to take it.
+
+-- A run's job kind ('' implement, 'review', 'revise'), how it failed, a
+-- review's verdict, the run it falls back from and the pipeline it is a step
+-- of.
+ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_of     TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pipeline_id  TEXT NOT NULL DEFAULT '';
+-- The rest of the fallback chain, []runnerwire.AgentModel as JSON ('' none).
+ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
+-- What a review or revise job is offered: the PR branch, its pull request,
+-- and (revise) the review it addresses.
+ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
+
+-- One owner's routing rules, in order: a PUT replaces them all.
+CREATE TABLE run_routes (
+    owner_id    TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    -- runnerwire.RouteRule as JSON.
+    rule        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (owner_id, position)
+) STRICT;
+
+-- Implement → review (→ revise → review…) for one node.
+CREATE TABLE run_pipelines (
+    id          TEXT PRIMARY KEY,
+    -- The runner's owner, as on runs.
+    owner_id    TEXT NOT NULL,
+    created_by  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    node_id     TEXT NOT NULL,
+    -- runnerwire.Pipeline as JSON, models resolved when it was dispatched.
+    pipeline    TEXT NOT NULL,
+    -- The implement step's fallback chain, []runnerwire.AgentModel as JSON.
+    fallbacks   TEXT NOT NULL DEFAULT '',
+    -- The task as first offered and the dispatcher's extra instructions; every
+    -- step starts from them.
+    job_prompt  TEXT NOT NULL DEFAULT '',
+    prompt      TEXT NOT NULL DEFAULT '',
+    -- The pull request the implement step opened, which later steps work on.
+    branch      TEXT NOT NULL DEFAULT '',
+    pr_url      TEXT NOT NULL DEFAULT '',
+    round       INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+) STRICT;
+CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

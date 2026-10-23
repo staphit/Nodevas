@@ -67,6 +67,12 @@ type Record struct {
 	// NodeTitle and JobPrompt are what the runner is offered.
 	NodeTitle string
 	JobPrompt string
+	// W5: the rest of the fallback chain, and what a review or revise job is
+	// offered (the PR branch, its pull request, the review to address).
+	Fallbacks []runnerwire.AgentModel
+	JobBranch string
+	JobPRURL  string
+	Review    string
 }
 
 // Job is the offer for this run.
@@ -75,6 +81,7 @@ func (r Record) Job() runnerwire.Job {
 		RunID: r.ID, Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
 		Prompt: r.JobPrompt, Agent: r.Agent, Model: r.Model, RepoID: r.RepoID,
 		Base: r.Base, RequestedBy: r.CreatedByName,
+		Kind: r.Kind, Branch: r.JobBranch, PRURL: r.JobPRURL, Review: r.Review,
 	}
 }
 
@@ -145,6 +152,13 @@ type New struct {
 	// task the runner is offered.
 	Prompt, JobPrompt        string
 	CreatedBy, CreatedByName string
+	// W5: job kind and what a review or revise works on; the run this one
+	// falls back from, its pipeline, and the fallback chain still left.
+	Kind                string
+	JobBranch, JobPRURL string
+	Review              string
+	RetryOf, PipelineID string
+	Fallbacks           []runnerwire.AgentModel
 }
 
 // Create records a queued run.
@@ -157,6 +171,13 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if len(in.JobPrompt) > runnerwire.MaxPromptBytes {
 		return Record{}, fmt.Errorf("%w: prompt over %d bytes", ErrInvalid, runnerwire.MaxPromptBytes)
 	}
+	if !jobKinds[in.Kind] {
+		return Record{}, fmt.Errorf("%w: job kind %q", ErrInvalid, in.Kind)
+	}
+	fallbacks, err := encodeChain(in.Fallbacks)
+	if err != nil {
+		return Record{}, err
+	}
 	id, err := newID()
 	if err != nil {
 		return Record{}, err
@@ -165,11 +186,14 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
-                  created_by, created_by_name, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  created_by, created_by_name, created_at,
+                  kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
-		in.CreatedBy, in.CreatedByName, now)
+		in.CreatedBy, in.CreatedByName, now,
+		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
+		Truncate(in.Review, runnerwire.MaxSummaryBytes), in.RetryOf, in.PipelineID, fallbacks)
 	if err != nil {
 		return Record{}, err
 	}
@@ -180,17 +204,20 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
        started_at, finished_at, commit_sha, files_changed, additions, deletions,
-       pr_number, pr_state, pr_error, pr_head_sha`
+       pr_number, pr_state, pr_error, pr_head_sha,
+       kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
-	var usage string
+	var usage, fallbacks string
 	var exit, files, additions, deletions, prNumber int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
 		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
-		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA); err != nil {
+		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA,
+		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
+		&r.JobBranch, &r.JobPRURL, &r.Review); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)
@@ -201,6 +228,7 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 			r.Usage = &parsed
 		}
 	}
+	r.Fallbacks = decodeChain(fallbacks)
 	return r, nil
 }
 
@@ -315,6 +343,9 @@ type Change struct {
 	Summary  string
 	ExitCode *int
 	Usage    *runnerwire.Usage
+	// FailureKind and Verdict are what a finish reports (W5).
+	FailureKind string
+	Verdict     string
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -350,6 +381,12 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.Summary != "" {
 		set("summary", Truncate(change.Summary, runnerwire.MaxSummaryBytes))
+	}
+	if change.FailureKind != "" {
+		set("failure_kind", change.FailureKind)
+	}
+	if change.Verdict != "" {
+		set("verdict", change.Verdict)
 	}
 	if change.ExitCode != nil {
 		set("exit_code", int64(*change.ExitCode))
@@ -396,9 +433,14 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 		return Record{}, fmt.Errorf("%w: finish status %q", ErrInvalid, result.Status)
 	}
 	exit := result.ExitCode
+	failureKind := ""
+	if result.Status == runnerwire.RunFailed {
+		failureKind = CleanFailureKind(result.FailureKind)
+	}
 	return s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
+		FailureKind: failureKind, Verdict: CleanVerdict(result.Verdict),
 	})
 }
 
