@@ -194,6 +194,12 @@ export const IconBell = (p: P) => (
   </svg>
 );
 
+export const IconPaperclip = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m20 11.5-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" />
+  </svg>
+);
+
 export const IconComputer = (p: P) => (
   <svg {...base(p)}>
     <rect x="3" y="4.5" width="18" height="12" rx="1.8" />

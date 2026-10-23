@@ -58,6 +58,8 @@ export type WSEvent = {
     | "locks"
     | "lock-denied"
     | "agents-changed"
+    | "agent-messages-changed"
+    | "agent-notify"
     | "runners-changed"
     | "runs-changed"
     | "run-events";

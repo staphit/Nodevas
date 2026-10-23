@@ -15,13 +15,27 @@ let previous: string | null = null;
  * global-setup.ts; booting another instance of it costs almost nothing.
  *
  * Ports start clear of 5700 (serve.mjs default) and 5701 (mobile preview) so
- * an e2e run never fights a preview run for a listener.
+ * an e2e run never fights a preview run for a listener. Two checkouts running
+ * e2e at once would still collide, so NODEVAS_E2E_PORT_BASE moves the range.
  */
+const portBase = Number(process.env.NODEVAS_E2E_PORT_BASE) || 5720;
+
 export const test = base.extend<{}, { workerServer: { baseURL: string } }>({
   workerServer: [
     async ({}, use, workerInfo) => {
-      const port = 5720 + workerInfo.parallelIndex;
+      const port = portBase + workerInfo.parallelIndex;
       const baseURL = `http://127.0.0.1:${port}`;
+      // A server already answering here belongs to another run (another
+      // checkout's e2e, say). Testing against it would test the wrong build.
+      const taken = await fetch(`${baseURL}/api/projects`).then(
+        () => true,
+        () => false,
+      );
+      if (taken) {
+        throw new Error(
+          `port ${port} is already serving; set NODEVAS_E2E_PORT_BASE to another range`,
+        );
+      }
       const binary = join(
         import.meta.dirname,
         ".bin",
