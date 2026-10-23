@@ -909,6 +909,7 @@ export function TabBody({
           setEditorMode={setEditorMode}
           nodeId={id}
           pageId={activePageID ?? "main"}
+          pageTitle={subpages.pages.find((page) => page.id === activePageID)?.title}
           content={editorBody}
         />
 

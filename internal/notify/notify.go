@@ -71,7 +71,7 @@ func (n *Notifier) settingsPath() string {
 // secretPath is where the SMTP password lives: the app config directory, not
 // the project directory.
 //
-// The project directory is the thing users sync to Google Drive, hand to a
+// The project directory is the thing users sync to a cloud drive, hand to a
 // colleague, or check into git. A plaintext mail password does not belong in
 // anything that travels.
 func (n *Notifier) secretPath() string {

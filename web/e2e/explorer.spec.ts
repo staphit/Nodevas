@@ -53,8 +53,12 @@ test("exports the whole project as one document from the sidebar", async ({ page
   await freshProject(page, ["第一節", "第二節"]);
 
   await page.getByRole("button", { name: "匯出目標" }).click();
-  const download = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: /Markdown/ }).click();
+  // Explorer exports say what is about to leave and wait for a yes.
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText(".md");
+  const download = page.waitForEvent("download");
+  await confirm.getByRole("button", { name: "匯出", exact: true }).click();
   const file = await download;
   expect(file.suggestedFilename()).toContain(".md");
 

@@ -14,7 +14,7 @@ import (
 //
 // Every one of them answers a question an agent actually has, rather than
 // wrapping an HTTP endpoint. There are about sixty endpoints on the server and
-// most of them — drafts, trash, history, Drive backup, the file picker — mean
+// most of them — drafts, trash, history, backup, the file picker — mean
 // nothing to an agent; exposing them would spend the model's context on a menu
 // it will never order from.
 

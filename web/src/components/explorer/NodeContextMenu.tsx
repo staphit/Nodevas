@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { IconDoc, IconPages, IconSend, IconTerminal, IconTrash } from "../../icons";
+import { IconDoc, IconPages, IconPencil, IconSend, IconTerminal, IconTrash } from "../../icons";
 import { openNodeRuns } from "../../runs/RunsRoot";
 import { useRuns } from "../../runs/runStore";
 import { useI18n } from "../../i18n";
@@ -123,7 +123,7 @@ export function NodeContextMenu({
             }}
           >
             <span className="project-context-icon">
-              <IconDoc size={14} />
+              <IconPencil size={14} />
             </span>
             <span>
               <b>{t("explorer.open")}</b>
