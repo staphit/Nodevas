@@ -16,24 +16,34 @@ import (
 )
 
 func TestCommitMessage(t *testing.T) {
+	// The node's title is the subject; the whole summary is the body.
 	job := runnerwire.Job{RunID: "0123456789abcdef", NodeID: "n-42", NodeTitle: "Fix  the\nlogin page"}
-	got := commitMessage("\n\n## Fixed the login redirect\n\nThe callback now keeps ?next=.\r\nTests added.\n", job)
-	want := "Fixed the login redirect\n\nThe callback now keeps ?next=.\nTests added.\n\nNodevas-Node: n-42\nNodevas-Run: 0123456789abcdef\n"
+	got := commitMessage("\n\nDone.\n\nThe callback now keeps ?next=.\r\nTests added.\n", job)
+	want := "Fix the login page\n\nDone.\n\nThe callback now keeps ?next=.\nTests added.\n\nNodevas-Node: n-42\nNodevas-Run: 0123456789abcdef\n"
 	if got != want {
 		t.Errorf("message:\n%q\nwant\n%q", got, want)
 	}
 
-	// No summary: the run and the node name it.
-	if got := commitMessage("  ", job); got != "Nodevas run 01234567: Fix the login page\n\nNodevas-Node: n-42\nNodevas-Run: 0123456789abcdef\n" {
-		t.Errorf("fallback message %q", got)
+	// No summary: just the title and the trailers.
+	if got := commitMessage("  ", job); got != "Fix the login page\n\nNodevas-Node: n-42\nNodevas-Run: 0123456789abcdef\n" {
+		t.Errorf("no summary %q", got)
 	}
 
-	// A long first line is cut at a word, and the body keeps all of it.
+	// No title: the summary's first line, markup dropped, cut at a word.
+	untitled := runnerwire.Job{RunID: "0123456789abcdef", NodeID: "n-42"}
+	if got := commitMessage("## Fixed the login redirect\nmore", untitled); !strings.HasPrefix(got, "Fixed the login redirect\n\n") {
+		t.Errorf("untitled %q", got)
+	}
 	long := strings.Repeat("word ", 30) + "end"
-	got = commitMessage(long, job)
+	got = commitMessage(long, untitled)
 	subject, body, _ := strings.Cut(got, "\n\n")
 	if len([]rune(subject)) > maxSubject || strings.HasSuffix(subject, " ") || !strings.HasPrefix(body, long) {
 		t.Errorf("long subject %q, body %q", subject, body)
+	}
+
+	// Neither: the run names it.
+	if got := commitMessage("", untitled); !strings.HasPrefix(got, "Nodevas run 01234567\n\n") {
+		t.Errorf("bare fallback %q", got)
 	}
 
 	// The body is capped.
@@ -426,7 +436,7 @@ func TestPipelineOpensPR(t *testing.T) {
 	if got := gitT(t, bare, "rev-parse", "refs/heads/agent/n-1-run-pr"); got != changes.Commit {
 		t.Errorf("origin has %q, want %q", got, changes.Commit)
 	}
-	if subject := gitT(t, bare, "log", "-1", "--format=%s", "agent/n-1-run-pr"); subject != `Content: "hello fixture"` {
+	if subject := gitT(t, bare, "log", "-1", "--format=%s", "agent/n-1-run-pr"); subject != "Fix it" {
 		t.Errorf("commit subject %q", subject)
 	}
 	creates, bodies := gh.createCalls()

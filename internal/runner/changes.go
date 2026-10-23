@@ -31,34 +31,32 @@ const (
 	fallbackEmail = "runner@nodevas.invalid"
 )
 
-// commitMessage is a run's commit message: the summary's first line as the
-// subject, the rest as the body, and trailers naming the node and the run.
+// commitMessage is a run's commit message: the node's title as the subject,
+// the agent's summary as the body, and trailers naming the node and the run.
+// The title, not the summary's first line: agents open with "Done." as often
+// as with anything that says what changed, and the node is what the work was.
 func commitMessage(summary string, job runnerwire.Job) string {
 	summary = strings.TrimSpace(strings.ReplaceAll(summary, "\r\n", "\n"))
-	first, rest := "", ""
-	for i, line := range strings.Split(summary, "\n") {
-		if strings.TrimSpace(line) != "" {
-			first = strings.TrimSpace(line)
-			rest = strings.Join(strings.Split(summary, "\n")[i+1:], "\n")
-			break
+	subject := subjectLine(oneLine(job.NodeTitle))
+	if subject == "" {
+		for _, line := range strings.Split(summary, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				subject = subjectLine(line)
+				break
+			}
 		}
-	}
-	subject := subjectLine(first)
-	if subject != stripMarkup(first) {
-		// The subject lost words; the body keeps the whole summary.
-		rest = summary
 	}
 	if subject == "" {
 		runID := job.RunID
 		if len(runID) > 8 {
 			runID = runID[:8]
 		}
-		subject = subjectLine(strings.TrimSpace("Nodevas run " + runID + ": " + oneLine(job.NodeTitle)))
+		subject = "Nodevas run " + runID
 	}
 	var b strings.Builder
 	b.WriteString(subject)
 	b.WriteString("\n\n")
-	if body := truncateUTF8(strings.TrimSpace(rest), maxCommitBody); body != "" {
+	if body := truncateUTF8(summary, maxCommitBody); body != "" {
 		b.WriteString(body)
 		b.WriteString("\n\n")
 	}
