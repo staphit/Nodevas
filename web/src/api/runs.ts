@@ -29,6 +29,15 @@ export function runCancellable(status: string): boolean {
   return status === "queued" || status === "offered" || status === "running";
 }
 
+/** Mirrors runnerwire.ModeHeadless ("") and ModeInteractive (W2.5). */
+export type RunMode = "" | "interactive";
+export const RUN_MODE_INTERACTIVE = "interactive";
+
+/** Whether a run is interactive: its agent's own TUI in a PTY on the runner. */
+export function runInteractive(run: { mode?: string }): boolean {
+  return run.mode === RUN_MODE_INTERACTIVE;
+}
+
 export interface RunUsage {
   inputTokens: number;
   outputTokens: number;
@@ -95,6 +104,8 @@ export interface Run {
   prHeadSha?: string;
   /** The latest merge request for the run, if any (W4). */
   merge?: RunMergeRequest | null;
+  /** W2.5: absent (headless) or "interactive". */
+  mode?: RunMode | string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -182,6 +193,9 @@ export interface CreateRunRequest {
   base?: string;
   /** Extra instructions on top of the node's own content. */
   prompt?: string;
+  /** W2.5: omitted for headless. "interactive" needs the runner's
+   * "interactive" capability; the hub answers 409 otherwise. */
+  mode?: RunMode;
 }
 
 export interface RunListResponse {

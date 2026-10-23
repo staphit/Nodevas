@@ -126,6 +126,17 @@ export type {
 } from "./runs";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
+// W2.5: interactive runs and their terminal socket.
+export { RUN_MODE_INTERACTIVE, runInteractive } from "./runs";
+export type { RunMode } from "./runs";
+export {
+  connectTerminal,
+  MAX_TERM_CHUNK,
+  MAX_TERM_COLS,
+  MAX_TERM_ROWS,
+  terminalSocketURL,
+} from "./terminal";
+export type { TerminalConnection, TerminalHandlers, TerminalState } from "./terminal";
 
 export const api = {
   ...graphApi,

@@ -19,6 +19,10 @@ export default defineConfig({
           if (id.includes("/node_modules/marked/") || id.includes("/node_modules/dompurify/")) {
             return "markdown";
           }
+          // Only an interactive run's terminal loads it (RunModeTabs).
+          if (id.includes("/node_modules/@xterm/")) {
+            return "terminal";
+          }
         },
       },
     },
@@ -31,6 +35,8 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://127.0.0.1:5666",
+        // An interactive run's terminal is a WebSocket under /api/runs/:id/terminal.
+        ws: true,
         changeOrigin: true,
         headers: { Origin: "http://127.0.0.1:5666" },
       },
