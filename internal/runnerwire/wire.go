@@ -11,6 +11,11 @@ package runnerwire
 // Cloudflare Access it also sends the service token headers below.
 const ConnectPath = "/api/runner/connect"
 
+// ProxyPathPrefix is where a runner's loopback MCP proxy forwards an agent's
+// board calls: /api/runner/proxy/<path> on the hub serves /api/<path> as the
+// runner's owner, marked as an agent, for an allowlist of agent routes only.
+const ProxyPathPrefix = "/api/runner/proxy/"
+
 // TokenPrefix marks a runner token, so one pasted in the wrong place is
 // recognisable and secret scanners can find it.
 const TokenPrefix = "nvr_"
@@ -55,8 +60,18 @@ type Envelope struct {
 	Hello *Info `json:"hello,omitempty"`
 	// Welcome answers the first hello (TypeWelcome).
 	Welcome *Welcome `json:"welcome,omitempty"`
-	// Reason explains a TypeBye.
+	// Reason explains a TypeBye, TypeDecline or TypeCancel.
 	Reason string `json:"reason,omitempty"`
+	// Active lists, with a hello, the run IDs this runner is still executing.
+	// The hub fails any run it thinks is running there that is not listed.
+	Active []string `json:"active,omitempty"`
+
+	// Runs; see runs.go.
+	Job    *Job       `json:"job,omitempty"`
+	RunID  string     `json:"runId,omitempty"`
+	Accept *Accept    `json:"accept,omitempty"`
+	Events []RunEvent `json:"events,omitempty"`
+	Result *RunResult `json:"result,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -75,9 +90,15 @@ type Info struct {
 	Arch     string  `json:"arch"`
 	Agents   []Agent `json:"agents"`
 	Repos    []Repo  `json:"repos"`
-	// Capabilities the runner supports, e.g. "headless". Empty in W0.
+	// Capabilities the runner supports: CapHeadless from W1 on.
 	Capabilities []string `json:"capabilities,omitempty"`
+	// MaxConcurrent is how many runs the runner takes at once; the hub keeps
+	// further jobs queued rather than offering them.
+	MaxConcurrent int `json:"maxConcurrent,omitempty"`
 }
+
+// CapHeadless: the runner takes offers and runs agents non-interactively.
+const CapHeadless = "headless"
 
 // Agent is one agent CLI on the runner's machine.
 type Agent struct {
