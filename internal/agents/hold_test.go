@@ -344,8 +344,14 @@ func TestNotifyEventOnDelivery(t *testing.T) {
 		if !events.has("agent-notify:" + loud.Deliveries[0].MessageID) {
 			t.Fatalf("events = %v, want agent-notify for the notify message", events.events)
 		}
+		// Both can land in the same millisecond, so the inbox order between
+		// them is not fixed: match by body.
 		msgs, _ := hub.CheckInbox(ctx, "p", "alice-bot", "alice", 0)
-		if len(msgs) != 2 || msgs[0].Notify || !msgs[1].Notify {
+		notify := map[string]bool{}
+		for _, m := range msgs {
+			notify[m.Body] = m.Notify
+		}
+		if len(msgs) != 2 || notify["fyi"] || !notify["look"] {
 			t.Fatalf("notify flags = %+v", msgs)
 		}
 	})
