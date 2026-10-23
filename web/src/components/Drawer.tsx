@@ -32,6 +32,8 @@ import { NodeHistory } from "./inspector/NodeHistory";
 import { NodeMetaForm } from "./inspector/NodeMetaForm";
 import { NodeRelations } from "./inspector/NodeRelations";
 import { NodeTimeline } from "./inspector/NodeTimeline";
+import { NodeRuns } from "../runs/NodeRuns";
+import { useRuns } from "../runs/runStore";
 import { DocumentPreview } from "./drawer/DocumentPreview";
 import { DrawerTabs } from "./drawer/DrawerTabs";
 import { EditorToolbar } from "./drawer/EditorToolbar";
@@ -369,8 +371,16 @@ export function TabBody({
   }, [id, requestLock, releaseLock]);
 
   const [drawerView, setDrawerView] = useState<
-    "content" | "relations" | "timeline" | "appearance"
+    "content" | "relations" | "timeline" | "appearance" | "runs"
   >("content");
+  // "Runs" in a node menu, or a dispatch that just went out, asks for this
+  // node's runs; the body showing that node consumes the request.
+  const showRunsRequest = useRuns((s) => s.showRunsRequest);
+  useEffect(() => {
+    if (showRunsRequest?.nodeId !== id) return;
+    setDrawerView("runs");
+    useRuns.getState().clearShowRunsRequest();
+  }, [showRunsRequest, id]);
   // The panel is one column of panes with the document last, which a desktop
   // drawer has the height to show all at once and a phone sheet does not: on a
   // 390px screen 基本資料 and 實際狀態 together are taller than half the sheet,
@@ -844,11 +854,21 @@ export function TabBody({
         >
           {t("drawer.appearance")}
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={drawerView === "runs"}
+          className={drawerView === "runs" ? "active" : ""}
+          onClick={() => setDrawerView("runs")}
+        >
+          {t("drawer.runs")}
+        </button>
       </div>
 
       {drawerView === "relations" && <NodeRelations id={id} />}
       {drawerView === "timeline" && <NodeTimeline id={id} />}
       {drawerView === "appearance" && <NodeAppearance id={id} />}
+      {drawerView === "runs" && <NodeRuns id={id} />}
 
       <div className="node-content-view" hidden={drawerView !== "content"}>
         <NodeHistory

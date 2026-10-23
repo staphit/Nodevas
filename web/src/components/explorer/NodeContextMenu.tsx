@@ -6,7 +6,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { IconDoc, IconPages, IconTrash } from "../../icons";
+import { IconDoc, IconPages, IconSend, IconTerminal, IconTrash } from "../../icons";
+import { openNodeRuns } from "../../runs/RunsRoot";
+import { useRuns } from "../../runs/runStore";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
@@ -87,7 +89,8 @@ export function NodeContextMenu({
       aria-label={t("explorer.nodeActions", { title: menu.title })}
       style={{
         left: Math.max(8, Math.min(menu.x, window.innerWidth - 282)),
-        top: Math.max(8, Math.min(menu.y, window.innerHeight - 210)),
+        // A single node also lists the two run actions, which makes the menu taller.
+        top: Math.max(8, Math.min(menu.y, window.innerHeight - (menu.ids.length === 1 ? 330 : 210))),
       }}
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -148,6 +151,41 @@ export function NodeContextMenu({
             <span>
               <b>{t("explorer.duplicate")}</b>
               <small>{t("explorer.duplicateHint")}</small>
+            </span>
+          </button>
+          <div className="project-context-separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={nodeMenuBusy}
+            onClick={() => {
+              onClose();
+              useRuns.getState().openDispatch(menu.nodeId);
+            }}
+          >
+            <span className="project-context-icon">
+              <IconSend size={14} />
+            </span>
+            <span>
+              <b>{t("nodeMenu.dispatch")}</b>
+              <small>{t("explorer.dispatchHint")}</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={nodeMenuBusy}
+            onClick={() => {
+              onClose();
+              openNodeRuns(menu.nodeId);
+            }}
+          >
+            <span className="project-context-icon">
+              <IconTerminal size={14} />
+            </span>
+            <span>
+              <b>{t("nodeMenu.runs")}</b>
+              <small>{t("explorer.runsHint")}</small>
             </span>
           </button>
           <div className="project-context-separator" />

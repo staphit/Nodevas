@@ -26,6 +26,7 @@
 @import "./styles/15-copilot.css"; /* voice copilot button, panel, transcript */
 @import "./styles/16-agents.css"; /* agent collaboration network panel and ask cards */
 @import "./styles/17-runners.css"; /* runners dialog: machines that run agents */
+@import "./styles/18-runs.css"; /* agent runs: dispatch dialog, node run list and live run view */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

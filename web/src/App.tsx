@@ -23,6 +23,8 @@ import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
 import { useRunners } from "./runners/runnerStore";
+import { RunsRoot } from "./runs/RunsRoot";
+import { useRuns } from "./runs/runStore";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -326,6 +328,15 @@ function MainApp() {
           // that never opened it has nothing to keep current.
           void useRunners.getState().refreshIfLoaded();
           break;
+        case "runs-changed":
+          // The id is a node: its run list is refetched if something shows it.
+          useRuns.getState().onRunsChanged(ev.id);
+          break;
+        case "run-events":
+          // The id is a run: an open run view fetches what came after its
+          // last event.
+          useRuns.getState().onRunEvents(ev.id);
+          break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
           // nothing else to reload.
@@ -342,6 +353,9 @@ function MainApp() {
           // document that is still degraded after the client rejoins.
           dispatchDocumentPersistence({ type: "reset" });
           useApp.getState().setSelfPeerID(ev.selfId ?? "");
+          // Run pushes sent while the socket was down are gone; refetch
+          // whatever run lists and live runs are on screen.
+          useRuns.getState().resync();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);
@@ -641,6 +655,7 @@ function MainApp() {
       <OnboardingTour />
       <CopilotRoot />
       <AgentNetworkRoot />
+      <RunsRoot />
     </div>
   );
 }
