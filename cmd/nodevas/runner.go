@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -34,13 +35,15 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "login":
 		err = runnerLogin(args, in, stdout, stderr)
 	case "logout":
-		err = runnerLogout(args, stdout)
+		err = runnerLogout(args, stdout, stderr)
 	case "status":
-		err = runnerStatus(args, stdout)
+		err = runnerStatus(args, stdout, stderr)
 	case "repo":
 		err = runnerRepo(args, in, stdout, stderr)
 	case "set":
 		err = runnerSet(args, stdout, stderr)
+	case "autoaccept", "auto-accept":
+		err = runnerAutoAccept(args, stdout, stderr)
 	case "help", "-h", "--help":
 		runnerUsage(stdout)
 		return 0
@@ -72,11 +75,31 @@ func runnerUsage(w io.Writer) {
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
        nodevas runner repo remove <id|name>
+       nodevas runner autoaccept on|off|show the offers that start without asking here:
+       nodevas runner autoaccept step-up required|optional
+       nodevas runner autoaccept repo add|remove <id|name|path>
+       nodevas runner autoaccept agent add|remove <kind>
+       nodevas runner autoaccept mode add|remove headless|interactive
+                                             an offer is auto-accepted only when auto-accept is on,
+                                             the dispatcher stepped up on the hub (unless optional),
+                                             and its repo, agent and mode are all listed; anything
+                                             else is asked about at this terminal
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
-                                             maxConcurrent, runTimeoutMinutes, dataDir,
-                                             permissionMode (acceptEdits|auto|bypassPermissions|
-                                             manual|dontAsk|plan), allowedTools (one per argument,
-                                             or comma-separated; "none" clears), autoAccept
+                                             maxConcurrent, runTimeoutMinutes, dataDir, autoAccept
+                                             (true = autoaccept on with the defaults: step-up required,
+                                             every repo here, installed agents, headless; false = off);
+                                             Claude Code: permissionMode (acceptEdits|auto|
+                                             bypassPermissions|manual|dontAsk|plan), allowedTools
+                                             (one per argument, or comma-separated; "none" clears);
+                                             Codex: codexSandbox (read-only|workspace-write|
+                                             danger-full-access), codexIgnoreUserConfig (true|false);
+                                             Gemini CLI: geminiApprovalMode (default|auto_edit|yolo);
+                                             pull requests: autoPR (true|false), prDraft (true|false),
+                                             prLabels (one per argument, or comma-separated; {model}
+                                             and {agent} are filled in; "none" for no labels),
+                                             prPollSeconds (30 or more);
+                                             remote merge: remoteMerge (true|false), mergeMethod
+                                             (squash|merge|rebase), deleteBranchOnMerge (true|false)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -112,13 +135,18 @@ func runnerConfigPath(flagValue string) (string, error) {
 	return runner.DefaultConfigPath()
 }
 
-func loadRunnerConfig(flagValue string) (string, *runner.Config, error) {
+// loadRunnerConfig reads the settings, migrating (and saving) W1's boolean
+// autoAccept on the way; its one-time warning goes to stderr.
+func loadRunnerConfig(flagValue string, stderr io.Writer) (string, *runner.Config, error) {
 	path, err := runnerConfigPath(flagValue)
 	if err != nil {
 		return "", nil, err
 	}
 	cfg, err := runner.LoadConfig(path)
-	return path, cfg, err
+	if err != nil {
+		return path, nil, err
+	}
+	return path, cfg, migrateRunnerConfig(path, cfg, stderr)
 }
 
 func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
@@ -126,7 +154,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -137,7 +165,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
-	// offers are declined at once unless autoAccept is on.
+	// offers the auto-accept policy does not cover are declined at once.
 	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
 	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter}
 	return client.Run(ctx)
@@ -175,7 +203,7 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 		}
 	}
 
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -193,12 +221,12 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 	return nil
 }
 
-func runnerLogout(args []string, stdout io.Writer) error {
+func runnerLogout(args []string, stdout, stderr io.Writer) error {
 	fs, configFlag := newRunnerFlags("logout")
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -210,12 +238,12 @@ func runnerLogout(args []string, stdout io.Writer) error {
 	return nil
 }
 
-func runnerStatus(args []string, stdout io.Writer) error {
+func runnerStatus(args []string, stdout, stderr io.Writer) error {
 	fs, configFlag := newRunnerFlags("status")
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -258,17 +286,44 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	if len(cfg.AllowedTools) > 0 {
 		tools = strings.Join(cfg.AllowedTools, ", ")
 	}
-	accept := "asked at the runner's terminal"
-	if cfg.AutoAccept {
-		accept = "AUTO-ACCEPT: anyone who can sign in to the hub as you can run agents here"
+	codexConfig := "runs load your Codex config.toml: its model, MCP servers and hooks"
+	if cfg.CodexIgnoreUserConfig {
+		codexConfig = "runs skip your Codex config.toml; only its sign-in is used"
 	}
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
 	fmt.Fprintln(w, "runs:")
-	fmt.Fprintf(w, "  maxConcurrent      %d\n", cfg.MaxConcurrentRuns())
-	fmt.Fprintf(w, "  runTimeoutMinutes  %d\n", cfg.RunTimeoutMins())
-	fmt.Fprintf(w, "  dataDir            %s\n", dataDir)
-	fmt.Fprintf(w, "  permissionMode     %s\n", cfg.ClaudePermissionMode())
-	fmt.Fprintf(w, "  allowedTools       %s\n", tools)
-	fmt.Fprintf(w, "  autoAccept         %t (%s)\n", cfg.AutoAccept, accept)
+	setting("maxConcurrent", cfg.MaxConcurrentRuns())
+	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
+	setting("dataDir", dataDir)
+	fmt.Fprintln(w, "claude runs:")
+	setting("permissionMode", cfg.ClaudePermissionMode())
+	setting("allowedTools", tools)
+	fmt.Fprintln(w, "codex runs:")
+	setting("codexSandbox", cfg.CodexSandboxMode())
+	setting("codexIgnoreUserConfig", fmt.Sprintf("%t (%s)", cfg.CodexIgnoreUserConfig, codexConfig))
+	fmt.Fprintln(w, "gemini runs:")
+	setting("geminiApprovalMode", cfg.GeminiApproval())
+	labels := "(none)"
+	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
+		labels = strings.Join(templates, ", ")
+	}
+	autoPR := "commit, push the run's branch and open a PR with your gh login"
+	if !cfg.AutoPROn() {
+		autoPR = "commit only; the branch stays in its worktree"
+	}
+	fmt.Fprintln(w, "pull requests:")
+	setting("autoPR", fmt.Sprintf("%t (%s)", cfg.AutoPROn(), autoPR))
+	setting("prDraft", cfg.PRDraft)
+	setting("prLabels", labels)
+	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
+	remote := "a merge approved on the hub is merged here with your gh login, once its CI is green"
+	if !cfg.RemoteMergeOn() {
+		remote = "approvals on the hub are refused; merge on GitHub yourself"
+	}
+	setting("remoteMerge", fmt.Sprintf("%t (%s)", cfg.RemoteMergeOn(), remote))
+	setting("mergeMethod", cfg.MergeMethodOrDefault())
+	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
+	printAutoAccept(w, cfg)
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at
@@ -279,22 +334,34 @@ func runnerSet(args []string, stdout, stderr io.Writer) error {
 	if err != nil || len(rest) < 2 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
-	if err := cfg.Set(rest[0], rest[1:]); err != nil {
+	if strings.EqualFold(rest[0], "autoAccept") && len(rest) == 2 && !strings.EqualFold(rest[1], "default") {
+		// The defaults list the agents installed here, which only the CLI
+		// can detect.
+		on, err := strconv.ParseBool(strings.TrimSpace(rest[1]))
+		if err != nil {
+			return errors.New("autoAccept must be true or false")
+		}
+		cfg.SetAutoAccept(on, runner.InstalledKinds(context.Background(), runnerCommands, cfg))
+	} else if err := cfg.Set(rest[0], rest[1:]); err != nil {
 		return err
 	}
 	if err := runner.SaveConfig(path, cfg); err != nil {
 		return err
 	}
 	printRunSettings(stdout, cfg)
-	if cfg.AutoAccept {
-		fmt.Fprintln(stderr, runner.AutoAcceptWarning)
-	}
+	warnAutoAccept(stderr, cfg, false)
 	if cfg.PermissionMode == "bypassPermissions" {
 		fmt.Fprintln(stderr, "note: bypassPermissions lets agents run any command on this machine without asking.")
+	}
+	if cfg.CodexSandbox == "danger-full-access" {
+		fmt.Fprintln(stderr, "note: danger-full-access lets Codex runs run any command on this machine, outside any sandbox.")
+	}
+	if cfg.GeminiApprovalMode == "yolo" {
+		fmt.Fprintln(stderr, "note: yolo lets Gemini runs run any command on this machine without asking.")
 	}
 	fmt.Fprintln(stdout, "saved; restart a running runner for it to take effect")
 	return nil
@@ -312,7 +379,7 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}

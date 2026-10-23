@@ -494,6 +494,128 @@ CREATE TABLE run_events (
 );
 `,
 	},
+	{
+		// 0011 belongs to the agent network's W1.5 step on another branch.
+		name: "0012_run_changes",
+		stmt: `
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pr_error      TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE run_changes (
+    run_id          TEXT COLLATE "C" PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
+	{
+		name: "0013_run_merges_budgets",
+		stmt: `
+ALTER TABLE runs ADD COLUMN pr_head_sha TEXT COLLATE "C" NOT NULL DEFAULT '';
+CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
+
+CREATE TABLE run_merges (
+    id                TEXT COLLATE "C" PRIMARY KEY,
+    run_id            TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    head_sha          TEXT COLLATE "C" NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
+    reason            TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT COLLATE "C" NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT COLLATE "C" NOT NULL,
+    finished_at       TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
+CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
+
+CREATE TABLE run_budgets (
+    owner_id        TEXT COLLATE "C" PRIMARY KEY,
+    daily_runs      INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    daily_tokens    BIGINT NOT NULL DEFAULT 0,
+    updated_at      TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
+	{
+		name: "0014_run_routing",
+		stmt: `
+ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_of     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pipeline_id  TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
+
+CREATE TABLE run_routes (
+    owner_id    TEXT COLLATE "C" NOT NULL,
+    position    INTEGER NOT NULL,
+    rule        TEXT NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, position)
+);
+
+CREATE TABLE run_pipelines (
+    id          TEXT COLLATE "C" PRIMARY KEY,
+    owner_id    TEXT COLLATE "C" NOT NULL,
+    created_by  TEXT COLLATE "C" NOT NULL,
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    pipeline    TEXT NOT NULL,
+    fallbacks   TEXT NOT NULL DEFAULT '',
+    job_prompt  TEXT NOT NULL DEFAULT '',
+    prompt      TEXT NOT NULL DEFAULT '',
+    branch      TEXT NOT NULL DEFAULT '',
+    pr_url      TEXT NOT NULL DEFAULT '',
+    round       INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT COLLATE "C" NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
+`,
+	},
+	{
+		name: "0016_w6",
+		stmt: `
+ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE session_changes (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    project       TEXT COLLATE "C" NOT NULL,
+    node_id       TEXT COLLATE "C" NOT NULL,
+    session_id    TEXT COLLATE "C" NOT NULL,
+    session_name  TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    actor_id      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    files         TEXT NOT NULL DEFAULT '[]',
+    snapshot      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT COLLATE "C" NOT NULL,
+    updated_at    TEXT COLLATE "C" NOT NULL
+);
+CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
+CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

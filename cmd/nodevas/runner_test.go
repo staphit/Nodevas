@@ -158,26 +158,41 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	t.Cleanup(func() { runnerCommands = saved })
 	cfgPath := filepath.Join(t.TempDir(), "runner.json")
 
-	code, _, stderr := runRunner(t, "", "status", "--config", cfgPath)
+	code, stdout, stderr := runRunner(t, "", "status", "--config", cfgPath)
 	if code != 0 {
 		t.Fatal(stderr)
+	}
+	for _, want := range []string{"remoteMerge            true (a merge approved on the hub", "mergeMethod            squash",
+		"deleteBranchOnMerge    false"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("default status missing %q:\n%s", want, stdout)
+		}
 	}
 	for _, args := range [][]string{
 		{"set", "maxConcurrent", "2"},
 		{"set", "runTimeoutMinutes", "30", "--config", cfgPath},
 		{"set", "permissionMode", "plan"},
 		{"set", "allowedTools", "Edit", "Bash(go test *)"},
+		{"set", "codexsandbox", "READ-ONLY"},
+		{"set", "codexIgnoreUserConfig", "true"},
+		{"set", "autoPR", "false"},
+		{"set", "prDraft", "true"},
+		{"set", "prLabels", "nodevas,agent:{agent}", "model:{model}"},
+		{"set", "prPollSeconds", "60"},
+		{"set", "remoteMerge", "false"},
+		{"set", "mergeMethod", "Rebase"},
+		{"set", "deleteBranchOnMerge", "true"},
 	} {
 		args = append(args, "--config", cfgPath)
 		if code, _, stderr := runRunner(t, "", args...); code != 0 {
 			t.Fatalf("%v: exit %d %s", args, code, stderr)
 		}
 	}
-	code, stdout, stderr := runRunner(t, "", "set", "autoAccept", "true", "--config", cfgPath)
-	if code != 0 || !strings.Contains(stderr, "Anyone who can sign in to the hub as you") {
+	code, stdout, stderr = runRunner(t, "", "set", "autoAccept", "true", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, runner.AutoAcceptWarning) {
 		t.Fatalf("autoAccept: exit %d, stderr %q", code, stderr)
 	}
-	if !strings.Contains(stdout, "autoAccept         true") {
+	if !strings.Contains(stdout, "autoAccept             on") || !strings.Contains(stdout, "stepUp                 required") {
 		t.Fatalf("set output:\n%s", stdout)
 	}
 	cfg, err := runner.LoadConfig(cfgPath)
@@ -185,18 +200,32 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.MaxConcurrent != 2 || cfg.RunTimeoutMinutes != 30 || cfg.PermissionMode != "plan" ||
-		len(cfg.AllowedTools) != 2 || !cfg.AutoAccept {
+		len(cfg.AllowedTools) != 2 || !cfg.AutoAcceptOn() || cfg.CodexSandbox != "read-only" || !cfg.CodexIgnoreUserConfig ||
+		cfg.GeminiApprovalMode != "" {
 		t.Fatalf("config = %+v", cfg)
 	}
+	// The dangerous modes say so.
+	code, _, stderr = runRunner(t, "", "set", "geminiApprovalMode", "yolo", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, "yolo lets Gemini runs run any command") {
+		t.Fatalf("geminiApprovalMode yolo: exit %d, stderr %q", code, stderr)
+	}
 	_, stdout, _ = runRunner(t, "", "status", "--config", cfgPath)
-	for _, want := range []string{"maxConcurrent      2", "runTimeoutMinutes  30", "permissionMode     plan",
-		"allowedTools       Edit, Bash(go test *)", "AUTO-ACCEPT", "runner-data"} {
+	for _, want := range []string{"maxConcurrent          2", "runTimeoutMinutes      30", "permissionMode         plan",
+		"allowedTools           Edit, Bash(go test *)", "agents                 claude", "runner-data",
+		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
+		"geminiApprovalMode     yolo", "autoPR                 false (commit only", "prDraft                true",
+		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60",
+		"remoteMerge            false (approvals on the hub are refused", "mergeMethod            rebase",
+		"deleteBranchOnMerge    true"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)
 		}
 	}
 
-	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"}} {
+	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"},
+		{"set", "codexSandbox", "full"}, {"set", "codexIgnoreUserConfig", "maybe"}, {"set", "geminiApprovalMode", "plan"},
+		{"set", "autoPR", "maybe"}, {"set", "prPollSeconds", "10"}, {"set", "prDraft", "x", "y"},
+		{"set", "remoteMerge", "maybe"}, {"set", "mergeMethod", "fast-forward"}, {"set", "deleteBranchOnMerge", "x"}} {
 		if code, _, _ := runRunner(t, "", append(bad, "--config", cfgPath)...); code == 0 {
 			t.Errorf("%v succeeded", bad)
 		}

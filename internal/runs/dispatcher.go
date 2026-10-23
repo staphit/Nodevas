@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -29,14 +30,97 @@ type Dispatcher struct {
 	// changes; events when a run has new events. Either may be nil.
 	changed func(project, nodeID string)
 	events  func(project, runID string)
+	// notify is told when a run deserves a notification (RunNotifyEvent);
+	// audit records merge approvals and results. Either may be nil.
+	notify func(project, runID string)
+	audit  func(AuditEntry)
+
+	// W6 step-up: whether this server has accounts to step up (a loopback
+	// server does not, and vouches for everyone), how long a step-up lasts,
+	// and the clock offers are judged by.
+	stepUpRequired bool
+	stepUpWindow   time.Duration
+	now            func() time.Time
 
 	locks sync.Map // runner ID → *sync.Mutex
 }
 
 // NewDispatcher builds a dispatcher. changed and events are the realtime
-// hooks; see Dispatcher.
+// hooks; see Dispatcher. Offers vouch for no dispatcher until SetStepUp says
+// how: failing closed, a runner's auto-accept waits for a person.
 func NewDispatcher(store *Store, reg *runners.Registry, changed func(project, nodeID string), events func(project, runID string)) *Dispatcher {
-	return &Dispatcher{store: store, reg: reg, changed: changed, events: events}
+	return &Dispatcher{
+		store: store, reg: reg, changed: changed, events: events,
+		stepUpRequired: true, stepUpWindow: runnerwire.StepUpWindowSeconds * time.Second, now: time.Now,
+	}
+}
+
+// SetStepUp says whether dispatchers must step up for offers to vouch for
+// them (Job.SteppedUp), and for how long a step-up lasts. A server without
+// accounts passes required false: the OS account is the boundary there, and
+// every offer vouches. Call it before serving.
+func (d *Dispatcher) SetStepUp(required bool, window time.Duration) {
+	d.stepUpRequired = required
+	if window > 0 {
+		d.stepUpWindow = window
+	}
+}
+
+// SteppedUp is what an offer of r says in Job.SteppedUp now: the dispatcher
+// was stepped up when the run was made and that step-up has not run out. A
+// run left queued past the window is offered without the vouch, so a runner
+// does not auto-accept it hours later.
+func (d *Dispatcher) SteppedUp(r Record) bool {
+	if !d.stepUpRequired {
+		return true
+	}
+	if r.SteppedUpAt == "" {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, r.SteppedUpAt)
+	if err != nil {
+		return false
+	}
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	return now().Before(at.Add(d.stepUpWindow))
+}
+
+// AuditEntry is a merge approval or result for the audit trail. Project is
+// the project's name as ?project= takes it.
+type AuditEntry struct {
+	Project, ActorID, ActorName, Action, Target string
+	Detail                                      map[string]any
+}
+
+// SetNotify sets the hook told when a run finishes (succeeded or failed), its
+// CI turns red, or its merge succeeds or fails. Call it before serving.
+func (d *Dispatcher) SetNotify(fn func(project, runID string)) { d.notify = fn }
+
+// SetAudit sets the hook that records merge approvals and results. Call it
+// before serving.
+func (d *Dispatcher) SetAudit(fn func(AuditEntry)) { d.audit = fn }
+
+func (d *Dispatcher) notifyRun(r Record) {
+	if d.notify != nil {
+		d.notify(r.Project, r.ID)
+	}
+}
+
+func (d *Dispatcher) record(entry AuditEntry) {
+	if d.audit != nil {
+		d.audit(entry)
+	}
+}
+
+// finished tells about a run that just reached an end state. Only success and
+// failure are worth a notification: a cancel or decline was someone's choice.
+func (d *Dispatcher) finished(r Record) {
+	if r.Status == runnerwire.RunSucceeded || r.Status == runnerwire.RunFailed {
+		d.notifyRun(r)
+	}
 }
 
 // Store is the run store the dispatcher writes to.
@@ -131,6 +215,7 @@ func (d *Dispatcher) offer(ctx context.Context, r Record) bool {
 		return false
 	}
 	job := offered.Job()
+	job.SteppedUp = d.SteppedUp(offered)
 	if err := d.reg.Send(r.RunnerID, runnerwire.Envelope{Type: runnerwire.TypeOffer, Job: &job}); err != nil {
 		slog.Warn("runs: send offer", slog.String("run", r.ID), slog.Any("error", err))
 		if back, err := d.store.Transition(ctx, r.ID, runnerwire.RunQueued, Change{}); err == nil {
@@ -173,6 +258,8 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 		}
 		if err == nil {
 			d.notifyChanged(next)
+			d.finished(next)
+			d.afterEnd(ctx, next, true)
 		}
 	}
 	for id := range listed {
@@ -185,6 +272,7 @@ func (d *Dispatcher) Attached(ctx context.Context, runnerID string, active []str
 		}
 	}
 	d.Pump(ctx, runnerID)
+	d.sendPendingMerges(ctx, runnerID)
 }
 
 func (d *Dispatcher) sendCancel(r Record, reason string) bool {
@@ -220,6 +308,7 @@ func (d *Dispatcher) Decline(ctx context.Context, runnerID, runID, reason string
 		return err
 	}
 	d.notifyChanged(r)
+	d.afterEnd(ctx, r, false)
 	d.Pump(ctx, runnerID)
 	return nil
 }
@@ -246,6 +335,42 @@ func (d *Dispatcher) Events(ctx context.Context, runnerID, runID string, events 
 	return nil
 }
 
+// Changes records what a run committed, from its runner. Only the first
+// report counts; a resend is ignored quietly. Run lists show the counts, so a
+// stored report is announced as a runs change.
+func (d *Dispatcher) Changes(ctx context.Context, runnerID, runID string, changes runnerwire.RunChanges) error {
+	r, stored, err := d.store.SetChanges(ctx, runID, runnerID, changes)
+	if err != nil {
+		return err
+	}
+	if stored {
+		d.notifyChanged(r)
+	}
+	return nil
+}
+
+// PR records a run's pull request, from its runner, in any status: the
+// runner reports the PR's state and CI until it is merged or closed. Only a
+// report that changes what the run shows is announced.
+func (d *Dispatcher) PR(ctx context.Context, runnerID, runID string, pr runnerwire.PRInfo) error {
+	before, r, changed, err := d.store.setPR(ctx, runID, runnerID, pr)
+	if err != nil {
+		return err
+	}
+	if changed {
+		d.notifyChanged(r)
+		if r.CIStatus == runnerwire.CIFailure && before.CIStatus != runnerwire.CIFailure {
+			d.notifyRun(r)
+		}
+		// A pipeline whose implement run ended before its PR was reported
+		// moves on now.
+		if before.PRURL == "" && before.PRError == "" {
+			d.prReported(ctx, r)
+		}
+	}
+	return nil
+}
+
 // Finish applies a runner's finish, then offers it the next queued run.
 func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result runnerwire.RunResult) error {
 	r, err := d.store.Finish(ctx, runID, runnerID, result)
@@ -253,6 +378,8 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 		return err
 	}
 	d.notifyChanged(r)
+	d.finished(r)
+	d.afterEnd(ctx, r, r.Status == runnerwire.RunSucceeded || r.Status == runnerwire.RunFailed)
 	d.Pump(ctx, runnerID)
 	return nil
 }
@@ -286,6 +413,7 @@ func (d *Dispatcher) Cancel(ctx context.Context, runID, reason string) (Record, 
 				return Record{}, err
 			}
 			d.notifyChanged(next)
+			d.afterEnd(ctx, next, false)
 			return next, nil
 		default: // queued, offered
 			next, err := d.store.Transition(ctx, runID, runnerwire.RunCancelled, Change{})
@@ -299,6 +427,7 @@ func (d *Dispatcher) Cancel(ctx context.Context, runID, reason string) (Record, 
 				d.sendCancel(r, reason)
 			}
 			d.notifyChanged(next)
+			d.afterEnd(ctx, next, false)
 			d.Pump(ctx, r.RunnerID)
 			return next, nil
 		}

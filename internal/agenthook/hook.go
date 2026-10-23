@@ -22,6 +22,7 @@ import (
 
 	"nodevas/internal/agents"
 	"nodevas/internal/mcp"
+	"nodevas/internal/runnerwire"
 )
 
 // Events the hook understands, as named on the command line.
@@ -63,6 +64,10 @@ type Input struct {
 	SessionID      string
 	Cwd            string
 	StopHookActive bool
+	// ToolName and Files (W6): on post-tool-use, the tool that ran and the
+	// files it wrote, as its input names them (see EditedFiles).
+	ToolName string
+	Files    []string
 }
 
 // ParseInput reads an agent's hook payload leniently: a byte-order mark
@@ -86,6 +91,10 @@ func ParseInput(raw []byte) Input {
 		}
 	}
 	in.StopHookActive, _ = v["stop_hook_active"].(bool)
+	in.ToolName = str("tool_name")
+	if in.ToolName != "" {
+		in.Files = EditedFiles(in.ToolName, toolInputMap(v["tool_input"]))
+	}
 	return in
 }
 
@@ -150,11 +159,19 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	switch event {
 	case EventUserPromptSubmit:
 		state = agents.StateBusy
-	case EventSessionStart, EventStop:
+	case EventSessionStart:
 		state = agents.StateIdle
 	}
 	if err := client.Heartbeat(ctx, state, "", ""); err != nil {
 		return ""
+	}
+	reportChanges(ctx, client, event, in)
+	if event == EventStop {
+		// Idle now, still holding the node it holds: a turn ending is not the
+		// claim ending, and the next turn's edits belong to the same node.
+		if err := client.Heartbeat(ctx, agents.StateIdle, client.ClaimedNode(), ""); err != nil {
+			return ""
+		}
 	}
 
 	// A stop hook that already blocked once is running again because of that
@@ -184,6 +201,34 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 		windows = *opts.Windows
 	}
 	return Format(agent, event, text, windows)
+}
+
+// reportChanges sends the hub what this event changed, if the session holds a
+// node (as the heartbeat just answered): the files an edit tool wrote, or at
+// Stop a snapshot of the working tree. Failures are dropped.
+func reportChanges(ctx context.Context, client *mcp.Client, event string, in Input) {
+	if client.ClaimedNode() == "" || in.Cwd == "" || excluded(in.Cwd) {
+		return
+	}
+	switch event {
+	case EventPostToolUse:
+		if len(in.Files) == 0 {
+			return
+		}
+		files := RepoRelative(ctx, in.Cwd, in.Files)
+		if len(files) > runnerwire.MaxSessionFiles {
+			files = files[:runnerwire.MaxSessionFiles]
+		}
+		_, _ = client.RecordSessionChanges(ctx, files, nil)
+	case EventStop:
+		// Leave time in the hook's budget for the idle heartbeat after it.
+		snapCtx, cancel := context.WithTimeout(ctx, gitTimeout)
+		snapshot, ok := Snapshot(snapCtx, in.Cwd)
+		cancel()
+		if ok {
+			_, _ = client.RecordSessionChanges(ctx, nil, &snapshot)
+		}
+	}
 }
 
 // Format renders text as the JSON agent expects from this hook event to put it

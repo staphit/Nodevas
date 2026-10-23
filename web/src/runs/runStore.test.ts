@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type Run, type RunEvent } from "../api";
-import { mergeEvents, useRuns } from "./runStore";
+import { api, type Run, type RunChanges, type RunEvent } from "../api";
+import { foldLatest, mergeEvents, useRuns } from "./runStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -195,5 +195,98 @@ describe("useRuns", () => {
     expect(useRuns.getState().selectedRun.alpha).toBe("run1");
     useRuns.getState().clearShowRunsRequest();
     expect(useRuns.getState().showRunsRequest).toBeNull();
+  });
+});
+
+describe("run changes", () => {
+  const changes = (commit: string): RunChanges => ({
+    commit,
+    base: "main",
+    files: [{ path: "a.go", status: "modified", additions: 1, deletions: 0 }],
+    additions: 1,
+    deletions: 0,
+    patch: "",
+  });
+
+  it("fetches a run's changes once per commit, sharing an in-flight request", async () => {
+    const get = vi.spyOn(api, "getRunChanges").mockResolvedValue({ changes: changes("c1") });
+    await Promise.all([
+      useRuns.getState().loadChanges("run1", "c1"),
+      useRuns.getState().loadChanges("run1", "c1"),
+    ]);
+    await useRuns.getState().loadChanges("run1", "c1");
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(useRuns.getState().changesByRun.run1.changes?.commit).toBe("c1");
+    expect(useRuns.getState().changesLoading.run1).toBeUndefined();
+
+    // A new commit on the run makes the held copy stale.
+    get.mockResolvedValueOnce({ changes: changes("c2") });
+    await useRuns.getState().loadChanges("run1", "c2");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(useRuns.getState().changesByRun.run1.commit).toBe("c2");
+  });
+
+  it("holds a null answer and reports a failure", async () => {
+    const get = vi
+      .spyOn(api, "getRunChanges")
+      .mockResolvedValueOnce({ changes: null })
+      .mockRejectedValueOnce(new Error("boom"));
+    await useRuns.getState().loadChanges("run1", undefined);
+    expect(useRuns.getState().changesByRun.run1).toEqual({ commit: "", changes: null });
+    await useRuns.getState().loadChanges("run1", undefined);
+    expect(get).toHaveBeenCalledTimes(1);
+
+    await useRuns.getState().loadChanges("run2", "c9");
+    expect(useRuns.getState().changesErrors.run2).toBe("boom");
+    expect(useRuns.getState().changesByRun.run2).toBeUndefined();
+  });
+});
+
+describe("latest run per node", () => {
+  it("asks for the project's runs once and keeps the newest per node", async () => {
+    const list = vi.spyOn(api, "listProjectRuns").mockResolvedValue({
+      runs: [
+        makeRun({ id: "b2", nodeId: "beta", createdAt: "2026-10-24T09:00:00Z" }),
+        makeRun({ id: "a1", nodeId: "alpha", createdAt: "2026-10-24T08:00:00Z" }),
+        makeRun({ id: "b1", nodeId: "beta", createdAt: "2026-10-24T07:00:00Z" }),
+      ],
+    });
+    await Promise.all([useRuns.getState().loadProjectRuns(), useRuns.getState().loadProjectRuns()]);
+    await useRuns.getState().loadProjectRuns();
+    expect(list).toHaveBeenCalledTimes(1);
+    const latest = useRuns.getState().latestByNode;
+    expect(latest.alpha.id).toBe("a1");
+    expect(latest.beta.id).toBe("b2");
+  });
+
+  it("follows runs-changed for unopened nodes only once the board asked", async () => {
+    const listRuns = vi
+      .spyOn(api, "listRuns")
+      .mockResolvedValue({ runs: [makeRun({ id: "g1", nodeId: "gamma", prState: "merged" })] });
+    useRuns.getState().onRunsChanged("gamma");
+    expect(listRuns).not.toHaveBeenCalled();
+
+    vi.spyOn(api, "listProjectRuns").mockResolvedValue({ runs: [] });
+    await useRuns.getState().loadProjectRuns();
+    useRuns.getState().onRunsChanged("gamma");
+    await vi.waitFor(() => expect(useRuns.getState().latestByNode.gamma?.id).toBe("g1"));
+    expect(listRuns).toHaveBeenCalledWith("gamma");
+  });
+
+  it("lets a node's own list replace what the project list said", async () => {
+    useRuns.setState({ latestByNode: { alpha: makeRun({ id: "stale", status: "running" }) } });
+    vi.spyOn(api, "listRuns").mockResolvedValue({ runs: [] });
+    await useRuns.getState().loadRuns("alpha");
+    expect(useRuns.getState().latestByNode.alpha).toBeUndefined();
+  });
+});
+
+describe("foldLatest", () => {
+  it("replaces the same run and ignores older ones", () => {
+    const first = makeRun({ id: "x", createdAt: "2026-10-24T08:00:00Z" });
+    const held = foldLatest({}, [first]);
+    expect(foldLatest(held, [makeRun({ id: "old", createdAt: "2026-10-23T08:00:00Z" })])).toBe(held);
+    const updated = foldLatest(held, [{ ...first, prState: "open" }]);
+    expect(updated.alpha.prState).toBe("open");
   });
 });

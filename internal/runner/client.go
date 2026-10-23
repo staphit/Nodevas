@@ -45,8 +45,8 @@ type Client struct {
 	// the proxy.
 	HTTPClient *http.Client
 
-	// Accepter asks whether to take an offer; nil declines every offer unless
-	// the config's AutoAccept is on.
+	// Accepter asks whether to take an offer the auto-accept policy does not
+	// cover; nil declines those.
 	Accepter Accepter
 	// Adapter returns the agent adapter for a kind; nil means adapter.For.
 	// Tests swap in a fake agent.
@@ -55,6 +55,9 @@ type Client struct {
 	FlushInterval time.Duration
 	// RunTimeout overrides the config's run timeout; tests shorten it.
 	RunTimeout time.Duration
+	// PRPollInterval overrides the config's PR polling interval; tests
+	// shorten it.
+	PRPollInterval time.Duration
 
 	jobs *jobs
 }
@@ -78,11 +81,25 @@ func (c *Client) Run(ctx context.Context) error {
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
 		return err
 	}
-	if c.Config.AutoAccept {
+	if c.Config.LegacyAutoAccept() {
+		// The CLI migrates and saves before this; a Config built elsewhere
+		// is migrated here, in memory.
+		if warning := c.Config.MigrateLegacyAutoAccept(InstalledKinds(ctx, c.Commands, c.Config)); warning != "" {
+			c.logf("%s", warning)
+		}
+	}
+	if c.Config.AutoAcceptOn() {
 		c.logf("%s", AutoAcceptWarning)
+		if !c.Config.AutoAcceptPolicy().RequireStepUp {
+			c.logf("%s", StepUpOptionalWarning)
+		}
 	}
 	c.jobs = newJobs(ctx, c)
 	defer c.jobs.shutdown()
+	c.jobs.loadPRs()
+	c.jobs.loadMerges()
+	c.jobs.wg.Add(1)
+	go c.jobs.watchPRs(c.prPollInterval)
 	backoff := c.backoffMin()
 	for {
 		welcomed, err := c.session(ctx)
@@ -172,6 +189,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			case runnerwire.TypeWelcome:
 				welcomed = true
 				if msg.Welcome != nil {
+					c.jobs.setHubName(msg.Welcome.Name)
 					c.logf("connected to %s as %q (owner %s)", c.Config.Hub, msg.Welcome.Name, msg.Welcome.Owner)
 				} else {
 					c.logf("connected to %s", c.Config.Hub)
@@ -189,7 +207,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	flushTick := time.NewTicker(c.flushInterval())
 	defer flushTick.Stop()
 	lastHeard := time.Now()
-	// Whatever runs said while the runner was away goes out first.
+	// Whatever runs said while the runner was away goes out first, then the
+	// latest of every watched PR, once, in case the hub missed a change.
+	c.jobs.resendPRs()
 	flush := func() error {
 		return c.jobs.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) })
 	}
@@ -212,6 +232,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.offer(msg.Job)
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			case runnerwire.TypeMerge:
+				c.jobs.merge(msg.RunID, msg.Merge)
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {
@@ -359,6 +381,13 @@ func (c *Client) runTimeout() time.Duration {
 		return c.RunTimeout
 	}
 	return c.Config.RunTimeout()
+}
+
+func (c *Client) prPollInterval() time.Duration {
+	if c.PRPollInterval > 0 {
+		return c.PRPollInterval
+	}
+	return c.Config.PRPollInterval()
 }
 
 func (c *Client) adapterFor(kind string) adapter.Adapter {

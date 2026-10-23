@@ -283,6 +283,13 @@ func ActorFor(runner runnerwire.Runner) identity.Actor {
 	return identity.Actor{ID: runner.OwnerID, Name: runner.OwnerName, Agent: identity.AgentWorker}
 }
 
+// Limits on a hello's auto-accept allowlist (W6), besides runnerwire.MaxRepos
+// for its repos.
+const (
+	MaxAutoAcceptAgents = 16
+	MaxAutoAcceptModes  = 2
+)
+
 // ValidateInfo enforces the limits a hello must respect.
 func ValidateInfo(info runnerwire.Info) error {
 	bad := func(what string) error { return fmt.Errorf("%w: hello %s", ErrInvalid, what) }
@@ -310,6 +317,22 @@ func ValidateInfo(info runnerwire.Info) error {
 	}
 	if models > runnerwire.MaxModels {
 		return bad("lists too many models")
+	}
+	// W6: the auto-accept allowlist is shown, never enforced, here; it still
+	// must not be a way to park junk in the runners table.
+	if policy := info.AutoAccept; policy != nil {
+		if len(policy.Repos) > runnerwire.MaxRepos {
+			return bad("auto-accept lists too many repos")
+		}
+		if len(policy.Agents) > MaxAutoAcceptAgents {
+			return bad("auto-accept lists too many agents")
+		}
+		if len(policy.Modes) > MaxAutoAcceptModes {
+			return bad("auto-accept lists too many modes")
+		}
+		for _, list := range [][]string{policy.Repos, policy.Agents, policy.Modes} {
+			short = append(short, list...)
+		}
 	}
 	var long []string
 	for _, repo := range info.Repos {

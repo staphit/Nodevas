@@ -372,6 +372,13 @@ export const IconFork = (p: P) => (
   </svg>
 );
 
+export const IconShield = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 3 5 6v5.5c0 4.3 2.9 8 7 9.5 4.1-1.5 7-5.2 7-9.5V6l-7-3Z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
+
 export const IconGate = (p: P) => (
   <svg {...base(p)}>
     <path d="M5 21V8a7 7 0 0 1 14 0v13M5 21h14M9 21v-5h6v5" />

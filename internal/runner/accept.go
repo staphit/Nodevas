@@ -31,7 +31,7 @@ type Accepter interface {
 
 // Decline reasons the terminal accepter gives.
 const (
-	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner set autoAccept true`)"
+	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner autoaccept on`)"
 	ReasonTimedOut   = "nobody accepted at the runner"
 	ReasonDeclined   = "declined at the runner"
 	ReasonInputGone  = "the runner's terminal input closed"
@@ -137,11 +137,18 @@ func describeOffer(o Offer) string {
 	fmt.Fprintf(&b, "  node:         %s  %s\n", job.NodeID, job.NodeTitle)
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
 	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
-	base := job.Base
-	if base == "" {
-		base = "(the repository's default branch)"
+	switch job.Kind {
+	case runnerwire.JobReview:
+		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", job.PRURL, job.Branch)
+	case runnerwire.JobRevise:
+		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
+	default:
+		base := job.Base
+		if base == "" {
+			base = "(the repository's default branch)"
+		}
+		fmt.Fprintf(&b, "  base:         %s\n", base)
 	}
-	fmt.Fprintf(&b, "  base:         %s\n", base)
 	fmt.Fprintf(&b, "  run:          %s\n", job.RunID)
 	prompt := strings.TrimSpace(job.Prompt)
 	if utf8.RuneCountInString(prompt) > promptPreview {
@@ -150,6 +157,16 @@ func describeOffer(o Offer) string {
 	b.WriteString("  task:\n")
 	for _, line := range strings.Split(prompt, "\n") {
 		b.WriteString("    " + line + "\n")
+	}
+	if job.Kind == runnerwire.JobRevise {
+		review := strings.TrimSpace(job.Review)
+		if utf8.RuneCountInString(review) > promptPreview {
+			review = string([]rune(review)[:promptPreview]) + " …"
+		}
+		b.WriteString("  review to address:\n")
+		for _, line := range strings.Split(review, "\n") {
+			b.WriteString("    " + line + "\n")
+		}
 	}
 	return printable(b.String())
 }
