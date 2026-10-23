@@ -206,8 +206,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
         setProjectOverride("");
       } catch (refusal) {
         // 403 means "you may not move the server's active project" — it is
-        // shared state, and visitors (and members, on this admin-only route)
-        // are refused. Looking at another project is not that: reads resolve
+        // shared state, and members are refused on this admin-only route. Looking at another project is not that: reads resolve
         // ?project= per request, so this browser scopes itself and browses.
         // Creation cannot be scoped around; a refused create stays refused.
         if (create || !(refusal instanceof AuthError) || refusal.status !== 403) {

@@ -183,4 +183,3 @@ Fallback 不會自動 backfill，這套 trail 也不宣稱是與 domain mutation
 - Terraform state 含資源識別資訊，視為敏感檔；勿提交 Git，正式團隊環境應移到有加密與鎖定的遠端 backend。
 - `sslip.io` 適合快速啟用，不是完整 production DNS 控制。正式服務建議自有網域、DNSSEC（供應商支援時）及外部可用性監控。
 - Always Free 沒有高可用保證；單 VM、單 AD 仍是故障點。Object Storage 備份要定期演練還原，重要資料另做跨區或離線副本。
-- Visitor 是 view access，不是 copy protection：持有共享 credential 的人可以複製或儲存所有可見文件與附件，但不能寫入、整案匯出、管理服務、瀏覽主機或使用 operator remote integrations。

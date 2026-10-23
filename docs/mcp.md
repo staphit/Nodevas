@@ -52,7 +52,41 @@ An agent can work the queue safely:
 5. Call `set_node_status` with `done`, `failed`, or `skipped`, including a useful note.
 6. Call `release_task` if the work cannot be completed.
 
-Available capabilities include project listing, ready-task discovery, node reading and search, graph outlines, graph validation, task claiming and release, status updates, node creation, body and metadata updates, and dependency links. MCP also exposes project and node resources plus the `work_the_queue` prompt. It intentionally has no delete tool.
+Available capabilities include project listing, ready-task discovery, node reading and search, graph outlines, graph validation, task claiming and release, status updates, node creation, body and metadata updates, dependency links, and multi-agent collaboration (`list_team`, `send_message`, `check_inbox`, `ask_user`). MCP also exposes project and node resources plus the `work_the_queue` prompt. It intentionally has no delete tool.
+
+## Agent-to-agent collaboration & human-in-the-loop
+
+Multiple MCP sessions connected to the same Nodevas server automatically register in the project's agent directory (tracking session name, agent kind, `repo@branch`, `busy`/`idle` state, and the currently claimed node):
+
+- `list_team`: list active (and recently offline) agent sessions and project members.
+- `send_message`: message another agent by session name (`api-claude`), actor-qualified name (`alice/api-claude`), or by the node it holds (`node:design`). Messages can attach a `nodeId` to link the discussion to a task.
+- `check_inbox`: fetch unread messages (optionally long-polling with `waitSeconds`). Every tool response also appends an `[Unread mail: N message(s) waiting]` notice when unread mail is present.
+- `ask_user`: prompt a human in the Nodevas Agent Network panel (`Ctrl+Shift+A`) to approve or deny a question (blocking up to 10 minutes). When `about` references a peer message ID, the human's verified decision (`<nodevas-approval>`) is also forwarded to the original sender.
+
+Sessions are bound to the actor that first registered them: on a shared server another account cannot take over a session or read its inbox. Pass `--session-name` to `nodevas mcp` for a stable address; otherwise one is derived from the repo and agent (`visual-editor-claude`).
+
+### Hooks: mail without polling
+
+`check_inbox` only runs when the agent calls it. `nodevas setup-agent` also wires each agent's hooks to `nodevas hook <agent> <event>`, so mail reaches the model on its own and the roster shows `busy`/`idle` from the agent's real turns:
+
+| Event | Effect |
+| --- | --- |
+| `session-start` | registers the session; injects unread mail or a one-line "you are …" note |
+| `user-prompt-submit` | marks the session `busy`; injects unread mail |
+| `post-tool-use` | injects mail that arrived mid-turn |
+| `stop` | marks the session `idle`; with unread mail, blocks the stop once so the agent reads it |
+| `session-end` | marks the session offline |
+
+```sh
+nodevas setup-agent --dry-run                 # show what would change
+nodevas setup-agent                           # wire every detected agent
+nodevas setup-agent --agents claude,codex     # only these
+nodevas setup-agent --remove                  # undo
+```
+
+It configures Claude Code (`claude mcp add --scope user`, hooks and `permissions.allow` in `~/.claude/settings.json`), Codex (`$CODEX_HOME/config.toml` and `hooks.json`; Codex asks once to trust the hooks), and Gemini CLI (`~/.gemini/settings.json`, or under `$GEMINI_CLI_HOME/.gemini`; trusted folders only). Each file is backed up once to `<file>.bak-nodevas`, and re-running it changes nothing. Each agent gets the actor `mcp:<agent>` (override with `--actor`) on both its MCP line and its hooks, since the server ties sessions to actors. A hook never fails the agent: if Nodevas is down it prints nothing and exits 0.
+
+The MCP process follows the agent's session as it changes: after Claude Code's `/clear` it re-reads `~/.claude/sessions/<CLAUDE_PID>.json`, moves to the new conversation under the same name and signs the old one off; under Codex, whose single MCP process serves every thread, each tool call's `_meta.sessionId` selects the thread's own session.
 
 Reads use small defaults: `get_node` returns up to 2,000 body characters, and
 `get_graph_outline` returns 25 nodes per page. Use `maxBodyChars` (up to 60,000)

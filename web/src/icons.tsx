@@ -194,6 +194,13 @@ export const IconBell = (p: P) => (
   </svg>
 );
 
+export const IconComputer = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4.5" width="18" height="12" rx="1.8" />
+    <path d="M9 20h6M12 16.5V20" />
+  </svg>
+);
+
 export const IconPencil = (p: P) => (
   <svg {...base(p)}>
     <path d="M4 20h4l10.5-10.5a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20Z" />
@@ -477,6 +484,21 @@ export const IconScene = (p: P) => (
 export const IconSpark = (p: P) => (
   <svg {...base(p)}>
     <path d="M12 3v5M12 16v5M3 12h5M16 12h5M6.5 6.5 9 9M15 15l2.5 2.5M17.5 6.5 15 9M9 15l-2.5 2.5" />
+  </svg>
+);
+
+/** Dispatch: hand a node to an agent on a runner. */
+export const IconSend = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5 21 3Z" />
+  </svg>
+);
+
+/** A run: one agent CLI working in a terminal on a runner. */
+export const IconTerminal = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+    <path d="m7 9.5 3 2.5-3 2.5M12.5 15h4.5" />
   </svg>
 );
 

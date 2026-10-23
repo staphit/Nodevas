@@ -62,8 +62,8 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * of its own active one.
  *
  * This exists for sessions that may not move the server's active project —
- * switching it is a write to state every other browser shares, so a visitor
- * (and a member, on an admin-only route) is refused. Refusing them the READ
+ * switching it is a write to state every other browser shares, so a member is
+ * refused on that admin-only route. Refusing them the READ
  * would be wrong though: which project this browser is looking at is this
  * browser's business, and the server already resolves it per request. An
  * explicit ?project= in a URL still wins; the server checks the query first.

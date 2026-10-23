@@ -16,6 +16,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/runnerwire"
 )
 
 type RouteClass string
@@ -434,7 +435,9 @@ func newAbuseGuardWithOptions(opts AbuseGuardOptions) *abuseGuard {
 // ClassifyRoute categorizes a request into a route class with an associated cost.
 // Any unknown /api/* route falls back to a safe default class (ClassWrite if unsafe, ClassRead if safe).
 func ClassifyRoute(method, path string) (RouteClass, float64) {
-	if path == "/ws" {
+	// A runner's socket is charged once, at the upgrade, like the browser's:
+	// what flows over it afterwards is not a request.
+	if path == "/ws" || path == runnerwire.ConnectPath {
 		return ClassWSUpgrade, 1.0
 	}
 	if auth.SignInPaths[path] ||
@@ -665,6 +668,11 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 	}
 	path := c.Request.URL.Path
 	if !strings.HasPrefix(path, "/api/") && path != "/ws" {
+		c.Next()
+		return
+	}
+	// A request the runner proxy re-dispatched was charged on its way in.
+	if _, proxied := runnerProxiedFrom(c.Request.Context()); proxied {
 		c.Next()
 		return
 	}

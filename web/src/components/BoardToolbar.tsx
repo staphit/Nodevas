@@ -13,7 +13,6 @@ import type { GraphAnalysis } from "../analysis";
 import { InlineNotice } from "./InteractionPrimitives";
 import { GRAPH_GESTURE_MODES, type GraphGestureMode } from "./canvas/gestureMode";
 import { useCoarsePointer, useTouchCapable } from "./touch";
-import { useCanEdit } from "./SignIn";
 import type { LaneContextMenu } from "./LaneView";
 import { useI18n } from "../i18n";
 
@@ -157,7 +156,6 @@ export function BoardToolbar({
   // it follows whichever input the device is mainly driven with.
   const touchCapable = useTouchCapable();
   const coarsePointer = useCoarsePointer();
-  const canEdit = useCanEdit();
   // Both panes render this toolbar, so the hint needs an id that stays unique.
   const hintId = useId();
   const [hintOpen, setHintOpen] = useState(false);
@@ -186,7 +184,7 @@ export function BoardToolbar({
         <span className="board-title-main">
           {isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         </span>
-        {!collapsed && canEdit && (
+        {!collapsed && (
           <button
             type="button"
             className="board-primary-action"

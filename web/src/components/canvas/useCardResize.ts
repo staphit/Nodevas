@@ -37,15 +37,12 @@ export interface CardResizeState {
 export function useCardResize({
   zoom,
   onCommit,
-  canResize = true,
   snapEnabled = false,
   snapBoxes = [],
   rectOf,
 }: {
   zoom: number;
   onCommit: (nodeId: string, size: { width: number; height: number }) => void;
-  /** False for a read-only session: the handles do nothing at all. */
-  canResize?: boolean;
   /**
    * Whether the edge under the handle aligns to its neighbours. A card is
    * anchored at its centre, so both edges move: the size has to change by twice
@@ -69,7 +66,7 @@ export function useCardResize({
     width: number,
     height: number,
   ) => {
-    if (event.button !== 0 || !canResize) return;
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -160,7 +157,6 @@ export function useCardResize({
     width: number,
     height: number,
   ) => {
-    if (!canResize) return;
     const size = resizeCardByKeyboard(width, height, event.key, event.shiftKey);
     if (!size) return;
     event.preventDefault();

@@ -447,6 +447,185 @@ UPDATE accounts SET email = ''
 CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
 `,
 	},
+	{
+		name: "0007_copilot",
+		stmt: `
+-- The voice copilot's conversations and transcripts (see COPILOT.md). They
+-- belong to the account that held them, never to the project's content: a
+-- transcript is not a node, and a project shared with others must not show
+-- one person's dictation to the rest.
+--
+-- Timestamps here are Unix milliseconds rather than the RFC3339 text the other
+-- tables use. A conversation produces several entries a second, and a
+-- transcript is ordered by seq, not by time; the millisecond value is what
+-- the browser shows and sorts conversations by without parsing anything.
+CREATE TABLE copilot_conversations (
+    id          TEXT PRIMARY KEY,
+    -- Not a foreign key to accounts: on a loopback server the account is the
+    -- built-in "local" actor, which has no row.
+    account_id  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'default',
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT;
+CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
+
+CREATE TABLE copilot_entries (
+    id               TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    seq              INTEGER NOT NULL,
+    kind             TEXT NOT NULL,             -- user | assistant | tool | notice
+    source           TEXT NOT NULL DEFAULT '',  -- voice | text (user entries)
+    text             TEXT NOT NULL DEFAULT '',
+    tool_name        TEXT NOT NULL DEFAULT '',
+    tool_input       TEXT NOT NULL DEFAULT '',
+    tool_output      TEXT NOT NULL DEFAULT '',
+    tool_status      TEXT NOT NULL DEFAULT '',  -- ok | error | denied
+    -- provider.Message JSON, replayed to the model on the next turn. The
+    -- columns above are what the panel reads, so a transcript renders without
+    -- decoding a vendor payload.
+    message          TEXT NOT NULL DEFAULT '',
+    created_at       INTEGER NOT NULL,
+    UNIQUE (conversation_id, seq)
+) STRICT;
+`,
+	},
+	{
+		name: "0008_agent_network",
+		stmt: `
+-- Agent-to-agent messages and human-in-the-loop ask requests.
+CREATE TABLE agent_messages (
+    id              TEXT PRIMARY KEY,
+    project         TEXT NOT NULL,
+    sender_actor    TEXT NOT NULL,
+    sender_session  TEXT NOT NULL DEFAULT '',
+    sender_agent    TEXT NOT NULL DEFAULT '',
+    recipient       TEXT NOT NULL,
+    reply_to        TEXT NOT NULL DEFAULT '',
+    thread_id       TEXT NOT NULL DEFAULT '',
+    node_id         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    read_at         INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_messages_inbox ON agent_messages (project, recipient, read_at, created_at);
+CREATE INDEX agent_messages_project ON agent_messages (project, created_at);
+
+CREATE TABLE agent_asks (
+    id            TEXT PRIMARY KEY,
+    project       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL,
+    actor_id      TEXT NOT NULL,
+    agent         TEXT NOT NULL DEFAULT '',
+    question      TEXT NOT NULL,
+    about_msg_id  TEXT NOT NULL DEFAULT '',
+    node_id       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    decided_by    TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    decided_at    INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
+`,
+	},
+	{
+		name: "0009_runners",
+		stmt: `
+-- Runners: the machines that execute agent runs (nodevas runner). The hub
+-- only records them; it never starts a process itself. See
+-- docs/nodevas-workstation-plan.md.
+CREATE TABLE runners (
+    id            TEXT PRIMARY KEY,
+    -- Not a foreign key to accounts: on a loopback server the owner is the
+    -- built-in "local" actor, which has no row.
+    owner_id      TEXT NOT NULL,
+    owner_name    TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL DEFAULT '',
+    -- The runner's last hello (runnerwire.Info) as JSON, shown as given. The
+    -- hub never acts on a path or command in it.
+    info          TEXT NOT NULL DEFAULT '',
+    -- Revoked runners stay as a record of what once had access.
+    revoked_at    TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runners_owner ON runners (owner_id, created_at);
+
+CREATE TABLE runner_tokens (
+    -- sha256 of the token, hex. Never the token: a backup of this database
+    -- must not be a bag of working credentials.
+    token_hash  TEXT PRIMARY KEY,
+    runner_id   TEXT NOT NULL REFERENCES runners(id),
+    created_at  TEXT NOT NULL,
+    revoked_at  TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
+`,
+	},
+	{
+		name: "0010_runs",
+		stmt: `
+-- Runs: one agent CLI invocation on a runner for one board node. The hub
+-- records and relays them; only the runner executes anything.
+CREATE TABLE runs (
+    id               TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it ("." for the workspace root),
+    -- not its path: the name is what a runner's agent sends back through the
+    -- proxy, and a path on the hub is none of the runner's business.
+    project          TEXT NOT NULL,
+    node_id          TEXT NOT NULL,
+    -- Not foreign keys: a run outlives its runner being revoked, and its
+    -- record must not vanish with it.
+    runner_id        TEXT NOT NULL,
+    runner_name      TEXT NOT NULL DEFAULT '',
+    -- The runner's owner when the run was made. Who may see and cancel a run
+    -- is decided from this, not from a join that a revoked runner breaks.
+    owner_id         TEXT NOT NULL,
+    agent            TEXT NOT NULL,
+    model            TEXT NOT NULL DEFAULT '',
+    repo_id          TEXT NOT NULL,
+    repo_name        TEXT NOT NULL DEFAULT '',
+    base             TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    -- The dispatcher's extra instructions as typed.
+    prompt           TEXT NOT NULL DEFAULT '',
+    -- What the runner is offered: the node as it read when the run was made,
+    -- so a run that waits in the queue still does what was asked.
+    node_title       TEXT NOT NULL DEFAULT '',
+    job_prompt       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
+    error            TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    exit_code        INTEGER NOT NULL DEFAULT 0,
+    -- runnerwire.Usage as JSON, or '' before the first usage report.
+    usage            TEXT NOT NULL DEFAULT '',
+    pr_url           TEXT NOT NULL DEFAULT '',
+    ci_status        TEXT NOT NULL DEFAULT '',
+    created_by       TEXT NOT NULL,
+    created_by_name  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    started_at       TEXT NOT NULL DEFAULT '',
+    finished_at      TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runs_node ON runs (project, node_id, created_at);
+CREATE INDEX runs_runner ON runs (runner_id, status);
+
+CREATE TABLE run_events (
+    run_id   TEXT NOT NULL REFERENCES runs(id),
+    -- The runner's own 1, 2, 3… for the run; a resent batch collides here.
+    seq      INTEGER NOT NULL,
+    type     TEXT NOT NULL,
+    at       TEXT NOT NULL DEFAULT '',
+    -- The whole runnerwire.RunEvent as JSON, as the API returns it.
+    payload  TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

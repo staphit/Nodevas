@@ -26,7 +26,6 @@ import { useTimelineDays } from "./timeline/useTimelineDays";
 import { useTimelineCellSize } from "./timeline/useTimelineCellSize";
 import { useMilestoneDrag } from "./timeline/useMilestoneDrag";
 import { usePlanMenu } from "./timeline/usePlanMenu";
-import { useCanEdit } from "./SignIn";
 import { useNarrowViewport } from "./TopbarOverflow";
 import { GraphCanvas } from "./canvas/GraphCanvas";
 import { GraphMinimap } from "./canvas/GraphMinimap";
@@ -271,11 +270,6 @@ export function LaneView({
     activeProject,
     zoom: viewScale,
   });
-  // A read-only session keeps every gesture that only looks — select, open,
-  // pan, zoom — and loses the ones that would write. The server refuses those
-  // regardless; this is what stops the card from moving under the pointer
-  // first and springing back afterwards.
-  const canEdit = useCanEdit();
 
   const userNames = useMemo(
     () => new Map((graph?.users ?? []).map((user) => [user.id, user.name])),
@@ -372,7 +366,6 @@ export function LaneView({
 
   const { state: cardResize, handlers: cardResizeHandlers } = useCardResize({
     zoom: viewScale,
-    canResize: canEdit,
     snapEnabled: snapGuidesEnabled,
     snapBoxes,
     rectOf: snapRectOf,
@@ -398,7 +391,6 @@ export function LaneView({
 
   const { state: drag, handlers: cardDragHandlers } = useCardDrag({
     zoom: viewScale,
-    canMove: canEdit,
     snapToGrid,
     columns: cols,
     snapEnabled: snapGuidesEnabled,
@@ -832,7 +824,7 @@ export function LaneView({
 
 
   const connection = useConnectionDrag({
-    enabled: isGraph && canEdit,
+    enabled: isGraph,
     graphPointFromClient,
     connectionPointForNode,
     onSelectGate: (gateId) => setGraphSelection({ kind: "logic-gate", id: gateId }),
@@ -903,7 +895,6 @@ export function LaneView({
     openTab,
     setContextMenu,
     setPlanNotice,
-    canEdit,
   });
 
   const conditions = useNodeConditions({
@@ -1149,7 +1140,7 @@ export function LaneView({
         minimapVisible={minimapVisible}
         setMinimapVisible={setMinimapVisible}
         alignAllToGrid={alignAllToGrid}
-        canAlignToGrid={canEdit && cols.length > 0}
+        canAlignToGrid={cols.length > 0}
         selectedIDs={selectedIDs}
         selectedNodeId={selectedNodeId}
         nodeTitle={nodeTitle}
@@ -1175,9 +1166,7 @@ export function LaneView({
         graphNotice={graphNotice}
         planNotice={planNotice}
       />
-      {/* Every control in it mutates — batch status, assignee, copy, move —
-        * so for a read-only session the whole strip goes. */}
-      {canEdit && isGraph && !collapsed && selectedIDs.length > 0 && (
+      {isGraph && !collapsed && selectedIDs.length > 0 && (
         <GraphBatchToolbar
           graph={graph}
           customStatuses={customStatuses}

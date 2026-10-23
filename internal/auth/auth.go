@@ -107,8 +107,6 @@ var PublicPaths = map[string]bool{
 	// cannot be behind having one. Its own throttles are what keep it from
 	// being abused; see otp.go.
 	"/api/auth/otp/request": true,
-	// The shared read-only credential's own door. See visitor.go.
-	"/api/auth/visitor": true,
 }
 
 // SignInPaths are the public endpoints that accept a credential from a
@@ -117,7 +115,6 @@ var PublicPaths = map[string]bool{
 var SignInPaths = map[string]bool{
 	"/api/auth/login":       true,
 	"/api/auth/otp/request": true,
-	"/api/auth/visitor":     true,
 }
 
 const (

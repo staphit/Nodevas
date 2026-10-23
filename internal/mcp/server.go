@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -14,9 +17,14 @@ const Version = "v1"
 
 // Options configure a `nodevas mcp` process.
 type Options struct {
-	Server  string
-	Project string
-	Actor   string
+	Server      string
+	Project     string
+	Actor       string
+	SessionID   string
+	SessionName string
+	AgentKind   string
+	Repo        string
+	Branch      string
 	// AgentRole is the write-permission class this process declares on every
 	// request: "worker" or "orchestrator". Empty presents as a human session.
 	// Nodes whose write_access outranks it refuse this agent's writes.
@@ -29,6 +37,9 @@ type Options struct {
 	// on the session, usually with an error that names neither the line nor
 	// this program.
 	Stderr io.Writer
+	// HTTPClient replaces the socket client; see ClientOptions.HTTPClient.
+	// Only the in-process copilot bridge sets it.
+	HTTPClient *http.Client
 }
 
 // DefaultActor names an agent when the operator did not.
@@ -61,13 +72,29 @@ func NewServer(ctx context.Context, opts Options) (*mcp.Server, error) {
 	return server, err
 }
 
+// NewServerWithClose is NewServer for a caller that outlives one session in a
+// long-running process — the copilot bridge. With ChromaURL set the server
+// owns an embedding worker subprocess; NewServer leaves it to die with ctx,
+// which is fine for a test but leaks one per turn in `nodevas serve` if ctx
+// outlives the turn. The returned close stops it; it is safe to call more than
+// once and is a no-op without RAG.
+func NewServerWithClose(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
+	return newServer(ctx, opts)
+}
+
 func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	closeWorker := func() {}
 	client, err := NewClient(ClientOptions{
-		Server:    opts.Server,
-		Project:   opts.Project,
-		Actor:     opts.Actor,
-		AgentRole: opts.AgentRole,
+		Server:      opts.Server,
+		Project:     opts.Project,
+		Actor:       opts.Actor,
+		SessionID:   opts.SessionID,
+		SessionName: opts.SessionName,
+		AgentKind:   opts.AgentKind,
+		Repo:        opts.Repo,
+		Branch:      opts.Branch,
+		AgentRole:   opts.AgentRole,
+		HTTPClient:  opts.HTTPClient,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -77,6 +104,26 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	// start.
 	if err := client.Probe(ctx); err != nil {
 		return nil, nil, err
+	}
+	// Register session presence on startup (best-effort) and refresh every 30s.
+	stopHB := make(chan struct{})
+	var stopOnce sync.Once
+	if opts.HTTPClient == nil || opts.SessionID != "" || opts.SessionName != "" {
+		_ = client.Heartbeat(ctx, "", "", "")
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-stopHB:
+					return
+				case <-ticker.C:
+					_ = client.Heartbeat(ctx, "", "", "")
+				}
+			}
+		}()
 	}
 	if opts.Stderr != nil {
 		fmt.Fprintf(opts.Stderr, "nodevas mcp: %s, project %q, acting as %q, role %s\n",
@@ -94,14 +141,41 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	if opts.ChromaURL != "" {
 		closeWorker, err = registerRAGTools(ctx, server, client, opts)
 		if err != nil {
+			stopOnce.Do(func() { close(stopHB) })
 			return nil, nil, err
 		}
 	}
 	registerWriteTools(server, client)
 	registerAuthoringTools(server, client)
+	registerNetworkTools(server, client)
 	registerResources(server, client)
 	registerPrompt(server, client)
-	return server, closeWorker, nil
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if method == "tools/call" && req != nil && req.GetParams() != nil {
+				client.FollowToolCall(ctx, req.GetParams().GetMeta())
+			}
+			res, err := next(ctx, method, req)
+			if err != nil || method != "tools/call" {
+				return res, err
+			}
+			toolRes, ok := res.(*mcp.CallToolResult)
+			if !ok || toolRes == nil || toolRes.IsError {
+				return res, nil
+			}
+			if unread := client.UnreadCount(); unread > 0 {
+				toolRes.Content = append(toolRes.Content, &mcp.TextContent{
+					Text: fmt.Sprintf("[Unread mail: %d message(s) waiting — call check_inbox]", unread),
+				})
+			}
+			return toolRes, nil
+		}
+	})
+	closeAll := func() {
+		stopOnce.Do(func() { close(stopHB) })
+		closeWorker()
+	}
+	return server, closeAll, nil
 }
 
 func displayProject(name string) string {

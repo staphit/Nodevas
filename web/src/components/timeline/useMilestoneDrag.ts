@@ -71,7 +71,6 @@ export function useMilestoneDrag({
   openTab,
   setContextMenu,
   setPlanNotice,
-  canEdit = true,
 }: {
   graph: Graph | null;
   zoom: number;
@@ -85,8 +84,6 @@ export function useMilestoneDrag({
   openTab: (id: string) => Promise<unknown>;
   setContextMenu: (menu: LaneContextMenu | null) => void;
   setPlanNotice: (notice: { text: string; kind: "ok" | "error" } | null) => void;
-  /** False for a read-only session: a milestone cannot be dragged to a new date. */
-  canEdit?: boolean;
 }) {
   const { t, language } = useI18n();
   const planDragRef = useRef<PlanDragState | null>(null);
@@ -99,7 +96,6 @@ export function useMilestoneDrag({
     nodeId: string,
     plan: PlanMilestone,
   ) => {
-    if (!canEdit) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -224,7 +220,6 @@ export function useMilestoneDrag({
     event: React.PointerEvent<HTMLDivElement>,
     historyEvent: HistoryEvent,
   ) => {
-    if (!canEdit) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
 		if (!historyEvent.id || !historyEvent.node) {
       return;

@@ -18,6 +18,13 @@ import { ConfirmDialogHost } from "./components/ConfirmDialog";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
+import { CopilotRoot } from "./copilot/CopilotRoot";
+import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
+import { useAgents } from "./agents/agentStore";
+import { RunnersModal } from "./runners/RunnersModal";
+import { useRunners } from "./runners/runnerStore";
+import { RunsRoot } from "./runs/RunsRoot";
+import { useRuns } from "./runs/runStore";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -26,7 +33,7 @@ import {
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
-import { AuthGate, SignOutButton, useSignOut, useViewer, VisitorBadge } from "./components/SignIn";
+import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
 import { ProjectSettings } from "./components/ProjectSettings";
 import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
@@ -36,6 +43,7 @@ import { LANGUAGE_OPTIONS, useI18n } from "./i18n";
 import {
   IconBell,
   IconCloud,
+  IconComputer,
   IconGear,
   IconHelp,
   IconMoon,
@@ -98,7 +106,7 @@ function MainApp() {
   // still up did open it, underneath, and read as a button that did nothing. Making them one value makes that unrepresentable instead
   // of relying on every opener remembering to close its neighbours.
   const [modal, setModal] = useState<
-    "" | "notify" | "backup" | "settings"
+    "" | "notify" | "backup" | "settings" | "runners"
   >("");
   const closeModal = useCallback(() => setModal(""), []);
   // Live width while dragging; the preference is written on commit so a drag
@@ -149,11 +157,14 @@ function MainApp() {
   useEffect(() => {
     const onOpenSettings = () => setModal("settings");
     const onOpenNotify = () => setModal("notify");
+    const onOpenRunners = () => setModal("runners");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
+    window.addEventListener("nodevas-open-runners", onOpenRunners);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
+      window.removeEventListener("nodevas-open-runners", onOpenRunners);
     };
   }, []);
 
@@ -279,6 +290,24 @@ function MainApp() {
         }
         case "state-changed":
           void refreshState().catch(reportError);
+          void useAgents.getState().refreshAll();
+          break;
+        case "agents-changed":
+          void useAgents.getState().refreshAll();
+          break;
+        case "runners-changed":
+          // Only refetched once the Runners dialog has loaded them; a board
+          // that never opened it has nothing to keep current.
+          void useRunners.getState().refreshIfLoaded();
+          break;
+        case "runs-changed":
+          // The id is a node: its run list is refetched if something shows it.
+          useRuns.getState().onRunsChanged(ev.id);
+          break;
+        case "run-events":
+          // The id is a run: an open run view fetches what came after its
+          // last event.
+          useRuns.getState().onRunEvents(ev.id);
           break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
@@ -296,6 +325,9 @@ function MainApp() {
           // document that is still degraded after the client rejoins.
           dispatchDocumentPersistence({ type: "reset" });
           useApp.getState().setSelfPeerID(ev.selfId ?? "");
+          // Run pushes sent while the socket was down are gone; refetch
+          // whatever run lists and live runs are on screen.
+          useRuns.getState().resync();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);
@@ -402,8 +434,6 @@ function MainApp() {
           />
         )}
         <PresenceAvatars narrow={narrowTopbar} />
-        {/* Renders nothing unless the session is a visitor's. */}
-        <VisitorBadge />
         <div className="topbar-actions">
           <button
             className="command-trigger"
@@ -504,6 +534,12 @@ function MainApp() {
                 onSelect: () => setModal("backup"),
               },
               {
+                id: "runners",
+                label: t("topbar.runners"),
+                icon: <IconComputer size={16} />,
+                onSelect: () => setModal("runners"),
+              },
+              {
                 id: "theme",
                 label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
                 icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
@@ -528,6 +564,7 @@ function MainApp() {
       {modal === "notify" && <NotifySettingsModal onClose={closeModal} />}
       {modal === "backup" && <BackupModal onClose={closeModal} />}
       {modal === "settings" && <ProjectSettings onClose={closeModal} />}
+      {modal === "runners" && <RunnersModal onClose={closeModal} />}
       {error && (
         <div className="global-error" role="alert">
           <span>{error}</span>
@@ -582,6 +619,9 @@ function MainApp() {
       <ProjectPickerHost />
       <CommandPalette />
       <OnboardingTour />
+      <CopilotRoot />
+      <AgentNetworkRoot />
+      <RunsRoot />
     </div>
   );
 }

@@ -13,10 +13,6 @@ type Role string
 const (
 	RoleAdmin  Role = "admin"
 	RoleMember Role = "member"
-	// RoleVisitor may read and nothing else. It is not an account: one shared
-	// credential admits everyone who has it, so a visitor has no name to
-	// attribute a change to, which is the other reason no change is allowed.
-	RoleVisitor Role = "visitor"
 )
 
 // AgentClass says what kind of automation, if any, a request acts as. It is
@@ -47,16 +43,6 @@ func (a Actor) IsAgent() bool { return a.Agent != "" }
 // boundary in desktop mode.
 func (a Actor) IsAdmin() bool {
 	return a.Role == RoleAdmin || a.ID == "local"
-}
-
-// CanWrite reports whether the actor may change anything at all.
-//
-// It is phrased as a denial of one role rather than a list of the roles that
-// may write, because the failure mode of the other phrasing is a role added
-// later that silently gets no access. A new role should have to opt out of
-// writing, not opt in.
-func (a Actor) CanWrite() bool {
-	return a.Role != RoleVisitor
 }
 
 // Local is the single actor of a loopback-only server: the OS already decided

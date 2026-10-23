@@ -353,6 +353,147 @@ CREATE INDEX sessions_user ON sessions (user_id);
 CREATE INDEX sessions_expires ON sessions (expires_at);
 `,
 	},
+	{
+		// BIGINT where SQLite says INTEGER: SQLite's INTEGER is 64-bit, and a
+		// Unix millisecond timestamp does not fit PostgreSQL's 32-bit one.
+		name: "0007_copilot",
+		stmt: `
+CREATE TABLE copilot_conversations (
+    id          TEXT COLLATE "C" PRIMARY KEY,
+    account_id  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'default',
+    created_at  BIGINT NOT NULL,
+    updated_at  BIGINT NOT NULL
+);
+CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
+
+CREATE TABLE copilot_entries (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    conversation_id  TEXT COLLATE "C" NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    seq              BIGINT NOT NULL,
+    kind             TEXT NOT NULL,
+    source           TEXT NOT NULL DEFAULT '',
+    text             TEXT NOT NULL DEFAULT '',
+    tool_name        TEXT NOT NULL DEFAULT '',
+    tool_input       TEXT NOT NULL DEFAULT '',
+    tool_output      TEXT NOT NULL DEFAULT '',
+    tool_status      TEXT NOT NULL DEFAULT '',
+    message          TEXT NOT NULL DEFAULT '',
+    created_at       BIGINT NOT NULL,
+    UNIQUE (conversation_id, seq)
+);
+`,
+	},
+	{
+		name: "0008_agent_network",
+		stmt: `
+CREATE TABLE agent_messages (
+    id              TEXT COLLATE "C" PRIMARY KEY,
+    project         TEXT NOT NULL,
+    sender_actor    TEXT NOT NULL,
+    sender_session  TEXT NOT NULL DEFAULT '',
+    sender_agent    TEXT NOT NULL DEFAULT '',
+    recipient       TEXT NOT NULL,
+    reply_to        TEXT NOT NULL DEFAULT '',
+    thread_id       TEXT NOT NULL DEFAULT '',
+    node_id         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL,
+    created_at      BIGINT NOT NULL,
+    read_at         BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX agent_messages_inbox ON agent_messages (project, recipient, read_at, created_at);
+CREATE INDEX agent_messages_project ON agent_messages (project, created_at);
+
+CREATE TABLE agent_asks (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    project       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL,
+    actor_id      TEXT NOT NULL,
+    agent         TEXT NOT NULL DEFAULT '',
+    question      TEXT NOT NULL,
+    about_msg_id  TEXT NOT NULL DEFAULT '',
+    node_id       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    decided_by    TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    BIGINT NOT NULL,
+    decided_at    BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
+`,
+	},
+	{
+		name: "0009_runners",
+		stmt: `
+CREATE TABLE runners (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    owner_name    TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL DEFAULT '',
+    info          TEXT NOT NULL DEFAULT '',
+    revoked_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runners_owner ON runners (owner_id, created_at);
+
+CREATE TABLE runner_tokens (
+    token_hash  TEXT COLLATE "C" PRIMARY KEY,
+    runner_id   TEXT NOT NULL REFERENCES runners(id),
+    created_at  TEXT NOT NULL,
+    revoked_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
+`,
+	},
+	{
+		name: "0010_runs",
+		stmt: `
+CREATE TABLE runs (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    project          TEXT COLLATE "C" NOT NULL,
+    node_id          TEXT COLLATE "C" NOT NULL,
+    runner_id        TEXT COLLATE "C" NOT NULL,
+    runner_name      TEXT NOT NULL DEFAULT '',
+    owner_id         TEXT COLLATE "C" NOT NULL,
+    agent            TEXT NOT NULL,
+    model            TEXT NOT NULL DEFAULT '',
+    repo_id          TEXT NOT NULL,
+    repo_name        TEXT NOT NULL DEFAULT '',
+    base             TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    prompt           TEXT NOT NULL DEFAULT '',
+    node_title       TEXT NOT NULL DEFAULT '',
+    job_prompt       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
+    error            TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    exit_code        INTEGER NOT NULL DEFAULT 0,
+    usage            TEXT NOT NULL DEFAULT '',
+    pr_url           TEXT NOT NULL DEFAULT '',
+    ci_status        TEXT NOT NULL DEFAULT '',
+    created_by       TEXT COLLATE "C" NOT NULL,
+    created_by_name  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT COLLATE "C" NOT NULL,
+    started_at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    finished_at      TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX runs_node ON runs (project, node_id, created_at);
+CREATE INDEX runs_runner ON runs (runner_id, status);
+
+CREATE TABLE run_events (
+    run_id   TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    seq      BIGINT NOT NULL,
+    type     TEXT NOT NULL,
+    at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    payload  TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
