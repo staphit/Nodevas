@@ -81,6 +81,18 @@ type Config struct {
 	PRLabels *[]string `json:"prLabels,omitempty"`
 	// PRPollSeconds is how often open pull requests are checked with gh.
 	PRPollSeconds int `json:"prPollSeconds,omitempty"`
+
+	// Remote merge, from W4 on.
+
+	// RemoteMerge lets someone who approves a run's diff on the hub have this
+	// runner merge its PR (with the owner's gh login); nil means the default,
+	// on. Off, every approval is refused.
+	RemoteMerge *bool `json:"remoteMerge,omitempty"`
+	// MergeMethod is how an approved PR is merged: squash (the default),
+	// merge or rebase. The hub's request never chooses.
+	MergeMethod string `json:"mergeMethod,omitempty"`
+	// DeleteBranchOnMerge deletes the PR's branch on GitHub once merged.
+	DeleteBranchOnMerge bool `json:"deleteBranchOnMerge,omitempty"`
 }
 
 // Defaults and bounds for the run settings.
@@ -96,6 +108,21 @@ const (
 
 // DefaultPRLabels are a run's pull request labels unless the owner set others.
 var DefaultPRLabels = []string{"nodevas", "model:{model}"}
+
+// MergeMethods are the merge methods gh pr merge takes, the default first.
+var MergeMethods = []string{"squash", "merge", "rebase"}
+
+// RemoteMergeOn is RemoteMerge with its default (on) applied.
+func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge == nil || *c.RemoteMerge }
+
+// MergeMethodOrDefault is MergeMethod with its default applied; anything
+// unknown (a hand-edited file) falls back to squash.
+func (c *Config) MergeMethodOrDefault() string {
+	if slices.Contains(MergeMethods, c.MergeMethod) {
+		return c.MergeMethod
+	}
+	return MergeMethods[0]
+}
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
@@ -211,7 +238,7 @@ const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept",
-	"autoPR", "prDraft", "prLabels", "prPollSeconds"}
+	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
@@ -389,6 +416,36 @@ func (c *Config) Set(key string, values []string) error {
 			return fmt.Errorf("prPollSeconds must be a number from %d to %d", MinPRPollSeconds, MaxPRPollSeconds)
 		}
 		c.PRPollSeconds = n
+	case "remoteMerge":
+		if reset {
+			c.RemoteMerge = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("remoteMerge must be true or false")
+		}
+		c.RemoteMerge = &on
+	case "mergeMethod":
+		if reset {
+			c.MergeMethod = ""
+			return nil
+		}
+		method, err := oneOf(canonical, value, MergeMethods)
+		if err != nil {
+			return err
+		}
+		c.MergeMethod = method
+	case "deleteBranchOnMerge":
+		if reset {
+			c.DeleteBranchOnMerge = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("deleteBranchOnMerge must be true or false")
+		}
+		c.DeleteBranchOnMerge = on
 	}
 	return nil
 }

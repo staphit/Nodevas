@@ -178,6 +178,9 @@ type ghPRView struct {
 	IsDraft           bool      `json:"isDraft"`
 	HeadRefOid        string    `json:"headRefOid"`
 	StatusCheckRollup []ghCheck `json:"statusCheckRollup"`
+	// Read only before a merge (prMergeFields).
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
 }
 
 // ghCheck is a check run (status and conclusion) or a commit status (state).

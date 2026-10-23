@@ -87,6 +87,7 @@ func (c *Client) Run(ctx context.Context) error {
 	c.jobs = newJobs(ctx, c)
 	defer c.jobs.shutdown()
 	c.jobs.loadPRs()
+	c.jobs.loadMerges()
 	c.jobs.wg.Add(1)
 	go c.jobs.watchPRs(c.prPollInterval)
 	backoff := c.backoffMin()
@@ -221,6 +222,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.offer(msg.Job)
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			case runnerwire.TypeMerge:
+				c.jobs.merge(msg.RunID, msg.Merge)
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {

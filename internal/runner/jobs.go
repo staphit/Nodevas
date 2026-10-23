@@ -45,6 +45,14 @@ type jobs struct {
 	prPending  map[string]runnerwire.PRInfo
 	prOrder    []string
 
+	// Remote merges (see merge.go): answers kept to dedupe re-sent requests,
+	// requests being worked on, and answers not yet written. mergeMu lets one
+	// merge at a time talk to gh.
+	merges        map[string]mergeRecord
+	mergeInFlight map[string]bool
+	mergeResults  []runnerwire.Envelope
+	mergeMu       sync.Mutex
+
 	proxy    *Proxy
 	proxyErr error
 
@@ -110,6 +118,9 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 		watched:   map[string]*watchedPR{},
 		watchErrs: map[string]string{},
 		prPending: map[string]runnerwire.PRInfo{},
+
+		merges:        map[string]mergeRecord{},
+		mergeInFlight: map[string]bool{},
 	}
 }
 
@@ -652,6 +663,10 @@ func (j *jobs) flush(write func(runnerwire.Envelope) error) error {
 func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 	if len(j.declines) > 0 {
 		return j.declines[0], func() { j.declines = j.declines[1:] }
+	}
+	// A merge's answer goes before the PR update that shows it merged.
+	if len(j.mergeResults) > 0 {
+		return j.mergeResults[0], func() { j.mergeResults = j.mergeResults[1:] }
 	}
 	for _, id := range j.order {
 		r := j.runs[id]

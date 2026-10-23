@@ -28,6 +28,8 @@ type watchedPR struct {
 	Repo     string            `json:"repo"`
 	Branch   string            `json:"branch,omitempty"`
 	PR       runnerwire.PRInfo `json:"pr"`
+	// closing: merged or closed, its worktree being removed.
+	closing bool
 }
 
 type prsFile struct {
@@ -187,10 +189,19 @@ func (j *jobs) pollPRs() {
 }
 
 // updatePR records a PR's new state and, when something the hub shows has
-// changed, queues it. A merged or closed PR ends its watch.
+// changed, queues it. A merged or closed PR ends its watch. The poller and a
+// remote merge may both see a PR end; the first one cleans up.
 func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 	final := info.State == runnerwire.PRMerged || info.State == runnerwire.PRClosed
 	if final {
+		j.mu.Lock()
+		current := j.watched[w.RunID]
+		if current == nil || current.closing {
+			j.mu.Unlock()
+			return
+		}
+		current.closing = true
+		j.mu.Unlock()
 		wt := Worktree{Path: w.Worktree, Branch: w.Branch}
 		if err := removeWorktree(j.ctx, w.Repo, wt, false); err != nil {
 			j.c.logf("run %s: PR %s; removing its worktree: %v", w.RunID, info.State, err)
@@ -200,7 +211,7 @@ func (j *jobs) updatePR(w watchedPR, info runnerwire.PRInfo) {
 	}
 	j.mu.Lock()
 	current := j.watched[w.RunID]
-	if current == nil {
+	if current == nil || (current.closing && !final) {
 		j.mu.Unlock()
 		return
 	}

@@ -83,7 +83,9 @@ func runnerUsage(w io.Writer) {
                                              pull requests: autoPR (true|false), prDraft (true|false),
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
-                                             prPollSeconds (30 or more)
+                                             prPollSeconds (30 or more);
+                                             remote merge: remoteMerge (true|false), mergeMethod
+                                             (squash|merge|rebase), deleteBranchOnMerge (true|false)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -300,6 +302,13 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("prDraft", cfg.PRDraft)
 	setting("prLabels", labels)
 	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
+	remote := "a merge approved on the hub is merged here with your gh login, once its CI is green"
+	if !cfg.RemoteMergeOn() {
+		remote = "approvals on the hub are refused; merge on GitHub yourself"
+	}
+	setting("remoteMerge", fmt.Sprintf("%t (%s)", cfg.RemoteMergeOn(), remote))
+	setting("mergeMethod", cfg.MergeMethodOrDefault())
+	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at
