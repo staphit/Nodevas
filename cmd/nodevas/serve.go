@@ -476,6 +476,7 @@ func serve(args []string) {
 	}
 	srv.UseAudit(audit.New(database))
 	srv.UseAgentsDB(database)
+	srv.UseRunnersDB(database)
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
 	if err != nil {
 		log.Fatalf("copilot: %v", err)

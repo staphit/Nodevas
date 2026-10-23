@@ -17,6 +17,8 @@ import (
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
 	"nodevas/internal/remote"
+	"nodevas/internal/runners"
+	"nodevas/internal/runnerwire"
 	"nodevas/internal/store"
 	"strconv"
 	"sync"
@@ -36,6 +38,8 @@ type Server struct {
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
 	agents   *agents.Hub
+	// runners serves /api/runners and /api/runner/*; nil until UseRunnersDB.
+	runners *runners.Registry
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -191,6 +195,17 @@ func (s *Server) UseAgentsDB(database *db.DB) {
 	if s.agents != nil {
 		s.agents.SetDatabase(database)
 	}
+}
+
+// UseRunnersDB enables runners (nodevas runner) against the workspace
+// database. Call it before Handler. Without it the runner endpoints do not
+// exist and a runner token opens nothing.
+func (s *Server) UseRunnersDB(database *db.DB) {
+	s.runners = runners.NewRegistry(database, func() {
+		if s.hub != nil {
+			s.hub.Broadcast(runnerwire.ChangedEvent, "")
+		}
+	})
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.

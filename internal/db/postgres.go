@@ -425,6 +425,30 @@ CREATE TABLE agent_asks (
 CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
 `,
 	},
+	{
+		name: "0009_runners",
+		stmt: `
+CREATE TABLE runners (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    owner_name    TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL DEFAULT '',
+    info          TEXT NOT NULL DEFAULT '',
+    revoked_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runners_owner ON runners (owner_id, created_at);
+
+CREATE TABLE runner_tokens (
+    token_hash  TEXT COLLATE "C" PRIMARY KEY,
+    runner_id   TEXT NOT NULL REFERENCES runners(id),
+    created_at  TEXT NOT NULL,
+    revoked_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
