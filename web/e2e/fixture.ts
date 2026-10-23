@@ -15,12 +15,16 @@ let previous: string | null = null;
  * global-setup.ts; booting another instance of it costs almost nothing.
  *
  * Ports start clear of 5700 (serve.mjs default) and 5701 (mobile preview) so
- * an e2e run never fights a preview run for a listener.
+ * an e2e run never fights a preview run for a listener; NODEVAS_E2E_PORT_BASE
+ * overrides the start.
  */
 export const test = base.extend<{}, { workerServer: { baseURL: string } }>({
   workerServer: [
     async ({}, use, workerInfo) => {
-      const port = 5720 + workerInfo.parallelIndex;
+      // NODEVAS_E2E_PORT_BASE moves the range, so suites in two checkouts
+      // (git worktrees) can run at the same time without fighting for ports.
+      const base = Number(process.env.NODEVAS_E2E_PORT_BASE) || 5720;
+      const port = base + workerInfo.parallelIndex;
       const baseURL = `http://127.0.0.1:${port}`;
       const binary = join(
         import.meta.dirname,

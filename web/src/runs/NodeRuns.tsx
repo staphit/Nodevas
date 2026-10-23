@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { runCancellable, runFinal, type Run, type RunEvent } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
 import { IconSend, IconTerminal } from "../icons";
@@ -11,9 +11,15 @@ import {
   oneLine,
   paragraphs,
   prettyInput,
+  runHasChanges,
   totalTokens,
 } from "./runFormat";
+import { RunDiffDialog } from "./DiffViewer";
+import { RunChangesSummary } from "./RunChanges";
 import { useRuns } from "./runStore";
+
+/** The hub's cap on GET /api/runs. */
+const RUN_LIST_CAP = 50;
 
 const KNOWN_STATUSES = new Set([
   "queued",
@@ -51,17 +57,24 @@ function UsageText({ run }: { run: Run }) {
 
 function RunRow({
   run,
+  number,
   selected,
   onSelect,
 }: {
   run: Run;
+  /** 1 for the node's first run; 0 when unknown. */
+  number: number;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const { language } = useI18n();
+  const { t, language } = useI18n();
   const branch = run.branch || run.base;
+  // The PR chip is a link, which cannot live inside the row's button: it
+  // sits in a footer that reads as part of the same row.
+  const summary = <RunChangesSummary run={run} className="run-row-changes" />;
+  const hasSummary = runHasChanges(run) || Boolean(run.prUrl) || Boolean(run.prError);
   return (
-    <li>
+    <li className={`run-item${selected ? " selected" : ""}${hasSummary ? " has-changes" : ""}`}>
       <button
         type="button"
         className={`run-row${selected ? " selected" : ""}`}
@@ -71,6 +84,9 @@ function RunRow({
         <span className="run-row-top">
           <RunStatusBadge status={run.status} />
           <strong className="run-row-agent">
+            {number > 0 && (
+              <span className="run-row-number">{t("runs.number", { number })} </span>
+            )}
             {run.agent}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
@@ -88,6 +104,7 @@ function RunRow({
           <UsageText run={run} />
         </span>
       </button>
+      {hasSummary && summary}
     </li>
   );
 }
@@ -288,6 +305,8 @@ export function RunDetail({ run }: { run: Run }) {
   };
 
   const hintKey = KNOWN_STATUSES.has(run.status) ? `runs.statusHint.${run.status}` : "";
+  const [diffOpen, setDiffOpen] = useState(false);
+  const closeDiff = useCallback(() => setDiffOpen(false), []);
 
   return (
     <section className="run-detail" aria-label={t("runs.detail")}>
@@ -315,6 +334,18 @@ export function RunDetail({ run }: { run: Run }) {
           </button>
         )}
       </div>
+
+      {(runHasChanges(run) || run.prUrl || run.prError) && (
+        <div className="run-detail-changes">
+          <RunChangesSummary run={run} />
+          {final && runHasChanges(run) && (
+            <button type="button" className="run-link-button" onClick={() => setDiffOpen(true)}>
+              {t("runs.viewChanges")}
+            </button>
+          )}
+        </div>
+      )}
+      {diffOpen && <RunDiffDialog run={run} onClose={closeDiff} />}
 
       <dl className="run-meta">
         <div>
@@ -487,10 +518,13 @@ export function NodeRuns({ id }: { id: string }) {
       ) : (
         <>
           <ul className="run-list" aria-label={t("runs.title")}>
-            {list.map((run) => (
+            {list.map((run, index) => (
               <RunRow
                 key={run.id}
                 run={run}
+                // The hub lists at most 50 runs: past that, counting from the
+                // oldest one shown would number them wrong.
+                number={list.length < RUN_LIST_CAP ? list.length - index : 0}
                 selected={run.id === selected?.id}
                 onSelect={() => selectRun(id, run.id)}
               />

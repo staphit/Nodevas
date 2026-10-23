@@ -80,13 +80,57 @@ export interface Run {
   summary?: string;
   exitCode: number;
   usage?: RunUsage;
+  /** The run's commit SHA; absent while running or when nothing changed. */
+  commit?: string;
+  filesChanged?: number;
+  additions?: number;
+  deletions?: number;
   prUrl?: string;
-  ciStatus?: string;
+  prNumber?: number;
+  prState?: PRState | string;
+  /** Why no pull request could be opened; prUrl is then absent. */
+  prError?: string;
+  ciStatus?: CIStatus | string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+export type PRState = "open" | "merged" | "closed";
+/** Rolled up over the PR's checks; "" while none reported. */
+export type CIStatus = "" | "pending" | "success" | "failure";
+export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
+
+/** Mirrors runnerwire.FileChange: one file in a run's commit. */
+export interface FileChange {
+  path: string;
+  status: FileChangeStatus | string;
+  /** Set for a rename. */
+  oldPath?: string;
+  additions: number;
+  deletions: number;
+  /** Binary files have no line counts. */
+  binary?: boolean;
+}
+
+/** Mirrors runnerwire.RunChanges: `git diff <base>...<commit>`. */
+export interface RunChanges {
+  /** "" when the agent changed nothing. */
+  commit: string;
+  base: string;
+  files: FileChange[] | null;
+  additions: number;
+  deletions: number;
+  /** The unified diff, at most 1 MiB; absent when patchTruncated. */
+  patch?: string;
+  patchTruncated?: boolean;
+}
+
+export interface RunChangesResponse {
+  /** null for a run that reported none (yet). */
+  changes: RunChanges | null;
 }
 
 export interface CreateRunRequest {
@@ -127,8 +171,11 @@ export const runsApi = {
     req<Run>("/api/runs", { method: "POST", body: JSON.stringify(body) }),
   listRuns: (nodeId: string) =>
     req<RunListResponse>(`/api/runs?nodeId=${encodeURIComponent(nodeId)}`),
+  /** The project's most recent runs (the hub caps the list at 50). */
+  listProjectRuns: () => req<RunListResponse>("/api/runs"),
   getRun: (id: string) => req<Run>(runPath(id)),
   getRunEvents: (id: string, after = 0, limit = RUN_EVENTS_PAGE) =>
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),
+  getRunChanges: (id: string) => req<RunChangesResponse>(`${runPath(id)}/changes`),
   cancelRun: (id: string) => req<Run>(`${runPath(id)}/cancel`, { method: "POST" }),
 };
