@@ -1,10 +1,20 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, AuthError, ConflictError, type Actor, type Run, type Runner } from "../api";
+import {
+  api,
+  AuthError,
+  ConflictError,
+  RequestError,
+  type Actor,
+  type Run,
+  type RunBudgetStatus,
+  type Runner,
+} from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import { DispatchDialog, ownRunners, runnerUnavailableReason } from "./DispatchDialog";
+import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
 
 const viewer = vi.hoisted(() => ({ current: null as Actor | null }));
@@ -90,6 +100,12 @@ const created: Run = {
   createdAt: "2026-10-24T08:00:00Z",
 };
 
+const withinBudget: RunBudgetStatus = {
+  budget: { dailyRuns: 10, dailyCostUsd: 5, dailyTokens: 0 },
+  used: { runs: 2, costUsd: 0.5, tokens: 1000 },
+  exceeded: "",
+};
+
 function selectNamed(name: string): HTMLSelectElement {
   return screen.getByRole("combobox", { name }) as HTMLSelectElement;
 }
@@ -112,6 +128,8 @@ beforeEach(() => {
     revoking: {},
   });
   useRuns.getState().reset();
+  useBudget.getState().reset();
+  vi.spyOn(api, "getRunBudget").mockResolvedValue(withinBudget);
 });
 
 afterEach(() => {
@@ -297,5 +315,63 @@ describe("DispatchDialog", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [bobs] });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     expect(await screen.findByText(/You have no runners yet/)).toBeInTheDocument();
+  });
+
+  it("warns up front when today's budget is used up, and links to it", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const budget = vi.spyOn(api, "getRunBudget").mockResolvedValue({
+      ...withinBudget,
+      used: { runs: 0, costUsd: 5.1, tokens: 0 },
+      exceeded: "cost",
+    });
+    const onClose = vi.fn();
+    const opened = vi.fn();
+    window.addEventListener("nodevas-open-runners", opened);
+
+    render(<DispatchDialog nodeId="alpha" onClose={onClose} onCreated={vi.fn()} />);
+    expect(
+      await screen.findByText(/Today's budget is used up \(Estimated cost\)/),
+    ).toBeInTheDocument();
+    expect(budget).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Adjust budget" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(opened).toHaveBeenCalled();
+    expect(useBudget.getState().showRequested).toBe(true);
+    window.removeEventListener("nodevas-open-runners", opened);
+  });
+
+  it("says nothing about the budget while within it", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByRole("combobox", { name: "Runner" });
+    await waitFor(() => expect(useBudget.getState().status).not.toBeNull());
+    expect(screen.queryByText(/budget is used up/)).not.toBeInTheDocument();
+  });
+
+  it("shows the hub's 429 budget refusal and catches the warning up", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    const budget = vi
+      .spyOn(api, "getRunBudget")
+      .mockResolvedValueOnce(withinBudget)
+      .mockResolvedValueOnce({ ...withinBudget, used: { runs: 10, costUsd: 0, tokens: 0 }, exceeded: "runs" });
+    vi.spyOn(api, "createRun").mockRejectedValue(
+      new RequestError(
+        429,
+        "daily run budget reached: 10 of 10 runs today (UTC)",
+        "RESOURCE_EXHAUSTED",
+      ),
+    );
+    const onCreated = vi.fn();
+    render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={onCreated} />);
+    await screen.findByRole("combobox", { name: "Runner" });
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Over budget: daily run budget reached: 10 of 10 runs today (UTC)",
+    );
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Today's budget is used up \(Runs\)/)).toBeInTheDocument();
+    expect(budget).toHaveBeenCalledTimes(2);
   });
 });

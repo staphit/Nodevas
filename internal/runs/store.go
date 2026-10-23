@@ -105,8 +105,11 @@ func (s *Store) stamp() string {
 		t = s.last.Add(time.Microsecond)
 	}
 	s.last = t
-	return t.Format("2006-01-02T15:04:05.000000Z07:00")
+	return t.Format(stampLayout)
 }
+
+// stampLayout is the fixed-width form of every stored time.
+const stampLayout = "2006-01-02T15:04:05.000000Z07:00"
 
 func newID() (string, error) {
 	var raw [12]byte
@@ -176,19 +179,22 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agent, model,
        repo_id, repo_name, base, branch, prompt, node_title, job_prompt, status, error, summary,
        exit_code, usage, pr_url, ci_status, created_by, created_by_name, created_at,
-       started_at, finished_at`
+       started_at, finished_at, commit_sha, files_changed, additions, deletions,
+       pr_number, pr_state, pr_error, pr_head_sha`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var usage string
-	var exit int64
+	var exit, files, additions, deletions, prNumber int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
-		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt); err != nil {
+		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
+		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)
+	r.FilesChanged, r.Additions, r.Deletions, r.PRNumber = int(files), int(additions), int(deletions), int(prNumber)
 	if usage != "" {
 		var parsed runnerwire.Usage
 		if json.Unmarshal([]byte(usage), &parsed) == nil {
@@ -198,13 +204,19 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	return r, nil
 }
 
-// Get returns one run.
+// Get returns one run, with its latest merge request.
 func (s *Store) Get(ctx context.Context, id string) (Record, error) {
 	r, err := scanRun(s.db.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound
 	}
-	return r, err
+	if err != nil {
+		return Record{}, err
+	}
+	if err := s.attachMerges(ctx, []*Record{&r}); err != nil {
+		return Record{}, err
+	}
+	return r, nil
 }
 
 // Filter narrows List.
@@ -236,7 +248,18 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
-	return s.query(ctx, query, args...)
+	out, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]*Record, len(out))
+	for i := range out {
+		refs[i] = &out[i]
+	}
+	if err := s.attachMerges(ctx, refs); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ForRunner returns the runner's runs in the given statuses, oldest first.

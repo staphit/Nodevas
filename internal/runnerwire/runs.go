@@ -170,14 +170,26 @@ type Run struct {
 	Summary  string `json:"summary,omitempty"`
 	ExitCode int    `json:"exitCode"`
 	Usage    *Usage `json:"usage,omitempty"`
-	// PRURL and CIStatus are filled from W3 on.
-	PRURL         string `json:"prUrl,omitempty"`
-	CIStatus      string `json:"ciStatus,omitempty"`
-	CreatedBy     string `json:"createdBy"`
-	CreatedByName string `json:"createdByName"`
-	CreatedAt     string `json:"createdAt"`
-	StartedAt     string `json:"startedAt,omitempty"`
-	FinishedAt    string `json:"finishedAt,omitempty"`
+	// Changes and pull request (W3; see changes.go).
+	Commit       string `json:"commit,omitempty"`
+	FilesChanged int    `json:"filesChanged"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	PRURL        string `json:"prUrl,omitempty"`
+	PRNumber     int    `json:"prNumber,omitempty"`
+	PRState      string `json:"prState,omitempty"`
+	PRError      string `json:"prError,omitempty"`
+	CIStatus     string `json:"ciStatus,omitempty"`
+	// PRHeadSHA is the PR head the CI status belongs to; a merge approval
+	// must name it (W4).
+	PRHeadSHA string `json:"prHeadSha,omitempty"`
+	// Merge is the latest merge request for the run, if any (W4).
+	Merge         *MergeRequest `json:"merge,omitempty"`
+	CreatedBy     string        `json:"createdBy"`
+	CreatedByName string        `json:"createdByName"`
+	CreatedAt     string        `json:"createdAt"`
+	StartedAt     string        `json:"startedAt,omitempty"`
+	FinishedAt    string        `json:"finishedAt,omitempty"`
 }
 
 // CreateRunRequest is the body of POST /api/runs (project from ?project=).

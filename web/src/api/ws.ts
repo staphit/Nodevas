@@ -60,7 +60,8 @@ export type WSEvent = {
     | "agents-changed"
     | "runners-changed"
     | "runs-changed"
-    | "run-events";
+    | "run-events"
+    | "run-notify";
   id?: string;
   project?: string;
   peers?: Peer[];

@@ -1,12 +1,37 @@
 import { create } from "zustand";
-import { api, runFinal, type CreateRunRequest, type Run, type RunEvent } from "../api";
+import {
+  api,
+  AuthError,
+  ConflictError,
+  runFinal,
+  type CreateRunRequest,
+  type Run,
+  type RunChanges,
+  type RunEvent,
+} from "../api";
 
 /** Pages fetched per events load before yielding; the next push resumes. */
 const MAX_EVENT_PAGES = 20;
 
+/** A run's changes as fetched, with the commit they were fetched for: a new
+ * commit on the run means the held copy is stale. */
+export interface HeldChanges {
+  commit: string;
+  changes: RunChanges | null;
+}
+
 export interface RunStoreState {
   /** A node's runs, newest first; present only once something asked. */
   runsByNode: Record<string, Run[]>;
+  /** The newest run known for each node, from node lists and the project's
+   * recent-runs list. Feeds the graph cards' run badges. */
+  latestByNode: Record<string, Run>;
+  /** Whether the project's recent runs were asked for (once per project). */
+  projectRunsLoaded: boolean;
+  /** A run's changes, fetched only when someone opens its diff. */
+  changesByRun: Record<string, HeldChanges>;
+  changesLoading: Record<string, boolean>;
+  changesErrors: Record<string, string>;
   loadingNodes: Record<string, boolean>;
   nodeErrors: Record<string, string>;
   /** A run's events in seq order, without duplicates. */
@@ -21,12 +46,21 @@ export interface RunStoreState {
   cancelErrors: Record<string, string>;
   /** Runs whose cancel the hub accepted while they were still running. */
   stopRequested: Record<string, boolean>;
+  /** Runs whose merge approval is being posted. */
+  merging: Record<string, boolean>;
+  /** Why the hub refused a run's merge approval. */
+  mergeErrors: Record<string, MergeRefusal>;
   /** The node the dispatch dialog is open for, or null. */
   dispatchNodeId: string | null;
   /** A request for the node's detail view to switch to its Runs tab. */
   showRunsRequest: { nodeId: string; nonce: number } | null;
 
   loadRuns: (nodeId: string) => Promise<void>;
+  /** One request for the project's most recent runs, for the graph badges.
+   * Repeated calls are free until the next reset (or a forced reload). */
+  loadProjectRuns: (force?: boolean) => Promise<void>;
+  /** Fetches a run's changes unless they are held for this commit already. */
+  loadChanges: (runId: string, commit: string | undefined) => Promise<void>;
   /** Reloads one run from GET /api/runs/:id. */
   refreshRun: (runId: string) => Promise<void>;
   /** Fetches the events after the last one held, page by page. */
@@ -36,6 +70,9 @@ export interface RunStoreState {
   /** Creates a run; throws the API error so the dialog can show it. */
   createRun: (body: CreateRunRequest) => Promise<Run>;
   cancelRun: (runId: string) => Promise<boolean>;
+  /** Approves merging a run's PR at the head the approver saw. */
+  mergeRun: (runId: string, headSha: string) => Promise<boolean>;
+  clearMergeError: (runId: string) => void;
   /** Starts following a run live; returns the matching unwatch. */
   watchRun: (runId: string) => () => void;
   selectRun: (nodeId: string, runId: string | null) => void;
@@ -59,6 +96,24 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A refused merge approval: "denied" is a 403 (an agent session may not
+ * approve merges), "precondition" a 409 with the hub's reason (CI not green,
+ * the PR changed since, no open PR, a merge already pending). */
+export interface MergeRefusal {
+  kind: "denied" | "precondition" | "other";
+  message: string;
+}
+
+export function mergeRefusal(error: unknown): MergeRefusal {
+  if (error instanceof ConflictError) {
+    return { kind: "precondition", message: error.serverMessage };
+  }
+  if (error instanceof AuthError && error.status === 403) {
+    return { kind: "denied", message: error.message };
+  }
+  return { kind: "other", message: message(error) };
+}
+
 /** Merges two seq-ordered event lists, keeping the first copy of each seq. */
 export function mergeEvents(held: RunEvent[], incoming: RunEvent[]): RunEvent[] {
   if (incoming.length === 0) return held;
@@ -74,6 +129,24 @@ export function mergeEvents(held: RunEvent[], incoming: RunEvent[]): RunEvent[] 
 
 function lastSeq(events: RunEvent[] | undefined): number {
   return events && events.length > 0 ? events[events.length - 1].seq : 0;
+}
+
+function newer(a: Run, b: Run | undefined): boolean {
+  if (!b) return true;
+  if (a.id === b.id) return true;
+  return a.createdAt > b.createdAt || (a.createdAt === b.createdAt && a.id > b.id);
+}
+
+/** Folds runs into the newest-per-node map; a run already held is replaced. */
+export function foldLatest(latest: Record<string, Run>, runs: Run[]): Record<string, Run> {
+  let next = latest;
+  for (const run of runs) {
+    if (!run?.nodeId) continue;
+    if (!newer(run, next[run.nodeId])) continue;
+    if (next === latest) next = { ...latest };
+    next[run.nodeId] = run;
+  }
+  return next;
 }
 
 /** Replaces a run wherever a node list holds it, or puts it on top. */
@@ -102,11 +175,19 @@ const eventsDirty = new Set<string>();
 // Same for node lists, so a burst of runs-changed costs one or two requests.
 const nodesInFlight = new Map<string, Promise<void>>();
 const nodesDirty = new Set<string>();
+// One changes fetch per run at a time.
+const changesInFlight = new Map<string, Promise<void>>();
+let projectRunsInFlight: Promise<void> | null = null;
 // Bumped by reset(): a response for the previous project is dropped.
 let generation = 0;
 
 const initial = {
   runsByNode: {},
+  latestByNode: {},
+  projectRunsLoaded: false,
+  changesByRun: {},
+  changesLoading: {},
+  changesErrors: {},
   loadingNodes: {},
   nodeErrors: {},
   eventsByRun: {},
@@ -116,6 +197,8 @@ const initial = {
   cancelling: {},
   cancelErrors: {},
   stopRequested: {},
+  merging: {},
+  mergeErrors: {},
   dispatchNodeId: null,
   showRunsRequest: null,
 } satisfies Partial<RunStoreState>;
@@ -140,8 +223,13 @@ export const useRuns = create<RunStoreState>((set, get) => ({
           set((state) => {
             const nodeErrors = { ...state.nodeErrors };
             delete nodeErrors[nodeId];
+            const runs = response.runs ?? [];
+            // The node's own list is the authority on its newest run.
+            const latestByNode = { ...state.latestByNode };
+            delete latestByNode[nodeId];
             return {
-              runsByNode: { ...state.runsByNode, [nodeId]: response.runs ?? [] },
+              runsByNode: { ...state.runsByNode, [nodeId]: runs },
+              latestByNode: foldLatest(latestByNode, runs),
               nodeErrors,
             };
           });
@@ -165,12 +253,87 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     return work;
   },
 
+  loadProjectRuns: (force = false) => {
+    if (projectRunsInFlight) return projectRunsInFlight;
+    if (get().projectRunsLoaded && !force) return Promise.resolve();
+    const gen = generation;
+    set({ projectRunsLoaded: true });
+    const work = (async () => {
+      try {
+        const response = await api.listProjectRuns();
+        if (gen !== generation) return;
+        const runs = response?.runs ?? [];
+        set((state) => ({
+          // A node whose list is loaded already knows better.
+          latestByNode: foldLatest(
+            state.latestByNode,
+            runs.filter((run) => !(run.nodeId in state.runsByNode)),
+          ),
+        }));
+      } catch {
+        // Badges are a convenience: a hub without runs (or a viewer who may
+        // not list them) simply shows none.
+      }
+    })().finally(() => {
+      if (projectRunsInFlight === work) projectRunsInFlight = null;
+    });
+    projectRunsInFlight = work;
+    return work;
+  },
+
+  loadChanges: (runId, commit) => {
+    const key = commit ?? "";
+    const held = get().changesByRun[runId];
+    if (held && held.commit === key) return Promise.resolve();
+    const running = changesInFlight.get(runId);
+    if (running) return running;
+    const gen = generation;
+    set((state) => {
+      const changesErrors = { ...state.changesErrors };
+      delete changesErrors[runId];
+      return { changesLoading: { ...state.changesLoading, [runId]: true }, changesErrors };
+    });
+    const work = (async () => {
+      try {
+        const response = await api.getRunChanges(runId);
+        if (gen !== generation) return;
+        const changes = response?.changes ?? null;
+        set((state) => ({
+          changesByRun: {
+            ...state.changesByRun,
+            // Held under the commit the response describes, so a run row
+            // that is a push behind does not fetch a second time.
+            [runId]: { commit: changes?.commit || key, changes },
+          },
+        }));
+      } catch (error) {
+        if (gen !== generation) return;
+        set((state) => ({ changesErrors: { ...state.changesErrors, [runId]: message(error) } }));
+      } finally {
+        if (gen === generation) {
+          set((state) => {
+            const changesLoading = { ...state.changesLoading };
+            delete changesLoading[runId];
+            return { changesLoading };
+          });
+        }
+      }
+    })().finally(() => {
+      if (changesInFlight.get(runId) === work) changesInFlight.delete(runId);
+    });
+    changesInFlight.set(runId, work);
+    return work;
+  },
+
   refreshRun: async (runId) => {
     const gen = generation;
     try {
       const run = await api.getRun(runId);
       if (gen !== generation) return;
-      set((state) => ({ runsByNode: upsertRun(state.runsByNode, run) }));
+      set((state) => ({
+        runsByNode: upsertRun(state.runsByNode, run),
+        latestByNode: foldLatest(state.latestByNode, [run]),
+      }));
     } catch {
       // The list refresh reports failures; a single run's is not worth a
       // second message for the same outage.
@@ -226,7 +389,10 @@ export const useRuns = create<RunStoreState>((set, get) => ({
 
   createRun: async (body) => {
     const run = await api.createRun(body);
-    set((state) => ({ runsByNode: upsertRun(state.runsByNode, run) }));
+    set((state) => ({
+      runsByNode: upsertRun(state.runsByNode, run),
+      latestByNode: foldLatest(state.latestByNode, [run]),
+    }));
     return run;
   },
 
@@ -242,6 +408,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       // view says the stop is on its way instead of offering cancel again.
       set((state) => ({
         runsByNode: upsertRun(state.runsByNode, run),
+        latestByNode: foldLatest(state.latestByNode, [run]),
         stopRequested: runFinal(run.status)
           ? state.stopRequested
           : { ...state.stopRequested, [runId]: true },
@@ -258,6 +425,45 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       });
     }
   },
+
+  mergeRun: async (runId, headSha) => {
+    if (get().merging[runId]) return false;
+    get().clearMergeError(runId);
+    set((state) => ({ merging: { ...state.merging, [runId]: true } }));
+    const gen = generation;
+    try {
+      const run = await api.mergeRun(runId, headSha);
+      if (gen !== generation) return true;
+      if (run?.id) {
+        set((state) => ({
+          runsByNode: upsertRun(state.runsByNode, run),
+          latestByNode: foldLatest(state.latestByNode, [run]),
+        }));
+      }
+      return true;
+    } catch (error) {
+      if (gen !== generation) return false;
+      set((state) => ({ mergeErrors: { ...state.mergeErrors, [runId]: mergeRefusal(error) } }));
+      // A 409 often means the run moved on (a new head, a merge already
+      // pending): show what the hub knows now.
+      if (error instanceof ConflictError) void get().refreshRun(runId);
+      return false;
+    } finally {
+      set((state) => {
+        const merging = { ...state.merging };
+        delete merging[runId];
+        return { merging };
+      });
+    }
+  },
+
+  clearMergeError: (runId) =>
+    set((state) => {
+      if (!(runId in state.mergeErrors)) return {};
+      const mergeErrors = { ...state.mergeErrors };
+      delete mergeErrors[runId];
+      return { mergeErrors };
+    }),
 
   watchRun: (runId) => {
     set((state) => ({ watched: { ...state.watched, [runId]: (state.watched[runId] ?? 0) + 1 } }));
@@ -295,8 +501,13 @@ export const useRuns = create<RunStoreState>((set, get) => ({
   clearShowRunsRequest: () => set({ showRunsRequest: null }),
 
   onRunsChanged: (nodeId) => {
-    if (!nodeId || !(nodeId in get().runsByNode)) return;
-    void get().loadRuns(nodeId);
+    if (!nodeId) return;
+    const state = get();
+    // Once the board asked for the project's runs, every node has a card
+    // that may show a badge: a node nobody opened gets its list loaded here,
+    // so a PR or CI change long after its run finished reaches the badge.
+    if (!(nodeId in state.runsByNode) && !state.projectRunsLoaded) return;
+    void state.loadRuns(nodeId);
   },
 
   onRunEvents: (runId) => {
@@ -307,6 +518,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
   resync: () => {
     const state = get();
     for (const nodeId of Object.keys(state.runsByNode)) void state.loadRuns(nodeId);
+    if (state.projectRunsLoaded) void state.loadProjectRuns(true);
     for (const runId of Object.keys(state.watched)) {
       const run = findRun(state, runId);
       if (!run || !runFinal(run.status)) void state.loadEvents(runId);
@@ -319,6 +531,8 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     eventsDirty.clear();
     nodesInFlight.clear();
     nodesDirty.clear();
+    changesInFlight.clear();
+    projectRunsInFlight = null;
     // Live views keep their watch counts; they re-register on remount.
     set({ ...initial, watched: get().watched });
   },

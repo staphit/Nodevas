@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -54,12 +55,44 @@ type Config struct {
 	DataDir string `json:"dataDir,omitempty"`
 	// PermissionMode is Claude Code's --permission-mode for every run.
 	PermissionMode string `json:"permissionMode,omitempty"`
-	// AllowedTools is passed as --allowedTools, e.g. "Bash(go test *)".
+	// AllowedTools is passed to Claude Code as --allowedTools, e.g. "Bash(go test *)".
 	AllowedTools []string `json:"allowedTools,omitempty"`
+	// CodexSandbox is Codex's --sandbox for every run.
+	CodexSandbox string `json:"codexSandbox,omitempty"`
+	// CodexIgnoreUserConfig runs Codex without the owner's config.toml (their
+	// MCP servers, hooks and default model); its sign-in is still used.
+	CodexIgnoreUserConfig bool `json:"codexIgnoreUserConfig,omitempty"`
+	// GeminiApprovalMode is Gemini CLI's --approval-mode for every run.
+	GeminiApprovalMode string `json:"geminiApprovalMode,omitempty"`
 	// AutoAccept takes every valid offer without asking at the terminal. Off
 	// by default: with it on, anyone who can sign in to the hub as the owner
 	// can run agents on this machine.
 	AutoAccept bool `json:"autoAccept,omitempty"`
+
+	// Pull requests, from W3 on.
+
+	// AutoPR pushes a run's commit and opens a pull request with the owner's
+	// gh login; nil means the default, on.
+	AutoPR *bool `json:"autoPR,omitempty"`
+	// PRDraft opens pull requests as drafts. A failed run's PR is always one.
+	PRDraft bool `json:"prDraft,omitempty"`
+	// PRLabels replaces the default labels; nil means DefaultPRLabels, an
+	// empty list means none. "{model}" and "{agent}" are filled in per run.
+	PRLabels *[]string `json:"prLabels,omitempty"`
+	// PRPollSeconds is how often open pull requests are checked with gh.
+	PRPollSeconds int `json:"prPollSeconds,omitempty"`
+
+	// Remote merge, from W4 on.
+
+	// RemoteMerge lets someone who approves a run's diff on the hub have this
+	// runner merge its PR (with the owner's gh login); nil means the default,
+	// on. Off, every approval is refused.
+	RemoteMerge *bool `json:"remoteMerge,omitempty"`
+	// MergeMethod is how an approved PR is merged: squash (the default),
+	// merge or rebase. The hub's request never chooses.
+	MergeMethod string `json:"mergeMethod,omitempty"`
+	// DeleteBranchOnMerge deletes the PR's branch on GitHub once merged.
+	DeleteBranchOnMerge bool `json:"deleteBranchOnMerge,omitempty"`
 }
 
 // Defaults and bounds for the run settings.
@@ -68,7 +101,65 @@ const (
 	MaxMaxConcurrent         = 16
 	DefaultRunTimeoutMinutes = 60
 	MaxRunTimeoutMinutes     = 24 * 60
+	DefaultPRPollSeconds     = 120
+	MinPRPollSeconds         = 30
+	MaxPRPollSeconds         = 24 * 60 * 60
 )
+
+// DefaultPRLabels are a run's pull request labels unless the owner set others.
+var DefaultPRLabels = []string{"nodevas", "model:{model}"}
+
+// MergeMethods are the merge methods gh pr merge takes, the default first.
+var MergeMethods = []string{"squash", "merge", "rebase"}
+
+// RemoteMergeOn is RemoteMerge with its default (on) applied.
+func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge == nil || *c.RemoteMerge }
+
+// MergeMethodOrDefault is MergeMethod with its default applied; anything
+// unknown (a hand-edited file) falls back to squash.
+func (c *Config) MergeMethodOrDefault() string {
+	if slices.Contains(MergeMethods, c.MergeMethod) {
+		return c.MergeMethod
+	}
+	return MergeMethods[0]
+}
+
+// AutoPROn is AutoPR with its default (on) applied.
+func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
+
+// PRLabelTemplates is PRLabels with its default applied, placeholders unfilled.
+func (c *Config) PRLabelTemplates() []string {
+	if c.PRLabels == nil {
+		return append([]string(nil), DefaultPRLabels...)
+	}
+	return append([]string(nil), (*c.PRLabels)...)
+}
+
+// PRLabelsFor is the labels for one run's pull request: {model} and {agent}
+// filled in, "default" standing for the CLI's own default model.
+func (c *Config) PRLabelsFor(agent, model string) []string {
+	if model == "" {
+		model = "default"
+	}
+	var labels []string
+	for _, label := range c.PRLabelTemplates() {
+		label = strings.ReplaceAll(label, "{model}", model)
+		label = strings.ReplaceAll(label, "{agent}", agent)
+		if label = strings.TrimSpace(label); label != "" && !slices.Contains(labels, label) {
+			labels = append(labels, label)
+		}
+	}
+	return labels
+}
+
+// PRPollInterval is PRPollSeconds with its default and bounds applied.
+func (c *Config) PRPollInterval() time.Duration {
+	seconds := c.PRPollSeconds
+	if seconds <= 0 {
+		seconds = DefaultPRPollSeconds
+	}
+	return time.Duration(min(max(seconds, MinPRPollSeconds), MaxPRPollSeconds)) * time.Second
+}
 
 // MaxConcurrentRuns is MaxConcurrent with its default applied.
 func (c *Config) MaxConcurrentRuns() int {
@@ -111,18 +202,49 @@ func (c *Config) ClaudePermissionMode() string {
 	return c.PermissionMode
 }
 
+// CodexSandboxMode is CodexSandbox with its default applied.
+func (c *Config) CodexSandboxMode() string {
+	if c.CodexSandbox == "" {
+		return adapter.DefaultCodexSandbox
+	}
+	return c.CodexSandbox
+}
+
+// GeminiApproval is GeminiApprovalMode with its default applied.
+func (c *Config) GeminiApproval() string {
+	if c.GeminiApprovalMode == "" {
+		return adapter.DefaultGeminiApprovalMode
+	}
+	return c.GeminiApprovalMode
+}
+
+// PermissionModeFor is the owner's permission setting for an agent kind, as
+// adapter.RunEnv.PermissionMode takes it.
+func (c *Config) PermissionModeFor(kind string) string {
+	switch kind {
+	case "codex":
+		return c.CodexSandboxMode()
+	case "gemini":
+		return c.GeminiApproval()
+	}
+	return c.ClaudePermissionMode()
+}
+
 // AutoAcceptWarning is printed whenever auto-accept is switched on or the
 // runner starts with it on.
 const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to the hub as you can now run " +
 	"agents on this machine, in the repositories you added, without anyone here saying yes."
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
-var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools", "autoAccept"}
+var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept",
+	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
 // top-level commas ("Edit,Bash(git diff, git log)" is two tools); "none"
-// clears it.
+// clears it. prLabels takes labels one per value or comma-separated; "none"
+// means no labels.
 func (c *Config) Set(key string, values []string) error {
 	canonical := ""
 	for _, k := range SettingKeys {
@@ -136,7 +258,7 @@ func (c *Config) Set(key string, values []string) error {
 	if len(values) == 0 {
 		return fmt.Errorf("%s needs a value", canonical)
 	}
-	if canonical != "allowedTools" && len(values) != 1 {
+	if canonical != "allowedTools" && canonical != "prLabels" && len(values) != 1 {
 		return fmt.Errorf("%s takes one value", canonical)
 	}
 	value := strings.TrimSpace(values[0])
@@ -177,13 +299,41 @@ func (c *Config) Set(key string, values []string) error {
 			c.PermissionMode = ""
 			return nil
 		}
-		for _, mode := range adapter.ClaudePermissionModes {
-			if strings.EqualFold(mode, value) {
-				c.PermissionMode = mode
-				return nil
-			}
+		mode, err := oneOf(canonical, value, adapter.ClaudePermissionModes)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("permissionMode must be one of %s", strings.Join(adapter.ClaudePermissionModes, ", "))
+		c.PermissionMode = mode
+	case "codexSandbox":
+		if reset {
+			c.CodexSandbox = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.CodexSandboxModes)
+		if err != nil {
+			return err
+		}
+		c.CodexSandbox = mode
+	case "codexIgnoreUserConfig":
+		if reset {
+			c.CodexIgnoreUserConfig = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("codexIgnoreUserConfig must be true or false")
+		}
+		c.CodexIgnoreUserConfig = on
+	case "geminiApprovalMode":
+		if reset {
+			c.GeminiApprovalMode = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.GeminiApprovalModes)
+		if err != nil {
+			return err
+		}
+		c.GeminiApprovalMode = mode
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
@@ -213,8 +363,102 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("autoAccept must be true or false")
 		}
 		c.AutoAccept = on
+	case "autoPR":
+		if reset {
+			c.AutoPR = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("autoPR must be true or false")
+		}
+		c.AutoPR = &on
+	case "prDraft":
+		if reset {
+			c.PRDraft = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("prDraft must be true or false")
+		}
+		c.PRDraft = on
+	case "prLabels":
+		if reset {
+			c.PRLabels = nil
+			return nil
+		}
+		labels := []string{}
+		if !(len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
+			for _, v := range values {
+				for _, label := range strings.Split(v, ",") {
+					if label = strings.TrimSpace(label); label == "" {
+						continue
+					}
+					if len(label) > 50 {
+						return fmt.Errorf("label %q is longer than GitHub allows (50)", label)
+					}
+					labels = append(labels, label)
+				}
+			}
+			if len(labels) == 0 {
+				return errors.New("prLabels: no labels given")
+			}
+		}
+		c.PRLabels = &labels
+	case "prPollSeconds":
+		if reset {
+			c.PRPollSeconds = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < MinPRPollSeconds || n > MaxPRPollSeconds {
+			return fmt.Errorf("prPollSeconds must be a number from %d to %d", MinPRPollSeconds, MaxPRPollSeconds)
+		}
+		c.PRPollSeconds = n
+	case "remoteMerge":
+		if reset {
+			c.RemoteMerge = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("remoteMerge must be true or false")
+		}
+		c.RemoteMerge = &on
+	case "mergeMethod":
+		if reset {
+			c.MergeMethod = ""
+			return nil
+		}
+		method, err := oneOf(canonical, value, MergeMethods)
+		if err != nil {
+			return err
+		}
+		c.MergeMethod = method
+	case "deleteBranchOnMerge":
+		if reset {
+			c.DeleteBranchOnMerge = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("deleteBranchOnMerge must be true or false")
+		}
+		c.DeleteBranchOnMerge = on
 	}
 	return nil
+}
+
+// oneOf matches value to one of choices, ignoring case, and returns the
+// choice as the CLI spells it.
+func oneOf(key, value string, choices []string) (string, error) {
+	for _, choice := range choices {
+		if strings.EqualFold(choice, value) {
+			return choice, nil
+		}
+	}
+	return "", fmt.Errorf("%s must be one of %s", key, strings.Join(choices, ", "))
 }
 
 // splitTools splits at commas outside parentheses, so a rule like

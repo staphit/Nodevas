@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a169ca-6623-74b2-925a-3aac89e0d8da"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (C:\\Users\\owner\\.codex\\config.toml): `features.rmcp_client` is ignored."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (C:\\Users\\owner\\.codex\\config.toml): `features.rmcp_client` is ignored."}}
+{"type":"item.completed","item":{"id":"item_2","type":"error","message":"loading hooks from both C:\\Users\\owner\\.codex\\hooks.json and C:\\Users\\owner\\.codex\\config.toml; prefer a single representation for this layer"}}
+{"type":"turn.started"}
+{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.\"}}"}
+{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.\"}}"}}

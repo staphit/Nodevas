@@ -175,7 +175,24 @@ func git(ctx context.Context, repoPath string, args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", args[0], msg)
+		return "", fmt.Errorf("git %s: %s", gitVerb(args), msg)
 	}
 	return stdout.String(), nil
+}
+
+// gitVerb is the subcommand in a git command line, past any -c overrides.
+func gitVerb(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			return args[i]
+		}
+	}
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
 }
