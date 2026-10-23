@@ -80,7 +80,11 @@ export type {
 } from "./remote";
 export type {
   AgentAsk,
+  AgentFileUpload,
+  AgentInbound,
   AgentMessage,
+  AgentMessageFile,
+  AgentMessageStatus,
   AgentRosterResponse,
   AgentSession,
 } from "./agents";

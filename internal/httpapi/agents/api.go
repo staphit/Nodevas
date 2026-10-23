@@ -5,6 +5,7 @@ package agents
 
 import (
 	"errors"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -20,9 +21,13 @@ import (
 
 const (
 	maxHeartbeatBody = 16 << 10
-	maxMessageBody   = 64 << 10
-	maxInboxBody     = 8 << 10
-	maxAskBody       = 64 << 10
+	// maxMessageBody leaves room for the most a message may attach
+	// (agents.MaxFiles of agents.MaxFileBytes) after JSON escaping, which can
+	// grow text several times over; the per-file limits are checked after
+	// decoding, against the text itself.
+	maxMessageBody = 64<<10 + 6*agents.MaxFiles*agents.MaxFileBytes
+	maxInboxBody   = 8 << 10
+	maxAskBody     = 64 << 10
 )
 
 // API exposes an agents.Hub over HTTP.
@@ -42,8 +47,12 @@ func (a *API) Register(api *gin.RouterGroup) {
 	group.GET("", a.getRoster)
 	group.POST("/heartbeat", a.postHeartbeat)
 	group.POST("/leave", a.postLeave)
+	group.POST("/sessions/:id/inbound", a.postInbound)
 	group.GET("/messages", a.getMessages)
 	group.POST("/messages", a.postMessage)
+	group.POST("/messages/:id/approve", a.postApprove)
+	group.POST("/messages/:id/reject", a.postReject)
+	group.GET("/messages/:id/files/:name", a.getMessageFile)
 	group.POST("/inbox", a.postInbox)
 	group.GET("/asks", a.getAsks)
 	group.POST("/asks", a.postAsk)
@@ -118,7 +127,7 @@ func fail(c *gin.Context, err error) {
 		httpx.Coded(c, http.StatusTooManyRequests, "RATE_LIMITED", err, nil)
 	case errors.Is(err, agents.ErrLoopDetected):
 		httpx.Coded(c, http.StatusConflict, "CONFLICT", err, nil)
-	case errors.Is(err, agents.ErrAskBusy):
+	case errors.Is(err, agents.ErrAskBusy), errors.Is(err, agents.ErrNotHeld):
 		httpx.Coded(c, http.StatusConflict, "CONFLICT", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -165,6 +174,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		State     string `json:"state"`
 		Doing     string `json:"doing"`
 		NodeID    string `json:"nodeId"`
+		Model     string `json:"model"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxHeartbeatBody) {
 		return
@@ -189,6 +199,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		State:     body.State,
 		Doing:     body.Doing,
 		NodeID:    body.NodeID,
+		Model:     body.Model,
 	})
 	if err != nil {
 		fail(c, err)
@@ -218,11 +229,72 @@ func (a *API) postLeave(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]any{"ok": true})
 }
 
+// humanViewer is the caller of a route a person uses: who they are as the
+// server authenticated them, never an attribution from the body.
+func humanViewer(r *http.Request) agents.Viewer {
+	authed := auth.ActorFrom(r)
+	return agents.Viewer{ID: authed.ID, Admin: authed.IsAdmin(), Agent: authed.IsAgent()}
+}
+
+// refuseAgent answers 403 for a request from an agent and reports whether it
+// did. Holding, approving and rejecting are what a person does about agents;
+// an agent that could do them could let its own mail through.
+func refuseAgent(c *gin.Context, what string) bool {
+	if !auth.ActorFrom(c.Request).IsAgent() {
+		return false
+	}
+	httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
+		errors.New("only a person may "+what), nil)
+	return true
+}
+
+func (a *API) postInbound(c *gin.Context) {
+	if refuseAgent(c, "change a session's inbound policy") {
+		return
+	}
+	var body struct {
+		Inbound string `json:"inbound"`
+	}
+	if !httpx.DecodeJSONLimit(c, &body, maxInboxBody) {
+		return
+	}
+	viewer := humanViewer(c.Request)
+	session, err := a.hub.SetInbound(a.projectKey(c.Request), c.Param("id"), body.Inbound, viewer.ID, viewer.Admin)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, session)
+}
+
 func (a *API) getMessages(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	projectKey := a.projectKey(c.Request)
-	nodeID := c.Query("nodeId")
-	msgs, err := a.hub.ListMessages(c.Request.Context(), projectKey, nodeID, 150)
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
+	var msgs []agents.Message
+	var err error
+	if status == agents.StatusHeld {
+		// The held queue is what a person decides on; an agent reading it
+		// would read its mail before anyone let it through.
+		if refuseAgent(c, "list held messages") {
+			return
+		}
+		msgs, err = a.hub.ListHeld(c.Request.Context(), projectKey, humanViewer(c.Request))
+	} else {
+		msgs, err = a.hub.ListMessages(c.Request.Context(), projectKey, c.Query("nodeId"), status, 150)
+		if err == nil {
+			// Held and rejected mail shows only to those it concerns, and
+			// never to an agent.
+			viewer := humanViewer(c.Request)
+			kept := msgs[:0]
+			for _, m := range msgs {
+				if viewer.MaySee(m) {
+					kept = append(kept, m)
+				}
+			}
+			msgs = kept
+		}
+	}
 	if err != nil {
 		fail(c, err)
 		return
@@ -233,15 +305,51 @@ func (a *API) getMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]any{"messages": msgs})
 }
 
+func (a *API) postApprove(c *gin.Context) { a.decide(c, true) }
+func (a *API) postReject(c *gin.Context)  { a.decide(c, false) }
+
+func (a *API) decide(c *gin.Context, approve bool) {
+	if refuseAgent(c, "approve or reject held messages") {
+		return
+	}
+	msg, err := a.hub.Decide(c.Request.Context(), a.projectKey(c.Request), c.Param("id"), approve, humanViewer(c.Request))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, msg)
+}
+
+// getMessageFile serves one attachment as a download. It is never rendered:
+// the type is plain text whatever the name says, nosniff stops a browser
+// guessing otherwise, and the disposition makes it a file to save, so an
+// attached .html cannot run as a page on this origin.
+func (a *API) getMessageFile(c *gin.Context) {
+	authed := auth.ActorFrom(c.Request)
+	viewerID, _ := resolveActor(c.Request, c.Query("actor"))
+	viewer := agents.Viewer{ID: viewerID, Admin: authed.IsAdmin(), Agent: authed.IsAgent()}
+	info, content, err := a.hub.FileContent(c.Request.Context(), a.projectKey(c.Request), c.Param("id"), c.Param("name"), viewer)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name}))
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
+}
+
 func (a *API) postMessage(c *gin.Context) {
 	var body struct {
-		Actor       string `json:"actor"`
-		FromSession string `json:"fromSession"`
-		SenderAgent string `json:"senderAgent"`
-		To          string `json:"to"`
-		Message     string `json:"message"`
-		ReplyTo     string `json:"replyTo"`
-		NodeID      string `json:"nodeId"`
+		Actor       string             `json:"actor"`
+		FromSession string             `json:"fromSession"`
+		SenderAgent string             `json:"senderAgent"`
+		To          string             `json:"to"`
+		Message     string             `json:"message"`
+		ReplyTo     string             `json:"replyTo"`
+		NodeID      string             `json:"nodeId"`
+		Notify      bool               `json:"notify"`
+		Files       []agents.FileInput `json:"files"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxMessageBody) {
 		return
@@ -262,6 +370,8 @@ func (a *API) postMessage(c *gin.Context) {
 		ReplyTo:       body.ReplyTo,
 		NodeID:        body.NodeID,
 		Body:          body.Message,
+		Notify:        body.Notify,
+		Files:         body.Files,
 		Claims:        claims,
 	})
 	if err != nil {

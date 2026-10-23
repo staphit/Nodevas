@@ -33,6 +33,8 @@ func mcpServe(args []string) {
 		"the write-permission class this agent acts as: worker or orchestrator")
 	sessionName := fs.String("session-name", "",
 		"the name other agents address this session by (send_message to); empty derives one from the agent and repo")
+	model := fs.String("model", "",
+		"the model this agent runs on, shown on the roster; empty reads NODEVAS_MODEL")
 	chromaURL := fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project")
 	ragPython := fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings")
 	_ = fs.Parse(args)
@@ -67,9 +69,15 @@ func mcpServe(args []string) {
 		Actor:       name,
 		SessionName: strings.TrimSpace(*sessionName),
 		AgentRole:   role,
-		ChromaURL:   *chromaURL,
-		RAGPython:   *ragPython,
-		Stderr:      os.Stderr,
+		Model:       strings.TrimSpace(*model),
+		// A runner names its runs' sidecars run:<agent> (internal/runner
+		// mcpArgs). A run was dispatched to its repo on purpose, so the
+		// folder exclusions, which are about agents a person starts by
+		// hand, do not apply to it.
+		IgnoreExclusion: strings.HasPrefix(name, "run:"),
+		ChromaURL:       *chromaURL,
+		RAGPython:       *ragPython,
+		Stderr:          os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
 		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)

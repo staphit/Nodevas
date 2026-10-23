@@ -275,6 +275,7 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 			To:            updated.SessionName,
 			NodeID:        updated.NodeID,
 			Body:          body,
+			system:        true,
 		})
 	}
 
@@ -296,6 +297,7 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 				ReplyTo:       orig.ID,
 				NodeID:        updated.NodeID,
 				Body:          approvalBody,
+				system:        true,
 			})
 		}
 	}

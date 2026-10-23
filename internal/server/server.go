@@ -108,12 +108,16 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		abuse:    newAbuseGuard(),
 		stop:     make(chan struct{}),
 	}
-	s.agents = agents.NewHub(nil, func(projectRoot, _ string, _ any) {
+	s.agents = agents.NewHub(nil, func(projectRoot, eventType string, payload any) {
 		if s.hub == nil {
 			return
 		}
-		if projectRoot == "" {
-			s.hub.Broadcast("agents-changed", "")
+		// A notify message pops up on its recipient's screen, so it travels
+		// as its own event naming the message; everything else is one
+		// "reload the agent panel" signal.
+		if eventType == "agent-notify" {
+			id, _ := payload.(string)
+			s.hub.BroadcastRoom(projectRoot, "agent-notify", id)
 			return
 		}
 		s.hub.BroadcastRoom(projectRoot, "agents-changed", "")

@@ -126,6 +126,12 @@ func TestRunnerProxyRefusesEverythingElse(t *testing.T) {
 		{http.MethodGet, "/api/nodes//context"},
 		{http.MethodGet, "/api/graph/"},
 		{http.MethodPost, "/api/agents/asks/x/answer"},
+		{http.MethodPost, "/api/agents/sessions/x/inbound"},
+		{http.MethodPost, "/api/agents/messages/x/approve"},
+		{http.MethodPost, "/api/agents/messages/x/reject"},
+		{http.MethodGet, "/api/agents/messages"},
+		{http.MethodGet, "/api/agents/messages/x/files"},
+		{http.MethodGet, "/api/agents/messages/x/files/../../x"},
 		{http.MethodPost, "/api/copilot/turn"},
 	} {
 		if runnerProxyAllows(route[0], route[1]) {

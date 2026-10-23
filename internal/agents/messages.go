@@ -15,23 +15,40 @@ const (
 	maxMessagesPerMinute    = 20
 	maxConsecutiveAgentTurn = 12
 	MaxInboxWait            = 10 * time.Minute
+
+	// A message is delivered (in its recipient's inbox), held (waiting for a
+	// person to approve it, because the recipient session holds its inbound
+	// mail), or rejected (a person said no; it never reaches the inbox).
+	StatusDelivered = "delivered"
+	StatusHeld      = "held"
+	StatusRejected  = "rejected"
 )
 
 // Message is one envelope in the agent network.
 type Message struct {
-	ID            string `json:"id"`
-	Project       string `json:"project"`
-	From          string `json:"from"`
-	SenderActor   string `json:"senderActor"`
-	SenderSession string `json:"senderSession,omitempty"`
-	SenderAgent   string `json:"senderAgent,omitempty"`
-	Recipient     string `json:"to"`
-	ReplyTo       string `json:"replyTo,omitempty"`
-	ThreadID      string `json:"threadId,omitempty"`
-	NodeID        string `json:"nodeId,omitempty"`
-	Body          string `json:"body"`
-	CreatedAt     int64  `json:"createdAt"`
-	ReadAt        int64  `json:"readAt,omitempty"`
+	ID            string     `json:"id"`
+	Project       string     `json:"project"`
+	From          string     `json:"from"`
+	SenderActor   string     `json:"senderActor"`
+	SenderSession string     `json:"senderSession,omitempty"`
+	SenderAgent   string     `json:"senderAgent,omitempty"`
+	Recipient     string     `json:"to"`
+	ReplyTo       string     `json:"replyTo,omitempty"`
+	ThreadID      string     `json:"threadId,omitempty"`
+	NodeID        string     `json:"nodeId,omitempty"`
+	Body          string     `json:"body"`
+	CreatedAt     int64      `json:"createdAt"`
+	ReadAt        int64      `json:"readAt,omitempty"`
+	Status        string     `json:"status"`
+	Notify        bool       `json:"notify"`
+	Files         []FileInfo `json:"files,omitempty"`
+	DecidedBy     string     `json:"decidedBy,omitempty"`
+	DecidedAt     int64      `json:"decidedAt,omitempty"`
+	// RecipientActor is the account behind the recipient session when the
+	// message was sent, empty when the address named no known session. It
+	// decides who may approve the message or read its files, so it is not
+	// something to hand to every browser in the project.
+	RecipientActor string `json:"-"`
 }
 
 // SendInput describes an outbound message from an agent session or human.
@@ -45,13 +62,20 @@ type SendInput struct {
 	ReplyTo       string
 	NodeID        string
 	Body          string
+	Notify        bool
+	Files         []FileInput
 	Claims        []ClaimInfo
+
+	// system marks the hub's own notices (a late ask_user answer, a verified
+	// approval): they carry a decision a person already made, so a hold that
+	// asks a person again would only ask the same question twice.
+	system bool
 }
 
 // DeliveryStatus reports the outcome for one resolved recipient.
 type DeliveryStatus struct {
 	Recipient string `json:"recipient"`
-	Status    string `json:"status"` // "delivered" | "queued"
+	Status    string `json:"status"` // "delivered" | "queued" | "held"
 	MessageID string `json:"messageId"`
 }
 
@@ -70,7 +94,12 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	if to == "" {
 		return SendResult{}, fmt.Errorf("%w: 'to' address is required", ErrInvalid)
 	}
-	if body == "" {
+	files, err := prepareFiles(in.Files)
+	if err != nil {
+		return SendResult{}, err
+	}
+	// Files can be the whole message; text alone must say something.
+	if body == "" && len(files) == 0 {
 		return SendResult{}, fmt.Errorf("%w: 'message' body is required", ErrInvalid)
 	}
 	if len(body) > maxBodyBytes {
@@ -130,11 +159,22 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		h.mu.Unlock()
 		return SendResult{}, err
 	}
+	// The hold is decided per recipient, now: a broadcast reaches the open
+	// sessions at once and waits at the holding ones.
+	recipientActor := make(map[string]string, len(targets))
+	held := make(map[string]bool, len(targets))
+	for _, recipient := range targets {
+		if s := h.sessionByNameLocked(project, recipient); s != nil {
+			recipientActor[recipient] = s.ActorID
+			held[recipient] = s.Inbound == InboundHold && !in.system
+		}
+	}
 	h.mu.Unlock()
 
 	from := shortActor(senderActor) + "/" + senderSession
 	deliveries := make([]DeliveryStatus, 0, len(targets))
 	var created []Message
+	delivered := false
 
 	for _, recipient := range targets {
 		msgID := newID()
@@ -142,26 +182,40 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		if tID == "" {
 			tID = msgID
 		}
-		msg := Message{
-			ID:            msgID,
-			Project:       project,
-			From:          from,
-			SenderActor:   senderActor,
-			SenderSession: senderSession,
-			SenderAgent:   senderAgent,
-			Recipient:     recipient,
-			ReplyTo:       replyTo,
-			ThreadID:      tID,
-			NodeID:        nodeID,
-			Body:          body,
-			CreatedAt:     now,
+		status := StatusDelivered
+		if held[recipient] {
+			status = StatusHeld
 		}
-		if err := h.persistMessage(ctx, msg); err != nil {
+		msg := Message{
+			ID:             msgID,
+			Project:        project,
+			From:           from,
+			SenderActor:    senderActor,
+			SenderSession:  senderSession,
+			SenderAgent:    senderAgent,
+			Recipient:      recipient,
+			ReplyTo:        replyTo,
+			ThreadID:       tID,
+			NodeID:         nodeID,
+			Body:           body,
+			CreatedAt:      now,
+			Status:         status,
+			Notify:         in.Notify,
+			Files:          fileInfos(files),
+			RecipientActor: recipientActor[recipient],
+		}
+		if err := h.persistMessage(ctx, msg, files); err != nil {
 			return SendResult{}, err
 		}
 		state := "queued"
-		if onlineMap[recipient] {
-			state = "delivered"
+		switch {
+		case status == StatusHeld:
+			state = StatusHeld
+		case onlineMap[recipient]:
+			state = StatusDelivered
+		}
+		if status == StatusDelivered {
+			delivered = true
 		}
 		deliveries = append(deliveries, DeliveryStatus{
 			Recipient: recipient,
@@ -174,9 +228,14 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		}
 	}
 
-	h.wakeInboxWaiters(project)
+	if delivered {
+		h.wakeInboxWaiters(project)
+	}
 	for _, msg := range created {
 		h.emit(project, "agent-message", msg)
+		if msg.Status == StatusDelivered && msg.Notify {
+			h.emit(project, "agent-notify", msg.ID)
+		}
 	}
 	return SendResult{
 		ThreadID:   threadID,
@@ -312,23 +371,74 @@ func (h *Hub) resolveRecipients(project, to string, claims []ClaimInfo) ([]strin
 	return matched, online, nil
 }
 
-func (h *Hub) persistMessage(ctx context.Context, msg Message) error {
+// messageColumns is every agent_messages column a Message is read from, in
+// scanMessage's order.
+const messageColumns = `id, project, sender_actor, sender_session, sender_agent,
+	       recipient, reply_to, thread_id, node_id, body, created_at, read_at,
+	       status, notify, recipient_actor, decided_by, decided_at`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanMessage(row rowScanner) (Message, error) {
+	var m Message
+	// notify is an INTEGER on both engines: a Go bool does not bind to one on
+	// PostgreSQL.
+	var notify int64
+	if err := row.Scan(
+		&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
+		&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt, &m.ReadAt,
+		&m.Status, &notify, &m.RecipientActor, &m.DecidedBy, &m.DecidedAt,
+	); err != nil {
+		return Message{}, err
+	}
+	m.Notify = notify != 0
+	m.From = shortActor(m.SenderActor) + "/" + m.SenderSession
+	return m, nil
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (h *Hub) persistMessage(ctx context.Context, msg Message, files []storedFile) error {
 	if h.database == nil {
 		h.mu.Lock()
 		h.memMessages = append(h.memMessages, msg)
+		if len(files) > 0 {
+			h.memFiles[msg.ID] = files
+		}
 		h.mu.Unlock()
 		return nil
 	}
-	_, err := h.database.ExecContext(ctx, `
-		INSERT INTO agent_messages (
-			id, project, sender_actor, sender_session, sender_agent,
-			recipient, reply_to, thread_id, node_id, body, created_at, read_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-	`,
-		msg.ID, msg.Project, msg.SenderActor, msg.SenderSession, msg.SenderAgent,
-		msg.Recipient, msg.ReplyTo, msg.ThreadID, msg.NodeID, msg.Body, msg.CreatedAt,
-	)
-	return err
+	return h.database.Tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO agent_messages (
+				id, project, sender_actor, sender_session, sender_agent,
+				recipient, reply_to, thread_id, node_id, body, created_at, read_at,
+				status, notify, recipient_actor, decided_by, decided_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 0)
+		`,
+			msg.ID, msg.Project, msg.SenderActor, msg.SenderSession, msg.SenderAgent,
+			msg.Recipient, msg.ReplyTo, msg.ThreadID, msg.NodeID, msg.Body, msg.CreatedAt,
+			msg.Status, boolInt(msg.Notify), msg.RecipientActor,
+		); err != nil {
+			return err
+		}
+		for _, f := range files {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO agent_message_files (message_id, name, size, sha256, content)
+				VALUES (?, ?, ?, ?, ?)
+			`, msg.ID, f.Name, f.Size, f.SHA256, f.content); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (h *Hub) getMessageByID(ctx context.Context, project, id string) (Message, error) {
@@ -337,29 +447,28 @@ func (h *Hub) getMessageByID(ctx context.Context, project, id string) (Message, 
 		defer h.mu.Unlock()
 		for _, m := range h.memMessages {
 			if m.Project == project && m.ID == id {
+				m.Files = fileInfos(h.memFiles[m.ID])
 				return m, nil
 			}
 		}
 		return Message{}, ErrNotFound
 	}
-	var m Message
-	err := h.database.QueryRowContext(ctx, `
-		SELECT id, project, sender_actor, sender_session, sender_agent,
-		       recipient, reply_to, thread_id, node_id, body, created_at, read_at
+	m, err := scanMessage(h.database.QueryRowContext(ctx, `
+		SELECT `+messageColumns+`
 		  FROM agent_messages
 		 WHERE project = ? AND id = ?
-	`, project, id).Scan(
-		&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
-		&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt, &m.ReadAt,
-	)
+	`, project, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
 	}
 	if err != nil {
 		return Message{}, err
 	}
-	m.From = shortActor(m.SenderActor) + "/" + m.SenderSession
-	return m, nil
+	out := []Message{m}
+	if err := h.attachFileInfos(ctx, out); err != nil {
+		return Message{}, err
+	}
+	return out[0], nil
 }
 
 // recipientAliases returns the inbox keys a session or actor checks.
@@ -398,7 +507,8 @@ func (h *Hub) inboxRefused(project, sessionName, actorID string) bool {
 
 // CheckInbox returns unread messages for a session/actor and marks them read.
 // If wait > 0 and the mailbox is currently empty, it long-polls up to wait (or
-// ctx cancellation) before returning.
+// ctx cancellation) before returning. Held and rejected messages are never
+// returned: only an approval puts a held one in the inbox.
 func (h *Hub) CheckInbox(ctx context.Context, project, sessionName, actorID string, wait time.Duration) ([]Message, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	if wait > MaxInboxWait {
@@ -461,9 +571,12 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 		var out []Message
 		for i := range h.memMessages {
 			m := &h.memMessages[i]
-			if m.Project == project && m.ReadAt == 0 && aliasSet[strings.ToLower(m.Recipient)] {
+			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
+				aliasSet[strings.ToLower(m.Recipient)] {
 				m.ReadAt = now
-				out = append(out, *m)
+				copied := *m
+				copied.Files = fileInfos(h.memFiles[m.ID])
+				out = append(out, copied)
 			}
 		}
 		return out, nil
@@ -478,25 +591,20 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 			args = append(args, a)
 		}
 		rows, err := tx.QueryContext(ctx, `
-			SELECT id, project, sender_actor, sender_session, sender_agent,
-			       recipient, reply_to, thread_id, node_id, body, created_at
+			SELECT `+messageColumns+`
 			  FROM agent_messages
-			 WHERE project = ? AND read_at = 0 AND recipient IN (`+placeholders+`)
+			 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
 			 ORDER BY created_at ASC, id ASC
 		`, args...)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
-			var m Message
-			if err := rows.Scan(
-				&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
-				&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt,
-			); err != nil {
+			m, err := scanMessage(rows)
+			if err != nil {
 				rows.Close()
 				return err
 			}
-			m.From = shortActor(m.SenderActor) + "/" + m.SenderSession
 			m.ReadAt = now
 			out = append(out, m)
 		}
@@ -515,12 +623,15 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 	if err != nil {
 		return nil, err
 	}
+	if err := h.attachFileInfos(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
 // UnreadCount returns how many unread messages are waiting for sessionName /
 // actorID without marking them read. Used to append unread notices to MCP tool
-// responses.
+// responses. Held messages do not count: the agent cannot read them yet.
 func (h *Hub) UnreadCount(ctx context.Context, project, sessionName, actorID string) int {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	if h.inboxRefused(project, sessionName, actorID) {
@@ -539,7 +650,8 @@ func (h *Hub) UnreadCount(ctx context.Context, project, sessionName, actorID str
 		}
 		count := 0
 		for _, m := range h.memMessages {
-			if m.Project == project && m.ReadAt == 0 && aliasSet[strings.ToLower(m.Recipient)] {
+			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
+				aliasSet[strings.ToLower(m.Recipient)] {
 				count++
 			}
 		}
@@ -554,16 +666,17 @@ func (h *Hub) UnreadCount(ctx context.Context, project, sessionName, actorID str
 	var count int
 	_ = h.database.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM agent_messages
-		 WHERE project = ? AND read_at = 0 AND recipient IN (`+placeholders+`)
+		 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
 	`, args...).Scan(&count)
 	return count
 }
 
 // ListMessages returns recent messages in a project (optionally filtered by
-// nodeID) in chronological order for the browser UI.
-func (h *Hub) ListMessages(ctx context.Context, project, nodeID string, limit int) ([]Message, error) {
+// nodeID and status) in chronological order for the browser UI.
+func (h *Hub) ListMessages(ctx context.Context, project, nodeID, status string, limit int) ([]Message, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	nodeID = strings.TrimSpace(nodeID)
+	status = strings.ToLower(strings.TrimSpace(status))
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -578,6 +691,10 @@ func (h *Hub) ListMessages(ctx context.Context, project, nodeID string, limit in
 			if nodeID != "" && m.NodeID != nodeID {
 				continue
 			}
+			if status != "" && m.Status != status {
+				continue
+			}
+			m.Files = fileInfos(h.memFiles[m.ID])
 			out = append(out, m)
 		}
 		if len(out) > limit {
@@ -587,14 +704,17 @@ func (h *Hub) ListMessages(ctx context.Context, project, nodeID string, limit in
 	}
 
 	query := `
-		SELECT id, project, sender_actor, sender_session, sender_agent,
-		       recipient, reply_to, thread_id, node_id, body, created_at, read_at
+		SELECT ` + messageColumns + `
 		  FROM agent_messages
 		 WHERE project = ?`
 	args := []any{project}
 	if nodeID != "" {
 		query += ` AND node_id = ?`
 		args = append(args, nodeID)
+	}
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
@@ -606,14 +726,10 @@ func (h *Hub) ListMessages(ctx context.Context, project, nodeID string, limit in
 	defer rows.Close()
 	var out []Message
 	for rows.Next() {
-		var m Message
-		if err := rows.Scan(
-			&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
-			&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt, &m.ReadAt,
-		); err != nil {
+		m, err := scanMessage(rows)
+		if err != nil {
 			return nil, err
 		}
-		m.From = shortActor(m.SenderActor) + "/" + m.SenderSession
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -622,6 +738,9 @@ func (h *Hub) ListMessages(ctx context.Context, project, nodeID string, limit in
 	// Reverse into chronological order.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	if err := h.attachFileInfos(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

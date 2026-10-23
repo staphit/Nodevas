@@ -293,7 +293,13 @@ function MainApp() {
           void useAgents.getState().refreshAll();
           break;
         case "agents-changed":
+        case "agent-messages-changed":
           void useAgents.getState().refreshAll();
+          break;
+        case "agent-notify":
+          // The id is a delivered message sent with notify=true: toast it,
+          // and raise a system notification when this browser allows one.
+          void useAgents.getState().handleNotify(ev.id ?? "");
           break;
         case "runners-changed":
           // Only refetched once the Runners dialog has loaded them; a board

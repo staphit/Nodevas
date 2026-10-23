@@ -494,6 +494,26 @@ CREATE TABLE run_events (
 );
 `,
 	},
+	{
+		name: "0011_agent_network_w15",
+		stmt: `
+ALTER TABLE agent_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered' CHECK (status IN ('delivered', 'held', 'rejected'));
+ALTER TABLE agent_messages ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_messages ADD COLUMN recipient_actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_at BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX agent_messages_status ON agent_messages (project, status, created_at);
+
+CREATE TABLE agent_message_files (
+    message_id  TEXT COLLATE "C" NOT NULL REFERENCES agent_messages(id),
+    name        TEXT COLLATE "C" NOT NULL,
+    size        BIGINT NOT NULL,
+    sha256      TEXT COLLATE "C" NOT NULL,
+    content     TEXT NOT NULL,
+    PRIMARY KEY (message_id, name)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

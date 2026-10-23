@@ -1,22 +1,93 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
+import { api, type AgentFileUpload, type AgentMessage } from "../api";
 import { formatLocalizedDateTime, useI18n } from "../i18n";
-import { IconClose, IconComputer } from "../icons";
+import { IconBell, IconClose, IconComputer, IconPaperclip } from "../icons";
 import { useApp } from "../store";
 import { AskCard } from "./AskCard";
-import { useAgents } from "./agentStore";
+import { canManageSession, useAgents } from "./agentStore";
+import {
+  addAttachments,
+  formatFileSize,
+  MAX_AGENT_FILE_BYTES,
+  MAX_AGENT_FILES,
+  type AttachmentError,
+} from "./attachments";
+import {
+  requestSystemNotifications,
+  systemNotifyPermission,
+  type SystemNotifyPermission,
+} from "./systemNotify";
 
 function toDate(value: number): Date {
   return new Date(value < 1e12 ? value * 1000 : value);
 }
 
+const NOTIFY_PROMPT_KEY = "nodevas-agent-notify-prompt";
+
+function promptDismissed(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_PROMPT_KEY) === "dismissed";
+  } catch {
+    return false;
+  }
+}
+
+/** A message's files: download links once delivered, plain names while held. */
+function FileChips({ message }: { message: AgentMessage }) {
+  const { t } = useI18n();
+  const files = message.files ?? [];
+  if (files.length === 0) return null;
+  // The hub refuses the recipient side a held message's files, so a held
+  // message only names them.
+  const downloadable = message.status !== "held";
+  return (
+    <div className="agent-file-chips" aria-label={t("agents.files.label")}>
+      {files.map((file) =>
+        downloadable ? (
+          <a
+            key={file.name}
+            className="agent-file-chip"
+            href={api.agentMessageFileURL(message.id, file.name)}
+            download={file.name}
+            title={t("agents.files.download", { name: file.name })}
+          >
+            <IconPaperclip size={11} />
+            <span className="agent-file-name">{file.name}</span>
+            <span className="agent-file-size">{formatFileSize(file.size)}</span>
+          </a>
+        ) : (
+          <span key={file.name} className="agent-file-chip is-static">
+            <IconPaperclip size={11} />
+            <span className="agent-file-name">{file.name}</span>
+            <span className="agent-file-size">{formatFileSize(file.size)}</span>
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
 export function AgentPanel({ onClose }: { onClose: () => void }) {
   const { language, t } = useI18n();
   const headingId = useId();
+  const heldHeadingId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sessions = useAgents((s) => s.sessions);
   const messages = useAgents((s) => s.messages);
   const asks = useAgents((s) => s.asks);
+  const held = useAgents((s) => s.held);
+  const viewer = useAgents((s) => s.viewer);
   const submittingAskIds = useAgents((s) => s.submittingAskIds);
+  const decidingIds = useAgents((s) => s.decidingIds);
+  const inboundPendingIds = useAgents((s) => s.inboundPendingIds);
   const showOffline = useAgents((s) => s.showOffline);
   const setShowOffline = useAgents((s) => s.setShowOffline);
   const selectedRecipient = useAgents((s) => s.selectedRecipient);
@@ -30,11 +101,20 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const setError = useAgents((s) => s.setError);
   const sendMessage = useAgents((s) => s.sendMessage);
   const answerAsk = useAgents((s) => s.answerAsk);
+  const decideHeld = useAgents((s) => s.decideHeld);
+  const setInbound = useAgents((s) => s.setInbound);
   const activeTab = useApp((s) => s.activeTab);
   const openTab = useApp((s) => s.openTab);
 
   const [draft, setDraft] = useState("");
   const [attachActiveNode, setAttachActiveNode] = useState(false);
+  const [notify, setNotify] = useState(false);
+  const [attachments, setAttachments] = useState<AgentFileUpload[]>([]);
+  const [attachErrors, setAttachErrors] = useState<AttachmentError[]>([]);
+  const [permission, setPermission] = useState<SystemNotifyPermission>(() =>
+    systemNotifyPermission(),
+  );
+  const [promptHidden, setPromptHidden] = useState(promptDismissed);
 
   const pendingAsks = asks.filter((a) => a.status === "pending");
 
@@ -55,11 +135,46 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
       message: draft,
       replyTo: replyToId || undefined,
       nodeId: attachActiveNode && activeTab ? activeTab : filterNodeId || undefined,
+      notify,
+      files: attachments,
     });
     if (ok) {
       setDraft("");
+      setAttachments([]);
+      setAttachErrors([]);
+      setNotify(false);
     }
   };
+
+  const onPickFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(event.target.files ?? []);
+    // Clear the input so picking the same file again still fires a change.
+    event.target.value = "";
+    if (picked.length === 0) return;
+    const result = await addAttachments(attachments, picked);
+    setAttachments(result.files);
+    setAttachErrors(result.errors);
+  };
+
+  const enableNotifications = async () => {
+    setPermission(await requestSystemNotifications());
+  };
+
+  const hideNotifyPrompt = () => {
+    setPromptHidden(true);
+    try {
+      localStorage.setItem(NOTIFY_PROMPT_KEY, "dismissed");
+    } catch {
+      /* the prompt just comes back next time */
+    }
+  };
+
+  const attachErrorText = (err: AttachmentError) =>
+    t(`agents.files.error.${err.code}`, {
+      name: err.name,
+      max: MAX_AGENT_FILES,
+      kb: MAX_AGENT_FILE_BYTES / 1024,
+    });
 
   return (
     <aside
@@ -112,6 +227,27 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
         </div>
       </header>
 
+      {permission === "default" && !promptHidden && (
+        <div className="agent-notify-prompt">
+          <IconBell size={13} />
+          <button
+            type="button"
+            className="agent-notify-enable"
+            onClick={() => void enableNotifications()}
+          >
+            {t("agents.notify.enableDesktop")}
+          </button>
+          <button
+            type="button"
+            className="copilot-icon-btn agent-notify-prompt-close"
+            onClick={hideNotifyPrompt}
+            aria-label={t("agents.dismiss")}
+          >
+            <IconClose size={11} />
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="copilot-banner" role="status">
           <span>{error}</span>
@@ -140,6 +276,47 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
         </section>
       )}
 
+      {held.length > 0 && (
+        <section className="agent-held-section" aria-labelledby={heldHeadingId}>
+          <h3 id={heldHeadingId} className="agent-section-label agent-held-heading">
+            {t("agents.held.section", { count: held.length })}
+          </h3>
+          {held.map((m) => {
+            const busy = Boolean(decidingIds[m.id]);
+            return (
+              <div key={m.id} className="agent-held-card" data-message-id={m.id}>
+                <div className="agent-held-route">
+                  <strong>{m.from}</strong>
+                  <span aria-hidden> → </span>
+                  <span className="sr-only">{t("agents.held.to")}</span>
+                  <span>{m.to}</span>
+                </div>
+                <div className="agent-held-body">{m.body}</div>
+                <FileChips message={m} />
+                <div className="copilot-permission-actions agent-held-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => void decideHeld(m.id, "approve")}
+                  >
+                    {t("agents.held.approve")}
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busy}
+                    onClick={() => void decideHeld(m.id, "reject")}
+                  >
+                    {t("agents.held.reject")}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       <section className="agent-roster-section" aria-label={t("agents.roster")}>
         {sessions.length === 0 ? (
           <div className="agent-roster-empty">{t("agents.emptyRoster")}</div>
@@ -147,11 +324,13 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
           <div className="agent-roster-list">
             {sessions.map((s) => {
               const isTarget = selectedRecipient === s.name;
+              const holding = s.inbound === "hold";
               const repoBranch = s.repo
                 ? s.branch
                   ? `${s.repo}@${s.branch}`
                   : s.repo
                 : "";
+              const label = s.actorName ? `${s.actorName}/${s.name}` : s.name;
               return (
                 <div
                   key={s.id}
@@ -172,10 +351,38 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                       onClick={() => setSelectedRecipient(s.name)}
                       title={t("agents.targetSession", { name: s.name })}
                     >
-                      {s.actorName ? `${s.actorName}/${s.name}` : s.name}
+                      {label}
                     </button>
                     <span className="copilot-badge">{s.agent}</span>
+                    {s.model && (
+                      <span className="copilot-badge agent-model-badge" title={s.model}>
+                        {s.model}
+                      </span>
+                    )}
                     {s.role && <span className="copilot-badge">{s.role}</span>}
+                    {canManageSession(s, viewer) ? (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={holding}
+                        className={`agent-inbound-toggle${holding ? " is-hold" : ""}`}
+                        disabled={Boolean(inboundPendingIds[s.id])}
+                        onClick={() => void setInbound(s.id, holding ? "open" : "hold")}
+                        aria-label={t("agents.inbound.toggleLabel", { name: label })}
+                        title={t(holding ? "agents.inbound.holdTitle" : "agents.inbound.openTitle")}
+                      >
+                        {t(holding ? "agents.inbound.hold" : "agents.inbound.open")}
+                      </button>
+                    ) : (
+                      holding && (
+                        <span
+                          className="copilot-badge agent-inbound-badge"
+                          title={t("agents.inbound.holdTitle")}
+                        >
+                          {t("agents.inbound.hold")}
+                        </span>
+                      )
+                    )}
                   </div>
                   {(repoBranch || s.doing || s.nodeId) && (
                     <div className="agent-session-meta">
@@ -233,17 +440,29 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
         ) : (
           messages.map((m) => {
             const fromHuman = m.senderAgent === "human";
+            const status = m.status === "held" || m.status === "rejected" ? m.status : "";
             return (
               <div
                 key={m.id}
                 className={`copilot-bubble ${
                   fromHuman ? "copilot-bubble-user" : "copilot-bubble-assistant"
-                } agent-msg-bubble`}
+                } agent-msg-bubble${status ? ` is-${status}` : ""}`}
               >
                 <div className="agent-msg-head">
                   <span className="agent-msg-route">
                     <strong>{m.from}</strong> → <span>{m.to}</span>
                   </span>
+                  {m.notify && (
+                    <span className="agent-msg-notify" title={t("agents.notify.sent")}>
+                      <IconBell size={11} />
+                      <span className="sr-only">{t("agents.notify.sent")}</span>
+                    </span>
+                  )}
+                  {status && (
+                    <span className={`copilot-badge agent-status-badge status-${status}`}>
+                      {t(`agents.status.${status}`)}
+                    </span>
+                  )}
                   {m.nodeId && (
                     <button
                       type="button"
@@ -268,6 +487,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                   </button>
                 </div>
                 <div className="agent-msg-body">{m.body}</div>
+                <FileChips message={m} />
                 <div className="agent-msg-time">
                   {formatLocalizedDateTime(toDate(m.createdAt), language)}
                 </div>
@@ -297,6 +517,39 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
               )}
             </select>
           </label>
+          <span className="agent-composer-tools">
+            <button
+              type="button"
+              className={`copilot-icon-btn agent-composer-tool${notify ? " is-on" : ""}`}
+              aria-pressed={notify}
+              onClick={() => setNotify((v) => !v)}
+              aria-label={t("agents.notify.toggle")}
+              title={t(notify ? "agents.notify.onTitle" : "agents.notify.offTitle")}
+            >
+              <IconBell size={14} />
+            </button>
+            <button
+              type="button"
+              className="copilot-icon-btn agent-composer-tool"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending || attachments.length >= MAX_AGENT_FILES}
+              aria-label={t("agents.files.attach")}
+              title={t("agents.files.attachTitle", {
+                max: MAX_AGENT_FILES,
+                kb: MAX_AGENT_FILE_BYTES / 1024,
+              })}
+            >
+              <IconPaperclip size={14} />
+            </button>
+          </span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            data-testid="agent-file-input"
+            onChange={(e) => void onPickFiles(e)}
+          />
           {replyToId && (
             <button
               type="button"
@@ -317,6 +570,33 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
             </label>
           )}
         </div>
+        {attachments.length > 0 && (
+          <div className="agent-file-chips agent-attachments" aria-label={t("agents.files.attached")}>
+            {attachments.map((file) => (
+              <span key={file.name} className="agent-file-chip is-static">
+                <IconPaperclip size={11} />
+                <span className="agent-file-name">{file.name}</span>
+                <button
+                  type="button"
+                  className="agent-file-remove"
+                  onClick={() =>
+                    setAttachments((list) => list.filter((f) => f.name !== file.name))
+                  }
+                  aria-label={t("agents.files.remove", { name: file.name })}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {attachErrors.length > 0 && (
+          <ul className="agent-attach-errors" role="alert">
+            {attachErrors.map((err, index) => (
+              <li key={`${index}:${err.code}:${err.name}`}>{attachErrorText(err)}</li>
+            ))}
+          </ul>
+        )}
         <div className="agent-composer-row">
           <textarea
             ref={inputRef}

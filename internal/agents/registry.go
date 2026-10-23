@@ -24,11 +24,22 @@ const (
 	// SessionTTL is how long a session stays online without a heartbeat.
 	SessionTTL = 90 * time.Second
 	// OfflineRetention is how long an idle/disconnected session remains visible
-	// with `all=true` before being pruned from memory.
+	// with `all=true` before being pruned from memory, counted from when it
+	// went offline. It is also how long the session's name stays reserved for
+	// its actor: a new session of the same actor asking for the name gets it
+	// back (and the mail waiting under it), another actor cannot take it.
 	OfflineRetention = 24 * time.Hour
 
 	StateBusy = "busy"
 	StateIdle = "idle"
+
+	// InboundOpen delivers mail to the session as it arrives; InboundHold
+	// keeps it as "held" until a person approves or rejects it.
+	InboundOpen = "open"
+	InboundHold = "hold"
+
+	// MaxModelLen bounds the model name a heartbeat reports.
+	MaxModelLen = 64
 )
 
 var (
@@ -38,6 +49,7 @@ var (
 	ErrLoopDetected = errors.New("agent-to-agent thread limit reached; waiting for human input")
 	ErrRefused      = errors.New("recipient refused message")
 	ErrAskBusy      = errors.New("session already has a pending ask_user request")
+	ErrNotHeld      = errors.New("message is not held")
 )
 
 // Session describes one connected (or recently seen) coding agent session.
@@ -58,6 +70,10 @@ type Session struct {
 	NodeID    string `json:"nodeId,omitempty"`
 	LastSeen  int64  `json:"lastSeen"`
 	Online    bool   `json:"online"`
+	// Inbound is InboundOpen or InboundHold.
+	Inbound string `json:"inbound"`
+	// Model is what the agent last reported it runs on, if anything.
+	Model string `json:"model,omitempty"`
 }
 
 // Address returns the canonical `<actor>/<name>` handle for this session.
@@ -93,6 +109,7 @@ type Heartbeat struct {
 	State     string `json:"state,omitempty"`
 	Doing     string `json:"doing,omitempty"`
 	NodeID    string `json:"nodeId,omitempty"`
+	Model     string `json:"model,omitempty"`
 }
 
 // EventFunc is called whenever sessions, messages, or asks change in a project
@@ -110,6 +127,7 @@ type Hub struct {
 
 	// In-memory fallback stores when database == nil (used in lightweight tests)
 	memMessages []Message
+	memFiles    map[string][]storedFile // key: message ID
 	memAsks     map[string]*Ask
 
 	// Waiters for inbox long-polling: key is project
@@ -131,6 +149,7 @@ func NewHub(database *db.DB, notify EventFunc) *Hub {
 		now:           time.Now,
 		sessions:      make(map[string]*Session),
 		memAsks:       make(map[string]*Ask),
+		memFiles:      make(map[string][]storedFile),
 		inboxWaiters:  make(map[string]map[chan struct{}]struct{}),
 		askWaiters:    make(map[string]chan Ask),
 		senderHistory: make(map[string][]int64),
@@ -199,6 +218,10 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	}
 	project := strings.Trim(strings.TrimSpace(hb.Project), "/")
 	now := h.nowMillis()
+	model := strings.TrimSpace(hb.Model)
+	if len(model) > MaxModelLen {
+		return Session{}, fmt.Errorf("%w: model exceeds %d characters", ErrInvalid, MaxModelLen)
+	}
 
 	state := strings.ToLower(strings.TrimSpace(hb.State))
 	if state != StateBusy && state != StateIdle {
@@ -235,6 +258,8 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		}
 		name := h.uniqueNameLocked(project, sessionID, actorID, baseName)
 		existing = &Session{
+			Inbound:   h.inheritedInboundLocked(project, sessionID, actorID, name),
+			Model:     model,
 			ID:        sessionID,
 			Project:   project,
 			ActorID:   actorID,
@@ -300,6 +325,9 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		if hb.NodeID != "" || explicitIdle {
 			existing.NodeID = strings.TrimSpace(hb.NodeID)
 		}
+		if model != "" {
+			existing.Model = model
+		}
 		existing.LastSeen = now
 		existing.Online = true
 	}
@@ -348,6 +376,68 @@ func (h *Hub) Leave(project, sessionID, actorID string) error {
 	return nil
 }
 
+// inheritedInboundLocked is the inbound policy a new session starts with: the
+// policy of the offline session of the same actor whose name it is taking
+// over (the agent carrying on in a new conversation keeps its mail policy),
+// or InboundOpen.
+func (h *Hub) inheritedInboundLocked(project, sessionID, actorID, name string) string {
+	var newest *Session
+	for _, s := range h.sessions {
+		if s.Project != project || s.ID == sessionID || s.Online ||
+			!strings.EqualFold(s.Name, name) || !strings.EqualFold(s.ActorID, actorID) {
+			continue
+		}
+		if newest == nil || s.LastSeen > newest.LastSeen {
+			newest = s
+		}
+	}
+	if newest != nil && newest.Inbound == InboundHold {
+		return InboundHold
+	}
+	return InboundOpen
+}
+
+// sessionByNameLocked finds the session that answers to name in project: the
+// online one if any, else the one seen most recently. A name can sit on two
+// entries for a while, the offline session and the new one that took it over.
+func (h *Hub) sessionByNameLocked(project, name string) *Session {
+	var best *Session
+	for _, s := range h.sessions {
+		if s.Project != project || !strings.EqualFold(s.Name, name) {
+			continue
+		}
+		if best == nil || (s.Online && !best.Online) ||
+			(s.Online == best.Online && s.LastSeen > best.LastSeen) {
+			best = s
+		}
+	}
+	return best
+}
+
+// SetInbound sets a session's inbound policy. Only the session's own actor
+// or an admin may; to anyone else the session does not exist.
+func (h *Hub) SetInbound(project, sessionID, inbound, callerID string, callerAdmin bool) (Session, error) {
+	project = strings.Trim(strings.TrimSpace(project), "/")
+	sessionID = strings.TrimSpace(sessionID)
+	inbound = strings.ToLower(strings.TrimSpace(inbound))
+	if inbound != InboundOpen && inbound != InboundHold {
+		return Session{}, fmt.Errorf("%w: inbound must be %q or %q", ErrInvalid, InboundOpen, InboundHold)
+	}
+	h.mu.Lock()
+	h.pruneExpiredLocked(h.nowMillis())
+	s, ok := h.sessions[project+"\x00"+sessionID]
+	if !ok || !(callerAdmin || strings.EqualFold(s.ActorID, strings.TrimSpace(callerID))) {
+		h.mu.Unlock()
+		return Session{}, fmt.Errorf("%w: session %q", ErrNotFound, sessionID)
+	}
+	s.Inbound = inbound
+	snapshot := *s
+	h.mu.Unlock()
+
+	h.emit(project, "agents-changed", nil)
+	return snapshot, nil
+}
+
 // uniqueNameLocked picks base, or base-N when another session holds it. An
 // offline session of the same actor gives its name up: that is the agent
 // continuing under a new conversation ID (Claude Code's /clear), and its mail
@@ -391,10 +481,12 @@ func (h *Hub) nameHeldByOtherLocked(project, name, actorID string) bool {
 }
 
 func (h *Hub) pruneExpiredLocked(now int64) {
-	retentionCutoff := now - OfflineRetention.Milliseconds()
 	ttlCutoff := now - SessionTTL.Milliseconds()
 	for k, s := range h.sessions {
-		if s.LastSeen < retentionCutoff {
+		// A session goes offline SessionTTL after its last heartbeat (Leave
+		// backdates LastSeen to make that now), and keeps its name for
+		// OfflineRetention after that.
+		if s.LastSeen+SessionTTL.Milliseconds() < now-OfflineRetention.Milliseconds() {
 			delete(h.sessions, k)
 			continue
 		}

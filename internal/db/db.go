@@ -626,6 +626,33 @@ CREATE TABLE run_events (
 ) STRICT;
 `,
 	},
+	{
+		name: "0011_agent_network_w15",
+		stmt: `
+-- Agent network W1.5: a session may hold its inbound mail for a person to
+-- approve, a message may ask to pop up on the recipient's screen, and it may
+-- carry small text files. Existing rows were delivered when they were sent.
+ALTER TABLE agent_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered' CHECK (status IN ('delivered', 'held', 'rejected'));
+ALTER TABLE agent_messages ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;
+-- The account behind the recipient session when the message was sent. Who
+-- may approve a held message, or read its files, is decided from this: the
+-- session itself is in memory and gone after a restart.
+ALTER TABLE agent_messages ADD COLUMN recipient_actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_at INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX agent_messages_status ON agent_messages (project, status, created_at);
+
+-- Attachments: UTF-8 text only, so TEXT holds them on either engine.
+CREATE TABLE agent_message_files (
+    message_id  TEXT NOT NULL REFERENCES agent_messages(id),
+    name        TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    PRIMARY KEY (message_id, name)
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.
