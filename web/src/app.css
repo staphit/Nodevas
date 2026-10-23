@@ -25,6 +25,7 @@
 @import "./styles/14-touch.css"; /* touch gestures, coarse-pointer targets, phone layout, safe areas */
 @import "./styles/15-copilot.css"; /* voice copilot button, panel, transcript */
 @import "./styles/16-agents.css"; /* agent collaboration network panel and ask cards */
+@import "./styles/17-runners.css"; /* runners dialog: machines that run agents */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

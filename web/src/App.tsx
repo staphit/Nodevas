@@ -21,6 +21,8 @@ import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
+import { RunnersModal } from "./runners/RunnersModal";
+import { useRunners } from "./runners/runnerStore";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -39,6 +41,7 @@ import { LANGUAGE_OPTIONS, useI18n } from "./i18n";
 import {
   IconBell,
   IconCloud,
+  IconComputer,
   IconGear,
   IconHelp,
   IconMoon,
@@ -102,7 +105,7 @@ function MainApp() {
   // that did nothing. Making them one value makes that unrepresentable instead
   // of relying on every opener remembering to close its neighbours.
   const [modal, setModal] = useState<
-    "" | "notify" | "backup" | "drive-workspace" | "settings"
+    "" | "notify" | "backup" | "drive-workspace" | "settings" | "runners"
   >("");
   const closeModal = useCallback(() => setModal(""), []);
   // Live width while dragging; the preference is written on commit so a drag
@@ -158,13 +161,16 @@ function MainApp() {
     const onOpenSettings = () => setModal("settings");
     const onOpenNotify = () => setModal("notify");
     const onOpenDriveImport = () => setModal("drive-workspace");
+    const onOpenRunners = () => setModal("runners");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
     window.addEventListener("nodevas-drive-import", onOpenDriveImport);
+    window.addEventListener("nodevas-open-runners", onOpenRunners);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
       window.removeEventListener("nodevas-drive-import", onOpenDriveImport);
+      window.removeEventListener("nodevas-open-runners", onOpenRunners);
     };
   }, []);
 
@@ -314,6 +320,11 @@ function MainApp() {
           break;
         case "agents-changed":
           void useAgents.getState().refreshAll();
+          break;
+        case "runners-changed":
+          // Only refetched once the Runners dialog has loaded them; a board
+          // that never opened it has nothing to keep current.
+          void useRunners.getState().refreshIfLoaded();
           break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
@@ -537,6 +548,12 @@ function MainApp() {
                 onSelect: () => setModal("backup"),
               },
               {
+                id: "runners",
+                label: t("topbar.runners"),
+                icon: <IconComputer size={16} />,
+                onSelect: () => setModal("runners"),
+              },
+              {
                 id: "theme",
                 label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
                 icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
@@ -567,6 +584,7 @@ function MainApp() {
         <BackupModal onClose={closeModal} initialTab="import" />
       )}
       {modal === "settings" && <ProjectSettings onClose={closeModal} />}
+      {modal === "runners" && <RunnersModal onClose={closeModal} />}
       {error && (
         <div className="global-error" role="alert">
           <span>{error}</span>

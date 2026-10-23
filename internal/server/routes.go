@@ -11,6 +11,7 @@ import (
 	"nodevas/internal/httpapi/node"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
+	runnersapi "nodevas/internal/httpapi/runners"
 	"nodevas/internal/httpapi/system"
 )
 
@@ -38,6 +39,9 @@ func (s *Server) Handler() http.Handler {
 	remoteapi.New(s.pm, s.remotes, s.auth).Register(api)
 	if s.agents != nil {
 		agentsapi.New(s.pm, s.agents).Register(api)
+	}
+	if s.runners != nil {
+		runnersapi.New(s.runners).Register(api)
 	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {

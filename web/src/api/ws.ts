@@ -57,7 +57,8 @@ export type WSEvent = {
     | "presence"
     | "locks"
     | "lock-denied"
-    | "agents-changed";
+    | "agents-changed"
+    | "runners-changed";
   id?: string;
   project?: string;
   peers?: Peer[];

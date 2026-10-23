@@ -215,3 +215,23 @@ func TestHandlerEnforcesAccessWhenRequired(t *testing.T) {
 		t.Errorf("GET /api/auth/status with a valid Access JWT = 403")
 	}
 }
+
+// A runner reaches the hub with an Access service token: the edge swaps the
+// client ID and secret for a JWT that names the token, not a person.
+func TestAccessMiddlewareAcceptsServiceToken(t *testing.T) {
+	f := newAccessFixture(t)
+	var seen string
+	r := accessRouter(f, true, &seen)
+	now := time.Now()
+	req := fromEdge("/api/state")
+	req.Header.Set(auth.AccessHeaderName, f.token(t, map[string]any{
+		"aud": []string{"aud-1"}, "iss": f.v.Issuer(), "common_name": "runner-id.access",
+		"type": "app", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+	}))
+	if code := serveAccess(r, req); code != http.StatusOK {
+		t.Fatalf("service token: %d, want 200", code)
+	}
+	if seen != "service:runner-id.access" {
+		t.Fatalf("access identity = %q", seen)
+	}
+}

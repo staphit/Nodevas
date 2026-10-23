@@ -26,7 +26,7 @@
 //	                    the audit trail on a PostgreSQL server instead of the
 //	                    workspace's SQLite file (the search index stays local)
 //
-// A subcommand per file: serve.go, user.go, db.go. This one is the
+// A subcommand per file: serve.go, user.go, db.go, runner.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
 // reading what any of it does.
 package main
@@ -54,6 +54,8 @@ func main() {
 		hookCmd(os.Args[2:])
 	case "setup-agent":
 		setupAgentCmd(os.Args[2:])
+	case "runner":
+		os.Exit(runnerCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	default:
 		usage()
 		os.Exit(2)
@@ -89,6 +91,8 @@ func usage() {
 		"       nodevas setup-agent [--agents claude,codex,gemini] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas hook <claude|codex|gemini> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas runner [start|login|logout|status|repo]  (connects this machine to a hub; nodevas runner help)")
 	fmt.Fprintln(os.Stderr,
 		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
 }

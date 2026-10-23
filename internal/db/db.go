@@ -532,6 +532,40 @@ CREATE TABLE agent_asks (
 CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
 `,
 	},
+	{
+		name: "0009_runners",
+		stmt: `
+-- Runners: the machines that execute agent runs (nodevas runner). The hub
+-- only records them; it never starts a process itself. See
+-- docs/nodevas-workstation-plan.md.
+CREATE TABLE runners (
+    id            TEXT PRIMARY KEY,
+    -- Not a foreign key to accounts: on a loopback server the owner is the
+    -- built-in "local" actor, which has no row.
+    owner_id      TEXT NOT NULL,
+    owner_name    TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL DEFAULT '',
+    -- The runner's last hello (runnerwire.Info) as JSON, shown as given. The
+    -- hub never acts on a path or command in it.
+    info          TEXT NOT NULL DEFAULT '',
+    -- Revoked runners stay as a record of what once had access.
+    revoked_at    TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runners_owner ON runners (owner_id, created_at);
+
+CREATE TABLE runner_tokens (
+    -- sha256 of the token, hex. Never the token: a backup of this database
+    -- must not be a bag of working credentials.
+    token_hash  TEXT PRIMARY KEY,
+    runner_id   TEXT NOT NULL REFERENCES runners(id),
+    created_at  TEXT NOT NULL,
+    revoked_at  TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

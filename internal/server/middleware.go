@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/runners"
 )
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
@@ -109,6 +110,13 @@ func (s *Server) withAuth(c *gin.Context) {
 		c.Next()
 		return
 	}
+	// Runner endpoints take a runner token and nothing else, and a runner
+	// token opens nothing else: a stolen token reaches the runner socket, not
+	// the board, and a browser session cannot pose as a runner.
+	if strings.HasPrefix(r.URL.Path, runnerPathPrefix) {
+		s.withRunnerAuth(c)
+		return
+	}
 	actor, err := s.auth.Authenticate(r)
 	if err != nil {
 		httpx.Err(c, http.StatusUnauthorized, err)
@@ -148,6 +156,32 @@ func (s *Server) withAuth(c *gin.Context) {
 		})
 	}
 	c.Request = r.WithContext(requestContext)
+	c.Next()
+}
+
+// runnerPathPrefix is where the runner-token routes live. /api/runners (the
+// owner's management API) does not match it and takes a session as usual.
+const runnerPathPrefix = "/api/runner/"
+
+// withRunnerAuth admits a request carrying a valid runner token, acting as
+// the runner's owner marked as a worker agent.
+func (s *Server) withRunnerAuth(c *gin.Context) {
+	r := c.Request
+	if s.runners == nil {
+		httpx.Err(c, http.StatusNotFound, errors.New("runners are not enabled on this server"))
+		return
+	}
+	runner, err := s.runners.Authenticate(r.Context(), runners.BearerToken(r))
+	if err != nil {
+		if !errors.Is(err, runners.ErrUnauthenticated) {
+			httpx.Err(c, http.StatusInternalServerError, err)
+			return
+		}
+		httpx.Err(c, http.StatusUnauthorized, err)
+		return
+	}
+	ctx := runners.WithRunner(auth.WithActor(r.Context(), runners.ActorFor(runner)), runner)
+	c.Request = r.WithContext(ctx)
 	c.Next()
 }
 

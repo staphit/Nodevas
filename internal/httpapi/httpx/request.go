@@ -26,6 +26,9 @@ var projectScopedPathExempt = []string{
 	// /api/remote/push takes its target through ExportScope's own ?project=
 	// semantics (which may name a folder with no graph.yaml).
 	"/api/remote",
+	// Runners belong to their owner, not to a project.
+	"/api/runners",
+	"/api/runner/",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

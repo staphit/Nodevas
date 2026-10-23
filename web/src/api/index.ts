@@ -13,6 +13,7 @@ import { lifecycleApi } from "./lifecycle";
 import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
 import { remoteApi } from "./remote";
+import { runnersApi } from "./runners";
 import { workspaceApi } from "./workspace";
 
 export {
@@ -85,6 +86,15 @@ export type {
   AgentRosterResponse,
   AgentSession,
 } from "./agents";
+export type {
+  Runner,
+  RunnerAgent,
+  RunnerCreateResponse,
+  RunnerInfo,
+  RunnerListResponse,
+  RunnerModel,
+  RunnerRepo,
+} from "./runners";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 
@@ -100,4 +110,5 @@ export const api = {
   ...remoteApi,
   ...copilotApi,
   ...agentsApi,
+  ...runnersApi,
 };
