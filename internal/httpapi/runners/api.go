@@ -24,6 +24,13 @@ import (
 
 const maxCreateBody = 4 << 10
 
+// maxRunMessageBytes is the socket's read limit once hello is done. It is
+// above runnerwire.MaxMessageBytes because a changes message carries a patch
+// of up to MaxPatchBytes plus up to MaxChangedFiles paths, and JSON escaping
+// (Go escapes <, > and & as <…) can grow the patch several times over.
+// What a message may hold is checked by type after reading.
+const maxRunMessageBytes = 8 << 20
+
 // Timeouts on the connect socket. Variables so tests need not wait a minute.
 var (
 	// helloTimeout is how long a new connection has to say who it is.
@@ -199,8 +206,8 @@ func (a *API) connect(c *gin.Context) {
 	}
 	detach := a.reg.Attach(runner.ID, s)
 	defer detach()
-	// Past the hello, run traffic (event batches, finishes) is larger.
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	// Past the hello, run traffic (event batches, changes) is larger.
+	conn.SetReadLimit(maxRunMessageBytes)
 	if a.runs != nil {
 		a.runs.Attached(ctx, runner.ID, first.Active)
 	}
@@ -234,7 +241,8 @@ func (a *API) connect(c *gin.Context) {
 			if a.runs != nil {
 				a.runs.Pump(ctx, runner.ID)
 			}
-		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish:
+		case runnerwire.TypeAccept, runnerwire.TypeDecline, runnerwire.TypeEvents, runnerwire.TypeFinish,
+			runnerwire.TypeChanges, runnerwire.TypePR:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
 				return
@@ -283,6 +291,18 @@ func (a *API) runMessage(ctx context.Context, runnerID string, env runnerwire.En
 			return errMalformed
 		}
 		return a.runs.Finish(ctx, runnerID, env.RunID, *env.Result)
+	case runnerwire.TypeChanges:
+		if env.RunID == "" || env.Changes == nil {
+			return errMalformed
+		}
+		// Out of limits, for another runner's run, or for a run that never
+		// ran: dropped. A resend after the first report is ignored.
+		return a.runs.Changes(ctx, runnerID, env.RunID, *env.Changes)
+	case runnerwire.TypePR:
+		if env.RunID == "" || env.PR == nil {
+			return errMalformed
+		}
+		return a.runs.PR(ctx, runnerID, env.RunID, *env.PR)
 	}
 	return errMalformed
 }

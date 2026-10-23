@@ -246,6 +246,34 @@ func (d *Dispatcher) Events(ctx context.Context, runnerID, runID string, events 
 	return nil
 }
 
+// Changes records what a run committed, from its runner. Only the first
+// report counts; a resend is ignored quietly. Run lists show the counts, so a
+// stored report is announced as a runs change.
+func (d *Dispatcher) Changes(ctx context.Context, runnerID, runID string, changes runnerwire.RunChanges) error {
+	r, stored, err := d.store.SetChanges(ctx, runID, runnerID, changes)
+	if err != nil {
+		return err
+	}
+	if stored {
+		d.notifyChanged(r)
+	}
+	return nil
+}
+
+// PR records a run's pull request, from its runner, in any status: the
+// runner reports the PR's state and CI until it is merged or closed. Only a
+// report that changes what the run shows is announced.
+func (d *Dispatcher) PR(ctx context.Context, runnerID, runID string, pr runnerwire.PRInfo) error {
+	r, changed, err := d.store.SetPR(ctx, runID, runnerID, pr)
+	if err != nil {
+		return err
+	}
+	if changed {
+		d.notifyChanged(r)
+	}
+	return nil
+}
+
 // Finish applies a runner's finish, then offers it the next queued run.
 func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result runnerwire.RunResult) error {
 	r, err := d.store.Finish(ctx, runID, runnerID, result)
