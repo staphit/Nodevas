@@ -785,8 +785,14 @@ CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
 `,
 	},
 	{
-		// 0015 is left to the W-step merged beside this one; the numbering is
-		// reconciled at merge.
+		name: "0015_run_mode",
+		stmt: `
+-- Interactive runs (W2.5): the agent runs as its TUI in a pseudo-terminal on
+-- the runner, relayed to the browser. '' is headless.
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
+	{
 		name: "0016_w6",
 		stmt: `
 -- Remote dispatch and external sessions (W6).

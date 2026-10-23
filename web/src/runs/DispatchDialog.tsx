@@ -35,6 +35,7 @@ import { useRuns } from "./runStore";
 import { AutoAcceptNote } from "./AutoAcceptNote";
 import { StepUpDialog } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
+import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "./RunModePicker";
 
 const HEADLESS = "headless";
 
@@ -111,6 +112,7 @@ export function DispatchDialog({
   const [repoChoice, setRepoId] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [modeChoice, setMode] = useState<DispatchMode>("headless");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // W5: the fallback chain and the implement → review pipeline.
@@ -202,6 +204,7 @@ export function DispatchDialog({
   const catalog = useMemo(() => agentCatalog(runner ? [runner] : []), [runner]);
   const repos = runner?.info?.repos ?? [];
   const repoId = repos.some((repo) => repo.id === repoChoice) ? repoChoice : (repos[0]?.id ?? "");
+  const mode = effectiveDispatchMode(modeChoice, runner);
 
   // The hub's own checks, so a bad value is caught while typing rather than
   // as a 400 after the click.
@@ -276,6 +279,7 @@ export function DispatchDialog({
               },
             }
           : {}),
+        ...(mode === "interactive" ? { mode } : {}),
       });
       onCreated(run);
     } catch (caught) {
@@ -286,7 +290,7 @@ export function DispatchDialog({
           ? t("runs.permissionDenied", { message: text })
           : // On this route a 409 only ever means the runner cannot take runs.
             caught instanceof ConflictError
-            ? t("runs.runnerCannotRun")
+            ? t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
             : overBudget
               ? t("runs.overBudget", { message: text })
               : text,
@@ -576,11 +580,14 @@ export function DispatchDialog({
                     )}
                   </label>
 
+                  <RunModePicker runner={runner} value={mode} onChange={setMode} />
+
                   {runner && (
                     <AutoAcceptNote
                       runner={runner}
                       repoId={repoId}
                       agent={agent?.kind ?? ""}
+                      mode={mode === "interactive" ? "interactive" : ""}
                       onVerify={() => setStepUpOpen(true)}
                     />
                   )}

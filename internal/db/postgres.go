@@ -611,6 +611,12 @@ CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
 `,
 	},
 	{
+		name: "0015_run_mode",
+		stmt: `
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
+	{
 		name: "0016_w6",
 		stmt: `
 ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';

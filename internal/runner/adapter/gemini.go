@@ -57,25 +57,9 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("gemini: binary, workdir and temp dir are required")
 	}
-	settings, err := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]any{
-			"nodevas": map[string]any{
-				"command": env.MCP.Command,
-				"args":    env.MCP.Args,
-				// trust skips the CLI's confirmation for this server's tools:
-				// the preamble has the agent claim its node, nobody can say
-				// yes headless, and the hub limits these tools anyway.
-				"trust":   true,
-				"timeout": geminiToolTimeoutMs,
-			},
-		},
-	}, "", "  ")
+	settingsPath, err := writeGeminiSettings(env)
 	if err != nil {
 		return nil, err
-	}
-	settingsPath := filepath.Join(env.TempDir, "gemini-settings.json")
-	if err := os.WriteFile(settingsPath, settings, 0o600); err != nil {
-		return nil, fmt.Errorf("writing the Gemini settings: %w", err)
 	}
 
 	mode := env.PermissionMode
@@ -98,6 +82,32 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
 	return cmd, nil
+}
+
+// writeGeminiSettings writes the system settings override that defines the
+// nodevas MCP server into the run's temp dir.
+func writeGeminiSettings(env RunEnv) (string, error) {
+	settings, err := json.MarshalIndent(map[string]any{
+		"mcpServers": map[string]any{
+			"nodevas": map[string]any{
+				"command": env.MCP.Command,
+				"args":    env.MCP.Args,
+				// trust skips the CLI's confirmation for this server's tools:
+				// the preamble has the agent claim its node, nobody can say
+				// yes headless, and the hub limits these tools anyway.
+				"trust":   true,
+				"timeout": geminiToolTimeoutMs,
+			},
+		},
+	}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	settingsPath := filepath.Join(env.TempDir, "gemini-settings.json")
+	if err := os.WriteFile(settingsPath, settings, 0o600); err != nil {
+		return "", fmt.Errorf("writing the Gemini settings: %w", err)
+	}
+	return settingsPath, nil
 }
 
 // geminiParser reads `--output-format stream-json`: one JSON object per line,

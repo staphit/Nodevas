@@ -58,7 +58,10 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	}
 
 	underAPI := strings.HasPrefix(r.URL.Path, "/api/")
-	if underAPI && isUnsafeMethod(r.Method) {
+	// A GET that changes state is a write wearing a safe method's clothes, so
+	// it gets the same cross-origin treatment even though the method check
+	// would wave it through.
+	if underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r)) {
 		if origin := r.Header.Get("Origin"); origin != "" && !s.isAllowedOrigin(origin, r.Host) {
 			httpx.Err(c, http.StatusForbidden, errors.New("cross-origin API request rejected"))
 			return
@@ -257,6 +260,14 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 			ClientIP:  auth.ClientIP(r),
 		})
 	}
+}
+
+// stateChangingGET reports a GET that changes state: the method is the only
+// signal the transport layer has, and it lies about these. An interactive
+// run's terminal socket is opened with a GET and then carries keystrokes into
+// a process on the runner, so a cross-site page must not be able to open it.
+func stateChangingGET(r *http.Request) bool {
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && runTerminalPath(r.URL.Path)
 }
 
 // allowsFetchSite reports whether a Sec-Fetch-Site value belongs to this

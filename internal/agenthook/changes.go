@@ -25,11 +25,6 @@ import (
 // gitTimeout bounds one git call from the hook.
 const gitTimeout = 4 * time.Second
 
-// excluded reports whether a working directory is one whose changes must not
-// leave the machine. Nothing is excluded on this branch; the agent network's
-// folder exclusion plugs in here.
-func excluded(cwd string) bool { return false }
-
 // editTools are the tools whose input names a file they write: Claude Code's
 // (Edit, Write, MultiEdit, NotebookEdit) and Gemini CLI's (write_file,
 // replace, edit). Codex's apply_patch names its files inside the patch.

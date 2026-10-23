@@ -29,6 +29,15 @@ export function runCancellable(status: string): boolean {
   return status === "queued" || status === "offered" || status === "running";
 }
 
+/** Mirrors runnerwire.ModeHeadless ("") and ModeInteractive (W2.5). */
+export type RunMode = "" | "interactive";
+export const RUN_MODE_INTERACTIVE = "interactive";
+
+/** Whether a run is interactive: its agent's own TUI in a PTY on the runner. */
+export function runInteractive(run: { mode?: string }): boolean {
+  return run.mode === RUN_MODE_INTERACTIVE;
+}
+
 export interface RunUsage {
   inputTokens: number;
   outputTokens: number;
@@ -105,6 +114,8 @@ export interface Run {
   retryOf?: string;
   /** W5: the pipeline the run is a step of. */
   pipelineId?: string;
+  /** W2.5: absent (headless) or "interactive". */
+  mode?: RunMode | string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -227,6 +238,9 @@ export interface CreateRunRequest {
   /** Dispatches implement → review instead of one run (W5); agent and model
    * are then the hub's to ignore in favour of pipeline.implement. */
   pipeline?: RunPipeline;
+  /** W2.5: omitted for headless. "interactive" needs the runner's
+   * "interactive" capability; the hub answers 409 otherwise. */
+  mode?: RunMode;
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.

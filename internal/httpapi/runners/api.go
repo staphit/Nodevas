@@ -254,6 +254,12 @@ func (a *API) connect(c *gin.Context) {
 					slog.String("runner", runner.ID), slog.String("type", env.Type),
 					slog.String("run", runID(env)), slog.Any("error", err))
 			}
+		case runnerwire.TypeTermOut:
+			if a.runs == nil {
+				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
+				return
+			}
+			a.termOut(ctx, runner.ID, env)
 		default:
 			_ = conn.Close(websocket.StatusPolicyViolation, "unknown message type")
 			return

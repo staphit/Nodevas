@@ -1,0 +1,237 @@
+/* W2.5: interactive runs — dispatch mode choice, run view tabs and the
+ * in-browser terminal (xterm's own stylesheet loads with its lazy chunk). */
+
+/* ---------- dispatch dialog: headless / interactive ---------- */
+.run-mode-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.run-mode-field > legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.run-mode-options {
+  display: inline-flex;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.run-mode-option {
+  position: relative;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.run-mode-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.run-mode-option.selected {
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--shadow);
+  color: var(--text);
+  font-weight: 600;
+}
+.run-mode-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.run-mode-option:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------- run view: Terminal | Activity ---------- */
+.run-mode-tabs {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.run-mode-tablist {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.run-mode-tablist [role="tab"] {
+  min-height: 30px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.run-mode-tablist [role="tab"].active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+.run-mode-panel {
+  min-width: 0;
+}
+.run-mode-panel[hidden] {
+  display: none;
+}
+
+/* ---------- the terminal ---------- */
+.run-term {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.run-term-bar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.run-term-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--st-locked-fg);
+}
+.run-term-dot-open {
+  background: var(--st-done-fg);
+}
+.run-term-dot-connecting,
+.run-term-dot-reconnecting {
+  background: var(--st-ready-fg);
+}
+.run-term-dot-closed {
+  background: var(--st-failed-fg);
+}
+.run-term-readonly {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.run-term-screen {
+  position: relative;
+  min-width: 0;
+}
+.run-term-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.run-term-host {
+  box-sizing: border-box;
+  height: clamp(260px, 56vh, 560px);
+  min-width: 100%;
+  padding: 6px 4px 6px 8px;
+  font-family: var(--mono);
+  font-size: var(--run-term-font-size, 13px);
+}
+.run-term-host .xterm {
+  height: 100%;
+}
+.run-term-ended {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  max-width: calc(100% - 20px);
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px var(--shadow);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-term.is-ended .run-term-host {
+  opacity: 0.82;
+}
+
+/* Keys a phone keyboard lacks. Hidden where a real keyboard is the norm. */
+.run-term-keys {
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.run-term-keys button {
+  min-width: 36px;
+  min-height: 34px;
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  touch-action: manipulation;
+}
+.run-term-keys button:active:not(:disabled) {
+  background: var(--hover);
+  transform: scale(0.97);
+}
+.run-term-keys button:disabled {
+  opacity: 0.45;
+}
+@media (min-width: 641px) and (hover: hover) and (pointer: fine) {
+  .run-term-keys {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  /* A TUI below ~80 columns wraps into noise: keep 80 and scroll sideways
+     inside the terminal instead. */
+  .run-term-host {
+    height: 50vh;
+    min-width: calc(80ch + 12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-mode-option,
+  .run-term-keys button {
+    transition: none;
+  }
+}

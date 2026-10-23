@@ -71,6 +71,10 @@ type Config struct {
 	// legacyAutoAccept: the file had W1's `"autoAccept": true`, and
 	// MigrateLegacyAutoAccept has not filled in the agents yet.
 	legacyAutoAccept bool
+	// Interactive takes interactive runs (W2.5): the agent's TUI in a terminal
+	// here that the dispatcher can type into. nil means the default, on; off,
+	// every interactive offer is declined.
+	Interactive *bool `json:"interactive,omitempty"`
 
 	// Pull requests, from W3 on.
 
@@ -126,6 +130,9 @@ func (c *Config) MergeMethodOrDefault() string {
 	}
 	return MergeMethods[0]
 }
+
+// InteractiveOn is Interactive with its default (on) applied.
+func (c *Config) InteractiveOn() bool { return c.Interactive == nil || *c.Interactive }
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
@@ -235,7 +242,7 @@ func (c *Config) PermissionModeFor(kind string) string {
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
-	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept", "interactive",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
 
 // Set changes one run setting from its command-line form. "default" resets
@@ -363,6 +370,16 @@ func (c *Config) Set(key string, values []string) error {
 		// Without detection at hand every kind is listed; the CLI calls
 		// SetAutoAccept itself with the agents installed here.
 		c.SetAutoAccept(on, Kinds)
+	case "interactive":
+		if reset {
+			c.Interactive = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("interactive must be true or false")
+		}
+		c.Interactive = &on
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil

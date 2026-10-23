@@ -240,9 +240,10 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 
 // reportChanges sends the hub what this event changed, if the session holds a
 // node (as the heartbeat just answered): the files an edit tool wrote, or at
-// Stop a snapshot of the working tree. Failures are dropped.
+// Stop a snapshot of the working tree. Failures are dropped. A session in an
+// excluded folder never gets here: Run returns before it joins the network.
 func reportChanges(ctx context.Context, client *mcp.Client, event string, in Input) {
-	if client.ClaimedNode() == "" || in.Cwd == "" || excluded(in.Cwd) {
+	if client.ClaimedNode() == "" || in.Cwd == "" {
 		return
 	}
 	switch event {

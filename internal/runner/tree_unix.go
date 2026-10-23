@@ -23,7 +23,12 @@ func prepareTree(cmd *exec.Cmd) {
 }
 
 // attachTree is called right after Start.
-func attachTree(cmd *exec.Cmd) *procTree { return &procTree{pgid: cmd.Process.Pid} }
+func attachTree(cmd *exec.Cmd) *procTree { return attachPID(cmd.Process.Pid) }
+
+// attachPID is attachTree for a process started some other way. A process
+// started in a pseudo-terminal leads its own session (setsid), hence its own
+// process group.
+func attachPID(pid int) *procTree { return &procTree{pgid: pid} }
 
 // kill ends the whole group. Killing only the leader would leave its children
 // running, holding the worktree and the agent's stdout open.

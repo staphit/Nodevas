@@ -211,7 +211,7 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		Arch:          runtime.GOARCH,
 		Agents:        Detect(ctx, cmds, cfg),
 		Repos:         repos,
-		Capabilities:  []string{runnerwire.CapHeadless},
+		Capabilities:  capabilities(cfg),
 		MaxConcurrent: maxConcurrent,
 		AutoAccept:    autoAccept,
 	}

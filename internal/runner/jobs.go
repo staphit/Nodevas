@@ -56,6 +56,9 @@ type jobs struct {
 	proxy    *Proxy
 	proxyErr error
 
+	// terms holds interactive runs' terminals (W2.5, see interactive.go).
+	terms termRelay
+
 	wg sync.WaitGroup
 }
 
@@ -239,6 +242,10 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
+	// W2.5: interactive runs (interactive.go).
+	if reason := j.checkMode(job); reason != "" {
+		return repo, reason
+	}
 	var agent *runnerwire.Agent
 	for i := range j.agents {
 		if j.agents[i].Kind == job.Agent {
@@ -409,6 +416,10 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 // the PR's diff added to its prompt. text is the agent's whole final message
 // (adapter.Outcome.Text), which a review needs beyond the summary's cap.
 func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire.Job) (runnerwire.RunResult, string) {
+	// W2.5: the agent's TUI in a terminal instead (interactive.go).
+	if job.Mode == runnerwire.ModeInteractive {
+		return j.runInteractive(ctx, r, wt), ""
+	}
 	fail := func(kind, format string, args ...any) (runnerwire.RunResult, string) {
 		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: kind,
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""

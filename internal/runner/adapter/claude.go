@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -42,15 +41,9 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	// The MCP config goes in a file rather than inline JSON: on Windows the
 	// CLI is a .cmd shim, and cmd.exe's quoting rules mangle JSON arguments.
-	config, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]MCPServer{"nodevas": env.MCP},
-	})
+	mcpPath, err := writeMCPConfig(env)
 	if err != nil {
 		return nil, err
-	}
-	mcpPath := filepath.Join(env.TempDir, "mcp.json")
-	if err := os.WriteFile(mcpPath, config, 0o600); err != nil {
-		return nil, fmt.Errorf("writing the MCP config: %w", err)
 	}
 
 	mode := env.PermissionMode

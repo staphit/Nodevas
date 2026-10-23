@@ -69,6 +69,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
 	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
 	api.GET("/runs/routing", a.routing)
@@ -157,6 +158,10 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "base is not a valid branch name")
 		return
 	}
+	if !validMode(body.Mode) {
+		invalid(c, "mode must be \"\" or %q", runnerwire.ModeInteractive)
+		return
+	}
 	if err := runs.ValidateChain(body.Fallbacks, false); err != nil {
 		fail(c, err)
 		return
@@ -199,6 +204,11 @@ func (a *API) create(c *gin.Context) {
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
 			errors.New("this runner does not take runs; update nodevas on it"), nil)
+		return
+	}
+	if !modeSupported(runner.Info, body.Mode) {
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
+			errors.New("this runner cannot run interactive sessions"), nil)
 		return
 	}
 	// The budget is the runner owner's: runs spend their subscription.
@@ -256,7 +266,7 @@ func (a *API) create(c *gin.Context) {
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: actor.ID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: steppedUpAt,
+		SteppedUpAt: steppedUpAt, Mode: body.Mode,
 	})
 	if err != nil {
 		if pipelineID != "" {

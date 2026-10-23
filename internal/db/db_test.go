@@ -51,13 +51,13 @@ func TestOpenCreatesEverySchemaObject(t *testing.T) {
 			t.Fatalf("table %q missing; have %v", want, present)
 		}
 	}
-	// Every step ran, the newest included: 0001-0011.
+	// Every step ran, the newest included: 0001-0016.
 	var steps int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&steps); err != nil {
 		t.Fatal(err)
 	}
-	if steps != 11 || steps != len(migrations) {
-		t.Fatalf("schema_migrations has %d rows, want 11 (%d defined)", steps, len(migrations))
+	if steps != 16 || steps != len(migrations) {
+		t.Fatalf("schema_migrations has %d rows, want 16 (%d defined)", steps, len(migrations))
 	}
 }
 

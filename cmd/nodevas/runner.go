@@ -87,7 +87,9 @@ func runnerUsage(w io.Writer) {
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
                                              maxConcurrent, runTimeoutMinutes, dataDir, autoAccept
                                              (true = autoaccept on with the defaults: step-up required,
-                                             every repo here, installed agents, headless; false = off);
+                                             every repo here, installed agents, headless; false = off),
+                                             interactive (true|false: take runs whose agent TUI the
+                                             dispatcher can type into);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
@@ -295,6 +297,11 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("maxConcurrent", cfg.MaxConcurrentRuns())
 	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
 	setting("dataDir", dataDir)
+	interactive := "interactive runs: the agent's TUI in a terminal here, which the dispatcher can type into"
+	if !cfg.InteractiveOn() {
+		interactive = "interactive runs are declined; headless only"
+	}
+	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)

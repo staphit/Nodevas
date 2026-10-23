@@ -19,6 +19,7 @@ import { RunDiffDialog } from "./DiffViewer";
 import { MergeControl } from "./MergeApproval";
 import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
+import { RunModeTabs } from "./RunModeTabs";
 import { useRuns } from "./runStore";
 
 /** The hub's cap on GET /api/runs. */
@@ -519,6 +520,7 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
         </div>
       )}
 
+      <RunModeTabs run={run}>
       <div className="run-timeline-wrap">
         <ol
           ref={scroller}
@@ -560,6 +562,7 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
           {eventError}
         </div>
       )}
+      </RunModeTabs>
     </section>
   );
 }
