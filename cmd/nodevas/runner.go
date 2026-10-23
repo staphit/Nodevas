@@ -73,7 +73,9 @@ func runnerUsage(w io.Writer) {
        nodevas runner repo list
        nodevas runner repo remove <id|name>
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
-                                             maxConcurrent, runTimeoutMinutes, dataDir, autoAccept;
+                                             maxConcurrent, runTimeoutMinutes, dataDir, autoAccept,
+                                             interactive (true|false: take runs whose agent TUI the
+                                             dispatcher can type into);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
@@ -281,6 +283,11 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
 	setting("dataDir", dataDir)
 	setting("autoAccept", fmt.Sprintf("%t (%s)", cfg.AutoAccept, accept))
+	interactive := "interactive runs: the agent's TUI in a terminal here, which the dispatcher can type into"
+	if !cfg.InteractiveOn() {
+		interactive = "interactive runs are declined; headless only"
+	}
+	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)

@@ -68,6 +68,10 @@ type Config struct {
 	// by default: with it on, anyone who can sign in to the hub as the owner
 	// can run agents on this machine.
 	AutoAccept bool `json:"autoAccept,omitempty"`
+	// Interactive takes interactive runs (W2.5): the agent's TUI in a terminal
+	// here that the dispatcher can type into. nil means the default, on; off,
+	// every interactive offer is declined.
+	Interactive *bool `json:"interactive,omitempty"`
 
 	// Pull requests, from W3 on.
 
@@ -123,6 +127,9 @@ func (c *Config) MergeMethodOrDefault() string {
 	}
 	return MergeMethods[0]
 }
+
+// InteractiveOn is Interactive with its default (on) applied.
+func (c *Config) InteractiveOn() bool { return c.Interactive == nil || *c.Interactive }
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
@@ -237,7 +244,7 @@ const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to 
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
-	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept", "interactive",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
 
 // Set changes one run setting from its command-line form. "default" resets
@@ -363,6 +370,16 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("autoAccept must be true or false")
 		}
 		c.AutoAccept = on
+	case "interactive":
+		if reset {
+			c.Interactive = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("interactive must be true or false")
+		}
+		c.Interactive = &on
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil

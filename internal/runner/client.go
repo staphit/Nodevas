@@ -58,6 +58,9 @@ type Client struct {
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
+	// NewTerminal starts an interactive run's agent in a terminal; nil means
+	// a real pseudo-terminal. Tests swap in a fake.
+	NewTerminal TerminalStarter
 
 	jobs *jobs
 }
@@ -201,7 +204,12 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	// latest of every watched PR, once, in case the hub missed a change.
 	c.jobs.resendPRs()
 	flush := func() error {
-		return c.jobs.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) })
+		write := func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) }
+		// Terminal output first, so a run's last screen arrives before its finish.
+		if err := c.jobs.terms.flush(write); err != nil {
+			return err
+		}
+		return c.jobs.flush(write)
 	}
 	if err := flush(); err != nil {
 		return true, err
@@ -224,9 +232,17 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
 			case runnerwire.TypeMerge:
 				c.jobs.merge(msg.RunID, msg.Merge)
+			case runnerwire.TypeTermIn:
+				c.jobs.termInput(msg.RunID, msg.Term)
+			case runnerwire.TypeTermResize:
+				c.jobs.termResize(msg.RunID, msg.Term)
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {
+				return true, err
+			}
+		case <-c.jobs.terms.notifyCh():
+			if err := c.jobs.terms.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) }); err != nil {
 				return true, err
 			}
 		case <-flushTick.C:

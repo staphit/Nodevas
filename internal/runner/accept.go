@@ -131,12 +131,21 @@ const promptPreview = 500
 func describeOffer(o Offer) string {
 	var b strings.Builder
 	job := o.Job
-	b.WriteString("\n=== Run offered by the hub ===\n")
+	interactive := job.Mode == runnerwire.ModeInteractive
+	if interactive {
+		b.WriteString("\n=== INTERACTIVE run offered by the hub ===\n")
+	} else {
+		b.WriteString("\n=== Run offered by the hub ===\n")
+	}
 	fmt.Fprintf(&b, "  requested by: %s\n", orDash(job.RequestedBy))
 	fmt.Fprintf(&b, "  project:      %s\n", orDash(job.Project))
 	fmt.Fprintf(&b, "  node:         %s  %s\n", job.NodeID, job.NodeTitle)
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
 	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
+	if interactive {
+		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine, and the\n" +
+			"                dispatcher can type into it (answer its prompts, run what it lets them)\n")
+	}
 	base := job.Base
 	if base == "" {
 		base = "(the repository's default branch)"

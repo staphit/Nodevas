@@ -33,8 +33,12 @@ func prepareTree(cmd *exec.Cmd) {
 // attachTree is called right after Start. The process is assigned to the job
 // before it has had time to start node, so its children are in the job too.
 // Kill-on-close means a runner that dies takes its agents with it.
-func attachTree(cmd *exec.Cmd) *procTree {
-	t := &procTree{pid: cmd.Process.Pid}
+func attachTree(cmd *exec.Cmd) *procTree { return attachPID(cmd.Process.Pid) }
+
+// attachPID is attachTree for a process started some other way (in a
+// pseudo-terminal).
+func attachPID(pid int) *procTree {
+	t := &procTree{pid: pid}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return t
