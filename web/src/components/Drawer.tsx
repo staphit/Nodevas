@@ -23,7 +23,6 @@ import {
   useRemoteCarets,
 } from "../store";
 import { OperationStatus, ResizeHandle } from "./InteractionPrimitives";
-import { useCanEdit } from "./SignIn";
 import { DocumentOutline } from "./inspector/DocumentOutline";
 import { NodeAppearance } from "./inspector/NodeAppearance";
 import { NodeLinkPicker } from "./NodeLinkPicker";
@@ -363,10 +362,6 @@ export function TabBody({
   const requestLock = useApp((s) => s.requestLock);
   const releaseLock = useApp((s) => s.releaseLock);
   const heldByOther = Boolean(lock && !lock.mine);
-  // A visitor session reads everything and changes nothing. The server refuses
-  // the writes regardless; what this gates is the offer — a document that lets
-  // you type and then fails to save reads as a broken server, not as a rule.
-  const canEdit = useCanEdit();
 
   useEffect(() => {
     requestLock(id);
@@ -799,12 +794,6 @@ export function TabBody({
         </div>
       )}
 
-      {/* One disabled fieldset over every metadata control, rather than a
-        * canEdit prop threaded into each panel. The browser disables every
-        * input, select and button underneath it, including ones added to
-        * these panels later — which is the same deny-by-default reasoning the
-        * server's middleware gate uses. The server refuses these writes
-        * regardless; this only stops the UI offering what will be refused. */}
       <details
         className="drawer-meta-band"
         open={metaOpen}
@@ -814,10 +803,8 @@ export function TabBody({
           * desktop drawer this band is always open and the two panels look
           * exactly as they did before it existed. */}
         <summary>{t("drawer.metaSummary")}</summary>
-        <fieldset className="readonly-gate" disabled={!canEdit}>
-          <NodeMetaForm id={id} />
-          <LifecyclePanel id={id} />
-        </fieldset>
+        <NodeMetaForm id={id} />
+        <LifecyclePanel id={id} />
       </details>
 
       <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
@@ -859,11 +846,9 @@ export function TabBody({
         </button>
       </div>
 
-      <fieldset className="readonly-gate" disabled={!canEdit}>
-        {drawerView === "relations" && <NodeRelations id={id} />}
-        {drawerView === "timeline" && <NodeTimeline id={id} />}
-        {drawerView === "appearance" && <NodeAppearance id={id} />}
-      </fieldset>
+      {drawerView === "relations" && <NodeRelations id={id} />}
+      {drawerView === "timeline" && <NodeTimeline id={id} />}
+      {drawerView === "appearance" && <NodeAppearance id={id} />}
 
       <div className="node-content-view" hidden={drawerView !== "content"}>
         <NodeHistory
@@ -873,9 +858,7 @@ export function TabBody({
           onRestored={reloadDocument}
         />
 
-        {/* Not fieldset-gated: the page tabs inside are how a reader moves
-          * between subpages. The component hides its own mutators instead. */}
-        <SubpageControls pages={subpages} onPopout={popoutPage} canEdit={canEdit} />
+        <SubpageControls pages={subpages} onPopout={popoutPage} />
 
         <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
           {activeProject && (
@@ -892,31 +875,24 @@ export function TabBody({
           {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
         </nav>
 
-        {/* The formatting toolbar's whole job is inserting text, and the
-          * editor below refuses insertions. font size, outline and the
-          * preview toggle live in it too, which is a real loss for a reader —
-          * accepted for now over teaching the toolbar which of its buttons
-          * write. */}
-        {canEdit && (
-          <EditorToolbar
-            markdownTools={markdownTools}
-            view={view}
-            onInsertNodeLink={() => setLinkPickerOpen(true)}
-            attachments={attachments}
-            tables={tables}
-            fontSize={fontSize}
-            setFontSize={setFontSize}
-            outlineOpen={outlineOpen}
-            toggleOutline={toggleOutline}
-            editorMode={editorMode}
-            setEditorMode={setEditorMode}
-            nodeId={id}
-            pageId={activePageID ?? "main"}
-            content={editorBody}
-          />
-        )}
+        <EditorToolbar
+          markdownTools={markdownTools}
+          view={view}
+          onInsertNodeLink={() => setLinkPickerOpen(true)}
+          attachments={attachments}
+          tables={tables}
+          fontSize={fontSize}
+          setFontSize={setFontSize}
+          outlineOpen={outlineOpen}
+          toggleOutline={toggleOutline}
+          editorMode={editorMode}
+          setEditorMode={setEditorMode}
+          nodeId={id}
+          pageId={activePageID ?? "main"}
+          content={editorBody}
+        />
 
-        {canEdit && markdownTools && !preview && <TableToolbar tables={tables} />}
+        {markdownTools && !preview && <TableToolbar tables={tables} />}
 
         <div className={`editor-stage${outlineOpen ? " with-outline" : ""}`}>
         {outlineOpen && markdownTools && (
@@ -976,7 +952,7 @@ export function TabBody({
             value={liveEditing ? (liveMountText.current ?? "") : editorBody}
             height="100%"
             theme={theme}
-            readOnly={(liveDoc.ready ? false : heldByOther) || !canEdit || pageBusy}
+            readOnly={(liveDoc.ready ? false : heldByOther) || pageBusy}
             extensions={editorExtensions}
             onCreateEditor={syncEditorView}
             onChange={onEditorChange}
@@ -1000,12 +976,6 @@ export function TabBody({
           here as everywhere else, and a failure stays on screen — with the
           reason and a way to try again — for as long as it is unresolved.
         */}
-        {!canEdit && (
-          <div className="tab-footer">
-            <span className="tab-footer-hint">{t("drawer.readOnlyVisitor")}</span>
-          </div>
-        )}
-        {canEdit && (
         <div className="tab-footer">
           <OperationStatus
             status={saveState.status}
@@ -1031,7 +1001,6 @@ export function TabBody({
             <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
           </span>
         </div>
-        )}
       </div>
     </div>
   );

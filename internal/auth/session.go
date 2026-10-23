@@ -136,14 +136,6 @@ func (a *SessionAuth) seatAvailableLocked(userID string, now time.Time) bool {
 	if a.maxActiveUsers <= 0 {
 		return true
 	}
-	// Visitors do not take seats. The limit exists to bound how many people can
-	// have work open at once, and a visitor has none open — counting them would
-	// let anyone with the shared PIN fill the server and lock the editors out,
-	// which is the one thing a read-only credential must not be able to do.
-	// maxSessions still bounds the total.
-	if userID == VisitorID {
-		return true
-	}
 	active := a.activeUserIDsLocked(now)
 	if _, alreadyHere := active[userID]; alreadyHere {
 		return true
@@ -196,28 +188,6 @@ func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
 	actor := found.actor
 	revision := found.revision
 	a.mu.Unlock()
-
-	// A visitor session is pinned to no account, so there is no revision to
-	// re-read. What it is pinned to instead is the credential still existing:
-	// `nodevas visitor off` has to mean off now, not at the end of a
-	// twelve-hour TTL, because the situation an operator turns it off in is one
-	// where the link is somewhere they did not expect.
-	//
-	// The credential is not re-verified here, only its presence. Rotating the
-	// PIN is not the same act as revoking access, and forcing every reader off
-	// the page for it would make an operator hesitate over the safer of the two.
-	if actor.ID == VisitorID {
-		if !a.VisitorEnabled(r.Context()) {
-			a.mu.Lock()
-			if a.sessions[key] == found {
-				_ = a.removeSessionsLocked(key)
-			}
-			a.mu.Unlock()
-			return identity.Actor{}, ErrUnauthenticated
-		}
-		a.renew(key, found, now)
-		return actor, nil
-	}
 
 	// The request's context, so a client that disconnects mid-request releases
 	// the read slot this query is holding instead of pinning it until SQLite's

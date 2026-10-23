@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthGate, SignIn, SignOutButton, VisitorBadge } from "./SignIn";
+import { AuthGate, SignIn, SignOutButton } from "./SignIn";
 import { AuthError, api } from "../api";
 import { useApp } from "../store";
 
@@ -17,7 +17,6 @@ vi.mock("../api", async () => {
     api: {
       requestOtp: vi.fn(),
       login: vi.fn(),
-      visitorLogin: vi.fn(),
       logout: vi.fn(),
       getAuthStatus: vi.fn(),
     },
@@ -27,16 +26,11 @@ vi.mock("../api", async () => {
 const mocked = vi.mocked(api as unknown as {
   requestOtp: (email: string) => Promise<{ ok: boolean }>;
   login: (email: string, otp: string) => Promise<{ ok: boolean; actor: unknown }>;
-  visitorLogin: (
-    pin: string,
-    passcode: string,
-  ) => Promise<{ ok: boolean; actor: unknown }>;
   logout: () => Promise<{ ok: boolean }>;
   getAuthStatus: () => Promise<{
     mode: "local" | "accounts";
     authenticated: boolean;
     actor: unknown;
-    visitor?: boolean;
   }>;
 });
 
@@ -49,17 +43,6 @@ async function requestPasscode(
   await user.click(screen.getByRole("button", { name: "寄送驗證碼" }));
 }
 
-/** Opens the visitor form and submits a credential with Enter. */
-async function visitorSubmit(
-  user: ReturnType<typeof userEvent.setup>,
-  pin: string,
-  passcode: string,
-) {
-  await user.click(screen.getByRole("button", { name: "訪客登入" }));
-  await user.type(screen.getByLabelText("訪客 PIN"), pin);
-  await user.type(screen.getByLabelText("通行碼"), `${passcode}{Enter}`);
-}
-
 describe("SignIn", () => {
   beforeEach(() => {
     useApp.setState({
@@ -67,10 +50,6 @@ describe("SignIn", () => {
     });
     mocked.requestOtp.mockResolvedValue({ ok: true });
     mocked.login.mockResolvedValue({ ok: true, actor: { name: "阿明" } });
-    mocked.visitorLogin.mockResolvedValue({
-      ok: true,
-      actor: { id: "visitor", name: "訪客", role: "visitor" },
-    });
   });
 
   afterEach(() => {
@@ -259,80 +238,19 @@ describe("SignIn", () => {
     expect(screen.getByText(/其他裝置.*登出/)).toBeInTheDocument();
   });
 
-  it("offers no visitor entry when visitor access is off", () => {
-    render(<SignIn onSignedIn={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "訪客登入" })).toBeNull();
-  });
-
-  /**
-   * The visitor credential is a shared PIN and a fixed passcode that is never
-   * mailed, so it has its own form and never touches the email flow.
-   */
-  it("signs a visitor in with the visitor PIN and passcode", async () => {
-    const user = userEvent.setup();
-    const onSignedIn = vi.fn();
-    render(<SignIn onSignedIn={onSignedIn} visitor />);
-
-    await user.click(screen.getByRole("button", { name: "訪客登入" }));
-    expect(screen.getByLabelText("訪客 PIN")).toHaveFocus();
-    await user.type(screen.getByLabelText("訪客 PIN"), "777");
-    await user.type(screen.getByLabelText("通行碼"), "LOOKONLY");
-    await user.click(screen.getByRole("button", { name: "登入" }));
-
-    expect(mocked.visitorLogin).toHaveBeenCalledWith("777", "LOOKONLY");
-    expect(mocked.requestOtp).not.toHaveBeenCalled();
-    expect(mocked.login).not.toHaveBeenCalled();
-    expect(onSignedIn).toHaveBeenCalledWith({
-      id: "visitor",
-      name: "訪客",
-      role: "visitor",
-    });
-  });
-
-  it("shows a rejected visitor credential and links back to the email form", async () => {
-    const user = userEvent.setup();
-    mocked.visitorLogin.mockRejectedValue(
-      new AuthError(401, "訪客 PIN 或通行碼不正確"),
-    );
-    render(<SignIn onSignedIn={vi.fn()} visitor />);
-
-    await visitorSubmit(user, "777", "WRONG");
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("訪客 PIN 或通行碼不正確");
-
-    await user.click(screen.getByRole("button", { name: "改用 email 登入" }));
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(screen.queryByLabelText("訪客 PIN")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("rewrites a visitor 429 into readable advice", async () => {
-    const user = userEvent.setup();
-    mocked.visitorLogin.mockRejectedValue(new AuthError(429, "rate limited"));
-    render(<SignIn onSignedIn={vi.fn()} visitor />);
-
-    await visitorSubmit(user, "777", "LOOKONLY");
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "嘗試次數過多，請稍後再試",
-    );
-  });
-
   /**
    * Nothing typed here may survive the tab. Both stores are checked wholesale
    * rather than by key: a future refactor could persist it under any name.
    */
   it("leaves no trace of credentials in web storage", async () => {
     const user = userEvent.setup();
-    render(<SignIn onSignedIn={vi.fn()} visitor />);
+    render(<SignIn onSignedIn={vi.fn()} />);
 
     await requestPasscode(user, "ming@example.com");
     await user.type(screen.getByLabelText("驗證碼"), "a7k2m9p4");
     await user.click(screen.getByRole("button", { name: "登入" }));
-    await visitorSubmit(user, "777", "LOOKONLY");
 
     expect(mocked.login).toHaveBeenCalled();
-    expect(mocked.visitorLogin).toHaveBeenCalled();
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(window.location.search).toBe("");
@@ -420,90 +338,5 @@ describe("AuthGate", () => {
 
     await user.click(screen.getByRole("button", { name: "重試" }));
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
-  });
-
-  it("offers the visitor entry when the server enables it", async () => {
-    const user = userEvent.setup();
-    mocked.getAuthStatus.mockResolvedValue({
-      mode: "accounts",
-      authenticated: false,
-      actor: null,
-      visitor: true,
-    });
-    mocked.visitorLogin.mockResolvedValue({
-      ok: true,
-      actor: { id: "visitor", name: "訪客", role: "visitor" },
-    });
-
-    render(
-      <AuthGate>
-        <VisitorBadge />
-      </AuthGate>,
-    );
-
-    await screen.findByRole("button", { name: "訪客登入" });
-    await visitorSubmit(user, "777", "LOOKONLY");
-
-    expect(mocked.visitorLogin).toHaveBeenCalledWith("777", "LOOKONLY");
-    expect(await screen.findByText("訪客 · 唯讀")).toBeInTheDocument();
-  });
-
-  // An older server sends no visitor field at all; that must read as "off".
-  it("hides the visitor entry when status omits it", async () => {
-    mocked.getAuthStatus.mockResolvedValue({
-      mode: "accounts",
-      authenticated: false,
-      actor: null,
-    });
-
-    render(
-      <AuthGate>
-        <p>app</p>
-      </AuthGate>,
-    );
-
-    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "訪客登入" })).toBeNull();
-  });
-
-  /** The read-only rule is permanent, worn as a topbar pill rather than a strip. */
-  it("gives a visitor the read-only notice and a way out", async () => {
-    mocked.getAuthStatus.mockResolvedValue({
-      mode: "accounts",
-      authenticated: true,
-      actor: { id: "visitor", name: "訪客", role: "visitor" },
-    });
-
-    render(
-      <AuthGate>
-        <VisitorBadge />
-        <SignOutButton />
-      </AuthGate>,
-    );
-
-    const badge = await screen.findByText("訪客 · 唯讀");
-    // The pill only has to be noticed; the whole rule rides its title.
-    expect(badge).toHaveAttribute("title", expect.stringMatching(/無法編輯/));
-    expect(badge).toHaveAttribute("title", expect.stringMatching(/儲存可見的文件和附件/));
-    expect(badge).toHaveAttribute("title", expect.stringMatching(/整案匯出/));
-    expect(screen.getByRole("button", { name: "登出（訪客）" })).toBeInTheDocument();
-  });
-
-  it("wears no visitor badge for a signed-in account", async () => {
-    mocked.getAuthStatus.mockResolvedValue({
-      mode: "accounts",
-      authenticated: true,
-      actor: { id: "u1", name: "patrick", role: "member" },
-    });
-
-    render(
-      <AuthGate>
-        <VisitorBadge />
-        <span>app</span>
-      </AuthGate>,
-    );
-
-    await screen.findByText("app");
-    expect(screen.queryByText("訪客 · 唯讀")).toBeNull();
   });
 });

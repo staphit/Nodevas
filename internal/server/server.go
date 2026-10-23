@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
+	"nodevas/internal/db"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
@@ -18,6 +20,9 @@ import (
 	"nodevas/internal/store"
 	"strconv"
 	"sync"
+	"sync/atomic"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
@@ -30,9 +35,13 @@ type Server struct {
 	auth     auth.Authenticator
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
-	abuse    *abuseGuard
-	stop     chan struct{}
-	stopOnce sync.Once
+	agents   *agents.Hub
+
+	accessVerifier *auth.AccessVerifier
+	accessRequired bool
+	abuse          *abuseGuard
+	stop           chan struct{}
+	stopOnce       sync.Once
 	// allowedHosts are the Host header names this server answers on, lowercased
 	// and without a port. A nil map means nobody has said where this server
 	// listens, so there is no name to judge a Host against: that is the zero
@@ -44,6 +53,39 @@ type Server struct {
 	// listenPort is set only once UseListenAddress has run, and is what tells
 	// the origin check that it may insist on a port.
 	listenPort string
+	// copilot serves /api/copilot when set; see UseCopilot.
+	copilot RouteRegistrar
+	// router is the last router Handler built, read by the copilot's tool
+	// bridge from request goroutines while startup may still be writing it.
+	router atomic.Pointer[builtRouter]
+}
+
+// builtRouter boxes the router for the atomic pointer.
+type builtRouter struct{ handler http.Handler }
+
+// RouteRegistrar is a handler package that adds its own routes under /api.
+type RouteRegistrar interface {
+	Register(api *gin.RouterGroup)
+}
+
+// UseCopilot enables the voice copilot's API (internal/httpapi/copilot).
+// Call it before Handler. The copilot service's tool bridge should be given
+// BuiltHandler, which is how its tool calls reach this server's own routes.
+//
+// It takes the handler set as an interface rather than importing it because
+// the copilot reaches the MCP tools, and the MCP package's tests build this
+// server: a direct import here would be a cycle.
+func (s *Server) UseCopilot(api RouteRegistrar) {
+	s.copilot = api
+}
+
+// BuiltHandler returns the router Handler built, or nil before Handler has
+// run. Unlike Handler it builds nothing, so it is safe to call per request.
+func (s *Server) BuiltHandler() http.Handler {
+	if built := s.router.Load(); built != nil {
+		return built.handler
+	}
+	return nil
 }
 
 func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
@@ -58,6 +100,16 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		abuse:    newAbuseGuard(),
 		stop:     make(chan struct{}),
 	}
+	s.agents = agents.NewHub(nil, func(projectRoot, _ string, _ any) {
+		if s.hub == nil {
+			return
+		}
+		if projectRoot == "" {
+			s.hub.Broadcast("agents-changed", "")
+			return
+		}
+		s.hub.BroadcastRoom(projectRoot, "agents-changed", "")
+	})
 	go s.notifier.Run(s.stop)
 	// The backup loop touches the workspace immediately at startup, so it only
 	// runs with a real project manager (a static-only server passes nil).
@@ -119,10 +171,26 @@ func (s *Server) UseAccounts(users *auth.UserStore) {
 	}
 }
 
+// UseAccess puts Cloudflare Access in front of every route: with required, a
+// request without a valid Access JWT is refused before anything else runs;
+// without it, failures are only logged. Call it before Handler.
+func (s *Server) UseAccess(verifier *auth.AccessVerifier, required bool) {
+	s.accessVerifier = verifier
+	s.accessRequired = required
+}
+
 // UseAudit points the audit trail at the workspace database. Servers with
 // accounts should configure it before building their handler.
 func (s *Server) UseAudit(store *audit.Store) {
 	s.audit = store
+}
+
+// UseAgentsDB attaches the workspace database to the agent collaboration hub so
+// messages and ask_user requests persist across restarts.
+func (s *Server) UseAgentsDB(database *db.DB) {
+	if s.agents != nil {
+		s.agents.SetDatabase(database)
+	}
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.
@@ -140,21 +208,6 @@ func (s *Server) SetMaxActiveUsers(limit int) {
 	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
 		accounts.SetMaxActiveUsers(limit)
 	}
-}
-
-// SetVisitor configures the shared read-only credential. Both halves empty
-// turns it off, which is the default. Call it after UseAccounts; a server
-// without accounts has no sign-in for it to belong to.
-//
-// The credential is stored in the workspace database, not in this process, so
-// `nodevas visitor on|off` changes it while the server runs. This entry point
-// exists for tests and embedders that already hold a Server.
-func (s *Server) SetVisitor(pin, otp string) error {
-	accounts, ok := s.auth.(*auth.SessionAuth)
-	if !ok {
-		return nil
-	}
-	return accounts.SetVisitor(context.Background(), pin, otp)
 }
 
 // ErrWildcardNeedsHostName is returned when a wildcard bind arrives with no

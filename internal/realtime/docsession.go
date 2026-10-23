@@ -171,17 +171,12 @@ func (h *Hub) beginCompactionLocked(session *docSession, client *wsClient, now t
 	return token
 }
 
-func writableMemberLocked(session *docSession, client *wsClient) bool {
+func memberLocked(session *docSession, client *wsClient) bool {
 	if session == nil {
 		return false
 	}
-	if _, present := session.members[client]; !present {
-		return false
-	}
-	client.mu.Lock()
-	writable := client.actor.CanWrite()
-	client.mu.Unlock()
-	return writable
+	_, present := session.members[client]
+	return present
 }
 
 // docKey names the document a message is about. This is wire format, not an
@@ -217,18 +212,12 @@ type leaderNotice struct {
 	leader bool
 }
 
-// elect picks the leader: the lowest client id among the participants that may
-// write. Lowest id rather than oldest join because every participant computes
-// the same answer from the same set, and a set has no arrival order.
+// elect picks the leader: the lowest client id among the participants. Lowest
+// id rather than oldest join because every participant computes the same
+// answer from the same set, and a set has no arrival order.
 func (session *docSession) elect() {
 	var chosen *wsClient
 	for member := range session.members {
-		member.mu.Lock()
-		actor := member.actor
-		member.mu.Unlock()
-		if !actor.CanWrite() {
-			continue
-		}
 		if chosen == nil || member.id < chosen.id {
 			chosen = member
 		}
@@ -852,7 +841,7 @@ func (h *Hub) docUpdate(client *wsClient, key, payload string) {
 		unlockPersistence()
 		return
 	}
-	if !writableMemberLocked(session, client) {
+	if !memberLocked(session, client) {
 		// An update from outside the session has nowhere to be stored and no
 		// audience: doc-open is what buys a place in both.
 		h.mu.Unlock()
@@ -1069,7 +1058,7 @@ func (h *Hub) docCompactRequest(client *wsClient, key string) {
 	if s != nil {
 		h.expireCompactionLocked(s, now)
 	}
-	if !writableMemberLocked(s, client) {
+	if !memberLocked(s, client) {
 		h.mu.Unlock()
 		unlock()
 		return
@@ -1110,7 +1099,7 @@ func (h *Hub) docSnapshotStart(client *wsClient, key string, message clientMessa
 	if s != nil {
 		h.expireCompactionLocked(s, now)
 	}
-	valid := writableMemberLocked(s, client) && s.compaction != nil && s.compaction.client == client &&
+	valid := memberLocked(s, client) && s.compaction != nil && s.compaction.client == client &&
 		s.compaction.token == message.Token && s.compaction.until.After(now) && s.compaction.assembly == nil &&
 		client.snapshotActive == "" && h.snapshotBytes+message.Size <= maxHubSnapshotBytes &&
 		client.canSnapshotStart(now, message.Size) && h.canSnapshotCadenceLocked(actorKey, docCadenceKey, now)
@@ -1233,7 +1222,7 @@ func (h *Hub) docSnapshotCommit(client *wsClient, key string, message clientMess
 	h.mu.Lock()
 	s := h.docs[room][key]
 	now := time.Now()
-	if !writableMemberLocked(s, client) || s.compaction == nil || s.compaction.client != client || s.compaction.token != message.Token || s.compaction.assembly == nil || !s.compaction.until.After(now) {
+	if !memberLocked(s, client) || s.compaction == nil || s.compaction.client != client || s.compaction.token != message.Token || s.compaction.assembly == nil || !s.compaction.until.After(now) {
 		if s != nil && s.compaction != nil && s.compaction.client == client && s.compaction.token == message.Token {
 			h.clearCompactionLocked(s)
 		}

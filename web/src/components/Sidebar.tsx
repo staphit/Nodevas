@@ -30,7 +30,6 @@ import {
   useWorkspacePicker,
 } from "./explorer/WorkspacePickerPanel";
 import { TreeContextMenu } from "./explorer/TreeContextMenu";
-import { useCanEdit } from "./SignIn";
 import {
   NodeContextMenu,
   type NodeMenuTarget,
@@ -62,10 +61,6 @@ export function SidebarBackdrop({
 
 export function Sidebar() {
   const { t } = useI18n();
-  // Read-only sessions browse the tree and search; the rows that create,
-  // import, rename or transfer are not offered. The server refuses them all
-  // regardless — this only stops the sidebar promising what will be refused.
-  const canEdit = useCanEdit();
   const graph = useApp((state) => state.graph);
   const statuses = useApp((state) => state.statuses);
   const issues = useApp((state) => state.issues);
@@ -322,7 +317,6 @@ export function Sidebar() {
             {t("sidebar.projectCount", { count: String(projects.length) })}
           </span>
         </div>
-        {canEdit && (
         <div className="explorer-create-actions" aria-label={t("sidebar.tools")}>
           <button
             type="button"
@@ -384,26 +378,21 @@ export function Sidebar() {
             {t("sidebar.connectWorkspace")}
           </button>
         </div>
-        )}
-        {canEdit && (
-          <>
-            <ProjectTransferBar
-              transfer={transfer}
-              activeProject={activeProject}
-              setProjectTransferNotice={setProjectTransferNotice}
-              openSaveAs={saveAs.openSaveAs}
-              saveAsBusy={saveAs.saveAsBusy}
-            />
-            <ProjectCreatePanel
-              create={create}
-              projects={projects}
-              projectByName={projectByName}
-            />
-            <ProjectRenamePanel rename={rename} />
-            <SaveAsPanel saveAs={saveAs} activeProject={activeProject} />
-            <WorkspacePickerPanel picker={picker} />
-          </>
-        )}
+        <ProjectTransferBar
+          transfer={transfer}
+          activeProject={activeProject}
+          setProjectTransferNotice={setProjectTransferNotice}
+          openSaveAs={saveAs.openSaveAs}
+          saveAsBusy={saveAs.saveAsBusy}
+        />
+        <ProjectCreatePanel
+          create={create}
+          projects={projects}
+          projectByName={projectByName}
+        />
+        <ProjectRenamePanel rename={rename} />
+        <SaveAsPanel saveAs={saveAs} activeProject={activeProject} />
+        <WorkspacePickerPanel picker={picker} />
         {projectTransferNotice && (
           <div className="project-transfer-notice" role="status">
             {projectTransferNotice}

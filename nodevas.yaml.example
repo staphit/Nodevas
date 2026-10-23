@@ -24,3 +24,20 @@ smtp:
 logging:
   level: info
   format: json
+
+# Voice copilot (see COPILOT.md). These are defaults: an administrator's
+# settings in the UI (PUT /api/copilot/settings) override them at runtime.
+# The API key never goes here. Set NODEVAS_COPILOT_API_KEY (or the file-backed
+# NODEVAS_COPILOT_API_KEY_FILE), or ANTHROPIC_API_KEY / OPENAI_API_KEY, or save
+# one in the settings, which stores it encrypted under the machine key.
+# NODEVAS_COPILOT_PROVIDER, NODEVAS_COPILOT_MODEL, NODEVAS_COPILOT_BASE_URL and
+# NODEVAS_COPILOT_ENABLED override the matching keys; --copilot=false turns it off.
+copilot:
+  enabled: true
+  provider: anthropic        # anthropic | openai (any OpenAI-compatible endpoint)
+  model: ""                  # empty: the provider's default model
+  base_url: ""               # e.g. http://127.0.0.1:11434/v1 for Ollama; no key needed then
+  effort: low                # low | medium | high; voice favours latency
+  # allow_bypass: false      # unset: allowed on a loopback-only server, refused with accounts
+  max_tool_calls_per_turn: 25
+  agent_role: orchestrator   # orchestrator | worker, enforced against node write_access

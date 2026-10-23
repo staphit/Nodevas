@@ -1,0 +1,305 @@
+/* Agent collaboration network: floating button, independent side sheet,
+ * session roster, ask_user approval cards, and node card agent pills.
+ */
+
+.agent-fab {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right, 0px));
+  bottom: calc(max(18px, env(safe-area-inset-bottom, 0px)) + 58px);
+  z-index: var(--copilot-z, 60);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 20px var(--shadow), 0 1px 3px var(--shadow);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+.agent-fab:hover {
+  background: var(--hover);
+}
+.agent-fab.has-online {
+  border-color: var(--st-progress-fg);
+}
+.agent-fab.has-pending-ask {
+  border-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.agent-fab-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 18px;
+}
+.agent-fab.has-pending-ask .agent-fab-badge {
+  background: var(--st-failed-fg);
+  color: #fff;
+}
+
+.agent-panel {
+  z-index: calc(var(--copilot-z, 60) + 1);
+}
+
+.agent-toggle-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-asks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--st-ready-bg) 35%, var(--surface));
+}
+.agent-ask-note {
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.agent-roster-section {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.agent-roster-empty {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.agent-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-session-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.agent-session-card.is-selected {
+  border-color: var(--accent);
+}
+.agent-session-card.is-offline {
+  opacity: 0.6;
+}
+.agent-session-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-2);
+}
+.agent-state-dot.state-busy {
+  background: var(--st-progress-fg);
+}
+.agent-state-dot.state-idle {
+  background: var(--st-done-fg);
+}
+.agent-session-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agent-session-name:hover {
+  color: var(--accent);
+}
+.agent-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.agent-session-repo {
+  font-family: var(--mono);
+}
+.agent-session-doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-node-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-node-chip.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+.agent-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.agent-section-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-msg-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 92%;
+}
+.agent-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+.agent-msg-route {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.agent-reply-btn {
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.agent-reply-btn:hover {
+  opacity: 1;
+}
+.agent-msg-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-msg-time {
+  font-size: 10px;
+  opacity: 0.7;
+  align-self: flex-end;
+}
+
+.agent-composer {
+  flex-direction: column;
+  align-items: stretch;
+}
+.agent-composer-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.agent-to-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.agent-to-label select {
+  flex: 1;
+}
+.agent-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* Graph node card agent badge */
+.col-card-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--st-progress-bg);
+  color: var(--st-progress-fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Node timeline: agent messages bound to the node */
+.timeline-audit-kind.agent {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.node-timeline-agent-body {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

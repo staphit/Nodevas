@@ -18,6 +18,9 @@ import { ConfirmDialogHost } from "./components/ConfirmDialog";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
+import { CopilotRoot } from "./copilot/CopilotRoot";
+import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
+import { useAgents } from "./agents/agentStore";
 import { NotifySettingsModal } from "./components/NotifySettingsModal";
 import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
@@ -26,7 +29,7 @@ import {
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
-import { AuthGate, SignOutButton, useSignOut, useViewer, VisitorBadge } from "./components/SignIn";
+import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
 import { ProjectSettings } from "./components/ProjectSettings";
 import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
@@ -307,6 +310,10 @@ function MainApp() {
         }
         case "state-changed":
           void refreshState().catch(reportError);
+          void useAgents.getState().refreshAll();
+          break;
+        case "agents-changed":
+          void useAgents.getState().refreshAll();
           break;
         case "folders-changed":
           // Only the file layout moved; the graph is untouched, so there is
@@ -430,8 +437,6 @@ function MainApp() {
           />
         )}
         <PresenceAvatars narrow={narrowTopbar} />
-        {/* Renders nothing unless the session is a visitor's. */}
-        <VisitorBadge />
         <div className="topbar-actions">
           <button
             className="command-trigger"
@@ -616,6 +621,8 @@ function MainApp() {
       <ProjectPickerHost />
       <CommandPalette />
       <OnboardingTour />
+      <CopilotRoot />
+      <AgentNetworkRoot />
     </div>
   );
 }

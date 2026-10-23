@@ -38,7 +38,7 @@ func TestAgentPayloadMeasurements(t *testing.T) {
 	}
 	raw, _ := json.Marshal(list)
 	t.Logf("tools/list: %d bytes; instructions: %d bytes", len(raw), len(instructions("fixture")))
-	if len(raw) > 14500 || len(instructions("fixture")) > 600 {
+	if len(raw) > 17500 || len(instructions("fixture")) > 600 {
 		t.Fatal("agent catalog exceeded its context budget")
 	}
 	for _, name := range []string{"get_node", "get_graph_outline"} {

@@ -1,4 +1,4 @@
-﻿/* Entry point. app.css was one 6,700-line file; it is now a series of
+/* Entry point. app.css was one 6,700-line file; it is now a series of
  * contiguous slices. The order below is the original file's order and the
  * cascade depends on it — reordering these imports changes which rules
  * win. Add new rules to the slice that owns that area, at its end.
@@ -23,6 +23,8 @@
 @import "./styles/12-timeline.css"; /* timeline lanes, snapshots, split panes */
 @import "./styles/13-tour.css"; /* onboarding tour overlay and tooltips */
 @import "./styles/14-touch.css"; /* touch gestures, coarse-pointer targets, phone layout, safe areas */
+@import "./styles/15-copilot.css"; /* voice copilot button, panel, transcript */
+@import "./styles/16-agents.css"; /* agent collaboration network panel and ask cards */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {
@@ -126,38 +128,6 @@
  * waiting for input. */
 .signin-pin-row input[readonly] {
   color: var(--text-dim, #888);
-}
-/* Switching between the email and visitor forms is a secondary path, so it is
- * a quiet text button rather than a second primary action. */
-.signin-form button.signin-switch {
-  align-self: center;
-  margin-top: 4px;
-  border: 0;
-  background: none;
-  color: var(--text-dim, #888);
-  font-size: 13px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.signin-form button.signin-switch:hover {
-  color: var(--text, inherit);
-}
-
-/* Read-only sessions say so permanently — the fact does not stop being true
- * after a few seconds — but as a pill in the top bar rather than a strip above
- * the app, which cost a phone a whole row. The full sentence rides the title
- * attribute; the pill itself only has to be noticed, not read. */
-.visitor-badge {
-  flex: 0 0 auto;
-  padding: 2px 9px;
-  font-size: 11px;
-  line-height: 1.6;
-  white-space: nowrap;
-  border-radius: 999px;
-  color: var(--warn-text, #f0d9a0);
-  background: var(--warn-bg, #4a3a12);
-  border: 1px solid color-mix(in srgb, var(--warn-text, #f0d9a0) 30%, transparent);
 }
 .signin-actions button {
   flex: 1;

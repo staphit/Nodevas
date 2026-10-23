@@ -447,6 +447,91 @@ UPDATE accounts SET email = ''
 CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
 `,
 	},
+	{
+		name: "0007_copilot",
+		stmt: `
+-- The voice copilot's conversations and transcripts (see COPILOT.md). They
+-- belong to the account that held them, never to the project's content: a
+-- transcript is not a node, and a project shared with others must not show
+-- one person's dictation to the rest.
+--
+-- Timestamps here are Unix milliseconds rather than the RFC3339 text the other
+-- tables use. A conversation produces several entries a second, and a
+-- transcript is ordered by seq, not by time; the millisecond value is what
+-- the browser shows and sorts conversations by without parsing anything.
+CREATE TABLE copilot_conversations (
+    id          TEXT PRIMARY KEY,
+    -- Not a foreign key to accounts: on a loopback server the account is the
+    -- built-in "local" actor, which has no row.
+    account_id  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    mode        TEXT NOT NULL DEFAULT 'default',
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+) STRICT;
+CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
+
+CREATE TABLE copilot_entries (
+    id               TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    seq              INTEGER NOT NULL,
+    kind             TEXT NOT NULL,             -- user | assistant | tool | notice
+    source           TEXT NOT NULL DEFAULT '',  -- voice | text (user entries)
+    text             TEXT NOT NULL DEFAULT '',
+    tool_name        TEXT NOT NULL DEFAULT '',
+    tool_input       TEXT NOT NULL DEFAULT '',
+    tool_output      TEXT NOT NULL DEFAULT '',
+    tool_status      TEXT NOT NULL DEFAULT '',  -- ok | error | denied
+    -- provider.Message JSON, replayed to the model on the next turn. The
+    -- columns above are what the panel reads, so a transcript renders without
+    -- decoding a vendor payload.
+    message          TEXT NOT NULL DEFAULT '',
+    created_at       INTEGER NOT NULL,
+    UNIQUE (conversation_id, seq)
+) STRICT;
+`,
+	},
+	{
+		name: "0008_agent_network",
+		stmt: `
+-- Agent-to-agent messages and human-in-the-loop ask requests.
+CREATE TABLE agent_messages (
+    id              TEXT PRIMARY KEY,
+    project         TEXT NOT NULL,
+    sender_actor    TEXT NOT NULL,
+    sender_session  TEXT NOT NULL DEFAULT '',
+    sender_agent    TEXT NOT NULL DEFAULT '',
+    recipient       TEXT NOT NULL,
+    reply_to        TEXT NOT NULL DEFAULT '',
+    thread_id       TEXT NOT NULL DEFAULT '',
+    node_id         TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    read_at         INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_messages_inbox ON agent_messages (project, recipient, read_at, created_at);
+CREATE INDEX agent_messages_project ON agent_messages (project, created_at);
+
+CREATE TABLE agent_asks (
+    id            TEXT PRIMARY KEY,
+    project       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL,
+    actor_id      TEXT NOT NULL,
+    agent         TEXT NOT NULL DEFAULT '',
+    question      TEXT NOT NULL,
+    about_msg_id  TEXT NOT NULL DEFAULT '',
+    node_id       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    decided_by    TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    decided_at    INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

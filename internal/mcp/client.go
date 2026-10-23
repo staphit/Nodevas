@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nodevas/internal/auth"
@@ -101,26 +102,59 @@ func codeFor(status int) string {
 
 // Client talks to one Nodevas server about one project.
 type Client struct {
-	base      *url.URL
-	project   string
-	actor     string
-	agentRole string
-	http      *http.Client
+	base       *url.URL
+	project    string
+	actor      string
+	agentRole  string
+	http       *http.Client
+	customHTTP bool
+
+	mu          sync.Mutex
+	sessionID   string
+	sessionName string
+	agentKind   string
+	repo        string
+	branch      string
+	cwd         string
+	state       string
+	nodeID      string
+	doing       string
+	unreadCount int
+	// names remembers the server-given name of every session ID this process
+	// has acted as, so switching between them never renames one.
+	names map[string]string
+	// follow says where the current session ID can change mid-process:
+	// "claude" re-reads Claude Code's session registry (/clear starts a new
+	// conversation in the same process), "codex" takes the sessionId Codex
+	// puts in each tool call's _meta (one MCP process serves every thread).
+	follow string
 }
 
 // ClientOptions configures a Client. Project is fixed for the process: tools
 // other than list_projects never accept a project argument, so an agent cannot
 // be talked into writing to a workspace the operator did not point it at.
 type ClientOptions struct {
-	Server  string
-	Project string
-	Actor   string
+	Server      string
+	Project     string
+	Actor       string
+	SessionID   string
+	SessionName string
+	AgentKind   string
+	Repo        string
+	Branch      string
 	// AgentRole is the write-permission class every request declares:
 	// "worker" or "orchestrator". Empty sends no header, which the server
 	// reads as a human session. Like Actor it is fixed for the process, so a
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
 	Timeout   time.Duration
+	// HTTPClient, when set, carries every request instead of a socket client,
+	// and Timeout is left to it. It exists for the copilot's tool bridge,
+	// whose client serves requests with the server's own handler inside this
+	// process. Such a client never leaves the process, so the loopback-only
+	// check on Server — which is about where a socket would connect — has
+	// nothing to guard and is skipped.
+	HTTPClient *http.Client
 }
 
 // LoopbackOnlyError is returned when --server names something this process
@@ -148,21 +182,68 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if base.Scheme != "http" && base.Scheme != "https" {
 		return nil, fmt.Errorf("--server %q: expected an http:// or https:// URL", raw)
 	}
-	if !isLoopbackURL(base) {
+	if opts.HTTPClient == nil && !isLoopbackURL(base) {
 		return nil, &LoopbackOnlyError{Host: base.Host}
 	}
 	base.Path = strings.TrimSuffix(base.Path, "/")
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	httpClient := opts.HTTPClient
+	if httpClient == nil {
+		timeout := opts.Timeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	actor := strings.TrimSpace(opts.Actor)
+	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor)
+	if strings.TrimSpace(opts.SessionID) != "" {
+		sessionID = strings.TrimSpace(opts.SessionID)
+	}
+	if strings.TrimSpace(opts.AgentKind) != "" {
+		agentKind = strings.TrimSpace(opts.AgentKind)
+	}
+	if strings.TrimSpace(opts.Repo) != "" {
+		repo = strings.TrimSpace(opts.Repo)
+	}
+	if strings.TrimSpace(opts.Branch) != "" {
+		branch = strings.TrimSpace(opts.Branch)
 	}
 	return &Client{
-		base:      base,
-		project:   strings.TrimSpace(opts.Project),
-		actor:     strings.TrimSpace(opts.Actor),
-		agentRole: strings.TrimSpace(opts.AgentRole),
-		http:      &http.Client{Timeout: timeout},
+		base:        base,
+		project:     strings.TrimSpace(opts.Project),
+		actor:       actor,
+		agentRole:   strings.TrimSpace(opts.AgentRole),
+		http:        httpClient,
+		customHTTP:  opts.HTTPClient != nil,
+		sessionID:   sessionID,
+		sessionName: strings.TrimSpace(opts.SessionName),
+		agentKind:   agentKind,
+		repo:        repo,
+		branch:      branch,
+		cwd:         cwd,
+		state:       "idle",
+		names:       map[string]string{},
+		follow:      followMode(opts.SessionID, agentKind),
 	}, nil
+}
+
+// longPollClientKey carries a per-call *http.Client whose timeout outlasts a
+// long-poll; see doLongPoll.
+type longPollClientKey struct{}
+
+func (c *Client) httpFor(ctx context.Context) *http.Client {
+	if hc, ok := ctx.Value(longPollClientKey{}).(*http.Client); ok {
+		return hc
+	}
+	return c.http
+}
+
+// UnreadCount returns the most recently observed unread message count for this
+// session.
+func (c *Client) UnreadCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.unreadCount
 }
 
 // Project is the workspace this client is pinned to; empty means the server's
@@ -299,7 +380,7 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 		request.Header.Set(auth.AgentRoleHeaderName, c.agentRole)
 	}
 
-	response, err := c.http.Do(request)
+	response, err := c.httpFor(ctx).Do(request)
 	if err != nil {
 		return &APIError{
 			Code:    CodeServerUnavailable,

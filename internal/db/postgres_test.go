@@ -83,8 +83,8 @@ func TestPostgresSchemaAndReopen(t *testing.T) {
 	if err := second.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&steps); err != nil {
 		t.Fatal(err)
 	}
-	if steps != 4 {
-		t.Fatalf("schema_migrations has %d rows, want 4", steps)
+	if steps != 6 {
+		t.Fatalf("schema_migrations has %d rows, want 6", steps)
 	}
 	// The read pool is read-only on the server, as query_only makes it on
 	// SQLite.
@@ -111,7 +111,7 @@ func TestCopyToPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := src.SetSetting(ctx, "visitor.pin", ""); err != nil {
+	if err := src.SetSetting(ctx, "copy.test", ""); err != nil {
 		t.Fatal(err)
 	}
 

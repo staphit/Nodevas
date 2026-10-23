@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
 )
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
@@ -113,7 +114,24 @@ func (s *Server) withAuth(c *gin.Context) {
 		httpx.Err(c, http.StatusUnauthorized, err)
 		return
 	}
-	if s.auth.NeedsCSRF() && isUnsafeMethod(r.Method) {
+	// The copilot's tool bridge serves its calls with this handler in-process,
+	// marked by a context value no network request can carry (see
+	// auth.WithInProcessAgent). It authenticated above with the person's own
+	// cookie, so who it is stays theirs; what changes is that it is an agent —
+	// node write_access applies to it on every authenticator, including the
+	// ones that ignore the agent-role header — and that there is no browser in
+	// the loop for a CSRF token to protect. Abuse limits and the audit trail
+	// run after this as for any request.
+	inProcess := false
+	if class, ok := auth.InProcessAgent(r.Context()); ok {
+		if class != identity.AgentWorker && class != identity.AgentOrchestrator {
+			httpx.Err(c, http.StatusUnauthorized, auth.ErrUnknownAgentRole)
+			return
+		}
+		actor.Agent = class
+		inProcess = true
+	}
+	if s.auth.NeedsCSRF() && isUnsafeMethod(r.Method) && !inProcess {
 		if err := auth.CheckCSRF(r); err != nil {
 			httpx.Err(c, http.StatusForbidden, err)
 			return
@@ -131,79 +149,6 @@ func (s *Server) withAuth(c *gin.Context) {
 	}
 	c.Request = r.WithContext(requestContext)
 	c.Next()
-}
-
-// withVisitorReadOnly is the whole of what a visitor session may not do.
-//
-// It sits here rather than in the handlers because the guarantee is negative:
-// "a visitor changes nothing" cannot be kept by a set of checks that each route
-// has to remember to add. So this decides by shape — safe method, not on the
-// deny list — and every route added later is covered without being edited.
-//
-// It runs after withAuth, which is where the actor comes from, and before the
-// rest of the chain, so a refusal costs nothing beyond the identity lookup that
-// had already happened.
-func (s *Server) withVisitorReadOnly(c *gin.Context) {
-	r := c.Request
-	if auth.ActorFrom(r).CanWrite() {
-		c.Next()
-		return
-	}
-	if !visitorMayCall(r) {
-		httpx.Err(c, http.StatusForbidden,
-			errors.New("this is a read-only visitor session"))
-		return
-	}
-	c.Next()
-}
-
-// visitorMayCall decides one request. Deny by default: an unrecognised method
-// or a path that has to be reasoned about is refused, because the cost of
-// refusing a read a visitor should have had is a bug report, and the cost of
-// allowing a write is the document.
-func visitorMayCall(r *http.Request) bool {
-	// Signing out is the one state change a visitor must keep. Signing in is
-	// not listed because it happens before there is an actor to test.
-	if r.URL.Path == "/api/auth/logout" {
-		return true
-	}
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-	default:
-		return false
-	}
-	if visitorDeniedPaths[r.URL.Path] {
-		return false
-	}
-	for _, prefix := range visitorDeniedPrefixes {
-		if strings.HasPrefix(r.URL.Path, prefix) {
-			return false
-		}
-	}
-	return true
-}
-
-// visitorDeniedPaths are reads that are not viewing.
-//
-// An export is a copy of the whole project leaving the server in one request.
-// It changes nothing, so nothing above stops it, and it is exactly what a
-// credential handed out to be able to look must not also hand out. The audit
-// trail and the notification settings are listed for the same reason they are
-// admin-gated — they describe the deployment, not the document — and are
-// repeated here so this file states the visitor's limits on its own.
-var visitorDeniedPaths = map[string]bool{
-	"/api/projects/export": true,
-	"/api/audit":           true,
-	"/api/notify/settings": true,
-}
-
-// visitorDeniedPrefixes are whole subtrees a visitor has no business in. The
-// filesystem browser enumerates the host's directories, and the remote
-// endpoints reach Google Drive with the operator's credentials; neither is
-// part of the document a visitor came to read.
-var visitorDeniedPrefixes = []string{
-	"/api/fs/",
-	"/api/remote/",
 }
 
 // withRequestProject resolves ?project= / X-Nodevas-Project once per request.

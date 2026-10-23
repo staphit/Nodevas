@@ -109,22 +109,6 @@ func TestStreamBudgetIsBoundedByVolumeAsWellAsCount(t *testing.T) {
 	}
 }
 
-func TestAStreamMessageIsRefusedToAVisitor(t *testing.T) {
-	// A visitor may watch a room and show a cursor, but a ghost card being
-	// dragged is a change other people see, so it is refused on the same terms
-	// as a lock.
-	for _, messageType := range []string{"lock", "unlock", "graph-drag"} {
-		if !mutatesSharedState(messageType) {
-			t.Fatalf("%q is not refused to a read-only session", messageType)
-		}
-	}
-	for _, messageType := range []string{"subscribe", "presence", "awareness"} {
-		if mutatesSharedState(messageType) {
-			t.Fatalf("%q is refused to a read-only session", messageType)
-		}
-	}
-}
-
 func TestValidClientMessageRejectsOversizedAndUnknownInput(t *testing.T) {
 	valid := []clientMessage{
 		{Type: "subscribe", Project: "project"},
@@ -211,18 +195,8 @@ func TestValidClientMessageBoundsTheLiveDocumentMessages(t *testing.T) {
 	}
 }
 
-func TestALiveDocumentIsReadableByAVisitorButNotWritable(t *testing.T) {
+func TestDocumentMessagesAreChargedToThePayloadBudget(t *testing.T) {
 	mutations := []string{"doc-update", "doc-snapshot", "doc-flushed", "doc-compact-request", "doc-snapshot-start", "doc-snapshot-chunk", "doc-snapshot-commit", "doc-snapshot-abort"}
-	for _, messageType := range mutations {
-		if !mutatesSharedState(messageType) {
-			t.Fatalf("%q is not refused to a read-only session", messageType)
-		}
-	}
-	for _, messageType := range []string{"doc-open", "doc-close"} {
-		if mutatesSharedState(messageType) {
-			t.Fatalf("%q is refused to a read-only session", messageType)
-		}
-	}
 	for _, messageType := range append([]string{"doc-open", "doc-close"}, mutations...) {
 		if !isPayload(messageType) {
 			t.Fatalf("%q is charged to the control budget", messageType)
@@ -376,7 +350,6 @@ func TestRemovedClientCannotAcquireALock(t *testing.T) {
 
 func TestDocumentLeadershipGoesToTheLowestWriterAndMovesOnLeave(t *testing.T) {
 	hub := NewHub()
-	visitor := docClient(hub, "aaa", identity.RoleVisitor)
 	late := docClient(hub, "ccc", identity.RoleMember)
 	early := docClient(hub, "bbb", identity.RoleMember)
 
@@ -384,16 +357,6 @@ func TestDocumentLeadershipGoesToTheLowestWriterAndMovesOnLeave(t *testing.T) {
 	if state := firstEvent(t, late, "doc-state"); !state.Leader || !state.Seed {
 		t.Fatalf("the first opener was not told to seed and lead: %+v", state)
 	}
-	// The visitor cannot be handed the file to write even though its id sorts
-	// first, and its arrival changes nobody's answer.
-	hub.openDoc(visitor, "alpha")
-	if state := firstEvent(t, visitor, "doc-state"); state.Leader || state.Seed {
-		t.Fatalf("a visitor was made leader or told to seed: %+v", state)
-	}
-	if events := docEvents(t, late); len(events) != 0 {
-		t.Fatalf("leadership was re-announced without changing: %+v", events)
-	}
-
 	hub.openDoc(early, "alpha")
 	if state := firstEvent(t, early, "doc-state"); !state.Leader || state.Seed {
 		t.Fatalf("the lower writer did not take leadership: %+v", state)
@@ -405,9 +368,6 @@ func TestDocumentLeadershipGoesToTheLowestWriterAndMovesOnLeave(t *testing.T) {
 	hub.closeDoc(early, "alpha")
 	if leader := firstEvent(t, late, "doc-leader"); !leader.Leader {
 		t.Fatal("leadership was not handed back when the leader left")
-	}
-	if events := docEvents(t, visitor); len(events) != 0 {
-		t.Fatalf("a visitor was told about an election it can never win: %+v", events)
 	}
 }
 

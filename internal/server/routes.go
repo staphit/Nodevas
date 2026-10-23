@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	agentsapi "nodevas/internal/httpapi/agents"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
 	"nodevas/internal/httpapi/node"
@@ -27,7 +28,7 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(gin.Recovery(), s.secureHTTP, s.preAuthAbuseLimits, s.withAuth, s.withVisitorReadOnly, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
+	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
@@ -35,6 +36,9 @@ func (s *Server) Handler() http.Handler {
 	project.New(s.pm).Register(api)
 	fsbrowse.New(s.auth, s.openDir).Register(api)
 	remoteapi.New(s.pm, s.remotes, s.auth).Register(api)
+	if s.agents != nil {
+		agentsapi.New(s.pm, s.agents).Register(api)
+	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {
 		sys.UseMailer(s.mailer)
@@ -48,10 +52,16 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	sys.Register(api)
+	if s.copilot != nil {
+		s.copilot.Register(api)
+	}
 
 	router.GET("/ws", s.hub.Handle)
 	// Unmatched: JSON 404 under /api/, the SPA everywhere else.
 	router.NoRoute(s.notFound)
 
+	// Kept so the copilot's tool bridge can serve its calls through this same
+	// router, middleware and all, without a socket.
+	s.router.Store(&builtRouter{handler: router})
 	return router
 }

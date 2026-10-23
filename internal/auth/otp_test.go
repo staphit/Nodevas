@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"nodevas/internal/db/dbtest"
+	"nodevas/internal/identity"
 )
 
 // annEmail is the address otpStoreForTest registers for "ann".
@@ -457,36 +458,17 @@ func TestACancelledRequestIsNotAFailedSignIn(t *testing.T) {
 	}
 }
 
-// The visitor credential opens only its own door. Offered to the account
-// endpoints it is just a wrong address and a wrong passcode; offered to its
-// own endpoint it signs in, without ending anybody else's visit.
-func TestTheVisitorCredentialOpensOnlyTheVisitorDoor(t *testing.T) {
+// Visitor access is gone. A session it opened before the upgrade — still in the
+// sessions table, pinned to the "visitor" id and revision — names no account,
+// so the revision check refuses it and drops it.
+func TestALeftoverVisitorSessionIsRefused(t *testing.T) {
 	sessions, _ := otpStoreForTest(t)
-	if err := sessions.SetVisitor(context.Background(), "777", "LOOKONLY"); err != nil {
+	_, token, _, err := sessions.openSession(
+		identity.Actor{ID: "visitor", Name: "visitor", Role: identity.Role("visitor")}, "visitor")
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	if _, _, _, err := sessions.LoginWithOTP(nil, "777", "LOOKONLY"); !errors.Is(err, ErrBadCredentials) {
-		t.Fatalf("account login with the visitor credential = %v, want ErrBadCredentials", err)
-	}
-	if _, err := sessions.RequestOTP(nil, "777"); !errors.Is(err, ErrNoSuchAccount) {
-		t.Fatalf("passcode request with the visitor pin = %v, want ErrNoSuchAccount", err)
-	}
-
-	actor, first, _, err := sessions.LoginVisitor(nil, "777", "look only")
-	if err != nil {
-		t.Fatalf("visitor login: %v", err)
-	}
-	if actor.ID != VisitorID {
-		t.Fatalf("actor = %+v, want the visitor", actor)
-	}
-	if _, _, _, err := sessions.LoginVisitor(nil, "777", "LOOKONLY"); err != nil {
-		t.Fatalf("second visitor: %v", err)
-	}
-	if _, err := sessions.Authenticate(requestWith(first)); err != nil {
-		t.Fatalf("a second visitor signed the first out: %v", err)
-	}
-	if _, _, _, err := sessions.LoginVisitor(nil, "777", "WRONGONE"); !errors.Is(err, ErrBadCredentials) {
-		t.Fatalf("wrong visitor passcode = %v, want ErrBadCredentials", err)
+	if _, err := sessions.Authenticate(requestWith(token)); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("leftover visitor session = %v, want ErrUnauthenticated", err)
 	}
 }

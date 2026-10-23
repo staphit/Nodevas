@@ -6,6 +6,9 @@
  * are deliberately shown together.
  */
 
+import { useEffect, useState } from "react";
+import type { AgentMessage } from "../../api/agents";
+import { useAgents } from "../../agents/agentStore";
 import { BUILTIN_PLAN_STATUSES } from "../../plan";
 import { operationScope, reportError, useApp, useOperation } from "../../store";
 import {
@@ -35,6 +38,30 @@ function calendarDayDifference(left: string, right: string): number {
   return Math.round((parse(left) - parse(right)) / 86_400_000);
 }
 
+// Long peer messages are clipped here; the Agent Network panel has the full text.
+const AGENT_MESSAGE_PREVIEW_CHARS = 600;
+
+/**
+ * Agent messages bound to this node. Refetched whenever the agent store
+ * refreshes (it does on every `agents-changed` push), so a new message lands
+ * here without its own subscription. A failed read simply shows nothing.
+ */
+function useNodeAgentMessages(id: string): AgentMessage[] {
+  const storeMessages = useAgents((state) => state.messages);
+  const loadNodeMessages = useAgents((state) => state.loadNodeMessages);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadNodeMessages(id).then((loaded) => {
+      if (!cancelled) setMessages(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, storeMessages, loadNodeMessages]);
+  return messages;
+}
+
 export function NodeTimeline({ id }: { id: string }) {
   const { t, language } = useI18n();
   const graph = useApp((state) => state.graph);
@@ -45,6 +72,7 @@ export function NodeTimeline({ id }: { id: string }) {
   const plans = graph?.ui?.plans?.[id] ?? [];
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
+  const agentMessages = useNodeAgentMessages(id);
 
   // Expected milestones go through the plan commands: clearing the date removes
   // the milestone, and the note survives a reschedule [A-04].
@@ -243,6 +271,34 @@ export function NodeTimeline({ id }: { id: string }) {
           </ol>
         )}
       </section>
+
+      {agentMessages.length > 0 && (
+        <section className="node-timeline-audit node-timeline-agents">
+          <h3>{t("timeline.agentMessagesTitle")}</h3>
+          <ol>
+            {agentMessages.map((message) => {
+              const body =
+                message.body.length > AGENT_MESSAGE_PREVIEW_CHARS
+                  ? `${message.body.slice(0, AGENT_MESSAGE_PREVIEW_CHARS)}…`
+                  : message.body;
+              return (
+                <li key={message.id}>
+                  <span className="timeline-audit-kind agent">
+                    {message.senderAgent || t("timeline.agentMessage")}
+                  </span>
+                  <div>
+                    <b>
+                      {message.from} → {message.to}
+                    </b>
+                    <time>{formatLocalizedDateTime(new Date(message.createdAt), language)}</time>
+                    <p className="node-timeline-agent-body">{body}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
 
       <div className="node-timeline-help">
         {t("timeline.help")}

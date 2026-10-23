@@ -82,6 +82,29 @@ type AbuseConfig struct {
 	MaxConcurrentRemote int `yaml:"max_concurrent_remote"`
 }
 
+// CopilotConfig configures the voice copilot (see COPILOT.md). The provider's
+// API key is deliberately not here: it comes from NODEVAS_COPILOT_API_KEY (or
+// the vendor's own variable) or from the encrypted secrets file an
+// administrator writes through the settings API, never from this file, which
+// sits in the workspace beside the notes.
+//
+// Values here are defaults. Settings an administrator saves at runtime win
+// over them, so a deployment can be reconfigured without a restart.
+type CopilotConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
+	BaseURL  string `yaml:"base_url"`
+	Effort   string `yaml:"effort"`
+	// AllowBypass is a pointer because its default depends on the deployment:
+	// on a loopback-only server the person at the keyboard owns everything
+	// the copilot could touch, on a server with accounts they do not. Nil
+	// means "decide from the deployment".
+	AllowBypass         *bool  `yaml:"allow_bypass"`
+	MaxToolCallsPerTurn int    `yaml:"max_tool_calls_per_turn"`
+	AgentRole           string `yaml:"agent_role"`
+}
+
 // ServeConfig contains settings for the nodevas serve command. CLI flags are
 // applied by the command after this value has been loaded, so a flag always
 // overrides the file and environment values.
@@ -98,6 +121,37 @@ type ServeConfig struct {
 	SMTP           SMTPConfig    `yaml:"smtp"`
 	Logging        LoggingConfig `yaml:"logging"`
 	Abuse          AbuseConfig   `yaml:"abuse"`
+	Copilot        CopilotConfig `yaml:"copilot"`
+	Access         AccessConfig  `yaml:"access"`
+}
+
+// AccessConfig puts Cloudflare Access in front of the server. With
+// TeamDomain and AUD set, every request's Access token is verified; Required
+// refuses the ones without a valid token, and without it failures are only
+// logged, which is how a deployment checks its Access setup first.
+type AccessConfig struct {
+	TeamDomain string `yaml:"team_domain"`
+	AUD        string `yaml:"aud"`
+	Required   bool   `yaml:"required"`
+}
+
+// Enabled reports whether Access tokens are checked at all.
+func (a AccessConfig) Enabled() bool {
+	return strings.TrimSpace(a.TeamDomain) != "" || strings.TrimSpace(a.AUD) != ""
+}
+
+// Validate refuses half a configuration: a team domain without an audience
+// (or the reverse) would verify nothing, and required with neither would
+// lock everyone out.
+func (a AccessConfig) Validate() error {
+	team, aud := strings.TrimSpace(a.TeamDomain), strings.TrimSpace(a.AUD)
+	if (team == "") != (aud == "") {
+		return errors.New("access team_domain and aud must be given together")
+	}
+	if a.Required && team == "" {
+		return errors.New("access required needs team_domain and aud")
+	}
+	return nil
 }
 
 // DefaultServeConfig returns the same defaults that the serve command used
@@ -114,6 +168,14 @@ func DefaultServeConfig() ServeConfig {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Copilot: CopilotConfig{
+			Enabled:  true,
+			Provider: "anthropic",
+			// Voice favours latency over depth.
+			Effort:              "low",
+			MaxToolCallsPerTurn: 25,
+			AgentRole:           "orchestrator",
 		},
 		Abuse: AbuseConfig{
 			PreAuthGlobalRate:  200,
@@ -220,6 +282,14 @@ func ApplyEnvironment(cfg *ServeConfig, lookup func(string) (string, bool)) erro
 		{"NODEVAS_SERVE_SMTP_SECURITY", func(value string) { cfg.SMTP.Security = value }},
 		{"NODEVAS_SERVE_LOG_LEVEL", func(value string) { cfg.Logging.Level = value }},
 		{"NODEVAS_SERVE_LOG_FORMAT", func(value string) { cfg.Logging.Format = value }},
+		// The copilot's own names, as COPILOT.md documents them. The API key is
+		// not among them: it is a secret, and the serve command reads it, with
+		// its _FILE form, the way it reads the SMTP password.
+		{"NODEVAS_COPILOT_PROVIDER", func(value string) { cfg.Copilot.Provider = value }},
+		{"NODEVAS_COPILOT_MODEL", func(value string) { cfg.Copilot.Model = value }},
+		{"NODEVAS_COPILOT_BASE_URL", func(value string) { cfg.Copilot.BaseURL = value }},
+		{"NODEVAS_SERVE_ACCESS_TEAM_DOMAIN", func(value string) { cfg.Access.TeamDomain = value }},
+		{"NODEVAS_SERVE_ACCESS_AUD", func(value string) { cfg.Access.AUD = value }},
 	}
 	for _, field := range stringsToSet {
 		if value, ok := lookup(field.name); ok && strings.TrimSpace(value) != "" {
@@ -307,6 +377,8 @@ func ApplyEnvironment(cfg *ServeConfig, lookup func(string) (string, bool)) erro
 	}{
 		{"NODEVAS_SERVE_BEHIND_PROXY", func(value bool) { cfg.BehindProxy = value }},
 		{"NODEVAS_SERVE_ALLOW_PLAINTEXT", func(value bool) { cfg.AllowPlaintext = value }},
+		{"NODEVAS_COPILOT_ENABLED", func(value bool) { cfg.Copilot.Enabled = value }},
+		{"NODEVAS_SERVE_ACCESS_REQUIRED", func(value bool) { cfg.Access.Required = value }},
 	}
 	for _, field := range bools {
 		value, ok := lookup(field.name)
@@ -337,6 +409,12 @@ func (c ServeConfig) Validate() error {
 	}
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return errors.New("tls_cert and tls_key must be given together")
+	}
+	if err := c.Copilot.Validate(); err != nil {
+		return err
+	}
+	if err := c.Access.Validate(); err != nil {
+		return err
 	}
 
 	rates := []struct {
@@ -399,6 +477,31 @@ func (c ServeConfig) Validate() error {
 		c.Abuse.MaxConcurrentDOCX < 1 || c.Abuse.MaxConcurrentDOCX > 64 ||
 		c.Abuse.MaxConcurrentRemote < 1 || c.Abuse.MaxConcurrentRemote > 64 {
 		return errors.New("abuse max concurrent parameters must be between 1 and 64")
+	}
+	return nil
+}
+
+// Validate checks the copilot section. An unknown provider or role is refused
+// at startup rather than surfacing as a failed turn, which is where a typo in
+// a YAML file would otherwise first show itself.
+func (c CopilotConfig) Validate() error {
+	switch c.Provider {
+	case "anthropic", "openai":
+	default:
+		return fmt.Errorf("copilot provider must be anthropic or openai, got %q", c.Provider)
+	}
+	switch c.Effort {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("copilot effort must be low, medium or high, got %q", c.Effort)
+	}
+	if c.MaxToolCallsPerTurn < 1 || c.MaxToolCallsPerTurn > 200 {
+		return errors.New("copilot max_tool_calls_per_turn must be between 1 and 200")
+	}
+	switch c.AgentRole {
+	case "orchestrator", "worker":
+	default:
+		return fmt.Errorf("copilot agent_role must be orchestrator or worker, got %q", c.AgentRole)
 	}
 	return nil
 }
