@@ -239,6 +239,8 @@ describe("policy", () => {
     expect(policyProblems({ ...POLICY, review: { mode: "bogus" } }, "advisor")).toContain(
       "reviewMode",
     );
+    expect(policyProblems({ ...POLICY, advisor: "systemone" }, "advisor")).not.toContain("advisor");
+    expect(policyProblems({ ...POLICY, advisor: "oracle" }, "advisor")).toContain("advisor");
   });
 
   it("drops what the chosen modes do not use", () => {

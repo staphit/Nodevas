@@ -189,12 +189,15 @@ export function PolicyEditor({
               >
                 <option value="">{t("autopilot.advisor.rules")}</option>
                 <option value="llm">{t("autopilot.advisor.llm")}</option>
+                <option value="systemone">{t("autopilot.advisor.systemone")}</option>
               </select>
             </label>
             <small className="run-hint">
               {value.advisor === "llm"
                 ? t("autopilot.advisorLlmHint")
-                : t("autopilot.advisorRulesHint")}
+                : value.advisor === "systemone"
+                  ? t("autopilot.advisorSystemOneHint")
+                  : t("autopilot.advisorRulesHint")}
             </small>
           </>
         ) : (

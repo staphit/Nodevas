@@ -61,7 +61,12 @@ export function policyProblems(policy: AutopilotPolicy, choice: ImplementChoice)
     else if (implement.length > MAX_FALLBACKS + 1) problems.push("implementLong");
     else if (implement.some((item) => agentModelProblem(item) !== "")) problems.push("implement");
   }
-  if (policy.advisor !== "" && policy.advisor !== "llm" && policy.advisor !== undefined) {
+  if (
+    policy.advisor !== "" &&
+    policy.advisor !== "llm" &&
+    policy.advisor !== "systemone" &&
+    policy.advisor !== undefined
+  ) {
     problems.push("advisor");
   }
   const mode = policy.review.mode;

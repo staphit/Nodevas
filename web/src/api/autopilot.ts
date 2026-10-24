@@ -31,8 +31,9 @@ export interface ReviewPolicy {
 }
 
 /** "" picks by the implement chain, else the owner's routing rules; "llm"
- * lets a fast model on the owner's runner pick per task. */
-export type AutopilotAdvisor = "" | "llm";
+ * lets a fast model on the owner's runner pick per task; "systemone" asks a
+ * System One decision model there (local Laya, or TypeSafe Jev). */
+export type AutopilotAdvisor = "" | "llm" | "systemone";
 
 export interface AutopilotPolicy {
   /** The implement step's chain (first, then fallbacks); empty leaves the
