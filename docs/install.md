@@ -65,8 +65,8 @@ NODEVAS_RUNNER_TOKEN=... NODEVAS_ACCESS_CLIENT_SECRET=... scripts/install.sh \
 ## Things to know
 
 - **Offers are accepted at a terminal.** A runner started at login has no terminal, so it declines every offer that auto-accept does not cover. Either turn auto-accept on (`--auto-accept`) and review it with `nodevas runner autoaccept show`, or run `nodevas runner` in a terminal and answer each offer there.
-- **Antigravity CLI** runs need `mcp(nodevas/*)` in its permissions. The agents step adds it; the runner itself never edits agy's settings.
-- **A hub behind Cloudflare Access.** Agent sessions you start by hand talk to the hub directly and cannot pass Access; runner runs are not affected. Point `--agents-server` at a server those sessions can reach, or pass `--no-agents`.
+- **A remote hub gets results, not your sessions.** With `--hub` on another machine, runs report their events, diff, commit, PR and usage through the runner; the agent sessions you start by hand stay on this PC and are not joined to the hub. The agents step then only runs `nodevas setup-agent --runs-only`, which changes nothing but Antigravity's permission rule. `--agents-server <url>` joins your own sessions to a server they can reach on this machine.
+- **Antigravity CLI** runs need `mcp(nodevas/*)` in its permissions (`nodevas setup-agent --runs-only --agents antigravity`). The runner itself never edits agy's settings.
 - **Upgrading** is running the script again from an updated checkout. On Windows, the running `nodevas.exe` is renamed to `nodevas.exe.old` so the new one can take its place. The runner picks up the new binary once restarted (`--restart`).
 
 ## Check and remove

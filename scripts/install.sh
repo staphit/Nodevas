@@ -51,7 +51,9 @@ work:
 agents:
   --agents <list>          agents to wire (claude,codex,gemini,opencode,antigravity);
                            default: every one installed here
-  --agents-server <url>    the server agents' MCP and hooks talk to (default: --hub)
+  --agents-server <url>    also join the sessions you start by hand to this server
+                           (default: only when --hub is on this machine; with a
+                           remote hub runs report results, your sessions stay local)
   --no-agents              do not touch any agent's config
 
 service:
@@ -423,6 +425,20 @@ step_settings() {
 	fi
 }
 
+# loopback_url: whether a URL's host is this machine.
+loopback_url() {
+	local host="${1#*://}"
+	host="${host%%/*}"
+	case "$host" in
+	\[*\]*) host="${host%%]*}]" ;;
+	*) host="${host%%:*}" ;;
+	esac
+	case "$host" in
+	localhost | 127.* | "[::1]") return 0 ;;
+	esac
+	return 1
+}
+
 step_agents() {
 	if [ "$NO_AGENTS" = 1 ]; then
 		return 0
@@ -433,15 +449,26 @@ step_agents() {
 			found+="${found:+ }$cli"
 		fi
 	done
-	say "wiring the coding agents into the agent network (on PATH: ${found:-none})"
-	if [ -n "$(status_field access)" ] && [ -z "$AGENTS_SERVER" ]; then
-		warn "the hub is behind Cloudflare Access. Agent sessions you start by hand on this machine talk to"
-		warn "$server directly and cannot pass Access (runner runs are not affected). Use --agents-server"
-		warn "for a server they can reach, or --no-agents."
-	fi
 	local -a args=(setup-agent --server "$server")
-	if [ -n "$AGENTS" ]; then
-		args+=(--agents "$AGENTS")
+	if [ -z "$AGENTS_SERVER" ] && ! loopback_url "$HUB"; then
+		# The hub is elsewhere: runs report their results through the runner, and
+		# the sessions you start by hand stay on this machine. Only what runs
+		# need from your own config is changed (Antigravity's allow rule).
+		say "preparing the coding agents for runner runs (on PATH: ${found:-none}); your own sessions stay off the hub"
+		args=(setup-agent --runs-only)
+		if [ -n "$AGENTS" ]; then
+			args+=(--agents "$AGENTS")
+		elif command -v agy >/dev/null 2>&1; then
+			args+=(--agents antigravity)
+		else
+			note "nothing to change: runner runs bring their own MCP server"
+			return 0
+		fi
+	else
+		say "wiring the coding agents into the agent network (on PATH: ${found:-none})"
+		if [ -n "$AGENTS" ]; then
+			args+=(--agents "$AGENTS")
+		fi
 	fi
 	show "$NV" "${args[@]}" --dry-run
 	local preview

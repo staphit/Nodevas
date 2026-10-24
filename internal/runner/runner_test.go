@@ -200,7 +200,7 @@ func TestDetectOpenCodeAndAntigravity(t *testing.T) {
 	}
 	// No settings file: not usable, and the fix is named.
 	if agy.Installed || agy.Version != "1.4.6" || !strings.Contains(agy.Error, AntigravityMCPRule) ||
-		!strings.Contains(agy.Error, "nodevas setup-agent --agents antigravity") || slices.Contains(cmds.calls, "/bin/agy models") {
+		!strings.Contains(agy.Error, "nodevas setup-agent --runs-only --agents antigravity") || slices.Contains(cmds.calls, "/bin/agy models") {
 		t.Errorf("antigravity without the rule = %+v", agy)
 	}
 

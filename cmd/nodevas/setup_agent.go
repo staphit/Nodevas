@@ -21,6 +21,8 @@ func setupAgentCmd(args []string) {
 		"comma-separated agents to wire: claude, codex, gemini, opencode, antigravity; empty means every one installed here")
 	remove := fs.Bool("remove", false, "take nodevas out of the agents' configs instead")
 	dryRun := fs.Bool("dry-run", false, "report what would change without writing anything")
+	runsOnly := fs.Bool("runs-only", false,
+		"only what the runner's runs need (Antigravity's mcp(nodevas/*) allow rule); your own sessions stay off the hub")
 	server := fs.String("server", mcp.DefaultServer, "the Nodevas server the agents work through")
 	projectName := fs.String("project", "", "the project in that server's workspace; empty means whichever one it has open")
 	actor := fs.String("actor", "",
@@ -58,6 +60,7 @@ func setupAgentCmd(args []string) {
 		Agents:    agents,
 		Remove:    *remove,
 		DryRun:    *dryRun,
+		RunsOnly:  *runsOnly,
 		Server:    strings.TrimSpace(*server),
 		Project:   strings.TrimSpace(*projectName),
 		Actor:     strings.TrimSpace(*actor),

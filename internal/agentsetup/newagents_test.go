@@ -376,3 +376,44 @@ console.log(fs.readFileSync("stop.json", "utf8"));
 		t.Fatalf("stop payload = %s\nby model %v, want %v", out, byModel, want)
 	}
 }
+
+// --runs-only touches only what runner runs need: Antigravity's allow rule,
+// and nothing that joins the person's own sessions to a hub.
+func TestRunsOnly(t *testing.T) {
+	env, _ := testEnv(t, "linux")
+	gem := filepath.Join(env.Home, ".gemini")
+	mcpConfig := filepath.Join(gem, "config", "mcp_config.json")
+	hooks := filepath.Join(gem, "config", "hooks.json")
+	settings := filepath.Join(gem, "antigravity-cli", "settings.json")
+	write(t, settings, `{"colorScheme": "dark"}`)
+
+	o := opts(Antigravity, Claude)
+	o.RunsOnly = true
+	r := Apply(env, o)
+	for _, rep := range r {
+		if rep.Err != nil {
+			t.Fatalf("%s: %v", rep.Agent, rep.Err)
+		}
+	}
+	if got := read(t, settings); !strings.Contains(got, `"mcp(nodevas/*)"`) || !strings.Contains(got, `"colorScheme": "dark"`) {
+		t.Fatalf("settings.json = %s", got)
+	}
+	for _, path := range []string{mcpConfig, hooks, filepath.Join(env.Home, ".claude", "settings.json")} {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("%s written by --runs-only", path)
+		}
+	}
+	if len(r) != 2 || len(r[1].Lines) != 1 || !strings.Contains(r[1].Lines[0], "nothing to change") {
+		t.Fatalf("reports = %+v", r)
+	}
+
+	o.Remove = true
+	for _, rep := range Apply(env, o) {
+		if rep.Err != nil {
+			t.Fatalf("removing %s: %v", rep.Agent, rep.Err)
+		}
+	}
+	if got := read(t, settings); strings.Contains(got, "nodevas") {
+		t.Fatalf("settings.json after removal = %s", got)
+	}
+}

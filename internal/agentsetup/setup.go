@@ -208,6 +208,11 @@ type Options struct {
 	Agents []string
 	Remove bool
 	DryRun bool
+	// RunsOnly wires only what a runner's runs need from the person's own
+	// config, and nothing that joins their hand-started sessions to a hub:
+	// for Antigravity the mcp(nodevas/*) allow rule (headless agy cannot
+	// ask), for the others nothing, since runs bring their own MCP server.
+	RunsOnly bool
 	// Server, Project and AgentRole go on every MCP command line; Server and
 	// Project on every hook line too.
 	Server    string
@@ -254,19 +259,17 @@ func Apply(env Env, opts Options) []Report {
 	for _, agent := range opts.Agents {
 		s := &setup{env: env, opts: opts, agent: agent, report: Report{Agent: agent}}
 		var err error
-		switch agent {
-		case Claude:
-			err = s.claude()
-		case Codex:
-			err = s.codex()
-		case Gemini:
-			err = s.gemini()
-		case OpenCode:
-			err = s.openCode()
-		case Antigravity:
-			err = s.antigravity()
+		switch {
+		case opts.RunsOnly && agent == Antigravity:
+			err = s.antigravityAllow(filepath.Join(env.antigravityGemini(), "antigravity-cli", "settings.json"))
+		case opts.RunsOnly:
+			if !slices.Contains(Agents, agent) {
+				err = fmt.Errorf("unknown agent %q (want one of %s)", agent, strings.Join(Agents, ", "))
+				break
+			}
+			s.line("nothing to change: runner runs bring their own MCP server")
 		default:
-			err = fmt.Errorf("unknown agent %q (want one of %s)", agent, strings.Join(Agents, ", "))
+			err = s.wire()
 		}
 		s.report.Err = err
 		for _, b := range s.backups {
@@ -275,6 +278,24 @@ func Apply(env Env, opts Options) []Report {
 		reports = append(reports, s.report)
 	}
 	return reports
+}
+
+// wire wires (or unwires) one agent fully: MCP server, hooks, permissions.
+func (s *setup) wire() error {
+	switch agent := s.agent; agent {
+	case Claude:
+		return s.claude()
+	case Codex:
+		return s.codex()
+	case Gemini:
+		return s.gemini()
+	case OpenCode:
+		return s.openCode()
+	case Antigravity:
+		return s.antigravity()
+	default:
+		return fmt.Errorf("unknown agent %q (want one of %s)", agent, strings.Join(Agents, ", "))
+	}
 }
 
 // ParseAgents splits a comma list and checks every name.

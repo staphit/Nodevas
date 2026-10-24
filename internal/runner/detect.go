@@ -208,7 +208,7 @@ var antigravitySettingsPath = func() (string, error) {
 // setup-agent --agents antigravity` is what adds the rule.
 func antigravityRunsBlocked() string {
 	const fix = "antigravity: runs need \"" + AntigravityMCPRule + "\" in permissions.allow of " +
-		"~/.gemini/antigravity-cli/settings.json; run `nodevas setup-agent --agents antigravity`"
+		"~/.gemini/antigravity-cli/settings.json; run `nodevas setup-agent --runs-only --agents antigravity`"
 	path, err := antigravitySettingsPath()
 	if err != nil {
 		return fix
