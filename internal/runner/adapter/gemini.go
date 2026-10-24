@@ -33,6 +33,25 @@ import (
 // exactly as given here; --allowed-mcp-server-names then leaves the owner's
 // own MCP servers out of the run. An administrator's system settings file, if
 // there is one, is not read for these runs.
+//
+// Checked against Gemini CLI 0.65.0 (run from its npm package, not
+// installed here), which changes some of that:
+//   - Headless, it refuses to start in a folder it does not trust (exit 55),
+//     and a run's worktree is a new folder: runs set
+//     GEMINI_CLI_TRUST_WORKSPACE=true. A trusted workspace's own
+//     .gemini/settings.json then applies: its hooks, tools.discoveryCommand
+//     and MCP servers run, and .gemini/.env or .env load. For implement and
+//     revise runs that is the owner's repository, trusted as such.
+//   - It skips a system settings file that is not owned by an administrator,
+//     which the run's temp file never is.
+//
+// So a read-only run (ReadOnly) has its nodevas server in the worktree's
+// .gemini/settings.json instead, written by Command after the runner removed
+// the repository's .gemini/, .agents/ and .env (see repoconfig.go); the
+// worktree is thrown away after. Workspace settings take precedence over the
+// owner's, and mcpServers merges by name, so the server is defined exactly as
+// given here there too. An implement run on 0.65 gets no nodevas server from
+// the override; it has the owner's own "nodevas" entry, if any.
 type Gemini struct{}
 
 // GeminiApprovalModes are --approval-mode's choices, per the CLI's docs.
@@ -44,6 +63,10 @@ const DefaultGeminiApprovalMode = "auto_edit"
 
 // geminiSystemSettingsEnv names the file the CLI reads as its system settings.
 const geminiSystemSettingsEnv = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
+
+// geminiTrustWorkspace trusts the run's worktree: without it, headless Gemini
+// CLI exits in a folder it does not know.
+const geminiTrustWorkspace = "GEMINI_CLI_TRUST_WORKSPACE=true"
 
 // geminiToolTimeoutMs bounds one nodevas MCP tool call; ask_user waits up to
 // ten minutes.
@@ -57,7 +80,7 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("gemini: binary, workdir and temp dir are required")
 	}
-	settingsPath, err := writeGeminiSettings(env)
+	settingsPath, err := writeGeminiSettings(job, env)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +100,7 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = jobEnv(job, geminiSystemSettingsEnv+"="+settingsPath)
+	cmd.Env = jobEnv(job, geminiSystemSettingsEnv+"="+settingsPath, geminiTrustWorkspace)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
@@ -85,8 +108,9 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 }
 
 // writeGeminiSettings writes the system settings override that defines the
-// nodevas MCP server into the run's temp dir.
-func writeGeminiSettings(env RunEnv) (string, error) {
+// nodevas MCP server into the run's temp dir and returns its path; for a
+// read-only run, the same settings into the worktree's .gemini/settings.json.
+func writeGeminiSettings(job runnerwire.Job, env RunEnv) (string, error) {
 	settings, err := json.MarshalIndent(map[string]any{
 		"mcpServers": map[string]any{
 			"nodevas": map[string]any{
@@ -107,7 +131,35 @@ func writeGeminiSettings(env RunEnv) (string, error) {
 	if err := os.WriteFile(settingsPath, settings, 0o600); err != nil {
 		return "", fmt.Errorf("writing the Gemini settings: %w", err)
 	}
+	if ReadOnly(job) {
+		if err := writeGeminiWorkspaceSettings(env.Workdir, settings); err != nil {
+			return "", err
+		}
+	}
 	return settingsPath, nil
+}
+
+// writeGeminiWorkspaceSettings writes settings as dir's .gemini/settings.json.
+// The runner has removed the repository's .gemini; through os.Root, a link
+// that appeared there anyway is not followed out of the worktree, and an
+// existing settings file is replaced, not merged with.
+func writeGeminiWorkspaceSettings(dir string, settings []byte) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("writing the Gemini workspace settings: %w", err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(".gemini", 0o700); err != nil {
+		return fmt.Errorf("writing the Gemini workspace settings: %w", err)
+	}
+	name := filepath.Join(".gemini", "settings.json")
+	if err := root.RemoveAll(name); err != nil {
+		return fmt.Errorf("writing the Gemini workspace settings: %w", err)
+	}
+	if err := root.WriteFile(name, settings, 0o600); err != nil {
+		return fmt.Errorf("writing the Gemini workspace settings: %w", err)
+	}
+	return nil
 }
 
 // geminiParser reads `--output-format stream-json`: one JSON object per line,

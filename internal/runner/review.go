@@ -293,7 +293,7 @@ func (j *jobs) executeReview(ctx context.Context, r *run, pr prCheck) {
 	r.publishing = true
 	j.mu.Unlock()
 
-	if dirty, _ := git(j.ctx, wt.Path, "status", "--porcelain"); strings.TrimSpace(dirty) != "" {
+	if dirty, _ := changedFiles(j.ctx, wt.Path); strings.TrimSpace(dirty) != "" {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "the reviewer changed files; discarded"})
 	}
 	if result.Status != runnerwire.RunSucceeded {

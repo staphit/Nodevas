@@ -115,6 +115,10 @@ func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 		// would need a permission prompt.
 		args = append(args, "--add-dir", env.TempDir)
 	}
+	if ReadOnly(job) {
+		// As headless (Command): the worktree's settings are not trusted.
+		args = append(args, "--setting-sources", "user", "--disallowedTools", ClaudeReadOnlyDeny)
+	}
 	args = append(args, "--allowedTools", NodevasMCPTools)
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
@@ -200,7 +204,7 @@ func (Gemini) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("gemini: binary, workdir and temp dir are required")
 	}
-	settingsPath, err := writeGeminiSettings(env)
+	settingsPath, err := writeGeminiSettings(job, env)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +229,8 @@ func (Gemini) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	args = append(args, "-i", prompt)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), geminiSystemSettingsEnv+"="+settingsPath)...)
+	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), geminiSystemSettingsEnv+"="+settingsPath,
+		geminiTrustWorkspace)...)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
@@ -250,7 +255,7 @@ func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, e
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
 	}
-	config, err := openCodeConfig(env, true)
+	config, err := openCodeConfig(env, true, ReadOnly(job))
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +270,7 @@ func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, e
 	args = append(args, "--prompt", prompt)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), "PWD="+env.Workdir, openCodeConfigEnv+"="+config)...)
+	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), openCodeEnv(job, env, config)...)...)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("opencode: %w", err)
 	}

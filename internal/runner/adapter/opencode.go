@@ -31,6 +31,12 @@ import (
 //
 // Headless, a permission that would ask is rejected and ends the run, so the
 // rules deny instead: a denied tool is not offered to the model at all.
+//
+// A read-only run (ReadOnly) also gets OPENCODE_DISABLE_PROJECT_CONFIG=1 and
+// no LSP servers or formatters: the worktree's opencode.json and .opencode/
+// are not the owner's. The runner removes those from the worktree as well,
+// because opencode 1.18.23's newer config loader ignores the variable (see
+// repoconfig.go).
 type OpenCode struct{}
 
 // OpenCodePermissionModes are the runner's permission settings for OpenCode
@@ -46,6 +52,11 @@ const DefaultOpenCodePermission = "edit"
 // from.
 const openCodeConfigEnv = "OPENCODE_CONFIG_CONTENT"
 
+// openCodeNoProjectConfig makes OpenCode skip the project's opencode.json and
+// .opencode/ directories (opencode 1.18.23's config loader and its plugin
+// dependency install).
+const openCodeNoProjectConfig = "OPENCODE_DISABLE_PROJECT_CONFIG=1"
+
 // openCodeToolTimeoutMs bounds one nodevas MCP request. ask_user waits up to
 // ten minutes for an answer; OpenCode's default is five seconds.
 const openCodeToolTimeoutMs = 900_000
@@ -58,7 +69,7 @@ func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
 	}
-	config, err := openCodeConfig(env, false)
+	config, err := openCodeConfig(env, false, ReadOnly(job))
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +80,7 @@ func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = jobEnv(job, "PWD="+env.Workdir, openCodeConfigEnv+"="+config)
+	cmd.Env = jobEnv(job, openCodeEnv(job, env, config)...)
 	// npm installs opencode on Windows as a .cmd shim; nothing here needs
 	// quoting (the config is in the environment, the prompt on stdin).
 	if err := wrapBatch(cmd); err != nil {
@@ -78,9 +89,19 @@ func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
+// openCodeEnv is what an OpenCode process gets on top of jobEnv.
+func openCodeEnv(job runnerwire.Job, env RunEnv, config string) []string {
+	extra := []string{"PWD=" + env.Workdir, openCodeConfigEnv + "=" + config}
+	if ReadOnly(job) {
+		extra = append(extra, openCodeNoProjectConfig)
+	}
+	return extra
+}
+
 // openCodeConfig is the run's OPENCODE_CONFIG_CONTENT. interactive turns each
-// deny into ask: someone is at the terminal to answer.
-func openCodeConfig(env RunEnv, interactive bool) (string, error) {
+// deny into ask: someone is at the terminal to answer. readOnly also turns off
+// LSP servers and formatters, programs OpenCode starts on its own.
+func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 	mode := env.PermissionMode
 	if mode == "" {
 		mode = DefaultOpenCodePermission
@@ -129,10 +150,15 @@ func openCodeConfig(env RunEnv, interactive bool) (string, error) {
 			servers[name] = map[string]any{"enabled": false}
 		}
 	}
-	config, err := json.Marshal(map[string]any{
+	inline := map[string]any{
 		"mcp":        servers,
 		"permission": permission,
-	})
+	}
+	if readOnly {
+		inline["lsp"] = false
+		inline["formatter"] = false
+	}
+	config, err := json.Marshal(inline)
 	if err != nil {
 		return "", err
 	}

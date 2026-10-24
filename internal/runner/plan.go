@@ -56,7 +56,7 @@ func (j *jobs) executePlan(ctx context.Context, r *run) {
 			FailureKind: runnerwire.FailureTask, Error: err.Error()})
 		return
 	}
-	if dirty, _ := git(j.ctx, wt.Path, "status", "--porcelain"); strings.TrimSpace(dirty) != "" {
+	if dirty, _ := changedFiles(j.ctx, wt.Path); strings.TrimSpace(dirty) != "" {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "the planner changed files; discarded"})
 	}
 	cleanup()

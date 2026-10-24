@@ -75,7 +75,7 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// server's tools are always allowed: the preamble tells the agent to claim
 	// its node, headless nobody can approve that, and the hub limits what
 	// those tools reach to the agent routes anyway.
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
+	if ReadOnly(job) {
 		// Read only, whatever the owner's permission mode and allowedTools:
 		// a deny wins over every allow, bypassPermissions included. The
 		// nodevas tools stay allowed; a plan writes through them.

@@ -45,7 +45,7 @@ func TestOpenCodeMCPServersReal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(project), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	names, err := OpenCodeMCPServers(context.Background(), bin, dir)
+	names, err := OpenCodeMCPServers(context.Background(), bin, dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}

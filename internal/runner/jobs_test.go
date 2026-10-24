@@ -91,6 +91,24 @@ func TestHelperProcess(t *testing.T) {
 	case "codex-ok":
 		fixture("codex_stream.jsonl")
 		os.Exit(0)
+	case "repoconfig":
+		// Which of the repository's own agent config the agent found, then
+		// some of its own, written into the worktree.
+		var found []string
+		for _, path := range adapter.RepoConfigPaths() {
+			if _, err := os.Lstat(filepath.Join(wd, filepath.FromSlash(path))); err == nil {
+				found = append(found, path)
+			}
+		}
+		put("found", strings.Join(found, ",")+".")
+		if err := os.MkdirAll(filepath.Join(wd, ".codex"), 0o700); err != nil {
+			os.Exit(9)
+		}
+		if err := os.WriteFile(filepath.Join(wd, ".codex", "config.toml"), []byte("x = 1\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
 	case "codex-fail":
 		fixture("codex_model_error.jsonl")
 		fmt.Fprintln(os.Stderr, "ERROR rmcp::transport::worker: worker quit")

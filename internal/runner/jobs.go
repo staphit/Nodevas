@@ -440,7 +440,7 @@ func (j *jobs) disabledMCP(ctx context.Context, r *run, bin, dir string) []strin
 	if r.job.Agent != "opencode" {
 		return nil
 	}
-	names, err := adapter.OpenCodeMCPServers(ctx, bin, dir)
+	names, err := adapter.OpenCodeMCPServers(ctx, bin, dir, adapter.ReadOnly(r.job))
 	if err != nil {
 		j.c.logf("run %s: cannot list OpenCode's MCP servers to switch them off: %v", r.job.RunID, err)
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
@@ -466,11 +466,12 @@ func (j *jobs) setRemoteTyping(r *run, on bool) {
 	}
 }
 
-// runAgent starts the agent in the worktree and waits for it, a cancel or the
-// timeout, whichever comes first. job is r.job, or for a review the job with
-// the PR's diff added to its prompt. text is the agent's whole final message
-// (adapter.Outcome.Text), which a review needs beyond the summary's cap.
-func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire.Job) (runnerwire.RunResult, string) {
+// startAgent starts the agent in the worktree and waits for it, a cancel or
+// the timeout, whichever comes first; runAgent (worktree_repoconfig.go) calls
+// it. job is r.job, or for a review the job with the PR's diff added to its
+// prompt. text is the agent's whole final message (adapter.Outcome.Text),
+// which a review needs beyond the summary's cap.
+func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwire.Job) (runnerwire.RunResult, string) {
 	// W2.5: the agent's TUI in a terminal instead (interactive.go).
 	if job.Mode == runnerwire.ModeInteractive {
 		return j.runInteractive(ctx, r, wt), ""

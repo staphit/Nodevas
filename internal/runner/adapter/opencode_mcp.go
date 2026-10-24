@@ -18,12 +18,20 @@ const openCodeConfigTimeout = 30 * time.Second
 // repository's opencode.json can name a local command as one). A run turns
 // them all off (RunEnv.DisableMCP); inline config is deep-merged over every
 // other, so `"enabled": false` wins (checked against opencode 1.18.23).
-func OpenCodeMCPServers(ctx context.Context, bin, dir string) ([]string, error) {
+//
+// It runs `opencode debug config` in dir, which loads the project config
+// there, plugins included. For a read-only run (readOnly) the runner has
+// removed that config from the worktree first, and the project config is
+// switched off here as it is for the run.
+func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, openCodeConfigTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "debug", "config")
 	cmd.Dir = dir
 	cmd.Env = append(childEnv(), "PWD="+dir)
+	if readOnly {
+		cmd.Env = append(cmd.Env, openCodeNoProjectConfig)
+	}
 	if err := wrapBatch(cmd); err != nil {
 		return nil, err
 	}
