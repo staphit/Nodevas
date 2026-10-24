@@ -30,6 +30,15 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Frame-Options", "DENY")
+	// A cross-origin page that opened this one keeps no handle on it (no
+	// tab-nabbing), and other origins cannot embed its responses.
+	c.Header("Cross-Origin-Opener-Policy", "same-origin")
+	c.Header("Cross-Origin-Resource-Policy", "same-origin")
+	// The voice copilot needs the microphone; nothing needs the rest.
+	c.Header("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)")
+	if auth.RequestIsSecure(r) {
+		c.Header("Strict-Transport-Security", "max-age=31536000")
+	}
 	// style-src keeps 'unsafe-inline' because React writes component styles as
 	// inline style attributes; there is no nonce to hang on them. Everything
 	// else is as narrow as the app actually needs:
@@ -40,6 +49,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	//   img-src keeps https: because markdown previews render remote images
 	//     (web/src/editor/livePreview.ts), but drops bare http: so a remote
 	//     image cannot downgrade the page or beacon the reader's IP in the clear.
+	//     Copilot answers render no remote media at all (web/src/markdown.ts).
 	c.Header(
 		"Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
@@ -66,8 +76,8 @@ func (s *Server) secureHTTP(c *gin.Context) {
 			httpx.Err(c, http.StatusForbidden, errors.New("cross-origin API request rejected"))
 			return
 		}
-		// Origin is absent on a top-level cross-site navigation, which is
-		// exactly how a state-changing GET gets attacked. Sec-Fetch-Site is
+		// Origin can be absent on a top-level cross-site form submission,
+		// which is exactly how a CSRF write gets attempted. Sec-Fetch-Site is
 		// set by the browser and unforgeable by page script, so it catches
 		// what Origin cannot. It is missing entirely on non-browser clients
 		// (agents, curl), which are not subject to CSRF in the first place.
@@ -262,23 +272,12 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	}
 }
 
-// stateChangingGETPaths are the GET routes that mutate server state. They are
-// listed rather than inferred because the method is the only signal the
-// transport layer has, and it lies about these.
-//
-// /api/remote/drive/auth mints a single-use OAuth state entry and redirects to
-// Google's consent screen, so a cross-site page that can reach it can both
-// exhaust that table and drive an administrator into an unexpected consent
-// flow. It stays a GET because the browser has to follow the 302 as a
-// navigation — a fetch cannot read a cross-origin redirect target, and a form
-// POST cannot carry the CSRF header a networked deployment requires.
-var stateChangingGETPaths = map[string]bool{
-	"/api/remote/drive/auth": true,
-}
-
+// stateChangingGET reports a GET that changes state: the method is the only
+// signal the transport layer has, and it lies about these. An interactive
+// run's terminal socket is opened with a GET and then carries keystrokes into
+// a process on the runner, so a cross-site page must not be able to open it.
 func stateChangingGET(r *http.Request) bool {
-	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-		stateChangingGETPaths[r.URL.Path]
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && runTerminalPath(r.URL.Path)
 }
 
 // allowsFetchSite reports whether a Sec-Fetch-Site value belongs to this

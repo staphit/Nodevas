@@ -55,8 +55,17 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/agents/heartbeat"},
 	{http.MethodPost, "/api/agents/leave"},
 	{http.MethodPost, "/api/agents/messages"},
+	// save_attachment; what a held message carries stays out of reach of an
+	// agent until a person approves it (agents.Viewer.mayRead).
+	{http.MethodGet, "/api/agents/messages/*/files/*"},
 	{http.MethodPost, "/api/agents/inbox"},
 	{http.MethodPost, "/api/agents/asks"},
+	// W6: `nodevas hook` reporting an external session's edits and snapshot.
+	{http.MethodPost, "/api/agents/sessions/*/changes"},
+	// `nodevas hook` reporting an external session's token usage.
+	{http.MethodPost, "/api/agents/sessions/*/usage"},
+	// Deliberately absent: holding a session's inbound mail and approving or
+	// rejecting held messages are a person's decisions about agents.
 }
 
 // runnerProxyAllows reports whether the proxy forwards method on target, an

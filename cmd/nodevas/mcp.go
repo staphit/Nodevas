@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,20 +23,10 @@ import (
 // opposite of the point. --project names a project inside the workspace the
 // running server already has open.
 func mcpServe(args []string) {
-	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	server := fs.String("server", mcp.DefaultServer,
-		"the running Nodevas server to work through; must be on this machine")
-	projectName := fs.String("project", "",
-		"which project in that server's workspace to act on; empty means whichever one it has open")
-	actor := fs.String("actor", mcp.DefaultActor,
-		"the name recorded against everything this agent changes; attribution, not authentication")
-	agentRole := fs.String("agent-role", "worker",
-		"the write-permission class this agent acts as: worker or orchestrator")
-	sessionName := fs.String("session-name", "",
-		"the name other agents address this session by (send_message to); empty derives one from the agent and repo")
-	chromaURL := fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project")
-	ragPython := fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings")
-	_ = fs.Parse(args)
+	fs, f := newMCPFlags(flag.ExitOnError)
+	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
+	server, projectName, actor, agentRole := f.server, f.projectName, f.actor, f.agentRole
+	sessionName, model, chromaURL, ragPython := f.sessionName, f.model, f.chromaURL, f.ragPython
 
 	// Every diagnostic goes to stderr, without exception. stdout carries the
 	// JSON-RPC stream, and one stray line on it ends the session with an error
@@ -67,13 +58,82 @@ func mcpServe(args []string) {
 		Actor:       name,
 		SessionName: strings.TrimSpace(*sessionName),
 		AgentRole:   role,
-		ChromaURL:   *chromaURL,
-		RAGPython:   *ragPython,
-		Stderr:      os.Stderr,
+		Model:       strings.TrimSpace(*model),
+		// A runner names its runs' sidecars run:<agent> (internal/runner
+		// mcpArgs). A run was dispatched to its repo on purpose, so the
+		// folder exclusions, which are about agents a person starts by
+		// hand, do not apply to it.
+		IgnoreExclusion: strings.HasPrefix(name, "run:"),
+		ChromaURL:       *chromaURL,
+		RAGPython:       *ragPython,
+		Stderr:          os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
 		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// runMCPEnv carries a runner's `nodevas mcp` command line for one run, as a
+// JSON array of strings: "mcp", then its flags.
+//
+// Inside a run, an agent may start a `nodevas mcp` other than the run's own:
+// one its global config names, which the Antigravity CLI prefers to the run's
+// entry of the same name. With this set, that one serves the run instead of
+// whatever its own command line says.
+const runMCPEnv = "NODEVAS_RUN_MCP"
+
+// mcpArgsFor is the command line to serve: args, or the run's from runMCP
+// when that holds one whose flags all parse.
+func mcpArgsFor(args []string, runMCP string) []string {
+	override, ok := runMCPArgs(runMCP)
+	if !ok {
+		return args
+	}
+	probe, _ := newMCPFlags(flag.ContinueOnError)
+	probe.SetOutput(io.Discard)
+	if probe.Parse(override) != nil || probe.NArg() > 0 {
+		return args
+	}
+	return override
+}
+
+// runMCPArgs reads a runMCPEnv value: the flags after "mcp", or false when it
+// is not a JSON array of strings that starts with "mcp".
+func runMCPArgs(value string) ([]string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, false
+	}
+	var words []string
+	if err := json.Unmarshal([]byte(value), &words); err != nil || len(words) == 0 || words[0] != "mcp" {
+		return nil, false
+	}
+	return words[1:], true
+}
+
+// mcpFlags are `nodevas mcp`'s flags.
+type mcpFlags struct {
+	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython *string
+}
+
+func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
+	fs := flag.NewFlagSet("mcp", handling)
+	return fs, mcpFlags{
+		server: fs.String("server", mcp.DefaultServer,
+			"the running Nodevas server to work through; must be on this machine"),
+		projectName: fs.String("project", "",
+			"which project in that server's workspace to act on; empty means whichever one it has open"),
+		actor: fs.String("actor", mcp.DefaultActor,
+			"the name recorded against everything this agent changes; attribution, not authentication"),
+		agentRole: fs.String("agent-role", "worker",
+			"the write-permission class this agent acts as: worker or orchestrator"),
+		sessionName: fs.String("session-name", "",
+			"the name other agents address this session by (send_message to); empty derives one from the agent and repo"),
+		model: fs.String("model", "",
+			"the model this agent runs on, shown on the roster; empty reads NODEVAS_MODEL"),
+		chromaURL: fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project"),
+		ragPython: fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings"),
 	}
 }
 

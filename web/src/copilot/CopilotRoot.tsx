@@ -11,6 +11,7 @@ import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
 import { IconMic } from "./icons";
+import { RunnerHelp } from "./RunnerHelp";
 import { decide, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
 import { cancelSpeech, useSpeechRecognition, useSpeechSynthesis } from "./speech";
 
@@ -160,6 +161,24 @@ export function CopilotRoot() {
     };
   }, [serverState]);
 
+  // On, but waiting for this person's runner, which holds the key for the
+  // model calls: the button stays, and opens how to start it.
+  if (serverState === "needsRunner") {
+    return open ? (
+      <RunnerHelp onClose={() => setOpen(false)} />
+    ) : (
+      <button
+        ref={fabRef}
+        type="button"
+        className="copilot-fab is-offline"
+        onClick={() => setOpen(true)}
+        aria-label={t("copilot.runner.open")}
+        title={t("copilot.runner.open")}
+      >
+        <IconMic size={20} />
+      </button>
+    );
+  }
   if (serverState !== "ready") return null;
 
   return (

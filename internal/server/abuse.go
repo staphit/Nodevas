@@ -437,11 +437,11 @@ func newAbuseGuardWithOptions(opts AbuseGuardOptions) *abuseGuard {
 func ClassifyRoute(method, path string) (RouteClass, float64) {
 	// A runner's socket is charged once, at the upgrade, like the browser's:
 	// what flows over it afterwards is not a request.
-	if path == "/ws" || path == runnerwire.ConnectPath {
+	if path == "/ws" || path == runnerwire.ConnectPath || runTerminalPath(path) {
 		return ClassWSUpgrade, 1.0
 	}
 	if auth.SignInPaths[path] ||
-		path == "/api/auth/status" || path == "/api/remote/drive/callback" {
+		path == "/api/auth/status" {
 		return ClassPublicAuth, 1.0
 	}
 	if isHeavyPath(path) {
@@ -479,10 +479,7 @@ func isExpensivePath(path string) bool {
 	}
 	return strings.HasPrefix(path, "/api/remote/") &&
 		path != "/api/remote/config" &&
-		path != "/api/remote/sync/status" &&
-		path != "/api/remote/drive/credentials" &&
-		path != "/api/remote/drive/callback" &&
-		path != "/api/remote/drive/auth"
+		path != "/api/remote/sync/status"
 }
 
 func expensivePath(path string) bool {

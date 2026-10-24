@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"nodevas/internal/agentsetup"
 )
 
 // Version is what this server reports to a client. It is the MCP surface's own
@@ -40,6 +43,17 @@ type Options struct {
 	// HTTPClient replaces the socket client; see ClientOptions.HTTPClient.
 	// Only the in-process copilot bridge sets it.
 	HTTPClient *http.Client
+	// Model is the model the agent runs on, for the roster.
+	Model string
+	// WorkDir overrides the working directory (tests).
+	WorkDir string
+	// IgnoreExclusion keeps the session on the network even in an excluded
+	// folder: a runner's run was dispatched on purpose, by a person, to
+	// exactly that repo.
+	IgnoreExclusion bool
+	// ExclusionFile overrides where the folder exclusion list is read from;
+	// empty is agentsetup.NetworkConfigPath().
+	ExclusionFile string
 }
 
 // DefaultActor names an agent when the operator did not.
@@ -84,7 +98,24 @@ func NewServerWithClose(ctx context.Context, opts Options) (*mcp.Server, func(),
 
 func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	closeWorker := func() {}
+	workDir := opts.WorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	// The in-process copilot bridge has no folder of its own; a sidecar in
+	// an excluded folder stays off the roster.
+	offNetwork := ""
+	if opts.HTTPClient == nil && !opts.IgnoreExclusion && workDir != "" {
+		folder, err := agentsetup.ExcludedFolder(opts.ExclusionFile, workDir)
+		if err != nil && opts.Stderr != nil {
+			fmt.Fprintf(opts.Stderr, "nodevas mcp: folder exclusions not read, staying on the network: %v\n", err)
+		}
+		offNetwork = folder
+	}
 	client, err := NewClient(ClientOptions{
+		Model:       opts.Model,
+		WorkDir:     workDir,
+		OffNetwork:  offNetwork,
 		Server:      opts.Server,
 		Project:     opts.Project,
 		Actor:       opts.Actor,
@@ -129,6 +160,9 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 		fmt.Fprintf(opts.Stderr, "nodevas mcp: %s, project %q, acting as %q, role %s\n",
 			client.BaseURL(), displayProject(client.Project()), client.Actor(),
 			displayRole(client.AgentRole()))
+		if offNetwork != "" {
+			fmt.Fprintf(opts.Stderr, "nodevas mcp: %s is excluded from the agent network; this session stays off the roster\n", offNetwork)
+		}
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{

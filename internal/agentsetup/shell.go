@@ -1,6 +1,7 @@
 package agentsetup
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -62,6 +63,37 @@ func shellCmd(sh shell, goos, exe string, args []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// cmdPlain is what one word of an Antigravity hook command may hold on
+// Windows (see antigravityCmd).
+var cmdPlain = regexp.MustCompile(`^[A-Za-z0-9/._:=@,+-]+$`)
+
+// antigravityCmd renders `exe args…` for an Antigravity CLI hook, or says
+// why it cannot. The CLI runs a hook command through `sh -c` or, on Windows,
+// `cmd /c`, and both quirks below were seen with agy 1.4.6 on Windows: the
+// command string has its backslash escapes read (`.\nv-hook.cmd` ran as `.`
+// then a new line), and the whole command reaches cmd.exe as one Go-escaped
+// argument, so a double quote in it arrives as \" and breaks the line. So on
+// Windows the path is written with forward slashes (cmd.exe takes them) and
+// nothing is quoted: a word that would need quoting is refused. Elsewhere sh
+// quoting is fine as long as it needs no backslash.
+func antigravityCmd(goos, exe string, args []string) (string, error) {
+	if goos != "windows" {
+		line := shellCmd(posixShell, goos, exe, args)
+		if strings.Contains(line, `\`) {
+			return "", fmt.Errorf("the hook command %q would need a backslash, which the Antigravity CLI reads as an escape", line)
+		}
+		return line, nil
+	}
+	words := append([]string{strings.ReplaceAll(exe, `\`, "/")}, args...)
+	for _, w := range words {
+		if !cmdPlain.MatchString(w) {
+			return "", fmt.Errorf("%q holds a space or a character cmd.exe acts on, and the Antigravity CLI "+
+				"cannot pass a quoted word to cmd /c; move nodevas, or pick a --server/--project/--actor without one", w)
+		}
+	}
+	return strings.Join(words, " "), nil
 }
 
 func psQuote(s string) string {

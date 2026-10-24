@@ -46,6 +46,9 @@ type AskInput struct {
 	Question    string
 	AboutMsgID  string
 	NodeID      string
+	// FromRun: the asker is a run (the transport recognised it), whose
+	// inbox is its own session's alone (recipientAliases).
+	FromRun bool
 }
 
 // CreateAndWait records a pending ask, broadcasts it to the UI, and blocks
@@ -75,6 +78,19 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if actorID == "" {
 		actorID = "local"
 	}
+	// The answer goes back to this session and, with aboutMsgId, out as a
+	// verified approval from it: asking as a session another account holds
+	// would borrow that person's name for both.
+	if h.sessionHeldByOther(project, sessionID, sessionName, actorID) {
+		return Ask{}, fmt.Errorf("%w: session %q belongs to another actor", ErrRefused, sessionName)
+	}
+	aboutMsgID := strings.TrimSpace(in.AboutMsgID)
+	if aboutMsgID != "" {
+		run := in.FromRun || h.runInbox(project, sessionName, actorID)
+		if !h.receivedBy(ctx, project, aboutMsgID, sessionName, actorID, run) {
+			return Ask{}, fmt.Errorf("%w: aboutMsgId must name a message this session received", ErrInvalid)
+		}
+	}
 	now := h.nowMillis()
 	ask := Ask{
 		ID:          newID(),
@@ -84,7 +100,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		ActorID:     actorID,
 		Agent:       strings.TrimSpace(in.Agent),
 		Question:    question,
-		AboutMsgID:  strings.TrimSpace(in.AboutMsgID),
+		AboutMsgID:  aboutMsgID,
 		NodeID:      strings.TrimSpace(in.NodeID),
 		Status:      AskPending,
 		CreatedAt:   now,
@@ -125,6 +141,37 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		}
 		return Ask{}, ctx.Err()
 	}
+}
+
+// sessionHeldByOther reports whether the session an ask names, by id or by
+// name, is registered to an account other than actorID.
+func (h *Hub) sessionHeldByOther(project, sessionID, sessionName, actorID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s, ok := h.sessions[project+"\x00"+sessionID]; ok && !strings.EqualFold(s.ActorID, actorID) {
+		return true
+	}
+	return h.nameHeldByOtherLocked(project, sessionName, actorID)
+}
+
+// receivedBy reports whether message id was delivered to sessionName (as
+// actorID): addressed to one of the inbox keys that session reads, and not
+// to a session of another account.
+func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID string, run bool) bool {
+	m, err := h.getMessageByID(ctx, project, id)
+	if err != nil || m.Status != StatusDelivered {
+		return false
+	}
+	if m.RecipientActor != "" && !strings.EqualFold(m.RecipientActor, actorID) {
+		return false
+	}
+	recipient := strings.ToLower(strings.TrimSpace(m.Recipient))
+	for _, alias := range recipientAliases(sessionName, actorID, run) {
+		if alias == recipient {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
@@ -194,7 +241,11 @@ func (h *Hub) expireAsk(ctx context.Context, project, askID string) (Ask, error)
 // session's inbox as a message so the agent still receives it on its next turn.
 // When `aboutMsgId` was set on the ask, a verified `<nodevas-approval>` notice
 // is also sent back to the sender of that message.
-func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decidedBy string) (Ask, error) {
+//
+// Only the person whose session asked, or an administrator, may answer: the
+// answer is that person's decision, and an approval forwarded about a message
+// speaks for them. To anyone else the ask does not exist.
+func (h *Hub) Answer(ctx context.Context, project, askID, decision, note string, viewer Viewer) (Ask, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	askID = strings.TrimSpace(askID)
 	decision = strings.ToLower(strings.TrimSpace(decision))
@@ -207,9 +258,15 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 		return Ask{}, fmt.Errorf("%w: decision must be approved or denied", ErrInvalid)
 	}
 	note = strings.TrimSpace(note)
-	decidedBy = strings.TrimSpace(decidedBy)
+	if viewer.Agent {
+		return Ask{}, fmt.Errorf("%w: only a person may answer ask_user requests", ErrRefused)
+	}
+	decidedBy := strings.TrimSpace(viewer.ID)
 	if decidedBy == "" {
 		decidedBy = "local"
+	}
+	mayAnswer := func(a Ask) bool {
+		return viewer.Admin || strings.EqualFold(a.ActorID, decidedBy)
 	}
 	now := h.nowMillis()
 
@@ -219,9 +276,14 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 	if h.database == nil {
 		h.mu.Lock()
 		a, ok := h.memAsks[askID]
-		if !ok || a.Project != project {
+		if !ok || a.Project != project || !mayAnswer(*a) {
 			h.mu.Unlock()
 			return Ask{}, ErrNotFound
+		}
+		if a.Status != AskPending && a.Status != AskExpired {
+			existing := *a
+			h.mu.Unlock()
+			return existing, nil
 		}
 		wasExpired = a.Status == AskExpired
 		a.Status = decision
@@ -234,6 +296,9 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 		existing, err := h.getAskByID(ctx, project, askID)
 		if err != nil {
 			return Ask{}, err
+		}
+		if !mayAnswer(existing) {
+			return Ask{}, ErrNotFound
 		}
 		wasExpired = existing.Status == AskExpired
 		if existing.Status != AskPending && existing.Status != AskExpired {
@@ -275,6 +340,7 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 			To:            updated.SessionName,
 			NodeID:        updated.NodeID,
 			Body:          body,
+			system:        true,
 		})
 	}
 
@@ -296,6 +362,7 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note, decide
 				ReplyTo:       orig.ID,
 				NodeID:        updated.NodeID,
 				Body:          approvalBody,
+				system:        true,
 			})
 		}
 	}

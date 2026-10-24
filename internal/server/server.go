@@ -9,10 +9,12 @@ import (
 	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
+	"nodevas/internal/autopilot"
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
+	"nodevas/internal/members"
 	"nodevas/internal/notify"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
@@ -21,9 +23,11 @@ import (
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 	"nodevas/internal/store"
+	"nodevas/internal/usage"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +48,19 @@ type Server struct {
 	// runs serves /api/runs and the run traffic on the runner socket; nil
 	// until UseRunnersDB.
 	runs *runs.Dispatcher
+	// usage keeps agent sessions' token usage and the prices that cost it;
+	// nil until UseAgentsDB.
+	usage *usage.Store
+	// llm relays copilot model calls to runners; nil until UseRunnersDB.
+	llm *runners.LLMRelay
+	// autopilot works goals' task DAGs (W7); nil until UseRunnersDB.
+	autopilot *autopilot.Orchestrator
+	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
+	stepUpWindow time.Duration
+	// members is project membership (members.go); nil until UseMembersDB.
+	members *members.Store
+	// users is the account store on a server with accounts; nil on loopback.
+	users *auth.UserStore
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -108,8 +125,27 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		abuse:    newAbuseGuard(),
 		stop:     make(chan struct{}),
 	}
-	s.agents = agents.NewHub(nil, func(projectRoot, _ string, _ any) {
+	s.agents = agents.NewHub(nil, func(projectRoot, eventType string, payload any) {
 		if s.hub == nil {
+			return
+		}
+		// A notify message pops up on its recipient's screen, so it travels
+		// as its own event naming the message; everything else is one
+		// "reload the agent panel" signal.
+		if eventType == "agent-notify" {
+			id, _ := payload.(string)
+			s.hub.BroadcastRoom(projectRoot, "agent-notify", id)
+			return
+		}
+		// An external session's changes are news for one node: the event
+		// names it, so only a browser showing that node refetches.
+		if eventType == agents.SessionChangesEvent {
+			nodeID, _ := payload.(string)
+			if projectRoot == "" {
+				s.hub.Broadcast(eventType, nodeID)
+				return
+			}
+			s.hub.BroadcastRoom(projectRoot, eventType, nodeID)
 			return
 		}
 		if projectRoot == "" {
@@ -173,6 +209,7 @@ func (s *Server) notifyRoom(r *http.Request, evType, id string) {
 // UseAccounts switches the server from "whoever reaches loopback is the local
 // user" to real accounts. Call it before Handler.
 func (s *Server) UseAccounts(users *auth.UserStore) {
+	s.users = users
 	s.auth = auth.NewSessionAuth(users)
 	if s.pm != nil {
 		s.pm.SetRemote(true)
@@ -199,6 +236,9 @@ func (s *Server) UseAgentsDB(database *db.DB) {
 	if s.agents != nil {
 		s.agents.SetDatabase(database)
 	}
+	if database != nil {
+		s.usage = usage.NewStore(database)
+	}
 }
 
 // UseRunnersDB enables runners (nodevas runner) against the workspace
@@ -213,6 +253,64 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	s.runs = runs.NewDispatcher(runs.NewStore(database), s.runners,
 		func(project, nodeID string) { s.broadcastProject(project, runnerwire.RunsChangedEvent, nodeID) },
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
+	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
+	s.runs.SetAudit(s.auditRun)
+	s.llm = runners.NewLLMRelay(s.runners)
+	// W7: the autopilot's LLM advisor asks the owner's advisor model through
+	// the same relay.
+	autopilot.RegisterLLMAdvisor(autopilot.NewLLMAdvisor(s.llm))
+	// …or a System One model (Jev, or Laya on the owner's PC) through it.
+	autopilot.RegisterSystemOneAdvisor(autopilot.NewSystemOneAdvisor(s.llm))
+	s.startAutopilot(database)
+}
+
+// RunnerLLM is the relay for copilot model calls made on runners, or nil
+// before UseRunnersDB.
+func (s *Server) RunnerLLM() *runners.LLMRelay { return s.llm }
+
+// SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).
+// Zero keeps the default. Call it before Handler.
+func (s *Server) SetStepUpWindow(window time.Duration) {
+	s.stepUpWindow = window
+}
+
+// configureStepUp applies the step-up setting to whoever needs it, once the
+// authenticator is settled: on a server with accounts, sessions step up and
+// runs record the dispatcher's step-up for their offers; on loopback there is
+// nothing to step up and every offer vouches for its dispatcher.
+func (s *Server) configureStepUp(runsAPI interface {
+	UseStepUp(func(*http.Request) (time.Time, bool))
+}) {
+	accounts, remote := s.auth.(*auth.SessionAuth)
+	window := s.stepUpWindow
+	if remote {
+		accounts.SetStepUpWindow(window)
+		window = accounts.StepUpWindow()
+	}
+	if s.runs != nil {
+		s.runs.SetStepUp(remote, window)
+	}
+	if remote && runsAPI != nil {
+		runsAPI.UseStepUp(accounts.SteppedUpAt)
+	}
+}
+
+// auditRun records a merge approval or result. Results arrive from a runner's
+// socket, not a request, so the request audit trail never sees them.
+func (s *Server) auditRun(entry runs.AuditEntry) {
+	if s.audit == nil {
+		return
+	}
+	project := ""
+	if s.pm != nil {
+		if st, err := s.pm.StoreFor(entry.Project); err == nil {
+			project = st.Root()
+		}
+	}
+	s.audit.RecordOrLog(context.Background(), audit.Event{
+		At: time.Now(), Project: project, ActorID: entry.ActorID, ActorName: entry.ActorName,
+		Action: entry.Action, Target: entry.Target, Detail: entry.Detail,
+	})
 }
 
 // broadcastProject tells the clients watching a project, named as ?project=

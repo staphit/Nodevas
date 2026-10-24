@@ -102,7 +102,13 @@ type Adapter interface {
 | Claude Code | `claude -p` | `--model` | `--mcp-config <tmp.json>` | `--output-format stream-json` |
 | Codex | `codex exec` | `-m` | `-c mcp_servers.nodevas...` | `--json` |
 | Gemini CLI | `gemini -p` | `-m` | 暫存 settings / `--allowed-mcp-server-names` | `--output-format stream-json` |
-| opencode（後期） | `opencode run` | `--model provider/model` | config | json |
+| OpenCode | `opencode run --format json --dir <worktree>`，任務走 stdin | `-m provider/model` | `OPENCODE_CONFIG_CONTENT`（mcp + permission） | json |
+| Antigravity CLI（`agy`） | `agy --input-format=stream-json --output-format=stream-json -p=`，任務走 stdin | `--model=` | `--add-dir=<tmp>/agyroot`（`.agents/mcp_config.json`），另以 `NODEVAS_RUN_MCP` 蓋過全域同名 server | stream-json |
+
+Antigravity 注意：headless 下需要權限的工具會被自動拒絕，且一拒絕就結束整個 turn（還回報 SUCCESS）。所以：
+- MCP 要能用，`~/.gemini/antigravity-cli/settings.json` 的 `permissions.allow` 必須有 `mcp(nodevas/*)`（`nodevas setup-agent --agents antigravity` 會加；runner 只讀不寫，缺了就把 agy 標成不可用）。
+- `plan` / `accept-edits` 模式下，run 的 agyroot 會放一個 PreToolUse hook（`nodevas runner agy-gate`），把 shell、非 nodevas 的 MCP、瀏覽器、worktree 外的檔案改成「deny + 原因」，agent 收到錯誤後會繞開繼續做，而不是整個 run 中斷。hook 沒意見時回 `{"decision":"ask"}`（空的 decision 等於拒絕）。
+- 結果裡有 `denied_actions` 時，run 記為失敗。
 
 實作前要逐一用 `--help` 核對旗標，因為各 CLI 改版很快；表格只是起點。
 
@@ -235,9 +241,37 @@ SQLite 和 Postgres 都要有，migration 編號接在現有的 6 之後。
 | **W4 遠端核准** | 遠端核准 merge（由 runner 執行）、預算、通知 | 用手機看 diff、核准 merge |
 | **W5 路由與管線** | 路由規則、fallback、實作與審查的多模型管線 | 自動挑模型、跨模型互審 |
 | **W6 外部 session 與遠端派工** | hook 回報改動、step-up 驗證、runner auto-accept → 開放遠端派工 | 終端機的工作也記到 board 上；遠端可以直接派工 |
+| **W7 Autopilot** | 口述需求 → plan run 拆成 task DAG → orchestrator 依 ready 自動派工 → 每個 task 走 implement → review（多 agent 共識或人工）→ revise → merge，像 Airflow 一樣記錄每個 task 的 stage | 講一句需求，看整個 DAG 自己跑完 |
 | 之後 | Claude messaging socket 推送、NAS 上跑沙箱 runner、一個 prompt 同時派給多個模型再比較結果（Orca 式 fan-out） | — |
 
 每一期各開一個 branch 和 PR，可以並行的部分依檔案拆給多個 worker。
+
+## W7 Autopilot（2026-10-24）
+
+使用者的流程：口述需求 → agent 拆解成 task → orchestrator 派發 → 像 Airflow DAG 一樣記錄每個節點的狀態（commit、push、PR、review…）→ PR review 由多個 agent 共識 approve，或由人審。
+
+- **口述 → goal node**：語音 copilot 建立 goal node（需求原文），並可直接啟動拆解（需要使用者在 copilot 裡確認）。
+- **拆解（plan run，`JobPlan`）**：runner 在 repo 的 worktree 裡以唯讀方式跑 agent，讀程式碼後用 `create_node` / `link_nodes` 在 goal 底下建立 task，task 之間用 requires 表示相依。不改任何檔案、不 commit。拆完使用者可以先在看板上修改，再啟動 autopilot。
+- **Orchestrator（hub 上的 `internal/autopilot`）**：一次 autopilot run 對應一個 goal。它看板上的 ready 狀態（requires 都完成）決定哪些 task 可以跑，依 `MaxParallel` 派工，每個 task 都走一條 pipeline。所有派工仍然經過 runner 端的接受與 auto-accept，hub 依舊不執行任何東西。
+- **Stage 紀錄（Airflow 式）**：每個 task instance 有 state（none / scheduled / queued / running / waiting_review / waiting_human / success / failed / upstream_failed / skipped）與 stage 紀錄（queued、implement、commit、push、pr、ci、review、human_review、revise、approved、merge、done），每筆有時間、run 與輪次。上游失敗時下游標成 upstream_failed；可以對單一 task retry 或 skip，整個 run 可以 pause / resume / cancel。
+- **Review**：`ReviewPolicy.Mode` = none / agents / human / agents+human。agents 模式下多個 reviewer（不同 agent 或模型）平行審同一個 PR，達到 `Quorum` 個 approve 才通過，否則把所有 review 合併交給 revise；human 模式等人在網頁上 approve 或要求修改（預設只有 autopilot 的建立者、runner 擁有者或管理員能審，和 W4 的 merge 核准同一條規則，因為核准可能讓 runner merge；policy 的 `anyEditor` 開啟後，能編輯此 project 的成員也能審）；agents+human 先過 agent 共識再等人。通過後若 `AutoMerge`，由 runner 依 W4 的方式 merge（CI 綠燈、head 不變）。
+- **派工輔助**：`Advisor` = rules（預設：policy 指定的 chain，否則 routing 規則）或 llm（用 owner 的 runner 上設定的快速模型，經 C1 的 LLM relay，依 task 內容挑 agent 與模型；失敗就退回 rules）。advisor 模型是 runner 的獨立設定（`advisorProvider` / `advisorModel` / `advisorBaseURL`、`nodevas runner advisor-key`），任何 Anthropic 或 OpenAI 相容的端點都能接；relay 的請求帶 `purpose: "advisor"`，runner 只用 advisor 的設定回應。模型只能從 runner 回報的 agent／模型中選，最多 3 個（第一個實作，其餘是 fallback），格式不對、亂編模型、超過 6 秒或 runner 離線都算失敗。第三種 `systemone`：System One 決策模型（本機的 Laya，或 TypeSafe 託管的 Jev，同一套 `POST /v1/systemone` 協定），在 runner 上以 `advisorProvider systemone` 設定，hub 送 `decide_request`，問題是在已安裝的 agent／模型中做 choice（附複雜度 score），依機率取前 3 個；失敗或超過 10 秒就退回 rules。
+- **語音入口**：copilot 專用工具 `start_breakdown`（建立 goal node 並派 plan run）與 `start_autopilot`（`POST /api/autopilot`）。它們不是 MCP 工具，agent 碰不到；以使用者本人身分呼叫 API，所以任何模式（包括 bypass）都一定先問使用者，plan 模式直接拒絕。
+- **介面**：goal 上的 Autopilot 面板（policy、啟動、暫停、DAG grid：列是 task、欄是 stage）、看板上每個 task 的 stage badge、等待人審的 task 清單。
+
+合約：`internal/runnerwire/autopilot.go`（型別）、`runs.Dispatcher.Observe`（run 與 pipeline 的變化通知）。API：`POST/GET /api/autopilot`、`GET /api/autopilot/:id`、`POST /api/autopilot/:id/{pause,resume,cancel}`、`POST /api/autopilot/:id/tasks/:node/{retry,skip,review}`、`POST /api/runs/pipelines/:id/review`、`POST /api/runs`（`kind: "plan"`）；即時事件 `autopilot-changed`。
+
+### 安全預設（2026-10-24）
+
+Task 內容、程式碼、PR 都可能是攻擊者能改的（有編輯權限的成員、被入侵的帳號、repo 裡的 prompt injection），所以 agent 的判斷不單獨決定會改變程式碼或權限的事：
+
+- **合併要有人**：`AutoMerge` 只在 review mode 為 human 或 agents+human 時可開；none / agents 要合併必須明確設定 `allowAgentOnlyMerge`（面板上有警告的開關，copilot 的 `start_autopilot` 無法替使用者開，hub 端驗證）。
+- **敏感路徑一律等人**：沒有人審的 PR（`allowAgentOnlyMerge`）若動到 `.github/`、CI 設定、manifest 與 lockfile、`.husky/`、`.pre-commit-config.yaml`、`.git*`、`Dockerfile*`、`docker-compose*`、`scripts/`、agent 指示檔（`.claude/`、`CLAUDE.md`、`AGENTS.md`）等，task 停在 waiting_human（`hold: sensitive`，原因列出路徑）；只有 autopilot 建立者或管理員能經 `POST /api/autopilot/:id/tasks/:node/review` 核准後才合併（`anyEditor` 不適用）。讀不到變更檔案、檔案數超過上限、或 PR head 不是 run 自己的 commit，也一樣等人。
+- **Task 集合在啟動時凍結**：`Create` 當下的 task 就是全部（上限 25 個）；之後加進 goal 或改 tag 進來的 node 不會派工（run 結束時註明幾個沒做，goal 不標 done）；成為某 task 上游的新 node 會擋住它，直到它在看板上完成。每個 task 記錄內容 hash，尚未開始的 task 內容被改過會停在 waiting_human（`hold: changed`），要建立者 retry（接受目前內容）或 skip；離開 goal 的 task 停在 `hold: removed`，不會當成 skipped 放行下游。
+- **Agent network**：run（經 runner proxy，或本機 `run:` actor）寄給人的 session（非 run）或不存在的位址的訊息一律 held，等收件人核可；run 不能讀人的 session inbox、不能冒用人的 session 名稱寄信、不能用人的 session ID heartbeat 接管它。
+- **Copilot 派工確認**：`start_breakdown` / `start_autopilot` 每次都問，「本次對話都允許」對它們無效；確認卡直接展開完整 input。
+- **CI / 供應鏈**：所有 GitHub Actions 以完整 commit SHA 固定（註解標 tag）；release 與 deploy job 的 secret 與 token 只給用到的 step；release job 走 `release` environment；`npm ci --ignore-scripts`，只明確執行 esbuild 的 install script；desktop 的 `npm audit` 含 dev 相依；Dockerfile 的 base image 以 digest 固定（compose 的固定方式見 `deploy/truenas/README.md`）。
+- **GitHub 設定（要使用者自己在 Settings 改）**：開啟 Actions 的 SHA pinning 要求、限制可用的 actions、保護 `master`（必須經 PR 與 CI）、fork PR 一律需核准才跑 workflow、建立 `release` environment 並設 required reviewer。
 
 ## 已確認（2026-10-23 第二輪）
 

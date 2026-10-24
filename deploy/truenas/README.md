@@ -49,7 +49,27 @@ Tunnel 為 outbound-only。路由器不需 port forwarding。防火牆需允許 
 - 將 `NODEVAS_SERVE_HOSTNAME` 改為 Public Hostname。
 - 填入 SMTP host、port、user、from、security。
 - 若 `172.31.250.0/24` 與現有網路重疊，整組更換 subnet 與三個固定 IP；`NODEVAS_SERVE_TRUSTED_PROXY` 必須保持為 `cloudflared` 的 `/32` IP。
-- 正式環境建議把 `latest` 換成固定版本 tag 或 digest。
+- 正式環境把 `latest` 換成以 digest 固定的 image（見下節）。
+
+### 以 digest 固定 image
+
+Tag 可以被改指向別的 image（registry 帳號或 CI 被入侵時就會發生），digest 不行。`compose.yaml`、`compose.existing-tunnel.yaml` 與 `compose.postgres.yaml` 的每個 `image:` 都建議寫成 `name:tag@sha256:<digest>`，tag 只是給人看的：
+
+```yaml
+image: ghcr.io/staphit/nodevas:<版本 tag>@sha256:<digest>
+image: cloudflare/cloudflared:<版本 tag>@sha256:<digest>
+image: postgres:17@sha256:<digest>
+```
+
+Digest 要自己從 registry 查，不要從別處複製（範例與文件裡的值不能直接用）：
+
+```sh
+docker buildx imagetools inspect ghcr.io/staphit/nodevas:<版本 tag>
+docker buildx imagetools inspect cloudflare/cloudflared:<版本 tag>
+docker buildx imagetools inspect postgres:17
+```
+
+取輸出第一段的 `Digest:`（multi-arch index 的 digest），不要取單一平台的 manifest digest。Nodevas 的 digest 也可在 GitHub 的 container.yml 執行紀錄（build-push-action 的 `digest` 輸出）或 Packages 頁面對照，兩邊一致才用。固定 digest 後 `pull_policy: always` 不會換到新版；更新時查新 tag 的 digest，連同 tag 一起改掉再重新部署。
 
 `NODEVAS_SERVE_ALLOW_PLAINTEXT=true` 只允許 Compose 私有 bridge 上的 Nodevas 到 `cloudflared` HTTP hop。不要新增 `ports:`，否則會把 origin 暴露到 TrueNAS host 或 LAN。
 

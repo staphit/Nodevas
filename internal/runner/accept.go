@@ -18,6 +18,9 @@ import (
 type Offer struct {
 	Job  runnerwire.Job
 	Repo runnerwire.Repo
+	// Shell is why the agent may run any shell command here
+	// (Config.ShellAccess); "" when it cannot.
+	Shell string
 }
 
 // Accepter decides whether this machine takes a job. It is the point of the
@@ -31,7 +34,7 @@ type Accepter interface {
 
 // Decline reasons the terminal accepter gives.
 const (
-	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner set autoAccept true`)"
+	ReasonNoTerminal = "runner needs someone at its terminal to accept (or `nodevas runner autoaccept on`)"
 	ReasonTimedOut   = "nobody accepted at the runner"
 	ReasonDeclined   = "declined at the runner"
 	ReasonInputGone  = "the runner's terminal input closed"
@@ -125,23 +128,88 @@ func (t *TerminalAccepter) Accept(ctx context.Context, offer Offer) (bool, strin
 	}
 }
 
+// RemoteTypingAsker is an Accepter that can also ask, once an interactive
+// offer is accepted, whether the dispatcher may type into its terminal.
+type RemoteTypingAsker interface {
+	AllowRemoteTyping(ctx context.Context, offer Offer) bool
+}
+
+// AllowRemoteTyping asks "Allow remote typing? [y/N]". Anything but yes, a
+// timeout included, leaves the terminal view only.
+func (t *TerminalAccepter) AllowRemoteTyping(ctx context.Context, offer Offer) bool {
+	if !t.Interactive {
+		return false
+	}
+	t.init()
+	select {
+	case t.turn <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	}
+	defer func() { <-t.turn }()
+	fmt.Fprint(t.Out, "The dispatcher can watch this run's terminal. Typing into it answers the agent's\n"+
+		"prompts as you (approving commands, edits). Allow remote typing? [y/N]: ")
+	timeout := t.Timeout
+	if timeout <= 0 {
+		timeout = DefaultAcceptTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case line, ok := <-t.lines:
+		if !ok {
+			fmt.Fprintln(t.Out)
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes":
+			return true
+		}
+	case <-timer.C:
+		fmt.Fprintln(t.Out, "\nno answer; view only.")
+	case <-ctx.Done():
+	}
+	return false
+}
+
 // promptPreview is how much of the task the question shows.
 const promptPreview = 500
 
 func describeOffer(o Offer) string {
 	var b strings.Builder
 	job := o.Job
-	b.WriteString("\n=== Run offered by the hub ===\n")
+	interactive := job.Mode == runnerwire.ModeInteractive
+	if interactive {
+		b.WriteString("\n=== INTERACTIVE run offered by the hub ===\n")
+	} else {
+		b.WriteString("\n=== Run offered by the hub ===\n")
+	}
 	fmt.Fprintf(&b, "  requested by: %s\n", orDash(job.RequestedBy))
 	fmt.Fprintf(&b, "  project:      %s\n", orDash(job.Project))
 	fmt.Fprintf(&b, "  node:         %s  %s\n", job.NodeID, job.NodeTitle)
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
 	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
-	base := job.Base
-	if base == "" {
-		base = "(the repository's default branch)"
+	if interactive {
+		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine; the\n" +
+			"                dispatcher watches it, and types into it only if you allow that next\n")
 	}
-	fmt.Fprintf(&b, "  base:         %s\n", base)
+	if o.Shell != "" {
+		fmt.Fprintf(&b, "  shell:        the agent may run ANY shell command here (%s)\n", o.Shell)
+	}
+	switch job.Kind {
+	case runnerwire.JobReview:
+		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", job.PRURL, job.Branch)
+	case runnerwire.JobRevise:
+		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
+	case runnerwire.JobPlan:
+		fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
+	default:
+		base := job.Base
+		if base == "" {
+			base = "(the repository's default branch)"
+		}
+		fmt.Fprintf(&b, "  base:         %s\n", base)
+	}
 	fmt.Fprintf(&b, "  run:          %s\n", job.RunID)
 	prompt := strings.TrimSpace(job.Prompt)
 	if utf8.RuneCountInString(prompt) > promptPreview {
@@ -150,6 +218,16 @@ func describeOffer(o Offer) string {
 	b.WriteString("  task:\n")
 	for _, line := range strings.Split(prompt, "\n") {
 		b.WriteString("    " + line + "\n")
+	}
+	if job.Kind == runnerwire.JobRevise {
+		review := strings.TrimSpace(job.Review)
+		if utf8.RuneCountInString(review) > promptPreview {
+			review = string([]rune(review)[:promptPreview]) + " …"
+		}
+		b.WriteString("  review to address:\n")
+		for _, line := range strings.Split(review, "\n") {
+			b.WriteString("    " + line + "\n")
+		}
 	}
 	return printable(b.String())
 }

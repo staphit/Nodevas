@@ -11,7 +11,7 @@ export interface RunnerModel {
 }
 
 export interface RunnerAgent {
-  /** "claude" | "codex" | "gemini" */
+  /** "claude" | "codex" | "gemini" | "opencode" | "antigravity" */
   kind: string;
   installed: boolean;
   version?: string;
@@ -26,6 +26,20 @@ export interface RunnerRepo {
   remote?: string;
 }
 
+/** Mirrors runnerwire.AutoAcceptPolicy (W6): what the runner takes without
+ * asking whoever sits at it. The runner enforces it; the hub only shows it. */
+export interface AutoAcceptPolicy {
+  enabled: boolean;
+  /** Auto-accept only jobs whose dispatcher stepped up recently. */
+  requireStepUp: boolean;
+  /** Repo ids; empty means none (not all). */
+  repos?: string[] | null;
+  /** Agent kinds; empty means none. */
+  agents?: string[] | null;
+  /** "" (headless) and/or "interactive"; empty means headless only. */
+  modes?: string[] | null;
+}
+
 export interface RunnerInfo {
   version: string;
   hostname: string;
@@ -34,6 +48,8 @@ export interface RunnerInfo {
   agents: RunnerAgent[] | null;
   repos: RunnerRepo[] | null;
   capabilities?: string[];
+  /** W6: absent from a runner that predates auto-accept policies. */
+  autoAccept?: AutoAcceptPolicy | null;
 }
 
 export interface Runner {

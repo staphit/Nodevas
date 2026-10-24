@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"slices"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -28,6 +28,11 @@ var ClaudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions",
 // not run arbitrary commands unless the owner allowed them (AllowedTools).
 const DefaultClaudePermissionMode = "acceptEdits"
 
+// ClaudeReadOnlyDeny is the --disallowedTools list of a review or plan run:
+// every built-in tool that writes a file or runs a command (PowerShell is
+// Claude Code's shell tool on Windows). Subagents inherit the deny.
+const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
+
 // NodevasMCPTools is the --allowedTools rule for every tool of the run's
 // nodevas MCP server.
 const NodevasMCPTools = "mcp__nodevas"
@@ -42,15 +47,9 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	// The MCP config goes in a file rather than inline JSON: on Windows the
 	// CLI is a .cmd shim, and cmd.exe's quoting rules mangle JSON arguments.
-	config, err := json.Marshal(map[string]any{
-		"mcpServers": map[string]MCPServer{"nodevas": env.MCP},
-	})
+	mcpPath, err := writeMCPConfig(env)
 	if err != nil {
 		return nil, err
-	}
-	mcpPath := filepath.Join(env.TempDir, "mcp.json")
-	if err := os.WriteFile(mcpPath, config, 0o600); err != nil {
-		return nil, fmt.Errorf("writing the MCP config: %w", err)
 	}
 
 	mode := env.PermissionMode
@@ -76,6 +75,15 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// server's tools are always allowed: the preamble tells the agent to claim
 	// its node, headless nobody can approve that, and the hub limits what
 	// those tools reach to the agent routes anyway.
+	if ReadOnly(job) {
+		// Read only, whatever the owner's permission mode and allowedTools:
+		// a deny wins over every allow, bypassPermissions included. The
+		// nodevas tools stay allowed; a plan writes through them.
+		// The worktree is a PR head or a base it only reads: its
+		// .claude/settings.json (hooks, permissions) is not trusted here.
+		args = append(args, "--setting-sources", "user")
+		args = append(args, "--disallowedTools", ClaudeReadOnlyDeny)
+	}
 	args = append(args, "--allowedTools", NodevasMCPTools)
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
@@ -83,20 +91,29 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// On stdin, not as an argument: no command-line length limit and no
 	// cmd.exe quoting for a prompt full of quotes and percent signs.
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = childEnv()
+	cmd.Env = jobEnv(job)
 	return cmd, nil
 }
 
-// childEnv is the runner's environment minus the markers Claude Code sets for
-// its own children: a runner started from inside a Claude Code session would
-// otherwise hand them on, and the CLI refuses to start "inside" another one.
+// childEnv is the runner's environment minus what an agent must not have:
+//   - the markers Claude Code sets for its own children (a runner started from
+//     inside a Claude Code session would otherwise hand them on, and the CLI
+//     refuses to start "inside" another one);
+//   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
+//     secret, the copilot and advisor keys. jobEnv adds back the few a run
+//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP);
+//   - GitHub tokens: the runner pushes and opens pull requests itself, an
+//     agent never needs them.
+//
+// An agent that a task or a repository file talks into running `env` must find
+// nothing worth stealing. ANTHROPIC_API_KEY and OPENAI_API_KEY stay: agents may
+// sign in with them.
 func childEnv() []string {
 	env := os.Environ()
 	out := env[:0:0]
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		switch strings.ToUpper(name) {
-		case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT":
+		if strippedEnv(name) {
 			continue
 		}
 		out = append(out, kv)
@@ -104,10 +121,71 @@ func childEnv() []string {
 	return out
 }
 
+// strippedEnv reports whether childEnv drops the variable called name.
+func strippedEnv(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
+		return true
+	}
+	return strings.HasPrefix(upper, "NODEVAS_")
+}
+
+// RunIDEnv names the run an agent process belongs to. `nodevas hook` does
+// nothing while it is set, so the owner's own agent hooks (from `nodevas
+// setup-agent`) do not report a run as one of the owner's sessions.
+const RunIDEnv = "NODEVAS_RUN_ID"
+
+// jobEnv is childEnv for job's agent process: RunIDEnv set, and each of extra
+// ("NAME=value") in place of whatever the runner's environment had under that
+// name (names compared case-insensitively, as Windows does).
+func jobEnv(job runnerwire.Job, extra ...string) []string {
+	if job.RunID != "" {
+		extra = append([]string{RunIDEnv + "=" + job.RunID}, extra...)
+	}
+	names := make([]string, 0, len(extra))
+	for _, kv := range extra {
+		name, _, _ := strings.Cut(kv, "=")
+		names = append(names, name)
+	}
+	env := childEnv()
+	out := env[:0:0]
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, name) }) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, extra...)
+}
+
+// claudeMainModel is the model a run mostly ran on: of the result's models
+// (a run's subagents may use others), the one that wrote the most, else the
+// model the init line named.
+func claudeMainModel(msg claudeLine, initModel string) string {
+	best, most := "", int64(-1)
+	for id, u := range msg.ModelUsage {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if u.OutputTokens > most || (u.OutputTokens == most && id < best) {
+			best, most = id, u.OutputTokens
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return initModel
+}
+
 // claudeParser reads `--output-format stream-json --verbose`: one JSON object
 // per line, typed system / assistant / user / result (and others, ignored).
 type claudeParser struct {
 	outcome Outcome
+	// model is the model the init line named, for the usage when the result
+	// does not name one.
+	model string
 }
 
 func (p *claudeParser) Outcome() Outcome { return p.outcome }
@@ -135,6 +213,10 @@ type claudeLine struct {
 	TotalCostUSD float64         `json:"total_cost_usd"`
 	Usage        *claudeUsage    `json:"usage"`
 	Errors       json.RawMessage `json:"errors"`
+	// ModelUsage is the result's usage per model ID.
+	ModelUsage map[string]struct {
+		OutputTokens int64 `json:"outputTokens"`
+	} `json:"modelUsage"`
 }
 
 type claudeUsage struct {
@@ -184,6 +266,7 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 		if msg.Subtype != "init" {
 			return nil // hook chatter, retries: not progress
 		}
+		p.model = strings.TrimSpace(msg.Model)
 		text := "claude session started"
 		if msg.SessionID != "" {
 			text += " " + msg.SessionID
@@ -300,9 +383,10 @@ func (p *claudeParser) result(msg claudeLine) []runnerwire.RunEvent {
 	p.outcome.Done = true
 	p.outcome.IsError = msg.IsError
 	p.outcome.Summary = Truncate(msg.Result, runnerwire.MaxSummaryBytes)
+	p.outcome.Text = Truncate(msg.Result, MaxTextBytes)
 	var events []runnerwire.RunEvent
 	if msg.Usage != nil || msg.TotalCostUSD > 0 {
-		usage := &runnerwire.Usage{CostUSD: msg.TotalCostUSD}
+		usage := &runnerwire.Usage{CostUSD: msg.TotalCostUSD, Model: claudeMainModel(msg, p.model)}
 		if msg.Usage != nil {
 			usage.InputTokens = msg.Usage.InputTokens
 			usage.OutputTokens = msg.Usage.OutputTokens

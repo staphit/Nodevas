@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"nodevas/internal/redact"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -34,9 +35,30 @@ type jobs struct {
 	seenOrder []string
 	declines  []runnerwire.Envelope
 	agents    []runnerwire.Agent
+	// hubName is what the hub calls this runner, from its welcome.
+	hubName string
+
+	// Pull requests being watched (see prwatch.go) and their unsent updates,
+	// latest per run.
+	watched    map[string]*watchedPR
+	watchOrder []string
+	watchErrs  map[string]string
+	prPending  map[string]runnerwire.PRInfo
+	prOrder    []string
+
+	// Remote merges (see merge.go): answers kept to dedupe re-sent requests,
+	// requests being worked on, and answers not yet written. mergeMu lets one
+	// merge at a time talk to gh.
+	merges        map[string]mergeRecord
+	mergeInFlight map[string]bool
+	mergeResults  []runnerwire.Envelope
+	mergeMu       sync.Mutex
 
 	proxy    *Proxy
 	proxyErr error
+
+	// terms holds interactive runs' terminals (W2.5, see interactive.go).
+	terms termRelay
 
 	wg sync.WaitGroup
 }
@@ -51,13 +73,21 @@ type run struct {
 	// finish is delivered, the run is listed as active in every hello.
 	accepted bool
 	started  time.Time
+	// publishing: the agent is done and its work is being committed and
+	// pushed; a cancel no longer applies.
+	publishing bool
+	// remoteTyping: the dispatcher may type into this interactive run's
+	// terminal (auto-accepted under AllowRemoteTyping, or a yes here).
+	remoteTyping bool
 
-	// Outbound, unsent. events is bounded: a run that talks a lot while the
-	// socket is down loses its oldest events, never its finish.
+	// Outbound, unsent, in this order. events is bounded: a run that talks a
+	// lot while the socket is down loses its oldest events, never its finish.
 	accept  *runnerwire.Accept
 	seq     int64
 	events  []runnerwire.RunEvent
 	dropped int
+	changes *runnerwire.RunChanges
+	pr      *runnerwire.PRInfo
 	finish  *runnerwire.RunResult
 }
 
@@ -91,6 +121,13 @@ func newJobs(ctx context.Context, c *Client) *jobs {
 		notify: make(chan struct{}, 1),
 		runs:   map[string]*run{},
 		seen:   map[string]bool{},
+
+		watched:   map[string]*watchedPR{},
+		watchErrs: map[string]string{},
+		prPending: map[string]runnerwire.PRInfo{},
+
+		merges:        map[string]mergeRecord{},
+		mergeInFlight: map[string]bool{},
 	}
 }
 
@@ -209,6 +246,10 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
+	// W2.5: interactive runs (interactive.go).
+	if reason := j.checkMode(job); reason != "" {
+		return repo, reason
+	}
 	var agent *runnerwire.Agent
 	for i := range j.agents {
 		if j.agents[i].Kind == job.Agent {
@@ -237,6 +278,9 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if len(job.Prompt) > runnerwire.MaxPromptBytes {
 		return repo, "prompt is too long"
 	}
+	if reason := checkKind(job, cfg); reason != "" {
+		return repo, reason
+	}
 	busy := 0
 	for _, r := range j.runs {
 		if r.finish == nil {
@@ -254,9 +298,14 @@ func (j *jobs) cancelRun(runID, reason string) {
 	j.mu.Lock()
 	r := j.runs[runID]
 	ended := r == nil || r.finish != nil
+	publishing := !ended && r.publishing
 	j.mu.Unlock()
 	if ended {
 		j.c.logf("run %s: cancel for a run that is not running here; ignored", runID)
+		return
+	}
+	if publishing {
+		j.c.logf("run %s: cancel after the agent finished; its changes are being published; ignored", runID)
 		return
 	}
 	if reason == "" {
@@ -272,6 +321,23 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	defer r.cancel(nil)
 	job := r.job
 
+	// Review and revise name an existing pull request: it must be this
+	// repository's, open, and on the branch the job names, before anyone is
+	// asked to accept.
+	var check prCheck
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise {
+		var reason string
+		check, reason = j.checkPR(ctx, r)
+		if ctx.Err() != nil {
+			j.finish(r, cancelled(ctx))
+			return
+		}
+		if reason != "" {
+			j.decline(r, reason)
+			return
+		}
+	}
+
 	ok, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
 		j.finish(r, cancelled(ctx))
@@ -279,6 +345,17 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	}
 	if !ok {
 		j.decline(r, reason)
+		return
+	}
+	switch job.Kind {
+	case runnerwire.JobReview:
+		j.executeReview(ctx, r, check)
+		return
+	case runnerwire.JobRevise:
+		j.executeRevise(ctx, r, check)
+		return
+	case runnerwire.JobPlan:
+		j.executePlan(ctx, r)
 		return
 	}
 
@@ -306,61 +383,148 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, wt.BaseRef)})
 
-	j.finish(r, j.runAgent(ctx, r, wt))
+	result, _ := j.runAgent(ctx, r, wt, job)
+	if result.Status == runnerwire.RunCancelled {
+		// Stopped on purpose: nothing is committed or pushed, and the
+		// worktree stays as the agent left it.
+		j.finish(r, result)
+		return
+	}
+	if !j.guardGitDir(r, wt) {
+		return
+	}
+	j.mu.Lock()
+	r.publishing = true
+	j.mu.Unlock()
+	changes, pr := j.publish(r, wt, result)
+	j.finishWith(r, result, changes, pr)
 }
 
+// ask decides an offer: auto-accepted when the owner's policy covers it,
+// else asked at the terminal. With nobody there, the decline says what kept
+// auto-accept from applying.
 func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
-	if j.c.Config.AutoAccept {
-		j.c.logf("run %s: auto-accepted (autoAccept is on)", r.job.RunID)
+	offer := Offer{Job: r.job, Repo: r.repo, Shell: j.c.Config.ShellAccess(r.job)}
+	policy := j.c.Config.AutoAcceptPolicy()
+	auto, why := AutoAcceptDecision(policy, offer)
+	interactive := r.job.Mode == runnerwire.ModeInteractive
+	if auto {
+		j.c.logf("run %s: auto-accepted: %s", r.job.RunID, why)
+		if interactive {
+			j.setRemoteTyping(r, policy.AllowRemoteTyping)
+		}
 		return true, ""
 	}
-	if j.c.Accepter == nil {
-		return false, ReasonNoTerminal
+	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
+	ok, reason := false, ReasonNoTerminal
+	if j.c.Accepter != nil {
+		ok, reason = j.c.Accepter.Accept(ctx, offer)
 	}
-	return j.c.Accepter.Accept(ctx, Offer{Job: r.job, Repo: r.repo})
+	if ok && interactive {
+		typing := false
+		if asker, can := j.c.Accepter.(RemoteTypingAsker); can {
+			typing = asker.AllowRemoteTyping(ctx, offer)
+		}
+		j.setRemoteTyping(r, typing)
+	}
+	if !ok && reason == ReasonNoTerminal && why != ReasonAutoAcceptOff {
+		reason = why + " (and nobody is at the runner's terminal to accept)"
+	}
+	return ok, reason
 }
 
-// runAgent starts the agent in the worktree and waits for it, a cancel or the
-// timeout, whichever comes first.
-func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.RunResult {
-	job := r.job
-	fail := func(format string, args ...any) runnerwire.RunResult {
-		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
-			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}
+// disabledMCP is, for an OpenCode run, every MCP server but the run's own,
+// to switch off. When OpenCode cannot say which it loads, the run goes on
+// with them and says so.
+func (j *jobs) disabledMCP(ctx context.Context, r *run, bin, dir string) []string {
+	if r.job.Agent != "opencode" {
+		return nil
+	}
+	names, err := adapter.OpenCodeMCPServers(ctx, bin, dir, adapter.ReadOnly(r.job))
+	if err != nil {
+		j.c.logf("run %s: cannot list OpenCode's MCP servers to switch them off: %v", r.job.RunID, err)
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: "warning: could not switch off OpenCode's other MCP servers: " + adapter.Truncate(err.Error(), 300)})
+		return nil
+	}
+	if len(names) > 0 {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: "OpenCode MCP servers switched off for this run: " + strings.Join(names, ", ")})
+	}
+	return names
+}
+
+// setRemoteTyping records whether the dispatcher may type into r's terminal.
+func (j *jobs) setRemoteTyping(r *run, on bool) {
+	j.mu.Lock()
+	r.remoteTyping = on
+	j.mu.Unlock()
+	if on {
+		j.c.logf("run %s: remote typing allowed", r.job.RunID)
+	} else {
+		j.c.logf("run %s: view only: typing from the hub is refused", r.job.RunID)
+	}
+}
+
+// startAgent starts the agent in the worktree and waits for it, a cancel or
+// the timeout, whichever comes first; runAgent (worktree_repoconfig.go) calls
+// it. job is r.job, or for a review the job with the PR's diff added to its
+// prompt. text is the agent's whole final message (adapter.Outcome.Text),
+// which a review needs beyond the summary's cap.
+func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwire.Job) (runnerwire.RunResult, string) {
+	// W2.5: the agent's TUI in a terminal instead (interactive.go).
+	if job.Mode == runnerwire.ModeInteractive {
+		return j.runInteractive(ctx, r, wt), ""
+	}
+	fail := func(kind, format string, args ...any) (runnerwire.RunResult, string) {
+		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: kind,
+			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
 	}
 	ad := j.c.adapterFor(job.Agent)
-	bin, err := j.c.Commands.LookPath(job.Agent)
+	bin, err := j.c.Commands.LookPath(adapter.Binary(job.Agent))
 	if err != nil {
-		return fail("%s is no longer on PATH", job.Agent)
+		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", adapter.Binary(job.Agent))
 	}
 	proxy, err := j.proxyFor()
 	if err != nil {
-		return fail("could not start the MCP proxy: %v", err)
+		return fail(runnerwire.FailureTask, "could not start the MCP proxy: %v", err)
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
 	tmp, err := os.MkdirTemp("", "nodevas-run-")
 	if err != nil {
-		return fail("could not make a temporary directory: %v", err)
+		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
 	}
 	defer os.RemoveAll(tmp)
 	exe, err := os.Executable()
 	if err != nil {
-		return fail("cannot find the nodevas executable for the MCP server: %v", err)
+		return fail(runnerwire.FailureTask, "cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
 	cfg := j.c.Config
+	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
+		// A plan reads the code as a review does; what it writes goes on the
+		// board, through MCP, not into files.
+		mode, modeText = reviewPermission(cfg, job.Agent)
+		if job.Kind == runnerwire.JobPlan {
+			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
+		}
+	}
 	cmd, err := ad.Command(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
 		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
-		PermissionMode: cfg.ClaudePermissionMode(),
-		AllowedTools:   cfg.AllowedTools,
+		PermissionMode: mode,
+		// Each adapter reads only the settings meant for it.
+		AllowedTools:     cfg.AllowedTools,
+		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
+		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 	})
 	if err != nil {
-		return fail("%v", err)
+		return fail(runnerwire.FailureTask, "%v", err)
 	}
 	parser := ad.NewParser()
 	stdout := &lineWriter{fn: func(line []byte) {
@@ -375,16 +539,16 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	cmd.WaitDelay = waitDelay
 	prepareTree(cmd)
 	if err := cmd.Start(); err != nil {
-		return fail("could not start %s: %v", job.Agent, err)
+		return fail(runnerwire.FailureAgentAbsent, "could not start %s: %v", job.Agent, err)
 	}
 	tree := attachTree(cmd)
 	defer tree.close()
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: fmt.Sprintf("started %s (model %s, permission mode %s)", job.Agent, orDash(job.Model), cfg.ClaudePermissionMode())})
+		Text: fmt.Sprintf("started %s (model %s, %s)", job.Agent, orDash(job.Model), modeText)})
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timeout := j.c.runTimeout()
+	timeout := j.c.runTimeout(job.Kind)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	var waitErr error
@@ -416,13 +580,15 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 	case stopped == "timeout":
 		result.Status = runnerwire.RunFailed
 		result.Error = "timed out after " + minutesText(timeout)
+		result.FailureKind = runnerwire.FailureTask
 	case exitCode == 0 && !outcome.IsError:
 		result.Status = runnerwire.RunSucceeded
 	default:
 		result.Status = runnerwire.RunFailed
+		errText := stderr.String()
 		result.Error = outcome.Error
 		if result.Error == "" {
-			result.Error = stderr.String()
+			result.Error = errText
 		}
 		if result.Error == "" && waitErr != nil {
 			result.Error = waitErr.Error()
@@ -431,8 +597,54 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree) runnerwire.Run
 			result.Error = fmt.Sprintf("%s exited with code %d", job.Agent, exitCode)
 		}
 		result.Error = adapter.Truncate(result.Error, runnerwire.MaxSummaryBytes)
+		// What the CLI said, then its stderr: a login problem often shows only
+		// on stderr while the stream says something generic.
+		result.FailureKind = ad.Classify(outcome.Error + "\n" + errText)
 	}
-	return result
+	return result, outcome.Text
+}
+
+// reviewPermission is how freely a review's agent may act: read only where
+// the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
+// approval mode, under which an edit needs an approval nobody can give
+// headless; OpenCode with edits and the shell denied; agy's plan mode), the
+// owner's setting otherwise. The prompt forbids edits either way, and the
+// review's worktree is thrown away after.
+func reviewPermission(cfg *Config, kind string) (mode, text string) {
+	switch kind {
+	case "codex":
+		return "read-only", "sandbox read-only for a review"
+	case "gemini":
+		return "default", "approval mode default for a review"
+	case "opencode":
+		return "read-only", "permission read-only for a review"
+	case "antigravity":
+		return "plan", "mode plan for a review"
+	}
+	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
+}
+
+// permissionText says how freely the agent may act, for the run's log.
+func permissionText(cfg *Config, kind string) string {
+	switch kind {
+	case "codex":
+		text := "sandbox " + cfg.CodexSandboxMode()
+		if cfg.CodexIgnoreUserConfig {
+			text += ", without the owner's config.toml"
+		}
+		return text
+	case "gemini":
+		return "approval mode " + cfg.GeminiApproval()
+	case "opencode":
+		return "permission " + cfg.OpenCodePermissionMode()
+	case "antigravity":
+		mode := cfg.AntigravityModeOrDefault()
+		if mode == "full" {
+			return "mode full (accept-edits, every permission skipped)"
+		}
+		return "mode " + mode
+	}
+	return "permission mode " + cfg.ClaudePermissionMode()
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
@@ -493,8 +705,9 @@ func minutesText(d time.Duration) string {
 
 // emit stamps an event and queues it.
 func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
-	ev.Text = adapter.Truncate(ev.Text, runnerwire.MaxEventText)
-	ev.Input = adapter.Truncate(ev.Input, runnerwire.MaxEventText)
+	// Whatever the agent read or printed, a key does not reach the hub.
+	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
+	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
 	r.seq++
 	ev.Seq = r.seq
@@ -514,12 +727,37 @@ func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 }
 
 func (j *jobs) finish(r *run, result runnerwire.RunResult) {
+	j.finishWith(r, result, nil, nil)
+}
+
+// finishWith queues a run's changes, PR and finish together, so they go out in
+// that order after its last events.
+func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
+	// Every failed run says why in a word the hub can route on; a failure
+	// nothing recognised (a worktree git refused, a push) is the task's.
+	result.Summary, result.Error = redact.String(result.Summary), redact.String(result.Error)
+	if pr != nil {
+		pr.Error = redact.String(pr.Error)
+	}
+	switch {
+	case result.Status != runnerwire.RunFailed:
+		result.FailureKind = ""
+	case result.FailureKind == "":
+		result.FailureKind = runnerwire.FailureTask
+	}
 	j.mu.Lock()
+	r.changes, r.pr = changes, pr
 	r.finish = &result
 	dropped := r.dropped
 	j.mu.Unlock()
 	j.wake()
 	line := fmt.Sprintf("run %s: %s", r.job.RunID, result.Status)
+	if result.FailureKind != "" && result.FailureKind != runnerwire.FailureTask {
+		line += " (" + result.FailureKind + ")"
+	}
+	if result.Verdict != "" {
+		line += ", verdict " + result.Verdict
+	}
 	if result.Error != "" {
 		line += ": " + firstLine(result.Error)
 	}
@@ -594,6 +832,10 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 	if len(j.declines) > 0 {
 		return j.declines[0], func() { j.declines = j.declines[1:] }
 	}
+	// A merge's answer goes before the PR update that shows it merged.
+	if len(j.mergeResults) > 0 {
+		return j.mergeResults[0], func() { j.mergeResults = j.mergeResults[1:] }
+	}
 	for _, id := range j.order {
 		r := j.runs[id]
 		if r.accept != nil {
@@ -612,10 +854,33 @@ func (j *jobs) nextLocked() (runnerwire.Envelope, func()) {
 				r.events = r.events[i:]
 			}
 		}
-		if r.finish != nil {
-			result := *r.finish
-			return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
-				func() { j.forgetLocked(id) }
+		if r.finish == nil {
+			continue
+		}
+		if r.changes != nil {
+			changes := *r.changes
+			return runnerwire.Envelope{Type: runnerwire.TypeChanges, RunID: id, Changes: &changes},
+				func() { r.changes = nil }
+		}
+		if r.pr != nil {
+			pr := *r.pr
+			return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr},
+				func() { r.pr = nil }
+		}
+		result := *r.finish
+		return runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: id, Result: &result},
+			func() { j.forgetLocked(id) }
+	}
+	// PR updates from the watcher, after every run's own messages.
+	if len(j.prOrder) > 0 {
+		id := j.prOrder[0]
+		pr := j.prPending[id]
+		return runnerwire.Envelope{Type: runnerwire.TypePR, RunID: id, PR: &pr}, func() {
+			// A newer update queued while this one was being written stays.
+			if now, ok := j.prPending[id]; ok && now == pr {
+				delete(j.prPending, id)
+				j.prOrder = j.prOrder[1:]
+			}
 		}
 	}
 	return runnerwire.Envelope{}, nil

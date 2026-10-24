@@ -10,7 +10,9 @@ import {
   UnauthorizedError,
   type CopilotDecision,
   type CopilotMode,
+  type CopilotSettings,
   type CopilotSource,
+  type CopilotStatus,
   type CopilotTurnContext,
   type CopilotTurnEvent,
 } from "../api";
@@ -47,6 +49,34 @@ export async function refreshCopilotStatus(): Promise<void> {
     if (error instanceof UnauthorizedError) return;
     useCopilot.getState().setStatus(null);
   }
+}
+
+/** The copilot's status, fetched fresh (the settings tab shows it). */
+export async function fetchCopilotStatus(): Promise<CopilotStatus> {
+  const status = await api.getCopilotStatus();
+  useCopilot.getState().setStatus(status);
+  return status;
+}
+
+/** The administrator's copilot settings; rejects for everyone else (403). */
+export function loadCopilotSettings(): Promise<CopilotSettings> {
+  return api.getCopilotSettings();
+}
+
+/** Where the copilot's key lives (administrators only). */
+export async function saveCopilotKeySource(keySource: "auto" | "runner" | "server"): Promise<CopilotSettings> {
+  const saved = await api.putCopilotSettings({ keySource });
+  await refreshCopilotStatus();
+  return saved;
+}
+
+/**
+ * A runner came or went: when model calls run on runners, that may turn the
+ * copilot on or off for this person.
+ */
+export function runnersChanged(): void {
+  const { status, serverState } = useCopilot.getState();
+  if (status?.keySource === "runner" || serverState === "needsRunner") void refreshCopilotStatus();
 }
 
 export async function loadConversations(): Promise<void> {

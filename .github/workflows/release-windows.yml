@@ -19,14 +19,18 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 35
+    # Protected environment: the user's required reviewer approves a release
+    # before the job (and its contents:write token) runs.
+    environment: release
+    # The token is handed only to the step that publishes; builds and
+    # dependency installs never see it.
     env:
-      GH_TOKEN: ${{ github.token }}
       GH_OWNER: ${{ github.repository_owner }}
       ELECTRON_REPO_NAME: ${{ github.event.repository.name }}
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A manual run must build the requested tag, not the branch from
           # which the workflow was dispatched. Tag-push runs keep their event
@@ -83,13 +87,13 @@ jobs:
           echo "target_sha=${release_target_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -99,8 +103,12 @@ jobs:
 
       - name: Build web interface
         shell: bash
+        # No dependency runs an install script (a compromised package's
+        # postinstall would run with this job's token); esbuild's, the one the
+        # build needs, runs explicitly from the lockfile's own copy.
         run: |
-          npm ci --prefix web
+          npm ci --ignore-scripts --prefix web
+          node web/node_modules/esbuild/install.js
           npm run build --prefix web
 
       - name: Build Go sidecar
@@ -114,8 +122,10 @@ jobs:
           go build -tags nomsgpack -trimpath -ldflags="-s -w" \
             -o desktop/resources/bin/nodevas.exe ./cmd/nodevas
 
+      # electron-builder downloads the Electron it packages itself, and the
+      # nsis/zip targets need no package's install script.
       - name: Install desktop dependencies
-        run: npm ci --prefix desktop
+        run: npm ci --ignore-scripts --prefix desktop
 
       - name: Build Windows installer (unsigned)
         shell: bash
@@ -144,6 +154,7 @@ jobs:
       - name: Publish GitHub release
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TARGET_SHA: ${{ steps.release.outputs.target_sha }}
           RELEASE_PRERELEASE: ${{ steps.release.outputs.prerelease }}

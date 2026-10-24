@@ -14,19 +14,17 @@
 // a command line is readable by every process on the machine and lands in the
 // shell history. --password still works and warns.
 //
-// Google Drive backup (optional) accepts OAuth credentials from the App UI.
-// They are encrypted in the app secrets directory, outside the workspace.
+// Secrets are encrypted in the app secrets directory, outside the workspace.
 // Environment variables remain available as a server deployment fallback:
 //
-//	NODEVAS_GOOGLE_CLIENT_ID / NODEVAS_GOOGLE_CLIENT_SECRET  OAuth client
-//	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE        SMTP secret
-//	NODEVAS_SECRET_KEY  base64 32-byte key encrypting the stored Drive token
+//	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE  SMTP secret
+//	NODEVAS_SECRET_KEY  base64 32-byte key encrypting stored secrets
 //	                    (a machine-local secrets/master.key is generated if unset)
 //	NODEVAS_DATABASE_URL  postgres://… to keep accounts, sessions, settings and
 //	                    the audit trail on a PostgreSQL server instead of the
 //	                    workspace's SQLite file (the search index stays local)
 //
-// A subcommand per file: serve.go, user.go, db.go, runner.go. This one is the
+// A subcommand per file: serve.go, user.go, db.go, runner.go, agents.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
 // reading what any of it does.
 package main
@@ -56,6 +54,8 @@ func main() {
 		setupAgentCmd(os.Args[2:])
 	case "runner":
 		os.Exit(runnerCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	case "agents":
+		os.Exit(agentsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	default:
 		usage()
 		os.Exit(2)
@@ -82,17 +82,19 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    [--password-stdin]  (--password is deprecated: it is visible in the process list)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--server http://127.0.0.1:5666]")
+		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--model m] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas db status|copy-to-postgres --project <dir> [--replace]")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas setup-agent [--agents claude,codex,gemini] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
+		"       nodevas setup-agent [--agents claude,codex,gemini,opencode,antigravity] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas hook <claude|codex|gemini> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
+		"       nodevas hook <claude|codex|gemini|opencode|antigravity> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas runner [start|login|logout|status|repo]  (connects this machine to a hub; nodevas runner help)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas agents who|send|listen|exclude  (the agent network from a terminal; nodevas agents help)")
 	fmt.Fprintln(os.Stderr,
 		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
 }

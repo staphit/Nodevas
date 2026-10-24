@@ -59,7 +59,7 @@ jobs:
       commit: ${{ steps.source.outputs.commit }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
 
@@ -103,20 +103,24 @@ jobs:
           echo "target architecture: linux/${arch}"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # No dependency runs an install script; esbuild's, the one the build
+      # needs, runs explicitly from the lockfile's own copy.
       - name: Install web dependencies
-        run: npm ci --prefix web
+        run: |
+          npm ci --ignore-scripts --prefix web
+          node web/node_modules/esbuild/install.js
 
       # --- The suite, before anything is built for the server -----------------
       #
@@ -206,7 +210,7 @@ jobs:
           echo "nodevas linux/${GOARCH_TARGET}: ${sum} ($(stat -c%s nodevas) bytes)"
 
       - name: Upload the artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nodevas-linux-${{ steps.target.outputs.goarch }}
           path: |
@@ -248,22 +252,25 @@ jobs:
     # "production" in Settings > Environments; the job still runs if it does
     # not exist yet, just without the approval gate.
     environment: production
+    # The SSH secrets are handed only to the steps that use them, never to
+    # the job (where every step, actions included, would see them).
     env:
-      SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      SSH_HOST: ${{ secrets.DEPLOY_HOST }}
-      SSH_USER: ${{ secrets.DEPLOY_USER }}
-      SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
       GOARCH_TARGET: ${{ needs.build.outputs.goarch }}
       ARTIFACT_SHA256: ${{ needs.build.outputs.sha256 }}
       COMMIT: ${{ needs.build.outputs.commit }}
     steps:
       - name: Download the artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: nodevas-linux-${{ needs.build.outputs.goarch }}
 
       - name: Check the secrets are all present
         shell: bash
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
         run: |
           missing=()
           [ -n "${SSH_KEY}" ]         || missing+=(DEPLOY_SSH_KEY)
@@ -283,6 +290,9 @@ jobs:
       #   ssh-keyscan -t ed25519 <instance-ip>
       - name: Prepare the SSH client
         shell: bash
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -301,6 +311,9 @@ jobs:
       # GitHub — which is the situation a rollback is for.
       - name: Upload and install
         shell: bash
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
           remote_dir="/tmp/nodevas-deploy-${GITHUB_RUN_ID}"

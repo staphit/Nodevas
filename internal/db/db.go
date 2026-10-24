@@ -626,6 +626,350 @@ CREATE TABLE run_events (
 ) STRICT;
 `,
 	},
+	{
+		name: "0011_agent_network_w15",
+		stmt: `
+-- Agent network W1.5: a session may hold its inbound mail for a person to
+-- approve, a message may ask to pop up on the recipient's screen, and it may
+-- carry small text files. Existing rows were delivered when they were sent.
+ALTER TABLE agent_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered' CHECK (status IN ('delivered', 'held', 'rejected'));
+ALTER TABLE agent_messages ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;
+-- The account behind the recipient session when the message was sent. Who
+-- may approve a held message, or read its files, is decided from this: the
+-- session itself is in memory and gone after a restart.
+ALTER TABLE agent_messages ADD COLUMN recipient_actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_at INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX agent_messages_status ON agent_messages (project, status, created_at);
+
+-- Attachments: UTF-8 text only, so TEXT holds them on either engine.
+CREATE TABLE agent_message_files (
+    message_id  TEXT NOT NULL REFERENCES agent_messages(id),
+    name        TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    PRIMARY KEY (message_id, name)
+) STRICT;
+`,
+	},
+	{
+		name: "0012_run_changes",
+		stmt: `
+-- What a run changed and the pull request it opened (W3). The runner commits,
+-- pushes and opens the PR with its owner's own gh login; the hub only records
+-- what it reports.
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT    NOT NULL DEFAULT '';
+-- Why no PR could be opened (no origin, gh not signed in, push refused).
+ALTER TABLE runs ADD COLUMN pr_error      TEXT    NOT NULL DEFAULT '';
+
+-- One row per run, written once: a resent changes message is ignored.
+CREATE TABLE run_changes (
+    run_id          TEXT PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    -- []runnerwire.FileChange as JSON.
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    -- The unified diff, at most runnerwire.MaxPatchBytes; '' when dropped.
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
+	{
+		name: "0013_run_merges_budgets",
+		stmt: `
+-- Remote merge approval and budgets (W4). The hub records approvals and
+-- relays them to the run's runner, which merges with its owner's own gh
+-- login; it never merges anything itself.
+
+-- The PR head the CI status belongs to; an approval must name it.
+ALTER TABLE runs ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT '';
+-- Run usage per owner and day, for budgets.
+CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
+
+CREATE TABLE run_merges (
+    id                TEXT PRIMARY KEY,
+    run_id            TEXT NOT NULL REFERENCES runs(id),
+    -- The PR head the approver saw; the runner refuses if the PR moved on.
+    head_sha          TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
+    -- Why it failed or expired; '' when merged.
+    reason            TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    finished_at       TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
+-- At most one approval waits per run.
+CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
+
+-- Per-owner daily limits on new runs; zero means no limit.
+CREATE TABLE run_budgets (
+    owner_id        TEXT PRIMARY KEY,
+    daily_runs      INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd  REAL    NOT NULL DEFAULT 0,
+    daily_tokens    INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL
+) STRICT;
+`,
+	},
+	{
+		name: "0014_run_routing",
+		stmt: `
+-- Routing, fallback and pipelines (W5). Every rule is the owner's own; the hub
+-- only picks what a run asks for, the runner still decides whether to take it.
+
+-- A run's job kind ('' implement, 'review', 'revise'), how it failed, a
+-- review's verdict, the run it falls back from and the pipeline it is a step
+-- of.
+ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_of     TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pipeline_id  TEXT NOT NULL DEFAULT '';
+-- The rest of the fallback chain, []runnerwire.AgentModel as JSON ('' none).
+ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
+-- What a review or revise job is offered: the PR branch, its pull request,
+-- and (revise) the review it addresses.
+ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
+
+-- One owner's routing rules, in order: a PUT replaces them all.
+CREATE TABLE run_routes (
+    owner_id    TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    -- runnerwire.RouteRule as JSON.
+    rule        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (owner_id, position)
+) STRICT;
+
+-- Implement → review (→ revise → review…) for one node.
+CREATE TABLE run_pipelines (
+    id          TEXT PRIMARY KEY,
+    -- The runner's owner, as on runs.
+    owner_id    TEXT NOT NULL,
+    created_by  TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    node_id     TEXT NOT NULL,
+    -- runnerwire.Pipeline as JSON, models resolved when it was dispatched.
+    pipeline    TEXT NOT NULL,
+    -- The implement step's fallback chain, []runnerwire.AgentModel as JSON.
+    fallbacks   TEXT NOT NULL DEFAULT '',
+    -- The task as first offered and the dispatcher's extra instructions; every
+    -- step starts from them.
+    job_prompt  TEXT NOT NULL DEFAULT '',
+    prompt      TEXT NOT NULL DEFAULT '',
+    -- The pull request the implement step opened, which later steps work on.
+    branch      TEXT NOT NULL DEFAULT '',
+    pr_url      TEXT NOT NULL DEFAULT '',
+    round       INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+) STRICT;
+CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
+`,
+	},
+	{
+		name: "0015_run_mode",
+		stmt: `
+-- Interactive runs (W2.5): the agent runs as its TUI in a pseudo-terminal on
+-- the runner, relayed to the browser. '' is headless.
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
+	{
+		name: "0016_w6",
+		stmt: `
+-- Remote dispatch and external sessions (W6).
+
+-- When this browser session last re-proved its identity with a mailed
+-- passcode ('' never). A step-up lasts a window from this moment; a new
+-- sign-in is a new row and starts without one.
+ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
+
+-- The dispatcher's step-up when the run was made ('' none). Offers vouch for
+-- the dispatcher (runnerwire.Job.SteppedUp) only within the window from it.
+ALTER TABLE runs ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
+
+-- What an agent in its owner's own terminal changed while it held a node, as
+-- its hook reported it: one row per project, node and session.
+CREATE TABLE session_changes (
+    id            TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it, as on runs.
+    project       TEXT NOT NULL,
+    node_id       TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    session_name  TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    actor_id      TEXT NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    -- []string as JSON, at most runnerwire.MaxSessionFiles.
+    files         TEXT NOT NULL DEFAULT '[]',
+    -- runnerwire.RunChanges as JSON, replaced at every Stop; '' none yet.
+    snapshot      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
+CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
+`,
+	},
+	{
+		name: "0017_usage",
+		stmt: `
+-- Token usage (internal/usage). Runs keep theirs on runs.usage; these are
+-- the agents their owners run in their own terminals, as their hooks report.
+
+-- One row per project, session and model: the session's running totals for
+-- that model, replaced by every report (a report is cumulative, never a
+-- delta).
+CREATE TABLE agent_session_usage (
+    -- The project's name as ?project= takes it, as on runs.
+    project            TEXT NOT NULL,
+    session_id         TEXT NOT NULL,
+    model              TEXT NOT NULL,
+    actor_id           TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    session_name       TEXT NOT NULL DEFAULT '',
+    agent              TEXT NOT NULL DEFAULT '',
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    -- What the agent itself said it cost (USD); 0 when it said nothing.
+    reported_cost_usd  REAL NOT NULL DEFAULT 0,
+    first_at           TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    PRIMARY KEY (project, session_id, model)
+) STRICT;
+CREATE INDEX agent_session_usage_updated ON agent_session_usage (project, updated_at);
+-- Usage over a window reads runs by project and creation time.
+CREATE INDEX runs_project_created ON runs (project, created_at);
+
+-- The owner's own prices (USD per million tokens), over the built-in table.
+CREATE TABLE usage_prices (
+    model                 TEXT PRIMARY KEY,
+    input_per_mtok        REAL NOT NULL DEFAULT 0,
+    output_per_mtok       REAL NOT NULL DEFAULT 0,
+    cache_read_per_mtok   REAL NOT NULL DEFAULT 0,
+    cache_write_per_mtok  REAL NOT NULL DEFAULT 0,
+    updated_at            TEXT NOT NULL,
+    updated_by            TEXT NOT NULL DEFAULT ''
+) STRICT;
+`,
+	},
+	{
+		name: "0018_project_members",
+		stmt: `
+-- Who may reach a project (internal/members). A project with no rows here is
+-- open to every signed-in account, as before; once it has members, only they
+-- and server administrators may.
+CREATE TABLE project_members (
+    -- The project's directory as project.Key normalizes it: the same key the
+    -- realtime rooms and the store cache use, so a request and a socket agree
+    -- on which project they reach.
+    project    TEXT NOT NULL,
+    -- accounts.id. Not a foreign key: a removed account's rows stop matching
+    -- anyone and are dropped when the project's members are next written.
+    user_id    TEXT NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+    added_by   TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, user_id)
+) STRICT;
+CREATE INDEX project_members_user ON project_members (user_id);
+`,
+	},
+	{
+		name: "0019_autopilot",
+		stmt: `
+-- Autopilot (W7, internal/autopilot): a goal node's tasks worked as a DAG.
+-- One row per autopilot run; at most one running or paused per goal.
+CREATE TABLE autopilot_runs (
+    id              TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it, as on runs.
+    project         TEXT NOT NULL,
+    goal_node_id    TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
+    -- runnerwire.AutopilotPolicy as JSON.
+    policy          TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    created_by      TEXT NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    -- The creator's step-up when the autopilot started, recorded on its
+    -- runs as POST /api/runs records the dispatcher's.
+    stepped_up_at   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    finished_at     TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX autopilot_runs_goal ON autopilot_runs (project, goal_node_id, created_at);
+CREATE UNIQUE INDEX autopilot_runs_live ON autopilot_runs (project, goal_node_id)
+    WHERE status IN ('running', 'paused');
+
+-- One row per task instance: runnerwire.TaskInstance as JSON, plus the
+-- columns an update is looked up by.
+CREATE TABLE autopilot_tasks (
+    autopilot_id TEXT NOT NULL REFERENCES autopilot_runs(id),
+    node_id      TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    run_id       TEXT NOT NULL DEFAULT '',
+    pipeline_id  TEXT NOT NULL DEFAULT '',
+    data         TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (autopilot_id, node_id)
+) STRICT;
+CREATE INDEX autopilot_tasks_run ON autopilot_tasks (run_id);
+CREATE INDEX autopilot_tasks_pipeline ON autopilot_tasks (pipeline_id);
+`,
+	},
+	{
+		name: "0020_review_votes",
+		stmt: `
+-- Review consensus and human review (W7). A pipeline round may have several
+-- reviewers voting on the same PR head, and a person deciding after them.
+
+-- 'human' while a running pipeline waits for a person's review; '' else. The
+-- status stays 'running' so every other step's checks still hold.
+ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';
+
+-- One row per reviewer per round: agent reviewers by their position in the
+-- pipeline's list ('0', '1', …), a person as 'human'.
+CREATE TABLE review_votes (
+    pipeline_id TEXT NOT NULL,
+    round       INTEGER NOT NULL,
+    reviewer    TEXT NOT NULL,
+    agent       TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    -- '' while the review runs; abstain when it failed or gave no verdict.
+    verdict     TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes', 'abstain')),
+    run_id      TEXT NOT NULL DEFAULT '',
+    -- A person's comment (a review run's text is its run's summary).
+    comment     TEXT NOT NULL DEFAULT '',
+    actor_id    TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (pipeline_id, round, reviewer)
+) STRICT;
+CREATE INDEX review_votes_run ON review_votes (run_id);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

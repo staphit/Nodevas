@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconClose, IconWarning } from "../icons";
 import { useI18n } from "../i18n";
 
@@ -8,6 +8,8 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: "default" | "danger";
+  /** Replaces the warning glyph, for confirmations that are not warnings. */
+  icon?: ReactNode;
 }
 
 type ConfirmRequest = ConfirmOptions & {
@@ -93,7 +95,7 @@ export function ConfirmDialogHost() {
       >
         <header>
           <span className="confirm-dialog-icon">
-            <IconWarning size={17} />
+            {request.icon ?? <IconWarning size={17} />}
           </span>
           <div>
             <h2 id="confirm-title">{request.title}</h2>

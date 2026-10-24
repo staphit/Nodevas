@@ -5,11 +5,14 @@ import { useI18n } from "../i18n";
 export function AskCard({
   ask,
   submitting,
+  canAnswer = true,
   onSelectNode,
   onAnswer,
 }: {
   ask: AgentAsk;
   submitting?: boolean;
+  /** Only the asking session's person (or an admin) may answer. */
+  canAnswer?: boolean;
   onSelectNode?: (nodeId: string) => void;
   onAnswer: (decision: "approved" | "denied", note: string) => void;
 }) {
@@ -19,7 +22,7 @@ export function AskCard({
   const busy = Boolean(submitting);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.ctrlKey || event.metaKey || event.altKey || busy) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || busy || !canAnswer) return;
     if ((event.target as HTMLElement)?.tagName === "INPUT") return;
     if (event.key === "1") {
       event.preventDefault();
@@ -55,38 +58,44 @@ export function AskCard({
         )}
       </div>
       <p className="copilot-permission-summary">{ask.question}</p>
-      <input
-        type="text"
-        className="agent-ask-note"
-        placeholder={t("agents.ask.notePlaceholder")}
-        value={note}
-        disabled={busy}
-        onChange={(e) => setNote(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onAnswer("approved", note);
-          }
-        }}
-      />
-      <div className="copilot-permission-actions">
-        <button
-          type="button"
-          className="primary"
-          disabled={busy}
-          onClick={() => onAnswer("approved", note)}
-        >
-          {t("agents.ask.approve")} <kbd>1</kbd>
-        </button>
-        <button
-          type="button"
-          className="danger"
-          disabled={busy}
-          onClick={() => onAnswer("denied", note)}
-        >
-          {t("agents.ask.deny")} <kbd>2</kbd>
-        </button>
-      </div>
+      {canAnswer ? (
+        <>
+          <input
+            type="text"
+            className="agent-ask-note"
+            placeholder={t("agents.ask.notePlaceholder")}
+            value={note}
+            disabled={busy}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onAnswer("approved", note);
+              }
+            }}
+          />
+          <div className="copilot-permission-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => onAnswer("approved", note)}
+            >
+              {t("agents.ask.approve")} <kbd>1</kbd>
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => onAnswer("denied", note)}
+            >
+              {t("agents.ask.deny")} <kbd>2</kbd>
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="agent-ask-not-yours">{t("agents.ask.notYours")}</p>
+      )}
     </div>
   );
 }

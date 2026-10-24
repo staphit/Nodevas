@@ -138,7 +138,7 @@ func TestTerminalAccepterOneQuestionAtATime(t *testing.T) {
 
 func TestConfigSet(t *testing.T) {
 	cfg := &Config{}
-	if cfg.MaxConcurrentRuns() != 1 || cfg.RunTimeoutMins() != 60 || cfg.ClaudePermissionMode() != "acceptEdits" || cfg.AutoAccept {
+	if cfg.MaxConcurrentRuns() != 1 || cfg.RunTimeoutMins() != 60 || cfg.ClaudePermissionMode() != "acceptEdits" || cfg.AutoAcceptOn() {
 		t.Fatalf("defaults: %+v", cfg)
 	}
 	if dir, err := cfg.RunDataDir(); err != nil || !strings.HasSuffix(dir, "runner-data") {
@@ -161,7 +161,7 @@ func TestConfigSet(t *testing.T) {
 		}
 	}
 	if cfg.MaxConcurrentRuns() != 3 || cfg.RunTimeout() != 90*time.Minute || cfg.PermissionMode != "dontAsk" ||
-		!slices.Equal(cfg.AllowedTools, []string{"Edit", "Bash(git diff, git log)", "Read"}) || !cfg.AutoAccept ||
+		!slices.Equal(cfg.AllowedTools, []string{"Edit", "Bash(git diff, git log)", "Read"}) || !cfg.AutoAcceptOn() ||
 		!strings.HasSuffix(cfg.DataDir, "dir") || !filepath.IsAbs(cfg.DataDir) {
 		t.Fatalf("after set: %+v", cfg)
 	}
@@ -175,7 +175,7 @@ func TestConfigSet(t *testing.T) {
 		}
 	}
 	if cfg.MaxConcurrent != 0 || cfg.RunTimeoutMinutes != 0 || cfg.PermissionMode != "" || cfg.AllowedTools != nil ||
-		cfg.AutoAccept || cfg.DataDir != "" {
+		cfg.AutoAccept != nil || cfg.DataDir != "" {
 		t.Fatalf("after reset: %+v", cfg)
 	}
 	bad := []struct {
@@ -195,5 +195,42 @@ func TestConfigSet(t *testing.T) {
 		if err := cfg.Set(c.key, c.values); err == nil {
 			t.Errorf("Set(%s, %v) accepted", c.key, c.values)
 		}
+	}
+}
+
+func TestTerminalAccepterRemoteTyping(t *testing.T) {
+	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
+		var out strings.Builder
+		a := &TerminalAccepter{In: strings.NewReader(in), Out: &out, Interactive: true, Timeout: 5 * time.Second}
+		if got := a.AllowRemoteTyping(context.Background(), Offer{}); got != want {
+			t.Errorf("answer %q: %t", in, got)
+		}
+		if !strings.Contains(out.String(), "Allow remote typing? [y/N]") {
+			t.Errorf("question: %q", out.String())
+		}
+	}
+	if (&TerminalAccepter{In: strings.NewReader("y\n"), Out: io.Discard}).AllowRemoteTyping(context.Background(), Offer{}) {
+		t.Error("no terminal, yet typing allowed")
+	}
+}
+
+func TestRunTimeoutFor(t *testing.T) {
+	cfg := &Config{}
+	if cfg.RunTimeoutFor(runnerwire.JobReview) != 20*time.Minute || cfg.RunTimeoutFor(runnerwire.JobPlan) != 30*time.Minute ||
+		cfg.RunTimeoutFor("") != 60*time.Minute || cfg.RunTimeoutFor(runnerwire.JobRevise) != 60*time.Minute {
+		t.Fatal("defaults")
+	}
+	cfg.RunTimeoutMinutes = 15
+	if cfg.RunTimeoutFor(runnerwire.JobReview) != 15*time.Minute {
+		t.Fatal("a review's default outlasts the run timeout")
+	}
+	if err := cfg.Set("reviewTimeoutMinutes", []string{"45"}); err != nil || cfg.RunTimeoutFor(runnerwire.JobReview) != 45*time.Minute {
+		t.Fatalf("set review: %v", err)
+	}
+	if err := cfg.Set("planTimeoutMinutes", []string{"0"}); err == nil {
+		t.Fatal("0 accepted")
+	}
+	if err := cfg.Set("reviewTimeoutMinutes", []string{"default"}); err != nil || cfg.ReviewTimeoutMinutes != 0 {
+		t.Fatalf("reset: %v", err)
 	}
 }

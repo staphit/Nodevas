@@ -15,12 +15,17 @@ import (
 
 func parseFixture(t *testing.T, name string) ([]runnerwire.RunEvent, Outcome) {
 	t.Helper()
+	return parseWith(t, Claude{}.NewParser(), name)
+}
+
+// parseWith feeds a fixture to a parser a line at a time, as the runner does.
+func parseWith(t *testing.T, parser Parser, name string) ([]runnerwire.RunEvent, Outcome) {
+	t.Helper()
 	f, err := os.Open(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	parser := Claude{}.NewParser()
 	var events []runnerwire.RunEvent
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64<<10), 1<<20)
@@ -80,7 +85,7 @@ func TestClaudeParseStream(t *testing.T) {
 	}
 	usage := events[8].Usage
 	if usage == nil || usage.InputTokens != 4 || usage.OutputTokens != 130 || usage.CacheReadTokens != 45006 ||
-		usage.CacheWriteTokens != 17059 || usage.CostUSD != 0.00392726 {
+		usage.CacheWriteTokens != 17059 || usage.CostUSD != 0.00392726 || usage.Model != "claude-haiku-5-5" {
 		t.Errorf("usage = %+v", usage)
 	}
 	if !outcome.Done || outcome.IsError || outcome.Summary != `Content: "hello fixture"` || outcome.Usage == nil ||
@@ -97,6 +102,24 @@ func TestClaudeParseErrorResult(t *testing.T) {
 	if !outcome.Done || !outcome.IsError || outcome.Error != "Reached maximum number of turns (50)" ||
 		outcome.Usage.CostUSD != 1.25 {
 		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+// Of a result's models, the one that wrote the most is the run's; with no
+// modelUsage, the init line's.
+func TestClaudeMainModel(t *testing.T) {
+	p := Claude{}.NewParser()
+	p.Parse([]byte(`{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}`))
+	events := p.Parse([]byte(`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":9},` +
+		`"modelUsage":{"claude-haiku-5-5":{"outputTokens":3},"claude-sonnet-5-5":{"outputTokens":6}}}`))
+	if len(events) == 0 || events[0].Usage == nil || events[0].Usage.Model != "claude-sonnet-5-5" {
+		t.Fatalf("events = %+v", events)
+	}
+	p = Claude{}.NewParser()
+	p.Parse([]byte(`{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}`))
+	events = p.Parse([]byte(`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":9}}`))
+	if len(events) == 0 || events[0].Usage == nil || events[0].Usage.Model != "claude-opus-5-5" {
+		t.Fatalf("events = %+v", events)
 	}
 }
 
@@ -205,8 +228,19 @@ func TestClaudeCommand(t *testing.T) {
 }
 
 func TestForAndTruncate(t *testing.T) {
-	if For("claude") == nil || For("codex") != nil || For("") != nil {
+	for _, kind := range []string{"claude", "codex", "gemini", "opencode", "antigravity"} {
+		if a := For(kind); a == nil || a.Kind() != kind {
+			t.Errorf("For(%q) = %v", kind, a)
+		}
+		if _, ok := For(kind).(Interactive); !ok {
+			t.Errorf("%s has no interactive command", kind)
+		}
+	}
+	if For("aider") != nil || For("") != nil {
 		t.Error("For")
+	}
+	if Binary("antigravity") != "agy" || Binary("opencode") != "opencode" || Binary("claude") != "claude" {
+		t.Error("Binary")
 	}
 	if got := Truncate("héllo", 2); got != "h" {
 		t.Errorf("Truncate = %q", got)
@@ -226,5 +260,30 @@ func TestClaudeParserPermissionDenied(t *testing.T) {
 	if len(events) != 1 || events[0].Type != runnerwire.EventError ||
 		events[0].Text != "permission denied: Bash (This command requires approval)" {
 		t.Fatalf("events = %+v", events)
+	}
+}
+
+// A review or plan never gets a tool that writes a file or runs a command,
+// whatever the owner allowed; implement runs are as configured.
+func TestClaudeReadOnlyKinds(t *testing.T) {
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: "/w", TempDir: t.TempDir(),
+		PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash"}}
+	for kind, readOnly := range map[string]bool{
+		runnerwire.JobReview: true, runnerwire.JobPlan: true, runnerwire.JobRevise: false, "": false,
+	} {
+		cmd, err := Claude{}.Command(runnerwire.Job{RunID: "r", NodeID: "n", Kind: kind}, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.Index(cmd.Args, "--disallowedTools")
+		if readOnly != (i >= 0) {
+			t.Fatalf("kind %q: args %q", kind, cmd.Args)
+		}
+		if readOnly {
+			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell" || cmd.Args[i+2] != "--allowedTools" ||
+				cmd.Args[i+3] != NodevasMCPTools || cmd.Args[i-2] != "--setting-sources" || cmd.Args[i-1] != "user" {
+				t.Fatalf("kind %q: args %q", kind, cmd.Args)
+			}
+		}
 	}
 }

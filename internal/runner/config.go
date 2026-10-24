@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -50,16 +51,90 @@ type Config struct {
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
 	// RunTimeoutMinutes stops a run that goes on longer.
 	RunTimeoutMinutes int `json:"runTimeoutMinutes,omitempty"`
+	// ReviewTimeoutMinutes and PlanTimeoutMinutes stop a review or a plan
+	// sooner: they read, they do not build, and a run that reads for long is
+	// more likely stuck or being steered than working.
+	ReviewTimeoutMinutes int `json:"reviewTimeoutMinutes,omitempty"`
+	PlanTimeoutMinutes   int `json:"planTimeoutMinutes,omitempty"`
 	// DataDir holds run worktrees, under DataDir/worktrees/<run id>.
 	DataDir string `json:"dataDir,omitempty"`
 	// PermissionMode is Claude Code's --permission-mode for every run.
 	PermissionMode string `json:"permissionMode,omitempty"`
-	// AllowedTools is passed as --allowedTools, e.g. "Bash(go test *)".
+	// AllowedTools is passed to Claude Code as --allowedTools, e.g. "Bash(go test *)".
 	AllowedTools []string `json:"allowedTools,omitempty"`
-	// AutoAccept takes every valid offer without asking at the terminal. Off
-	// by default: with it on, anyone who can sign in to the hub as the owner
-	// can run agents on this machine.
-	AutoAccept bool `json:"autoAccept,omitempty"`
+	// CodexSandbox is Codex's --sandbox for every run.
+	CodexSandbox string `json:"codexSandbox,omitempty"`
+	// CodexIgnoreUserConfig runs Codex without the owner's config.toml (their
+	// MCP servers, hooks and default model); its sign-in is still used.
+	CodexIgnoreUserConfig bool `json:"codexIgnoreUserConfig,omitempty"`
+	// GeminiApprovalMode is Gemini CLI's --approval-mode for every run.
+	GeminiApprovalMode string `json:"geminiApprovalMode,omitempty"`
+	// OpenCodePermission is how freely OpenCode runs may act: read-only,
+	// edit or full (adapter.OpenCodePermissionModes).
+	OpenCodePermission string `json:"opencodePermission,omitempty"`
+	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
+	// (adapter.AntigravityModes).
+	AntigravityMode string `json:"antigravityMode,omitempty"`
+	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
+	// offers are taken without asking at the terminal. nil means off. W1's
+	// boolean form is migrated on load.
+	AutoAccept *runnerwire.AutoAcceptPolicy `json:"autoAccept,omitempty"`
+	// legacyAutoAccept: the file had W1's `"autoAccept": true`, and
+	// MigrateLegacyAutoAccept has not filled in the agents yet.
+	legacyAutoAccept bool
+	// Interactive takes interactive runs (W2.5): the agent's TUI in a terminal
+	// here that the dispatcher watches (and types into, when allowed). nil
+	// means the default, off: every interactive offer is declined.
+	Interactive *bool `json:"interactive,omitempty"`
+
+	// Pull requests, from W3 on.
+
+	// AutoPR pushes a run's commit and opens a pull request with the owner's
+	// gh login; nil means the default, on.
+	AutoPR *bool `json:"autoPR,omitempty"`
+	// PRDraft opens pull requests as drafts. A failed run's PR is always one.
+	PRDraft bool `json:"prDraft,omitempty"`
+	// PRLabels replaces the default labels; nil means DefaultPRLabels, an
+	// empty list means none. "{model}" and "{agent}" are filled in per run.
+	PRLabels *[]string `json:"prLabels,omitempty"`
+	// PRPollSeconds is how often open pull requests are checked with gh.
+	PRPollSeconds int `json:"prPollSeconds,omitempty"`
+
+	// Remote merge, from W4 on.
+
+	// RemoteMerge lets someone who approves a run's diff on the hub have this
+	// runner merge its PR (with the owner's gh login); nil means the default,
+	// off: every approval is refused.
+	RemoteMerge *bool `json:"remoteMerge,omitempty"`
+	// MergeMethod is how an approved PR is merged: squash (the default),
+	// merge or rebase. The hub's request never chooses.
+	MergeMethod string `json:"mergeMethod,omitempty"`
+	// DeleteBranchOnMerge deletes the PR's branch on GitHub once merged.
+	DeleteBranchOnMerge bool `json:"deleteBranchOnMerge,omitempty"`
+
+	// The copilot's model calls (llm.go): this runner makes them for its
+	// owner with a key that stays on this machine.
+
+	// CopilotProvider is "anthropic" or "openai"; "" means the runner does
+	// not answer copilot model calls.
+	CopilotProvider string `json:"copilotProvider,omitempty"`
+	// CopilotModel is the model called; "" is the provider's default.
+	CopilotModel string `json:"copilotModel,omitempty"`
+	// CopilotBaseURL points the provider elsewhere (an OpenAI-compatible
+	// server, a proxy); "" is the vendor's own endpoint.
+	CopilotBaseURL string `json:"copilotBaseURL,omitempty"`
+	// CopilotAPIKey is the key, set with `nodevas runner copilot-key` from
+	// stdin and never printed. CopilotKeyEnv is used when it is empty.
+	CopilotAPIKey string `json:"copilotApiKey,omitempty"`
+
+	// The autopilot advisor's model calls (W7, llm.go): a fast model this
+	// runner calls for its owner's autopilot to pick an agent and model per
+	// task. Same rules as the copilot's; the key is AdvisorAPIKey, else
+	// AdvisorKeyEnv, else the copilot key when both use the same provider.
+	AdvisorProvider string `json:"advisorProvider,omitempty"`
+	AdvisorModel    string `json:"advisorModel,omitempty"`
+	AdvisorBaseURL  string `json:"advisorBaseURL,omitempty"`
+	AdvisorAPIKey   string `json:"advisorApiKey,omitempty"`
 }
 
 // Defaults and bounds for the run settings.
@@ -67,8 +142,71 @@ const (
 	DefaultMaxConcurrent     = 1
 	MaxMaxConcurrent         = 16
 	DefaultRunTimeoutMinutes = 60
+	DefaultReviewTimeoutMins = 20
+	DefaultPlanTimeoutMins   = 30
 	MaxRunTimeoutMinutes     = 24 * 60
+	DefaultPRPollSeconds     = 120
+	MinPRPollSeconds         = 30
+	MaxPRPollSeconds         = 24 * 60 * 60
 )
+
+// DefaultPRLabels are a run's pull request labels unless the owner set others.
+var DefaultPRLabels = []string{"nodevas", "model:{model}"}
+
+// MergeMethods are the merge methods gh pr merge takes, the default first.
+var MergeMethods = []string{"squash", "merge", "rebase"}
+
+// RemoteMergeOn is RemoteMerge with its default (off) applied.
+func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge != nil && *c.RemoteMerge }
+
+// MergeMethodOrDefault is MergeMethod with its default applied; anything
+// unknown (a hand-edited file) falls back to squash.
+func (c *Config) MergeMethodOrDefault() string {
+	if slices.Contains(MergeMethods, c.MergeMethod) {
+		return c.MergeMethod
+	}
+	return MergeMethods[0]
+}
+
+// InteractiveOn is Interactive with its default (off) applied.
+func (c *Config) InteractiveOn() bool { return c.Interactive != nil && *c.Interactive }
+
+// AutoPROn is AutoPR with its default (on) applied.
+func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }
+
+// PRLabelTemplates is PRLabels with its default applied, placeholders unfilled.
+func (c *Config) PRLabelTemplates() []string {
+	if c.PRLabels == nil {
+		return append([]string(nil), DefaultPRLabels...)
+	}
+	return append([]string(nil), (*c.PRLabels)...)
+}
+
+// PRLabelsFor is the labels for one run's pull request: {model} and {agent}
+// filled in, "default" standing for the CLI's own default model.
+func (c *Config) PRLabelsFor(agent, model string) []string {
+	if model == "" {
+		model = "default"
+	}
+	var labels []string
+	for _, label := range c.PRLabelTemplates() {
+		label = strings.ReplaceAll(label, "{model}", model)
+		label = strings.ReplaceAll(label, "{agent}", agent)
+		if label = strings.TrimSpace(label); label != "" && !slices.Contains(labels, label) {
+			labels = append(labels, label)
+		}
+	}
+	return labels
+}
+
+// PRPollInterval is PRPollSeconds with its default and bounds applied.
+func (c *Config) PRPollInterval() time.Duration {
+	seconds := c.PRPollSeconds
+	if seconds <= 0 {
+		seconds = DefaultPRPollSeconds
+	}
+	return time.Duration(min(max(seconds, MinPRPollSeconds), MaxPRPollSeconds)) * time.Second
+}
 
 // MaxConcurrentRuns is MaxConcurrent with its default applied.
 func (c *Config) MaxConcurrentRuns() int {
@@ -83,6 +221,25 @@ func (c *Config) RunTimeout() time.Duration {
 	minutes := c.RunTimeoutMinutes
 	if minutes <= 0 {
 		minutes = DefaultRunTimeoutMinutes
+	}
+	return time.Duration(min(minutes, MaxRunTimeoutMinutes)) * time.Minute
+}
+
+// RunTimeoutFor is the timeout of a run of kind: a review's or a plan's own
+// setting, by default the shorter of theirs and RunTimeout; RunTimeout for
+// everything else.
+func (c *Config) RunTimeoutFor(kind string) time.Duration {
+	var minutes, fallback int
+	switch kind {
+	case runnerwire.JobReview:
+		minutes, fallback = c.ReviewTimeoutMinutes, DefaultReviewTimeoutMins
+	case runnerwire.JobPlan:
+		minutes, fallback = c.PlanTimeoutMinutes, DefaultPlanTimeoutMins
+	default:
+		return c.RunTimeout()
+	}
+	if minutes <= 0 {
+		return min(time.Duration(fallback)*time.Minute, c.RunTimeout())
 	}
 	return time.Duration(min(minutes, MaxRunTimeoutMinutes)) * time.Minute
 }
@@ -111,18 +268,67 @@ func (c *Config) ClaudePermissionMode() string {
 	return c.PermissionMode
 }
 
-// AutoAcceptWarning is printed whenever auto-accept is switched on or the
-// runner starts with it on.
-const AutoAcceptWarning = "WARNING: autoAccept is on. Anyone who can sign in to the hub as you can now run " +
-	"agents on this machine, in the repositories you added, without anyone here saying yes."
+// CodexSandboxMode is CodexSandbox with its default applied.
+func (c *Config) CodexSandboxMode() string {
+	if c.CodexSandbox == "" {
+		return adapter.DefaultCodexSandbox
+	}
+	return c.CodexSandbox
+}
+
+// GeminiApproval is GeminiApprovalMode with its default applied.
+func (c *Config) GeminiApproval() string {
+	if c.GeminiApprovalMode == "" {
+		return adapter.DefaultGeminiApprovalMode
+	}
+	return c.GeminiApprovalMode
+}
+
+// OpenCodePermissionMode is OpenCodePermission with its default applied.
+func (c *Config) OpenCodePermissionMode() string {
+	if c.OpenCodePermission == "" {
+		return adapter.DefaultOpenCodePermission
+	}
+	return c.OpenCodePermission
+}
+
+// AntigravityModeOrDefault is AntigravityMode with its default applied.
+func (c *Config) AntigravityModeOrDefault() string {
+	if c.AntigravityMode == "" {
+		return adapter.DefaultAntigravityMode
+	}
+	return c.AntigravityMode
+}
+
+// PermissionModeFor is the owner's permission setting for an agent kind, as
+// adapter.RunEnv.PermissionMode takes it.
+func (c *Config) PermissionModeFor(kind string) string {
+	switch kind {
+	case "codex":
+		return c.CodexSandboxMode()
+	case "gemini":
+		return c.GeminiApproval()
+	case "opencode":
+		return c.OpenCodePermissionMode()
+	case "antigravity":
+		return c.AntigravityModeOrDefault()
+	}
+	return c.ClaudePermissionMode()
+}
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
-var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools", "autoAccept"}
+var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "antigravityMode",
+	"autoAccept", "interactive",
+	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
+	"copilotProvider", "copilotModel", "copilotBaseURL",
+	"advisorProvider", "advisorModel", "advisorBaseURL"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
 // top-level commas ("Edit,Bash(git diff, git log)" is two tools); "none"
-// clears it.
+// clears it. prLabels takes labels one per value or comma-separated; "none"
+// means no labels.
 func (c *Config) Set(key string, values []string) error {
 	canonical := ""
 	for _, k := range SettingKeys {
@@ -136,12 +342,16 @@ func (c *Config) Set(key string, values []string) error {
 	if len(values) == 0 {
 		return fmt.Errorf("%s needs a value", canonical)
 	}
-	if canonical != "allowedTools" && len(values) != 1 {
+	if canonical != "allowedTools" && canonical != "prLabels" && len(values) != 1 {
 		return fmt.Errorf("%s takes one value", canonical)
 	}
 	value := strings.TrimSpace(values[0])
 	reset := strings.EqualFold(value, "default") && len(values) == 1
 	switch canonical {
+	case "copilotProvider", "copilotModel", "copilotBaseURL":
+		return c.setCopilot(canonical, value, reset)
+	case "advisorProvider", "advisorModel", "advisorBaseURL":
+		return c.setAdvisor(canonical, value, reset)
 	case "maxConcurrent":
 		if reset {
 			c.MaxConcurrent = 0
@@ -162,6 +372,20 @@ func (c *Config) Set(key string, values []string) error {
 			return fmt.Errorf("runTimeoutMinutes must be a number from 1 to %d", MaxRunTimeoutMinutes)
 		}
 		c.RunTimeoutMinutes = n
+	case "reviewTimeoutMinutes", "planTimeoutMinutes":
+		field := &c.ReviewTimeoutMinutes
+		if canonical == "planTimeoutMinutes" {
+			field = &c.PlanTimeoutMinutes
+		}
+		if reset {
+			*field = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxRunTimeoutMinutes {
+			return fmt.Errorf("%s must be a number from 1 to %d", canonical, MaxRunTimeoutMinutes)
+		}
+		*field = n
 	case "dataDir":
 		if reset {
 			c.DataDir = ""
@@ -177,13 +401,61 @@ func (c *Config) Set(key string, values []string) error {
 			c.PermissionMode = ""
 			return nil
 		}
-		for _, mode := range adapter.ClaudePermissionModes {
-			if strings.EqualFold(mode, value) {
-				c.PermissionMode = mode
-				return nil
-			}
+		mode, err := oneOf(canonical, value, adapter.ClaudePermissionModes)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("permissionMode must be one of %s", strings.Join(adapter.ClaudePermissionModes, ", "))
+		c.PermissionMode = mode
+	case "codexSandbox":
+		if reset {
+			c.CodexSandbox = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.CodexSandboxModes)
+		if err != nil {
+			return err
+		}
+		c.CodexSandbox = mode
+	case "codexIgnoreUserConfig":
+		if reset {
+			c.CodexIgnoreUserConfig = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("codexIgnoreUserConfig must be true or false")
+		}
+		c.CodexIgnoreUserConfig = on
+	case "geminiApprovalMode":
+		if reset {
+			c.GeminiApprovalMode = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.GeminiApprovalModes)
+		if err != nil {
+			return err
+		}
+		c.GeminiApprovalMode = mode
+	case "opencodePermission":
+		if reset {
+			c.OpenCodePermission = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.OpenCodePermissionModes)
+		if err != nil {
+			return err
+		}
+		c.OpenCodePermission = mode
+	case "antigravityMode":
+		if reset {
+			c.AntigravityMode = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.AntigravityModes)
+		if err != nil {
+			return err
+		}
+		c.AntigravityMode = mode
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
@@ -205,16 +477,122 @@ func (c *Config) Set(key string, values []string) error {
 		c.AllowedTools = tools
 	case "autoAccept":
 		if reset {
-			c.AutoAccept = false
+			c.AutoAccept, c.legacyAutoAccept = nil, false
 			return nil
 		}
 		on, err := strconv.ParseBool(value)
 		if err != nil {
 			return errors.New("autoAccept must be true or false")
 		}
-		c.AutoAccept = on
+		// Without detection at hand every kind is listed; the CLI calls
+		// SetAutoAccept itself with the agents installed here.
+		c.SetAutoAccept(on, Kinds)
+	case "interactive":
+		if reset {
+			c.Interactive = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("interactive must be true or false")
+		}
+		c.Interactive = &on
+	case "autoPR":
+		if reset {
+			c.AutoPR = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("autoPR must be true or false")
+		}
+		c.AutoPR = &on
+	case "prDraft":
+		if reset {
+			c.PRDraft = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("prDraft must be true or false")
+		}
+		c.PRDraft = on
+	case "prLabels":
+		if reset {
+			c.PRLabels = nil
+			return nil
+		}
+		labels := []string{}
+		if !(len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
+			for _, v := range values {
+				for _, label := range strings.Split(v, ",") {
+					if label = strings.TrimSpace(label); label == "" {
+						continue
+					}
+					if len(label) > 50 {
+						return fmt.Errorf("label %q is longer than GitHub allows (50)", label)
+					}
+					labels = append(labels, label)
+				}
+			}
+			if len(labels) == 0 {
+				return errors.New("prLabels: no labels given")
+			}
+		}
+		c.PRLabels = &labels
+	case "prPollSeconds":
+		if reset {
+			c.PRPollSeconds = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < MinPRPollSeconds || n > MaxPRPollSeconds {
+			return fmt.Errorf("prPollSeconds must be a number from %d to %d", MinPRPollSeconds, MaxPRPollSeconds)
+		}
+		c.PRPollSeconds = n
+	case "remoteMerge":
+		if reset {
+			c.RemoteMerge = nil
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("remoteMerge must be true or false")
+		}
+		c.RemoteMerge = &on
+	case "mergeMethod":
+		if reset {
+			c.MergeMethod = ""
+			return nil
+		}
+		method, err := oneOf(canonical, value, MergeMethods)
+		if err != nil {
+			return err
+		}
+		c.MergeMethod = method
+	case "deleteBranchOnMerge":
+		if reset {
+			c.DeleteBranchOnMerge = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("deleteBranchOnMerge must be true or false")
+		}
+		c.DeleteBranchOnMerge = on
 	}
 	return nil
+}
+
+// oneOf matches value to one of choices, ignoring case, and returns the
+// choice as the CLI spells it.
+func oneOf(key, value string, choices []string) (string, error) {
+	for _, choice := range choices {
+		if strings.EqualFold(choice, value) {
+			return choice, nil
+		}
+	}
+	return "", fmt.Errorf("%s must be one of %s", key, strings.Join(choices, ", "))
 }
 
 // splitTools splits at commas outside parentheses, so a rule like

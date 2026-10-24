@@ -73,6 +73,20 @@ ON CONFLICT (token_hash) DO UPDATE SET
 	}
 }
 
+// stepUp records when a session completed a step-up, so a restart keeps it.
+// A failure is logged: losing it costs a fresh passcode after the restart,
+// which is the safe direction.
+func (s sessionStore) stepUp(key string, at time.Time) {
+	if !s.enabled() {
+		return
+	}
+	if _, err := s.database.ExecContext(context.Background(),
+		`UPDATE sessions SET stepped_up_at = ? WHERE token_hash = ?`,
+		stamp(at), key); err != nil {
+		log.Printf("session step-up: %v", err)
+	}
+}
+
 // touch records a renewed expiry. Called at most once an hour per session, so
 // it is a write the request path can afford.
 func (s sessionStore) touch(key string, expires time.Time) {
@@ -170,7 +184,7 @@ WHERE expires_at <= ?
 		return sessions
 	}
 	rows, err := s.database.QueryContext(ctx, `
-SELECT token_hash, user_id, user_name, user_role, revision, created_at, expires_at
+SELECT token_hash, user_id, user_name, user_role, revision, created_at, expires_at, stepped_up_at
 FROM sessions
 WHERE expires_at > ?
 ORDER BY created_at DESC, token_hash DESC
@@ -181,8 +195,8 @@ LIMIT ?`, stamp(now), maxSessions)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var key, userID, name, role, revision, created, expires string
-		if err := rows.Scan(&key, &userID, &name, &role, &revision, &created, &expires); err != nil {
+		var key, userID, name, role, revision, created, expires, steppedUp string
+		if err := rows.Scan(&key, &userID, &name, &role, &revision, &created, &expires, &steppedUp); err != nil {
 			log.Printf("session load: %v", err)
 			return sessions
 		}
@@ -202,12 +216,20 @@ LIMIT ?`, stamp(now), maxSessions)
 			log.Printf("session load: unreadable timestamps on %s", key[:8])
 			continue
 		}
-		sessions[key] = &Session{
+		session := &Session{
 			actor:    identity.Actor{ID: userID, Name: name, Role: identity.Role(role)},
 			revision: revision,
 			created:  createdAt,
 			expires:  expiresAt,
 		}
+		// An unreadable step-up is no step-up: the person asks for a passcode
+		// again, which is the direction to fail in.
+		if steppedUp != "" {
+			if at, err := time.Parse(time.RFC3339, steppedUp); err == nil {
+				session.steppedUp = at
+			}
+		}
+		sessions[key] = session
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("session load: %v", err)

@@ -7,12 +7,18 @@
 
 import { useEffect, useState } from "react";
 import {
+  IconArchive,
+  IconCanvas,
   IconClose,
   IconExport,
-  IconFolder,
   IconFolderOpen,
-  IconImport,
+  IconFolderPlus,
+  IconLayers,
+  IconLayersPlus,
+  IconMarkdown,
   IconPlus,
+  IconTree,
+  IconWarning,
 } from "../../icons";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
@@ -115,7 +121,7 @@ export function TreeContextMenu({
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className="project-context-heading">
-        <IconFolderOpen size={14} />
+        <IconLayers size={14} />
         <span>
           <b>{workspaceName}</b>
             <small>{t("explorer.workspace")}</small>
@@ -141,7 +147,7 @@ export function TreeContextMenu({
       {workspaceRoots.length <= 1 ? (
         <button type="button" role="menuitem" disabled>
           <span className="project-context-icon">
-            <IconClose size={14} />
+            <IconWarning size={14} />
           </span>
           <span>
             <b>{t("explorer.lastWorkspaceUnavailable")}</b>
@@ -192,7 +198,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconFolder size={14} />
+          <IconTree size={14} />
         </span>
         <span>
           <b>{t("explorer.newChildProject")}</b>
@@ -208,7 +214,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconFolderOpen size={14} />
+          <IconFolderPlus size={14} />
         </span>
         <span>
           <b>{t("explorer.newWorkspaceFolder")}</b>
@@ -225,7 +231,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconLayersPlus size={14} />
         </span>
         <span>
           <b>{t("explorer.addWorkspace")}</b>
@@ -243,7 +249,7 @@ export function TreeContextMenu({
         type="button"
         role="menuitem"
         onClick={() => {
-          transfer.exportProjectArchive({ name: ".", label: workspaceName });
+          void transfer.exportProjectArchive({ name: ".", label: workspaceName });
           onClose();
         }}
       >
@@ -265,7 +271,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconMarkdown size={14} />
         </span>
         <span>
           <b>{t("explorer.importMarkdown")}</b>
@@ -282,7 +288,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconArchive size={14} />
         </span>
         <span>
           <b>{t("explorer.importArchive")}</b>
@@ -299,7 +305,7 @@ export function TreeContextMenu({
         }}
       >
         <span className="project-context-icon">
-          <IconImport size={14} />
+          <IconCanvas size={14} />
         </span>
         <span>
           <b>{t("explorer.importCanvas")}</b>

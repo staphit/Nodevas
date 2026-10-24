@@ -1,9 +1,8 @@
 /**
  * Remote backup slice [A-05].
  *
- * Everything behind `/api/remote/*`: where bundles are pushed, the Google Drive
- * credentials and token, the bundle listing, and how the workspace compares to
- * its newest cloud snapshot. The deadline-mail settings sit here too — they are
+ * Everything behind `/api/remote/*`: where bundles are pushed, the bundle
+ * listing, and how the workspace compares to its newest backup snapshot. The deadline-mail settings sit here too — they are
  * the same kind of thing, workspace-wide server config that a modal edits, and
  * they are the only other one.
  *
@@ -13,10 +12,6 @@
  * left the sync banner claiming the local copy was still newer, and saving the
  * backend from one modal was invisible to the other until it was reopened. One
  * config on disk, one copy of it here.
- *
- * Folder browsing deliberately stays in the components. A Drive folder stack is
- * where one picker has navigated to, not something the server holds, and two
- * pickers open at once are *supposed* to sit in different folders.
  */
 
 import {
@@ -37,13 +32,12 @@ import type { AppSlice, RemoteConfigInput, RemoteSlice } from "./types";
 
 /**
  * Backup work runs in lanes that are genuinely independent — editing the
- * destination, moving a bundle, authorising Drive, wiring up mail — so each
+ * destination, moving a bundle, wiring up mail — so each
  * reports on its own badge rather than sharing a single "remote" one.
  */
 export const remoteScope = {
   config: (): OperationScope => "remote:config",
   bundle: (): OperationScope => "remote:bundle",
-  drive: (): OperationScope => "remote:drive",
   notify: (): OperationScope => "remote:notify",
 } as const;
 
@@ -83,7 +77,6 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     remoteConfig: null,
     remoteBundles: null,
     remoteSyncStatus: null,
-    driveCredentials: null,
     notifySettings: null,
     notifyHasPassword: false,
 
@@ -103,11 +96,6 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     refreshRemoteSyncStatus: () =>
       coalesceRequest("remote-sync", async () => {
         set({ remoteSyncStatus: await api.getRemoteSyncStatus() });
-      }),
-
-    refreshDriveCredentials: () =>
-      coalesceRequest("drive-credentials", async () => {
-        set({ driveCredentials: await api.getDriveCredentials() });
       }),
 
     refreshNotifySettings: () =>
@@ -164,40 +152,6 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
         return result.active;
       }),
 
-    connectDriveWorkspace: (folderId, bundleId, name) =>
-      command(
-        remoteScope.drive(),
-        "remote.connectDrive",
-        "從 Google Drive 匯入失敗",
-        async () => {
-          const result = await api.connectDriveWorkspace(folderId, bundleId, name);
-          await get().refreshProjects();
-          await get().switchProject(result.active);
-          await reread(get().refreshRemoteConfig, get().refreshRemoteSyncStatus);
-          return result.active;
-        },
-      ),
-
-    // Credentials decide `driveAvailable`, which the backup dialog reads off the
-    // config, so the config is stale the moment they change.
-    saveDriveCredentials: (clientId, clientSecret) =>
-      command(remoteScope.drive(), "remote.saveDriveCredentials", "儲存 OAuth 憑證失敗", async () => {
-        set({ driveCredentials: await api.putDriveCredentials(clientId, clientSecret) });
-        await reread(get().refreshRemoteConfig);
-      }),
-
-    clearDriveCredentials: () =>
-      command(remoteScope.drive(), "remote.clearDriveCredentials", "清除 OAuth 憑證失敗", async () => {
-        set({ driveCredentials: await api.deleteDriveCredentials() });
-        await reread(get().refreshRemoteConfig);
-      }),
-
-    disconnectDrive: () =>
-      command(remoteScope.drive(), "remote.disconnectDrive", "中斷連線失敗", async () => {
-        await api.disconnectDrive();
-        await reread(get().refreshRemoteConfig);
-      }),
-
     saveNotifySettings: (settings: NotifySettings) =>
       command(remoteScope.notify(), "notify.save", "儲存失敗", async () => {
         await api.putNotifySettings(settings);
@@ -224,16 +178,6 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
 /** RFC3339's zero value is the server's "never"; it must not reach a formatter. */
 export function hasEverBackedUp(config: RemoteConfig | null): boolean {
   return config != null && !config.lastBackupAt.startsWith("0001-01-01");
-}
-
-/** True when Drive is wired up far enough to list folders and push. */
-export function driveReady(config: RemoteConfig | null): boolean {
-  return (
-    config != null &&
-    config.driveAvailable &&
-    config.driveConnected &&
-    !config.driveNeedsReauth
-  );
 }
 
 /** Newest first, whatever order the backend happened to list them in. */

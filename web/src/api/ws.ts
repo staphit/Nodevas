@@ -57,12 +57,24 @@ export type WSEvent = {
     | "presence"
     | "locks"
     | "lock-denied"
+    // Membership (internal/members): this connection may no longer watch the
+    // project it asked for.
+    | "access-denied"
     | "agents-changed"
+    | "agent-messages-changed"
+    | "agent-notify"
     | "runners-changed"
     | "runs-changed"
-    | "run-events";
+    | "run-events"
+    | "run-notify"
+    | "session-changes"
+    | "usage-changed"
+    // W7: an autopilot run changed; the id is the autopilot run's.
+    | "autopilot-changed";
   id?: string;
   project?: string;
+  /** autopilot-changed: the goal node the autopilot run belongs to. */
+  goalNodeId?: string;
   peers?: Peer[];
   locks?: NodeLock[];
   actor?: Actor;

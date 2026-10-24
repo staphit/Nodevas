@@ -72,16 +72,20 @@ type Registry struct {
 
 	mu   sync.Mutex
 	live map[string]Conn
+	// attached is when each live connection was attached: the copilot asks
+	// the most recently connected of a person's runners (llm.go).
+	attached map[string]time.Time
 }
 
 // NewRegistry builds a registry over the workspace database. notify, when set,
 // is called after anything a runners list would show has changed.
 func NewRegistry(database *db.DB, notify func()) *Registry {
 	return &Registry{
-		db:     database,
-		notify: notify,
-		now:    time.Now,
-		live:   make(map[string]Conn),
+		db:       database,
+		notify:   notify,
+		now:      time.Now,
+		live:     make(map[string]Conn),
+		attached: make(map[string]time.Time),
 	}
 }
 
@@ -283,6 +287,13 @@ func ActorFor(runner runnerwire.Runner) identity.Actor {
 	return identity.Actor{ID: runner.OwnerID, Name: runner.OwnerName, Agent: identity.AgentWorker}
 }
 
+// Limits on a hello's auto-accept allowlist (W6), besides runnerwire.MaxRepos
+// for its repos.
+const (
+	MaxAutoAcceptAgents = 16
+	MaxAutoAcceptModes  = 2
+)
+
 // ValidateInfo enforces the limits a hello must respect.
 func ValidateInfo(info runnerwire.Info) error {
 	bad := func(what string) error { return fmt.Errorf("%w: hello %s", ErrInvalid, what) }
@@ -311,7 +322,29 @@ func ValidateInfo(info runnerwire.Info) error {
 	if models > runnerwire.MaxModels {
 		return bad("lists too many models")
 	}
+	// W6: the auto-accept allowlist is shown, never enforced, here; it still
+	// must not be a way to park junk in the runners table.
+	if policy := info.AutoAccept; policy != nil {
+		if len(policy.Repos) > runnerwire.MaxRepos {
+			return bad("auto-accept lists too many repos")
+		}
+		if len(policy.Agents) > MaxAutoAcceptAgents {
+			return bad("auto-accept lists too many agents")
+		}
+		if len(policy.Modes) > MaxAutoAcceptModes {
+			return bad("auto-accept lists too many modes")
+		}
+		for _, list := range [][]string{policy.Repos, policy.Agents, policy.Modes} {
+			short = append(short, list...)
+		}
+	}
 	var long []string
+	for _, llm := range []*runnerwire.LLMInfo{info.LLM, info.Advisor} {
+		if llm != nil {
+			short = append(short, llm.Provider, llm.Model, llm.Purpose)
+			long = append(long, llm.BaseURL)
+		}
+	}
 	for _, repo := range info.Repos {
 		if strings.TrimSpace(repo.ID) == "" {
 			return bad("has a repo without an id")
@@ -370,6 +403,7 @@ func (r *Registry) Attach(id string, conn Conn) (detach func()) {
 	r.mu.Lock()
 	previous := r.live[id]
 	r.live[id] = conn
+	r.attached[id] = r.now()
 	r.mu.Unlock()
 	if previous != nil {
 		previous.Bye(runnerwire.ByeReplaced)
@@ -382,6 +416,7 @@ func (r *Registry) Attach(id string, conn Conn) (detach func()) {
 			removed := r.live[id] == conn
 			if removed {
 				delete(r.live, id)
+				delete(r.attached, id)
 			}
 			r.mu.Unlock()
 			if removed {
@@ -414,6 +449,7 @@ func (r *Registry) kick(id, reason string) {
 	r.mu.Lock()
 	conn := r.live[id]
 	delete(r.live, id)
+	delete(r.attached, id)
 	r.mu.Unlock()
 	if conn != nil {
 		conn.Bye(reason)

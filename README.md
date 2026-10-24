@@ -24,7 +24,7 @@ The following capabilities are available today but still in beta, and may change
 
 - [MCP integration](./docs/mcp.md): AI agent tools, resources, and prompts.
 - [Real-time co-editing](./docs/collaboration.md): shared servers, WebSocket presence, and CRDT document sessions.
-- Cloud backup: Google Drive sync, backup, and restore.
+- Backup: scheduled snapshots to a local folder, and restore.
 - Version history: document drafts, past revisions, and restore.
 
 ## Use cases
@@ -69,6 +69,7 @@ Open <http://127.0.0.1:5666>. For production builds, development mode, configura
 ## Documentation
 
 - [Getting started](./docs/getting-started.md): build, run, configure, and expose a server safely.
+- [Install a runner](./docs/install.md): `scripts/install.sh` sets up the machine your agents run on in one command.
 - [Concepts](./docs/concepts.md): nodes, edges, dependency gates, readiness, and node metadata.
 - [Timeline](./docs/timeline.md): planned milestones, actual events, and date assessment.
 - [MCP integration](./docs/mcp.md): connect Claude Code, Codex, or another MCP client.

@@ -9,10 +9,15 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
+	"nodevas/internal/agenthook"
 	"nodevas/internal/runner"
+	"nodevas/internal/runner/adapter"
+	"nodevas/internal/runnerwire"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -34,13 +39,25 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "login":
 		err = runnerLogin(args, in, stdout, stderr)
 	case "logout":
-		err = runnerLogout(args, stdout)
+		err = runnerLogout(args, stdout, stderr)
 	case "status":
-		err = runnerStatus(args, stdout)
+		err = runnerStatus(args, stdout, stderr)
 	case "repo":
 		err = runnerRepo(args, in, stdout, stderr)
 	case "set":
 		err = runnerSet(args, stdout, stderr)
+	case "autoaccept", "auto-accept":
+		err = runnerAutoAccept(args, stdout, stderr)
+	case "copilot-key":
+		err = runnerCopilotKey(args, in, stdout, stderr)
+	case "advisor-key":
+		err = runnerAdvisorKey(args, in, stdout, stderr)
+	case "agy-gate":
+		// Not for people: the PreToolUse hook of a headless Antigravity run
+		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
+		fmt.Fprintln(stdout, adapter.AntigravityGate(agenthook.ReadStdin(stdin, agenthook.StdinLimit),
+			len(args) > 0 && args[0] == adapter.AntigravityGateReadOnly))
+		return 0
 	case "help", "-h", "--help":
 		runnerUsage(stdout)
 		return 0
@@ -72,11 +89,60 @@ func runnerUsage(w io.Writer) {
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
        nodevas runner repo remove <id|name>
+       nodevas runner autoaccept on|off|show the offers that start without asking here:
+       nodevas runner autoaccept step-up required|optional
+       nodevas runner autoaccept repo add|remove <id|name|path>
+       nodevas runner autoaccept agent add|remove <kind>
+       nodevas runner autoaccept mode add|remove headless|interactive
+       nodevas runner autoaccept allow-shell on|off
+       nodevas runner autoaccept remote-typing on|off
+                                             an offer is auto-accepted only when auto-accept is on,
+                                             the dispatcher stepped up on the hub (unless optional),
+                                             its repo, agent and mode are all listed, and its agent
+                                             cannot run any shell command (unless allow-shell on);
+                                             anything else is asked about at this terminal. A step-up
+                                             does not protect you from a compromised hub.
+                                             remote-typing on lets the dispatcher type into
+                                             auto-accepted interactive runs (default: view only)
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
-                                             maxConcurrent, runTimeoutMinutes, dataDir,
-                                             permissionMode (acceptEdits|auto|bypassPermissions|
-                                             manual|dontAsk|plan), allowedTools (one per argument,
-                                             or comma-separated; "none" clears), autoAccept
+                                             maxConcurrent, runTimeoutMinutes, reviewTimeoutMinutes
+                                             (default 20), planTimeoutMinutes (default 30), dataDir, autoAccept
+                                             (true = autoaccept on with the defaults: step-up required,
+                                             every repo here, installed agents, headless; false = off),
+                                             interactive (true|false, default false: take runs whose
+                                             agent TUI the dispatcher watches, typing only if allowed);
+                                             Claude Code: permissionMode (acceptEdits|auto|
+                                             bypassPermissions|manual|dontAsk|plan), allowedTools
+                                             (one per argument, or comma-separated; "none" clears);
+                                             Codex: codexSandbox (read-only|workspace-write|
+                                             danger-full-access), codexIgnoreUserConfig (true|false);
+                                             Gemini CLI: geminiApprovalMode (default|auto_edit|yolo);
+                                             OpenCode: opencodePermission (read-only|edit|full);
+                                             Antigravity CLI (agy): antigravityMode (plan|accept-edits|
+                                             auto|full; full skips every permission);
+                                             pull requests: autoPR (true|false), prDraft (true|false),
+                                             prLabels (one per argument, or comma-separated; {model}
+                                             and {agent} are filled in; "none" for no labels),
+                                             prPollSeconds (30 or more);
+                                             remote merge: remoteMerge (true|false, default false), mergeMethod
+                                             (squash|merge|rebase), deleteBranchOnMerge (true|false);
+                                             copilot: copilotProvider (anthropic|openai|none: this runner
+                                             makes your voice copilot's model calls with a key kept here),
+                                             copilotModel, copilotBaseURL (https, or http to this machine
+                                             or the local network);
+                                             autopilot advisor: advisorProvider (anthropic|openai|systemone|
+                                             none: a fast model here picks the agent and model for each
+                                             autopilot task), advisorModel, advisorBaseURL (same rules as
+                                             copilot). systemone is a System One endpoint: Laya on this PC
+                                             (in a venv: pip install "laya[serve]==0.4.14", then
+                                             LAYA_HOST=127.0.0.1 laya-serve; base URL defaults
+                                             to http://127.0.0.1:8000) or TypeSafe's Jev (advisorBaseURL
+                                             https://api.typesafe.ai, advisorModel jev-latest, advisor-key)
+       nodevas runner copilot-key [--clear]  store the copilot's API key, read from stdin (never a flag);
+                                             the hub never sees it (or set NODEVAS_COPILOT_API_KEY here)
+       nodevas runner advisor-key [--clear]  store the advisor's API key the same way (or set
+                                             NODEVAS_ADVISOR_API_KEY; with the copilot's provider, the
+                                             copilot key serves both)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -112,13 +178,18 @@ func runnerConfigPath(flagValue string) (string, error) {
 	return runner.DefaultConfigPath()
 }
 
-func loadRunnerConfig(flagValue string) (string, *runner.Config, error) {
+// loadRunnerConfig reads the settings, migrating (and saving) W1's boolean
+// autoAccept on the way; its one-time warning goes to stderr.
+func loadRunnerConfig(flagValue string, stderr io.Writer) (string, *runner.Config, error) {
 	path, err := runnerConfigPath(flagValue)
 	if err != nil {
 		return "", nil, err
 	}
 	cfg, err := runner.LoadConfig(path)
-	return path, cfg, err
+	if err != nil {
+		return path, nil, err
+	}
+	return path, cfg, migrateRunnerConfig(path, cfg, stderr)
 }
 
 func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
@@ -126,7 +197,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -137,7 +208,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
-	// offers are declined at once unless autoAccept is on.
+	// offers the auto-accept policy does not cover are declined at once.
 	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
 	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter}
 	return client.Run(ctx)
@@ -175,7 +246,7 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 		}
 	}
 
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -193,12 +264,12 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 	return nil
 }
 
-func runnerLogout(args []string, stdout io.Writer) error {
+func runnerLogout(args []string, stdout, stderr io.Writer) error {
 	fs, configFlag := newRunnerFlags("logout")
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -210,12 +281,12 @@ func runnerLogout(args []string, stdout io.Writer) error {
 	return nil
 }
 
-func runnerStatus(args []string, stdout io.Writer) error {
+func runnerStatus(args []string, stdout, stderr io.Writer) error {
 	fs, configFlag := newRunnerFlags("status")
 	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
@@ -258,17 +329,228 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	if len(cfg.AllowedTools) > 0 {
 		tools = strings.Join(cfg.AllowedTools, ", ")
 	}
-	accept := "asked at the runner's terminal"
-	if cfg.AutoAccept {
-		accept = "AUTO-ACCEPT: anyone who can sign in to the hub as you can run agents here"
+	codexConfig := "runs load your Codex config.toml: its model, MCP servers and hooks"
+	if cfg.CodexIgnoreUserConfig {
+		codexConfig = "runs skip your Codex config.toml; only its sign-in is used"
 	}
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
 	fmt.Fprintln(w, "runs:")
-	fmt.Fprintf(w, "  maxConcurrent      %d\n", cfg.MaxConcurrentRuns())
-	fmt.Fprintf(w, "  runTimeoutMinutes  %d\n", cfg.RunTimeoutMins())
-	fmt.Fprintf(w, "  dataDir            %s\n", dataDir)
-	fmt.Fprintf(w, "  permissionMode     %s\n", cfg.ClaudePermissionMode())
-	fmt.Fprintf(w, "  allowedTools       %s\n", tools)
-	fmt.Fprintf(w, "  autoAccept         %t (%s)\n", cfg.AutoAccept, accept)
+	setting("maxConcurrent", cfg.MaxConcurrentRuns())
+	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
+	setting("reviewTimeoutMinutes", int(cfg.RunTimeoutFor(runnerwire.JobReview)/time.Minute))
+	setting("planTimeoutMinutes", int(cfg.RunTimeoutFor(runnerwire.JobPlan)/time.Minute))
+	setting("dataDir", dataDir)
+	interactive := "interactive runs: the agent's TUI in a terminal here; the dispatcher watches, " +
+		"and types only where you allowed it"
+	if !cfg.InteractiveOn() {
+		interactive = "interactive runs are declined; headless only (the default)"
+	}
+	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
+	fmt.Fprintln(w, "claude runs:")
+	setting("permissionMode", cfg.ClaudePermissionMode())
+	setting("allowedTools", tools)
+	fmt.Fprintln(w, "codex runs:")
+	setting("codexSandbox", cfg.CodexSandboxMode())
+	setting("codexIgnoreUserConfig", fmt.Sprintf("%t (%s)", cfg.CodexIgnoreUserConfig, codexConfig))
+	fmt.Fprintln(w, "gemini runs:")
+	setting("geminiApprovalMode", cfg.GeminiApproval())
+	fmt.Fprintln(w, "opencode runs:")
+	setting("opencodePermission", cfg.OpenCodePermissionMode())
+	fmt.Fprintln(w, "antigravity runs:")
+	setting("antigravityMode", cfg.AntigravityModeOrDefault())
+	labels := "(none)"
+	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
+		labels = strings.Join(templates, ", ")
+	}
+	autoPR := "commit, push the run's branch and open a PR with your gh login"
+	if !cfg.AutoPROn() {
+		autoPR = "commit only; the branch stays in its worktree"
+	}
+	fmt.Fprintln(w, "pull requests:")
+	setting("autoPR", fmt.Sprintf("%t (%s)", cfg.AutoPROn(), autoPR))
+	setting("prDraft", cfg.PRDraft)
+	setting("prLabels", labels)
+	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
+	remote := "a merge approved on the hub is merged here with your gh login, once its CI is green"
+	if !cfg.RemoteMergeOn() {
+		remote = "approvals on the hub are refused; merge on GitHub yourself (the default)"
+	}
+	setting("remoteMerge", fmt.Sprintf("%t (%s)", cfg.RemoteMergeOn(), remote))
+	setting("mergeMethod", cfg.MergeMethodOrDefault())
+	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
+	printAutoAccept(w, cfg)
+	printCopilot(w, cfg)
+	printAdvisor(w, cfg)
+}
+
+// printAdvisor shows the autopilot advisor settings (W7); the key only as
+// where it comes from.
+func printAdvisor(w io.Writer, cfg *runner.Config) {
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
+	fmt.Fprintln(w, "autopilot advisor:")
+	if cfg.AdvisorProvider == "" {
+		setting("advisorProvider", "none (autopilot picks agents by its rules)")
+		return
+	}
+	info, _, reason := cfg.AdvisorLLM()
+	setting("advisorProvider", cfg.AdvisorProvider)
+	systemOne := cfg.AdvisorProvider == runnerwire.ProviderSystemOne
+	model := cfg.AdvisorModel
+	if model == "" {
+		model = "(default)"
+		if systemOne {
+			model = "(the endpoint's own)"
+		}
+	}
+	setting("advisorModel", model)
+	base := cfg.AdvisorBaseURL
+	if base == "" {
+		base = "(the vendor's own)"
+		if systemOne {
+			base = runnerwire.DefaultSystemOneBaseURL + " (Laya's laya-serve)"
+		}
+	}
+	setting("advisorBaseURL", base)
+	key := "none"
+	switch _, source := cfg.AdvisorKey(); source {
+	case "stored":
+		key = "stored in this file"
+	case "environment":
+		key = "from " + runner.AdvisorKeyEnv
+	case "copilot":
+		key = "the copilot's (same provider)"
+	}
+	setting("advisorKey", key)
+	switch {
+	case reason != "":
+		setting("state", "off: "+reason)
+	case systemOne:
+		setting("state", fmt.Sprintf("on: autopilot asks the System One endpoint at %s which agent and model take each task "+
+			"(policy advisor \"systemone\")", info.BaseURL))
+	default:
+		setting("state", fmt.Sprintf("on: autopilot asks %s/%s which agent and model take each task", info.Provider, info.Model))
+	}
+}
+
+// runnerAdvisorKey stores (or with --clear forgets) the advisor's API key,
+// read from stdin like the copilot's.
+func runnerAdvisorKey(args []string, in *bufio.Reader, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("advisor-key")
+	clear := fs.Bool("clear", false, "forget the stored key")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	if *clear {
+		cfg.AdvisorAPIKey = ""
+	} else {
+		if isTerminal(os.Stdin) {
+			fmt.Fprint(stderr, "advisor API key: ")
+		}
+		key, err := readSecretLine(in)
+		if err != nil {
+			return fmt.Errorf("reading the key from stdin: %w", err)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || len(key) > 4096 || strings.ContainsAny(key, " \t\r\n") {
+			return errors.New("that is not an API key")
+		}
+		cfg.AdvisorAPIKey = key
+	}
+	if err := runner.SaveConfig(path, cfg); err != nil {
+		return err
+	}
+	if *clear {
+		fmt.Fprintln(stdout, "advisor key forgotten")
+	} else {
+		fmt.Fprintln(stdout, "advisor key saved")
+	}
+	if cfg.AdvisorProvider == "" {
+		fmt.Fprintln(stdout, "set the provider too: nodevas runner set advisorProvider anthropic (or openai, or systemone)")
+	}
+	fmt.Fprintln(stdout, "restart a running runner for it to take effect")
+	return nil
+}
+
+// printCopilot shows the copilot settings; the key only as where it comes from.
+func printCopilot(w io.Writer, cfg *runner.Config) {
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
+	fmt.Fprintln(w, "copilot:")
+	if cfg.CopilotProvider == "" {
+		setting("copilotProvider", "none (the voice copilot's model calls are not made here)")
+		return
+	}
+	info, _, reason := cfg.CopilotLLM()
+	setting("copilotProvider", cfg.CopilotProvider)
+	model := cfg.CopilotModel
+	if model == "" {
+		model = "(default)"
+	}
+	setting("copilotModel", model)
+	base := cfg.CopilotBaseURL
+	if base == "" {
+		base = "(the vendor's own)"
+	}
+	setting("copilotBaseURL", base)
+	key := "none"
+	if _, source := cfg.CopilotKey(); source == "stored" {
+		key = "stored in this file"
+	} else if source == "environment" {
+		key = "from " + runner.CopilotKeyEnv
+	}
+	setting("copilotKey", key)
+	if reason != "" {
+		setting("state", "off: "+reason)
+	} else {
+		setting("state", fmt.Sprintf("on: your copilot's model calls run here (%s/%s)", info.Provider, info.Model))
+	}
+}
+
+// runnerCopilotKey stores (or with --clear forgets) the copilot's API key.
+// It is read from stdin so it is never on a command line, which every process
+// on the machine can read.
+func runnerCopilotKey(args []string, in *bufio.Reader, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("copilot-key")
+	clear := fs.Bool("clear", false, "forget the stored key")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	if *clear {
+		cfg.CopilotAPIKey = ""
+	} else {
+		if isTerminal(os.Stdin) {
+			fmt.Fprint(stderr, "copilot API key: ")
+		}
+		key, err := readSecretLine(in)
+		if err != nil {
+			return fmt.Errorf("reading the key from stdin: %w", err)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || len(key) > 4096 || strings.ContainsAny(key, " \t\r\n") {
+			return errors.New("that is not an API key")
+		}
+		cfg.CopilotAPIKey = key
+	}
+	if err := runner.SaveConfig(path, cfg); err != nil {
+		return err
+	}
+	if *clear {
+		fmt.Fprintln(stdout, "copilot key forgotten")
+	} else {
+		fmt.Fprintln(stdout, "copilot key saved")
+	}
+	if cfg.CopilotProvider == "" {
+		fmt.Fprintln(stdout, "set the provider too: nodevas runner set copilotProvider anthropic (or openai)")
+	}
+	fmt.Fprintln(stdout, "restart a running runner for it to take effect")
+	return nil
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at
@@ -279,22 +561,43 @@ func runnerSet(args []string, stdout, stderr io.Writer) error {
 	if err != nil || len(rest) < 2 {
 		return errUsage
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}
-	if err := cfg.Set(rest[0], rest[1:]); err != nil {
+	if strings.EqualFold(rest[0], "autoAccept") && len(rest) == 2 && !strings.EqualFold(rest[1], "default") {
+		// The defaults list the agents installed here, which only the CLI
+		// can detect.
+		on, err := strconv.ParseBool(strings.TrimSpace(rest[1]))
+		if err != nil {
+			return errors.New("autoAccept must be true or false")
+		}
+		cfg.SetAutoAccept(on, runner.InstalledKinds(context.Background(), runnerCommands, cfg))
+	} else if err := cfg.Set(rest[0], rest[1:]); err != nil {
 		return err
 	}
 	if err := runner.SaveConfig(path, cfg); err != nil {
 		return err
 	}
 	printRunSettings(stdout, cfg)
-	if cfg.AutoAccept {
-		fmt.Fprintln(stderr, runner.AutoAcceptWarning)
-	}
+	warnAutoAccept(stderr, cfg, false)
 	if cfg.PermissionMode == "bypassPermissions" {
 		fmt.Fprintln(stderr, "note: bypassPermissions lets agents run any command on this machine without asking.")
+	}
+	if cfg.CodexSandbox == "danger-full-access" {
+		fmt.Fprintln(stderr, "note: danger-full-access lets Codex runs run any command on this machine, outside any sandbox.")
+	}
+	if cfg.GeminiApprovalMode == "yolo" {
+		fmt.Fprintln(stderr, "note: yolo lets Gemini runs run any command on this machine without asking.")
+	}
+	if cfg.OpenCodePermission == "full" {
+		fmt.Fprintln(stderr, "note: full lets OpenCode runs run any command on this machine without asking.")
+	}
+	switch cfg.AntigravityMode {
+	case "full":
+		fmt.Fprintln(stderr, "note: full lets Antigravity runs use every tool, any command included, without asking.")
+	case "auto":
+		fmt.Fprintln(stderr, "note: auto lets Antigravity runs run the commands agy judges safe without asking.")
 	}
 	fmt.Fprintln(stdout, "saved; restart a running runner for it to take effect")
 	return nil
@@ -312,7 +615,7 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	path, cfg, err := loadRunnerConfig(*configFlag)
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
 	if err != nil {
 		return err
 	}

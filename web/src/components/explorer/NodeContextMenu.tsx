@@ -6,8 +6,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { IconDoc, IconPages, IconSend, IconTerminal, IconTrash } from "../../icons";
+import { IconDoc, IconPages, IconPencil, IconSend, IconTerminal, IconTrash } from "../../icons";
 import { openNodeRuns } from "../../runs/RunsRoot";
+import { openAutopilot } from "../../autopilot/openAutopilot";
 import { useRuns } from "../../runs/runStore";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
@@ -123,7 +124,7 @@ export function NodeContextMenu({
             }}
           >
             <span className="project-context-icon">
-              <IconDoc size={14} />
+              <IconPencil size={14} />
             </span>
             <span>
               <b>{t("explorer.open")}</b>
@@ -186,6 +187,23 @@ export function NodeContextMenu({
             <span>
               <b>{t("nodeMenu.runs")}</b>
               <small>{t("explorer.runsHint")}</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={nodeMenuBusy}
+            onClick={() => {
+              onClose();
+              openAutopilot(menu.nodeId);
+            }}
+          >
+            <span className="project-context-icon">
+              <IconSend size={14} />
+            </span>
+            <span>
+              <b>{t("nodeMenu.autopilot")}</b>
+              <small>{t("explorer.autopilotHint")}</small>
             </span>
           </button>
           <div className="project-context-separator" />

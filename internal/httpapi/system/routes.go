@@ -12,6 +12,9 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/auth/otp/request", a.postRequestOTP)
 	api.POST("/auth/login", a.postLogin)
 	api.POST("/auth/logout", a.postLogout)
+	api.GET("/auth/step-up", a.getStepUp)
+	api.POST("/auth/step-up", a.postStepUp)
+	api.POST("/auth/step-up/request", a.postStepUpRequest)
 	api.POST("/export", a.postExport)
 
 	admin := api.Group("")

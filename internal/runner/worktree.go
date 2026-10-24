@@ -22,6 +22,10 @@ type Worktree struct {
 	// BaseRef is what the branch was cut from: origin/<base> when the fetch
 	// worked, the local branch when offline.
 	BaseRef string
+	// GitFile and GitDirs are the worktree's .git file and where git says it
+	// points, as recorded before the agent ran; checkGitDir holds them to it.
+	GitFile string
+	GitDirs string
 }
 
 const (
@@ -129,6 +133,9 @@ func CreateWorktree(ctx context.Context, repoPath, dataDir, runID, nodeID, base 
 	if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "-b", wt.Branch, "--", wt.Path, baseRef); err != nil {
 		return Worktree{}, err
 	}
+	if err := recordGitDir(ctx, &wt); err != nil {
+		return Worktree{}, err
+	}
 	return wt, nil
 }
 
@@ -162,7 +169,9 @@ func git(ctx context.Context, repoPath string, args ...string) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, gitTimeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoPath}, args...)...)
+	// No hooks and no fsmonitor, whatever the repository's config says: a
+	// run's agent can write that config, and this git runs as the owner.
+	cmd := exec.CommandContext(ctx, "git", hardenedArgs(repoPath, args)...)
 	// Never wait for a credential prompt nobody will see.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	var stdout, stderr strings.Builder
@@ -175,7 +184,24 @@ func git(ctx context.Context, repoPath string, args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", args[0], msg)
+		return "", fmt.Errorf("git %s: %s", gitVerb(args), msg)
 	}
 	return stdout.String(), nil
+}
+
+// gitVerb is the subcommand in a git command line, past any -c overrides.
+func gitVerb(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			return args[i]
+		}
+	}
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
 }

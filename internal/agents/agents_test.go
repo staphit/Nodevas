@@ -247,7 +247,7 @@ func TestAskUserAndAboutApprovalForwarding(t *testing.T) {
 		t.Fatalf("pending asks = %d, want 1", len(pending))
 	}
 
-	_, err = hub.Answer(ctx, "alpha", pending[0].ID, "approved", "Proceed after backup", "alice")
+	_, err = hub.Answer(ctx, "alpha", pending[0].ID, "approved", "Proceed after backup", Viewer{ID: "alice"})
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

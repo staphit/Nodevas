@@ -79,6 +79,27 @@ UI actions the model may take, executed in the browser and answered through
 The browser declares which of these it supports in the turn request, so a
 server never offers a tool the client cannot run.
 
+### Dispatch tools (W7, `internal/copilot/servertools.go`)
+
+The voice entry point of the autopilot: the person dictates a requirement, the
+copilot confirms it, files it and has it broken down, then starts the
+orchestrator once the person agrees with the tasks.
+
+| Tool | Input | Effect |
+| --- | --- | --- |
+| `start_breakdown` | `{requirement, title?, goalNodeId?, runnerId?, agent?, model?, repoId?}` | creates the goal node (unless `goalNodeId` names one) and dispatches a plan run (`POST /api/runs`, `kind: "plan"`) on the speaker's online runner: first runner of theirs with the repo, agent order claude, codex, opencode, gemini, antigravity, the agent's default model |
+| `start_autopilot` | `{goalNodeId, maxParallel?, reviewMode?, reviewers?, quorum?, anyEditor?, autoMerge?, implement?, advisor?, runnerId?, repoId?}` | `POST /api/autopilot`; defaults: 2 tasks at a time, 2 review rounds, a person approves each PR, no auto-merge. Who implements: the `implement` chain when given, else `advisor`; with neither, the advisor the speaker's runner offers (System One, then its fast model), else the routing rules, whose last resort is the first installed agent's default model (often the most expensive). The result's `implementedBy` says which, and the prompt has the copilot tell the person. |
+
+They are copilot-only: not MCP tools, so no agent (and nothing through the
+runner proxy) can call them, and they exist only on a server that gives the
+copilot its router. Because only a person may dispatch runs, they call the API
+as the person rather than as an in-process agent, and so they **always ask**,
+in every mode that runs tools, `bypassPermissions` included (`plan` refuses
+them). The runner still applies its own acceptance rules (auto-accept, a
+person at its terminal) to what they dispatch. The system prompt walks the
+model through confirm → `start_breakdown` → summarize the tasks → ask →
+`start_autopilot`.
+
 ### Permission modes
 
 | Mode | `read` | `write` | `risky` |
@@ -116,7 +137,7 @@ All under `/api`, authenticated like every other route, JSON in.
 | `POST` | `/copilot/conversations/:id/turns/:turn/decisions` | `{requestId, decision, message?}` |
 | `POST` | `/copilot/conversations/:id/turns/:turn/client-results` | `{callId, output, isError}` |
 | `POST` | `/copilot/conversations/:id/turns/:turn/cancel` | stop the turn |
-| `GET`/`PUT` | `/copilot/settings` | admin: provider kind, model, base URL, effort, API key (write-only), allowBypass |
+| `GET`/`PUT` | `/copilot/settings` | admin: provider kind, model, base URL, effort, API key (write-only), allowBypass, keySource (`runner` \| `server` \| `auto`) |
 
 A conversation, transcript entry and turn belong to the account that created
 them; every other account gets 404.
@@ -197,6 +218,139 @@ The provider API key is stored with `internal/secrets` (AES-GCM, machine key),
 never in the database or `nodevas.yaml`. Environment overrides:
 `NODEVAS_COPILOT_PROVIDER`, `NODEVAS_COPILOT_MODEL`, `NODEVAS_COPILOT_BASE_URL`,
 `NODEVAS_COPILOT_API_KEY` (falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+
+## Key on the runner (`keySource`)
+
+The server need not hold a model key at all. With `keySource: runner` (and with
+`auto`, the default, whenever the server has no key), the turn loop, the
+permission gate and the tools stay on the server, but each **model call** goes
+to the speaker's own runner over its existing socket
+(`internal/runnerwire/llm.go`): `llm_request` carries the history and tool
+list, the runner calls the provider with a key that only that PC holds, and
+streams `llm_delta` fragments and one `llm_done` back. The server relays them
+into the turn (`internal/runners/llm.go`, `internal/copilot/remote.go`).
+
+On the PC:
+
+```sh
+nodevas runner set copilotProvider anthropic   # or openai
+nodevas runner set copilotModel claude-opus-5-5 # optional; the provider's default otherwise
+nodevas runner copilot-key                      # the key on stdin, never a flag
+nodevas runner                                  # restart; the hello now offers "llm"
+```
+
+`NODEVAS_COPILOT_API_KEY` in the runner's environment works instead of a
+stored key. `copilotBaseURL` points at an OpenAI-compatible server (Ollama,
+LM Studio: no key needed) or a proxy; it must be https, or http to the machine
+itself or the local network.
+
+What this guarantees, and what it does not:
+
+- The key never reaches the server: the hello names the provider and model,
+  never the key, and nothing on the wire carries one.
+- The runner decides the provider, base URL and model. A request that names
+  others is refused, so a server cannot point the key at another endpoint.
+- A call goes only to the speaker's own runner (the server picks among that
+  account's online runners, the most recently connected), and the runner
+  refuses a call for any account but its owner's (`Welcome.OwnerID`).
+- A server that is broken into can still make the runner spend its owner's
+  quota. The runner bounds that: two calls at once, 40 a minute, 64 000
+  output tokens per call, ten minutes per call, and a log line for each.
+- When the runner is offline, the copilot button stays and explains how to
+  start it (`status.needsRunner`); `runners-changed` refreshes the status.
+
+`keySource: server` keeps the old behaviour (the server's stored or
+environment key). The settings tab warns when the server holds a key.
+
+### The autopilot's advisor model
+
+The same relay carries a second kind of model call (`purpose: "advisor"`): the
+W7 autopilot asking a fast model which agent and model should implement each
+task (`AdvisorLLM`, `internal/autopilot/llmadvisor.go`). It has its own
+settings on the runner, so a cheap, quick model can pick while the copilot
+talks with a stronger one:
+
+```sh
+nodevas runner set advisorProvider openai        # or anthropic
+nodevas runner set advisorModel <fast-model-id>
+nodevas runner set advisorBaseURL https://…/v1   # optional: any OpenAI-compatible endpoint
+nodevas runner advisor-key                       # stdin; or NODEVAS_ADVISOR_API_KEY
+```
+
+With the copilot's provider, the copilot key serves both. The hello reports it
+as `Info.Advisor` with capability `llm-advisor`; a request for one purpose is
+never served with the other's settings, and the same refusal rules and limits
+apply. The advisor answers JSON choosing only among the agents and models the
+owner's runners report; anything else (an invented model, a malformed answer,
+more than 6 s, an offline runner) is an error, and the autopilot falls back to
+its rules.
+
+#### A System One advisor (Laya or Jev)
+
+`advisorProvider systemone` points the advisor at a System One endpoint
+instead: a model that answers typed questions (pick one option, score on a
+scale, yes or no) with calibrated probabilities in a fraction of a second, and
+generates no text. Two speak the same protocol (`POST /v1/systemone`):
+
+- **Laya**, open source (Apache-2.0), on your PC. Install a pinned version in
+  a virtual environment of its own, and start it with `LAYA_HOST=127.0.0.1`
+  (by default it listens on `0.0.0.0:8000`, open to your whole network). The
+  first call downloads its checkpoint (the three together are about 2.3 GB).
+  No key unless you set `LAYA_API_KEY`.
+
+  ```sh
+  python -m venv ~/.laya
+  ~/.laya/bin/pip install "laya[serve]==0.4.14"   # Windows: ~/.laya/Scripts/pip
+  LAYA_HOST=127.0.0.1 ~/.laya/bin/laya-serve
+  ```
+
+  ```sh
+  nodevas runner set advisorProvider systemone   # advisorBaseURL defaults to http://127.0.0.1:8000
+  nodevas runner advisor-key                      # only if laya-serve has LAYA_API_KEY
+  ```
+
+- **Jev**, TypeSafe's hosted model (early access; key from its console).
+
+  ```sh
+  nodevas runner set advisorProvider systemone
+  nodevas runner set advisorBaseURL https://api.typesafe.ai
+  nodevas runner set advisorModel jev-latest
+  nodevas runner advisor-key                      # stdin; sent as a bearer token
+  ```
+
+Then pick advisor **systemone** in the autopilot's policy. The hub sends a
+`decide_request` (`internal/runnerwire/decide.go`) to the owner's runner with
+capability `decide`, never to anyone else's; the runner checks it against its
+settings and asks its endpoint, the key never leaving the PC. The question is
+a choice among the installed agent/model pairs (options `o1…`, each described
+by agent and model), plus the task's complexity on a five-level score for the
+reason. The chain is the options by probability, at most three, a fallback
+only above 5 %. An answer naming no option given, an endpoint error or more
+than 10 s means the rules decide instead (`internal/autopilot/systemone.go`).
+
+When the choice itself is unsure (confidence below 0.35), the complexity score
+picks a tier instead: trivial and small tasks go to the fast tier (Haiku, free
+and flash models), medium to the balanced one (Sonnet), large and risky to the
+strong one (Opus, Fable, pro and high models), each tier in the order the
+choice ranked its options, with one fallback from the next tier. Models whose
+name does not tell their tier are left out of this path.
+
+Measured against a real local Laya 0.4.14 on this project's Windows PC (CPU
+build of PyTorch, 2026-10-24):
+
+- **Latency** 4–6 s a decision on CPU, within the 10 s limit but far from the
+  0.1–0.5 s System One promises; a CUDA build of PyTorch on the GPU is what
+  gets there.
+- **The implementer choice is spread evenly** (confidence 0.01–0.15 across
+  checkpoints) and once picked Haiku for a 30-file OAuth migration, which is
+  why the tier path above exists.
+- **The complexity score separates tasks**: 1.19–1.59 for one-line file
+  changes, 2.47–2.81 for the migration. A real autopilot with Laya deciding
+  sent a one-line task to a free flash model and a README-and-file task to
+  Sonnet.
+
+Jev is the hosted model the protocol was made for; a confident Jev choice is
+taken as it is.
 
 ## Configuration (`nodevas.yaml`)
 

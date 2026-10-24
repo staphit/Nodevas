@@ -57,14 +57,18 @@ type Event struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	RequestID string          `json:"requestId,omitempty"`
 	Summary   string          `json:"summary,omitempty"`
-	Decision  Decision        `json:"decision,omitempty"`
-	Output    *string         `json:"output,omitempty"`
-	IsError   *bool           `json:"isError,omitempty"`
-	Entry     *Entry          `json:"entry,omitempty"`
-	Message   string          `json:"message,omitempty"`
-	Code      string          `json:"code,omitempty"`
-	Stop      string          `json:"stop,omitempty"`
-	Usage     *Usage          `json:"usage,omitempty"`
+	// EveryTime marks a permission request asked on every call (the
+	// dispatching server tools): "allow for this session" is not offered,
+	// and the full input is what the person approves.
+	EveryTime bool     `json:"everyTime,omitempty"`
+	Decision  Decision `json:"decision,omitempty"`
+	Output    *string  `json:"output,omitempty"`
+	IsError   *bool    `json:"isError,omitempty"`
+	Entry     *Entry   `json:"entry,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Code      string   `json:"code,omitempty"`
+	Stop      string   `json:"stop,omitempty"`
+	Usage     *Usage   `json:"usage,omitempty"`
 }
 
 // Usage is the token count of a whole turn, summed over its model calls.
@@ -127,15 +131,30 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if err != nil {
 		return err
 	}
-	if reason := s.unavailableReason(settings, key); reason != "" {
-		return fmt.Errorf("%w: %s", ErrUnavailable, reason)
-	}
-	model, err := s.opts.NewProvider(provider.Config{
-		Kind: settings.Provider, Model: settings.Model, BaseURL: settings.BaseURL,
-		APIKey: key, Effort: settings.Effort,
-	})
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	var model provider.Provider
+	if effectiveKeySource(settings, key) == KeySourceRunner {
+		// The key is on the person's own runner, which makes the call; the
+		// server never sees it (remote.go).
+		if reason := s.baseUnavailableReason(); reason != "" {
+			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
+		}
+		runner, info, err := s.runnerTarget(ctx, req.Actor.ID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+		model = &runnerProvider{remote: s.opts.Remote, runnerID: runner.ID, info: info,
+			accountID: req.Actor.ID, effort: settings.Effort}
+	} else {
+		if reason := s.unavailableReason(settings, key); reason != "" {
+			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
+		}
+		model, err = s.opts.NewProvider(provider.Config{
+			Kind: settings.Provider, Model: settings.Model, BaseURL: settings.BaseURL,
+			APIKey: key, Effort: settings.Effort,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
 	}
 
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -206,12 +225,21 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	emit(Event{Type: EventTurnStarted, TurnID: turn.id, EntryID: userEntry.ID})
 	emit(Event{Type: EventEntry, Entry: &userEntry})
 
-	tools, info := collectTools(bridge.Tools(), req.ClientTools)
+	// Copilot-only server tools (servertools.go) call the API as the person,
+	// through the same router the bridge serves.
+	var server *serverToolEnv
+	if bridgeOptions.Handler != nil {
+		server = &serverToolEnv{
+			handler: bridgeOptions.Handler, host: req.Host, cookie: req.Cookie, remoteAddr: req.RemoteAddr,
+			project: conversation.Project, accountID: req.Actor.ID,
+		}
+	}
+	tools, info := collectTools(bridge.Tools(), req.ClientTools, server != nil)
 	run := &turnRun{
 		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
-		conversation: conversation, mode: mode, model: model, bridge: bridge,
+		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
 		tools: tools, info: info,
-		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context),
+		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, server != nil),
 		history: appendMessage(history, userMessage),
 	}
 	stop, usage, err := run.loop()
@@ -234,6 +262,7 @@ type turnRun struct {
 	mode         Mode
 	model        provider.Provider
 	bridge       toolbridge.Bridge
+	server       *serverToolEnv
 	tools        []provider.Tool
 	info         map[string]toolInfo
 	system       string
@@ -333,13 +362,19 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 		return r.finish(call, input, ToolError, fmt.Sprintf("Unknown tool %q.", call.ToolName), true)
 	}
 
-	switch gate(r.mode, info.kind) {
+	verdict := gate(r.mode, info.kind)
+	if info.alwaysAsk && verdict == verdictRun {
+		verdict = verdictAsk
+	}
+	switch verdict {
 	case verdictRefuse:
 		return r.finish(call, input, ToolDenied,
 			"Not run: plan mode does not change anything. Propose this change in your reply instead; "+
 				"the person can switch modes to apply it.", true)
 	case verdictAsk:
-		if !r.service.allowedForSession(r.conversation.ID, call.ToolName) {
+		// A tool that always asks is never allowed for the session: each
+		// dispatch is approved on its own input.
+		if info.alwaysAsk || !r.service.allowedForSession(r.conversation.ID, call.ToolName) {
 			answer, answered := r.ask(call, info, input)
 			if !answered {
 				return r.finish(call, input, ToolError, "Not run: the person stopped this turn.", true)
@@ -352,7 +387,9 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 				}
 				return r.finish(call, input, ToolDenied, output, true)
 			case DecisionAllowSession:
-				r.service.allowForSession(r.conversation.ID, call.ToolName)
+				if !info.alwaysAsk {
+					r.service.allowForSession(r.conversation.ID, call.ToolName)
+				}
 			}
 		}
 	}
@@ -360,6 +397,13 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 	var result toolbridge.Result
 	if info.client {
 		result = r.callClient(call, input)
+	} else if info.server {
+		spec, ok := serverTools[call.ToolName]
+		if !ok || r.server == nil {
+			result = toolbridge.Result{Output: "This tool is not available here.", IsError: true}
+		} else {
+			result = spec.run(r.ctx, r.server, input)
+		}
 	} else {
 		var err error
 		result, err = r.bridge.Call(r.ctx, call.ToolName, input)
@@ -406,7 +450,7 @@ func (r *turnRun) ask(call provider.Block, info toolInfo, input json.RawMessage)
 	r.emit(Event{
 		Type: EventPermissionRequest, RequestID: requestID, CallID: call.ToolCallID,
 		Name: call.ToolName, Kind: info.kind, Input: input,
-		Summary: summarize(info.title, input),
+		Summary: summarize(info.title, input), EveryTime: info.alwaysAsk,
 	})
 	timer := time.NewTimer(r.service.opts.PermissionTimeout)
 	defer timer.Stop()

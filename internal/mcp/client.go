@@ -21,11 +21,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"nodevas/internal/agents"
 	"nodevas/internal/auth"
 )
 
@@ -116,10 +119,14 @@ type Client struct {
 	repo        string
 	branch      string
 	cwd         string
+	model       string
 	state       string
 	nodeID      string
 	doing       string
 	unreadCount int
+	// claimedNode is the node the server last said this session holds a live
+	// claim on (W6); "" for none or before the first heartbeat.
+	claimedNode string
 	// names remembers the server-given name of every session ID this process
 	// has acted as, so switching between them never renames one.
 	names map[string]string
@@ -128,6 +135,14 @@ type Client struct {
 	// conversation in the same process), "codex" takes the sessionId Codex
 	// puts in each tool call's _meta (one MCP process serves every thread).
 	follow string
+
+	// workDir is the absolute folder the agent works in. Files it attaches
+	// must come from inside it (or the repo around it), and attachments it
+	// saves land under it.
+	workDir string
+	// offNetwork is the excluded folder workDir is in, or "": a session there
+	// never joins the roster and sends nothing.
+	offNetwork string
 }
 
 // ClientOptions configures a Client. Project is fixed for the process: tools
@@ -148,6 +163,15 @@ type ClientOptions struct {
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
 	Timeout   time.Duration
+	// Model is the model the agent runs on, reported in heartbeats; empty
+	// falls back to NODEVAS_MODEL.
+	Model string
+	// WorkDir overrides the process's working directory (tests, hooks that
+	// are told the agent's cwd).
+	WorkDir string
+	// OffNetwork names the excluded folder WorkDir is in; set, the client
+	// sends no heartbeats and refuses to send messages.
+	OffNetwork string
 	// HTTPClient, when set, carries every request instead of a socket client,
 	// and Timeout is left to it. It exists for the copilot's tool bridge,
 	// whose client serves requests with the server's own handler inside this
@@ -208,7 +232,24 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if strings.TrimSpace(opts.Branch) != "" {
 		branch = strings.TrimSpace(opts.Branch)
 	}
+	workDir := strings.TrimSpace(opts.WorkDir)
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	if abs, err := filepath.Abs(workDir); err == nil && workDir != "" {
+		workDir = abs
+	}
+	model := strings.TrimSpace(opts.Model)
+	if model == "" {
+		model = strings.TrimSpace(os.Getenv("NODEVAS_MODEL"))
+	}
+	if len(model) > agents.MaxModelLen {
+		model = model[:agents.MaxModelLen]
+	}
 	return &Client{
+		workDir:     workDir,
+		offNetwork:  strings.TrimSpace(opts.OffNetwork),
+		model:       model,
 		base:        base,
 		project:     strings.TrimSpace(opts.Project),
 		actor:       actor,
@@ -399,6 +440,12 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 		return failure
 	}
 	if out == nil {
+		return nil
+	}
+	// A *[]byte asks for the body as it came: an attachment is a file, not
+	// JSON.
+	if body, ok := out.(*[]byte); ok {
+		*body = raw
 		return nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {

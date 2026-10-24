@@ -9,11 +9,9 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,9 +29,8 @@ import (
 // Limits on POST /api/runs.
 const (
 	// MaxExtraPrompt caps the dispatcher's extra instructions.
-	MaxExtraPrompt = 8 << 10
+	MaxExtraPrompt = runs.MaxExtraPrompt
 	maxCreateBody  = 16 << 10
-	maxBaseLen     = 200
 	listLimit      = 50
 )
 
@@ -42,11 +39,20 @@ type API struct {
 	pm  *project.ProjectManager
 	reg *runners.Registry
 	d   *runs.Dispatcher
+	// steppedUpAt reports the dispatcher's live step-up (W6); nil on a server
+	// without accounts, where the dispatcher vouches for everyone anyway.
+	steppedUpAt func(*http.Request) (time.Time, bool)
 }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
 	return &API{pm: pm, reg: reg, d: d}
+}
+
+// UseStepUp tells run creation how to read the dispatcher's step-up, which
+// each run records so its offers can vouch for the dispatcher while it lasts.
+func (a *API) UseStepUp(steppedUpAt func(*http.Request) (time.Time, bool)) {
+	a.steppedUpAt = steppedUpAt
 }
 
 // Register wires /api/runs. Every route takes a session as usual; none is
@@ -56,7 +62,17 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs", a.list)
 	api.GET("/runs/:id", a.get)
 	api.GET("/runs/:id/events", a.events)
+	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/merge", a.merge)
+	api.GET("/runs/:id/terminal", a.terminal)
+	api.GET("/runs/budget", a.budget)
+	api.PUT("/runs/budget", a.setBudget)
+	api.GET("/runs/routing", a.routing)
+	api.PUT("/runs/routing", a.setRouting)
+	api.GET("/runs/route", a.route)
+	api.GET("/runs/pipelines/:id", a.pipeline)
+	api.POST("/runs/pipelines/:id/review", a.review)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -73,7 +89,7 @@ func fail(c *gin.Context, err error) {
 		notFound(c, "run")
 	case errors.Is(err, runs.ErrInvalid):
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
-	case errors.Is(err, runs.ErrTransition):
+	case errors.Is(err, runs.ErrPrecondition), errors.Is(err, runs.ErrTransition):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -127,118 +143,49 @@ func (a *API) create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !engine.ValidNodeID(body.NodeID) {
-		invalid(c, "nodeId is not a valid node id")
-		return
+	steppedUpAt := ""
+	if a.steppedUpAt != nil {
+		if at, ok := a.steppedUpAt(c.Request); ok {
+			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
+		}
 	}
-	if len(body.Prompt) > MaxExtraPrompt || !utf8.ValidString(body.Prompt) {
-		invalid(c, "prompt must be valid text of at most %d bytes", MaxExtraPrompt)
-		return
-	}
-	if !validBase(body.Base) {
-		invalid(c, "base is not a valid branch name")
-		return
-	}
-
-	// The runner must be the caller's own, administrators included: a run
-	// executes on the owner's machine with the owner's logins, and nobody
-	// else gets to put work there.
-	runner, err := a.reg.Get(c.Request.Context(), body.RunnerID)
-	if err != nil || runner.OwnerID != actor.ID {
-		notFound(c, "runner")
-		return
-	}
-	model, repo, problem := checkAgainstHello(runner.Info, body)
-	if problem != "" {
-		invalid(c, "%s", problem)
-		return
-	}
-	if !runs.Headless(runner.Info) {
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
-			errors.New("this runner does not take runs; update nodevas on it"), nil)
-		return
-	}
-
-	node, content, err := loadNode(st, body.NodeID)
-	if err != nil {
-		httpx.Err(c, http.StatusInternalServerError, err)
-		return
-	}
-	if node == nil {
-		notFound(c, "node")
-		return
-	}
-	title := node.Title
-	if title == "" {
-		title = node.ID
-	}
-	name := actor.Name
-	if name == "" {
-		name = actor.ID
-	}
-	record, err := a.d.Store().Create(c.Request.Context(), runs.New{
-		Project: projectName, NodeID: node.ID, NodeTitle: title,
-		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
-		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		Prompt: body.Prompt, JobPrompt: BuildPrompt(title, content, body.Prompt),
-		CreatedBy: actor.ID, CreatedByName: name,
+	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
+		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
+		SteppedUpAt: steppedUpAt,
+		LoadNode: func() (string, string, bool, error) {
+			node, content, err := loadNode(st, body.NodeID)
+			if err != nil || node == nil {
+				return "", "", false, err
+			}
+			return node.Title, content, true, nil
+		},
 	})
 	if err != nil {
-		fail(c, err)
+		startFailed(c, err)
 		return
 	}
-	record = a.d.Submit(c.Request.Context(), record)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, record.Run)
 }
 
-// checkAgainstHello resolves the request's agent, model and repo against what
-// the runner last reported. It returns the model to record and the repo, or a
-// reason the request does not fit.
-func checkAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, string) {
-	if info == nil {
-		return "", runnerwire.Repo{}, "the runner has not connected yet, so its agents are unknown"
+// startFailed answers a refused or failed run start.
+func startFailed(c *gin.Context, err error) {
+	var refused *runs.StartError
+	if !errors.As(err, &refused) {
+		httpx.Err(c, http.StatusInternalServerError, err)
+		return
 	}
-	i := slices.IndexFunc(info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == body.Agent })
-	if i < 0 || !info.Agents[i].Installed {
-		return "", runnerwire.Repo{}, fmt.Sprintf("agent %q is not installed on the runner", body.Agent)
+	switch refused.Code {
+	case runs.StartNotFound:
+		notFound(c, refused.What)
+	case runs.StartPrecondition:
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", errors.New(refused.Msg), nil)
+	case runs.StartBudget:
+		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
+			errors.New(refused.Msg), map[string]any{"exceeded": refused.Budget.Exceeded})
+	default:
+		invalid(c, "%s", refused.Msg)
 	}
-	agent := info.Agents[i]
-	model := body.Model
-	if model == "" {
-		model = "default"
-		for _, m := range agent.Models {
-			if m.Default {
-				model = m.ID
-				break
-			}
-		}
-	} else if !slices.ContainsFunc(agent.Models, func(m runnerwire.Model) bool { return m.ID == model }) {
-		return "", runnerwire.Repo{}, fmt.Sprintf("model %q is not offered by %s on the runner", model, agent.Kind)
-	}
-	r := slices.IndexFunc(info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == body.RepoID })
-	if body.RepoID == "" || r < 0 {
-		return "", runnerwire.Repo{}, "repoId is not one of the runner's repositories"
-	}
-	return model, info.Repos[r], ""
-}
-
-// validBase accepts "" (the repository's default) or a plausible branch
-// name. The runner checks again with git; this keeps junk out of the record
-// and anything that reads as an option off the runner's command line.
-func validBase(base string) bool {
-	if base == "" {
-		return true
-	}
-	if len(base) > maxBaseLen || strings.HasPrefix(base, "-") || strings.Contains(base, "..") {
-		return false
-	}
-	for _, r := range base {
-		if !(r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("._/-", r))) {
-			return false
-		}
-	}
-	return true
 }
 
 // loadNode returns the node and its body text, or a nil node when the graph
@@ -267,25 +214,8 @@ func loadNode(st *store.Store, id string) (*engine.Node, string, error) {
 	return node, file.Body, nil
 }
 
-const truncatedNote = "\n\n[node content truncated]"
-
-// BuildPrompt assembles the task a runner is offered: the node's title, its
-// content, and the dispatcher's extra instructions, within MaxPromptBytes.
-// The content gives way first, so the instructions typed for this run are
-// never the part that is cut.
-func BuildPrompt(title, content, extra string) string {
-	head := "# " + strings.TrimSpace(title) + "\n\n"
-	tail := ""
-	if extra = strings.TrimSpace(extra); extra != "" {
-		tail = "\n\nAdditional instructions:\n" + extra
-	}
-	content = strings.TrimSpace(content)
-	room := runnerwire.MaxPromptBytes - len(head) - len(tail)
-	if len(content) > room {
-		content = runs.Truncate(content, max(room-len(truncatedNote), 0)) + truncatedNote
-	}
-	return runs.Truncate(head+content+tail, runnerwire.MaxPromptBytes)
-}
+// BuildPrompt assembles the task a runner is offered (runs.BuildPrompt).
+func BuildPrompt(title, content, extra string) string { return runs.BuildPrompt(title, content, extra) }
 
 func (a *API) list(c *gin.Context) {
 	_, projectName, ok := a.requestProject(c)
@@ -314,11 +244,26 @@ func (a *API) list(c *gin.Context) {
 // project the request targets. Anything else is a 404: probing IDs teaches
 // nothing.
 func (a *API) visible(c *gin.Context) (runs.Record, bool) {
+	return a.visibleTo(c, false)
+}
+
+// reviewable is visible, widened for reading a run's work to whoever may
+// review its pipeline: with humanAnyEditor, any editor of the project, who
+// cannot give a review without seeing what it is of.
+func (a *API) reviewable(c *gin.Context) (runs.Record, bool) {
+	return a.visibleTo(c, true)
+}
+
+func (a *API) visibleTo(c *gin.Context, reviewers bool) (runs.Record, bool) {
 	_, projectName, ok := a.requestProject(c)
 	if !ok {
 		return runs.Record{}, false
 	}
 	r, err := a.d.Store().Get(c.Request.Context(), c.Param("id"))
+	if err == nil && r.Project == projectName && !canSee(auth.ActorFrom(c.Request), r) &&
+		reviewers && a.anyEditorReviews(c, r.PipelineID) {
+		return r, true
+	}
 	if errors.Is(err, runs.ErrNotFound) || (err == nil && (r.Project != projectName || !canSee(auth.ActorFrom(c.Request), r))) {
 		notFound(c, "run")
 		return runs.Record{}, false
@@ -363,6 +308,34 @@ func (a *API) events(c *gin.Context) {
 	c.JSON(http.StatusOK, runnerwire.RunEventsResponse{Events: events, More: more})
 }
 
+// changes returns what the run committed: files, counts and the patch. Changes
+// is null until the runner reports them, and stays null for a run that never
+// got that far.
+func (a *API) changes(c *gin.Context) {
+	r, ok := a.reviewable(c)
+	if !ok {
+		return
+	}
+	changes, err := a.d.Store().Changes(c.Request.Context(), r.ID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.RunChangesResponse{Changes: changes})
+}
+
+// anyEditorReviews reports whether pipeline id lets any editor of its project
+// give the person's review (humanAnyEditor). The members gate has already
+// checked the caller may read the project this request targets.
+func (a *API) anyEditorReviews(c *gin.Context, id string) bool {
+	if id == "" || auth.ActorFrom(c.Request).IsAgent() {
+		return false
+	}
+	p, err := a.d.Store().Pipeline(c.Request.Context(), id)
+	return err == nil && p.Pipeline.Human && p.Pipeline.HumanAnyEditor
+}
+
 func queryInt(c *gin.Context, key string, fallback int64) (int64, error) {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -380,6 +353,14 @@ func (a *API) cancel(c *gin.Context) {
 	name := actor.Name
 	if name == "" {
 		name = actor.ID
+	}
+	// Cancelling any run of a pipeline cancels the pipeline, and with it
+	// whichever of its runs has not ended.
+	if r.PipelineID != "" {
+		if err := a.d.CancelPipeline(c.Request.Context(), r.PipelineID, "cancelled by "+name); err != nil {
+			fail(c, err)
+			return
+		}
 	}
 	updated, err := a.d.Cancel(c.Request.Context(), r.ID, "cancelled by "+name)
 	if err != nil {

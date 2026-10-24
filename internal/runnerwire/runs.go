@@ -104,6 +104,22 @@ type Job struct {
 	Base string `json:"base,omitempty"`
 	// RequestedBy is who dispatched it, for the acceptance prompt.
 	RequestedBy string `json:"requestedBy"`
+
+	// W5: what kind of job (JobImplement, JobReview, JobRevise; see
+	// routing.go). For review and revise, Branch is the existing PR branch and
+	// PRURL its pull request; Review is the review text a revise addresses.
+	Kind   string `json:"kind,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	PRURL  string `json:"prUrl,omitempty"`
+	Review string `json:"review,omitempty"`
+
+	// W2.5: ModeHeadless ("") or ModeInteractive; see terminal.go.
+	Mode string `json:"mode,omitempty"`
+
+	// W6: SteppedUp is the hub vouching that the dispatcher re-proved their
+	// identity within the step-up window when this job was offered. A runner
+	// may auto-accept only such jobs (AutoAcceptPolicy.RequireStepUp).
+	SteppedUp bool `json:"steppedUp,omitempty"`
 }
 
 // Accept reports an accepted job: the worktree and branch it runs in.
@@ -137,6 +153,9 @@ type Usage struct {
 	CacheReadTokens  int64   `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
 	CostUSD          float64 `json:"costUsd,omitempty"`
+	// Model is the model the CLI said it ran on, when it said: what a run
+	// dispatched with model "default" actually used, for pricing.
+	Model string `json:"model,omitempty"`
 }
 
 // RunResult is how a run ended.
@@ -147,6 +166,11 @@ type RunResult struct {
 	Summary  string `json:"summary,omitempty"`
 	ExitCode int    `json:"exitCode"`
 	Usage    *Usage `json:"usage,omitempty"`
+	// FailureKind classifies a failed run (W5, routing.go): whether another
+	// model might succeed where this one could not.
+	FailureKind string `json:"failureKind,omitempty"`
+	// Verdict is a review job's verdict (VerdictApprove / VerdictChanges).
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // Run is a run as the HTTP API returns it.
@@ -170,9 +194,30 @@ type Run struct {
 	Summary  string `json:"summary,omitempty"`
 	ExitCode int    `json:"exitCode"`
 	Usage    *Usage `json:"usage,omitempty"`
-	// PRURL and CIStatus are filled from W3 on.
-	PRURL         string `json:"prUrl,omitempty"`
-	CIStatus      string `json:"ciStatus,omitempty"`
+	// Changes and pull request (W3; see changes.go).
+	Commit       string `json:"commit,omitempty"`
+	FilesChanged int    `json:"filesChanged"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	PRURL        string `json:"prUrl,omitempty"`
+	PRNumber     int    `json:"prNumber,omitempty"`
+	PRState      string `json:"prState,omitempty"`
+	PRError      string `json:"prError,omitempty"`
+	CIStatus     string `json:"ciStatus,omitempty"`
+	// PRHeadSHA is the PR head the CI status belongs to; a merge approval
+	// must name it (W4).
+	PRHeadSHA string `json:"prHeadSha,omitempty"`
+	// Merge is the latest merge request for the run, if any (W4).
+	Merge *MergeRequest `json:"merge,omitempty"`
+	// W5: job kind, failure kind, review verdict, the run this one falls back
+	// from, and the pipeline it belongs to.
+	Kind        string `json:"kind,omitempty"`
+	FailureKind string `json:"failureKind,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
+	RetryOf     string `json:"retryOf,omitempty"`
+	PipelineID  string `json:"pipelineId,omitempty"`
+	// W2.5: ModeHeadless ("") or ModeInteractive.
+	Mode          string `json:"mode,omitempty"`
 	CreatedBy     string `json:"createdBy"`
 	CreatedByName string `json:"createdByName"`
 	CreatedAt     string `json:"createdAt"`
@@ -190,6 +235,17 @@ type CreateRunRequest struct {
 	Base     string `json:"base,omitempty"`
 	// Prompt is extra instructions on top of the node's own content.
 	Prompt string `json:"prompt,omitempty"`
+	// Fallbacks are tried in order when the run fails with a fallback-worthy
+	// FailureKind (W5). At most MaxFallbacks.
+	Fallbacks []AgentModel `json:"fallbacks,omitempty"`
+	// Pipeline, when set, dispatches implement → review instead of one run
+	// (W5); Agent and Model are then ignored in favour of Pipeline.Implement.
+	Pipeline *Pipeline `json:"pipeline,omitempty"`
+	// Mode is ModeHeadless ("") or ModeInteractive (W2.5).
+	Mode string `json:"mode,omitempty"`
+	// Kind is JobImplement ("") or JobPlan (W7): a read-only run that breaks
+	// the node into task nodes and changes no files.
+	Kind string `json:"kind,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

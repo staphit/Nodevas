@@ -67,6 +67,9 @@ import {
 } from "./geometry";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
+import { RunCardBadge } from "../../runs/RunChanges";
+import { AutopilotCardBadge } from "../../autopilot/AutopilotCardBadge";
+import { safeCssColor } from "../../cssColor";
 
 type ConnectionHandlers = ReturnType<typeof useConnectionDrag>["handlers"];
 type CardResizeHandlers = ReturnType<typeof useCardResize>["handlers"];
@@ -528,10 +531,10 @@ export function GraphCanvas({
               ["--card-h" as string]: `${liveHeight}px`,
               // Fill and outline travel as variables: a clipped shape
               // draws its own edge and cannot use the box border.
-              ["--card-bg" as string]: nodeStyle?.color,
-              ["--card-border-color" as string]: nodeStyle?.borderColor,
-              borderColor: nodeStyle?.borderColor,
-              color: nodeStyle?.textColor,
+              ["--card-bg" as string]: safeCssColor(nodeStyle?.color),
+              ["--card-border-color" as string]: safeCssColor(nodeStyle?.borderColor),
+              borderColor: safeCssColor(nodeStyle?.borderColor),
+              color: safeCssColor(nodeStyle?.textColor),
               transform: isDragging
                 ? `translate(${drag.dx}px, ${drag.dy}px)`
                 : undefined,
@@ -599,6 +602,8 @@ export function GraphCanvas({
               <span className="lane-kind">{kindIcon(n.kind || "task", 11)}</span>
               {n.priority && <span className={`priority-dot ${n.priority}`} />}
               {errorNodes.has(n.id) && <span className="error-dot" />}
+              <RunCardBadge nodeId={n.id} />
+              <AutopilotCardBadge nodeId={n.id} />
             </span>
             <span className="col-card-title">{n.title || n.id}</span>
             <span

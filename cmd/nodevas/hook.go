@@ -21,7 +21,16 @@ import (
 // an error on every prompt. A Nodevas server that is not running is a normal
 // state, not a fault worth interrupting anyone over.
 func hookCmd(args []string) {
-	defer func() { _ = recover() }()
+	out := ""
+	defer func() {
+		_ = recover()
+		if out == "" && len(args) > 0 {
+			out = agenthook.Fallback(args[0])
+		}
+		if out != "" {
+			fmt.Fprintln(os.Stdout, out)
+		}
+	}()
 	if len(args) < 2 {
 		return
 	}
@@ -37,12 +46,9 @@ func hookCmd(args []string) {
 	in := agenthook.ParseInput(agenthook.ReadStdin(os.Stdin, agenthook.StdinLimit))
 	ctx, cancel := context.WithTimeout(context.Background(), agenthook.Timeout(event))
 	defer cancel()
-	out := agenthook.Run(ctx, agent, event, in, agenthook.Options{
+	out = agenthook.Run(ctx, agent, event, in, agenthook.Options{
 		Server:  *server,
 		Project: *projectName,
 		Actor:   *actor,
 	})
-	if out != "" {
-		fmt.Fprintln(os.Stdout, out)
-	}
 }

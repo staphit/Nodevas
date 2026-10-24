@@ -1,5 +1,8 @@
 import type { GraphUser } from "../types";
-import { req } from "./http";
+import { getProjectOverride, req } from "./http";
+
+/** "hold" parks every message to a session until a human approves it. */
+export type AgentInbound = "open" | "hold";
 
 export interface AgentSession {
   id: string;
@@ -18,6 +21,26 @@ export interface AgentSession {
   nodeId?: string;
   lastSeen: number;
   online: boolean;
+  /** Absent on hubs older than the hold policy, which means "open". */
+  inbound?: AgentInbound;
+  /** The model the agent reported in its heartbeat. */
+  model?: string;
+}
+
+/** Absent on hubs older than the hold policy, which means "delivered". */
+export type AgentMessageStatus = "delivered" | "held" | "rejected";
+
+/** A text file carried by a message, as the hub reports it. */
+export interface AgentMessageFile {
+  name: string;
+  size: number;
+  sha256: string;
+}
+
+/** A text file attached to an outgoing message. */
+export interface AgentFileUpload {
+  name: string;
+  content: string;
 }
 
 export interface AgentMessage {
@@ -34,6 +57,11 @@ export interface AgentMessage {
   body: string;
   createdAt: number;
   readAt?: number;
+  status?: AgentMessageStatus;
+  notify?: boolean;
+  files?: AgentMessageFile[];
+  decidedBy?: string;
+  decidedAt?: number;
 }
 
 export interface AgentAsk {
@@ -71,11 +99,39 @@ export const agentsApi = {
     const qs = nodeId ? `?nodeId=${encodeURIComponent(nodeId)}` : "";
     return req<{ messages: AgentMessage[] }>(`/api/agents/messages${qs}`);
   },
+  /** Held messages the viewer may approve or reject. */
+  getHeldAgentMessages: () =>
+    req<{ messages: AgentMessage[] }>("/api/agents/messages?status=held"),
+  approveAgentMessage: (id: string) =>
+    req<AgentMessage>(`/api/agents/messages/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+    }),
+  rejectAgentMessage: (id: string) =>
+    req<AgentMessage>(`/api/agents/messages/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+    }),
+  setAgentSessionInbound: (sessionId: string, inbound: AgentInbound) =>
+    req<AgentSession>(
+      `/api/agents/sessions/${encodeURIComponent(sessionId)}/inbound`,
+      { method: "POST", body: JSON.stringify({ inbound }) },
+    ),
+  /**
+   * Where a message's file downloads from. A plain link cannot carry the
+   * X-Nodevas-Project header req() adds, so the project rides in the query;
+   * the server reads ?project= before the header.
+   */
+  agentMessageFileURL: (messageId: string, name: string) => {
+    const path = `/api/agents/messages/${encodeURIComponent(messageId)}/files/${encodeURIComponent(name)}`;
+    const project = getProjectOverride();
+    return project ? `${path}?project=${encodeURIComponent(project)}` : path;
+  },
   sendAgentMessage: (payload: {
     to: string;
     message: string;
     replyTo?: string;
     nodeId?: string;
+    notify?: boolean;
+    files?: AgentFileUpload[];
   }) =>
     req<{
       ok: boolean;

@@ -172,3 +172,20 @@ func TestAgentNetworkMultiAgentCollaborationAndAskUser(t *testing.T) {
 		t.Fatalf("bob inbox = %+v, want <nodevas-approval>", bobInbox)
 	}
 }
+
+func TestInferAgentKindFromAgentEnvironment(t *testing.T) {
+	for _, name := range []string{"NODEVAS_AGENT", "CLAUDECODE", "CODEX_SANDBOX", "CURSOR_TRACE_ID", "CURSOR_AGENT", "GEMINI_CLI", "OPENCODE"} {
+		t.Setenv(name, "")
+	}
+	if got := inferAgentKind("mcp:agent"); got != "agent" {
+		t.Fatalf("no agent environment: %q", got)
+	}
+	t.Setenv("OPENCODE", "1")
+	if got := inferAgentKind("mcp:agent"); got != "opencode" {
+		t.Fatalf("OpenCode's environment: %q", got)
+	}
+	t.Setenv("NODEVAS_AGENT", "antigravity")
+	if got := inferAgentKind("mcp:agent"); got != "antigravity" {
+		t.Fatalf("NODEVAS_AGENT: %q", got)
+	}
+}

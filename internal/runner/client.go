@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"nodevas/internal/copilot/provider"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -45,8 +46,8 @@ type Client struct {
 	// the proxy.
 	HTTPClient *http.Client
 
-	// Accepter asks whether to take an offer; nil declines every offer unless
-	// the config's AutoAccept is on.
+	// Accepter asks whether to take an offer the auto-accept policy does not
+	// cover; nil declines those.
 	Accepter Accepter
 	// Adapter returns the agent adapter for a kind; nil means adapter.For.
 	// Tests swap in a fake agent.
@@ -55,9 +56,22 @@ type Client struct {
 	FlushInterval time.Duration
 	// RunTimeout overrides the config's run timeout; tests shorten it.
 	RunTimeout time.Duration
+	// PRPollInterval overrides the config's PR polling interval; tests
+	// shorten it.
+	PRPollInterval time.Duration
+	// NewTerminal starts an interactive run's agent in a terminal; nil means
+	// a real pseudo-terminal. Tests swap in a fake.
+	NewTerminal TerminalStarter
+	// NewLLMProvider builds the copilot's model provider (llm.go); nil means
+	// provider.New. Tests swap in a fake.
+	NewLLMProvider func(provider.Config) (provider.Provider, error)
 
 	jobs *jobs
+	// limiter caps copilot model calls per minute across connections.
+	limiter llmLimiter
 }
+
+func (c *Client) llmLimiter() *llmLimiter { return &c.limiter }
 
 const (
 	defaultRedetect   = 5 * time.Minute
@@ -78,11 +92,25 @@ func (c *Client) Run(ctx context.Context) error {
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
 		return err
 	}
-	if c.Config.AutoAccept {
+	if c.Config.LegacyAutoAccept() {
+		// The CLI migrates and saves before this; a Config built elsewhere
+		// is migrated here, in memory.
+		if warning := c.Config.MigrateLegacyAutoAccept(InstalledKinds(ctx, c.Commands, c.Config)); warning != "" {
+			c.logf("%s", warning)
+		}
+	}
+	if c.Config.AutoAcceptOn() {
 		c.logf("%s", AutoAcceptWarning)
+		if !c.Config.AutoAcceptPolicy().RequireStepUp {
+			c.logf("%s", StepUpOptionalWarning)
+		}
 	}
 	c.jobs = newJobs(ctx, c)
 	defer c.jobs.shutdown()
+	c.jobs.loadPRs()
+	c.jobs.loadMerges()
+	c.jobs.wg.Add(1)
+	go c.jobs.watchPRs(c.prPollInterval)
 	backoff := c.backoffMin()
 	for {
 		welcomed, err := c.session(ctx)
@@ -128,8 +156,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		return false, dialError(resp, err)
 	}
 	defer conn.CloseNow()
-	// Offers carry prompts of up to 64 KB; the hub caps every message at this.
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	// Offers carry prompts of up to 64 KB; the hub caps every message at this,
+	// except a copilot model call, which carries a whole conversation.
+	conn.SetReadLimit(max(runnerwire.MaxMessageBytes, runnerwire.MaxLLMRequestBytes))
 
 	info := BuildInfo(ctx, c.Commands, c.Config)
 	if err := c.hello(ctx, conn, info); err != nil {
@@ -158,6 +187,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 
 	welcomeDeadline := time.NewTimer(welcomeTimeout)
 	defer welcomeDeadline.Stop()
+	ownerID := ""
 	for !welcomed {
 		select {
 		case <-ctx.Done():
@@ -172,6 +202,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			case runnerwire.TypeWelcome:
 				welcomed = true
 				if msg.Welcome != nil {
+					ownerID = msg.Welcome.OwnerID
+					c.jobs.setHubName(msg.Welcome.Name)
 					c.logf("connected to %s as %q (owner %s)", c.Config.Hub, msg.Welcome.Name, msg.Welcome.Owner)
 				} else {
 					c.logf("connected to %s", c.Config.Hub)
@@ -182,6 +214,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		}
 	}
 
+	// Copilot model calls on this connection (llm.go); stopped with it.
+	llm := c.newLLMSession(ctx, ownerID)
+	defer llm.stop()
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
@@ -189,9 +224,16 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	flushTick := time.NewTicker(c.flushInterval())
 	defer flushTick.Stop()
 	lastHeard := time.Now()
-	// Whatever runs said while the runner was away goes out first.
+	// Whatever runs said while the runner was away goes out first, then the
+	// latest of every watched PR, once, in case the hub missed a change.
+	c.jobs.resendPRs()
 	flush := func() error {
-		return c.jobs.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) })
+		write := func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) }
+		// Terminal output first, so a run's last screen arrives before its finish.
+		if err := c.jobs.terms.flush(write); err != nil {
+			return err
+		}
+		return c.jobs.flush(write)
 	}
 	if err := flush(); err != nil {
 		return true, err
@@ -212,9 +254,29 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.offer(msg.Job)
 			case runnerwire.TypeCancel:
 				c.jobs.cancelRun(msg.RunID, msg.Reason)
+			case runnerwire.TypeMerge:
+				c.jobs.merge(msg.RunID, msg.Merge)
+			case runnerwire.TypeTermIn:
+				c.jobs.termInput(msg.RunID, msg.Term)
+			case runnerwire.TypeTermResize:
+				c.jobs.termResize(msg.RunID, msg.Term)
+			case runnerwire.TypeLLMRequest:
+				llm.request(msg.LLM)
+			case runnerwire.TypeLLMCancel:
+				llm.cancel(msg.LLMID)
+			case runnerwire.TypeDecideRequest:
+				llm.decide(msg.Decide)
+			}
+		case env := <-llm.out:
+			if err := c.write(ctx, conn, env); err != nil {
+				return true, err
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {
+				return true, err
+			}
+		case <-c.jobs.terms.notifyCh():
+			if err := c.jobs.terms.flush(func(msg runnerwire.Envelope) error { return c.write(ctx, conn, msg) }); err != nil {
 				return true, err
 			}
 		case <-flushTick.C:
@@ -354,11 +416,18 @@ func (c *Client) flushInterval() time.Duration {
 	return defaultFlush
 }
 
-func (c *Client) runTimeout() time.Duration {
+func (c *Client) runTimeout(kind string) time.Duration {
 	if c.RunTimeout > 0 {
 		return c.RunTimeout
 	}
-	return c.Config.RunTimeout()
+	return c.Config.RunTimeoutFor(kind)
+}
+
+func (c *Client) prPollInterval() time.Duration {
+	if c.PRPollInterval > 0 {
+		return c.PRPollInterval
+	}
+	return c.Config.PRPollInterval()
 }
 
 func (c *Client) adapterFor(kind string) adapter.Adapter {

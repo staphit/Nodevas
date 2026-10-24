@@ -4,18 +4,22 @@ import { IconClose } from "../icons";
 import { useI18n } from "../i18n";
 import { OperationStatus, InlineNotice } from "./InteractionPrimitives";
 import { AppearanceEditor } from "./settings/AppearanceEditor";
+import { CopilotEditor } from "./settings/CopilotEditor";
 import { MilestoneTypeEditor } from "./settings/MilestoneTypeEditor";
 import { PeopleEditor } from "./settings/PeopleEditor";
 import { StatusVocabularyEditor } from "./settings/StatusVocabularyEditor";
+import { MembersEditor } from "../members/MembersEditor";
 import type { SettingsNotify } from "./settings/notify";
 
-type SettingsTab = "workflow" | "milestones" | "people" | "appearance";
+type SettingsTab = "workflow" | "milestones" | "people" | "members" | "appearance" | "copilot";
 
 const TABS: { id: SettingsTab; labelKey: string; hintKey: string }[] = [
   { id: "workflow", labelKey: "settings.workflow", hintKey: "settings.workflowHint" },
   { id: "milestones", labelKey: "settings.milestones", hintKey: "settings.milestonesHint" },
   { id: "people", labelKey: "settings.people", hintKey: "settings.peopleHint" },
+  { id: "members", labelKey: "members.tab", hintKey: "members.tabHint" },
   { id: "appearance", labelKey: "settings.appearance", hintKey: "settings.appearanceHint" },
+  { id: "copilot", labelKey: "settings.copilot", hintKey: "settings.copilotHint" },
 ];
 
 /**
@@ -106,7 +110,11 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
 
           {tab === "people" && <PeopleEditor notify={notify} />}
 
+          {tab === "members" && <MembersEditor notify={notify} />}
+
           {tab === "appearance" && <AppearanceEditor notify={notify} />}
+
+          {tab === "copilot" && <CopilotEditor notify={notify} />}
         </div>
       </div>
     </div>
