@@ -26,15 +26,25 @@ import (
 const gitTimeout = 4 * time.Second
 
 // editTools are the tools whose input names a file they write: Claude Code's
-// (Edit, Write, MultiEdit, NotebookEdit) and Gemini CLI's (write_file,
-// replace, edit). Codex's apply_patch names its files inside the patch.
+// (Edit, Write, MultiEdit, NotebookEdit), Gemini CLI's (write_file, replace,
+// edit), OpenCode's (edit, write) and the Antigravity CLI's (write_to_file,
+// replace_file_content, multi_replace_file_content; its stream calls a write
+// write_file). Codex's apply_patch, which OpenCode also uses for some models,
+// names its files inside the patch.
 var editTools = map[string]bool{
 	"edit": true, "write": true, "multiedit": true, "notebookedit": true,
 	"write_file": true, "replace": true,
+	"write_to_file": true, "replace_file_content": true, "multi_replace_file_content": true,
 }
 
-// pathKeys are where those tools put the file they write.
-var pathKeys = []string{"file_path", "notebook_path", "absolute_path", "path"}
+// pathKeys are where those tools put the file they write: snake_case for
+// Claude Code and Gemini CLI, filePath for OpenCode, and the Antigravity
+// CLI's capitalised argument names.
+var pathKeys = []string{
+	"file_path", "notebook_path", "absolute_path", "path",
+	"filePath",
+	"TargetFile", "Path", "AbsolutePath", "FilePath",
+}
 
 // EditedFiles is the files a tool call wrote, as its input names them
 // (absolute, or relative to the session's directory). Anything that is not a

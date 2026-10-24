@@ -19,13 +19,26 @@ import (
 
 // The agents setup knows how to wire.
 const (
-	Claude = "claude"
-	Codex  = "codex"
-	Gemini = "gemini"
+	Claude      = "claude"
+	Codex       = "codex"
+	Gemini      = "gemini"
+	OpenCode    = "opencode"
+	Antigravity = "antigravity"
 )
 
 // Agents lists them in the order setup runs.
-var Agents = []string{Claude, Codex, Gemini}
+var Agents = []string{Claude, Codex, Gemini, OpenCode, Antigravity}
+
+// binaries are the CLIs' executable names where they differ from the agent's.
+var binaries = map[string]string{Antigravity: "agy"}
+
+// Binary is the executable an agent's CLI is installed as.
+func Binary(agent string) string {
+	if b, ok := binaries[agent]; ok {
+		return b
+	}
+	return agent
+}
 
 // ServerName is the name Nodevas's MCP server goes by in every agent config.
 const ServerName = "nodevas"
@@ -48,6 +61,12 @@ type Env struct {
 	// directory Gemini CLI keeps its .gemini folder in (GEMINI_CLI_HOME).
 	CodexHome  string
 	GeminiHome string
+	// XDGConfigHome replaces ~/.config, where OpenCode keeps its opencode
+	// folder (XDG_CONFIG_HOME, on every platform).
+	XDGConfigHome string
+	// AntigravityHome replaces the home directory the Antigravity CLI keeps
+	// its .gemini folder in; empty is Home.
+	AntigravityHome string
 	// Exe is the nodevas binary agents will run.
 	Exe string
 	// GOOS decides how hook commands are quoted.
@@ -77,12 +96,13 @@ func SystemEnv() (Env, error) {
 		}
 	}
 	return Env{
-		Home:       home,
-		CodexHome:  os.Getenv("CODEX_HOME"),
-		GeminiHome: os.Getenv("GEMINI_CLI_HOME"),
-		Exe:        exe,
-		GOOS:       runtime.GOOS,
-		LookPath:   exec.LookPath,
+		Home:          home,
+		CodexHome:     os.Getenv("CODEX_HOME"),
+		GeminiHome:    os.Getenv("GEMINI_CLI_HOME"),
+		XDGConfigHome: os.Getenv("XDG_CONFIG_HOME"),
+		Exe:           exe,
+		GOOS:          runtime.GOOS,
+		LookPath:      exec.LookPath,
 		Run: func(name string, args ...string) (string, error) {
 			cmd := exec.Command(name, args...)
 			var stderr strings.Builder
@@ -112,6 +132,26 @@ func (e Env) geminiHome() string {
 
 func (e Env) claudeHome() string { return filepath.Join(e.Home, ".claude") }
 
+// openCodeHome is OpenCode's global config directory: $XDG_CONFIG_HOME/opencode,
+// else ~/.config/opencode (on Windows too).
+func (e Env) openCodeHome() string {
+	if e.XDGConfigHome != "" {
+		return filepath.Join(e.XDGConfigHome, "opencode")
+	}
+	return filepath.Join(e.Home, ".config", "opencode")
+}
+
+// antigravityGemini is the .gemini folder the Antigravity CLI uses: its
+// config (MCP servers, hooks) in config/, its own settings in
+// antigravity-cli/.
+func (e Env) antigravityGemini() string {
+	home := e.AntigravityHome
+	if home == "" {
+		home = e.Home
+	}
+	return filepath.Join(home, ".gemini")
+}
+
 func (e Env) has(bin string) bool {
 	if e.LookPath == nil {
 		return false
@@ -125,12 +165,37 @@ func (e Env) has(bin string) bool {
 func Detect(env Env) []string {
 	var found []string
 	for _, a := range Agents {
-		dir := map[string]string{Claude: env.claudeHome(), Codex: env.codexHome(), Gemini: env.geminiHome()}[a]
-		if env.has(a) || dirExists(dir) {
+		dir := map[string]string{
+			Claude:      env.claudeHome(),
+			Codex:       env.codexHome(),
+			Gemini:      env.geminiHome(),
+			OpenCode:    env.openCodeHome(),
+			Antigravity: filepath.Join(env.antigravityGemini(), "antigravity-cli"),
+		}[a]
+		if a == Gemini && onlyAntigravity(dir) {
+			// The Antigravity CLI keeps its files in ~/.gemini too.
+			dir = ""
+		}
+		if env.has(Binary(a)) || (dir != "" && dirExists(dir)) {
 			found = append(found, a)
 		}
 	}
 	return found
+}
+
+// onlyAntigravity reports whether a .gemini folder holds the Antigravity
+// CLI's folders (antigravity-cli, config) and nothing else.
+func onlyAntigravity(geminiDir string) bool {
+	entries, err := os.ReadDir(geminiDir)
+	if err != nil || len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		if name := e.Name(); name != "antigravity-cli" && name != "config" {
+			return false
+		}
+	}
+	return true
 }
 
 func dirExists(path string) bool {
@@ -171,6 +236,10 @@ func Label(agent string) string {
 		return "Codex"
 	case Gemini:
 		return "Gemini CLI"
+	case OpenCode:
+		return "OpenCode"
+	case Antigravity:
+		return "Antigravity CLI"
 	}
 	return agent
 }
@@ -192,6 +261,10 @@ func Apply(env Env, opts Options) []Report {
 			err = s.codex()
 		case Gemini:
 			err = s.gemini()
+		case OpenCode:
+			err = s.openCode()
+		case Antigravity:
+			err = s.antigravity()
 		default:
 			err = fmt.Errorf("unknown agent %q (want one of %s)", agent, strings.Join(Agents, ", "))
 		}
@@ -274,13 +347,18 @@ func (s *setup) mcpArgs() []string {
 	return append(args, "--actor", s.actor(), "--agent-role", role)
 }
 
-// hookCmd is the shell command an agent runs for event.
-func (s *setup) hookCmd(event string) string {
-	args := []string{"hook", s.agent, event, "--server", s.opts.Server}
+// hookFlags are the flags after `hook <agent> <event>` on every hook line.
+func (s *setup) hookFlags() []string {
+	args := []string{"--server", s.opts.Server}
 	if s.opts.Project != "" {
 		args = append(args, "--project", s.opts.Project)
 	}
-	args = append(args, "--actor", s.actor())
+	return append(args, "--actor", s.actor())
+}
+
+// hookCmd is the shell command an agent runs for event.
+func (s *setup) hookCmd(event string) string {
+	args := append([]string{"hook", s.agent, event}, s.hookFlags()...)
 	return shellCmd(shellFor(s.agent, s.env.GOOS), s.env.GOOS, s.env.Exe, args)
 }
 

@@ -88,9 +88,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"       nodevas db status|copy-to-postgres --project <dir> [--replace]")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas setup-agent [--agents claude,codex,gemini] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
+		"       nodevas setup-agent [--agents claude,codex,gemini,opencode,antigravity] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas hook <claude|codex|gemini> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
+		"       nodevas hook <claude|codex|gemini|opencode|antigravity> <session-start|user-prompt-submit|post-tool-use|stop|session-end> [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas runner [start|login|logout|status|repo]  (connects this machine to a hub; nodevas runner help)")
 	fmt.Fprintln(os.Stderr,

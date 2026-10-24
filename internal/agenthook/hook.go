@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -62,7 +63,14 @@ type Options struct {
 	// ExclusionFile overrides where the folder exclusion list is read from
 	// (tests); empty is agentsetup.NetworkConfigPath().
 	ExclusionFile string
+	// Getenv reads the environment (tests); nil is os.Getenv.
+	Getenv func(string) string
 }
+
+// RunIDEnv is set by a runner on every agent run it starts. Such a session is
+// the runner's, on the network through the run's own MCP server; the owner's
+// global hooks firing inside it must not register it a second time.
+const RunIDEnv = "NODEVAS_RUN_ID"
 
 // Input is the part of an agent's hook payload the hook reads.
 type Input struct {
@@ -80,6 +88,11 @@ type Input struct {
 // ParseInput reads an agent's hook payload leniently: a byte-order mark
 // (Windows PowerShell pipes one in) is dropped, and unparseable input yields
 // an empty Input rather than an error.
+//
+// The Antigravity CLI's payload is camelCase protojson and names things its
+// own way: conversationId, workspacePaths (no cwd), modelName, toolCall
+// {name, args}, and on Stop executionNum (0 the first time a turn stops, 1
+// after a hook blocked that) and terminationReason.
 func ParseInput(raw []byte) Input {
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	var v map[string]any
@@ -91,6 +104,17 @@ func ParseInput(raw []byte) Input {
 		return strings.TrimSpace(s)
 	}
 	in := Input{Cwd: str("cwd")}
+	if in.Cwd == "" {
+		// agy lists --add-dir folders before the one it was started in.
+		if paths, ok := v["workspacePaths"].([]any); ok {
+			for i := len(paths) - 1; i >= 0; i-- {
+				if s, _ := paths[i].(string); strings.TrimSpace(s) != "" {
+					in.Cwd = filepath.Clean(strings.TrimSpace(s))
+					break
+				}
+			}
+		}
+	}
 	// Claude Code names the model as a string on some events and as
 	// {"id": …, "display_name": …} on others.
 	switch model := v["model"].(type) {
@@ -101,19 +125,39 @@ func ParseInput(raw []byte) Input {
 			in.Model = strings.TrimSpace(id)
 		}
 	}
+	if in.Model == "" {
+		// "auto" is Antigravity letting the model pick: no model to show.
+		if name := str("modelName"); name != "auto" {
+			in.Model = name
+		}
+	}
 	if len(in.Model) > agents.MaxModelLen {
 		in.Model = ""
 	}
-	for _, k := range []string{"session_id", "sessionId", "conversation_id"} {
+	for _, k := range []string{"session_id", "sessionId", "conversation_id", "conversationId"} {
 		if s := str(k); s != "" {
 			in.SessionID = s
 			break
 		}
 	}
 	in.StopHookActive, _ = v["stop_hook_active"].(bool)
+	if n, ok := v["executionNum"].(float64); ok && n > 0 {
+		in.StopHookActive = true
+	}
+	if reason := str("terminationReason"); reason != "" && reason != "NO_TOOL_CALL" {
+		// Stopped by an error, a cancel or a limit, not by finishing: no
+		// reason to keep it going for mail.
+		in.StopHookActive = true
+	}
 	in.ToolName = str("tool_name")
+	toolInput := v["tool_input"]
+	if call, ok := v["toolCall"].(map[string]any); ok && in.ToolName == "" {
+		name, _ := call["name"].(string)
+		in.ToolName = strings.TrimSpace(name)
+		toolInput = call["args"]
+	}
 	if in.ToolName != "" {
-		in.Files = EditedFiles(in.ToolName, toolInputMap(v["tool_input"]))
+		in.Files = EditedFiles(in.ToolName, toolInputMap(toolInput))
 	}
 	return in
 }
@@ -139,6 +183,13 @@ func ReadStdin(r io.Reader, limit time.Duration) []byte {
 // Run handles one hook invocation and returns what to print on stdout (empty
 // for nothing). Errors are swallowed by design.
 func Run(ctx context.Context, agent, event string, in Input, opts Options) string {
+	getenv := opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if strings.TrimSpace(getenv(RunIDEnv)) != "" {
+		return ""
+	}
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if in.SessionID == "" || agent == "" {
 		return ""
@@ -272,11 +323,31 @@ func reportChanges(ctx context.Context, client *mcp.Client, event string, in Inp
 // the agent takes another turn to read its mail. With asciiOnly, every
 // non-ASCII character is escaped: agents on Windows run hooks through
 // PowerShell, which can re-encode what passes through it.
+//
+// OpenCode's plugin (agentsetup) adds whatever the hook prints to the user's
+// message as is, so it gets the text alone. The Antigravity CLI injects steps:
+// a system message at session start, an ephemeral one before a model call
+// (its PreInvocation hook, which `nodevas setup-agent` wires to
+// user-prompt-submit), and on Stop a "continue" with the text as the reason.
 func Format(agent, event, text string, asciiOnly bool) string {
 	var out any
-	if event == EventStop {
+	switch {
+	case agent == "opencode":
+		return text
+	case agent == "antigravity":
+		switch event {
+		case EventSessionStart:
+			out = map[string]any{"injectSteps": []any{map[string]any{"systemMessage": map[string]any{"systemMessage": text}}}}
+		case EventUserPromptSubmit:
+			out = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": text}}}
+		case EventStop:
+			out = map[string]any{"decision": "continue", "reason": text}
+		default:
+			return ""
+		}
+	case event == EventStop:
 		out = map[string]any{"decision": "block", "reason": text}
-	} else {
+	default:
 		name := hookEventName(agent, event)
 		if name == "" {
 			return ""
@@ -297,6 +368,16 @@ func Format(agent, event, text string, asciiOnly bool) string {
 		s = EscapeNonASCII(s)
 	}
 	return s
+}
+
+// Fallback is what the hook prints when Run has nothing to say: the
+// Antigravity CLI reads every hook's stdout as a JSON object, so it gets an
+// empty one; the other agents get nothing.
+func Fallback(agent string) string {
+	if strings.ToLower(strings.TrimSpace(agent)) == "antigravity" {
+		return "{}"
+	}
+	return ""
 }
 
 func hookEventName(agent, event string) string {

@@ -675,6 +675,10 @@ func inferAgentKind(actor string) string {
 		return "cursor"
 	case os.Getenv("GEMINI_CLI") != "":
 		return "gemini"
+	case os.Getenv("OPENCODE") != "":
+		// OpenCode 1.18 sets OPENCODE=1 for the MCP servers it starts. The
+		// Antigravity CLI sets nothing; setup's NODEVAS_AGENT says it.
+		return "opencode"
 	}
 	clean := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(actor)), "mcp:")
 	if clean != "" && clean != "agent" && clean != "test" {

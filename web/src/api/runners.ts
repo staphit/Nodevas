@@ -11,7 +11,7 @@ export interface RunnerModel {
 }
 
 export interface RunnerAgent {
-  /** "claude" | "codex" | "gemini" */
+  /** "claude" | "codex" | "gemini" | "opencode" | "antigravity" */
   kind: string;
   installed: boolean;
   version?: string;

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -25,6 +27,16 @@ func TestParseInput(t *testing.T) {
 		{"bom", "\xef\xbb\xbf" + `{"session_id":"abc"}`, Input{SessionID: "abc"}},
 		{"camel", `{"sessionId":"g1"}`, Input{SessionID: "g1"}},
 		{"conversation", `{"conversation_id":"c1"}`, Input{SessionID: "c1"}},
+		{"antigravity", `{"conversationId":"ag1","workspacePaths":["/extra","/repo"],"modelName":"gemini-3.8-flash-low"}`,
+			Input{SessionID: "ag1", Cwd: filepath.Clean("/repo"), Model: "gemini-3.8-flash-low"}},
+		{"antigravity auto model", `{"conversationId":"ag1","modelName":"auto"}`, Input{SessionID: "ag1"}},
+		{"antigravity first stop", `{"conversationId":"ag1","executionNum":0,"terminationReason":"NO_TOOL_CALL"}`, Input{SessionID: "ag1"}},
+		{"antigravity stop after a block", `{"conversationId":"ag1","executionNum":1,"terminationReason":"NO_TOOL_CALL"}`,
+			Input{SessionID: "ag1", StopHookActive: true}},
+		{"antigravity stop on error", `{"conversationId":"ag1","executionNum":0,"terminationReason":"ERROR"}`,
+			Input{SessionID: "ag1", StopHookActive: true}},
+		{"antigravity tool", `{"conversationId":"ag1","toolCall":{"name":"write_to_file","args":{"TargetFile":"/repo/a.go"}}}`,
+			Input{SessionID: "ag1", ToolName: "write_to_file", Files: []string{"/repo/a.go"}}},
 		{"garbage", `not json`, Input{}},
 		{"empty", ``, Input{}},
 	}
@@ -49,11 +61,51 @@ func TestFormat(t *testing.T) {
 		{"gemini", EventStop, `{"decision":"block","reason":"hi"}`},
 		{"mystery", EventUserPromptSubmit, `{"hookSpecificOutput":{"additionalContext":"hi","hookEventName":"UserPromptSubmit"}}`},
 		{"claude", EventSessionEnd, ``},
+		{"opencode", EventUserPromptSubmit, `hi`},
+		{"opencode", EventStop, `hi`},
+		{"antigravity", EventSessionStart, `{"injectSteps":[{"systemMessage":{"systemMessage":"hi"}}]}`},
+		{"antigravity", EventUserPromptSubmit, `{"injectSteps":[{"ephemeralMessage":"hi"}]}`},
+		{"antigravity", EventStop, `{"decision":"continue","reason":"hi"}`},
+		{"antigravity", EventPostToolUse, ``},
 	}
 	for _, tc := range cases {
 		if got := Format(tc.agent, tc.event, "hi", false); got != tc.want {
 			t.Errorf("Format(%s, %s) = %s, want %s", tc.agent, tc.event, got, tc.want)
 		}
+	}
+}
+
+func TestFallback(t *testing.T) {
+	if got := Fallback("antigravity"); got != "{}" {
+		t.Fatalf("Fallback(antigravity) = %q, want {}", got)
+	}
+	for _, agent := range []string{"claude", "codex", "gemini", "opencode", ""} {
+		if got := Fallback(agent); got != "" {
+			t.Fatalf("Fallback(%s) = %q, want nothing", agent, got)
+		}
+	}
+	// Plain text is not JSON: escaping it would put \u sequences in front of
+	// the model.
+	if got := Format("opencode", EventUserPromptSubmit, "訊息", true); got != "訊息" {
+		t.Fatalf("opencode text was escaped: %q", got)
+	}
+}
+
+func TestRunSkipsRunnerRuns(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	env := map[string]string{RunIDEnv: "run-1"}
+	out := Run(context.Background(), "claude", EventSessionStart, Input{SessionID: "s1", Cwd: t.TempDir()}, Options{
+		Server:        srv.URL,
+		ExclusionFile: filepath.Join(t.TempDir(), "none.json"),
+		Getenv:        func(k string) string { return env[k] },
+	})
+	if out != "" || calls != 0 {
+		t.Fatalf("a runner's run reached the server: out %q, %d calls", out, calls)
 	}
 }
 

@@ -48,9 +48,16 @@ func (s *setup) claude() error {
 	return s.claudeMCP()
 }
 
-// claudeAllow adds (or removes) claudeAllowed in permissions.allow, leaving
-// no empty list or object behind that the person did not have.
+// claudeAllow adds (or removes) claudeAllowed in permissions.allow.
 func (s *setup) claudeAllow(doc *object) error {
+	return s.mergeAllow(doc, claudeAllowed,
+		"permissions.allow is not a list; left alone, so Claude Code asks before ask_user")
+}
+
+// mergeAllow adds (or, with Remove, removes) rules in doc's permissions.allow,
+// leaving no empty list or object behind that the person did not have. A
+// permissions.allow that is not a list is left alone, with notList as a note.
+func (s *setup) mergeAllow(doc *object, rules []string, notList string) error {
 	_, hadPerms := doc.get("permissions")
 	perms, err := doc.child("permissions")
 	if err != nil {
@@ -65,18 +72,18 @@ func (s *setup) claudeAllow(doc *object) error {
 	raw, hadAllow := perms.get("allow")
 	allow, isList := raw.([]any)
 	if hadAllow && !isList {
-		s.note("permissions.allow is not a list; left alone, so Claude Code asks before ask_user")
+		s.note("%s", notList)
 		return nil
 	}
 	kept := []any{}
 	for _, v := range allow {
 		rule, _ := v.(string)
-		if !s.opts.Remove || !slices.Contains(claudeAllowed, rule) {
+		if !s.opts.Remove || !slices.Contains(rules, rule) {
 			kept = append(kept, v)
 		}
 	}
 	if !s.opts.Remove {
-		for _, rule := range claudeAllowed {
+		for _, rule := range rules {
 			if !slices.Contains(kept, any(rule)) {
 				kept = append(kept, rule)
 			}
