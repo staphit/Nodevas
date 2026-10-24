@@ -64,7 +64,9 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
 	}
-	root, err := writeAntigravityRoot(env)
+	// Headless, nobody can approve a command: the gate turns what agy would
+	// refuse, ending the turn, into a denial the agent can work around.
+	root, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode))
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +125,9 @@ func antigravityEnv(env RunEnv) ([]string, error) {
 }
 
 // writeAntigravityRoot writes the run's customization root, which defines the
-// nodevas MCP server, into the temp dir and returns its path.
-func writeAntigravityRoot(env RunEnv) (string, error) {
+// nodevas MCP server (and, with gate, the PreToolUse gate in
+// antigravity_gate.go), into the temp dir and returns its path.
+func writeAntigravityRoot(env RunEnv, gate bool) (string, error) {
 	root := filepath.Join(env.TempDir, antigravityRootDir)
 	dir := filepath.Join(root, ".agents")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -144,6 +147,15 @@ func writeAntigravityRoot(env RunEnv) (string, error) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "mcp_config.json"), config, 0o600); err != nil {
 		return "", fmt.Errorf("writing the Antigravity MCP config: %w", err)
+	}
+	if hooks := antigravityGateHooks(env.MCP.Command); gate && hooks != nil {
+		data, err := json.MarshalIndent(hooks, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "hooks.json"), data, 0o600); err != nil {
+			return "", fmt.Errorf("writing the Antigravity hooks: %w", err)
+		}
 	}
 	return root, nil
 }
@@ -359,8 +371,12 @@ func (p *antigravityParser) result(r *antigravityResult) []runnerwire.RunEvent {
 			}
 			denied = append(denied, item)
 		}
-		events = append(events, runnerwire.RunEvent{Type: runnerwire.EventError,
-			Text: clip("antigravity denied without asking (headless): " + strings.Join(denied, ", "))})
+		// A denial ends agy's turn there and then, whatever was left to do:
+		// the run did not finish its task, though agy says SUCCESS.
+		reason := "antigravity stopped after denying without asking (headless): " + strings.Join(denied, ", ")
+		p.outcome.IsError = true
+		p.outcome.Error = Truncate(reason, runnerwire.MaxSummaryBytes)
+		events = append(events, runnerwire.RunEvent{Type: runnerwire.EventError, Text: clip(reason)})
 	}
 	if u := r.Usage; u != nil {
 		// agy's input_tokens include the cached ones; input here is the

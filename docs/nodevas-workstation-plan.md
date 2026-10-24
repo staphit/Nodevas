@@ -102,7 +102,13 @@ type Adapter interface {
 | Claude Code | `claude -p` | `--model` | `--mcp-config <tmp.json>` | `--output-format stream-json` |
 | Codex | `codex exec` | `-m` | `-c mcp_servers.nodevas...` | `--json` |
 | Gemini CLI | `gemini -p` | `-m` | 暫存 settings / `--allowed-mcp-server-names` | `--output-format stream-json` |
-| opencode（後期） | `opencode run` | `--model provider/model` | config | json |
+| OpenCode | `opencode run --format json --dir <worktree>`，任務走 stdin | `-m provider/model` | `OPENCODE_CONFIG_CONTENT`（mcp + permission） | json |
+| Antigravity CLI（`agy`） | `agy --input-format=stream-json --output-format=stream-json -p=`，任務走 stdin | `--model=` | `--add-dir=<tmp>/agyroot`（`.agents/mcp_config.json`），另以 `NODEVAS_RUN_MCP` 蓋過全域同名 server | stream-json |
+
+Antigravity 注意：headless 下需要權限的工具會被自動拒絕，且一拒絕就結束整個 turn（還回報 SUCCESS）。所以：
+- MCP 要能用，`~/.gemini/antigravity-cli/settings.json` 的 `permissions.allow` 必須有 `mcp(nodevas/*)`（`nodevas setup-agent --agents antigravity` 會加；runner 只讀不寫，缺了就把 agy 標成不可用）。
+- `plan` / `accept-edits` 模式下，run 的 agyroot 會放一個 PreToolUse hook（`nodevas runner agy-gate`），把 shell、非 nodevas 的 MCP、瀏覽器、worktree 外的檔案改成「deny + 原因」，agent 收到錯誤後會繞開繼續做，而不是整個 run 中斷。hook 沒意見時回 `{"decision":"ask"}`（空的 decision 等於拒絕）。
+- 結果裡有 `denied_actions` 時，run 記為失敗。
 
 實作前要逐一用 `--help` 核對旗標，因為各 CLI 改版很快；表格只是起點。
 

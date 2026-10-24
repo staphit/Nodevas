@@ -66,7 +66,8 @@ func TestAntigravityParseMCP(t *testing.T) {
 }
 
 // antigravity_denied.jsonl: a shell command headless mode denied without
-// asking; the turn still succeeds, with nothing to say.
+// asking. agy ends the turn there and calls it SUCCESS, with nothing to say;
+// the run failed its task.
 func TestAntigravityParseDenied(t *testing.T) {
 	events, outcome := parseWith(t, Antigravity{}.NewParser(), "antigravity_denied.jsonl")
 	var denied, refused *runnerwire.RunEvent
@@ -81,10 +82,11 @@ func TestAntigravityParseDenied(t *testing.T) {
 	if refused == nil || !refused.IsError || !strings.Contains(refused.Text, "user denied permission to run command") {
 		t.Errorf("refused command = %+v", refused)
 	}
-	if denied == nil || denied.Text != "antigravity denied without asking (headless): command (RunCommand)" {
+	const reason = "antigravity stopped after denying without asking (headless): command (RunCommand)"
+	if denied == nil || denied.Text != reason {
 		t.Errorf("denied = %+v", denied)
 	}
-	if !outcome.Done || outcome.IsError || outcome.Summary != "" {
+	if !outcome.Done || !outcome.IsError || outcome.Error != reason || outcome.Summary != "" {
 		t.Errorf("outcome = %+v", outcome)
 	}
 }

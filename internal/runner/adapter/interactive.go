@@ -285,7 +285,8 @@ func (Antigravity) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
 		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
 	}
-	root, err := writeAntigravityRoot(env)
+	// Someone is at the terminal to answer agy's prompts: no gate.
+	root, err := writeAntigravityRoot(env, false)
 	if err != nil {
 		return nil, err
 	}

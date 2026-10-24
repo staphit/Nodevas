@@ -13,7 +13,9 @@ import (
 	"strings"
 	"syscall"
 
+	"nodevas/internal/agenthook"
 	"nodevas/internal/runner"
+	"nodevas/internal/runner/adapter"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -44,6 +46,11 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerSet(args, stdout, stderr)
 	case "autoaccept", "auto-accept":
 		err = runnerAutoAccept(args, stdout, stderr)
+	case "agy-gate":
+		// Not for people: the PreToolUse hook of a headless Antigravity run
+		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
+		fmt.Fprintln(stdout, adapter.AntigravityGate(agenthook.ReadStdin(stdin, agenthook.StdinLimit)))
+		return 0
 	case "help", "-h", "--help":
 		runnerUsage(stdout)
 		return 0
