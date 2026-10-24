@@ -121,6 +121,10 @@ type Info struct {
 	// LLM is the model the runner calls for its owner's copilot (llm.go),
 	// set with CapLLM; nil when it has no copilot key.
 	LLM *LLMInfo `json:"llm,omitempty"`
+	// Advisor is the fast model the runner calls for its owner's autopilot
+	// to pick an agent and model per task (W7; LLMPurposeAdvisor), set with
+	// CapLLMAdvisor; nil when it has none.
+	Advisor *LLMInfo `json:"advisor,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.

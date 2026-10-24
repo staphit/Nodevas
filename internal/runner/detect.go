@@ -348,7 +348,18 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		MaxConcurrent: maxConcurrent,
 		AutoAccept:    autoAccept,
 		LLM:           copilotInfo(cfg),
+		Advisor:       advisorInfo(cfg),
 	}
+}
+
+// advisorInfo is what the hello says about the autopilot advisor's model
+// calls (never the key), or nil when this runner does not make them.
+func advisorInfo(cfg *Config) *runnerwire.LLMInfo {
+	info, _, reason := cfg.AdvisorLLM()
+	if reason != "" {
+		return nil
+	}
+	return &info
 }
 
 // copilotInfo is what the hello says about the copilot's model calls (never

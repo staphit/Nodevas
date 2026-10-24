@@ -9,6 +9,7 @@ import (
 	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
+	"nodevas/internal/autopilot"
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
@@ -253,6 +254,9 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
 	s.llm = runners.NewLLMRelay(s.runners)
+	// W7: the autopilot's LLM advisor asks the owner's advisor model through
+	// the same relay.
+	autopilot.RegisterLLMAdvisor(autopilot.NewLLMAdvisor(s.llm))
 }
 
 // RunnerLLM is the relay for copilot model calls made on runners, or nil

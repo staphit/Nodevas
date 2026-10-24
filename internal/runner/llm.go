@@ -28,6 +28,10 @@ import (
 // from when none is stored with `nodevas runner copilot-key`.
 const CopilotKeyEnv = "NODEVAS_COPILOT_API_KEY"
 
+// AdvisorKeyEnv is the environment variable a runner reads its advisor key
+// from when none is stored with `nodevas runner advisor-key`.
+const AdvisorKeyEnv = "NODEVAS_ADVISOR_API_KEY"
+
 // Limits on the model calls a runner makes for the hub.
 const (
 	// maxConcurrentLLM is how many calls run at once. A copilot turn makes
@@ -84,50 +88,130 @@ func (c *Config) CopilotLLM() (info runnerwire.LLMInfo, key string, reason strin
 	return info, key, ""
 }
 
+// AdvisorKey is the advisor key in effect and where it comes from: "stored"
+// (runner config), "environment" (AdvisorKeyEnv) or "copilot" (the copilot
+// key, used when both settings name the same provider); "" when none.
+func (c *Config) AdvisorKey() (key, source string) {
+	if c == nil {
+		return "", ""
+	}
+	if key := strings.TrimSpace(c.AdvisorAPIKey); key != "" {
+		return key, "stored"
+	}
+	if key := strings.TrimSpace(os.Getenv(AdvisorKeyEnv)); key != "" {
+		return key, "environment"
+	}
+	if c.AdvisorProvider != "" && c.AdvisorProvider == c.CopilotProvider {
+		if key, _ := c.CopilotKey(); key != "" {
+			return key, "copilot"
+		}
+	}
+	return "", ""
+}
+
+// AdvisorLLM is what this runner calls for its owner's autopilot advisor
+// (W7), and the key, when it answers advisor calls at all; reason says why
+// not otherwise. The same rules as CopilotLLM.
+func (c *Config) AdvisorLLM() (info runnerwire.LLMInfo, key string, reason string) {
+	if c == nil || c.AdvisorProvider == "" {
+		return runnerwire.LLMInfo{}, "", "advisorProvider is not set"
+	}
+	info = runnerwire.LLMInfo{
+		Provider: c.AdvisorProvider,
+		Model:    c.AdvisorModel,
+		BaseURL:  strings.TrimRight(strings.TrimSpace(c.AdvisorBaseURL), "/"),
+		Purpose:  runnerwire.LLMPurposeAdvisor,
+	}
+	if info.Model == "" {
+		info.Model = provider.DefaultModel(info.Provider)
+	}
+	key, _ = c.AdvisorKey()
+	keyless := info.Provider == provider.KindOpenAI && info.BaseURL != "" && info.BaseURL != provider.DefaultOpenAIBaseURL
+	if key == "" && !keyless {
+		return runnerwire.LLMInfo{}, "", "no advisor key: run `nodevas runner advisor-key`, set " + AdvisorKeyEnv +
+			", or use the copilot's provider so its key serves both"
+	}
+	return info, key, ""
+}
+
+// modelCallSettings is what answers a model call of purpose: the settings,
+// the key, and why this runner does not answer such calls ("" when it does).
+func (c *Config) modelCallSettings(purpose string) (info runnerwire.LLMInfo, key, reason string) {
+	switch purpose {
+	case runnerwire.LLMPurposeCopilot:
+		return c.CopilotLLM()
+	case runnerwire.LLMPurposeAdvisor:
+		return c.AdvisorLLM()
+	}
+	return runnerwire.LLMInfo{}, "", fmt.Sprintf("unknown purpose %q", truncate(purpose, 40))
+}
+
+// purposeLabel names a purpose in messages and the log.
+func purposeLabel(purpose string) string {
+	if purpose == runnerwire.LLMPurposeAdvisor {
+		return "advisor"
+	}
+	return "copilot"
+}
+
 // setCopilot handles the copilot settings of `nodevas runner set`.
 func (c *Config) setCopilot(key, value string, reset bool) error {
-	switch key {
-	case "copilotProvider":
+	return setModelSetting(key, value, reset, &c.CopilotProvider, &c.CopilotModel, &c.CopilotBaseURL)
+}
+
+// setAdvisor handles the advisor settings of `nodevas runner set` (W7).
+func (c *Config) setAdvisor(key, value string, reset bool) error {
+	return setModelSetting(key, value, reset, &c.AdvisorProvider, &c.AdvisorModel, &c.AdvisorBaseURL)
+}
+
+// setModelSetting sets one of a model call's provider, model or base URL;
+// key is the setting's name, ending in Provider, Model or BaseURL.
+func setModelSetting(key, value string, reset bool, providerField, modelField, baseField *string) error {
+	switch {
+	case strings.HasSuffix(key, "Provider"):
 		if reset || strings.EqualFold(value, "none") || strings.EqualFold(value, "off") {
-			c.CopilotProvider = ""
+			*providerField = ""
 			return nil
 		}
 		kind := strings.ToLower(value)
 		for _, p := range CopilotProviders {
 			if kind == p {
-				c.CopilotProvider = kind
+				*providerField = kind
 				return nil
 			}
 		}
-		return fmt.Errorf("copilotProvider must be one of %s, or none", strings.Join(CopilotProviders, ", "))
-	case "copilotModel":
+		return fmt.Errorf("%s must be one of %s, or none", key, strings.Join(CopilotProviders, ", "))
+	case strings.HasSuffix(key, "Model"):
 		if reset {
-			c.CopilotModel = ""
+			*modelField = ""
 			return nil
 		}
 		if len(value) > 200 || strings.IndexFunc(value, unicode.IsControl) >= 0 || strings.ContainsAny(value, " \t") {
-			return errors.New("copilotModel is not a model name")
+			return fmt.Errorf("%s is not a model name", key)
 		}
-		c.CopilotModel = value
-	case "copilotBaseURL":
+		*modelField = value
+	case strings.HasSuffix(key, "BaseURL"):
 		if reset {
-			c.CopilotBaseURL = ""
+			*baseField = ""
 			return nil
 		}
-		if err := checkCopilotBaseURL(value); err != nil {
+		if err := checkModelBaseURL(key, value); err != nil {
 			return err
 		}
-		c.CopilotBaseURL = strings.TrimRight(value, "/")
+		*baseField = strings.TrimRight(value, "/")
 	}
 	return nil
 }
 
 // checkCopilotBaseURL accepts https anywhere, and plain http only to this
 // machine or the local network: the key travels in every request.
-func checkCopilotBaseURL(value string) error {
+func checkCopilotBaseURL(value string) error { return checkModelBaseURL("copilotBaseURL", value) }
+
+// checkModelBaseURL is checkCopilotBaseURL for the setting named name.
+func checkModelBaseURL(name, value string) error {
 	u, err := url.Parse(value)
 	if err != nil || u.Host == "" || len(value) > runnerwire.MaxLLMFieldBytes || u.User != nil {
-		return errors.New("copilotBaseURL must be an http(s) URL")
+		return fmt.Errorf("%s must be an http(s) URL", name)
 	}
 	switch u.Scheme {
 	case "https":
@@ -136,9 +220,9 @@ func checkCopilotBaseURL(value string) error {
 		if localHost(u.Hostname()) {
 			return nil
 		}
-		return errors.New("copilotBaseURL may use plain http only to this machine or the local network; use https")
+		return fmt.Errorf("%s may use plain http only to this machine or the local network; use https", name)
 	}
-	return errors.New("copilotBaseURL must be an http(s) URL")
+	return fmt.Errorf("%s must be an http(s) URL", name)
 }
 
 func localHost(host string) bool {
@@ -236,17 +320,18 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 	if req == nil || req.ID == "" || len(req.ID) > runnerwire.MaxLLMIDBytes {
 		return
 	}
-	info, key, reason := s.c.Config.CopilotLLM()
+	what := purposeLabel(req.Purpose)
+	info, key, reason := s.c.Config.modelCallSettings(req.Purpose)
 	switch {
 	case reason != "":
-		s.refuse(req.ID, "this runner does not answer copilot model calls: "+reason)
+		s.refuse(req.ID, "this runner does not answer "+what+" model calls: "+reason)
 		return
 	case s.ownerID != "" && req.AccountID != s.ownerID:
-		s.refuse(req.ID, "this runner answers its owner's copilot only")
+		s.refuse(req.ID, "this runner answers its owner's "+what+" only")
 		return
 	case req.Provider != info.Provider || req.Model != info.Model ||
 		strings.TrimRight(req.BaseURL, "/") != info.BaseURL:
-		s.refuse(req.ID, "the request does not match this runner's copilot settings (restart the runner after changing them)")
+		s.refuse(req.ID, "the request does not match this runner's "+what+" settings (restart the runner after changing them)")
 		return
 	}
 	switch req.Effort {
@@ -303,13 +388,13 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 			s.mu.Unlock()
 			cancel()
 		}()
-		s.call(ctx, req.ID, info, key, req.Effort, provider.Request{
+		s.call(ctx, req.ID, what, info, key, req.Effort, provider.Request{
 			System: req.System, Messages: messages, Tools: tools, MaxTokens: maxTokens,
 		})
 	}()
 }
 
-func (s *llmSession) call(ctx context.Context, id string, info runnerwire.LLMInfo, key, effort string, req provider.Request) {
+func (s *llmSession) call(ctx context.Context, id, what string, info runnerwire.LLMInfo, key, effort string, req provider.Request) {
 	done := func(d runnerwire.LLMDone) {
 		d.ID = id
 		s.send(runnerwire.Envelope{Type: runnerwire.TypeLLMDone, LLMDone: &d})
@@ -325,7 +410,7 @@ func (s *llmSession) call(ctx context.Context, id string, info runnerwire.LLMInf
 		done(runnerwire.LLMDone{Error: err.Error()})
 		return
 	}
-	s.c.logf("copilot: model call %s to %s/%s (%d messages)", shortID(id), info.Provider, info.Model, len(req.Messages))
+	s.c.logf("%s: model call %s to %s/%s (%d messages)", what, shortID(id), info.Provider, info.Model, len(req.Messages))
 	started := time.Now()
 	resp, err := model.Stream(ctx, req, func(d provider.Delta) {
 		for text := d.Text; text != ""; {
@@ -341,7 +426,7 @@ func (s *llmSession) call(ctx context.Context, id string, info runnerwire.LLMInf
 		if ctx.Err() != nil && s.ctx.Err() == nil && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			err = errors.New("cancelled")
 		}
-		s.c.logf("copilot: model call %s failed: %v", shortID(id), err)
+		s.c.logf("%s: model call %s failed: %v", what, shortID(id), err)
 		done(runnerwire.LLMDone{Error: truncate(err.Error(), 2000)})
 		return
 	}
@@ -350,7 +435,7 @@ func (s *llmSession) call(ctx context.Context, id string, info runnerwire.LLMInf
 		done(runnerwire.LLMDone{Error: "the model's answer is too large to send to the hub"})
 		return
 	}
-	s.c.logf("copilot: model call %s done in %s (%d in, %d out tokens)", shortID(id),
+	s.c.logf("%s: model call %s done in %s (%d in, %d out tokens)", what, shortID(id),
 		time.Since(started).Round(100*time.Millisecond), resp.InputTokens, resp.OutputTokens)
 	done(runnerwire.LLMDone{Message: message, Stop: string(resp.Stop),
 		InputTokens: resp.InputTokens, OutputTokens: resp.OutputTokens})

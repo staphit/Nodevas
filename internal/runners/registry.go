@@ -339,9 +339,11 @@ func ValidateInfo(info runnerwire.Info) error {
 		}
 	}
 	var long []string
-	if llm := info.LLM; llm != nil {
-		short = append(short, llm.Provider, llm.Model)
-		long = append(long, llm.BaseURL)
+	for _, llm := range []*runnerwire.LLMInfo{info.LLM, info.Advisor} {
+		if llm != nil {
+			short = append(short, llm.Provider, llm.Model, llm.Purpose)
+			long = append(long, llm.BaseURL)
+		}
 	}
 	for _, repo := range info.Repos {
 		if strings.TrimSpace(repo.ID) == "" {

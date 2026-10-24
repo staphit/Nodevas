@@ -121,6 +121,15 @@ type Config struct {
 	// CopilotAPIKey is the key, set with `nodevas runner copilot-key` from
 	// stdin and never printed. CopilotKeyEnv is used when it is empty.
 	CopilotAPIKey string `json:"copilotApiKey,omitempty"`
+
+	// The autopilot advisor's model calls (W7, llm.go): a fast model this
+	// runner calls for its owner's autopilot to pick an agent and model per
+	// task. Same rules as the copilot's; the key is AdvisorAPIKey, else
+	// AdvisorKeyEnv, else the copilot key when both use the same provider.
+	AdvisorProvider string `json:"advisorProvider,omitempty"`
+	AdvisorModel    string `json:"advisorModel,omitempty"`
+	AdvisorBaseURL  string `json:"advisorBaseURL,omitempty"`
+	AdvisorAPIKey   string `json:"advisorApiKey,omitempty"`
 }
 
 // Defaults and bounds for the run settings.
@@ -286,7 +295,8 @@ var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "per
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "antigravityMode",
 	"autoAccept", "interactive",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
-	"copilotProvider", "copilotModel", "copilotBaseURL"}
+	"copilotProvider", "copilotModel", "copilotBaseURL",
+	"advisorProvider", "advisorModel", "advisorBaseURL"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
@@ -314,6 +324,8 @@ func (c *Config) Set(key string, values []string) error {
 	switch canonical {
 	case "copilotProvider", "copilotModel", "copilotBaseURL":
 		return c.setCopilot(canonical, value, reset)
+	case "advisorProvider", "advisorModel", "advisorBaseURL":
+		return c.setAdvisor(canonical, value, reset)
 	case "maxConcurrent":
 		if reset {
 			c.MaxConcurrent = 0

@@ -30,6 +30,21 @@ const (
 // CapLLM: the runner answers copilot model calls (its hello has LLM set).
 const CapLLM = "llm"
 
+// CapLLMAdvisor: the runner answers advisor model calls (its hello has
+// Advisor set).
+const CapLLMAdvisor = "llm-advisor"
+
+// What a model call is for (LLMRequest.Purpose, LLMInfo.Purpose). Each has
+// its own provider, model and key on the runner; a request for one is never
+// served with the other's settings.
+const (
+	// LLMPurposeCopilot: a voice copilot turn (the default, "").
+	LLMPurposeCopilot = ""
+	// LLMPurposeAdvisor: W7 autopilot asking a fast model which agent and
+	// model should implement a task.
+	LLMPurposeAdvisor = "advisor"
+)
+
 // Limits on model call messages.
 const (
 	// MaxLLMIDBytes bounds a call's id.
@@ -56,6 +71,8 @@ type LLMInfo struct {
 	Model    string `json:"model"`
 	// BaseURL is set for an OpenAI-compatible endpoint other than OpenAI's.
 	BaseURL string `json:"baseUrl,omitempty"`
+	// Purpose is LLMPurposeCopilot or LLMPurposeAdvisor.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // LLMRequest is one model call. Messages and Tools are the copilot's
@@ -63,8 +80,12 @@ type LLMInfo struct {
 // []Message and []Tool), carried as they are.
 type LLMRequest struct {
 	ID string `json:"id"`
-	// AccountID is whose copilot asked. A runner answers its owner only.
+	// AccountID is whose copilot (or autopilot) asked. A runner answers its
+	// owner only.
 	AccountID string `json:"accountId"`
+	// Purpose picks which of the runner's model settings answers it:
+	// LLMPurposeCopilot or LLMPurposeAdvisor.
+	Purpose string `json:"purpose,omitempty"`
 	// Provider, Model and BaseURL are what the hub expects the runner to
 	// call, from its hello; the runner refuses a request that disagrees with
 	// its settings.

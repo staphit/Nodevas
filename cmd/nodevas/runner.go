@@ -48,6 +48,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerAutoAccept(args, stdout, stderr)
 	case "copilot-key":
 		err = runnerCopilotKey(args, in, stdout, stderr)
+	case "advisor-key":
+		err = runnerAdvisorKey(args, in, stdout, stderr)
 	case "agy-gate":
 		// Not for people: the PreToolUse hook of a headless Antigravity run
 		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
@@ -117,9 +119,15 @@ func runnerUsage(w io.Writer) {
                                              copilot: copilotProvider (anthropic|openai|none: this runner
                                              makes your voice copilot's model calls with a key kept here),
                                              copilotModel, copilotBaseURL (https, or http to this machine
-                                             or the local network)
+                                             or the local network);
+                                             autopilot advisor: advisorProvider (anthropic|openai|none: a
+                                             fast model here picks the agent and model for each autopilot
+                                             task), advisorModel, advisorBaseURL (same rules as copilot)
        nodevas runner copilot-key [--clear]  store the copilot's API key, read from stdin (never a flag);
                                              the hub never sees it (or set NODEVAS_COPILOT_API_KEY here)
+       nodevas runner advisor-key [--clear]  store the advisor's API key the same way (or set
+                                             NODEVAS_ADVISOR_API_KEY; with the copilot's provider, the
+                                             copilot key serves both)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -354,6 +362,88 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
 	printAutoAccept(w, cfg)
 	printCopilot(w, cfg)
+	printAdvisor(w, cfg)
+}
+
+// printAdvisor shows the autopilot advisor settings (W7); the key only as
+// where it comes from.
+func printAdvisor(w io.Writer, cfg *runner.Config) {
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
+	fmt.Fprintln(w, "autopilot advisor:")
+	if cfg.AdvisorProvider == "" {
+		setting("advisorProvider", "none (autopilot picks agents by its rules)")
+		return
+	}
+	info, _, reason := cfg.AdvisorLLM()
+	setting("advisorProvider", cfg.AdvisorProvider)
+	model := cfg.AdvisorModel
+	if model == "" {
+		model = "(default)"
+	}
+	setting("advisorModel", model)
+	base := cfg.AdvisorBaseURL
+	if base == "" {
+		base = "(the vendor's own)"
+	}
+	setting("advisorBaseURL", base)
+	key := "none"
+	switch _, source := cfg.AdvisorKey(); source {
+	case "stored":
+		key = "stored in this file"
+	case "environment":
+		key = "from " + runner.AdvisorKeyEnv
+	case "copilot":
+		key = "the copilot's (same provider)"
+	}
+	setting("advisorKey", key)
+	if reason != "" {
+		setting("state", "off: "+reason)
+	} else {
+		setting("state", fmt.Sprintf("on: autopilot asks %s/%s which agent and model take each task", info.Provider, info.Model))
+	}
+}
+
+// runnerAdvisorKey stores (or with --clear forgets) the advisor's API key,
+// read from stdin like the copilot's.
+func runnerAdvisorKey(args []string, in *bufio.Reader, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("advisor-key")
+	clear := fs.Bool("clear", false, "forget the stored key")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	if *clear {
+		cfg.AdvisorAPIKey = ""
+	} else {
+		if isTerminal(os.Stdin) {
+			fmt.Fprint(stderr, "advisor API key: ")
+		}
+		key, err := readSecretLine(in)
+		if err != nil {
+			return fmt.Errorf("reading the key from stdin: %w", err)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || len(key) > 4096 || strings.ContainsAny(key, " \t\r\n") {
+			return errors.New("that is not an API key")
+		}
+		cfg.AdvisorAPIKey = key
+	}
+	if err := runner.SaveConfig(path, cfg); err != nil {
+		return err
+	}
+	if *clear {
+		fmt.Fprintln(stdout, "advisor key forgotten")
+	} else {
+		fmt.Fprintln(stdout, "advisor key saved")
+	}
+	if cfg.AdvisorProvider == "" {
+		fmt.Fprintln(stdout, "set the provider too: nodevas runner set advisorProvider anthropic (or openai)")
+	}
+	fmt.Fprintln(stdout, "restart a running runner for it to take effect")
+	return nil
 }
 
 // printCopilot shows the copilot settings; the key only as where it comes from.

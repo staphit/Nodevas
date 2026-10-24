@@ -23,6 +23,11 @@ import (
 var ErrNoLLMRunner = errors.New("your runner is offline or has no copilot key: start `nodevas runner` on your PC " +
 	"(set one up with `nodevas runner set copilotProvider anthropic` and `nodevas runner copilot-key`)")
 
+// ErrNoAdvisorRunner: the person has no online runner with an autopilot
+// advisor model (W7).
+var ErrNoAdvisorRunner = errors.New("no online runner of yours has an advisor model: set one with " +
+	"`nodevas runner set advisorProvider anthropic` (and advisorModel), then restart the runner")
+
 // ErrLLMRunnerGone: the runner a call was sent to disconnected before it
 // answered.
 var ErrLLMRunnerGone = errors.New("your runner disconnected before the model answered")
@@ -75,8 +80,29 @@ func NewLLMRelay(reg *Registry) *LLMRelay {
 // recently connected if there are several. Another account's runner is never
 // a target, administrators' included: the key on it is its owner's.
 func (l *LLMRelay) Target(ctx context.Context, accountID string) (runnerwire.Runner, error) {
+	return l.TargetFor(ctx, accountID, runnerwire.LLMPurposeCopilot)
+}
+
+// TargetFor is Target for a model call's purpose: a copilot call goes to a
+// runner whose hello offers copilot calls (Info.LLM), an advisor call to one
+// that offers advisor calls (Info.Advisor). The same ownership rule holds.
+func (l *LLMRelay) TargetFor(ctx context.Context, accountID, purpose string) (runnerwire.Runner, error) {
+	none := ErrNoLLMRunner
+	offers := func(info *runnerwire.Info) bool {
+		return info.LLM != nil && slices.Contains(info.Capabilities, runnerwire.CapLLM)
+	}
+	switch purpose {
+	case runnerwire.LLMPurposeCopilot:
+	case runnerwire.LLMPurposeAdvisor:
+		none = ErrNoAdvisorRunner
+		offers = func(info *runnerwire.Info) bool {
+			return info.Advisor != nil && slices.Contains(info.Capabilities, runnerwire.CapLLMAdvisor)
+		}
+	default:
+		return runnerwire.Runner{}, fmt.Errorf("%w: unknown model call purpose %q", ErrInvalid, purpose)
+	}
 	if accountID == "" {
-		return runnerwire.Runner{}, ErrNoLLMRunner
+		return runnerwire.Runner{}, none
 	}
 	rows, err := l.reg.db.QueryContext(ctx,
 		`SELECT `+runnerColumns+` FROM runners WHERE revoked_at = '' AND owner_id = ?`, accountID)
@@ -92,8 +118,7 @@ func (l *LLMRelay) Target(ctx context.Context, accountID string) (runnerwire.Run
 		if err != nil {
 			return runnerwire.Runner{}, err
 		}
-		if !runner.Online || runner.Info == nil || runner.Info.LLM == nil ||
-			!slices.Contains(runner.Info.Capabilities, runnerwire.CapLLM) {
+		if !runner.Online || runner.Info == nil || !offers(runner.Info) {
 			continue
 		}
 		at := l.reg.attachedAt(runner.ID)
@@ -105,7 +130,7 @@ func (l *LLMRelay) Target(ctx context.Context, accountID string) (runnerwire.Run
 		return runnerwire.Runner{}, err
 	}
 	if !found {
-		return runnerwire.Runner{}, ErrNoLLMRunner
+		return runnerwire.Runner{}, none
 	}
 	return best, nil
 }
@@ -139,6 +164,9 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 
 	if err := l.reg.Send(runnerID, runnerwire.Envelope{Type: runnerwire.TypeLLMRequest, LLM: &req}); err != nil {
 		if errors.Is(err, ErrOffline) {
+			if req.Purpose == runnerwire.LLMPurposeAdvisor {
+				return runnerwire.LLMDone{}, ErrNoAdvisorRunner
+			}
 			return runnerwire.LLMDone{}, ErrNoLLMRunner
 		}
 		return runnerwire.LLMDone{}, fmt.Errorf("sending the model call to your runner: %w", err)
