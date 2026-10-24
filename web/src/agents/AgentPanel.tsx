@@ -8,7 +8,7 @@ import {
 } from "react";
 import { api, type AgentFileUpload, type AgentMessage } from "../api";
 import { formatLocalizedDateTime, useI18n } from "../i18n";
-import { IconBell, IconClose, IconComputer, IconPaperclip } from "../icons";
+import { IconBell, IconClose, IconComputer, IconPaperclip, IconUsage } from "../icons";
 import { useApp } from "../store";
 import { AskCard } from "./AskCard";
 import { canManageSession, useAgents } from "./agentStore";
@@ -214,6 +214,15 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
             title={t("topbar.runnersTitle")}
           >
             <IconComputer size={14} />
+          </button>
+          <button
+            type="button"
+            className="copilot-icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent("nodevas-open-usage"))}
+            aria-label={t("topbar.usage")}
+            title={t("topbar.usageTitle")}
+          >
+            <IconUsage size={14} />
           </button>
           <button
             type="button"

@@ -22,6 +22,8 @@ import { CopilotRoot } from "./copilot/CopilotRoot";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
+import { UsageModal } from "./usage/UsageModal";
+import { useUsage } from "./usage/usageStore";
 import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
@@ -52,6 +54,7 @@ import {
   IconSignOut,
   IconSun,
   IconTree,
+  IconUsage,
 } from "./icons";
 
 const Drawer = lazy(() =>
@@ -108,7 +111,7 @@ function MainApp() {
   // still up did open it, underneath, and read as a button that did nothing. Making them one value makes that unrepresentable instead
   // of relying on every opener remembering to close its neighbours.
   const [modal, setModal] = useState<
-    "" | "notify" | "backup" | "settings" | "runners"
+    "" | "notify" | "backup" | "settings" | "runners" | "usage"
   >("");
   const closeModal = useCallback(() => setModal(""), []);
   // Live width while dragging; the preference is written on commit so a drag
@@ -160,13 +163,16 @@ function MainApp() {
     const onOpenSettings = () => setModal("settings");
     const onOpenNotify = () => setModal("notify");
     const onOpenRunners = () => setModal("runners");
+    const onOpenUsage = () => setModal("usage");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
     window.addEventListener("nodevas-open-runners", onOpenRunners);
+    window.addEventListener("nodevas-open-usage", onOpenUsage);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
       window.removeEventListener("nodevas-open-runners", onOpenRunners);
+      window.removeEventListener("nodevas-open-usage", onOpenUsage);
     };
   }, []);
 
@@ -308,9 +314,15 @@ function MainApp() {
           // that never opened it has nothing to keep current.
           void useRunners.getState().refreshIfLoaded();
           break;
+        case "usage-changed":
+          // A session reported its tokens: an open Usage dialog refetches.
+          useUsage.getState().onUsageEvent();
+          break;
         case "runs-changed":
           // The id is a node: its run list is refetched if something shows it.
           useRuns.getState().onRunsChanged(ev.id);
+          // A finished run's usage arrives only as runs-changed.
+          useUsage.getState().onUsageEvent();
           break;
         case "run-events":
           // The id is a run: an open run view fetches what came after its
@@ -559,6 +571,12 @@ function MainApp() {
                 onSelect: () => setModal("runners"),
               },
               {
+                id: "usage",
+                label: t("topbar.usage"),
+                icon: <IconUsage size={16} />,
+                onSelect: () => setModal("usage"),
+              },
+              {
                 id: "theme",
                 label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
                 icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
@@ -584,6 +602,7 @@ function MainApp() {
       {modal === "backup" && <BackupModal onClose={closeModal} />}
       {modal === "settings" && <ProjectSettings onClose={closeModal} />}
       {modal === "runners" && <RunnersModal onClose={closeModal} />}
+      {modal === "usage" && <UsageModal onClose={closeModal} />}
       {error && (
         <div className="global-error" role="alert">
           <span>{error}</span>

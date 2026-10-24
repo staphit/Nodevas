@@ -207,6 +207,13 @@ export const IconComputer = (p: P) => (
   </svg>
 );
 
+/** A bar meter: token usage. */
+export const IconUsage = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 20V11M10 20V5M16 20v-7M21 20H3" />
+  </svg>
+);
+
 export const IconPencil = (p: P) => (
   <svg {...base(p)}>
     <path d="M4 20h4l10.5-10.5a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20Z" />

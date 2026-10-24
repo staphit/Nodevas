@@ -15,6 +15,7 @@ import { notifyApi } from "./notify";
 import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
+import { usageApi } from "./usage";
 import { workspaceApi } from "./workspace";
 
 export {
@@ -148,6 +149,18 @@ export {
   pipelineEnded,
   ROUTE_MATCHES,
 } from "./runs";
+export { MAX_USAGE_DAYS, USAGE_RANGES } from "./usage";
+export type {
+  ModelPrice,
+  PriceSource,
+  UsageBucket,
+  UsageGroup,
+  UsageModelGroup,
+  UsagePrices,
+  UsageReport,
+  UsageSession,
+  UsageSource,
+} from "./usage";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -176,4 +189,5 @@ export const api = {
   ...agentsApi,
   ...runnersApi,
   ...runsApi,
+  ...usageApi,
 };
