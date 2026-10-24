@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/project"
+	"nodevas/internal/usage"
 )
 
 const (
@@ -34,6 +35,9 @@ const (
 type API struct {
 	pm  *project.ProjectManager
 	hub *agents.Hub
+	// usage records session token usage; nil leaves the route answering 503.
+	usage       *usage.Store
+	usageNotify func(projectKey string)
 }
 
 // New builds the HTTP handler set for the agent network.
@@ -58,6 +62,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	group.POST("/asks", a.postAsk)
 	group.POST("/asks/:id/answer", a.postAskAnswer)
 	group.POST("/sessions/:id/changes", a.postSessionChanges)
+	group.POST("/sessions/:id/usage", a.postSessionUsage)
 	api.GET("/nodes/:id/session-changes", a.getNodeSessionChanges)
 }
 

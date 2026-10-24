@@ -14,6 +14,8 @@ import (
 	runnersapi "nodevas/internal/httpapi/runners"
 	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/httpapi/system"
+	usageapi "nodevas/internal/httpapi/usage"
+	"nodevas/internal/usage"
 )
 
 // This file is the whole HTTP surface in one place. Each handler package owns
@@ -39,7 +41,23 @@ func (s *Server) Handler() http.Handler {
 	fsbrowse.New(s.auth, s.openDir).Register(api)
 	remoteapi.New(s.pm, s.remotes).Register(api)
 	if s.agents != nil {
-		agentsapi.New(s.pm, s.agents).Register(api)
+		agentsAPI := agentsapi.New(s.pm, s.agents)
+		if s.usage != nil {
+			agentsAPI.UseUsage(s.usage, func(projectKey string) {
+				if s.hub == nil {
+					return
+				}
+				if projectKey == "" {
+					s.hub.Broadcast(usage.ChangedEvent, "")
+					return
+				}
+				s.hub.BroadcastRoom(projectKey, usage.ChangedEvent, "")
+			})
+		}
+		agentsAPI.Register(api)
+	}
+	if s.usage != nil {
+		usageapi.New(s.pm, s.usage).Register(api)
 	}
 	if s.runners != nil {
 		runnersapi.New(s.runners, s.runs).Register(api)

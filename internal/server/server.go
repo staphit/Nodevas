@@ -21,6 +21,7 @@ import (
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 	"nodevas/internal/store"
+	"nodevas/internal/usage"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -45,6 +46,9 @@ type Server struct {
 	// runs serves /api/runs and the run traffic on the runner socket; nil
 	// until UseRunnersDB.
 	runs *runs.Dispatcher
+	// usage keeps agent sessions' token usage and the prices that cost it;
+	// nil until UseAgentsDB.
+	usage *usage.Store
 	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
 	stepUpWindow time.Duration
 
@@ -220,6 +224,9 @@ func (s *Server) UseAudit(store *audit.Store) {
 func (s *Server) UseAgentsDB(database *db.DB) {
 	if s.agents != nil {
 		s.agents.SetDatabase(database)
+	}
+	if database != nil {
+		s.usage = usage.NewStore(database)
 	}
 }
 

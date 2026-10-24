@@ -830,6 +830,50 @@ CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, se
 CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
 `,
 	},
+	{
+		name: "0017_usage",
+		stmt: `
+-- Token usage (internal/usage). Runs keep theirs on runs.usage; these are
+-- the agents their owners run in their own terminals, as their hooks report.
+
+-- One row per project, session and model: the session's running totals for
+-- that model, replaced by every report (a report is cumulative, never a
+-- delta).
+CREATE TABLE agent_session_usage (
+    -- The project's name as ?project= takes it, as on runs.
+    project            TEXT NOT NULL,
+    session_id         TEXT NOT NULL,
+    model              TEXT NOT NULL,
+    actor_id           TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    session_name       TEXT NOT NULL DEFAULT '',
+    agent              TEXT NOT NULL DEFAULT '',
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    -- What the agent itself said it cost (USD); 0 when it said nothing.
+    reported_cost_usd  REAL NOT NULL DEFAULT 0,
+    first_at           TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    PRIMARY KEY (project, session_id, model)
+) STRICT;
+CREATE INDEX agent_session_usage_updated ON agent_session_usage (project, updated_at);
+-- Usage over a window reads runs by project and creation time.
+CREATE INDEX runs_project_created ON runs (project, created_at);
+
+-- The owner's own prices (USD per million tokens), over the built-in table.
+CREATE TABLE usage_prices (
+    model                 TEXT PRIMARY KEY,
+    input_per_mtok        REAL NOT NULL DEFAULT 0,
+    output_per_mtok       REAL NOT NULL DEFAULT 0,
+    cache_read_per_mtok   REAL NOT NULL DEFAULT 0,
+    cache_write_per_mtok  REAL NOT NULL DEFAULT 0,
+    updated_at            TEXT NOT NULL,
+    updated_by            TEXT NOT NULL DEFAULT ''
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

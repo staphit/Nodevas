@@ -641,6 +641,40 @@ CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, se
 CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
 `,
 	},
+	{
+		name: "0017_usage",
+		stmt: `
+CREATE TABLE agent_session_usage (
+    project            TEXT COLLATE "C" NOT NULL,
+    session_id         TEXT COLLATE "C" NOT NULL,
+    model              TEXT COLLATE "C" NOT NULL,
+    actor_id           TEXT COLLATE "C" NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    session_name       TEXT NOT NULL DEFAULT '',
+    agent              TEXT NOT NULL DEFAULT '',
+    input_tokens       BIGINT NOT NULL DEFAULT 0,
+    output_tokens      BIGINT NOT NULL DEFAULT 0,
+    cache_read_tokens  BIGINT NOT NULL DEFAULT 0,
+    cache_write_tokens BIGINT NOT NULL DEFAULT 0,
+    reported_cost_usd  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    first_at           TEXT COLLATE "C" NOT NULL,
+    updated_at         TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (project, session_id, model)
+);
+CREATE INDEX agent_session_usage_updated ON agent_session_usage (project, updated_at);
+CREATE INDEX runs_project_created ON runs (project, created_at);
+
+CREATE TABLE usage_prices (
+    model                 TEXT COLLATE "C" PRIMARY KEY,
+    input_per_mtok        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    output_per_mtok       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cache_read_per_mtok   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cache_write_per_mtok  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at            TEXT COLLATE "C" NOT NULL,
+    updated_by            TEXT NOT NULL DEFAULT ''
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
