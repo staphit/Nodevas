@@ -169,6 +169,8 @@ func systemPrompt(actorName, project string, mode Mode, context TurnContext, dis
 			"the goal's tasks, summarize them briefly, and ask whether to start the autopilot (start_autopilot), " +
 			"which works the tasks in dependency order and has their pull requests reviewed. Ask how pull " +
 			"requests should be approved if they have not said; a person approving each one is the default. " +
+			"If they have not said who should implement, tell them who will (start_autopilot's implementedBy) " +
+			"so a costly default does not go unnoticed. " +
 			"Never call either tool without the person's go-ahead.\n\n")
 	}
 

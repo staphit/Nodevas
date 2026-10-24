@@ -62,7 +62,10 @@ var serverTools = map[string]serverToolSpec{
 		description: "Start the autopilot on a goal node: it dispatches the goal's tasks in dependency order to the " +
 			"person's runner, each through implement, review and merge, and records every task's stages. Use it " +
 			"only after the person agreed to the task breakdown. Review defaults to a person approving each pull " +
-			"request; reviewMode agents lets reviewer agents approve by quorum.",
+			"request; reviewMode agents lets reviewer agents approve by quorum. Who implements: the implement " +
+			"chain when given, else the advisor; without either, the person's runner's own advisor (System One, " +
+			"then its fast model) when it has one, else the routing rules, which fall back to the first " +
+			"installed agent's default model.",
 		schema: `{"type":"object","properties":{` +
 			`"goalNodeId":{"type":"string"},` +
 			`"maxParallel":{"type":"integer","minimum":1,"maximum":8},` +
@@ -71,7 +74,9 @@ var serverTools = map[string]serverToolSpec{
 			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
 			`"quorum":{"type":"integer","minimum":0},` +
 			`"autoMerge":{"type":"boolean","description":"Merge approved pull requests once CI is green"},` +
-			`"advisor":{"type":"string","enum":["rules","llm"],"description":"llm lets the person's fast advisor model pick agents per task"},` +
+			`"implement":{"type":"array","maxItems":3,"description":"Who implements every task: the first, then fallbacks","items":{"type":"object","properties":{` +
+			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
+			`"advisor":{"type":"string","enum":["rules","llm","systemone"],"description":"Who picks the implementer per task when no implement chain is given: rules (routing rules), llm (the person's fast advisor model), systemone (a System One decision model such as Laya or Jev on the person's runner)"},` +
 			`"runnerId":{"type":"string"},"repoId":{"type":"string"}},` +
 			`"required":["goalNodeId"],"additionalProperties":false}`,
 		run: runStartAutopilot,
@@ -391,6 +396,7 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 		Reviewers   []runnerwire.AgentModel `json:"reviewers"`
 		Quorum      int                     `json:"quorum"`
 		AutoMerge   bool                    `json:"autoMerge"`
+		Implement   []runnerwire.AgentModel `json:"implement"`
 		Advisor     string                  `json:"advisor"`
 		RunnerID    string                  `json:"runnerId"`
 		RepoID      string                  `json:"repoId"`
@@ -425,13 +431,38 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	if len(policy.Review.Reviewers) > runnerwire.MaxReviewers {
 		return toolError("at most %d reviewers", runnerwire.MaxReviewers)
 	}
+	if len(in.Implement) > 3 {
+		return toolError("at most 3 implementers (the first, then fallbacks)")
+	}
+	policy.Implement = in.Implement
+	picker := ""
 	switch in.Advisor {
-	case "", "rules":
+	case "":
+		if len(policy.Implement) == 0 {
+			// Nothing said: the advisor the person set up on their runner,
+			// rather than the routing rules' last resort (the first installed
+			// agent's default model, often the most expensive one).
+			policy.Advisor, picker = defaultAdvisor(ctx, env, policy.RunnerID)
+		}
+	case "rules":
 		policy.Advisor = runnerwire.AdvisorRules
 	case "llm":
 		policy.Advisor = runnerwire.AdvisorLLM
+	case "systemone":
+		policy.Advisor = runnerwire.AdvisorSystemOne
 	default:
-		return toolError("advisor must be rules or llm")
+		return toolError("advisor must be rules, llm or systemone")
+	}
+	switch {
+	case len(policy.Implement) > 0:
+		picker = "the implement chain: " + chainText(policy.Implement)
+	case picker != "":
+	case policy.Advisor == runnerwire.AdvisorSystemOne:
+		picker = "the System One advisor on the runner, the routing rules if it cannot decide"
+	case policy.Advisor == runnerwire.AdvisorLLM:
+		picker = "the fast advisor model on the runner, the routing rules if it cannot decide"
+	default:
+		picker = "the routing rules, else the first installed agent's default model"
 	}
 
 	var answer struct {
@@ -452,9 +483,47 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	return toolOK(map[string]any{
 		"autopilotId": id, "status": status, "goalNodeId": goal,
 		"review": policy.Review.Mode, "maxParallel": policy.MaxParallel, "autoMerge": policy.AutoMerge,
-		"advisor": in.Advisor,
-		"note":    "Tasks are dispatched in dependency order; their stages show on the goal's Autopilot panel.",
+		"advisor": policy.Advisor, "implementedBy": picker,
+		"note": "Tasks are dispatched in dependency order; their stages show on the goal's Autopilot panel. " +
+			"Tell the person who implements (implementedBy).",
 	})
+}
+
+// defaultAdvisor is the advisor a person's runner offers, best first: a
+// System One decision model, then a fast advisor model, else the routing
+// rules. picker describes the choice for the tool's result.
+func defaultAdvisor(ctx context.Context, env *serverToolEnv, runnerID string) (advisor, picker string) {
+	var list runnerwire.ListResponse
+	if err := env.do(ctx, http.MethodGet, "/api/runners", nil, &list); err != nil {
+		return runnerwire.AdvisorRules, ""
+	}
+	decide, llm := false, false
+	for _, runner := range list.Runners {
+		if !runner.Online || runner.Info == nil || (env.accountID != "" && runner.OwnerID != env.accountID) ||
+			(runnerID != "" && runner.ID != runnerID) {
+			continue
+		}
+		decide = decide || slices.Contains(runner.Info.Capabilities, runnerwire.CapDecide)
+		llm = llm || slices.Contains(runner.Info.Capabilities, runnerwire.CapLLMAdvisor)
+	}
+	switch {
+	case decide:
+		return runnerwire.AdvisorSystemOne, "the System One advisor on the runner (chosen because none was named), " +
+			"the routing rules if it cannot decide"
+	case llm:
+		return runnerwire.AdvisorLLM, "the fast advisor model on the runner (chosen because none was named), " +
+			"the routing rules if it cannot decide"
+	}
+	return runnerwire.AdvisorRules, ""
+}
+
+// chainText is an implement chain as "agent/model, agent/model".
+func chainText(chain []runnerwire.AgentModel) string {
+	parts := make([]string, 0, len(chain))
+	for _, am := range chain {
+		parts = append(parts, am.Agent+"/"+am.Model)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // serverToolDefs are the provider tools for the server tools, in order.

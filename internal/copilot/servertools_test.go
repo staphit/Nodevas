@@ -252,6 +252,78 @@ func TestStartAutopilotPolicy(t *testing.T) {
 	}
 }
 
+// Who implements when the person names nobody: the advisor their own runner
+// offers (System One first, then the fast model), not the routing rules' last
+// resort; and the result says who picks, so the copilot can tell them.
+func TestStartAutopilotImplementer(t *testing.T) {
+	ctx := context.Background()
+	sentPolicy := func(api *fakeAPI) runnerwire.AutopilotPolicy {
+		t.Helper()
+		raw, _ := json.Marshal(api.find(http.MethodPost, "/api/autopilot").body)
+		var sent runnerwire.CreateAutopilotRequest
+		if err := json.Unmarshal(raw, &sent); err != nil {
+			t.Fatal(err)
+		}
+		return sent.Policy
+	}
+	withCaps := func(caps ...string) *fakeAPI {
+		api := standardAPI()
+		for i := range api.runners {
+			if api.runners[i].ID == "r-ann" {
+				api.runners[i].Info.Capabilities = append(api.runners[i].Info.Capabilities, caps...)
+			}
+		}
+		// Another account's runner offering System One does not count.
+		for i := range api.runners {
+			if api.runners[i].ID == "r-bob" {
+				api.runners[i].Info.Capabilities = append(api.runners[i].Info.Capabilities, runnerwire.CapDecide)
+			}
+		}
+		return api
+	}
+	goal := json.RawMessage(`{"goalNodeId":"node-0042"}`)
+
+	api := withCaps(runnerwire.CapLLMAdvisor, runnerwire.CapDecide)
+	result := runStartAutopilot(ctx, toolEnv(api), goal)
+	if p := sentPolicy(api); result.IsError || p.Advisor != runnerwire.AdvisorSystemOne ||
+		!strings.Contains(result.Output, "System One advisor on the runner (chosen because none was named)") {
+		t.Fatalf("System One default: %+v %s", p, result.Output)
+	}
+
+	api = withCaps(runnerwire.CapLLMAdvisor)
+	result = runStartAutopilot(ctx, toolEnv(api), goal)
+	if p := sentPolicy(api); p.Advisor != runnerwire.AdvisorLLM || !strings.Contains(result.Output, "fast advisor model") {
+		t.Fatalf("fast model default: %+v %s", p, result.Output)
+	}
+
+	api = withCaps()
+	result = runStartAutopilot(ctx, toolEnv(api), goal)
+	if p := sentPolicy(api); p.Advisor != runnerwire.AdvisorRules ||
+		!strings.Contains(result.Output, "first installed agent") {
+		t.Fatalf("rules default: %+v %s", p, result.Output)
+	}
+
+	// A named chain wins, and is said back; the advisor stays the rules.
+	api = withCaps(runnerwire.CapDecide)
+	result = runStartAutopilot(ctx, toolEnv(api), json.RawMessage(`{"goalNodeId":"node-0042",`+
+		`"implement":[{"agent":"opencode","model":"opencode/deepseek-v4.1-flash-free"}]}`))
+	if p := sentPolicy(api); len(p.Implement) != 1 || p.Implement[0].Agent != "opencode" || p.Advisor != runnerwire.AdvisorRules ||
+		!strings.Contains(result.Output, "the implement chain: opencode/opencode/deepseek-v4.1-flash-free") {
+		t.Fatalf("named chain: %+v %s", p, result.Output)
+	}
+
+	api = withCaps()
+	result = runStartAutopilot(ctx, toolEnv(api), json.RawMessage(`{"goalNodeId":"node-0042","advisor":"systemone"}`))
+	if p := sentPolicy(api); p.Advisor != runnerwire.AdvisorSystemOne {
+		t.Fatalf("systemone asked for: %+v %s", p, result.Output)
+	}
+	api = withCaps()
+	if result := runStartAutopilot(ctx, toolEnv(api), json.RawMessage(`{"goalNodeId":"n","implement":[`+
+		`{"agent":"a","model":"1"},{"agent":"a","model":"2"},{"agent":"a","model":"3"},{"agent":"a","model":"4"}]}`)); !result.IsError {
+		t.Fatalf("four implementers accepted: %s", result.Output)
+	}
+}
+
 // The server tools are offered only where the copilot has the router, and
 // never as MCP tools: an agent cannot reach them.
 func TestServerToolsAreCopilotOnly(t *testing.T) {
