@@ -182,6 +182,8 @@ export interface TaskInstance {
   humanVerdict?: string;
   stages: StageRecord[] | null;
   reason?: string;
+  /** Why this try's implementer was picked (the advisor's reason). */
+  advisor?: string;
   updatedAt: string;
 }
 

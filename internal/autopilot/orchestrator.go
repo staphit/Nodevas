@@ -772,6 +772,7 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 	t.Votes, t.HumanVerdict, t.PRURL, t.CIStatus = nil, "", "", ""
 	t.Stages = []runnerwire.StageRecord{{Stage: runnerwire.StageQueued, Status: runnerwire.StageRunning,
 		At: firstNonEmpty(record.CreatedAt, w.now), RunID: record.ID, Detail: choice.Reason}}
+	t.Advisor = choice.Reason
 	setState(t, runnerwire.TaskQueued, runnerwire.StageQueued, "")
 	o.remember([]string{record.ID, record.PipelineID}, rec.ID)
 	return true
@@ -1167,7 +1168,7 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 
 // clear resets a task for a new try, keeping its try count.
 func (o *Orchestrator) clear(t *runnerwire.TaskInstance, reason string) {
-	t.RunID, t.PipelineID, t.PRURL, t.CIStatus, t.HumanVerdict = "", "", "", "", ""
+	t.RunID, t.PipelineID, t.PRURL, t.CIStatus, t.HumanVerdict, t.Advisor = "", "", "", "", "", ""
 	t.Votes, t.Stages = nil, nil
 	setState(t, runnerwire.TaskNone, "", reason)
 	t.Stage = ""

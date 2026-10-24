@@ -335,6 +335,23 @@ describe("grid", () => {
     expect(onOpen).toHaveBeenCalledWith(TASKS[0]);
   });
 
+  it("says why the advisor picked a task's implementer", () => {
+    const reason =
+      "System One (laya-rl-agent): complexity small (score 1.59) → fast tier: opencode/mimo-free";
+    render(
+      <AutopilotGrid
+        tasks={[{ ...TASKS[0], advisor: reason }]}
+        policy={POLICY}
+        active
+        busy={{}}
+        onOpen={vi.fn()}
+        onTaskAction={vi.fn()}
+      />,
+    );
+    const line = screen.getByText(`Picked: ${reason}`);
+    expect(line.getAttribute("title")).toBe(reason);
+  });
+
   it("offers no retry or skip once the run ended", () => {
     render(
       <AutopilotGrid

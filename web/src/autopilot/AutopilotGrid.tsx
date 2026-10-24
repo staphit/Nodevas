@@ -316,6 +316,11 @@ export function AutopilotGrid({
                         {t("autopilot.tryN", { n: task.try })}
                       </small>
                     )}
+                    {task.advisor && (
+                      <small className="ap-task-after ap-task-advisor" title={task.advisor}>
+                        {t("autopilot.pickedBy", { reason: task.advisor })}
+                      </small>
+                    )}
                   </button>
                 </th>
                 <td className="ap-col-state">

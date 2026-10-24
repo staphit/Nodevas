@@ -794,3 +794,18 @@ func TestKeepTimesCarriesDetail(t *testing.T) {
 		t.Fatalf("stages = %+v", got)
 	}
 }
+
+// The advisor's reason stays on the task for the whole try, whatever the
+// stages say later, and a new try starts without it.
+func TestTaskKeepsAdvisorReason(t *testing.T) {
+	h := newHarness(t, newBoard([]string{"goal", "a"}, []string{"a>goal"}))
+	v := h.create(runnerwire.AutopilotPolicy{})
+	a := task(v, "a")
+	if a.Advisor == "" {
+		t.Fatalf("no advisor reason: %+v", a)
+	}
+	h.runs.update(a.RunID, func(r *runs.Record) { r.Status, r.StartedAt = runnerwire.RunRunning, h.runs.stampLocked() })
+	if got := task(h.view(v.Run.ID), "a"); got.Advisor != a.Advisor {
+		t.Fatalf("advisor after start = %q, want %q", got.Advisor, a.Advisor)
+	}
+}

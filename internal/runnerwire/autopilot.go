@@ -172,7 +172,10 @@ type TaskInstance struct {
 	HumanVerdict string        `json:"humanVerdict,omitempty"`
 	Stages       []StageRecord `json:"stages"`
 	Reason       string        `json:"reason,omitempty"`
-	UpdatedAt    string        `json:"updatedAt"`
+	// Advisor says why this try's implementer was picked (the advisor's
+	// reason, e.g. a System One decision), when one was given.
+	Advisor   string `json:"advisor,omitempty"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 // AutopilotView is GET /api/autopilot/:id: the run and its task instances in

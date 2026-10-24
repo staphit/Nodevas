@@ -566,3 +566,13 @@
     max-width: 160px;
   }
 }
+
+/* The advisor's reason can be long (a System One decision): one line here,
+   the whole of it in the tooltip. */
+.ap-task-advisor {
+  display: block;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
