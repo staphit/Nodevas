@@ -71,6 +71,9 @@ export function policyProblems(policy: AutopilotPolicy, choice: ImplementChoice)
     problems.push("advisor");
   }
   const mode = policy.review.mode;
+  if (policy.autoMerge && !reviewHasHuman(mode) && !policy.allowAgentOnlyMerge) {
+    problems.push("agentOnlyMerge");
+  }
   if (!REVIEW_MODES.includes(mode as (typeof REVIEW_MODES)[number])) {
     problems.push("reviewMode");
   } else if (reviewHasAgents(mode)) {
@@ -102,6 +105,10 @@ export function normalizePolicy(policy: AutopilotPolicy, choice: ImplementChoice
     maxParallel: policy.maxParallel,
     maxRounds: policy.maxRounds,
     autoMerge: policy.autoMerge,
+    allowAgentOnlyMerge:
+      policy.autoMerge && !reviewHasHuman(policy.review.mode)
+        ? Boolean(policy.allowAgentOnlyMerge)
+        : false,
     advisor: choice === "advisor" ? (policy.advisor ?? "") : "",
     runnerId: policy.runnerId?.trim() ?? "",
     repoId: policy.repoId?.trim() ?? "",

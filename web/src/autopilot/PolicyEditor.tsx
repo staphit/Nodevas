@@ -398,6 +398,23 @@ export function PolicyEditor({
             <small className="run-hint">{t("autopilot.autoMergeHint")}</small>
           </span>
         </label>
+        {value.autoMerge && !reviewHasHuman(value.review.mode) && (
+          <label className="autopilot-check autopilot-check-warn">
+            <input
+              type="checkbox"
+              checked={Boolean(value.allowAgentOnlyMerge)}
+              onChange={(event) =>
+                onChange({ ...value, allowAgentOnlyMerge: event.target.checked })
+              }
+            />
+            <span>
+              {t("autopilot.allowAgentOnlyMerge")}
+              <small className="autopilot-warning" role="note">
+                {t("autopilot.allowAgentOnlyMergeWarning")}
+              </small>
+            </span>
+          </label>
+        )}
       </fieldset>
     </div>
   );

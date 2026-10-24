@@ -60,6 +60,10 @@ func (r DispatcherRuns) Busy(ctx context.Context, runnerID string) (int, error) 
 	return r.D.Store().Busy(ctx, runnerID)
 }
 
+func (r DispatcherRuns) Changes(ctx context.Context, runID string) (*runnerwire.RunChanges, error) {
+	return r.D.Store().Changes(ctx, runID)
+}
+
 // RegistryRunners is Runners over the runner registry.
 type RegistryRunners struct{ R *runners.Registry }
 

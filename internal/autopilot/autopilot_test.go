@@ -31,6 +31,7 @@ type fakeRuns struct {
 	reviews   []string // "<pipeline> <verdict> <comment>"
 	startErr  error
 	rules     []runnerwire.RouteRule
+	changes   map[string]*runnerwire.RunChanges
 }
 
 func newFakeRuns() *fakeRuns {
@@ -163,6 +164,26 @@ func (f *fakeRuns) Routing(context.Context, string) ([]runnerwire.RouteRule, err
 }
 func (f *fakeRuns) Busy(context.Context, string) (int, error) { return 0, nil }
 
+func (f *fakeRuns) Changes(_ context.Context, runID string) (*runnerwire.RunChanges, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.changes[runID], nil
+}
+
+// commit records what a run committed: its head and changed paths.
+func (f *fakeRuns) commit(runID, sha string, paths ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.changes == nil {
+		f.changes = map[string]*runnerwire.RunChanges{}
+	}
+	ch := &runnerwire.RunChanges{Commit: sha, Files: []runnerwire.FileChange{}}
+	for _, p := range paths {
+		ch.Files = append(ch.Files, runnerwire.FileChange{Path: p, Status: runnerwire.FileModified})
+	}
+	f.changes[runID] = ch
+}
+
 // update changes a run under the lock.
 func (f *fakeRuns) update(id string, fn func(*runs.Record)) {
 	f.mu.Lock()
@@ -233,6 +254,8 @@ type fakeBoard struct {
 	graph *engine.Graph
 	state *engine.RunState
 	sets  []string
+	// bodies overrides a node's content ("Do <id>." otherwise).
+	bodies map[string]string
 }
 
 // newBoard builds a graph: nodes by id (kind after a colon: "x:gate"), and
@@ -273,7 +296,24 @@ func (b *fakeBoard) Graph(string) (*engine.Graph, *engine.RunState, error) {
 	return b.graph, rs, err
 }
 
-func (b *fakeBoard) Content(_, id string) (string, error) { return "Do " + id + ".", nil }
+func (b *fakeBoard) Content(_, id string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if body, ok := b.bodies[id]; ok {
+		return body, nil
+	}
+	return "Do " + id + ".", nil
+}
+
+// edit changes a node's content.
+func (b *fakeBoard) edit(id, body string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.bodies == nil {
+		b.bodies = map[string]string{}
+	}
+	b.bodies[id] = body
+}
 
 func (b *fakeBoard) SetStatus(_, id string, status engine.Status, by, note string) error {
 	b.mu.Lock()
@@ -526,7 +566,7 @@ func TestUpstreamFailedAndSkip(t *testing.T) {
 
 func TestPipelineStagesAndAutoMerge(t *testing.T) {
 	h := newHarness(t, newBoard([]string{"goal", "a"}, []string{"a>goal"}))
-	v := h.create(runnerwire.AutopilotPolicy{AutoMerge: true, MaxRounds: 2, Review: runnerwire.ReviewPolicy{
+	v := h.create(runnerwire.AutopilotPolicy{AutoMerge: true, AllowAgentOnlyMerge: true, MaxRounds: 2, Review: runnerwire.ReviewPolicy{
 		Mode: runnerwire.ReviewAgents, Reviewers: []runnerwire.AgentModel{{Agent: "codex"}}}})
 	a := task(v, "a")
 	st := h.runs.lastStart("a")
@@ -539,6 +579,7 @@ func TestPipelineStagesAndAutoMerge(t *testing.T) {
 		t.Fatalf("running: %+v", got)
 	}
 	h.finishWithPR(impl)
+	h.runs.commit(impl, "abcdef1234", "internal/a.go")
 	h.runs.update(impl, func(r *runs.Record) { r.CIStatus = runnerwire.CIPending })
 	review := h.runs.add(runs.Record{Run: runnerwire.Run{NodeID: "a", Agent: "codex", Kind: runnerwire.JobReview,
 		PipelineID: a.PipelineID, Status: runnerwire.RunRunning}})

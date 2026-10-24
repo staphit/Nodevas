@@ -74,6 +74,11 @@ type Session struct {
 	Inbound string `json:"inbound"`
 	// Model is what the agent last reported it runs on, if anything.
 	Model string `json:"model,omitempty"`
+	// Run marks an agent a runner dispatched (a run, through the runner's
+	// proxy or as a "run:" actor), as opposed to a person's own session. A
+	// run reads content anyone who may edit the board controls, so what it
+	// sends a person's session waits for that person (Send).
+	Run bool `json:"run,omitempty"`
 }
 
 // Address returns the canonical `<actor>/<name>` handle for this session.
@@ -110,6 +115,9 @@ type Heartbeat struct {
 	Doing     string `json:"doing,omitempty"`
 	NodeID    string `json:"nodeId,omitempty"`
 	Model     string `json:"model,omitempty"`
+	// Run: the heartbeat comes from a run (Session.Run). It is set by the
+	// transport, not by what the agent says about itself.
+	Run bool `json:"-"`
 }
 
 // EventFunc is called whenever sessions, messages, or asks change in a project
@@ -278,6 +286,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			NodeID:    strings.TrimSpace(hb.NodeID),
 			LastSeen:  now,
 			Online:    true,
+			Run:       hb.Run,
 		}
 		h.sessions[key] = existing
 	} else {
@@ -287,6 +296,13 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		if !strings.EqualFold(existing.ActorID, actorID) {
 			h.mu.Unlock()
 			return Session{}, fmt.Errorf("%w: session %q belongs to another actor", ErrRefused, sessionID)
+		}
+		// A run acts as its runner's owner, so the actor check alone would let
+		// it take over its owner's own session (its name and inbox). Once a
+		// run, always a run: a session never loses the mark either.
+		if hb.Run && !existing.Run {
+			h.mu.Unlock()
+			return Session{}, fmt.Errorf("%w: session %q is not a run's", ErrRefused, sessionID)
 		}
 		if hb.Name != "" {
 			if wanted := sanitizeToken(hb.Name); wanted != "" && wanted != existing.Name {
@@ -414,6 +430,17 @@ func (h *Hub) sessionByNameLocked(project, name string) *Session {
 		}
 	}
 	return best
+}
+
+// PersonSession reports whether name is a session that is not a run's: a run
+// acts as its runner's owner, so it is refused that session's inbox and its
+// name as a sender, which the actor check alone would allow.
+func (h *Hub) PersonSession(project, name string) bool {
+	project = strings.Trim(strings.TrimSpace(project), "/")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessionByNameLocked(project, strings.TrimSpace(name))
+	return s != nil && !s.Run
 }
 
 // SetInbound sets a session's inbound policy. Only the session's own actor

@@ -94,6 +94,18 @@
   color: var(--st-failed-fg);
   font-size: 12px;
 }
+/* A guardrail the person is about to turn off, or a task held for them. */
+.autopilot-warning {
+  margin: 0;
+  color: var(--st-ready-fg);
+  font-size: 12px;
+}
+.ap-task-hold {
+  display: block;
+  max-width: 36ch;
+  color: var(--st-ready-fg);
+  white-space: normal;
+}
 .ap-problems {
   padding-inline-start: 18px;
 }

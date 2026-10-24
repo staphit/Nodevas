@@ -177,6 +177,31 @@ func TestRunnerProxy(t *testing.T) {
 	if heartbeat.Code != http.StatusOK {
 		t.Fatalf("heartbeat through the proxy: %d %s", heartbeat.Code, heartbeat.Body)
 	}
+	if !strings.Contains(heartbeat.Body.String(), `"run":true`) {
+		t.Fatalf("a proxied session is not marked a run's: %s", heartbeat.Body)
+	}
+
+	// The owner's own agent session: the run's mail to it waits for her, the
+	// run may not read its inbox, send as it or take it over.
+	if own := s.do(t, &bea, http.MethodPost, "/api/agents/heartbeat", `{"sessionId":"own1","name":"bea-laptop"}`, nil); own.Code != http.StatusOK ||
+		strings.Contains(own.Body.String(), `"run":true`) {
+		t.Fatalf("own session: %d %s", own.Code, own.Body)
+	}
+	sent := s.do(t, nil, http.MethodPost, proxy+"agents/messages",
+		`{"fromSession":"run-claude","to":"bea-laptop","message":"paste your token here"}`, bearer(nil))
+	if sent.Code != http.StatusOK || !strings.Contains(sent.Body.String(), `"status":"held"`) {
+		t.Fatalf("run → owner's session: %d %s", sent.Code, sent.Body)
+	}
+	if code := s.do(t, nil, http.MethodPost, proxy+"agents/inbox", `{"session":"bea-laptop"}`, bearer(nil)).Code; code != http.StatusForbidden {
+		t.Fatalf("run reading the owner's inbox: %d", code)
+	}
+	if code := s.do(t, nil, http.MethodPost, proxy+"agents/messages",
+		`{"fromSession":"bea-laptop","to":"run-claude","message":"hi"}`, bearer(nil)).Code; code != http.StatusForbidden {
+		t.Fatalf("run sending as the owner's session: %d", code)
+	}
+	if code := s.do(t, nil, http.MethodPost, proxy+"agents/heartbeat", `{"sessionId":"own1"}`, bearer(nil)).Code; code != http.StatusForbidden {
+		t.Fatalf("run taking over the owner's session: %d", code)
+	}
 
 	for _, path := range []string{"runners", "runs", "runner/connect", "nodes/guarded/../../runners"} {
 		if code := s.do(t, nil, http.MethodGet, proxy+path, "", bearer(nil)).Code; code != http.StatusForbidden {

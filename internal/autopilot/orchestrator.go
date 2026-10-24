@@ -37,6 +37,8 @@ type Runs interface {
 	HumanReview(ctx context.Context, id string, who runs.Reviewer, verdict, comment string) (runs.PipelineRecord, error)
 	Routing(ctx context.Context, ownerID string) ([]runnerwire.RouteRule, error)
 	Busy(ctx context.Context, runnerID string) (int, error)
+	// Changes is what a run committed, nil when its runner reported nothing.
+	Changes(ctx context.Context, runID string) (*runnerwire.RunChanges, error)
 }
 
 // Runners lists a person's runners.
@@ -257,6 +259,9 @@ type work struct {
 	state *engine.RunState
 	dirty bool
 	now   string
+	// added is the goal's members that joined after the autopilot started:
+	// its task set is frozen at the start, so they are not worked.
+	added []string
 }
 
 func (w *work) settled(id string) bool {
@@ -317,8 +322,8 @@ func snapshot(w *work) map[string]string {
 
 func fingerprint(t runnerwire.TaskInstance) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s|%s|%d|%s|%s|%s|%s|%s|%s|", t.State, t.Stage, t.Try, t.RunID, t.PipelineID, t.PRURL,
-		t.CIStatus, t.HumanVerdict, t.Reason)
+	fmt.Fprintf(&b, "%s|%s|%d|%s|%s|%s|%s|%s|%s|%s|%s|", t.State, t.Stage, t.Try, t.RunID, t.PipelineID, t.PRURL,
+		t.CIStatus, t.HumanVerdict, t.Reason, t.Hold, t.ContentHash)
 	for _, s := range t.Stages {
 		fmt.Fprintf(&b, "%s:%s:%d:%s:%s;", s.Stage, s.Status, s.Round, s.RunID, s.Detail)
 	}
@@ -362,19 +367,24 @@ func (o *Orchestrator) index1(w *work) {
 	o.remember(keys, w.rec.ID)
 }
 
-// syncMembers adds the DAG's new members as task instances and sets aside
-// instances whose node left it.
+// syncMembers keeps the task set the autopilot started with (Create froze
+// it): it refreshes the tasks' titles and edges from the board, and holds a
+// pending task whose node changed or left the goal for a person. Nodes that
+// joined the goal later are only noted (w.added): an edit after the start,
+// by anyone who may change the board or by an agent following injected
+// instructions, does not slip new work into a run its creator started.
 func (o *Orchestrator) syncMembers(w *work) {
 	statuses := engine.ComputeStatuses(w.graph, w.state)
+	w.added = nil
 	for _, id := range w.dag.order {
 		t := w.tasks[id]
 		if t == nil {
-			t = &runnerwire.TaskInstance{NodeID: id, State: runnerwire.TaskNone}
-			w.tasks[id] = t
+			w.added = append(w.added, id)
+			continue
 		}
 		t.Title = w.dag.title(id)
 		t.Upstream = slices.Clone(w.dag.upstream[id])
-		if t.RunID != "" || t.PipelineID != "" || final1(t.State) {
+		if t.RunID != "" || t.PipelineID != "" || final1(t.State) || t.Hold != "" {
 			continue
 		}
 		switch {
@@ -384,15 +394,46 @@ func (o *Orchestrator) syncMembers(w *work) {
 			setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, "already "+string(statuses[id])+" on the board")
 		case w.dag.inCycle(id):
 			setState(t, runnerwire.TaskFailed, "", "on a dependency cycle: it can never become ready")
+		default:
+			if body, err := o.opts.Board.Content(w.rec.Project, id); err == nil {
+				o.checkContent(t, body)
+			}
 		}
 	}
 	for id, t := range w.tasks {
-		if _, member := w.dag.nodes[id]; member || final1(t.State) {
+		if _, member := w.dag.nodes[id]; member || final1(t.State) || t.Hold != "" {
 			continue
 		}
 		if t.RunID == "" && t.PipelineID == "" {
-			setState(t, runnerwire.TaskSkipped, "", "no longer part of the goal")
+			// Held, not skipped: a skipped task counts as settled, so cutting
+			// an edge would otherwise wave its downstream through.
+			hold(t, runnerwire.HoldRemoved, "", "it left the goal after the autopilot started: skip it, or retry it once it is back")
 		}
+	}
+}
+
+// checkContent holds a pending task whose node changed since the task joined
+// the run, and reports whether it may go on. A task recorded before content
+// hashes were kept takes its current content as the one it started with.
+func (o *Orchestrator) checkContent(t *runnerwire.TaskInstance, body string) bool {
+	h := contentHash(t.Title, body)
+	switch t.ContentHash {
+	case "":
+		t.ContentHash = h
+		return true
+	case h:
+		return true
+	}
+	hold(t, runnerwire.HoldChanged, "", "the task changed after the autopilot started: a person must retry it to work the new content")
+	return false
+}
+
+// hold sets a task aside for a person (a TaskInstance.Hold).
+func hold(t *runnerwire.TaskInstance, kind, stage, reason string) {
+	t.Hold = kind
+	setState(t, runnerwire.TaskWaitingHuman, stage, reason)
+	if stage == "" {
+		t.Stage = ""
 	}
 }
 
@@ -552,6 +593,17 @@ func (o *Orchestrator) act(ctx context.Context, w *work, t *runnerwire.TaskInsta
 		o.markBoard(w, t.NodeID, engine.StatusDone, "approved by the autopilot; PR "+t.PRURL)
 		return
 	}
+	// No person reviewed (allowAgentOnlyMerge): a PR that changes how code
+	// is built, tested or run waits for one before it merges.
+	if !humanReview(pol) {
+		if t.Hold == runnerwire.HoldSensitive && t.HumanVerdict == runnerwire.VerdictApprove {
+			add(runnerwire.StageHuman, runnerwire.StageOK, "merge approved by a person")
+		} else if why := o.holdFor(ctx, w, t); why != "" {
+			add(runnerwire.StageHuman, runnerwire.StageWaiting, why)
+			hold(t, runnerwire.HoldSensitive, runnerwire.StageHuman, "not merging without a person: "+why)
+			return
+		}
+	}
 	switch d.ci {
 	case runnerwire.CIFailure:
 		setState(t, runnerwire.TaskFailed, "", "the pull request's checks failed")
@@ -562,6 +614,15 @@ func (o *Orchestrator) act(ctx context.Context, w *work, t *runnerwire.TaskInsta
 		return
 	}
 	o.merge(ctx, w, t, stages)
+}
+
+// holdFor is why a task's approved PR must wait for a person, or "".
+func (o *Orchestrator) holdFor(ctx context.Context, w *work, t *runnerwire.TaskInstance) string {
+	obs, err := o.observe(ctx, w.rec.Project, t)
+	if err != nil {
+		return "its runs cannot be read: " + err.Error()
+	}
+	return o.mergeHold(ctx, obs)
 }
 
 // merge asks the run's runner to merge the approved PR, once per head.
@@ -651,12 +712,16 @@ func (o *Orchestrator) propagateFailures(w *work) {
 func (o *Orchestrator) schedule(ctx context.Context, w *work) {
 	active := 0
 	for _, t := range w.tasks {
+		if t.Hold != "" && t.RunID == "" && t.PipelineID == "" {
+			continue // held before it started: it holds no slot
+		}
 		switch t.State {
 		case runnerwire.TaskQueued, runnerwire.TaskRunning, runnerwire.TaskWaitingReview, runnerwire.TaskWaitingHuman:
 			active++
 		}
 	}
 	room := w.rec.Policy.MaxParallel - active
+	statuses := engine.ComputeStatuses(w.graph, w.state)
 	for _, id := range w.dag.order {
 		t := w.tasks[id]
 		if t == nil || (t.State != runnerwire.TaskNone && t.State != runnerwire.TaskScheduled) {
@@ -664,10 +729,17 @@ func (o *Orchestrator) schedule(ctx context.Context, w *work) {
 		}
 		ready := true
 		for _, up := range w.dag.upstream[id] {
-			if !w.settled(up) {
-				ready = false
-				break
+			if w.settled(up) {
+				continue
 			}
+			if w.tasks[up] == nil && engine.Settled(statuses[up], boardStatuses(w.graph)) {
+				continue // joined the goal later, but done on the board
+			}
+			ready = false
+			if w.tasks[up] == nil {
+				t.Reason = "waits on " + w.dag.title(up) + ", which joined the goal after the autopilot started: finish it, or start a new autopilot"
+			}
+			break
 		}
 		if ready {
 			if blockers := externalBlockers(w.graph, w.state, w.dag, id); len(blockers) > 0 {
@@ -715,7 +787,15 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 		setState(t, runnerwire.TaskScheduled, runnerwire.StageQueued, "waiting for an online runner with the repository")
 		return false
 	}
-	content, _ := o.opts.Board.Content(rec.Project, t.NodeID)
+	content, err := o.opts.Board.Content(rec.Project, t.NodeID)
+	if err != nil {
+		setState(t, runnerwire.TaskScheduled, runnerwire.StageQueued, "cannot read the task: "+err.Error())
+		return false
+	}
+	// The content the run gets is the content the task started with.
+	if !o.checkContent(t, content) {
+		return false
+	}
 	choice, err := o.choose(ctx, ChooseInput{
 		OwnerID: rec.CreatedBy, Project: rec.Project, NodeID: t.NodeID, Title: t.Title, Body: content,
 		Policy: pol, Agents: mergeAgents(eligible),
@@ -821,13 +901,12 @@ func (o *Orchestrator) choose(ctx context.Context, in ChooseInput) (Choice, erro
 // finishIfDone ends the autopilot once no task can move: succeeded when
 // every task succeeded or was skipped, failed otherwise.
 func (o *Orchestrator) finishIfDone(ctx context.Context, w *work) {
-	if len(w.dag.order) == 0 {
-		return // nothing to do yet: a plan may still be adding tasks
+	if len(w.tasks) == 0 {
+		return // nothing to do
 	}
 	failed := 0
-	for _, id := range w.dag.order {
-		t := w.tasks[id]
-		if t == nil || !final1(t.State) {
+	for _, t := range w.tasks {
+		if !final1(t.State) {
 			return
 		}
 		if t.State == runnerwire.TaskFailed || t.State == runnerwire.TaskUpstreamFailed {
@@ -838,6 +917,12 @@ func (o *Orchestrator) finishIfDone(ctx context.Context, w *work) {
 	w.dirty = true
 	if failed > 0 {
 		w.rec.Status, w.rec.Reason = runnerwire.AutopilotFailed, fmt.Sprintf("%d task(s) failed", failed)
+		return
+	}
+	if len(w.added) > 0 {
+		// The goal is not done: what joined it later is still to do.
+		w.rec.Status, w.rec.Reason = runnerwire.AutopilotSucceeded,
+			fmt.Sprintf("every task is done; %d added to the goal after the start were not worked", len(w.added))
 		return
 	}
 	w.rec.Status, w.rec.Reason = runnerwire.AutopilotSucceeded, "every task is done"
@@ -897,6 +982,26 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 	if len(d.order) == 0 {
 		return runnerwire.AutopilotView{}, invalidf("the goal has no tasks yet: break it down first (a plan run, or tasks wired into it)")
 	}
+	todo := 0
+	for _, id := range d.order {
+		if d.dispatchable(id) {
+			todo++
+		}
+	}
+	if todo > runnerwire.MaxAutopilotTasks {
+		return runnerwire.AutopilotView{}, invalidf("the goal has %d tasks; an autopilot works at most %d: split the goal", todo, runnerwire.MaxAutopilotTasks)
+	}
+	// The task set is frozen here, each task with the content it starts with.
+	tasks := make([]runnerwire.TaskInstance, 0, len(d.order))
+	for _, id := range d.order {
+		body, err := o.opts.Board.Content(in.Project, id)
+		if err != nil {
+			return runnerwire.AutopilotView{}, fmt.Errorf("read task %s: %w", id, err)
+		}
+		title := d.title(id)
+		tasks = append(tasks, runnerwire.TaskInstance{NodeID: id, Title: title, State: runnerwire.TaskNone,
+			Upstream: slices.Clone(d.upstream[id]), ContentHash: contentHash(title, body)})
+	}
 	if pol.RepoID == "" {
 		owned, err := o.opts.Runners.Owned(ctx, in.Actor.ID)
 		if err != nil {
@@ -928,7 +1033,7 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 			CreatedBy: in.Actor.ID, CreatedByName: name,
 		},
 		SteppedUpAt: in.SteppedUpAt,
-	}, nil)
+	}, tasks)
 	if err != nil {
 		return runnerwire.AutopilotView{}, err
 	}
@@ -1056,6 +1161,7 @@ func (o *Orchestrator) Cancel(ctx context.Context, id, reason string) error {
 		}
 		o.stopTry(ctx, t, "autopilot cancelled")
 		setState(t, runnerwire.TaskSkipped, "", "the autopilot was cancelled")
+		t.Hold = ""
 	}
 	w.rec.Status, w.rec.Reason, w.dirty = runnerwire.AutopilotCancelled, firstNonEmpty(reason, "cancelled"), true
 	return o.save(ctx, w, before)
@@ -1080,10 +1186,24 @@ func (o *Orchestrator) stopTry(ctx context.Context, t *runnerwire.TaskInstance, 
 // again.
 func (o *Orchestrator) Retry(ctx context.Context, id, nodeID string) error {
 	return o.taskAction(ctx, id, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
-		switch t.State {
-		case runnerwire.TaskFailed, runnerwire.TaskUpstreamFailed, runnerwire.TaskSkipped:
+		switch {
+		case t.State == runnerwire.TaskFailed, t.State == runnerwire.TaskUpstreamFailed, t.State == runnerwire.TaskSkipped:
+		case t.Hold == runnerwire.HoldChanged, t.Hold == runnerwire.HoldRemoved:
+			if _, member := w.dag.nodes[nodeID]; !member {
+				return conflictf("the task is no longer part of the goal; skip it instead")
+			}
 		default:
-			return conflictf("only a failed or skipped task can be retried; this one is %s", t.State)
+			return conflictf("only a failed, skipped or held task can be retried; this one is %s", t.State)
+		}
+		// Retrying a task held for its change accepts the task as it is now;
+		// any other retry keeps the content it started with, so a change
+		// made meanwhile is still held and shown.
+		if t.Hold == runnerwire.HoldChanged {
+			body, err := o.opts.Board.Content(w.rec.Project, nodeID)
+			if err != nil {
+				return err
+			}
+			t.ContentHash = contentHash(w.dag.title(nodeID), body)
 		}
 		o.clear(t, "")
 		for _, other := range w.tasks {
@@ -1106,6 +1226,7 @@ func (o *Orchestrator) Skip(ctx context.Context, id, nodeID string) error {
 			o.stopTry(ctx, t, "skipped in the autopilot")
 		}
 		setState(t, runnerwire.TaskSkipped, "", "skipped by a person")
+		t.Hold = ""
 		for _, other := range w.tasks {
 			if other.State == runnerwire.TaskUpstreamFailed {
 				o.clear(other, "")
@@ -1139,16 +1260,20 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 		return err
 	}
 	allowed := admin || rec.CreatedBy == who.ID || rec.Policy.Review.AnyEditor
+	view, err := o.View(ctx, id)
+	if err != nil {
+		return err
+	}
+	if i := slices.IndexFunc(view.Tasks, func(t runnerwire.TaskInstance) bool { return t.NodeID == nodeID }); i >= 0 &&
+		view.Tasks[i].Hold != "" {
+		return o.reviewHold(ctx, rec, nodeID, who, admin, verdict, comment)
+	}
 	// A task whose pipeline waits for the person is decided by the pipeline
 	// (POST /api/runs/pipelines/:id/review does the same): approve ends it
 	// approved, changes starts its revise round. The pipeline's observer
 	// update then moves the task on. Called outside the autopilot's lock,
 	// since that update runs a pass.
 	if pipelineHandlesHuman {
-		view, err := o.View(ctx, id)
-		if err != nil {
-			return err
-		}
 		for _, t := range view.Tasks {
 			if t.NodeID != nodeID || t.PipelineID == "" {
 				continue
@@ -1185,10 +1310,36 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 	})
 }
 
+// reviewHold decides a held task. Only a merge held for its sensitive paths
+// is reviewed: approve lets it merge, changes start a new try. A task held
+// because its node changed or left the goal is retried or skipped instead.
+// The hold guards against whoever may edit the project, so the policy's
+// AnyEditor does not reach it: the creator or an administrator decides.
+func (o *Orchestrator) reviewHold(ctx context.Context, rec Record, nodeID string, who runs.Reviewer, admin bool, verdict, comment string) error {
+	if !admin && rec.CreatedBy != who.ID {
+		return ErrNotFound
+	}
+	return o.taskAction(ctx, rec.ID, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
+		if t.Hold != runnerwire.HoldSensitive || t.State != runnerwire.TaskWaitingHuman {
+			if t.Hold == runnerwire.HoldChanged || t.Hold == runnerwire.HoldRemoved {
+				return conflictf("the task is held because %s; retry or skip it", t.Reason)
+			}
+			return conflictf("the task is not waiting for a review; it is %s", t.State)
+		}
+		if verdict == runnerwire.VerdictApprove {
+			t.HumanVerdict = verdict
+			t.Reason = "merge approved by " + firstNonEmpty(who.Name, who.ID)
+			return nil
+		}
+		o.clear(t, humanChangesPrefix+firstNonEmpty(strings.TrimSpace(comment), "(no comment)"))
+		return nil
+	})
+}
+
 // clear resets a task for a new try, keeping its try count.
 func (o *Orchestrator) clear(t *runnerwire.TaskInstance, reason string) {
 	t.RunID, t.PipelineID, t.PRURL, t.CIStatus, t.HumanVerdict, t.Advisor = "", "", "", "", "", ""
-	t.Votes, t.Stages = nil, nil
+	t.Votes, t.Stages, t.Hold = nil, nil, ""
 	setState(t, runnerwire.TaskNone, "", reason)
 	t.Stage = ""
 }

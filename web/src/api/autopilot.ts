@@ -46,6 +46,9 @@ export interface AutopilotPolicy {
   maxParallel: number;
   maxRounds: number;
   autoMerge: boolean;
+  /** Lets autoMerge merge what no person reviewed (review none or agents).
+   * The hub refuses autoMerge without a person's review unless this is set. */
+  allowAgentOnlyMerge?: boolean;
   advisor?: AutopilotAdvisor | string;
   runnerId?: string;
   repoId?: string;
@@ -187,8 +190,14 @@ export interface TaskInstance {
   reason?: string;
   /** Why this try's implementer was picked (the advisor's reason). */
   advisor?: string;
+  /** Why the task waits for a person outside its review (state waiting_human):
+   * its node changed or left the goal after the start (retry or skip it), or
+   * its PR touches CI, manifests or scripts (approve the merge). */
+  hold?: TaskHold | string;
   updatedAt: string;
 }
+
+export type TaskHold = "changed" | "removed" | "sensitive";
 
 export interface AutopilotView {
   run: AutopilotRun;
@@ -242,6 +251,7 @@ export function normalizeAutopilotRun(raw: AutopilotRun): AutopilotRun {
       maxParallel: num(policy.maxParallel) || 1,
       maxRounds: num(policy.maxRounds) || 1,
       autoMerge: Boolean(policy.autoMerge),
+      allowAgentOnlyMerge: Boolean(policy.allowAgentOnlyMerge),
     },
   };
 }
@@ -290,6 +300,13 @@ export const autopilotApi = {
   autopilotTaskAction: (id: string, nodeId: string, action: AutopilotTaskAction) =>
     req<unknown>(`${autopilotPath(id)}/tasks/${encodeURIComponent(nodeId)}/${action}`, {
       method: "POST",
+    }),
+  /** A person's decision on a task the autopilot holds for its sensitive
+   * paths: approve lets it merge, changes start a new try. */
+  reviewAutopilotTask: (id: string, nodeId: string, body: HumanReviewRequest) =>
+    req<unknown>(`${autopilotPath(id)}/tasks/${encodeURIComponent(nodeId)}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
   /** A person's decision on a pipeline's PR (W7 human review). */
   /** 400 for "changes" without a comment, 409 when the pipeline is not

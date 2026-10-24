@@ -252,7 +252,9 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
       {run.reason && <p className="run-hint">{run.reason}</p>}
       <HumanReviewList
         autopilotId={run.id}
-        tasks={tasks.filter((task) => task.state === "waiting_human")}
+        tasks={tasks.filter(
+          (task) => task.state === "waiting_human" && (!task.hold || task.hold === "sensitive"),
+        )}
       />
       <AutopilotLegend />
       <AutopilotGrid

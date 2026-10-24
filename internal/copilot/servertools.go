@@ -74,7 +74,7 @@ var serverTools = map[string]serverToolSpec{
 			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
 			`"quorum":{"type":"integer","minimum":0},` +
 			`"anyEditor":{"type":"boolean","description":"Let anyone who may edit the project give the person's review, not only the person starting it, the runner's owner or an admin"},` +
-			`"autoMerge":{"type":"boolean","description":"Merge approved pull requests once CI is green"},` +
+			`"autoMerge":{"type":"boolean","description":"Merge approved pull requests once CI is green; needs reviewMode human or agents+human (a person approves each pull request)"},` +
 			`"implement":{"type":"array","maxItems":3,"description":"Who implements every task: the first, then fallbacks","items":{"type":"object","properties":{` +
 			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
 			`"advisor":{"type":"string","enum":["rules","llm","systemone"],"description":"Who picks the implementer per task when no implement chain is given: rules (routing rules), llm (the person's fast advisor model), systemone (a System One decision model such as Laya or Jev on the person's runner)"},` +
@@ -430,6 +430,11 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	if (policy.Review.Mode == runnerwire.ReviewAgents || policy.Review.Mode == runnerwire.ReviewAgentsHuman) &&
 		len(policy.Review.Reviewers) == 0 {
 		return toolError("reviewMode %s needs reviewers (agent and model each); ask the person which", policy.Review.Mode)
+	}
+	// Merging what no person approved is the person's own choice, made in
+	// the Autopilot panel; the copilot cannot opt in for them.
+	if policy.AutoMerge && policy.Review.Mode != runnerwire.ReviewHuman && policy.Review.Mode != runnerwire.ReviewAgentsHuman {
+		return toolError("autoMerge needs reviewMode human or agents+human: a person approves each pull request before it merges")
 	}
 	if len(policy.Review.Reviewers) > runnerwire.MaxReviewers {
 		return toolError("at most %d reviewers", runnerwire.MaxReviewers)

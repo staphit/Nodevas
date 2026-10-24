@@ -57,14 +57,18 @@ type Event struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	RequestID string          `json:"requestId,omitempty"`
 	Summary   string          `json:"summary,omitempty"`
-	Decision  Decision        `json:"decision,omitempty"`
-	Output    *string         `json:"output,omitempty"`
-	IsError   *bool           `json:"isError,omitempty"`
-	Entry     *Entry          `json:"entry,omitempty"`
-	Message   string          `json:"message,omitempty"`
-	Code      string          `json:"code,omitempty"`
-	Stop      string          `json:"stop,omitempty"`
-	Usage     *Usage          `json:"usage,omitempty"`
+	// EveryTime marks a permission request asked on every call (the
+	// dispatching server tools): "allow for this session" is not offered,
+	// and the full input is what the person approves.
+	EveryTime bool     `json:"everyTime,omitempty"`
+	Decision  Decision `json:"decision,omitempty"`
+	Output    *string  `json:"output,omitempty"`
+	IsError   *bool    `json:"isError,omitempty"`
+	Entry     *Entry   `json:"entry,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Code      string   `json:"code,omitempty"`
+	Stop      string   `json:"stop,omitempty"`
+	Usage     *Usage   `json:"usage,omitempty"`
 }
 
 // Usage is the token count of a whole turn, summed over its model calls.
@@ -368,7 +372,9 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 			"Not run: plan mode does not change anything. Propose this change in your reply instead; "+
 				"the person can switch modes to apply it.", true)
 	case verdictAsk:
-		if !r.service.allowedForSession(r.conversation.ID, call.ToolName) {
+		// A tool that always asks is never allowed for the session: each
+		// dispatch is approved on its own input.
+		if info.alwaysAsk || !r.service.allowedForSession(r.conversation.ID, call.ToolName) {
 			answer, answered := r.ask(call, info, input)
 			if !answered {
 				return r.finish(call, input, ToolError, "Not run: the person stopped this turn.", true)
@@ -381,7 +387,9 @@ func (r *turnRun) runCall(call provider.Block) provider.Block {
 				}
 				return r.finish(call, input, ToolDenied, output, true)
 			case DecisionAllowSession:
-				r.service.allowForSession(r.conversation.ID, call.ToolName)
+				if !info.alwaysAsk {
+					r.service.allowForSession(r.conversation.ID, call.ToolName)
+				}
 			}
 		}
 	}
@@ -442,7 +450,7 @@ func (r *turnRun) ask(call provider.Block, info toolInfo, input json.RawMessage)
 	r.emit(Event{
 		Type: EventPermissionRequest, RequestID: requestID, CallID: call.ToolCallID,
 		Name: call.ToolName, Kind: info.kind, Input: input,
-		Summary: summarize(info.title, input),
+		Summary: summarize(info.title, input), EveryTime: info.alwaysAsk,
 	})
 	timer := time.NewTimer(r.service.opts.PermissionTimeout)
 	defer timer.Stop()

@@ -38,6 +38,19 @@ type API struct {
 	// usage records session token usage; nil leaves the route answering 503.
 	usage       *usage.Store
 	usageNotify func(projectKey string)
+	// isRun reports whether a request comes from a run through its runner's
+	// proxy (UseRunCheck); nil means none does.
+	isRun func(*http.Request) bool
+}
+
+// UseRunCheck tells the API how to recognise a run's request (the server's
+// runner proxy marks them).
+func (a *API) UseRunCheck(isRun func(*http.Request) bool) { a.isRun = isRun }
+
+// fromRun reports whether a request acting as actorID is a run's: proxied by
+// a runner, or a local "run:" actor (`nodevas mcp --actor run:<agent>`).
+func (a *API) fromRun(r *http.Request, actorID string) bool {
+	return (a.isRun != nil && a.isRun(r)) || strings.HasPrefix(strings.ToLower(actorID), "run:")
 }
 
 // New builds the HTTP handler set for the agent network.
@@ -207,6 +220,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		Doing:     body.Doing,
 		NodeID:    body.NodeID,
 		Model:     body.Model,
+		Run:       a.fromRun(c.Request, actorID),
 	})
 	if err != nil {
 		fail(c, err)
@@ -370,6 +384,15 @@ func (a *API) postMessage(c *gin.Context) {
 	authed := auth.ActorFrom(c.Request)
 	actorID, _ := resolveActor(c.Request, body.Actor)
 	isHuman := authed.Agent == "" && strings.TrimSpace(body.FromSession) == ""
+	fromRun := a.fromRun(c.Request, actorID)
+	if fromRun && a.hub.PersonSession(projectKey, body.FromSession) {
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
+			errors.New("a run may not send as a person's session"), nil)
+		return
+	}
+	if fromRun {
+		isHuman = false
+	}
 	claims, _ := a.liveClaimsAndUsers(c.Request)
 
 	result, err := a.hub.Send(c.Request.Context(), agents.SendInput{
@@ -385,6 +408,7 @@ func (a *API) postMessage(c *gin.Context) {
 		Notify:        body.Notify,
 		Files:         body.Files,
 		Claims:        claims,
+		FromRun:       fromRun,
 	})
 	if err != nil {
 		fail(c, err)
@@ -423,6 +447,11 @@ func (a *API) postInbox(c *gin.Context) {
 	if wait > 0 {
 		controller := http.NewResponseController(c.Writer)
 		_ = controller.SetWriteDeadline(time.Now().Add(wait + 30*time.Second))
+	}
+	if a.fromRun(c.Request, actorID) && a.hub.PersonSession(projectKey, body.Session) {
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
+			errors.New("a run may not read a person's session inbox"), nil)
+		return
 	}
 	msgs, err := a.hub.CheckInbox(c.Request.Context(), projectKey, body.Session, actorID, wait)
 	if err != nil {

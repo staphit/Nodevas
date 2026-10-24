@@ -65,6 +65,9 @@ type SendInput struct {
 	Notify        bool
 	Files         []FileInput
 	Claims        []ClaimInfo
+	// FromRun: the sender is a run (Session.Run), set by the transport. Its
+	// mail to anything but another run is held for the recipient's person.
+	FromRun bool
 
 	// system marks the hub's own notices (a late ask_user answer, a verified
 	// approval): they carry a decision a person already made, so a hold that
@@ -164,9 +167,15 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	recipientActor := make(map[string]string, len(targets))
 	held := make(map[string]bool, len(targets))
 	for _, recipient := range targets {
-		if s := h.sessionByNameLocked(project, recipient); s != nil {
+		s := h.sessionByNameLocked(project, recipient)
+		if s != nil {
 			recipientActor[recipient] = s.ActorID
 			held[recipient] = s.Inbound == InboundHold && !in.system
+		}
+		// A run (which reads attacker-controllable content) does not reach a
+		// person's session, or an address no session holds, unasked.
+		if in.FromRun && !in.system && (s == nil || !s.Run) {
+			held[recipient] = true
 		}
 	}
 	h.mu.Unlock()

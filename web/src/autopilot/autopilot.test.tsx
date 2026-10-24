@@ -282,6 +282,36 @@ describe("policy", () => {
     expect(chain.advisor).toBe("");
   });
 
+  it("merges what no person reviewed only when the person opts in", () => {
+    const agents: AutopilotPolicy = {
+      ...POLICY,
+      review: { mode: "agents", reviewers: [{ agent: "codex", model: "gpt-5.5" }], quorum: 1 },
+      autoMerge: true,
+    };
+    expect(policyProblems(agents, "advisor")).toContain("agentOnlyMerge");
+    expect(policyProblems({ ...agents, review: { mode: "none" } }, "advisor")).toContain(
+      "agentOnlyMerge",
+    );
+    expect(policyProblems({ ...agents, allowAgentOnlyMerge: true }, "advisor")).not.toContain(
+      "agentOnlyMerge",
+    );
+    expect(policyProblems(POLICY, "advisor")).not.toContain("agentOnlyMerge");
+    expect(policyProblems({ ...agents, autoMerge: false }, "advisor")).not.toContain(
+      "agentOnlyMerge",
+    );
+    expect(normalizePolicy({ ...agents, allowAgentOnlyMerge: true }, "advisor").allowAgentOnlyMerge).toBe(
+      true,
+    );
+    // Not sent where a person reviews anyway, or nothing merges.
+    expect(normalizePolicy({ ...POLICY, allowAgentOnlyMerge: true }, "advisor").allowAgentOnlyMerge).toBe(
+      false,
+    );
+    expect(
+      normalizePolicy({ ...agents, autoMerge: false, allowAgentOnlyMerge: true }, "advisor")
+        .allowAgentOnlyMerge,
+    ).toBe(false);
+  });
+
   it("counts the approvals a round needs", () => {
     expect(quorumNeeded(POLICY)).toBe(2);
     expect(quorumNeeded({ ...POLICY, review: { ...POLICY.review, quorum: 0 } })).toBe(2);
@@ -464,6 +494,7 @@ describe("panel", () => {
         maxParallel: 3,
         maxRounds: 2,
         autoMerge: true,
+        allowAgentOnlyMerge: false,
         advisor: "",
         runnerId: "",
         repoId: "",
@@ -545,6 +576,52 @@ describe("panel", () => {
         comment: undefined,
       }),
     );
+  });
+
+  it("asks for a held merge on the task, and retries a task that changed", async () => {
+    const held: TaskInstance[] = [
+      {
+        ...TASKS[0],
+        nodeId: "t1",
+        title: "Deps",
+        state: "waiting_human",
+        stage: "human_review",
+        hold: "sensitive",
+        reason: "not merging without a person: it changes .github/workflows/ci.yml",
+      },
+      {
+        ...TASKS[0],
+        nodeId: "t2",
+        title: "Docs",
+        state: "waiting_human",
+        stage: "",
+        runId: undefined,
+        pipelineId: undefined,
+        prUrl: undefined,
+        stages: [],
+        hold: "changed",
+        reason: "the task changed after the autopilot started",
+      },
+    ];
+    vi.spyOn(api, "getAutopilotForGoal").mockResolvedValue(view({}, held));
+    vi.spyOn(api, "getAutopilot").mockResolvedValue(view({}, held));
+    const reviewTask = vi.spyOn(api, "reviewAutopilotTask").mockResolvedValue({});
+    const reviewPipeline = vi.spyOn(api, "reviewPipeline").mockResolvedValue({} as never);
+    const taskAction = vi.spyOn(api, "autopilotTaskAction").mockResolvedValue({});
+    render(<AutopilotPanel id="goal" />);
+    // Only the held merge is a review; the changed task is retried or skipped.
+    await screen.findByText("Waiting for your review (1)");
+    expect(screen.getAllByText(/\.github\/workflows\/ci\.yml/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Held: the task changed after the start. Retry to work it as it is now, or skip it."),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(reviewTask).toHaveBeenCalledWith("ap1", "t1", { verdict: "approve", comment: undefined }),
+    );
+    expect(reviewPipeline).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(taskAction).toHaveBeenCalledWith("ap1", "t2", "retry"));
   });
 
   it("opens a task's run from its row", async () => {

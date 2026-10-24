@@ -284,17 +284,22 @@ export function AutopilotGrid({
             const depth = Math.min(depths[task.nodeId] ?? 0, 6);
             const upstream = (task.upstream ?? []).map((id) => titles.get(id) ?? id);
             const pr = safeExternalUrl(task.prUrl);
+            // Held because its node changed or left the goal: a person
+            // retries it (accepting the node as it is now) or skips it.
+            const heldPending = task.hold === "changed" || task.hold === "removed";
             const canRetry =
               active &&
               (task.state === "failed" ||
                 task.state === "upstream_failed" ||
-                task.state === "skipped");
+                task.state === "skipped" ||
+                heldPending);
             const canSkip =
               active &&
               (task.state === "none" ||
                 task.state === "scheduled" ||
                 task.state === "failed" ||
-                task.state === "upstream_failed");
+                task.state === "upstream_failed" ||
+                heldPending);
             return (
               <tr key={task.nodeId} className={`ap-row ap-row-${stateClass(task.state)}`}>
                 <th scope="row" className="ap-col-task">
@@ -319,6 +324,11 @@ export function AutopilotGrid({
                     {task.advisor && (
                       <small className="ap-task-after ap-task-advisor" title={task.advisor}>
                         {t("autopilot.pickedBy", { reason: task.advisor })}
+                      </small>
+                    )}
+                    {task.hold && (
+                      <small className="ap-task-after ap-task-hold">
+                        {t(`autopilot.hold.${task.hold}`, { reason: task.reason ?? "" })}
                       </small>
                     )}
                   </button>

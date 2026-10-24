@@ -63,6 +63,8 @@ export interface PermissionRequest {
   kind: CopilotToolKind;
   input: string;
   summary: string;
+  /** Asked on every call: the full input is shown and "allow for this session" is not offered. */
+  everyTime?: boolean;
   /** A decision was posted and the server has not confirmed it yet. */
   submitting?: boolean;
 }
@@ -321,6 +323,7 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
             kind: event.kind,
             input: formatToolValue(event.input),
             summary: event.summary,
+            everyTime: event.everyTime === true,
           },
         ],
       };

@@ -53,6 +53,10 @@ func (s *Server) Handler() http.Handler {
 	remoteapi.New(s.pm, s.remotes).Register(api)
 	if s.agents != nil {
 		agentsAPI := agentsapi.New(s.pm, s.agents)
+		agentsAPI.UseRunCheck(func(r *http.Request) bool {
+			_, proxied := runnerProxiedFrom(r.Context())
+			return proxied
+		})
 		if s.usage != nil {
 			agentsAPI.UseUsage(s.usage, func(projectKey string) {
 				if s.hub == nil {

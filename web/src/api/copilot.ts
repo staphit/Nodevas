@@ -150,6 +150,8 @@ export type CopilotTurnEvent =
       kind: CopilotToolKind;
       input: unknown;
       summary: string;
+      /** Asked on every call (dispatching tools): no "allow for this session". */
+      everyTime?: boolean;
     }
   | { type: "permission_resolved"; requestId: string; decision: CopilotDecision | string }
   | { type: "client_tool_call"; callId: string; name: string; input: unknown }

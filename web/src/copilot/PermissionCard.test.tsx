@@ -90,6 +90,26 @@ describe("PermissionCard", () => {
     expect(onDecide.mock.calls).toEqual([["allow_session"], ["deny"], ["allow"]]);
   });
 
+  it("shows a dispatching tool's full input and asks every time", () => {
+    const onDecide = vi.fn();
+    const input = JSON.stringify({ goalNodeId: "n1", reviewMode: "agents", autoMerge: true, note: "x".repeat(400) }, null, 2);
+    render(
+      <PermissionCard
+        request={{ ...request, name: "start_autopilot", title: "Start autopilot", kind: "risky", input, everyTime: true }}
+        autoFocus
+        onDecide={onDecide}
+      />,
+    );
+    const details = screen.getByText("Input").closest("details");
+    expect(details).toHaveAttribute("open");
+    expect(details?.querySelector("pre")?.textContent).toBe(input);
+    expect(screen.queryByRole("button", { name: /Allow for this conversation/ })).toBeNull();
+    const card = screen.getByRole("group", { name: /^Allow Start autopilot/ });
+    fireEvent.keyDown(card, { key: "2" });
+    fireEvent.keyDown(card, { key: "1" });
+    expect(onDecide.mock.calls).toEqual([["allow"]]);
+  });
+
   it("does not answer twice while a decision is in flight", () => {
     const onDecide = vi.fn();
     render(<PermissionCard request={{ ...request, submitting: true }} onDecide={onDecide} />);

@@ -58,6 +58,15 @@ func ValidatePolicy(p runnerwire.AutopilotPolicy) (runnerwire.AutopilotPolicy, e
 	if len(p.RunnerID) > 64 || len(p.RepoID) > 64 {
 		return p, invalidf("runnerId and repoId are ids")
 	}
+	// Agents read content anyone with edit rights (or a prompt injection in
+	// the repo) controls; their approval alone does not merge unless the
+	// owner opts in on purpose.
+	if p.AutoMerge && !humanReview(p) && !p.AllowAgentOnlyMerge {
+		return p, invalidf("autoMerge needs a person's review (review mode human or agents+human) unless allowAgentOnlyMerge is set")
+	}
+	if !p.AutoMerge {
+		p.AllowAgentOnlyMerge = false
+	}
 	return p, nil
 }
 

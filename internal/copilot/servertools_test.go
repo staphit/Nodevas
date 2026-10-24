@@ -225,7 +225,7 @@ func TestStartAutopilotPolicy(t *testing.T) {
 	api = standardAPI()
 	api.autopilot = `{"run":{"id":"ap-2","status":"running"},"tasks":[]}`
 	result = runStartAutopilot(ctx, toolEnv(api), json.RawMessage(`{"goalNodeId":"node-0042","maxParallel":20,`+
-		`"reviewMode":"agents","reviewers":[{"agent":"claude","model":"opus"},{"agent":"codex","model":"gpt-5.5"}],`+
+		`"reviewMode":"agents+human","reviewers":[{"agent":"claude","model":"opus"},{"agent":"codex","model":"gpt-5.5"}],`+
 		`"quorum":2,"autoMerge":true,"advisor":"llm"}`))
 	if result.IsError || !strings.Contains(result.Output, `"autopilotId":"ap-2"`) {
 		t.Fatalf("result = %s", result.Output)
@@ -233,7 +233,7 @@ func TestStartAutopilotPolicy(t *testing.T) {
 	raw, _ = json.Marshal(api.find(http.MethodPost, "/api/autopilot").body)
 	_ = json.Unmarshal(raw, &sent)
 	p = sent.Policy
-	if p.MaxParallel != runnerwire.MaxAutopilotParallel || p.Review.Mode != runnerwire.ReviewAgents ||
+	if p.MaxParallel != runnerwire.MaxAutopilotParallel || p.Review.Mode != runnerwire.ReviewAgentsHuman ||
 		len(p.Review.Reviewers) != 2 || p.Review.Quorum != 2 || !p.AutoMerge || p.Advisor != runnerwire.AdvisorLLM {
 		t.Fatalf("policy = %+v", p)
 	}
@@ -243,6 +243,8 @@ func TestStartAutopilotPolicy(t *testing.T) {
 		`{"goalNodeId":"n","reviewMode":"agents"}`: "needs reviewers",
 		`{"goalNodeId":"n","reviewMode":"vote"}`:   "reviewMode must be",
 		`{"goalNodeId":"n","advisor":"oracle"}`:    "advisor must be",
+		`{"goalNodeId":"n","reviewMode":"agents","reviewers":[{"agent":"codex","model":"m"}],"autoMerge":true}`: "autoMerge needs",
+		`{"goalNodeId":"n","reviewMode":"none","autoMerge":true}`:                                               "autoMerge needs",
 	} {
 		api := standardAPI()
 		if result := runStartAutopilot(ctx, toolEnv(api), json.RawMessage(input)); !result.IsError ||
@@ -393,13 +395,30 @@ func TestDispatchToolsAlwaysAsk(t *testing.T) {
 	if request.Name != "start_autopilot" || api.find(http.MethodPost, "/api/autopilot") != nil {
 		t.Fatalf("request = %+v; dispatched before the answer: %v", request, api.find(http.MethodPost, "/api/autopilot") != nil)
 	}
-	if err := h.service.Decide(alice, conversation.ID, started.TurnID, request.RequestID, DecisionAllow, ""); err != nil {
+	if !request.EveryTime || !strings.Contains(string(request.Input), "node-0042") {
+		t.Fatalf("the request does not carry the full input to approve each time: %+v", request)
+	}
+	// "Allow for this session" counts once: the next dispatch asks again.
+	if err := h.service.Decide(alice, conversation.ID, started.TurnID, request.RequestID, DecisionAllowSession, ""); err != nil {
 		t.Fatal(err)
 	}
 	turn.finish()
 	if call := api.find(http.MethodPost, "/api/autopilot"); call == nil || call.agent {
 		t.Fatalf("autopilot call = %+v", call)
 	}
+	h.model.mu.Lock()
+	h.model.steps = append(h.model.steps, callWith("c2", "start_breakdown", `{"requirement":"y"}`), expectResult("c2", true, "denied"))
+	h.model.mu.Unlock()
+	turn = h.start(h.turn(conversation, ModeBypass))
+	started = turn.until(EventTurnStarted)
+	request = turn.until(EventPermissionRequest)
+	if request.Name != "start_breakdown" {
+		t.Fatalf("second dispatch: %+v", request)
+	}
+	if err := h.service.Decide(alice, conversation.ID, started.TurnID, request.RequestID, DecisionDeny, ""); err != nil {
+		t.Fatal(err)
+	}
+	turn.finish()
 
 	plan := standardAPI()
 	h = newHarness(t, func(opts *Options) { opts.Handler = func() http.Handler { return plan } })

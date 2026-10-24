@@ -11,6 +11,11 @@ import { openAutopilot } from "./openAutopilot";
 function HumanReviewItem({ autopilotId, task }: { autopilotId: string; task: TaskInstance }) {
   const { t } = useI18n();
   const review = useAutopilot((s) => s.review);
+  const reviewHeld = useAutopilot((s) => s.reviewHeld);
+  // A merge held for its sensitive paths is decided on the autopilot's task,
+  // not on the (already approved) pipeline.
+  const held = task.hold === "sensitive";
+  const canDecide = held || Boolean(task.pipelineId);
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState<"" | "approve" | "changes">("");
   const commentId = useId();
@@ -21,17 +26,17 @@ function HumanReviewItem({ autopilotId, task }: { autopilotId: string; task: Tas
   const [missingComment, setMissingComment] = useState(false);
 
   const decide = async (verdict: "approve" | "changes") => {
-    if (!task.pipelineId) return;
+    if (!canDecide) return;
     if (verdict === "changes" && !comment.trim()) {
       setMissingComment(true);
       return;
     }
     setMissingComment(false);
     setSending(verdict);
-    const ok = await review(autopilotId, task.pipelineId, {
-      verdict,
-      comment: comment.trim() || undefined,
-    });
+    const body = { verdict, comment: comment.trim() || undefined };
+    const ok = held
+      ? await reviewHeld(autopilotId, task.nodeId, body)
+      : await review(autopilotId, task.pipelineId ?? "", body);
     setSending("");
     if (ok) setComment("");
   };
@@ -46,6 +51,11 @@ function HumanReviewItem({ autopilotId, task }: { autopilotId: string; task: Tas
           </a>
         )}
       </div>
+      {held && (
+        <p className="autopilot-warning" role="note">
+          {t("autopilot.holdSensitive", { reason: task.reason ?? "" })}
+        </p>
+      )}
       {votes.length > 0 && (
         <p className="ap-muted">{votes.map((vote) => voteText(t, vote)).join(" · ")}</p>
       )}
@@ -73,7 +83,7 @@ function HumanReviewItem({ autopilotId, task }: { autopilotId: string; task: Tas
         <button
           type="button"
           className="ap-btn"
-          disabled={sending !== "" || !task.pipelineId}
+          disabled={sending !== "" || !canDecide}
           onClick={() => void decide("changes")}
         >
           {sending === "changes" ? t("autopilot.sending") : t("autopilot.requestChanges")}
@@ -81,7 +91,7 @@ function HumanReviewItem({ autopilotId, task }: { autopilotId: string; task: Tas
         <button
           type="button"
           className="run-dispatch-button"
-          disabled={sending !== "" || !task.pipelineId}
+          disabled={sending !== "" || !canDecide}
           onClick={() => void decide("approve")}
         >
           {sending === "approve" ? t("autopilot.sending") : t("autopilot.approve")}

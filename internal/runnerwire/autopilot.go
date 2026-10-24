@@ -55,8 +55,13 @@ type AutopilotPolicy struct {
 	MaxRounds int `json:"maxRounds"`
 	// AutoMerge merges an approved PR once its CI is green (W4: the runner
 	// merges with its owner's gh login); off, the task waits at "approved".
-	AutoMerge bool   `json:"autoMerge"`
-	Advisor   string `json:"advisor,omitempty"`
+	AutoMerge bool `json:"autoMerge"`
+	// AllowAgentOnlyMerge lets AutoMerge merge a PR no person reviewed
+	// (review mode none or agents). Off, AutoMerge needs mode human or
+	// agents+human: agents read attacker-controllable content (the task,
+	// the diff), so their approval alone is not trusted to merge.
+	AllowAgentOnlyMerge bool   `json:"allowAgentOnlyMerge,omitempty"`
+	Advisor             string `json:"advisor,omitempty"`
 	// RunnerID and RepoID pin where tasks run; "" lets the hub pick among the
 	// owner's online runners that have the goal's repo.
 	RunnerID string `json:"runnerId,omitempty"`
@@ -178,9 +183,27 @@ type TaskInstance struct {
 	Reason       string        `json:"reason,omitempty"`
 	// Advisor says why this try's implementer was picked (the advisor's
 	// reason, e.g. a System One decision), when one was given.
-	Advisor   string `json:"advisor,omitempty"`
+	Advisor string `json:"advisor,omitempty"`
+	// ContentHash is the task node's content when the task joined the run;
+	// a pending task whose node changed since is held (Hold) until a person
+	// retries it, so an edit after start cannot slip new work in unseen.
+	ContentHash string `json:"contentHash,omitempty"`
+	// Hold says why the task waits for a person (State waiting_human)
+	// outside its pipeline's own review: HoldChanged, HoldRemoved or
+	// HoldSensitive. A person clears it (retry, or approve for sensitive).
+	Hold      string `json:"hold,omitempty"`
 	UpdatedAt string `json:"updatedAt"`
 }
+
+// TaskInstance.Hold values.
+const (
+	HoldChanged   = "changed"   // the node's content changed after start
+	HoldRemoved   = "removed"   // the node left the goal after start
+	HoldSensitive = "sensitive" // the PR touches CI, manifests or scripts
+)
+
+// MaxAutopilotTasks bounds the tasks one autopilot run works.
+const MaxAutopilotTasks = 25
 
 // AutopilotView is GET /api/autopilot/:id: the run and its task instances in
 // topological order (upstream before downstream, then by title).

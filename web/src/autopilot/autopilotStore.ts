@@ -47,6 +47,8 @@ export interface AutopilotStoreState {
   act: (id: string, action: AutopilotAction) => Promise<boolean>;
   taskAct: (id: string, nodeId: string, action: AutopilotTaskAction) => Promise<boolean>;
   review: (id: string, pipelineId: string, body: HumanReviewRequest) => Promise<boolean>;
+  /** A person's decision on a task held for its sensitive paths. */
+  reviewHeld: (id: string, nodeId: string, body: HumanReviewRequest) => Promise<boolean>;
   /** autopilot-changed: the id is an autopilot run's. */
   onChanged: (id: string | undefined, goalNodeId?: string) => void;
   /** runs-changed: a task's run moved; active runs held refetch, coalesced. */
@@ -209,6 +211,18 @@ export const useAutopilot = create<AutopilotStoreState>((set, get) => {
       const goal = get().views[id]?.run.goalNodeId ?? "";
       try {
         await api.autopilotTaskAction(id, nodeId, action);
+        await get().refresh(id);
+        return true;
+      } catch (error) {
+        if (goal) set((s) => ({ errors: { ...s.errors, [goal]: message(error) } }));
+        return false;
+      }
+    },
+
+    reviewHeld: async (id, nodeId, body) => {
+      const goal = get().views[id]?.run.goalNodeId ?? "";
+      try {
+        await api.reviewAutopilotTask(id, nodeId, body);
         await get().refresh(id);
         return true;
       } catch (error) {
