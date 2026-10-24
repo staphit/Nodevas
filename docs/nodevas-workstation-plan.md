@@ -259,7 +259,19 @@ SQLite 和 Postgres 都要有，migration 編號接在現有的 6 之後。
 - **語音入口**：copilot 專用工具 `start_breakdown`（建立 goal node 並派 plan run）與 `start_autopilot`（`POST /api/autopilot`）。它們不是 MCP 工具，agent 碰不到；以使用者本人身分呼叫 API，所以任何模式（包括 bypass）都一定先問使用者，plan 模式直接拒絕。
 - **介面**：goal 上的 Autopilot 面板（policy、啟動、暫停、DAG grid：列是 task、欄是 stage）、看板上每個 task 的 stage badge、等待人審的 task 清單。
 
-合約：`internal/runnerwire/autopilot.go`（型別）、`runs.Dispatcher.Observe`（run 與 pipeline 的變化通知）。API：`POST/GET /api/autopilot`、`GET /api/autopilot/:id`、`POST /api/autopilot/:id/{pause,resume,cancel}`、`POST /api/autopilot/:id/tasks/:node/{retry,skip}`、`POST /api/runs/pipelines/:id/review`、`POST /api/runs`（`kind: "plan"`）；即時事件 `autopilot-changed`。
+合約：`internal/runnerwire/autopilot.go`（型別）、`runs.Dispatcher.Observe`（run 與 pipeline 的變化通知）。API：`POST/GET /api/autopilot`、`GET /api/autopilot/:id`、`POST /api/autopilot/:id/{pause,resume,cancel}`、`POST /api/autopilot/:id/tasks/:node/{retry,skip,review}`、`POST /api/runs/pipelines/:id/review`、`POST /api/runs`（`kind: "plan"`）；即時事件 `autopilot-changed`。
+
+### 安全預設（2026-10-24）
+
+Task 內容、程式碼、PR 都可能是攻擊者能改的（有編輯權限的成員、被入侵的帳號、repo 裡的 prompt injection），所以 agent 的判斷不單獨決定會改變程式碼或權限的事：
+
+- **合併要有人**：`AutoMerge` 只在 review mode 為 human 或 agents+human 時可開；none / agents 要合併必須明確設定 `allowAgentOnlyMerge`（面板上有警告的開關，copilot 的 `start_autopilot` 無法替使用者開，hub 端驗證）。
+- **敏感路徑一律等人**：沒有人審的 PR（`allowAgentOnlyMerge`）若動到 `.github/`、CI 設定、manifest 與 lockfile、`.husky/`、`.pre-commit-config.yaml`、`.git*`、`Dockerfile*`、`docker-compose*`、`scripts/`、agent 指示檔（`.claude/`、`CLAUDE.md`、`AGENTS.md`）等，task 停在 waiting_human（`hold: sensitive`，原因列出路徑）；只有 autopilot 建立者或管理員能經 `POST /api/autopilot/:id/tasks/:node/review` 核准後才合併（`anyEditor` 不適用）。讀不到變更檔案、檔案數超過上限、或 PR head 不是 run 自己的 commit，也一樣等人。
+- **Task 集合在啟動時凍結**：`Create` 當下的 task 就是全部（上限 25 個）；之後加進 goal 或改 tag 進來的 node 不會派工（run 結束時註明幾個沒做，goal 不標 done）；成為某 task 上游的新 node 會擋住它，直到它在看板上完成。每個 task 記錄內容 hash，尚未開始的 task 內容被改過會停在 waiting_human（`hold: changed`），要建立者 retry（接受目前內容）或 skip；離開 goal 的 task 停在 `hold: removed`，不會當成 skipped 放行下游。
+- **Agent network**：run（經 runner proxy，或本機 `run:` actor）寄給人的 session（非 run）或不存在的位址的訊息一律 held，等收件人核可；run 不能讀人的 session inbox、不能冒用人的 session 名稱寄信、不能用人的 session ID heartbeat 接管它。
+- **Copilot 派工確認**：`start_breakdown` / `start_autopilot` 每次都問，「本次對話都允許」對它們無效；確認卡直接展開完整 input。
+- **CI / 供應鏈**：所有 GitHub Actions 以完整 commit SHA 固定（註解標 tag）；release 與 deploy job 的 secret 與 token 只給用到的 step；release job 走 `release` environment；`npm ci --ignore-scripts`，只明確執行 esbuild 的 install script；desktop 的 `npm audit` 含 dev 相依；Dockerfile 的 base image 以 digest 固定（compose 的固定方式見 `deploy/truenas/README.md`）。
+- **GitHub 設定（要使用者自己在 Settings 改）**：開啟 Actions 的 SHA pinning 要求、限制可用的 actions、保護 `master`（必須經 PR 與 CI）、fork PR 一律需核准才跑 workflow、建立 `release` environment 並設 required reviewer。
 
 ## 已確認（2026-10-23 第二輪）
 

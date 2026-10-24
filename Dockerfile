@@ -1,13 +1,20 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
-FROM node:22-alpine AS web-build
+# Base images are pinned by digest (the multi-arch index), the tag kept for
+# reading: a tag can be repointed, a digest cannot. To update one, resolve the
+# new tag's digest (docker buildx imagetools inspect <image>:<tag>) and
+# replace both.
+
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS web-build
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./web/
-RUN npm ci --prefix web
+# No dependency runs an install script; esbuild's, the one the build needs,
+# runs explicitly.
+RUN npm ci --ignore-scripts --prefix web && node web/node_modules/esbuild/install.js
 COPY web ./web
 RUN npm run build --prefix web
 
-FROM golang:1.26.10-alpine AS go-build
+FROM golang:1.26.10-alpine@sha256:27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -19,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
     go build -tags=nomsgpack -trimpath -ldflags="-s -w" \
     -o /out/nodevas ./cmd/nodevas
 
-FROM alpine:3.22
+FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 568 nodevas \
     && adduser -S -D -H -u 568 -G nodevas nodevas \
