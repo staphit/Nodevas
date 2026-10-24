@@ -330,6 +330,19 @@ func firstNonEmpty(values ...string) string {
 // had, so a stage the runs carry no time for keeps the moment it was first
 // seen rather than moving on every pass.
 func keepTimes(prev, next []runnerwire.StageRecord) []runnerwire.StageRecord {
+	// A stage that moved on (queued → success) keeps what it said before
+	// when the new record says nothing: the queued stage's detail is why the
+	// advisor picked the implementer.
+	for i := range next {
+		if next[i].Detail != "" {
+			continue
+		}
+		for _, p := range prev {
+			if p.Stage == next[i].Stage && p.Round == next[i].Round && p.RunID == next[i].RunID && p.Detail != "" {
+				next[i].Detail = p.Detail
+			}
+		}
+	}
 	for i := range next {
 		for _, p := range prev {
 			if p.Stage == next[i].Stage && p.Round == next[i].Round && p.Status == next[i].Status && p.RunID == next[i].RunID {

@@ -779,3 +779,18 @@ func TestStartRefusalsKeepTheTaskScheduled(t *testing.T) {
 		t.Fatalf("after the budget: %+v", got)
 	}
 }
+
+// A stage that moves on keeps what it said: the queued stage's detail (why
+// the advisor picked the implementer) survives the stage succeeding.
+func TestKeepTimesCarriesDetail(t *testing.T) {
+	prev := []runnerwire.StageRecord{{Stage: runnerwire.StageQueued, Status: runnerwire.StageRunning, At: "t1",
+		RunID: "run-1", Detail: "System One (laya): opencode/x p=0.80"}}
+	next := []runnerwire.StageRecord{
+		{Stage: runnerwire.StageQueued, Status: runnerwire.StageOK, At: "t2", RunID: "run-1"},
+		{Stage: runnerwire.StageImplement, Status: runnerwire.StageRunning, At: "t2", RunID: "run-1", Detail: "opencode/x"},
+	}
+	got := keepTimes(prev, next)
+	if got[0].Detail != "System One (laya): opencode/x p=0.80" || got[0].At != "t2" || got[1].Detail != "opencode/x" {
+		t.Fatalf("stages = %+v", got)
+	}
+}
