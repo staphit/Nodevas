@@ -50,6 +50,10 @@ func dialHubAs(t *testing.T, base string, b browser) *wsPeer {
 // startedRun dispatches a run and has the runner accept it.
 func (f *runsFixture) startedRun(t *testing.T, conn *websocket.Conn) runnerwire.Run {
 	t.Helper()
+	// The hub reconciles a new connection (Attached) after its welcome; a run
+	// dispatched before that finishes is offered, re-queued as unseen and
+	// offered again. A pong means the reconcile is over.
+	pingPong(t, conn)
 	run := f.dispatch(t, f.bea, f.runBody(""))
 	expectOffer(t, conn, run.ID)
 	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeAccept, Accept: &runnerwire.Accept{
