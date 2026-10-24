@@ -15,6 +15,7 @@ import {
   type SnapGuide,
   type SnapTargets,
 } from "./snapping";
+import { safeCssColor } from "../../cssColor";
 
 export function CanvasDecoration({
   kind,
@@ -180,7 +181,7 @@ export function CanvasDecoration({
         top: offsetY + working.y,
         width: working.width,
         height: working.height,
-        ["--decoration-color" as string]: working.color || "#31566a",
+        ["--decoration-color" as string]: safeCssColor(working.color) || "#31566a",
       }}
       onContextMenu={(event) => event.stopPropagation()}
     >

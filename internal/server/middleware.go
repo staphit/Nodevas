@@ -30,6 +30,15 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Frame-Options", "DENY")
+	// A cross-origin page that opened this one keeps no handle on it (no
+	// tab-nabbing), and other origins cannot embed its responses.
+	c.Header("Cross-Origin-Opener-Policy", "same-origin")
+	c.Header("Cross-Origin-Resource-Policy", "same-origin")
+	// The voice copilot needs the microphone; nothing needs the rest.
+	c.Header("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)")
+	if auth.RequestIsSecure(r) {
+		c.Header("Strict-Transport-Security", "max-age=31536000")
+	}
 	// style-src keeps 'unsafe-inline' because React writes component styles as
 	// inline style attributes; there is no nonce to hang on them. Everything
 	// else is as narrow as the app actually needs:
@@ -40,6 +49,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	//   img-src keeps https: because markdown previews render remote images
 	//     (web/src/editor/livePreview.ts), but drops bare http: so a remote
 	//     image cannot downgrade the page or beacon the reader's IP in the clear.
+	//     Copilot answers render no remote media at all (web/src/markdown.ts).
 	c.Header(
 		"Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+

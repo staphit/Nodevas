@@ -22,13 +22,21 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 
 		for header, want := range map[string]string{
-			"X-Content-Type-Options": "nosniff",
-			"Referrer-Policy":        "no-referrer",
-			"X-Frame-Options":        "DENY",
+			"X-Content-Type-Options":       "nosniff",
+			"Referrer-Policy":              "no-referrer",
+			"X-Frame-Options":              "DENY",
+			"Cross-Origin-Opener-Policy":   "same-origin",
+			"Cross-Origin-Resource-Policy": "same-origin",
 		} {
 			if got := rec.Header().Get(header); got != want {
 				t.Errorf("%s: %s = %q, want %q", path, header, got, want)
 			}
+		}
+		if !strings.Contains(rec.Header().Get("Permissions-Policy"), "camera=()") {
+			t.Errorf("%s: Permissions-Policy = %q", path, rec.Header().Get("Permissions-Policy"))
+		}
+		if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
+			t.Errorf("%s: HSTS over plain HTTP: %q", path, got)
 		}
 		if rec.Header().Get("Content-Security-Policy") == "" {
 			t.Errorf("%s: no Content-Security-Policy", path)

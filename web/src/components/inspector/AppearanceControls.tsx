@@ -21,6 +21,7 @@ import type {
   Status,
   StatusDefinition,
 } from "../../types";
+import { safeCssColor } from "../../cssColor";
 
 const SHAPES: { value: NodeShape }[] = [
   { value: "rect" },
@@ -158,10 +159,10 @@ export function AppearanceControls({
               height,
               "--card-w": `${width}px`,
               "--card-h": `${height}px`,
-              "--card-bg": style.color,
-              "--card-border-color": style.borderColor,
-              borderColor: style.borderColor,
-              color: style.textColor,
+              "--card-bg": safeCssColor(style.color),
+              "--card-border-color": safeCssColor(style.borderColor),
+              borderColor: safeCssColor(style.borderColor),
+              color: safeCssColor(style.textColor),
             } as CSSProperties
           }
         >

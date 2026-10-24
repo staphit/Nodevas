@@ -60,13 +60,26 @@ const nodeLinkExtension: TokenizerAndRendererExtension = {
 
 marked.use({ extensions: [nodeLinkExtension] });
 
+export interface SanitizeOptions {
+  /**
+   * false turns remote images into plain links, so rendering fetches nothing
+   * from another host. Copilot answers use it: text a prompt injection steers
+   * could otherwise carry workspace data out in an image URL, with no click.
+   */
+  remoteMedia?: boolean;
+}
+
 /** Shared HTML cleaning: also used to preview an HTML subpage. */
-export function sanitizeHTML(html: string): string {
+export function sanitizeHTML(html: string, options: SanitizeOptions = {}): string {
   const sanitized = DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     ADD_ATTR: ["data-node-link", "data-node-link-project", "data-node-link-node"],
-    FORBID_TAGS: ["style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select"],
-    FORBID_ATTR: ["srcdoc"],
+    FORBID_TAGS: [
+      "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select",
+      // Media beyond <img> only adds more remote-fetch attributes.
+      "video", "audio", "source", "track", "picture",
+    ],
+    FORBID_ATTR: ["srcdoc", "srcset", "poster"],
   });
   const document = new DOMParser().parseFromString(sanitized, "text/html");
   for (const element of document.body.querySelectorAll<HTMLElement>("[style]")) {
@@ -75,12 +88,27 @@ export function sanitizeHTML(html: string): string {
       element.removeAttribute("style");
     }
   }
+  if (options.remoteMedia === false) {
+    for (const image of document.body.querySelectorAll("img")) {
+      const src = image.getAttribute("src") ?? "";
+      if (/^(\/(?!\/)|data:image\/|blob:)/i.test(src)) continue;
+      const link = document.createElement("a");
+      link.textContent = image.getAttribute("alt") || src;
+      if (/^https?:/i.test(src)) link.href = src;
+      image.replaceWith(link);
+    }
+  }
   for (const anchor of document.body.querySelectorAll<HTMLAnchorElement>("a")) {
     anchor.rel = "noopener noreferrer";
+    // A link in untrusted text must not replace the app's own tab (a look-alike
+    // sign-in page, unsaved work lost). Node links stay in-app.
+    if (!anchor.hasAttribute("data-node-link") && anchor.getAttribute("href")) {
+      anchor.target = "_blank";
+    }
   }
   return document.body.innerHTML;
 }
 
-export function renderMarkdown(source: string): string {
-  return sanitizeHTML(marked.parse(source, { async: false }) as string);
+export function renderMarkdown(source: string, options?: SanitizeOptions): string {
+  return sanitizeHTML(marked.parse(source, { async: false }) as string, options);
 }
