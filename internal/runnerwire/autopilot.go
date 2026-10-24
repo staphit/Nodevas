@@ -31,6 +31,9 @@ type ReviewPolicy struct {
 const (
 	AdvisorRules = ""    // Implement chain, else the owner's routing rules
 	AdvisorLLM   = "llm" // a fast model on the owner's runner picks per task
+	// AdvisorSystemOne: a System One model (Jev, or Laya run locally) on the
+	// owner's runner picks per task, from typed choices (decide.go).
+	AdvisorSystemOne = "systemone"
 )
 
 // MaxAutopilotParallel bounds AutopilotPolicy.MaxParallel.

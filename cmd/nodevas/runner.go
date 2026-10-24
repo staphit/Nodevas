@@ -16,6 +16,7 @@ import (
 	"nodevas/internal/agenthook"
 	"nodevas/internal/runner"
 	"nodevas/internal/runner/adapter"
+	"nodevas/internal/runnerwire"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -120,9 +121,13 @@ func runnerUsage(w io.Writer) {
                                              makes your voice copilot's model calls with a key kept here),
                                              copilotModel, copilotBaseURL (https, or http to this machine
                                              or the local network);
-                                             autopilot advisor: advisorProvider (anthropic|openai|none: a
-                                             fast model here picks the agent and model for each autopilot
-                                             task), advisorModel, advisorBaseURL (same rules as copilot)
+                                             autopilot advisor: advisorProvider (anthropic|openai|systemone|
+                                             none: a fast model here picks the agent and model for each
+                                             autopilot task), advisorModel, advisorBaseURL (same rules as
+                                             copilot). systemone is a System One endpoint: Laya on this PC
+                                             (pip install "laya[serve]", then laya-serve; base URL defaults
+                                             to http://127.0.0.1:8000) or TypeSafe's Jev (advisorBaseURL
+                                             https://api.typesafe.ai, advisorModel jev-latest, advisor-key)
        nodevas runner copilot-key [--clear]  store the copilot's API key, read from stdin (never a flag);
                                              the hub never sees it (or set NODEVAS_COPILOT_API_KEY here)
        nodevas runner advisor-key [--clear]  store the advisor's API key the same way (or set
@@ -376,14 +381,21 @@ func printAdvisor(w io.Writer, cfg *runner.Config) {
 	}
 	info, _, reason := cfg.AdvisorLLM()
 	setting("advisorProvider", cfg.AdvisorProvider)
+	systemOne := cfg.AdvisorProvider == runnerwire.ProviderSystemOne
 	model := cfg.AdvisorModel
 	if model == "" {
 		model = "(default)"
+		if systemOne {
+			model = "(the endpoint's own)"
+		}
 	}
 	setting("advisorModel", model)
 	base := cfg.AdvisorBaseURL
 	if base == "" {
 		base = "(the vendor's own)"
+		if systemOne {
+			base = runnerwire.DefaultSystemOneBaseURL + " (Laya's laya-serve)"
+		}
 	}
 	setting("advisorBaseURL", base)
 	key := "none"
@@ -396,9 +408,13 @@ func printAdvisor(w io.Writer, cfg *runner.Config) {
 		key = "the copilot's (same provider)"
 	}
 	setting("advisorKey", key)
-	if reason != "" {
+	switch {
+	case reason != "":
 		setting("state", "off: "+reason)
-	} else {
+	case systemOne:
+		setting("state", fmt.Sprintf("on: autopilot asks the System One endpoint at %s which agent and model take each task "+
+			"(policy advisor \"systemone\")", info.BaseURL))
+	default:
 		setting("state", fmt.Sprintf("on: autopilot asks %s/%s which agent and model take each task", info.Provider, info.Model))
 	}
 }
@@ -440,7 +456,7 @@ func runnerAdvisorKey(args []string, in *bufio.Reader, stdout, stderr io.Writer)
 		fmt.Fprintln(stdout, "advisor key saved")
 	}
 	if cfg.AdvisorProvider == "" {
-		fmt.Fprintln(stdout, "set the provider too: nodevas runner set advisorProvider anthropic (or openai)")
+		fmt.Fprintln(stdout, "set the provider too: nodevas runner set advisorProvider anthropic (or openai, or systemone)")
 	}
 	fmt.Fprintln(stdout, "restart a running runner for it to take effect")
 	return nil

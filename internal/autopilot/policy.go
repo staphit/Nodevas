@@ -26,9 +26,9 @@ func ValidatePolicy(p runnerwire.AutopilotPolicy) (runnerwire.AutopilotPolicy, e
 		return p, invalidf("maxRounds is between 1 and %d", runnerwire.MaxPipelineRounds)
 	}
 	switch p.Advisor {
-	case runnerwire.AdvisorRules, runnerwire.AdvisorLLM:
+	case runnerwire.AdvisorRules, runnerwire.AdvisorLLM, runnerwire.AdvisorSystemOne:
 	default:
-		return p, invalidf("advisor must be \"\" or %q", runnerwire.AdvisorLLM)
+		return p, invalidf("advisor must be \"\", %q or %q", runnerwire.AdvisorLLM, runnerwire.AdvisorSystemOne)
 	}
 	r := &p.Review
 	if r.Mode == "" {

@@ -259,6 +259,8 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
 	// the same relay.
 	autopilot.RegisterLLMAdvisor(autopilot.NewLLMAdvisor(s.llm))
+	// …or a System One model (Jev, or Laya on the owner's PC) through it.
+	autopilot.RegisterSystemOneAdvisor(autopilot.NewSystemOneAdvisor(s.llm))
 	s.startAutopilot(database)
 }
 

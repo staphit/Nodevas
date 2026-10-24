@@ -53,6 +53,24 @@ func registeredLLMAdvisor() Advisor {
 	return llmAdvisor
 }
 
+var systemOneAdvisor Advisor // guarded by llmMu
+
+// RegisterSystemOneAdvisor sets the advisor policies with Advisor
+// "systemone" ask first (a System One model on the owner's runner). The
+// orchestrator falls back to the rules on its error or after
+// systemOneAdvisorTimeout.
+func RegisterSystemOneAdvisor(a Advisor) {
+	llmMu.Lock()
+	systemOneAdvisor = a
+	llmMu.Unlock()
+}
+
+func registeredSystemOneAdvisor() Advisor {
+	llmMu.RLock()
+	defer llmMu.RUnlock()
+	return systemOneAdvisor
+}
+
 // errNoAgent is a task nothing can implement: no installed agent anywhere.
 var errNoAgent = errors.New("no installed agent on the owner's runners can take this task")
 

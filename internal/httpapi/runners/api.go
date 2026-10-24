@@ -263,7 +263,7 @@ func (a *API) connect(c *gin.Context) {
 					slog.String("runner", runner.ID), slog.String("type", env.Type),
 					slog.String("run", runID(env)), slog.Any("error", err))
 			}
-		case runnerwire.TypeLLMDelta, runnerwire.TypeLLMDone:
+		case runnerwire.TypeLLMDelta, runnerwire.TypeLLMDone, runnerwire.TypeDecideDone:
 			// An answer to a copilot model call. One nobody waits for any
 			// more (cancelled, timed out) is dropped, never fatal.
 			if a.llm != nil {

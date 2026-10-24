@@ -76,6 +76,10 @@ const DefaultTick = 15 * time.Second
 // llmAdvisorTimeout bounds an LLM advisor's answer.
 const llmAdvisorTimeout = 5 * time.Second
 
+// systemOneAdvisorTimeout bounds the System One advisor: it answers in well
+// under a second, but a local Laya loads its checkpoint on its first call.
+const systemOneAdvisorTimeout = 10 * time.Second
+
 // Orchestrator runs every live autopilot.
 type Orchestrator struct {
 	opts  Options
@@ -788,19 +792,25 @@ func label(am runnerwire.AgentModel) string {
 	return am.Agent + "/" + am.Model
 }
 
-// choose asks the LLM advisor first when the policy says so, the rules
-// otherwise and whenever it fails.
+// choose asks the policy's advisor first (the LLM advisor, or the System One
+// advisor), the rules otherwise and whenever it fails.
 func (o *Orchestrator) choose(ctx context.Context, in ChooseInput) (Choice, error) {
-	if in.Policy.Advisor == runnerwire.AdvisorLLM {
-		if a := registeredLLMAdvisor(); a != nil {
-			cctx, cancel := context.WithTimeout(ctx, llmAdvisorTimeout)
-			c, err := a.Choose(cctx, in)
-			cancel()
-			if err == nil {
-				if chain := usable(c.Implement, in.Agents); len(chain) > 0 {
-					c.Implement = chain
-					return c, nil
-				}
+	var advisor Advisor
+	timeout := llmAdvisorTimeout
+	switch in.Policy.Advisor {
+	case runnerwire.AdvisorLLM:
+		advisor = registeredLLMAdvisor()
+	case runnerwire.AdvisorSystemOne:
+		advisor, timeout = registeredSystemOneAdvisor(), systemOneAdvisorTimeout
+	}
+	if advisor != nil {
+		cctx, cancel := context.WithTimeout(ctx, timeout)
+		c, err := advisor.Choose(cctx, in)
+		cancel()
+		if err == nil {
+			if chain := usable(c.Implement, in.Agents); len(chain) > 0 {
+				c.Implement = chain
+				return c, nil
 			}
 		}
 	}

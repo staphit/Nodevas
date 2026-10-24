@@ -55,8 +55,12 @@ func capabilities(cfg *Config) []string {
 	if _, _, reason := cfg.CopilotLLM(); reason == "" {
 		caps = append(caps, runnerwire.CapLLM)
 	}
-	if _, _, reason := cfg.AdvisorLLM(); reason == "" {
-		caps = append(caps, runnerwire.CapLLMAdvisor)
+	if info, _, reason := cfg.AdvisorLLM(); reason == "" {
+		if info.Provider == runnerwire.ProviderSystemOne {
+			caps = append(caps, runnerwire.CapDecide)
+		} else {
+			caps = append(caps, runnerwire.CapLLMAdvisor)
+		}
 	}
 	return caps
 }

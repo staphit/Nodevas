@@ -28,6 +28,15 @@ var ErrNoLLMRunner = errors.New("your runner is offline or has no copilot key: s
 var ErrNoAdvisorRunner = errors.New("no online runner of yours has an advisor model: set one with " +
 	"`nodevas runner set advisorProvider anthropic` (and advisorModel), then restart the runner")
 
+// ErrNoDecideRunner: the person has no online runner with a System One
+// advisor (W7).
+var ErrNoDecideRunner = errors.New("no online runner of yours has a System One advisor: run Laya (`laya-serve`) " +
+	"or use Jev, then `nodevas runner set advisorProvider systemone` and restart the runner")
+
+// DefaultDecideTimeout bounds one System One decision end to end: the runner
+// gives the endpoint 10s.
+const DefaultDecideTimeout = 15 * time.Second
+
 // ErrLLMRunnerGone: the runner a call was sent to disconnected before it
 // answered.
 var ErrLLMRunnerGone = errors.New("your runner disconnected before the model answered")
@@ -56,11 +65,12 @@ type LLMRelay struct {
 type llmCall struct {
 	runnerID string
 
-	mu     sync.Mutex
-	queued []string
-	size   int
-	done   *runnerwire.LLMDone
-	signal chan struct{}
+	mu      sync.Mutex
+	queued  []string
+	size    int
+	done    *runnerwire.LLMDone
+	decided *runnerwire.DecideDone
+	signal  chan struct{}
 }
 
 func (c *llmCall) wake() {
@@ -97,6 +107,12 @@ func (l *LLMRelay) TargetFor(ctx context.Context, accountID, purpose string) (ru
 		none = ErrNoAdvisorRunner
 		offers = func(info *runnerwire.Info) bool {
 			return info.Advisor != nil && slices.Contains(info.Capabilities, runnerwire.CapLLMAdvisor)
+		}
+	case decidePurpose:
+		none = ErrNoDecideRunner
+		offers = func(info *runnerwire.Info) bool {
+			return info.Advisor != nil && info.Advisor.Provider == runnerwire.ProviderSystemOne &&
+				slices.Contains(info.Capabilities, runnerwire.CapDecide)
 		}
 	default:
 		return runnerwire.Runner{}, fmt.Errorf("%w: unknown model call purpose %q", ErrInvalid, purpose)
@@ -220,7 +236,83 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 	}
 }
 
-// Deliver applies a runner's llm_delta or llm_done. runnerID comes from the
+// decidePurpose is TargetFor's key for a System One decision (never on the
+// wire: a decision is its own message type).
+const decidePurpose = "decide"
+
+// Decide asks accountID's own runner with a System One advisor for a
+// decision and waits for it. The runner fills in nothing: the model and base
+// URL are its hello's, sent back so a runner whose settings changed refuses
+// rather than asks somewhere the hub did not expect.
+func (l *LLMRelay) Decide(ctx context.Context, accountID string, req runnerwire.DecisionRequest) (runnerwire.DecisionResponse, error) {
+	if len(req.State) > runnerwire.MaxDecideStateBytes || len(req.Questions) > runnerwire.MaxDecideQuestionsBytes {
+		return runnerwire.DecisionResponse{}, fmt.Errorf("%w: the decision is too large", ErrInvalid)
+	}
+	runner, err := l.TargetFor(ctx, accountID, decidePurpose)
+	if err != nil {
+		return runnerwire.DecisionResponse{}, err
+	}
+	id, err := newCallID()
+	if err != nil {
+		return runnerwire.DecisionResponse{}, err
+	}
+	req.Model = runner.Info.Advisor.Model
+	call := &llmCall{runnerID: runner.ID, signal: make(chan struct{}, 1)}
+	l.mu.Lock()
+	l.calls[id] = call
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		delete(l.calls, id)
+		l.mu.Unlock()
+	}()
+	err = l.reg.Send(runner.ID, runnerwire.Envelope{Type: runnerwire.TypeDecideRequest, Decide: &runnerwire.DecideRequest{
+		ID: id, AccountID: accountID, Purpose: runnerwire.LLMPurposeAdvisor,
+		Model: runner.Info.Advisor.Model, BaseURL: runner.Info.Advisor.BaseURL, Request: req,
+	}})
+	if err != nil {
+		if errors.Is(err, ErrOffline) {
+			return runnerwire.DecisionResponse{}, ErrNoDecideRunner
+		}
+		return runnerwire.DecisionResponse{}, fmt.Errorf("sending the decision to your runner: %w", err)
+	}
+	timeout := l.Timeout
+	if timeout <= 0 || timeout > DefaultDecideTimeout {
+		timeout = DefaultDecideTimeout
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return runnerwire.DecisionResponse{}, ctx.Err()
+		case <-deadline.C:
+			return runnerwire.DecisionResponse{}, fmt.Errorf("your runner's System One advisor did not answer within %s", timeout)
+		case <-call.signal:
+			call.mu.Lock()
+			done := call.decided
+			call.mu.Unlock()
+			if done == nil {
+				continue
+			}
+			if done.Error != "" || done.Response == nil {
+				return runnerwire.DecisionResponse{}, fmt.Errorf("your runner: %s", firstNonEmpty(done.Error, "no decision"))
+			}
+			return *done.Response, nil
+		}
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Deliver applies a runner's llm_delta, llm_done or decide_done. runnerID comes from the
 // authenticated socket: only the runner a call was sent to can answer it, and
 // an answer to a call nobody waits for any more is dropped.
 func (l *LLMRelay) Deliver(runnerID string, env runnerwire.Envelope) error {
@@ -242,6 +334,15 @@ func (l *LLMRelay) Deliver(runnerID string, env runnerwire.Envelope) error {
 		if len(env.LLMDone.Message) > runnerwire.MaxLLMDoneBytes || len(env.LLMDone.Error) > runnerwire.MaxLLMDeltaBytes {
 			return fmt.Errorf("%w: llm_done too large", ErrInvalid)
 		}
+	case runnerwire.TypeDecideDone:
+		if env.DecideDone == nil {
+			return fmt.Errorf("%w: empty decide_done", ErrInvalid)
+		}
+		id = env.DecideDone.ID
+		if len(env.DecideDone.Error) > runnerwire.MaxLLMDeltaBytes ||
+			(env.DecideDone.Response != nil && len(env.DecideDone.Response.Answers) > runnerwire.MaxDecideQuestions) {
+			return fmt.Errorf("%w: decide_done too large", ErrInvalid)
+		}
 	default:
 		return fmt.Errorf("%w: not a model call answer", ErrInvalid)
 	}
@@ -253,7 +354,13 @@ func (l *LLMRelay) Deliver(runnerID string, env runnerwire.Envelope) error {
 	}
 	call.mu.Lock()
 	defer call.mu.Unlock()
-	if call.done != nil {
+	if call.done != nil || call.decided != nil {
+		return nil
+	}
+	if env.Type == runnerwire.TypeDecideDone {
+		done := *env.DecideDone
+		call.decided = &done
+		call.wake()
 		return nil
 	}
 	if env.Type == runnerwire.TypeLLMDelta {

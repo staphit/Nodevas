@@ -90,6 +90,10 @@ type Envelope struct {
 	LLMDelta *LLMDelta   `json:"llmDelta,omitempty"`
 	LLMDone  *LLMDone    `json:"llmDone,omitempty"`
 	LLMID    string      `json:"llmId,omitempty"`
+
+	// System One decisions; see decide.go.
+	Decide     *DecideRequest `json:"decide,omitempty"`
+	DecideDone *DecideDone    `json:"decideDone,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.

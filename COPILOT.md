@@ -285,6 +285,42 @@ owner's runners report; anything else (an invented model, a malformed answer,
 more than 6 s, an offline runner) is an error, and the autopilot falls back to
 its rules.
 
+#### A System One advisor (Laya or Jev)
+
+`advisorProvider systemone` points the advisor at a System One endpoint
+instead: a model that answers typed questions (pick one option, score on a
+scale, yes or no) with calibrated probabilities in a fraction of a second, and
+generates no text. Two speak the same protocol (`POST /v1/systemone`):
+
+- **Laya**, open source (Apache-2.0), on your PC. `pip install "laya[serve]"`,
+  then `laya-serve` (listens on `0.0.0.0:8000`; set `LAYA_HOST=127.0.0.1` to
+  keep it on this machine). The first call downloads its checkpoint (the three
+  together are about 2.3 GB). No key unless you set `LAYA_API_KEY`.
+
+  ```sh
+  nodevas runner set advisorProvider systemone   # advisorBaseURL defaults to http://127.0.0.1:8000
+  nodevas runner advisor-key                      # only if laya-serve has LAYA_API_KEY
+  ```
+
+- **Jev**, TypeSafe's hosted model (early access; key from its console).
+
+  ```sh
+  nodevas runner set advisorProvider systemone
+  nodevas runner set advisorBaseURL https://api.typesafe.ai
+  nodevas runner set advisorModel jev-latest
+  nodevas runner advisor-key                      # stdin; sent as a bearer token
+  ```
+
+Then pick advisor **systemone** in the autopilot's policy. The hub sends a
+`decide_request` (`internal/runnerwire/decide.go`) to the owner's runner with
+capability `decide`, never to anyone else's; the runner checks it against its
+settings and asks its endpoint, the key never leaving the PC. The question is
+a choice among the installed agent/model pairs (options `o1…`, each described
+by agent and model), plus the task's complexity on a five-level score for the
+reason. The chain is the options by probability, at most three, a fallback
+only above 5 %. An answer naming no option given, an endpoint error or more
+than 10 s means the rules decide instead (`internal/autopilot/systemone.go`).
+
 ## Configuration (`nodevas.yaml`)
 
 ```yaml

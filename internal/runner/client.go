@@ -264,6 +264,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				llm.request(msg.LLM)
 			case runnerwire.TypeLLMCancel:
 				llm.cancel(msg.LLMID)
+			case runnerwire.TypeDecideRequest:
+				llm.decide(msg.Decide)
 			}
 		case env := <-llm.out:
 			if err := c.write(ctx, conn, env); err != nil {

@@ -49,6 +49,10 @@ const (
 // CopilotProviders are the providers copilotProvider takes.
 var CopilotProviders = []string{provider.KindAnthropic, provider.KindOpenAI}
 
+// AdvisorProviders are the providers advisorProvider takes: the copilot's, or
+// a System One endpoint (Jev, or Laya run locally; decide.go).
+var AdvisorProviders = []string{provider.KindAnthropic, provider.KindOpenAI, runnerwire.ProviderSystemOne}
+
 // CopilotKey is the copilot key in effect and where it comes from:
 // "stored" (runner config) or "environment" (CopilotKeyEnv); "" when none.
 func (c *Config) CopilotKey() (key, source string) {
@@ -122,6 +126,16 @@ func (c *Config) AdvisorLLM() (info runnerwire.LLMInfo, key string, reason strin
 		BaseURL:  strings.TrimRight(strings.TrimSpace(c.AdvisorBaseURL), "/"),
 		Purpose:  runnerwire.LLMPurposeAdvisor,
 	}
+	if info.Provider == runnerwire.ProviderSystemOne {
+		// A System One endpoint: Laya on this machine by default, which takes
+		// no key unless its owner set LAYA_API_KEY; the model may be left to
+		// the endpoint ("" sends none).
+		if info.BaseURL == "" {
+			info.BaseURL = runnerwire.DefaultSystemOneBaseURL
+		}
+		key, _ = c.AdvisorKey()
+		return info, key, ""
+	}
 	if info.Model == "" {
 		info.Model = provider.DefaultModel(info.Provider)
 	}
@@ -156,17 +170,17 @@ func purposeLabel(purpose string) string {
 
 // setCopilot handles the copilot settings of `nodevas runner set`.
 func (c *Config) setCopilot(key, value string, reset bool) error {
-	return setModelSetting(key, value, reset, &c.CopilotProvider, &c.CopilotModel, &c.CopilotBaseURL)
+	return setModelSetting(key, value, reset, CopilotProviders, &c.CopilotProvider, &c.CopilotModel, &c.CopilotBaseURL)
 }
 
 // setAdvisor handles the advisor settings of `nodevas runner set` (W7).
 func (c *Config) setAdvisor(key, value string, reset bool) error {
-	return setModelSetting(key, value, reset, &c.AdvisorProvider, &c.AdvisorModel, &c.AdvisorBaseURL)
+	return setModelSetting(key, value, reset, AdvisorProviders, &c.AdvisorProvider, &c.AdvisorModel, &c.AdvisorBaseURL)
 }
 
 // setModelSetting sets one of a model call's provider, model or base URL;
 // key is the setting's name, ending in Provider, Model or BaseURL.
-func setModelSetting(key, value string, reset bool, providerField, modelField, baseField *string) error {
+func setModelSetting(key, value string, reset bool, providers []string, providerField, modelField, baseField *string) error {
 	switch {
 	case strings.HasSuffix(key, "Provider"):
 		if reset || strings.EqualFold(value, "none") || strings.EqualFold(value, "off") {
@@ -174,13 +188,13 @@ func setModelSetting(key, value string, reset bool, providerField, modelField, b
 			return nil
 		}
 		kind := strings.ToLower(value)
-		for _, p := range CopilotProviders {
+		for _, p := range providers {
 			if kind == p {
 				*providerField = kind
 				return nil
 			}
 		}
-		return fmt.Errorf("%s must be one of %s, or none", key, strings.Join(CopilotProviders, ", "))
+		return fmt.Errorf("%s must be one of %s, or none", key, strings.Join(providers, ", "))
 	case strings.HasSuffix(key, "Model"):
 		if reset {
 			*modelField = ""
@@ -325,6 +339,9 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 	switch {
 	case reason != "":
 		s.refuse(req.ID, "this runner does not answer "+what+" model calls: "+reason)
+		return
+	case info.Provider == runnerwire.ProviderSystemOne:
+		s.refuse(req.ID, "this runner's "+what+" is a System One endpoint: it answers decisions, not model calls")
 		return
 	case s.ownerID != "" && req.AccountID != s.ownerID:
 		s.refuse(req.ID, "this runner answers its owner's "+what+" only")
