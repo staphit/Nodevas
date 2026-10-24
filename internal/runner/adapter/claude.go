@@ -81,21 +81,41 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-// childEnv is the runner's environment minus the markers Claude Code sets for
-// its own children: a runner started from inside a Claude Code session would
-// otherwise hand them on, and the CLI refuses to start "inside" another one.
+// childEnv is the runner's environment minus what an agent must not have:
+//   - the markers Claude Code sets for its own children (a runner started from
+//     inside a Claude Code session would otherwise hand them on, and the CLI
+//     refuses to start "inside" another one);
+//   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
+//     secret, the copilot and advisor keys. jobEnv adds back the few a run
+//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP);
+//   - GitHub tokens: the runner pushes and opens pull requests itself, an
+//     agent never needs them.
+//
+// An agent that a task or a repository file talks into running `env` must find
+// nothing worth stealing. ANTHROPIC_API_KEY and OPENAI_API_KEY stay: agents may
+// sign in with them.
 func childEnv() []string {
 	env := os.Environ()
 	out := env[:0:0]
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		switch strings.ToUpper(name) {
-		case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT":
+		if strippedEnv(name) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return out
+}
+
+// strippedEnv reports whether childEnv drops the variable called name.
+func strippedEnv(name string) bool {
+	upper := strings.ToUpper(name)
+	switch upper {
+	case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
+		return true
+	}
+	return strings.HasPrefix(upper, "NODEVAS_")
 }
 
 // RunIDEnv names the run an agent process belongs to. `nodevas hook` does

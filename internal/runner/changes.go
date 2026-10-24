@@ -109,7 +109,8 @@ type commitResult struct {
 	Commit string
 	// Changed: the worktree differs from Base, committed or not.
 	Changed bool
-	// Err is why a commit with changes failed (a hook refused it).
+	// Err is why a commit with changes failed (git refused it, or the
+	// worktree's git directory was changed).
 	Err error
 }
 
@@ -117,6 +118,11 @@ type commitResult struct {
 // have committed on its own; its commits count as the run's too.
 func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	var res commitResult
+	if err := checkGitDir(ctx, wt); err != nil {
+		res.Err = err
+		res.Changed = true
+		return res
+	}
 	head, err := revParse(ctx, wt.Path, "HEAD")
 	if err != nil {
 		res.Err = err
@@ -139,7 +145,7 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	}
 	if staged != "" {
 		args := identityArgs(ctx, wt.Path)
-		args = append(args, "commit", "--quiet", "-m", message)
+		args = append(args, "commit", "--quiet", "--no-verify", "-m", message)
 		commitCtx, cancel := context.WithTimeout(ctx, commitTimeout)
 		_, err := git(commitCtx, wt.Path, args...)
 		cancel()
@@ -308,7 +314,7 @@ func applyNumstat(files []runnerwire.FileChange, stats map[string]numstat) {
 // gitCapped runs git and keeps at most limit bytes of its output; over says
 // there was more.
 func gitCapped(ctx context.Context, dir string, limit int, args ...string) (string, bool, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", hardenedArgs(dir, args)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	out := &capWriter{limit: limit}
 	var stderr strings.Builder

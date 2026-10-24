@@ -575,26 +575,27 @@ func TestPipelinePRFailures(t *testing.T) {
 			t.Fatalf("creates %v", creates)
 		}
 	})
-	t.Run("commit hook refuses", func(t *testing.T) {
+	t.Run("repository hooks do not run", func(t *testing.T) {
+		// The runner's git runs no hooks: an agent can write them, and the
+		// commit and push run as the owner.
 		gh := &ghFake{url: "https://github.com/o/r/pull/1"}
 		env := startPRRunner(t, gh, nil)
 		withOrigin(t, env.repo)
-		hook := filepath.Join(env.repo, ".git", "hooks", "pre-commit")
-		if err := os.WriteFile(hook, []byte("#!/bin/sh\necho lint failed >&2\nexit 1\n"), 0o755); err != nil {
-			t.Fatal(err)
+		for _, name := range []string{"pre-commit", "pre-push"} {
+			hook := filepath.Join(env.repo, ".git", "hooks", name)
+			if err := os.WriteFile(hook, []byte("#!/bin/sh\necho lint failed >&2\nexit 1\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 		}
 		env.hub.hello()
 		env.hub.offer(testJob("run-hook", "edit:"))
 		env.hub.wait("run-hook", runnerwire.TypeFinish)
 		changes := env.hub.wait("run-hook", runnerwire.TypeChanges).Changes
-		if changes.Commit != "" || len(changes.Files) != 3 {
+		if changes.Commit == "" || len(changes.Files) != 3 {
 			t.Fatalf("changes = %+v", changes)
 		}
-		if pr := prOf(t, env, "run-hook"); pr.URL != "" || !strings.Contains(pr.Error, "lint failed") {
+		if pr := prOf(t, env, "run-hook"); pr.URL == "" || pr.Error != "" {
 			t.Fatalf("pr = %+v", pr)
-		}
-		if _, err := os.Stat(filepath.Join(env.client.Config.DataDir, "worktrees", "run-hook", "hello.txt")); err != nil {
-			t.Errorf("uncommitted work not kept: %v", err)
 		}
 	})
 	t.Run("autoPR off", func(t *testing.T) {

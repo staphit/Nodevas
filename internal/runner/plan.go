@@ -50,6 +50,12 @@ func (j *jobs) executePlan(ctx context.Context, r *run) {
 		Text: fmt.Sprintf("plan: worktree %s from %s (read only; thrown away after)", wt.Path, wt.BaseRef)})
 
 	result, _ := j.runAgent(ctx, r, wt, job)
+	if err := checkGitDir(j.ctx, wt); err != nil {
+		cleanup()
+		j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
+			FailureKind: runnerwire.FailureTask, Error: err.Error()})
+		return
+	}
 	if dirty, _ := git(j.ctx, wt.Path, "status", "--porcelain"); strings.TrimSpace(dirty) != "" {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "the planner changed files; discarded"})
 	}

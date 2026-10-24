@@ -386,6 +386,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		j.finish(r, result)
 		return
 	}
+	if !j.guardGitDir(r, wt) {
+		return
+	}
 	j.mu.Lock()
 	r.publishing = true
 	j.mu.Unlock()

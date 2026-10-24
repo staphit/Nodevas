@@ -217,6 +217,9 @@ func createPRWorktree(ctx context.Context, repoPath, dataDir, runID, branch, bas
 	if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "--detach", "--", wt.Path, ref); err != nil {
 		return Worktree{}, err
 	}
+	if err := recordGitDir(ctx, &wt); err != nil {
+		return Worktree{}, err
+	}
 	return wt, nil
 }
 
@@ -280,6 +283,9 @@ func (j *jobs) executeReview(ctx context.Context, r *run, pr prCheck) {
 	result, text := j.runAgent(ctx, r, wt, reviewJob)
 	if result.Status == runnerwire.RunCancelled {
 		j.finish(r, result)
+		return
+	}
+	if !j.guardGitDir(r, wt) {
 		return
 	}
 	j.mu.Lock()
@@ -418,6 +424,9 @@ func (j *jobs) executeRevise(ctx context.Context, r *run, pr prCheck) {
 		j.finish(r, result)
 		return
 	}
+	if !j.guardGitDir(r, wt) {
+		return
+	}
 	j.mu.Lock()
 	r.publishing = true
 	j.mu.Unlock()
@@ -478,7 +487,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	pushCtx, cancel := context.WithTimeout(ctx, pushTimeout)
 	// No + and no --force: a branch that moved on origin since the run
 	// started is refused, never overwritten.
-	_, err = git(pushCtx, wt.Path, "push", "origin", "HEAD:refs/heads/"+wt.Branch)
+	_, err = git(pushCtx, wt.Path, "push", "--no-verify", "origin", "HEAD:refs/heads/"+wt.Branch)
 	cancel()
 	if err != nil {
 		if pushRejected(err) {
