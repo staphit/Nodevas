@@ -25,6 +25,10 @@ type ReviewPolicy struct {
 	Reviewers []AgentModel `json:"reviewers,omitempty"`
 	// Quorum is how many of Reviewers must approve; 0 means all of them.
 	Quorum int `json:"quorum,omitempty"`
+	// AnyEditor lets anyone who may change the project give the person's
+	// review (human, agents+human). Without it only the autopilot's creator,
+	// the runner's owner or an administrator may, as for a merge approval.
+	AnyEditor bool `json:"anyEditor,omitempty"`
 }
 
 // Advisors for AutopilotPolicy.Advisor.

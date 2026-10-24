@@ -1121,7 +1121,12 @@ const humanChangesPrefix = "changes requested: "
 
 // Review records a person's verdict on a task waiting for one: approve lets
 // it go on to the merge; changes start a new try with the comment.
-func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.Reviewer, verdict, comment string) error {
+// Review records a person's verdict on a task waiting for one. Who may give
+// it is the pipeline review's rule: the autopilot's creator, the runner's
+// owner or an administrator (admin), or anyone who may change the project when
+// the policy lets any editor review (the caller has checked that much). Anyone
+// else gets ErrNotFound, as for the pipeline route.
+func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.Reviewer, admin bool, verdict, comment string) error {
 	verdict = strings.TrimSpace(verdict)
 	if verdict != runnerwire.VerdictApprove && verdict != runnerwire.VerdictChanges {
 		return invalidf("verdict must be %q or %q", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
@@ -1129,6 +1134,11 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 	if len(comment) > 8<<10 {
 		return invalidf("the comment is at most 8192 bytes")
 	}
+	rec, err := o.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	allowed := admin || rec.CreatedBy == who.ID || rec.Policy.Review.AnyEditor
 	// A task whose pipeline waits for the person is decided by the pipeline
 	// (POST /api/runs/pipelines/:id/review does the same): approve ends it
 	// approved, changes starts its revise round. The pipeline's observer
@@ -1143,6 +1153,12 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 			if t.NodeID != nodeID || t.PipelineID == "" {
 				continue
 			}
+			if !allowed {
+				p, err := o.opts.Runs.Pipeline(ctx, t.PipelineID)
+				if err != nil || p.OwnerID != who.ID {
+					return ErrNotFound
+				}
+			}
 			if t.State != runnerwire.TaskWaitingHuman {
 				return conflictf("the task is not waiting for a review; it is %s", t.State)
 			}
@@ -1152,6 +1168,9 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 			o.Reconcile(ctx, id)
 			return nil
 		}
+	}
+	if !allowed {
+		return ErrNotFound
 	}
 	return o.taskAction(ctx, id, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
 		if t.State != runnerwire.TaskWaitingHuman {

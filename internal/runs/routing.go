@@ -128,6 +128,9 @@ func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 	if n := len(runnerwire.ReviewersOf(p)); p.Quorum < 0 || p.Quorum > n {
 		return invalidf("pipeline quorum must be 0 (all) to %d, the number of reviewers", n)
 	}
+	if p.HumanAnyEditor && !p.Human {
+		return invalidf("pipeline humanAnyEditor needs human review")
+	}
 	return nil
 }
 
@@ -137,7 +140,7 @@ func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 func ResolvePipeline(info *runnerwire.Info, p runnerwire.Pipeline, implementModel string) (runnerwire.Pipeline, error) {
 	out := runnerwire.Pipeline{
 		Implement: runnerwire.AgentModel{Agent: p.Implement.Agent, Model: implementModel},
-		MaxRounds: p.MaxRounds, Quorum: p.Quorum, Human: p.Human,
+		MaxRounds: p.MaxRounds, Quorum: p.Quorum, Human: p.Human, HumanAnyEditor: p.HumanAnyEditor,
 	}
 	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
 		model, err := ResolveAgentModel(info, p.Review)

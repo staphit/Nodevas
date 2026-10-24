@@ -73,6 +73,7 @@ var serverTools = map[string]serverToolSpec{
 			`"reviewers":{"type":"array","maxItems":5,"items":{"type":"object","properties":{` +
 			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
 			`"quorum":{"type":"integer","minimum":0},` +
+			`"anyEditor":{"type":"boolean","description":"Let anyone who may edit the project give the person's review, not only the person starting it, the runner's owner or an admin"},` +
 			`"autoMerge":{"type":"boolean","description":"Merge approved pull requests once CI is green"},` +
 			`"implement":{"type":"array","maxItems":3,"description":"Who implements every task: the first, then fallbacks","items":{"type":"object","properties":{` +
 			`"agent":{"type":"string"},"model":{"type":"string"}},"required":["agent","model"],"additionalProperties":false}},` +
@@ -395,6 +396,7 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 		ReviewMode  string                  `json:"reviewMode"`
 		Reviewers   []runnerwire.AgentModel `json:"reviewers"`
 		Quorum      int                     `json:"quorum"`
+		AnyEditor   bool                    `json:"anyEditor"`
 		AutoMerge   bool                    `json:"autoMerge"`
 		Implement   []runnerwire.AgentModel `json:"implement"`
 		Advisor     string                  `json:"advisor"`
@@ -411,7 +413,8 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	policy := runnerwire.AutopilotPolicy{
 		MaxParallel: in.MaxParallel, MaxRounds: defaultAutopilotRounds, AutoMerge: in.AutoMerge,
 		RunnerID: strings.TrimSpace(in.RunnerID), RepoID: strings.TrimSpace(in.RepoID),
-		Review: runnerwire.ReviewPolicy{Mode: in.ReviewMode, Reviewers: in.Reviewers, Quorum: in.Quorum},
+		Review: runnerwire.ReviewPolicy{Mode: in.ReviewMode, Reviewers: in.Reviewers, Quorum: in.Quorum,
+			AnyEditor: in.AnyEditor},
 	}
 	if policy.MaxParallel <= 0 {
 		policy.MaxParallel = defaultAutopilotParallel

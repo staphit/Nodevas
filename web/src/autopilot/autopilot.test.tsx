@@ -259,7 +259,17 @@ describe("policy", () => {
     );
     expect(sent.implement).toEqual([]);
     expect(sent.advisor).toBe("llm");
-    expect(sent.review).toEqual({ mode: "human", reviewers: [], quorum: 0 });
+    expect(sent.review).toEqual({ mode: "human", reviewers: [], quorum: 0, anyEditor: false });
+    // anyEditor goes out only where a person reviews.
+    expect(
+      normalizePolicy({ ...POLICY, review: { mode: "human", anyEditor: true } }, "advisor").review.anyEditor,
+    ).toBe(true);
+    expect(
+      normalizePolicy(
+        { ...POLICY, review: { mode: "agents", reviewers: [{ agent: "codex", model: "x" }], anyEditor: true } },
+        "advisor",
+      ).review.anyEditor,
+    ).toBe(false);
     const chain = normalizePolicy(
       {
         ...POLICY,
@@ -449,6 +459,7 @@ describe("panel", () => {
           mode: "agents+human",
           reviewers: [{ agent: "codex", model: "gpt-5.5" }],
           quorum: 0,
+          anyEditor: false,
         },
         maxParallel: 3,
         maxRounds: 2,

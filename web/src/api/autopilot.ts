@@ -28,6 +28,9 @@ export interface ReviewPolicy {
   reviewers?: AgentModel[];
   /** How many reviewers must approve; 0 means all of them. */
   quorum?: number;
+  /** Anyone who may change the project gives the person's review, not only
+   * the creator, the runner's owner or an administrator. */
+  anyEditor?: boolean;
 }
 
 /** "" picks by the implement chain, else the owner's routing rules; "llm"

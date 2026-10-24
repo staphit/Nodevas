@@ -242,9 +242,10 @@ func (a *API) skip(c *gin.Context) {
 	a.act(c, func(rec ap.Record) error { return a.o.Skip(c.Request.Context(), rec.ID, node) })
 }
 
-// review is a person's verdict on a task waiting for one. Any person who may
-// write the project may give it (the members gate has checked that), not
-// only the creator: reviewing is the point of asking a person.
+// review is a person's verdict on a task waiting for one: the autopilot's
+// creator, the runner's owner or an administrator may give it, and so may
+// anyone who may write the project (the members gate has checked that) when
+// the policy lets any editor review (Orchestrator.Review decides).
 func (a *API) review(c *gin.Context) {
 	if _, ok := person(c); !ok {
 		return
@@ -263,7 +264,7 @@ func (a *API) review(c *gin.Context) {
 	}
 	actor := auth.ActorFrom(c.Request)
 	who := runs.Reviewer{ID: actor.ID, Name: actor.Name}
-	if err := a.o.Review(c.Request.Context(), rec.ID, node, who, body.Verdict, body.Comment); err != nil {
+	if err := a.o.Review(c.Request.Context(), rec.ID, node, who, actor.IsAdmin(), body.Verdict, body.Comment); err != nil {
 		fail(c, err)
 		return
 	}

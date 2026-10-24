@@ -239,6 +239,40 @@ func TestRunPipelineHumanReview(t *testing.T) {
 	}
 }
 
+// A pipeline that lets any editor of its project review takes a teammate's
+// verdict; one that does not refuses it (TestRunPipelineHumanReview).
+func TestRunPipelineHumanReviewAnyEditor(t *testing.T) {
+	f := newRunsFixture(t)
+	conn := f.connect(t, routingHello(2))
+	impl := f.dispatch(t, f.bea, f.createBody(func(r *runnerwire.CreateRunRequest) {
+		r.Agent, r.Model = "", ""
+		r.Pipeline = &runnerwire.Pipeline{
+			Implement: runnerwire.AgentModel{Agent: "claude", Model: "opus"},
+			Human:     true, HumanAnyEditor: true,
+			MaxRounds: 1,
+		}
+	}))
+	expectOffer(t, conn, impl.ID)
+	implement(t, conn, impl.ID)
+	pingPong(t, conn)
+	f.waitPipeline(t, impl.PipelineID, runnerwire.PipelineWaitingHuman)
+	code, p := f.humanReview(t, f.cal, impl.PipelineID, runnerwire.VerdictApprove, "")
+	if code != http.StatusOK || p.Status != runnerwire.PipelineApproved {
+		t.Fatalf("cal reviewing with humanAnyEditor = %d %+v", code, p)
+	}
+
+	// humanAnyEditor without human review is refused.
+	if code := f.do(t, &f.bea, http.MethodPost, "/api/runs", f.createBody(func(r *runnerwire.CreateRunRequest) {
+		r.Agent, r.Model = "", ""
+		r.Pipeline = &runnerwire.Pipeline{
+			Implement: runnerwire.AgentModel{Agent: "claude", Model: "opus"},
+			Reviewers: []runnerwire.AgentModel{{Agent: "codex"}}, HumanAnyEditor: true, MaxRounds: 1,
+		}
+	}), nil).Code; code != http.StatusBadRequest {
+		t.Fatalf("humanAnyEditor without human = %d", code)
+	}
+}
+
 // A person alone, and a pipeline with no review at all.
 func TestRunPipelineHumanOnlyAndImplementOnly(t *testing.T) {
 	f := newRunsFixture(t)

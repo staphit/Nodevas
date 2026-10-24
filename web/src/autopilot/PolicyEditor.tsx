@@ -6,6 +6,7 @@ import {
   MAX_REVIEWERS,
   REVIEW_MODES,
   reviewHasAgents,
+  reviewHasHuman,
   type AgentModel,
   type AutopilotPolicy,
   type Runner,
@@ -259,6 +260,21 @@ export function PolicyEditor({
           </select>
         </label>
         <small className="run-hint">{t(`autopilot.reviewModeHint.${value.review.mode}`)}</small>
+        {reviewHasHuman(value.review.mode) && (
+          <label className="autopilot-check">
+            <input
+              type="checkbox"
+              checked={Boolean(value.review.anyEditor)}
+              onChange={(event) =>
+                onChange({ ...value, review: { ...value.review, anyEditor: event.target.checked } })
+              }
+            />
+            <span>
+              {t("autopilot.anyEditor")}
+              <small className="run-hint">{t("autopilot.anyEditorHint")}</small>
+            </span>
+          </label>
+        )}
         {agents && (
           <>
             <AgentModelList

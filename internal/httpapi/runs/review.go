@@ -23,7 +23,10 @@ const (
 // review records a person's verdict on a pipeline waiting for one (W7):
 // approve ends it approved, changes starts a revise round with the comment as
 // the review. Like a merge approval, it is a person's decision about agents'
-// work: an agent is refused, and so is anyone who may not see the pipeline.
+// work: an agent is refused, and so is anyone but the pipeline's creator, the
+// runner's owner or an administrator — unless the pipeline lets any editor of
+// its project review (humanAnyEditor), which the members gate has already
+// checked this caller is, for this project.
 func (a *API) review(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
@@ -49,7 +52,7 @@ func (a *API) review(c *gin.Context) {
 	}
 	p, err := a.d.Store().Pipeline(c.Request.Context(), c.Param("id"))
 	if errors.Is(err, runs.ErrNotFound) || (err == nil && (p.Project != projectName ||
-		!(actor.IsAdmin() || p.CreatedBy == actor.ID || p.OwnerID == actor.ID))) {
+		!(actor.IsAdmin() || p.CreatedBy == actor.ID || p.OwnerID == actor.ID || p.Pipeline.HumanAnyEditor))) {
 		notFound(c, "pipeline")
 		return
 	}

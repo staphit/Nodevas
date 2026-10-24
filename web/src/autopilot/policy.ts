@@ -5,6 +5,7 @@ import {
   MAX_REVIEWERS,
   REVIEW_MODES,
   reviewHasAgents,
+  reviewHasHuman,
   type AgentModel,
   type AutopilotPolicy,
 } from "../api";
@@ -96,6 +97,7 @@ export function normalizePolicy(policy: AutopilotPolicy, choice: ImplementChoice
       mode: policy.review.mode,
       reviewers: agents ? (policy.review.reviewers ?? []).map(trimAgentModel) : [],
       quorum: agents ? (policy.review.quorum ?? 0) : 0,
+      anyEditor: reviewHasHuman(policy.review.mode) ? Boolean(policy.review.anyEditor) : false,
     },
     maxParallel: policy.maxParallel,
     maxRounds: policy.maxRounds,

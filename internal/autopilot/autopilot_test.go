@@ -596,12 +596,22 @@ func TestHumanReview(t *testing.T) {
 	if got := task(v, "a"); got.State != runnerwire.TaskWaitingHuman || got.Stage != runnerwire.StageHuman {
 		t.Fatalf("waiting: %+v", got)
 	}
-	ann := runs.Reviewer{ID: "ann", Name: "Ann"}
-	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, "maybe", ""); !errors.Is(err, ErrInvalid) {
+	// Someone who is neither the creator, the runner's owner nor an
+	// administrator may not review unless the policy lets any editor; an
+	// administrator may.
+	cal := runs.Reviewer{ID: "cal", Name: "Cal"}
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", cal, false, runnerwire.VerdictApprove, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a stranger's review: %v", err)
+	}
+	if len(h.runs.reviews) != 0 {
+		t.Fatalf("a refused review reached the pipeline: %q", h.runs.reviews)
+	}
+	ann := runs.Reviewer{ID: "bea", Name: "Bea"} // the autopilot's creator
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, false, "maybe", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad verdict: %v", err)
 	}
 	// The pipeline decides: changes go to it as the person's review.
-	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, runnerwire.VerdictChanges, "Handle the empty list."); err != nil {
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, false, runnerwire.VerdictChanges, "Handle the empty list."); err != nil {
 		t.Fatal(err)
 	}
 	if len(h.runs.reviews) != 1 || h.runs.reviews[0] != a.PipelineID+" changes Handle the empty list." {
@@ -611,14 +621,14 @@ func TestHumanReview(t *testing.T) {
 	h.runs.pipelines[a.PipelineID].Status = runnerwire.PipelineWaitingHuman
 	h.runs.mu.Unlock()
 	h.view(v.Run.ID)
-	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, runnerwire.VerdictApprove, ""); err != nil {
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, false, runnerwire.VerdictApprove, ""); err != nil {
 		t.Fatal(err)
 	}
 	v = h.view(v.Run.ID)
 	if got := task(v, "a"); got.State != runnerwire.TaskSuccess {
 		t.Fatalf("approved: %+v %s", got, stageList(got))
 	}
-	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, runnerwire.VerdictApprove, ""); !errors.Is(err, ErrConflict) {
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", ann, false, runnerwire.VerdictApprove, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("second review: %v", err)
 	}
 }
@@ -807,5 +817,29 @@ func TestTaskKeepsAdvisorReason(t *testing.T) {
 	h.runs.update(a.RunID, func(r *runs.Record) { r.Status, r.StartedAt = runnerwire.RunRunning, h.runs.stampLocked() })
 	if got := task(h.view(v.Run.ID), "a"); got.Advisor != a.Advisor {
 		t.Fatalf("advisor after start = %q, want %q", got.Advisor, a.Advisor)
+	}
+}
+
+// A policy that lets any editor review lets a teammate give the person's
+// review; the pipeline it starts says so too (humanAnyEditor).
+func TestAnyEditorMayReview(t *testing.T) {
+	h := newHarness(t, newBoard([]string{"goal", "a"}, []string{"a>goal"}))
+	v := h.create(runnerwire.AutopilotPolicy{MaxRounds: 1,
+		Review: runnerwire.ReviewPolicy{Mode: runnerwire.ReviewHuman, AnyEditor: true}})
+	if st := h.runs.lastStart("a"); st.Body.Pipeline == nil || !st.Body.Pipeline.HumanAnyEditor {
+		t.Fatalf("pipeline = %+v", st.Body.Pipeline)
+	}
+	a := task(v, "a")
+	h.finishWithPR(a.RunID)
+	h.runs.mu.Lock()
+	h.runs.pipelines[a.PipelineID].Status = runnerwire.PipelineWaitingHuman
+	h.runs.mu.Unlock()
+	h.view(v.Run.ID)
+	cal := runs.Reviewer{ID: "cal", Name: "Cal"}
+	if err := h.o.Review(h.ctx, v.Run.ID, "a", cal, false, runnerwire.VerdictApprove, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.runs.reviews) != 1 {
+		t.Fatalf("reviews = %q", h.runs.reviews)
 	}
 }

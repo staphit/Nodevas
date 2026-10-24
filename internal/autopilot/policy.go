@@ -75,6 +75,7 @@ func pipelineFor(p runnerwire.AutopilotPolicy, implement runnerwire.AgentModel) 
 		return nil
 	}
 	pl := &runnerwire.Pipeline{Implement: implement, MaxRounds: p.MaxRounds, Human: humanReview(p)}
+	pl.HumanAnyEditor = pl.Human && p.Review.AnyEditor
 	if p.Review.Mode == runnerwire.ReviewAgents || p.Review.Mode == runnerwire.ReviewAgentsHuman {
 		pl.Reviewers, pl.Quorum = p.Review.Reviewers, p.Review.Quorum
 	}

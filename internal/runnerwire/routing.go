@@ -107,6 +107,11 @@ type Pipeline struct {
 	Quorum int `json:"quorum,omitempty"`
 	// Human has a person approve after the reviewers' quorum (or alone).
 	Human bool `json:"human,omitempty"`
+	// HumanAnyEditor lets anyone who may change the pipeline's project give
+	// that person's review. Without it only the pipeline's creator, the
+	// runner's owner or an administrator may: an approval can have the
+	// owner's runner merge, the way a merge approval does (W4).
+	HumanAnyEditor bool `json:"humanAnyEditor,omitempty"`
 }
 
 // ReviewersOf is a pipeline's reviewers: Reviewers, else Review when set.
