@@ -501,7 +501,13 @@ func serve(args []string) {
 		log.Fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}
 	srv.SetStepUpWindow(time.Duration(*stepUpMinutes) * time.Minute)
-	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler)
+	// Model calls can run on each person's own runner, with a key only
+	// their machine holds (runnerwire/llm.go).
+	var runnerLLM copilot.RunnerLLM
+	if relay := srv.RunnerLLM(); relay != nil {
+		runnerLLM = relay
+	}
+	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler, runnerLLM)
 	if err != nil {
 		log.Fatalf("copilot: %v", err)
 	}
@@ -649,6 +655,7 @@ func newCopilotService(
 	pm *project.ProjectManager,
 	database *db.DB,
 	router func() http.Handler,
+	runnerLLM copilot.RunnerLLM,
 ) (*copilot.Service, error) {
 	apiKey, err := secretEnvironment("NODEVAS_COPILOT_API_KEY")
 	if err != nil {
@@ -686,6 +693,7 @@ func newCopilotService(
 			},
 		},
 		NewProvider:         provider.New,
+		Remote:              runnerLLM,
 		DefaultModel:        provider.DefaultModel,
 		OpenBridge:          toolbridge.Open,
 		Handler:             router,

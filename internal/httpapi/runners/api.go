@@ -46,11 +46,20 @@ type API struct {
 	// runs applies what a runner reports about its runs. Nil means the
 	// socket speaks W0 only: hello and ping.
 	runs *runs.Dispatcher
+	// llm relays copilot model calls (WithLLM); nil drops their answers.
+	llm *runners.LLMRelay
 }
 
 // New builds the handler set. dispatcher may be nil.
 func New(reg *runners.Registry, dispatcher *runs.Dispatcher) *API {
 	return &API{reg: reg, runs: dispatcher}
+}
+
+// WithLLM relays copilot model calls made on runners (runnerwire/llm.go)
+// through relay. It returns a for chaining.
+func (a *API) WithLLM(relay *runners.LLMRelay) *API {
+	a.llm = relay
+	return a
 }
 
 // Register wires /api/runners and /api/runner/connect. The server's auth
@@ -198,7 +207,7 @@ func (a *API) connect(c *gin.Context) {
 	// hear who it is first.
 	s := &session{conn: conn}
 	welcome := runnerwire.Envelope{Type: runnerwire.TypeWelcome, Welcome: &runnerwire.Welcome{
-		RunnerID: runner.ID, Name: runner.Name, Owner: runner.OwnerName,
+		RunnerID: runner.ID, Name: runner.Name, Owner: runner.OwnerName, OwnerID: runner.OwnerID,
 	}}
 	if err := s.send(ctx, welcome); err != nil {
 		return
@@ -253,6 +262,12 @@ func (a *API) connect(c *gin.Context) {
 				slog.Warn("runner run message dropped",
 					slog.String("runner", runner.ID), slog.String("type", env.Type),
 					slog.String("run", runID(env)), slog.Any("error", err))
+			}
+		case runnerwire.TypeLLMDelta, runnerwire.TypeLLMDone:
+			// An answer to a copilot model call. One nobody waits for any
+			// more (cancelled, timed out) is dropped, never fatal.
+			if a.llm != nil {
+				_ = a.llm.Deliver(runner.ID, env)
 			}
 		case runnerwire.TypeTermOut:
 			if a.runs == nil {

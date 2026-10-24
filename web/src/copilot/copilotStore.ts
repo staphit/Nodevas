@@ -67,7 +67,8 @@ export interface PermissionRequest {
   submitting?: boolean;
 }
 
-export type ServerState = "unknown" | "disabled" | "ready";
+/** needsRunner: the copilot is on, but its model calls wait for this person's runner. */
+export type ServerState = "unknown" | "disabled" | "needsRunner" | "ready";
 
 /** The part of the state a turn event can change. */
 export interface TurnState {
@@ -403,7 +404,10 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   lastReply: null,
 
   setStatus: (status) =>
-    set({ status, serverState: status?.enabled ? "ready" : "disabled" }),
+    set({
+      status,
+      serverState: status?.enabled ? "ready" : status?.needsRunner ? "needsRunner" : "disabled",
+    }),
   setOpen: (open) => set({ open }),
   toggleOpen: () => set({ open: !get().open }),
   setConversations: (conversations) => set({ conversations }),

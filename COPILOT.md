@@ -116,7 +116,7 @@ All under `/api`, authenticated like every other route, JSON in.
 | `POST` | `/copilot/conversations/:id/turns/:turn/decisions` | `{requestId, decision, message?}` |
 | `POST` | `/copilot/conversations/:id/turns/:turn/client-results` | `{callId, output, isError}` |
 | `POST` | `/copilot/conversations/:id/turns/:turn/cancel` | stop the turn |
-| `GET`/`PUT` | `/copilot/settings` | admin: provider kind, model, base URL, effort, API key (write-only), allowBypass |
+| `GET`/`PUT` | `/copilot/settings` | admin: provider kind, model, base URL, effort, API key (write-only), allowBypass, keySource (`runner` \| `server` \| `auto`) |
 
 A conversation, transcript entry and turn belong to the account that created
 them; every other account gets 404.
@@ -197,6 +197,49 @@ The provider API key is stored with `internal/secrets` (AES-GCM, machine key),
 never in the database or `nodevas.yaml`. Environment overrides:
 `NODEVAS_COPILOT_PROVIDER`, `NODEVAS_COPILOT_MODEL`, `NODEVAS_COPILOT_BASE_URL`,
 `NODEVAS_COPILOT_API_KEY` (falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+
+## Key on the runner (`keySource`)
+
+The server need not hold a model key at all. With `keySource: runner` (and with
+`auto`, the default, whenever the server has no key), the turn loop, the
+permission gate and the tools stay on the server, but each **model call** goes
+to the speaker's own runner over its existing socket
+(`internal/runnerwire/llm.go`): `llm_request` carries the history and tool
+list, the runner calls the provider with a key that only that PC holds, and
+streams `llm_delta` fragments and one `llm_done` back. The server relays them
+into the turn (`internal/runners/llm.go`, `internal/copilot/remote.go`).
+
+On the PC:
+
+```sh
+nodevas runner set copilotProvider anthropic   # or openai
+nodevas runner set copilotModel claude-opus-5-5 # optional; the provider's default otherwise
+nodevas runner copilot-key                      # the key on stdin, never a flag
+nodevas runner                                  # restart; the hello now offers "llm"
+```
+
+`NODEVAS_COPILOT_API_KEY` in the runner's environment works instead of a
+stored key. `copilotBaseURL` points at an OpenAI-compatible server (Ollama,
+LM Studio: no key needed) or a proxy; it must be https, or http to the machine
+itself or the local network.
+
+What this guarantees, and what it does not:
+
+- The key never reaches the server: the hello names the provider and model,
+  never the key, and nothing on the wire carries one.
+- The runner decides the provider, base URL and model. A request that names
+  others is refused, so a server cannot point the key at another endpoint.
+- A call goes only to the speaker's own runner (the server picks among that
+  account's online runners, the most recently connected), and the runner
+  refuses a call for any account but its owner's (`Welcome.OwnerID`).
+- A server that is broken into can still make the runner spend its owner's
+  quota. The runner bounds that: two calls at once, 40 a minute, 64 000
+  output tokens per call, ten minutes per call, and a log line for each.
+- When the runner is offline, the copilot button stays and explains how to
+  start it (`status.needsRunner`); `runners-changed` refreshes the status.
+
+`keySource: server` keeps the old behaviour (the server's stored or
+environment key). The settings tab warns when the server holds a key.
 
 ## Configuration (`nodevas.yaml`)
 

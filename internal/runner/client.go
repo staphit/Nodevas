@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"nodevas/internal/copilot/provider"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -61,9 +62,16 @@ type Client struct {
 	// NewTerminal starts an interactive run's agent in a terminal; nil means
 	// a real pseudo-terminal. Tests swap in a fake.
 	NewTerminal TerminalStarter
+	// NewLLMProvider builds the copilot's model provider (llm.go); nil means
+	// provider.New. Tests swap in a fake.
+	NewLLMProvider func(provider.Config) (provider.Provider, error)
 
 	jobs *jobs
+	// limiter caps copilot model calls per minute across connections.
+	limiter llmLimiter
 }
+
+func (c *Client) llmLimiter() *llmLimiter { return &c.limiter }
 
 const (
 	defaultRedetect   = 5 * time.Minute
@@ -148,8 +156,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		return false, dialError(resp, err)
 	}
 	defer conn.CloseNow()
-	// Offers carry prompts of up to 64 KB; the hub caps every message at this.
-	conn.SetReadLimit(runnerwire.MaxMessageBytes)
+	// Offers carry prompts of up to 64 KB; the hub caps every message at this,
+	// except a copilot model call, which carries a whole conversation.
+	conn.SetReadLimit(max(runnerwire.MaxMessageBytes, runnerwire.MaxLLMRequestBytes))
 
 	info := BuildInfo(ctx, c.Commands, c.Config)
 	if err := c.hello(ctx, conn, info); err != nil {
@@ -178,6 +187,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 
 	welcomeDeadline := time.NewTimer(welcomeTimeout)
 	defer welcomeDeadline.Stop()
+	ownerID := ""
 	for !welcomed {
 		select {
 		case <-ctx.Done():
@@ -192,6 +202,7 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 			case runnerwire.TypeWelcome:
 				welcomed = true
 				if msg.Welcome != nil {
+					ownerID = msg.Welcome.OwnerID
 					c.jobs.setHubName(msg.Welcome.Name)
 					c.logf("connected to %s as %q (owner %s)", c.Config.Hub, msg.Welcome.Name, msg.Welcome.Owner)
 				} else {
@@ -203,6 +214,9 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 		}
 	}
 
+	// Copilot model calls on this connection (llm.go); stopped with it.
+	llm := c.newLLMSession(ctx, ownerID)
+	defer llm.stop()
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
@@ -246,6 +260,14 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				c.jobs.termInput(msg.RunID, msg.Term)
 			case runnerwire.TypeTermResize:
 				c.jobs.termResize(msg.RunID, msg.Term)
+			case runnerwire.TypeLLMRequest:
+				llm.request(msg.LLM)
+			case runnerwire.TypeLLMCancel:
+				llm.cancel(msg.LLMID)
+			}
+		case env := <-llm.out:
+			if err := c.write(ctx, conn, env); err != nil {
+				return true, err
 			}
 		case <-c.jobs.notify:
 			if err := flush(); err != nil {

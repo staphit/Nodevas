@@ -127,15 +127,30 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if err != nil {
 		return err
 	}
-	if reason := s.unavailableReason(settings, key); reason != "" {
-		return fmt.Errorf("%w: %s", ErrUnavailable, reason)
-	}
-	model, err := s.opts.NewProvider(provider.Config{
-		Kind: settings.Provider, Model: settings.Model, BaseURL: settings.BaseURL,
-		APIKey: key, Effort: settings.Effort,
-	})
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	var model provider.Provider
+	if effectiveKeySource(settings, key) == KeySourceRunner {
+		// The key is on the person's own runner, which makes the call; the
+		// server never sees it (remote.go).
+		if reason := s.baseUnavailableReason(); reason != "" {
+			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
+		}
+		runner, info, err := s.runnerTarget(ctx, req.Actor.ID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
+		model = &runnerProvider{remote: s.opts.Remote, runnerID: runner.ID, info: info,
+			accountID: req.Actor.ID, effort: settings.Effort}
+	} else {
+		if reason := s.unavailableReason(settings, key); reason != "" {
+			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
+		}
+		model, err = s.opts.NewProvider(provider.Config{
+			Kind: settings.Provider, Model: settings.Model, BaseURL: settings.BaseURL,
+			APIKey: key, Effort: settings.Effort,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		}
 	}
 
 	turnCtx, cancel := context.WithCancel(ctx)

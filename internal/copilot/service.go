@@ -61,6 +61,9 @@ type Options struct {
 	Defaults Defaults
 
 	NewProvider func(provider.Config) (provider.Provider, error)
+	// Remote reaches model calls made on runners, for KeySourceRunner
+	// (remote.go). Nil means only a server-held key works.
+	Remote RunnerLLM
 	// DefaultModel names a provider's default model when nothing else does.
 	DefaultModel func(kind string) string
 	OpenBridge   func(context.Context, toolbridge.Options) (toolbridge.Bridge, error)
@@ -129,6 +132,14 @@ type Status struct {
 	Modes       []Mode `json:"modes"`
 	AllowBypass bool   `json:"allowBypass"`
 	Reason      string `json:"reason,omitempty"`
+	// KeySource is where this person's model calls run: server or runner.
+	KeySource string `json:"keySource"`
+	// Runner names the runner that makes them, with KeySourceRunner.
+	Runner string `json:"runner,omitempty"`
+	// NeedsRunner: everything is in place but this person's runner, which
+	// is offline or has no copilot key. The panel says how to start it
+	// rather than hiding the copilot.
+	NeedsRunner bool `json:"needsRunner,omitempty"`
 }
 
 // Status reports whether the copilot can answer this person, and with what.
@@ -137,15 +148,41 @@ func (s *Service) Status(ctx context.Context, actor identity.Actor) (Status, err
 	if err != nil {
 		return Status{}, err
 	}
-	reason := s.unavailableReason(settings, key)
-	return Status{
-		Enabled:     reason == "",
+	source := effectiveKeySource(settings, key)
+	status := Status{
 		Provider:    settings.Provider,
 		Model:       settings.Model,
 		Modes:       availableModes(settings.AllowBypass),
 		AllowBypass: settings.AllowBypass,
-		Reason:      reason,
-	}, nil
+		KeySource:   source,
+	}
+	if source == KeySourceRunner {
+		status.Reason = s.baseUnavailableReason()
+		if status.Reason == "" {
+			runner, info, err := s.runnerTarget(ctx, actor.ID)
+			if err != nil {
+				status.Reason = err.Error()
+				status.NeedsRunner = s.opts.Remote != nil
+			} else {
+				status.Provider, status.Model, status.Runner = info.Provider, info.Model, runner.Name
+			}
+		}
+	} else {
+		status.Reason = s.unavailableReason(settings, key)
+	}
+	status.Enabled = status.Reason == ""
+	return status, nil
+}
+
+// baseUnavailableReason is what stops every turn whatever holds the key.
+func (s *Service) baseUnavailableReason() string {
+	switch {
+	case !s.opts.Defaults.Enabled:
+		return "the copilot is turned off in the server configuration (copilot.enabled)"
+	case s.opts.OpenBridge == nil:
+		return "this server was built without the copilot's tool bridge"
+	}
+	return ""
 }
 
 // unavailableReason says why no turn can run, or "" when one can.

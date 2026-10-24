@@ -72,16 +72,20 @@ type Registry struct {
 
 	mu   sync.Mutex
 	live map[string]Conn
+	// attached is when each live connection was attached: the copilot asks
+	// the most recently connected of a person's runners (llm.go).
+	attached map[string]time.Time
 }
 
 // NewRegistry builds a registry over the workspace database. notify, when set,
 // is called after anything a runners list would show has changed.
 func NewRegistry(database *db.DB, notify func()) *Registry {
 	return &Registry{
-		db:     database,
-		notify: notify,
-		now:    time.Now,
-		live:   make(map[string]Conn),
+		db:       database,
+		notify:   notify,
+		now:      time.Now,
+		live:     make(map[string]Conn),
+		attached: make(map[string]time.Time),
 	}
 }
 
@@ -335,6 +339,10 @@ func ValidateInfo(info runnerwire.Info) error {
 		}
 	}
 	var long []string
+	if llm := info.LLM; llm != nil {
+		short = append(short, llm.Provider, llm.Model)
+		long = append(long, llm.BaseURL)
+	}
 	for _, repo := range info.Repos {
 		if strings.TrimSpace(repo.ID) == "" {
 			return bad("has a repo without an id")
@@ -393,6 +401,7 @@ func (r *Registry) Attach(id string, conn Conn) (detach func()) {
 	r.mu.Lock()
 	previous := r.live[id]
 	r.live[id] = conn
+	r.attached[id] = r.now()
 	r.mu.Unlock()
 	if previous != nil {
 		previous.Bye(runnerwire.ByeReplaced)
@@ -405,6 +414,7 @@ func (r *Registry) Attach(id string, conn Conn) (detach func()) {
 			removed := r.live[id] == conn
 			if removed {
 				delete(r.live, id)
+				delete(r.attached, id)
 			}
 			r.mu.Unlock()
 			if removed {
@@ -437,6 +447,7 @@ func (r *Registry) kick(id, reason string) {
 	r.mu.Lock()
 	conn := r.live[id]
 	delete(r.live, id)
+	delete(r.attached, id)
 	r.mu.Unlock()
 	if conn != nil {
 		conn.Bye(reason)

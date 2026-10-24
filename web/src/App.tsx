@@ -20,6 +20,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
+import { runnersChanged as copilotRunnersChanged } from "./copilot/session";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
@@ -314,6 +315,8 @@ function MainApp() {
           // Only refetched once the Runners dialog has loaded them; a board
           // that never opened it has nothing to keep current.
           void useRunners.getState().refreshIfLoaded();
+          // The copilot's model calls may run on this person's runner.
+          copilotRunnersChanged();
           break;
         case "usage-changed":
           // A session reported its tokens: an open Usage dialog refetches.

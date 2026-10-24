@@ -106,6 +106,21 @@ type Config struct {
 	MergeMethod string `json:"mergeMethod,omitempty"`
 	// DeleteBranchOnMerge deletes the PR's branch on GitHub once merged.
 	DeleteBranchOnMerge bool `json:"deleteBranchOnMerge,omitempty"`
+
+	// The copilot's model calls (llm.go): this runner makes them for its
+	// owner with a key that stays on this machine.
+
+	// CopilotProvider is "anthropic" or "openai"; "" means the runner does
+	// not answer copilot model calls.
+	CopilotProvider string `json:"copilotProvider,omitempty"`
+	// CopilotModel is the model called; "" is the provider's default.
+	CopilotModel string `json:"copilotModel,omitempty"`
+	// CopilotBaseURL points the provider elsewhere (an OpenAI-compatible
+	// server, a proxy); "" is the vendor's own endpoint.
+	CopilotBaseURL string `json:"copilotBaseURL,omitempty"`
+	// CopilotAPIKey is the key, set with `nodevas runner copilot-key` from
+	// stdin and never printed. CopilotKeyEnv is used when it is empty.
+	CopilotAPIKey string `json:"copilotApiKey,omitempty"`
 }
 
 // Defaults and bounds for the run settings.
@@ -270,7 +285,8 @@ func (c *Config) PermissionModeFor(kind string) string {
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "antigravityMode",
 	"autoAccept", "interactive",
-	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
+	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
+	"copilotProvider", "copilotModel", "copilotBaseURL"}
 
 // Set changes one run setting from its command-line form. "default" resets
 // any of them. allowedTools takes one tool per value, or one value split at
@@ -296,6 +312,8 @@ func (c *Config) Set(key string, values []string) error {
 	value := strings.TrimSpace(values[0])
 	reset := strings.EqualFold(value, "default") && len(values) == 1
 	switch canonical {
+	case "copilotProvider", "copilotModel", "copilotBaseURL":
+		return c.setCopilot(canonical, value, reset)
 	case "maxConcurrent":
 		if reset {
 			c.MaxConcurrent = 0

@@ -83,6 +83,13 @@ type Envelope struct {
 
 	// Interactive terminal; see terminal.go.
 	Term *TermChunk `json:"term,omitempty"`
+
+	// Copilot model calls; see llm.go. LLMID names the call a TypeLLMCancel
+	// stops.
+	LLM      *LLMRequest `json:"llm,omitempty"`
+	LLMDelta *LLMDelta   `json:"llmDelta,omitempty"`
+	LLMDone  *LLMDone    `json:"llmDone,omitempty"`
+	LLMID    string      `json:"llmId,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -90,6 +97,9 @@ type Welcome struct {
 	RunnerID string `json:"runnerId"`
 	Name     string `json:"name"`
 	Owner    string `json:"owner"`
+	// OwnerID is the owner's account id: a runner answers copilot model
+	// calls (llm.go) for that account only.
+	OwnerID string `json:"ownerId,omitempty"`
 }
 
 // Info is what a runner reports about itself. The hub stores it as given and
@@ -108,6 +118,9 @@ type Info struct {
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
 	// AutoAccept is the runner's auto-accept allowlist (W6; remote.go).
 	AutoAccept *AutoAcceptPolicy `json:"autoAccept,omitempty"`
+	// LLM is the model the runner calls for its owner's copilot (llm.go),
+	// set with CapLLM; nil when it has no copilot key.
+	LLM *LLMInfo `json:"llm,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.

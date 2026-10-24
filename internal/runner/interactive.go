@@ -52,6 +52,9 @@ func capabilities(cfg *Config) []string {
 	if (cfg == nil || cfg.InteractiveOn()) && ptySupported() {
 		caps = append(caps, runnerwire.CapInteractive)
 	}
+	if _, _, reason := cfg.CopilotLLM(); reason == "" {
+		caps = append(caps, runnerwire.CapLLM)
+	}
 	return caps
 }
 

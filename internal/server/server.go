@@ -50,6 +50,8 @@ type Server struct {
 	// usage keeps agent sessions' token usage and the prices that cost it;
 	// nil until UseAgentsDB.
 	usage *usage.Store
+	// llm relays copilot model calls to runners; nil until UseRunnersDB.
+	llm *runners.LLMRelay
 	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
 	stepUpWindow time.Duration
 	// members is project membership (members.go); nil until UseMembersDB.
@@ -250,7 +252,12 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
+	s.llm = runners.NewLLMRelay(s.runners)
 }
+
+// RunnerLLM is the relay for copilot model calls made on runners, or nil
+// before UseRunnersDB.
+func (s *Server) RunnerLLM() *runners.LLMRelay { return s.llm }
 
 // SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).
 // Zero keeps the default. Call it before Handler.

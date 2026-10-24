@@ -70,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 		usageapi.New(s.pm, s.usage).Register(api)
 	}
 	if s.runners != nil {
-		runnersapi.New(s.runners, s.runs).Register(api)
+		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).Register(api)
 	}
 	if s.runs != nil {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)

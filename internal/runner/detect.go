@@ -347,7 +347,18 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		Capabilities:  capabilities(cfg),
 		MaxConcurrent: maxConcurrent,
 		AutoAccept:    autoAccept,
+		LLM:           copilotInfo(cfg),
 	}
+}
+
+// copilotInfo is what the hello says about the copilot's model calls (never
+// the key), or nil when this runner does not make them.
+func copilotInfo(cfg *Config) *runnerwire.LLMInfo {
+	info, _, reason := cfg.CopilotLLM()
+	if reason != "" {
+		return nil
+	}
+	return &info
 }
 
 // Version identifies this build: the module version when it has one, else the

@@ -46,6 +46,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerSet(args, stdout, stderr)
 	case "autoaccept", "auto-accept":
 		err = runnerAutoAccept(args, stdout, stderr)
+	case "copilot-key":
+		err = runnerCopilotKey(args, in, stdout, stderr)
 	case "agy-gate":
 		// Not for people: the PreToolUse hook of a headless Antigravity run
 		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
@@ -111,7 +113,13 @@ func runnerUsage(w io.Writer) {
                                              and {agent} are filled in; "none" for no labels),
                                              prPollSeconds (30 or more);
                                              remote merge: remoteMerge (true|false), mergeMethod
-                                             (squash|merge|rebase), deleteBranchOnMerge (true|false)
+                                             (squash|merge|rebase), deleteBranchOnMerge (true|false);
+                                             copilot: copilotProvider (anthropic|openai|none: this runner
+                                             makes your voice copilot's model calls with a key kept here),
+                                             copilotModel, copilotBaseURL (https, or http to this machine
+                                             or the local network)
+       nodevas runner copilot-key [--clear]  store the copilot's API key, read from stdin (never a flag);
+                                             the hub never sees it (or set NODEVAS_COPILOT_API_KEY here)
        every subcommand takes --config <file> (default: <user config dir>/nodevas/runner.json)
 `)
 }
@@ -345,6 +353,85 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("mergeMethod", cfg.MergeMethodOrDefault())
 	setting("deleteBranchOnMerge", cfg.DeleteBranchOnMerge)
 	printAutoAccept(w, cfg)
+	printCopilot(w, cfg)
+}
+
+// printCopilot shows the copilot settings; the key only as where it comes from.
+func printCopilot(w io.Writer, cfg *runner.Config) {
+	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
+	fmt.Fprintln(w, "copilot:")
+	if cfg.CopilotProvider == "" {
+		setting("copilotProvider", "none (the voice copilot's model calls are not made here)")
+		return
+	}
+	info, _, reason := cfg.CopilotLLM()
+	setting("copilotProvider", cfg.CopilotProvider)
+	model := cfg.CopilotModel
+	if model == "" {
+		model = "(default)"
+	}
+	setting("copilotModel", model)
+	base := cfg.CopilotBaseURL
+	if base == "" {
+		base = "(the vendor's own)"
+	}
+	setting("copilotBaseURL", base)
+	key := "none"
+	if _, source := cfg.CopilotKey(); source == "stored" {
+		key = "stored in this file"
+	} else if source == "environment" {
+		key = "from " + runner.CopilotKeyEnv
+	}
+	setting("copilotKey", key)
+	if reason != "" {
+		setting("state", "off: "+reason)
+	} else {
+		setting("state", fmt.Sprintf("on: your copilot's model calls run here (%s/%s)", info.Provider, info.Model))
+	}
+}
+
+// runnerCopilotKey stores (or with --clear forgets) the copilot's API key.
+// It is read from stdin so it is never on a command line, which every process
+// on the machine can read.
+func runnerCopilotKey(args []string, in *bufio.Reader, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("copilot-key")
+	clear := fs.Bool("clear", false, "forget the stored key")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	path, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	if *clear {
+		cfg.CopilotAPIKey = ""
+	} else {
+		if isTerminal(os.Stdin) {
+			fmt.Fprint(stderr, "copilot API key: ")
+		}
+		key, err := readSecretLine(in)
+		if err != nil {
+			return fmt.Errorf("reading the key from stdin: %w", err)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || len(key) > 4096 || strings.ContainsAny(key, " \t\r\n") {
+			return errors.New("that is not an API key")
+		}
+		cfg.CopilotAPIKey = key
+	}
+	if err := runner.SaveConfig(path, cfg); err != nil {
+		return err
+	}
+	if *clear {
+		fmt.Fprintln(stdout, "copilot key forgotten")
+	} else {
+		fmt.Fprintln(stdout, "copilot key saved")
+	}
+	if cfg.CopilotProvider == "" {
+		fmt.Fprintln(stdout, "set the provider too: nodevas runner set copilotProvider anthropic (or openai)")
+	}
+	fmt.Fprintln(stdout, "restart a running runner for it to take effect")
+	return nil
 }
 
 // runnerSet changes one run setting. A running runner reads its settings at
