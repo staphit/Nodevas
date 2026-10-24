@@ -77,7 +77,7 @@ func (Gemini) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = append(childEnv(), geminiSystemSettingsEnv+"="+settingsPath)
+	cmd.Env = jobEnv(job, geminiSystemSettingsEnv+"="+settingsPath)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}

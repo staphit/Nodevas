@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -45,17 +47,24 @@ func (SystemCommands) Run(ctx context.Context, name string, args ...string) (str
 }
 
 // Kinds are the agent CLIs the runner looks for, in the order it reports them.
-var Kinds = []string{"claude", "codex", "gemini"}
+// Each is looked up on PATH as adapter.Binary(kind).
+var Kinds = []string{"claude", "codex", "gemini", "opencode", "antigravity"}
 
 // versionTimeout bounds one `<cli> --version`. Some CLIs check for updates on
 // start; a hung check must not hold up the hello.
 const versionTimeout = 5 * time.Second
 
+// catalogTimeout bounds asking a CLI for its models. OpenCode loads its
+// plugins and agy asks its server, so they get longer than --version.
+const catalogTimeout = 15 * time.Second
+
 // DefaultModels is the built-in model list for an agent kind: "default" (no
 // model flag: whatever the CLI itself picks) first, then a few current IDs.
 // Claude Code's aliases are stable; the Codex and Gemini IDs date, which is
 // why the owner can replace any list in the config, and why Detect asks the
-// installed Codex for its own catalog first.
+// installed Codex, OpenCode and agy for their own catalogs first. OpenCode's
+// and agy's models depend on the owner's providers and plan, so they have no
+// built-in IDs.
 func DefaultModels(kind string) []runnerwire.Model {
 	models := []runnerwire.Model{{ID: "default", Label: "CLI default", Default: true}}
 	switch kind {
@@ -119,6 +128,112 @@ func codexCatalog(ctx context.Context, cmds CommandRunner, bin string) []runnerw
 	return models
 }
 
+// openCodeCatalog asks the installed OpenCode for the models its configured
+// providers offer: `opencode models` prints one provider/model per line. nil
+// means the command failed or listed nothing usable.
+func openCodeCatalog(ctx context.Context, cmds CommandRunner, bin string) []runnerwire.Model {
+	ctx, cancel := context.WithTimeout(ctx, catalogTimeout)
+	defer cancel()
+	out, err := cmds.Run(ctx, bin, "models")
+	if err != nil {
+		return nil
+	}
+	var ids, labels []string
+	for _, line := range strings.Split(strings.TrimPrefix(out, "\ufeff"), "\n") {
+		id := strings.TrimSpace(line)
+		if strings.Contains(id, "/") {
+			ids, labels = append(ids, id), append(labels, id)
+		}
+	}
+	return catalogModels(ids, labels)
+}
+
+// antigravityCatalog asks the installed agy for the models the owner's plan
+// has: `agy models` prints "<id>\t<label>" lines after a progress line.
+func antigravityCatalog(ctx context.Context, cmds CommandRunner, bin string) []runnerwire.Model {
+	ctx, cancel := context.WithTimeout(ctx, catalogTimeout)
+	defer cancel()
+	out, err := cmds.Run(ctx, bin, "models")
+	if err != nil {
+		return nil
+	}
+	var ids, labels []string
+	for _, line := range strings.Split(strings.TrimPrefix(out, "\ufeff"), "\n") {
+		id, label, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		id, label = strings.TrimSpace(id), strings.TrimSpace(label)
+		if label == "" {
+			label = id
+		}
+		ids, labels = append(ids, id), append(labels, label)
+	}
+	return catalogModels(ids, labels)
+}
+
+// catalogModels is a CLI's model list: "default" first, then each valid id
+// with its label, up to runnerwire.MaxModels. nil when none is valid.
+func catalogModels(ids, labels []string) []runnerwire.Model {
+	models := []runnerwire.Model{{ID: "default", Label: "CLI default", Default: true}}
+	for i, id := range ids {
+		if !validModelID(id) || len(models) >= runnerwire.MaxModels {
+			continue
+		}
+		models = append(models, runnerwire.Model{ID: id, Label: truncate(labels[i], 100)})
+	}
+	if len(models) == 1 {
+		return nil
+	}
+	return models
+}
+
+// AntigravityMCPRule is the permission rule agy needs in the owner's
+// settings for a headless run to call the nodevas tools; without it every
+// call is denied without asking.
+const AntigravityMCPRule = "mcp(nodevas/*)"
+
+// antigravitySettingsPath is agy's own settings file, where that rule lives.
+// Tests point it elsewhere.
+var antigravitySettingsPath = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".gemini", "antigravity-cli", "settings.json"), nil
+}
+
+// antigravityRunsBlocked says why agy cannot take runs here, or "" when its
+// settings allow the nodevas tools. The runner only reads the file; `nodevas
+// setup-agent --agents antigravity` is what adds the rule.
+func antigravityRunsBlocked() string {
+	const fix = "antigravity: runs need \"" + AntigravityMCPRule + "\" in permissions.allow of " +
+		"~/.gemini/antigravity-cli/settings.json; run `nodevas setup-agent --agents antigravity`"
+	path, err := antigravitySettingsPath()
+	if err != nil {
+		return fix
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fix
+	}
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &settings) != nil {
+		return fix + " (the file does not parse)"
+	}
+	for _, rule := range settings.Permissions.Allow {
+		switch strings.TrimSpace(rule) {
+		case AntigravityMCPRule, "mcp(*)":
+			return ""
+		}
+	}
+	return fix
+}
+
 // validModelID keeps a catalog entry to what a model flag plausibly takes.
 func validModelID(id string) bool {
 	if id == "" || len(id) > 100 || id == "default" {
@@ -164,7 +279,7 @@ func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.A
 	agents := make([]runnerwire.Agent, 0, len(Kinds))
 	for _, kind := range Kinds {
 		agent := runnerwire.Agent{Kind: kind, Models: ModelsFor(kind, cfg)}
-		bin, err := cmds.LookPath(kind)
+		bin, err := cmds.LookPath(adapter.Binary(kind))
 		if err != nil {
 			agents = append(agents, agent)
 			continue
@@ -173,14 +288,32 @@ func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.A
 		out, err := cmds.Run(runCtx, bin, "--version")
 		cancel()
 		if err != nil {
-			agent.Error = truncate(fmt.Sprintf("%s --version: %v", kind, err), 300)
-		} else {
-			agent.Installed = true
-			agent.Version = truncate(firstLine(out), 200)
-			if _, configured := cfg.modelsFor(kind); !configured && kind == "codex" {
-				if models := codexCatalog(ctx, cmds, bin); models != nil {
-					agent.Models = models
-				}
+			agent.Error = truncate(fmt.Sprintf("%s --version: %v", adapter.Binary(kind), err), 300)
+			agents = append(agents, agent)
+			continue
+		}
+		agent.Version = truncate(firstLine(out), 200)
+		if kind == "antigravity" {
+			if reason := antigravityRunsBlocked(); reason != "" {
+				// Every nodevas tool call would be denied: not usable for runs.
+				agent.Error = truncate(reason, 300)
+				agents = append(agents, agent)
+				continue
+			}
+		}
+		agent.Installed = true
+		if _, configured := cfg.modelsFor(kind); !configured {
+			var models []runnerwire.Model
+			switch kind {
+			case "codex":
+				models = codexCatalog(ctx, cmds, bin)
+			case "opencode":
+				models = openCodeCatalog(ctx, cmds, bin)
+			case "antigravity":
+				models = antigravityCatalog(ctx, cmds, bin)
+			}
+			if models != nil {
+				agent.Models = models
 			}
 		}
 		agents = append(agents, agent)

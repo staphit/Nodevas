@@ -115,7 +115,8 @@ const CapHeadless = "headless"
 
 // Agent is one agent CLI on the runner's machine.
 type Agent struct {
-	// Kind is "claude", "codex" or "gemini".
+	// Kind is "claude", "codex", "gemini", "opencode" or "antigravity" (the
+	// Antigravity CLI, agy).
 	Kind      string `json:"kind"`
 	Installed bool   `json:"installed"`
 	// Version is the CLI's own --version output, first line, trimmed.

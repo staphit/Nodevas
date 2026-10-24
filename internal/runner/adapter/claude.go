@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -76,7 +77,7 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// On stdin, not as an argument: no command-line length limit and no
 	// cmd.exe quoting for a prompt full of quotes and percent signs.
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = childEnv()
+	cmd.Env = jobEnv(job)
 	return cmd, nil
 }
 
@@ -95,6 +96,34 @@ func childEnv() []string {
 		out = append(out, kv)
 	}
 	return out
+}
+
+// RunIDEnv names the run an agent process belongs to. `nodevas hook` does
+// nothing while it is set, so the owner's own agent hooks (from `nodevas
+// setup-agent`) do not report a run as one of the owner's sessions.
+const RunIDEnv = "NODEVAS_RUN_ID"
+
+// jobEnv is childEnv for job's agent process: RunIDEnv set, and each of extra
+// ("NAME=value") in place of whatever the runner's environment had under that
+// name (names compared case-insensitively, as Windows does).
+func jobEnv(job runnerwire.Job, extra ...string) []string {
+	if job.RunID != "" {
+		extra = append([]string{RunIDEnv + "=" + job.RunID}, extra...)
+	}
+	names := make([]string, 0, len(extra))
+	for _, kv := range extra {
+		name, _, _ := strings.Cut(kv, "=")
+		names = append(names, name)
+	}
+	env := childEnv()
+	out := env[:0:0]
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, name) }) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, extra...)
 }
 
 // claudeParser reads `--output-format stream-json --verbose`: one JSON object

@@ -640,9 +640,9 @@ func TestRunDeclines(t *testing.T) {
 		mutate func(*runnerwire.Job)
 		reason string
 	}{
-		"d-repo":     {func(j *runnerwire.Job) { j.RepoID = "elsewhere" }, "not on this runner's allowlist"},
-		"d-opencode": {func(j *runnerwire.Job) { j.Agent = "opencode" }, `agent "opencode" not supported yet`},
-		"d-gemini":   {func(j *runnerwire.Job) { j.Agent = "gemini" }, `agent "gemini" is not installed on this runner`},
+		"d-repo":   {func(j *runnerwire.Job) { j.RepoID = "elsewhere" }, "not on this runner's allowlist"},
+		"d-aider":  {func(j *runnerwire.Job) { j.Agent = "aider" }, `agent "aider" not supported yet`},
+		"d-gemini": {func(j *runnerwire.Job) { j.Agent = "gemini" }, `agent "gemini" is not installed on this runner`},
 		// codex is supported and installed, but sonnet is not one of its models.
 		"d-codex": {func(j *runnerwire.Job) { j.Agent = "codex" }, `model "sonnet" is not one this runner offers for codex`},
 		"d-model": {func(j *runnerwire.Job) { j.Model = "gpt-9" }, `model "gpt-9" is not one this runner offers`},

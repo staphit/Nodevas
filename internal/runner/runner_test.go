@@ -136,7 +136,7 @@ func TestDetect(t *testing.T) {
 	}
 	cfg := &Config{Models: map[string][]runnerwire.Model{"gemini": {{ID: "gemini-x", Default: true}}}}
 	agents := Detect(context.Background(), cmds, cfg)
-	if len(agents) != 3 {
+	if len(agents) != len(Kinds) {
 		t.Fatalf("agents = %+v", agents)
 	}
 	claude, codex, gemini := agents[0], agents[1], agents[2]
@@ -149,6 +149,86 @@ func TestDetect(t *testing.T) {
 	}
 	if gemini.Installed || gemini.Error != "" || gemini.Models[0].ID != "gemini-x" {
 		t.Errorf("gemini = %+v", gemini)
+	}
+	for _, agent := range agents[3:] {
+		if agent.Installed || agent.Error != "" || len(agent.Models) != 1 || agent.Models[0].ID != "default" {
+			t.Errorf("%s = %+v", agent.Kind, agent)
+		}
+	}
+}
+
+// OpenCode lists its providers' models; agy lists its plan's, after a
+// progress line, and is only usable when its settings let headless runs call
+// the nodevas tools.
+func TestDetectOpenCodeAndAntigravity(t *testing.T) {
+	settings := filepath.Join(t.TempDir(), "settings.json")
+	old := antigravitySettingsPath
+	antigravitySettingsPath = func() (string, error) { return settings, nil }
+	t.Cleanup(func() { antigravitySettingsPath = old })
+
+	cmds := &fakeCommands{
+		paths: map[string]string{"opencode": "/bin/opencode", "agy": "/bin/agy"},
+		outputs: map[string]string{
+			"/bin/opencode --version": "1.18.23\n",
+			"/bin/opencode models":    "opencode/big-pickle\nmacmini/qwen3.8-27b-q4km\nnot a model\n",
+			"/bin/agy --version":      "1.4.6\n",
+			"/bin/agy models":         "Fetching available models...\ngemini-4-argon-high\tGemini 4 Argon (High)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n",
+		},
+	}
+	find := func(agents []runnerwire.Agent, kind string) runnerwire.Agent {
+		for _, a := range agents {
+			if a.Kind == kind {
+				return a
+			}
+		}
+		t.Fatalf("no %s in %+v", kind, agents)
+		return runnerwire.Agent{}
+	}
+	ids := func(models []runnerwire.Model) []string {
+		var out []string
+		for _, m := range models {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+
+	agents := Detect(context.Background(), cmds, nil)
+	opencode, agy := find(agents, "opencode"), find(agents, "antigravity")
+	if !opencode.Installed || opencode.Version != "1.18.23" ||
+		!slices.Equal(ids(opencode.Models), []string{"default", "opencode/big-pickle", "macmini/qwen3.8-27b-q4km"}) {
+		t.Errorf("opencode = %+v", opencode)
+	}
+	// No settings file: not usable, and the fix is named.
+	if agy.Installed || agy.Version != "1.4.6" || !strings.Contains(agy.Error, AntigravityMCPRule) ||
+		!strings.Contains(agy.Error, "nodevas setup-agent --agents antigravity") || slices.Contains(cmds.calls, "/bin/agy models") {
+		t.Errorf("antigravity without the rule = %+v", agy)
+	}
+
+	// With the rule (and a byte-order mark), it is, with its own catalog.
+	if err := os.WriteFile(settings, []byte("\ufeff"+`{"model":"x","permissions":{"allow":["command(git status)","mcp(nodevas/*)"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agy = find(Detect(context.Background(), cmds, nil), "antigravity")
+	if !agy.Installed || agy.Error != "" ||
+		!slices.Equal(ids(agy.Models), []string{"default", "gemini-4-argon-high", "claude-opus-5-5-low"}) ||
+		agy.Models[1].Label != "Gemini 4 Argon (High)" {
+		t.Errorf("antigravity = %+v", agy)
+	}
+
+	// Another server's rule is not enough.
+	if err := os.WriteFile(settings, []byte(`{"permissions":{"allow":["mcp(probe/*)"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if agy := find(Detect(context.Background(), cmds, nil), "antigravity"); agy.Installed {
+		t.Errorf("another server's rule: %+v", agy)
+	}
+
+	// A config list wins over the catalogs.
+	cfg := &Config{Models: map[string][]runnerwire.Model{"opencode": {{ID: "opencode/x", Default: true}}}}
+	cmds.calls = nil
+	if oc := find(Detect(context.Background(), cmds, cfg), "opencode"); !slices.Equal(ids(oc.Models), []string{"opencode/x"}) ||
+		slices.Contains(cmds.calls, "/bin/opencode models") {
+		t.Errorf("config list: %+v, calls %v", oc.Models, cmds.calls)
 	}
 }
 
@@ -215,6 +295,30 @@ func TestPermissionModeFor(t *testing.T) {
 		}
 	}
 	if cfg.CodexSandbox != "" || cfg.GeminiApprovalMode != "" || cfg.CodexIgnoreUserConfig {
+		t.Errorf("reset: %+v", cfg)
+	}
+	if cfg.PermissionModeFor("opencode") != "edit" || cfg.PermissionModeFor("antigravity") != "accept-edits" {
+		t.Errorf("defaults: %q %q", cfg.PermissionModeFor("opencode"), cfg.PermissionModeFor("antigravity"))
+	}
+	if err := cfg.Set("opencodePermission", []string{"FULL"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Set("antigravitymode", []string{"plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PermissionModeFor("opencode") != "full" || cfg.PermissionModeFor("antigravity") != "plan" {
+		t.Errorf("set: %+v", cfg)
+	}
+	if err := cfg.Set("antigravityMode", []string{"yolo"}); err == nil ||
+		!strings.Contains(err.Error(), "plan, accept-edits, auto, full") {
+		t.Errorf("bad mode: %v", err)
+	}
+	for _, key := range []string{"opencodePermission", "antigravityMode"} {
+		if err := cfg.Set(key, []string{"default"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cfg.OpenCodePermission != "" || cfg.AntigravityMode != "" {
 		t.Errorf("reset: %+v", cfg)
 	}
 	if err := cfg.Set("codexSandbox", []string{"workspace"}); err == nil ||
@@ -353,7 +457,7 @@ func TestClientHelloWelcomePing(t *testing.T) {
 
 	select {
 	case info := <-hub.hellos:
-		if len(info.Agents) != 3 || info.OS != runtime.GOOS || info.Version == "" {
+		if len(info.Agents) != len(Kinds) || info.OS != runtime.GOOS || info.Version == "" {
 			t.Errorf("hello = %+v", info)
 		}
 	case <-time.After(5 * time.Second):
@@ -468,4 +572,21 @@ func runWithTimeout(t *testing.T, client *Client) error {
 		t.Fatal("Run did not stop on its own")
 	}
 	return err
+}
+
+// A review runs read only wherever the CLI can; the log says how freely.
+func TestReviewPermission(t *testing.T) {
+	cfg := &Config{OpenCodePermission: "full", AntigravityMode: "full", CodexSandbox: "danger-full-access"}
+	for kind, want := range map[string]string{"codex": "read-only", "gemini": "default", "opencode": "read-only",
+		"antigravity": "plan", "claude": "acceptEdits"} {
+		if mode, text := reviewPermission(cfg, kind); mode != want || text == "" {
+			t.Errorf("%s: %q, %q; want %q", kind, mode, text, want)
+		}
+	}
+	if text := permissionText(cfg, "antigravity"); !strings.Contains(text, "every permission skipped") {
+		t.Errorf("antigravity text = %q", text)
+	}
+	if text := permissionText(cfg, "opencode"); text != "permission full" {
+		t.Errorf("opencode text = %q", text)
+	}
 }

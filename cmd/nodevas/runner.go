@@ -96,6 +96,9 @@ func runnerUsage(w io.Writer) {
                                              Codex: codexSandbox (read-only|workspace-write|
                                              danger-full-access), codexIgnoreUserConfig (true|false);
                                              Gemini CLI: geminiApprovalMode (default|auto_edit|yolo);
+                                             OpenCode: opencodePermission (read-only|edit|full);
+                                             Antigravity CLI (agy): antigravityMode (plan|accept-edits|
+                                             auto|full; full skips every permission);
                                              pull requests: autoPR (true|false), prDraft (true|false),
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
@@ -310,6 +313,10 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("codexIgnoreUserConfig", fmt.Sprintf("%t (%s)", cfg.CodexIgnoreUserConfig, codexConfig))
 	fmt.Fprintln(w, "gemini runs:")
 	setting("geminiApprovalMode", cfg.GeminiApproval())
+	fmt.Fprintln(w, "opencode runs:")
+	setting("opencodePermission", cfg.OpenCodePermissionMode())
+	fmt.Fprintln(w, "antigravity runs:")
+	setting("antigravityMode", cfg.AntigravityModeOrDefault())
 	labels := "(none)"
 	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
 		labels = strings.Join(templates, ", ")
@@ -369,6 +376,15 @@ func runnerSet(args []string, stdout, stderr io.Writer) error {
 	}
 	if cfg.GeminiApprovalMode == "yolo" {
 		fmt.Fprintln(stderr, "note: yolo lets Gemini runs run any command on this machine without asking.")
+	}
+	if cfg.OpenCodePermission == "full" {
+		fmt.Fprintln(stderr, "note: full lets OpenCode runs run any command on this machine without asking.")
+	}
+	switch cfg.AntigravityMode {
+	case "full":
+		fmt.Fprintln(stderr, "note: full lets Antigravity runs use every tool, any command included, without asking.")
+	case "auto":
+		fmt.Fprintln(stderr, "note: auto lets Antigravity runs run the commands agy judges safe without asking.")
 	}
 	fmt.Fprintln(stdout, "saved; restart a running runner for it to take effect")
 	return nil

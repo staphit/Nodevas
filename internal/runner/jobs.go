@@ -425,9 +425,9 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
 	}
 	ad := j.c.adapterFor(job.Agent)
-	bin, err := j.c.Commands.LookPath(job.Agent)
+	bin, err := j.c.Commands.LookPath(adapter.Binary(job.Agent))
 	if err != nil {
-		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", job.Agent)
+		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", adapter.Binary(job.Agent))
 	}
 	proxy, err := j.proxyFor()
 	if err != nil {
@@ -545,14 +545,19 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire
 // reviewPermission is how freely a review's agent may act: read only where
 // the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
 // approval mode, under which an edit needs an approval nobody can give
-// headless), the owner's setting otherwise. The prompt forbids edits either
-// way, and the review's worktree is thrown away after.
+// headless; OpenCode with edits and the shell denied; agy's plan mode), the
+// owner's setting otherwise. The prompt forbids edits either way, and the
+// review's worktree is thrown away after.
 func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	switch kind {
 	case "codex":
 		return "read-only", "sandbox read-only for a review"
 	case "gemini":
 		return "default", "approval mode default for a review"
+	case "opencode":
+		return "read-only", "permission read-only for a review"
+	case "antigravity":
+		return "plan", "mode plan for a review"
 	}
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
@@ -568,6 +573,14 @@ func permissionText(cfg *Config, kind string) string {
 		return text
 	case "gemini":
 		return "approval mode " + cfg.GeminiApproval()
+	case "opencode":
+		return "permission " + cfg.OpenCodePermissionMode()
+	case "antigravity":
+		mode := cfg.AntigravityModeOrDefault()
+		if mode == "full" {
+			return "mode full (accept-edits, every permission skipped)"
+		}
+		return "mode " + mode
 	}
 	return "permission mode " + cfg.ClaudePermissionMode()
 }

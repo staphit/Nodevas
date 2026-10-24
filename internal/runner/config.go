@@ -64,6 +64,12 @@ type Config struct {
 	CodexIgnoreUserConfig bool `json:"codexIgnoreUserConfig,omitempty"`
 	// GeminiApprovalMode is Gemini CLI's --approval-mode for every run.
 	GeminiApprovalMode string `json:"geminiApprovalMode,omitempty"`
+	// OpenCodePermission is how freely OpenCode runs may act: read-only,
+	// edit or full (adapter.OpenCodePermissionModes).
+	OpenCodePermission string `json:"opencodePermission,omitempty"`
+	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
+	// (adapter.AntigravityModes).
+	AntigravityMode string `json:"antigravityMode,omitempty"`
 	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
 	// offers are taken without asking at the terminal. nil means off. W1's
 	// boolean form is migrated on load.
@@ -228,6 +234,22 @@ func (c *Config) GeminiApproval() string {
 	return c.GeminiApprovalMode
 }
 
+// OpenCodePermissionMode is OpenCodePermission with its default applied.
+func (c *Config) OpenCodePermissionMode() string {
+	if c.OpenCodePermission == "" {
+		return adapter.DefaultOpenCodePermission
+	}
+	return c.OpenCodePermission
+}
+
+// AntigravityModeOrDefault is AntigravityMode with its default applied.
+func (c *Config) AntigravityModeOrDefault() string {
+	if c.AntigravityMode == "" {
+		return adapter.DefaultAntigravityMode
+	}
+	return c.AntigravityMode
+}
+
 // PermissionModeFor is the owner's permission setting for an agent kind, as
 // adapter.RunEnv.PermissionMode takes it.
 func (c *Config) PermissionModeFor(kind string) string {
@@ -236,13 +258,18 @@ func (c *Config) PermissionModeFor(kind string) string {
 		return c.CodexSandboxMode()
 	case "gemini":
 		return c.GeminiApproval()
+	case "opencode":
+		return c.OpenCodePermissionMode()
+	case "antigravity":
+		return c.AntigravityModeOrDefault()
 	}
 	return c.ClaudePermissionMode()
 }
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
-	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "autoAccept", "interactive",
+	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "antigravityMode",
+	"autoAccept", "interactive",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge"}
 
 // Set changes one run setting from its command-line form. "default" resets
@@ -339,6 +366,26 @@ func (c *Config) Set(key string, values []string) error {
 			return err
 		}
 		c.GeminiApprovalMode = mode
+	case "opencodePermission":
+		if reset {
+			c.OpenCodePermission = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.OpenCodePermissionModes)
+		if err != nil {
+			return err
+		}
+		c.OpenCodePermission = mode
+	case "antigravityMode":
+		if reset {
+			c.AntigravityMode = ""
+			return nil
+		}
+		mode, err := oneOf(canonical, value, adapter.AntigravityModes)
+		if err != nil {
+			return err
+		}
+		c.AntigravityMode = mode
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil

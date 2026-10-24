@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -118,7 +119,7 @@ func (Claude) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Env = append(childEnv(), terminalEnv...)
+	cmd.Env = jobEnv(job, terminalEnv...)
 	// Unlike headless claude, the prompt is on the command line: through a
 	// .cmd shim it must go through the explicit cmd.exe command line.
 	if err := wrapBatch(cmd); err != nil {
@@ -180,7 +181,7 @@ func (Codex) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, erro
 	)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Env = append(childEnv(), terminalEnv...)
+	cmd.Env = jobEnv(job, terminalEnv...)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("codex: %w", err)
 	}
@@ -224,7 +225,7 @@ func (Gemini) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 	args = append(args, "-i", prompt)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
-	cmd.Env = append(append(childEnv(), terminalEnv...), geminiSystemSettingsEnv+"="+settingsPath)
+	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), geminiSystemSettingsEnv+"="+settingsPath)...)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
@@ -234,3 +235,85 @@ func (Gemini) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, err
 // terminalEnv tells a TUI what it is drawing on: the hub's browser terminal
 // is xterm.js, which speaks xterm-256color and truecolor.
 var terminalEnv = []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
+
+// InteractiveCommand starts the OpenCode TUI:
+//
+//	opencode <worktree> [-m <provider/model>] --prompt <prompt>
+//
+// with OPENCODE_CONFIG_CONTENT as for a headless run, except that what a
+// headless run denies is asked about: someone is at the terminal. Checked
+// against opencode 1.18.23's `opencode --help` ("opencode [project]": start
+// the TUI; --prompt: prompt to use). npm installs opencode as a .cmd shim on
+// Windows, so a prompt cmd.exe cannot pass on goes in the task file; reading
+// it, outside the worktree, is one of the things OpenCode asks about.
+func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+	if env.Binary == "" || env.Workdir == "" {
+		return nil, fmt.Errorf("opencode: binary and workdir are required")
+	}
+	config, err := openCodeConfig(env, true)
+	if err != nil {
+		return nil, err
+	}
+	prompt, _, err := initialPrompt(env.Binary, InteractivePrompt(job, env.Branch), env.TempDir)
+	if err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
+	args := []string{env.Workdir}
+	if job.Model != "" && job.Model != "default" {
+		args = append(args, "-m", job.Model)
+	}
+	args = append(args, "--prompt", prompt)
+	cmd := exec.Command(env.Binary, args...)
+	cmd.Dir = env.Workdir
+	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), "PWD="+env.Workdir, openCodeConfigEnv+"="+config)...)
+	if err := wrapBatch(cmd); err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
+	return cmd, nil
+}
+
+// InteractiveCommand starts the Antigravity CLI's TUI:
+//
+//	agy -i=<prompt> --mode=<mode> [--dangerously-skip-permissions] [--model=<id>]
+//	    --add-dir=<root> [--add-dir=<temp dir>]
+//
+// with the same customization root and RunMCPEnv as a headless run. Checked
+// against agy 1.4.6's --help (-i/--prompt-interactive: "run an initial prompt
+// interactively and continue the session"). The = forms keep a prompt that
+// starts with a dash a value.
+func (Antigravity) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
+		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
+	}
+	root, err := writeAntigravityRoot(env)
+	if err != nil {
+		return nil, err
+	}
+	modeArgs, err := antigravityModeArgs(env.PermissionMode)
+	if err != nil {
+		return nil, err
+	}
+	prompt, inFile, err := initialPrompt(env.Binary, InteractivePrompt(job, env.Branch), env.TempDir)
+	if err != nil {
+		return nil, fmt.Errorf("antigravity: %w", err)
+	}
+	args := append([]string{"-i=" + prompt}, modeArgs...)
+	if job.Model != "" && job.Model != "default" {
+		args = append(args, "--model="+job.Model)
+	}
+	args = append(args, "--add-dir="+root)
+	if inFile {
+		args = append(args, "--add-dir="+env.TempDir)
+	}
+	extra, err := antigravityEnv(env)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(env.Binary, args...)
+	cmd.Dir = env.Workdir
+	cmd.Env = jobEnv(job, append(slices.Clone(terminalEnv), extra...)...)
+	if err := wrapBatch(cmd); err != nil {
+		return nil, fmt.Errorf("antigravity: %w", err)
+	}
+	return cmd, nil
+}

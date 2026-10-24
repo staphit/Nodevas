@@ -90,7 +90,7 @@ func (Codex) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = childEnv()
+	cmd.Env = jobEnv(job)
 	if err := wrapBatch(cmd); err != nil {
 		return nil, fmt.Errorf("codex: %w", err)
 	}

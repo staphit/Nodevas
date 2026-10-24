@@ -21,6 +21,10 @@ func TestClassifyFixtures(t *testing.T) {
 		{"claude max turns", Claude{}, "claude_error.jsonl", runnerwire.FailureTask},
 		// gemini_error.jsonl is written from the CLI's docs, not recorded.
 		{"gemini quota", Gemini{}, "gemini_error.jsonl", runnerwire.FailureQuota},
+		// Real opencode 1.18.23 output: the model's provider is unreachable.
+		{"opencode provider down", OpenCode{}, "opencode_error.jsonl", runnerwire.FailureModel},
+		// Real agy 1.4.6 output: an executor error, nothing another model fixes.
+		{"antigravity executor", Antigravity{}, "antigravity_error.jsonl", runnerwire.FailureTask},
 	}
 	for _, c := range cases {
 		_, outcome := parseWith(t, c.adapter.NewParser(), c.fixture)
@@ -79,6 +83,22 @@ func TestClassifyTables(t *testing.T) {
 			{"models/gemini-9-pro is not found for API version v1beta", runnerwire.FailureModel},
 			{"Please set an Auth method in your settings.json or specify GEMINI_API_KEY", runnerwire.FailureAgentAbsent},
 			{"Tool execution failed: npm test exited 1", runnerwire.FailureTask},
+		}},
+		{OpenCode{}, []row{
+			{"ProviderModelNotFoundError: Model not found: opencode/nope", runnerwire.FailureModel},
+			{"ProviderAuthError: Anthropic API key is missing", runnerwire.FailureAgentAbsent},
+			{"APIError: 401 Unauthorized", runnerwire.FailureAgentAbsent},
+			{"APIError: Rate limit exceeded, retry later (HTTP 429)", runnerwire.FailureRateLimit},
+			{"APIError: insufficient_quota (HTTP 429)", runnerwire.FailureQuota},
+			{"'node' is not recognized as an internal or external command,", runnerwire.FailureAgentAbsent},
+			{"tests failed after the edit", runnerwire.FailureTask},
+		}},
+		{Antigravity{}, []row{
+			{"Print mode: not authenticated, trying silent auth", runnerwire.FailureAgentAbsent},
+			{`AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED: quota exceeded for this model","status":"RESOURCE_EXHAUSTED"}`, runnerwire.FailureQuota},
+			{`AGY_ERROR: {"short_error":"too many requests","status":"RESOURCE_EXHAUSTED","error_code":8}`, runnerwire.FailureRateLimit},
+			{"model gemini-9 not found", runnerwire.FailureModel},
+			{"the design in the brief is incomplete", runnerwire.FailureTask},
 		}},
 	}
 	for _, table := range tables {

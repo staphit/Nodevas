@@ -210,13 +210,19 @@ func TestClaudeCommand(t *testing.T) {
 }
 
 func TestForAndTruncate(t *testing.T) {
-	for _, kind := range []string{"claude", "codex", "gemini"} {
+	for _, kind := range []string{"claude", "codex", "gemini", "opencode", "antigravity"} {
 		if a := For(kind); a == nil || a.Kind() != kind {
 			t.Errorf("For(%q) = %v", kind, a)
 		}
+		if _, ok := For(kind).(Interactive); !ok {
+			t.Errorf("%s has no interactive command", kind)
+		}
 	}
-	if For("opencode") != nil || For("") != nil {
+	if For("aider") != nil || For("") != nil {
 		t.Error("For")
+	}
+	if Binary("antigravity") != "agy" || Binary("opencode") != "opencode" || Binary("claude") != "claude" {
+		t.Error("Binary")
 	}
 	if got := Truncate("héllo", 2); got != "h" {
 		t.Errorf("Truncate = %q", got)

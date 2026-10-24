@@ -5,7 +5,9 @@
 //
 // See docs/nodevas-workstation-plan.md, "Agent adapter". The Claude and Codex
 // flags were checked against the CLIs' own --help, because these CLIs change
-// quickly; the Gemini adapter follows the CLI's docs only (see gemini.go).
+// quickly; the OpenCode (1.18.23) and Antigravity CLI (agy 1.4.6) adapters
+// against real runs, whose output is in testdata; the Gemini adapter follows
+// the CLI's docs only (see gemini.go).
 package adapter
 
 import (
@@ -97,8 +99,21 @@ func For(kind string) Adapter {
 		return Codex{}
 	case "gemini":
 		return Gemini{}
+	case "opencode":
+		return OpenCode{}
+	case "antigravity":
+		return Antigravity{}
 	}
 	return nil
+}
+
+// Binary is the program an agent kind runs as, for a PATH lookup: the kind
+// itself, except the Antigravity CLI, which installs as agy.
+func Binary(kind string) string {
+	if kind == "antigravity" {
+		return "agy"
+	}
+	return kind
 }
 
 // Prompt is what the agent is told: the runner's preamble, then the task as

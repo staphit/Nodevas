@@ -209,11 +209,19 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	if code != 0 || !strings.Contains(stderr, "yolo lets Gemini runs run any command") {
 		t.Fatalf("geminiApprovalMode yolo: exit %d, stderr %q", code, stderr)
 	}
+	code, _, stderr = runRunner(t, "", "set", "opencodePermission", "full", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, "full lets OpenCode runs run any command") {
+		t.Fatalf("opencodePermission full: exit %d, stderr %q", code, stderr)
+	}
+	code, _, stderr = runRunner(t, "", "set", "antigravityMode", "full", "--config", cfgPath)
+	if code != 0 || !strings.Contains(stderr, "full lets Antigravity runs use every tool") {
+		t.Fatalf("antigravityMode full: exit %d, stderr %q", code, stderr)
+	}
 	_, stdout, _ = runRunner(t, "", "status", "--config", cfgPath)
 	for _, want := range []string{"maxConcurrent          2", "runTimeoutMinutes      30", "permissionMode         plan",
 		"allowedTools           Edit, Bash(go test *)", "agents                 claude", "runner-data",
 		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
-		"geminiApprovalMode     yolo", "autoPR                 false (commit only", "prDraft                true",
+		"geminiApprovalMode     yolo", "opencodePermission     full", "antigravityMode        full", "autoPR                 false (commit only", "prDraft                true",
 		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60",
 		"remoteMerge            false (approvals on the hub are refused", "mergeMethod            rebase",
 		"deleteBranchOnMerge    true"} {
@@ -224,6 +232,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 
 	for _, bad := range [][]string{{"set"}, {"set", "maxConcurrent"}, {"set", "bogus", "1"}, {"set", "permissionMode", "yolo"},
 		{"set", "codexSandbox", "full"}, {"set", "codexIgnoreUserConfig", "maybe"}, {"set", "geminiApprovalMode", "plan"},
+		{"set", "opencodePermission", "yolo"}, {"set", "antigravityMode", "edit"},
 		{"set", "autoPR", "maybe"}, {"set", "prPollSeconds", "10"}, {"set", "prDraft", "x", "y"},
 		{"set", "remoteMerge", "maybe"}, {"set", "mergeMethod", "fast-forward"}, {"set", "deleteBranchOnMerge", "x"}} {
 		if code, _, _ := runRunner(t, "", append(bad, "--config", cfgPath)...); code == 0 {

@@ -90,3 +90,33 @@ func (Codex) Classify(text string) string { return classify(codexFailures, text)
 
 // Classify sorts a failed Gemini CLI run.
 func (Gemini) Classify(text string) string { return classify(geminiFailures, text) }
+
+// openCodeFailures reads OpenCode's error lines, "<name>: <message>" (a
+// provider it cannot reach: "APIError: Cannot connect to API: Unable to
+// connect", ProviderModelNotFoundError, ProviderAuthError) and its stderr.
+// A provider that cannot be reached is the model's problem, not the task's:
+// another model, on another provider, may work.
+var openCodeFailures = append([]failureRule{
+	rule(runnerwire.FailureAgentAbsent, `providerautherror|not authenticated|not logged in|no api key|api key.{0,40}(missing|invalid|not set)|`+
+		`invalid api key|\b401\b|unauthori[sz]ed`),
+	rule(runnerwire.FailureModel, `providermodelnotfounderror|provideriniterror|model.{0,60}(not found|does not exist|not supported|not available)|`+
+		`unknown model|cannot connect to api|unable to connect|econnrefused`),
+	rule(runnerwire.FailureQuota, `insufficient_quota|quota|usage limit|credit|billing`),
+	rule(runnerwire.FailureRateLimit, `rate.?limit|too many requests|`+http429+`|overloaded|\b529\b`),
+}, shellMissing...)
+
+// antigravityFailures reads agy's result error and its stderr ("Print mode:
+// not authenticated", AGY_ERROR lines with a gRPC status such as
+// RESOURCE_EXHAUSTED).
+var antigravityFailures = append([]failureRule{
+	rule(runnerwire.FailureAgentAbsent, `not authenticated|unauthenticated|\bsign(ed)? in\b|log ?in required|auth_revoked|\b401\b`),
+	rule(runnerwire.FailureModel, `model.{0,60}(not found|does not exist|not supported|not available|unknown)|unknown model|invalid model`),
+	rule(runnerwire.FailureQuota, `quota|usage limit|credits?\b|billing`),
+	rule(runnerwire.FailureRateLimit, `resource_exhausted|rate.?limit|too many requests|`+http429+`|overloaded|\b503\b`),
+}, shellMissing...)
+
+// Classify sorts a failed OpenCode run.
+func (OpenCode) Classify(text string) string { return classify(openCodeFailures, text) }
+
+// Classify sorts a failed Antigravity CLI run.
+func (Antigravity) Classify(text string) string { return classify(antigravityFailures, text) }
