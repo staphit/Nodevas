@@ -167,6 +167,8 @@ func writeAntigravityRoot(env RunEnv, gate bool) (string, error) {
 // usage and any actions headless mode denied.
 type antigravityParser struct {
 	outcome Outcome
+	// model is the model the init line named.
+	model string
 	// textStep is the agent_response step whose deltas are in pending.
 	textStep int
 	pending  strings.Builder
@@ -257,6 +259,9 @@ func (p *antigravityParser) Parse(line []byte) []runnerwire.RunEvent {
 	}
 	switch msg.Event {
 	case "init":
+		if msg.Init != nil {
+			p.model = strings.TrimSpace(msg.Init.Model)
+		}
 		text := "antigravity session started"
 		if msg.ConversationID != "" {
 			text += " " + msg.ConversationID
@@ -386,6 +391,7 @@ func (p *antigravityParser) result(r *antigravityResult) []runnerwire.RunEvent {
 			InputTokens:     max(u.InputTokens-u.CacheReadTokens, 0),
 			OutputTokens:    u.OutputTokens,
 			CacheReadTokens: u.CacheReadTokens,
+			Model:           p.model,
 		}
 		p.outcome.Usage = usage
 		copied := *usage

@@ -49,7 +49,8 @@ func TestGeminiParseStream(t *testing.T) {
 		t.Errorf("warning = %q", events[6].Text)
 	}
 	usage := events[len(events)-1].Usage
-	if usage == nil || usage.InputTokens != 4000 || usage.CacheReadTokens != 8000 || usage.OutputTokens != 500 {
+	if usage == nil || usage.InputTokens != 4000 || usage.CacheReadTokens != 8000 || usage.OutputTokens != 500 ||
+		usage.Model != "gemini-2.5-pro" {
 		t.Errorf("usage = %+v", usage)
 	}
 	if !outcome.Done || outcome.IsError || outcome.Summary != "Created hello.txt and marked the node done." ||

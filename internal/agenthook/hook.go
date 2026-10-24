@@ -83,6 +83,13 @@ type Input struct {
 	// files it wrote, as its input names them (see EditedFiles).
 	ToolName string
 	Files    []string
+	// TranscriptPath is the agent's transcript of the session, when its
+	// payload names it (Claude Code, Codex: transcript_path; Antigravity:
+	// transcriptPath): where SessionUsage reads the tokens used.
+	TranscriptPath string
+	// Usage is the session's usage as the agent passed it in (OpenCode's
+	// plugin), in place of a transcript.
+	Usage []mcp.SessionModelUsage
 }
 
 // ParseInput reads an agent's hook payload leniently: a byte-order mark
@@ -140,6 +147,13 @@ func ParseInput(raw []byte) Input {
 			break
 		}
 	}
+	for _, k := range []string{"transcript_path", "transcriptPath"} {
+		if s := str(k); s != "" {
+			in.TranscriptPath = filepath.Clean(s)
+			break
+		}
+	}
+	in.Usage = parseUsage(v["usage"])
 	in.StopHookActive, _ = v["stop_hook_active"].(bool)
 	if n, ok := v["executionNum"].(float64); ok && n > 0 {
 		in.StopHookActive = true
@@ -237,6 +251,9 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	}
 
 	if event == EventSessionEnd {
+		// The last word on what the session used, while it is still there
+		// to count it against.
+		reportUsage(ctx, client, agent, in)
 		_ = client.Leave(ctx)
 		return ""
 	}
@@ -253,6 +270,7 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	}
 	reportChanges(ctx, client, event, in)
 	if event == EventStop {
+		reportUsage(ctx, client, agent, in)
 		// Idle now, still holding the node it holds: a turn ending is not the
 		// claim ending, and the next turn's edits belong to the same node.
 		if err := client.Heartbeat(ctx, agents.StateIdle, client.ClaimedNode(), ""); err != nil {
@@ -315,6 +333,14 @@ func reportChanges(ctx context.Context, client *mcp.Client, event string, in Inp
 		if ok {
 			_, _ = client.RecordSessionChanges(ctx, nil, &snapshot)
 		}
+	}
+}
+
+// reportUsage sends the hub the session's token usage so far, per model.
+// Failures are dropped, like every other report.
+func reportUsage(ctx context.Context, client *mcp.Client, agent string, in Input) {
+	if models := SessionUsage(ctx, agent, in); len(models) > 0 {
+		_ = client.RecordSessionUsage(ctx, agent, models)
 	}
 }
 

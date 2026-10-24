@@ -164,7 +164,12 @@ func openCodePluginSource(exe string, flags []string) ([]byte, error) {
 // agent up for long: the hook it runs is bounded by its own timeouts, and
 // only chat.message waits for it (for mail to put in front of the model).
 // Sessions a runner started (NODEVAS_RUN_ID) are the runner's, not the
-// network's, and subagent sessions belong to the session that started them.
+// network's, and subagent sessions belong to the session that started them,
+// tokens included: the plugin counts every assistant message's tokens and
+// cost against its top session and passes the totals, per model, to the stop
+// and session-end hooks (OpenCode keeps no transcript file to read). A
+// session first seen after OpenCode restarted is counted from its stored
+// messages once, so the totals stay totals.
 const openCodePluginTemplate = `@@MARKER@@
 // Written by ` + "`nodevas setup-agent`" + `, removed by ` + "`nodevas setup-agent --remove`" + `;
 // edits here are lost the next time setup runs.
@@ -173,6 +178,7 @@ import { spawn } from "node:child_process";
 const NODEVAS = @@EXE@@;
 const FLAGS = @@FLAGS@@;
 const WAIT_MS = 10000;
+const SEED_MS = 3000;
 
 function hook(event, payload, wait) {
   return new Promise((resolve) => {
@@ -218,11 +224,70 @@ function hook(event, payload, wait) {
   });
 }
 
-export const NodevasPlugin = async ({ directory }) => {
+const num = (v) => (typeof v === "number" && isFinite(v) && v > 0 ? v : 0);
+
+export const NodevasPlugin = async ({ directory, client }) => {
   if (process.env.NODEVAS_RUN_ID) return {};
   const cwd = directory || process.cwd();
-  const subagents = new Set();
-  const own = (sessionID) => typeof sessionID === "string" && sessionID !== "" && !subagents.has(sessionID);
+  // parents maps a subagent session to the session that started it.
+  const parents = new Map();
+  const own = (sessionID) => typeof sessionID === "string" && sessionID !== "" && !parents.has(sessionID);
+  const top = (sessionID) => {
+    let id = sessionID;
+    for (let i = 0; i < 32 && parents.has(id); i++) id = parents.get(id);
+    return id;
+  };
+  // messages: assistant message id -> { session, model, tokens, cost }.
+  const messages = new Map();
+  const seeded = new Set();
+  const count = (info, session) => {
+    if (!info || info.role !== "assistant" || typeof info.id !== "string") return;
+    const t = info.tokens || {};
+    const cache = t.cache || {};
+    const model = info.modelID ? (info.providerID ? info.providerID + "/" + info.modelID : info.modelID) : "unknown";
+    messages.set(info.id, {
+      session: session || top(info.sessionID),
+      model,
+      inputTokens: num(t.input),
+      outputTokens: num(t.output) + num(t.reasoning),
+      cacheReadTokens: num(cache.read),
+      cacheWriteTokens: num(cache.write),
+      costUsd: num(info.cost),
+    });
+  };
+  const seed = async (sessionID) => {
+    if (seeded.has(sessionID)) return;
+    seeded.add(sessionID);
+    try {
+      if (!client || !client.session || typeof client.session.messages !== "function") return;
+      let timer = null;
+      const result = await Promise.race([
+        client.session.messages({ path: { id: sessionID } }),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), SEED_MS); }),
+      ]);
+      if (timer) clearTimeout(timer);
+      const list = (result && Array.isArray(result.data) && result.data) || (Array.isArray(result) && result) || [];
+      for (const item of list) {
+        const info = (item && item.info) || item;
+        if (info && !messages.has(info.id)) count(info, sessionID);
+      }
+    } catch {}
+  };
+  const usage = async (sessionID) => {
+    await seed(sessionID);
+    const byModel = new Map();
+    for (const m of messages.values()) {
+      if (m.session !== sessionID) continue;
+      const u = byModel.get(m.model) || { model: m.model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+      u.inputTokens += m.inputTokens;
+      u.outputTokens += m.outputTokens;
+      u.cacheReadTokens += m.cacheReadTokens;
+      u.cacheWriteTokens += m.cacheWriteTokens;
+      u.costUsd += m.costUsd;
+      byModel.set(m.model, u);
+    }
+    return [...byModel.values()];
+  };
   return {
     event: async ({ event }) => {
       try {
@@ -231,17 +296,25 @@ export const NodevasPlugin = async ({ directory }) => {
         switch (event && event.type) {
           case "session.created":
             if (info.parentID) {
-              subagents.add(info.id);
+              parents.set(info.id, info.parentID);
             } else if (own(info.id)) {
+              seeded.add(info.id);
               hook("session-start", { session_id: info.id, cwd: info.directory || cwd }, false);
             }
             break;
+          case "message.updated":
+            count(info);
+            break;
           case "session.idle":
-            if (own(props.sessionID)) hook("stop", { session_id: props.sessionID, cwd }, false);
+            if (own(props.sessionID)) {
+              hook("stop", { session_id: props.sessionID, cwd, usage: await usage(props.sessionID) }, false);
+            }
             break;
           case "session.deleted":
-            if (own(info.id)) hook("session-end", { session_id: info.id, cwd }, false);
-            subagents.delete(info.id);
+            if (own(info.id)) hook("session-end", { session_id: info.id, cwd, usage: await usage(info.id) }, false);
+            parents.delete(info.id);
+            for (const [id, m] of messages) if (m.session === info.id) messages.delete(id);
+            seeded.delete(info.id);
             break;
         }
       } catch {}

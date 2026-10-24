@@ -42,7 +42,7 @@ func TestAntigravityParseStream(t *testing.T) {
 	if txt := events[5].Text; !strings.HasPrefix(txt, "Plan created: ") || !strings.HasSuffix(txt, "DONE\n") {
 		t.Errorf("text = %q", txt)
 	}
-	if u := events[6].Usage; u == nil || u.InputTokens != 24789 || u.OutputTokens != 406 {
+	if u := events[6].Usage; u == nil || u.InputTokens != 24789 || u.OutputTokens != 406 || u.Model != "gemini-3.8-flash-low" {
 		t.Errorf("usage = %+v", u)
 	}
 	if !outcome.Done || outcome.IsError || !strings.Contains(outcome.Summary, "```\nhi\n```") ||

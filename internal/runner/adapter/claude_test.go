@@ -85,7 +85,7 @@ func TestClaudeParseStream(t *testing.T) {
 	}
 	usage := events[8].Usage
 	if usage == nil || usage.InputTokens != 4 || usage.OutputTokens != 130 || usage.CacheReadTokens != 45006 ||
-		usage.CacheWriteTokens != 17059 || usage.CostUSD != 0.00392726 {
+		usage.CacheWriteTokens != 17059 || usage.CostUSD != 0.00392726 || usage.Model != "claude-haiku-5-5" {
 		t.Errorf("usage = %+v", usage)
 	}
 	if !outcome.Done || outcome.IsError || outcome.Summary != `Content: "hello fixture"` || outcome.Usage == nil ||
@@ -102,6 +102,24 @@ func TestClaudeParseErrorResult(t *testing.T) {
 	if !outcome.Done || !outcome.IsError || outcome.Error != "Reached maximum number of turns (50)" ||
 		outcome.Usage.CostUSD != 1.25 {
 		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
+// Of a result's models, the one that wrote the most is the run's; with no
+// modelUsage, the init line's.
+func TestClaudeMainModel(t *testing.T) {
+	p := Claude{}.NewParser()
+	p.Parse([]byte(`{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}`))
+	events := p.Parse([]byte(`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":9},` +
+		`"modelUsage":{"claude-haiku-5-5":{"outputTokens":3},"claude-sonnet-5-5":{"outputTokens":6}}}`))
+	if len(events) == 0 || events[0].Usage == nil || events[0].Usage.Model != "claude-sonnet-5-5" {
+		t.Fatalf("events = %+v", events)
+	}
+	p = Claude{}.NewParser()
+	p.Parse([]byte(`{"type":"system","subtype":"init","session_id":"s","model":"claude-opus-5-5"}`))
+	events = p.Parse([]byte(`{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":1,"output_tokens":9}}`))
+	if len(events) == 0 || events[0].Usage == nil || events[0].Usage.Model != "claude-opus-5-5" {
+		t.Fatalf("events = %+v", events)
 	}
 }
 

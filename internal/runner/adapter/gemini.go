@@ -118,6 +118,8 @@ func writeGeminiSettings(env RunEnv) (string, error) {
 // one event rather than one per token.
 type geminiParser struct {
 	outcome Outcome
+	// model is the model the init line named.
+	model   string
 	pending strings.Builder
 	// lastText is the latest finished assistant text: the run's summary.
 	lastText string
@@ -207,6 +209,7 @@ func (p *geminiParser) Parse(line []byte) []runnerwire.RunEvent {
 	events := p.flush()
 	switch msg.Type {
 	case "init":
+		p.model = strings.TrimSpace(msg.Model)
 		text := "gemini session started"
 		if msg.SessionID != "" {
 			text += " " + msg.SessionID
@@ -265,6 +268,7 @@ func (p *geminiParser) result(msg geminiLine) []runnerwire.RunEvent {
 			InputTokens:     max(msg.Stats.InputTokens-msg.Stats.Cached, 0),
 			OutputTokens:    msg.Stats.OutputTokens,
 			CacheReadTokens: msg.Stats.Cached,
+			Model:           p.model,
 		}
 		p.outcome.Usage = usage
 		copied := *usage

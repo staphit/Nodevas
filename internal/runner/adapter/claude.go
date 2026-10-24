@@ -126,10 +126,32 @@ func jobEnv(job runnerwire.Job, extra ...string) []string {
 	return append(out, extra...)
 }
 
+// claudeMainModel is the model a run mostly ran on: of the result's models
+// (a run's subagents may use others), the one that wrote the most, else the
+// model the init line named.
+func claudeMainModel(msg claudeLine, initModel string) string {
+	best, most := "", int64(-1)
+	for id, u := range msg.ModelUsage {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if u.OutputTokens > most || (u.OutputTokens == most && id < best) {
+			best, most = id, u.OutputTokens
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return initModel
+}
+
 // claudeParser reads `--output-format stream-json --verbose`: one JSON object
 // per line, typed system / assistant / user / result (and others, ignored).
 type claudeParser struct {
 	outcome Outcome
+	// model is the model the init line named, for the usage when the result
+	// does not name one.
+	model string
 }
 
 func (p *claudeParser) Outcome() Outcome { return p.outcome }
@@ -157,6 +179,10 @@ type claudeLine struct {
 	TotalCostUSD float64         `json:"total_cost_usd"`
 	Usage        *claudeUsage    `json:"usage"`
 	Errors       json.RawMessage `json:"errors"`
+	// ModelUsage is the result's usage per model ID.
+	ModelUsage map[string]struct {
+		OutputTokens int64 `json:"outputTokens"`
+	} `json:"modelUsage"`
 }
 
 type claudeUsage struct {
@@ -206,6 +232,7 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 		if msg.Subtype != "init" {
 			return nil // hook chatter, retries: not progress
 		}
+		p.model = strings.TrimSpace(msg.Model)
 		text := "claude session started"
 		if msg.SessionID != "" {
 			text += " " + msg.SessionID
@@ -325,7 +352,7 @@ func (p *claudeParser) result(msg claudeLine) []runnerwire.RunEvent {
 	p.outcome.Text = Truncate(msg.Result, MaxTextBytes)
 	var events []runnerwire.RunEvent
 	if msg.Usage != nil || msg.TotalCostUSD > 0 {
-		usage := &runnerwire.Usage{CostUSD: msg.TotalCostUSD}
+		usage := &runnerwire.Usage{CostUSD: msg.TotalCostUSD, Model: claudeMainModel(msg, p.model)}
 		if msg.Usage != nil {
 			usage.InputTokens = msg.Usage.InputTokens
 			usage.OutputTokens = msg.Usage.OutputTokens

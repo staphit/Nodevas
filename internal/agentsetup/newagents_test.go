@@ -1,10 +1,13 @@
 package agentsetup
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -298,5 +301,78 @@ console.log(JSON.stringify({ parts: output.parts, sub: sub.parts.length, inRun: 
 		if !strings.Contains(got, want) {
 			t.Errorf("plugin output missing %s:\n%s", want, got)
 		}
+	}
+}
+
+// The plugin counts assistant messages' tokens against their top session,
+// subagents included, seeds a session it first sees mid-way from OpenCode's
+// stored messages, and passes the totals to the stop hook.
+func TestOpenCodePluginUsage(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "hook"), `const fs = require("fs");
+let s = "";
+process.stdin.on("data", (d) => (s += d));
+process.stdin.on("end", () => {
+  if (process.argv[3] === "stop") fs.writeFileSync(__dirname + "/stop.json", s);
+});
+`)
+	src, err := openCodePluginSource(node, []string{"--server", "http://127.0.0.1:5666"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "nodevas.mjs"), string(src))
+	write(t, filepath.Join(dir, "drive.mjs"), `import { NodevasPlugin } from "./nodevas.mjs";
+import fs from "node:fs";
+const msg = (id, sessionID, modelID, input, output, reasoning, read, write, cost) => ({
+  id, sessionID, role: "assistant", providerID: "opencode", modelID, cost,
+  tokens: { input, output, reasoning, cache: { read, write } },
+});
+const client = { session: { messages: async ({ path }) => ({ data: path.id === "ses1" ? [
+  { info: msg("old", "ses1", "m1", 100, 10, 0, 1000, 0, 0.5), parts: [] },
+  { info: { id: "u1", sessionID: "ses1", role: "user" }, parts: [] },
+] : [] }) } };
+const hooks = await NodevasPlugin({ directory: "/repo", client });
+await hooks.event({ event: { type: "session.created", properties: { info: { id: "sub", parentID: "ses1" } } } });
+const updated = (info) => hooks.event({ event: { type: "message.updated", properties: { info } } });
+await updated(msg("a1", "ses1", "m1", 5, 1, 0, 0, 0, 0));
+await updated(msg("a1", "ses1", "m1", 7, 2, 1, 50, 3, 0.25));
+await updated(msg("s1", "sub", "m2", 4, 4, 0, 0, 0, 0));
+await updated({ id: "u2", sessionID: "ses1", role: "user" });
+await hooks.event({ event: { type: "session.idle", properties: { sessionID: "ses1" } } });
+for (let i = 0; i < 100 && !fs.existsSync("stop.json"); i++) await new Promise((r) => setTimeout(r, 50));
+console.log(fs.readFileSync("stop.json", "utf8"));
+`)
+	cmd := exec.Command(node, "drive.mjs")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "NODEVAS_RUN_ID=")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	var payload struct {
+		SessionID string `json:"session_id"`
+		Usage     []struct {
+			Model            string  `json:"model"`
+			InputTokens      int64   `json:"inputTokens"`
+			OutputTokens     int64   `json:"outputTokens"`
+			CacheReadTokens  int64   `json:"cacheReadTokens"`
+			CacheWriteTokens int64   `json:"cacheWriteTokens"`
+			CostUSD          float64 `json:"costUsd"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("stop payload %q: %v", out, err)
+	}
+	byModel := map[string]string{}
+	for _, u := range payload.Usage {
+		byModel[u.Model] = fmt.Sprintf("%d/%d/%d/%d/%g", u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD)
+	}
+	want := map[string]string{"opencode/m1": "107/13/1050/3/0.75", "opencode/m2": "4/4/0/0/0"}
+	if payload.SessionID != "ses1" || !reflect.DeepEqual(byModel, want) {
+		t.Fatalf("stop payload = %s\nby model %v, want %v", out, byModel, want)
 	}
 }
