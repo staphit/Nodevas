@@ -153,6 +153,9 @@ type Usage struct {
 	CacheReadTokens  int64   `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
 	CostUSD          float64 `json:"costUsd,omitempty"`
+	// Model is the model the CLI said it ran on, when it said: what a run
+	// dispatched with model "default" actually used, for pricing.
+	Model string `json:"model,omitempty"`
 }
 
 // RunResult is how a run ended.
