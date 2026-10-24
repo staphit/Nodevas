@@ -91,6 +91,18 @@ describe("AgentPanel", () => {
 
     expect(answerAsk).toHaveBeenCalledWith("ask-1", "approved", "After backup");
   });
+
+  it("shows another person's ask without answer controls", () => {
+    const answerAsk = vi.fn().mockResolvedValue(undefined);
+    useAgents.setState({ answerAsk, viewer: { id: "bob", name: "bob", role: "member" } });
+
+    render(<AgentPanel onClose={vi.fn()} />);
+
+    expect(screen.getByText("Drop legacy column?")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Approve/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Optional note for the agent…")).not.toBeInTheDocument();
+    expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+  });
 });
 
 describe("AgentPanel W1.5", () => {
