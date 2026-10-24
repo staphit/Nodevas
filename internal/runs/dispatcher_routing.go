@@ -267,6 +267,8 @@ func (d *Dispatcher) endPipeline(ctx context.Context, p PipelineRecord, r Record
 		return
 	}
 	d.note(ctx, r, "pipeline "+status+": "+reason)
+	p.Status, p.Reason = status, reason
+	d.observed(Update{Run: r, Pipeline: &p})
 	d.notifyChanged(r)
 	if !notified && status != runnerwire.PipelineCancelled {
 		d.notifyRun(r)

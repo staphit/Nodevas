@@ -47,6 +47,36 @@ type Dispatcher struct {
 	// terms relays interactive runs' terminals (terminal.go).
 	termsOnce sync.Once
 	terms     *Terminals
+
+	// observers are told every run and pipeline change (W7 autopilot).
+	observersMu sync.RWMutex
+	observers   []func(Update)
+}
+
+// Update is one change an observer hears about: a run (status, changes, PR,
+// CI, merge, verdict) or, with Pipeline set, a pipeline's state. Observers
+// run synchronously on the dispatcher's goroutine; they must not block or
+// call back into the dispatcher (queue work instead).
+type Update struct {
+	Run      Record
+	Pipeline *PipelineRecord
+}
+
+// Observe adds fn to the observers. Call it before serving.
+func (d *Dispatcher) Observe(fn func(Update)) {
+	d.observersMu.Lock()
+	d.observers = append(d.observers, fn)
+	d.observersMu.Unlock()
+}
+
+// observed tells every observer about u.
+func (d *Dispatcher) observed(u Update) {
+	d.observersMu.RLock()
+	fns := d.observers
+	d.observersMu.RUnlock()
+	for _, fn := range fns {
+		fn(u)
+	}
 }
 
 // NewDispatcher builds a dispatcher. changed and events are the realtime
@@ -135,6 +165,7 @@ func (d *Dispatcher) notifyChanged(r Record) {
 	if d.changed != nil {
 		d.changed(r.Project, r.NodeID)
 	}
+	d.observed(Update{Run: r})
 }
 
 func (d *Dispatcher) notifyEvents(r Record) {

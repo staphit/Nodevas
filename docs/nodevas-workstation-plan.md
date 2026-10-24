@@ -241,9 +241,24 @@ SQLite 和 Postgres 都要有，migration 編號接在現有的 6 之後。
 | **W4 遠端核准** | 遠端核准 merge（由 runner 執行）、預算、通知 | 用手機看 diff、核准 merge |
 | **W5 路由與管線** | 路由規則、fallback、實作與審查的多模型管線 | 自動挑模型、跨模型互審 |
 | **W6 外部 session 與遠端派工** | hook 回報改動、step-up 驗證、runner auto-accept → 開放遠端派工 | 終端機的工作也記到 board 上；遠端可以直接派工 |
+| **W7 Autopilot** | 口述需求 → plan run 拆成 task DAG → orchestrator 依 ready 自動派工 → 每個 task 走 implement → review（多 agent 共識或人工）→ revise → merge，像 Airflow 一樣記錄每個 task 的 stage | 講一句需求，看整個 DAG 自己跑完 |
 | 之後 | Claude messaging socket 推送、NAS 上跑沙箱 runner、一個 prompt 同時派給多個模型再比較結果（Orca 式 fan-out） | — |
 
 每一期各開一個 branch 和 PR，可以並行的部分依檔案拆給多個 worker。
+
+## W7 Autopilot（2026-10-24）
+
+使用者的流程：口述需求 → agent 拆解成 task → orchestrator 派發 → 像 Airflow DAG 一樣記錄每個節點的狀態（commit、push、PR、review…）→ PR review 由多個 agent 共識 approve，或由人審。
+
+- **口述 → goal node**：語音 copilot 建立 goal node（需求原文），並可直接啟動拆解（需要使用者在 copilot 裡確認）。
+- **拆解（plan run，`JobPlan`）**：runner 在 repo 的 worktree 裡以唯讀方式跑 agent，讀程式碼後用 `create_node` / `link_nodes` 在 goal 底下建立 task，task 之間用 requires 表示相依。不改任何檔案、不 commit。拆完使用者可以先在看板上修改，再啟動 autopilot。
+- **Orchestrator（hub 上的 `internal/autopilot`）**：一次 autopilot run 對應一個 goal。它看板上的 ready 狀態（requires 都完成）決定哪些 task 可以跑，依 `MaxParallel` 派工，每個 task 都走一條 pipeline。所有派工仍然經過 runner 端的接受與 auto-accept，hub 依舊不執行任何東西。
+- **Stage 紀錄（Airflow 式）**：每個 task instance 有 state（none / scheduled / queued / running / waiting_review / waiting_human / success / failed / upstream_failed / skipped）與 stage 紀錄（queued、implement、commit、push、pr、ci、review、human_review、revise、approved、merge、done），每筆有時間、run 與輪次。上游失敗時下游標成 upstream_failed；可以對單一 task retry 或 skip，整個 run 可以 pause / resume / cancel。
+- **Review**：`ReviewPolicy.Mode` = none / agents / human / agents+human。agents 模式下多個 reviewer（不同 agent 或模型）平行審同一個 PR，達到 `Quorum` 個 approve 才通過，否則把所有 review 合併交給 revise；human 模式等人在網頁上 approve 或要求修改；agents+human 先過 agent 共識再等人。通過後若 `AutoMerge`，由 runner 依 W4 的方式 merge（CI 綠燈、head 不變）。
+- **派工輔助**：`Advisor` = rules（預設：policy 指定的 chain，否則 routing 規則）或 llm（用 owner 的 runner 上設定的快速模型，經 C1 的 LLM relay，依 task 內容挑 agent 與模型；失敗就退回 rules）。
+- **介面**：goal 上的 Autopilot 面板（policy、啟動、暫停、DAG grid：列是 task、欄是 stage）、看板上每個 task 的 stage badge、等待人審的 task 清單。
+
+合約：`internal/runnerwire/autopilot.go`（型別）、`runs.Dispatcher.Observe`（run 與 pipeline 的變化通知）。API：`POST/GET /api/autopilot`、`GET /api/autopilot/:id`、`POST /api/autopilot/:id/{pause,resume,cancel}`、`POST /api/autopilot/:id/tasks/:node/{retry,skip}`、`POST /api/runs/pipelines/:id/review`、`POST /api/runs`（`kind: "plan"`）；即時事件 `autopilot-changed`。
 
 ## 已確認（2026-10-23 第二輪）
 
