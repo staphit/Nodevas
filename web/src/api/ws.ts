@@ -57,6 +57,9 @@ export type WSEvent = {
     | "presence"
     | "locks"
     | "lock-denied"
+    // Membership (internal/members): this connection may no longer watch the
+    // project it asked for.
+    | "access-denied"
     | "agents-changed"
     | "agent-messages-changed"
     | "agent-notify"

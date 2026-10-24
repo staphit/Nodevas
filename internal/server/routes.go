@@ -8,6 +8,7 @@ import (
 	agentsapi "nodevas/internal/httpapi/agents"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
+	membersapi "nodevas/internal/httpapi/members"
 	"nodevas/internal/httpapi/node"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
@@ -32,12 +33,21 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
+	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withAuditTrail)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
 	node.New(s.pm, s.hub).Register(api)
-	project.New(s.pm).Register(api)
+	projectAPI := project.New(s.pm)
+	if s.members != nil {
+		projectAPI.UseMembers(projectAccess{s}, membershipHooks{s.members})
+		var find membersapi.FindAccount
+		if s.users != nil {
+			find = s.users.FindAccount
+		}
+		membersapi.New(s.pm, s.members, find).Register(api)
+	}
+	projectAPI.Register(api)
 	fsbrowse.New(s.auth, s.openDir).Register(api)
 	remoteapi.New(s.pm, s.remotes).Register(api)
 	if s.agents != nil {

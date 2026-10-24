@@ -874,6 +874,28 @@ CREATE TABLE usage_prices (
 ) STRICT;
 `,
 	},
+	{
+		name: "0018_project_members",
+		stmt: `
+-- Who may reach a project (internal/members). A project with no rows here is
+-- open to every signed-in account, as before; once it has members, only they
+-- and server administrators may.
+CREATE TABLE project_members (
+    -- The project's directory as project.Key normalizes it: the same key the
+    -- realtime rooms and the store cache use, so a request and a socket agree
+    -- on which project they reach.
+    project    TEXT NOT NULL,
+    -- accounts.id. Not a foreign key: a removed account's rows stop matching
+    -- anyone and are dropped when the project's members are next written.
+    user_id    TEXT NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+    added_by   TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, user_id)
+) STRICT;
+CREATE INDEX project_members_user ON project_members (user_id);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

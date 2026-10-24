@@ -31,6 +31,7 @@
 @import "./styles/19-routing.css"; /* routing rules, fallback chains, pipelines */
 @import "./styles/20-remote.css"; /* step-up, auto-accept policies, terminal sessions */
 @import "./styles/21-usage.css"; /* usage: tokens and estimated cost of runs and sessions */
+@import "./styles/21-members.css"; /* project members and the access banner */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

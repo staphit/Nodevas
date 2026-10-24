@@ -10,6 +10,7 @@ import { foldersApi } from "./folders";
 import { graphApi } from "./graph";
 import { historyApi } from "./history";
 import { lifecycleApi } from "./lifecycle";
+import { membersApi } from "./members";
 import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
 import { remoteApi } from "./remote";
@@ -72,6 +73,7 @@ export type {
   CopilotView,
 } from "./copilot";
 export type { AuditEntry } from "./history";
+export type { MemberRole, ProjectAccess, ProjectMember, ProjectMembers } from "./members";
 export type { NotifySettings } from "./notify";
 export type {
   RemoteBundle,
@@ -190,4 +192,5 @@ export const api = {
   ...runnersApi,
   ...runsApi,
   ...usageApi,
+  ...membersApi,
 };

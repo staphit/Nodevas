@@ -572,6 +572,25 @@ func (u *UserStore) ActorRevision(ctx context.Context, id string) (identity.Acto
 	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, userRevision(user), true
 }
 
+// FindAccount resolves one account by its exact name or sign-in address. It
+// is how a project owner adds a member: they say who, and learn only whether
+// that one account exists, never the list of accounts on the server.
+func (u *UserStore) FindAccount(ctx context.Context, nameOrEmail string) (id, name string, ok bool) {
+	key := strings.TrimSpace(nameOrEmail)
+	if key == "" || len(key) > 320 {
+		return "", "", false
+	}
+	filter := accountByName
+	if strings.Contains(key, "@") {
+		filter = accountByEmail
+	}
+	users, err := u.accounts(ctx, filter, 1, key)
+	if err != nil || len(users) == 0 {
+		return "", "", false
+	}
+	return users[0].ID, users[0].Name, true
+}
+
 // userRevision binds a session to the credential that opened it. The sign-in
 // address is part of it: changing or clearing it must end the sessions the old
 // address authorised, which is the point of changing it.

@@ -247,6 +247,10 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("複製失敗：%w", err))
 		return
 	}
+	if a.membership != nil {
+		// A copy is as restricted as what it copies.
+		a.membership.Copied(c.Request.Context(), src, dest)
+	}
 
 	active := ""
 	if body.Open {
@@ -397,6 +401,9 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("搬移失敗：%w", err))
 		return
 	}
+	if a.membership != nil {
+		a.membership.Moved(c.Request.Context(), src, dst)
+	}
 	newActive := ""
 	if changesWorkspace {
 		a.pm.SetWorkspace(targetWorkspace)
@@ -453,10 +460,17 @@ func (a *API) PostProjectRemove(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("body must be {name, mode: detach|disk}"))
 		return
 	}
+	// Resolved before the directory goes, for the member list to follow it.
+	removedDir, resolveErr := a.pm.Resolve(body.Name)
 	active, err := a.pm.RemoveProject(body.Name, body.Mode == "disk")
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
+	}
+	// A detached project keeps its members for when it is added back; one
+	// deleted from disk loses them, so a new project there starts open.
+	if a.membership != nil && body.Mode == "disk" && resolveErr == nil {
+		a.membership.Removed(c.Request.Context(), removedDir)
 	}
 	a.pm.Hub().Broadcast("project-changed", active)
 	c.JSON(http.StatusOK, map[string]any{

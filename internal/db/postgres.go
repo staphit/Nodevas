@@ -675,6 +675,20 @@ CREATE TABLE usage_prices (
 );
 `,
 	},
+	{
+		name: "0018_project_members",
+		stmt: `
+CREATE TABLE project_members (
+    project    TEXT COLLATE "C" NOT NULL,
+    user_id    TEXT COLLATE "C" NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+    added_by   TEXT NOT NULL DEFAULT '',
+    created_at TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (project, user_id)
+);
+CREATE INDEX project_members_user ON project_members (user_id);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

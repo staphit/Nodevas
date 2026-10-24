@@ -19,6 +19,7 @@ import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { CopilotRoot } from "./copilot/CopilotRoot";
+import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
@@ -344,6 +345,11 @@ function MainApp() {
           // nothing else to reload.
           void useApp.getState().refreshNodeFolders().catch(reportError);
           break;
+        case "access-denied":
+          // The server moved this connection out of a project it may no
+          // longer watch (a membership change): say so instead of going quiet.
+          notifyAccessChanged();
+          break;
         case "project-changed":
           void refreshProjects().catch(reportError);
           void loadAll().catch(reportError);
@@ -597,6 +603,7 @@ function MainApp() {
         </div>
       </header>
       <DocumentPersistenceBanner documents={degradedDocuments} />
+      <ProjectAccessBanner />
       <RemoteSyncBanner onOpenBackup={() => setModal("backup")} />
       {modal === "notify" && <NotifySettingsModal onClose={closeModal} />}
       {modal === "backup" && <BackupModal onClose={closeModal} />}

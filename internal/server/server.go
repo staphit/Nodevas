@@ -13,6 +13,7 @@ import (
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
+	"nodevas/internal/members"
 	"nodevas/internal/notify"
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
@@ -51,6 +52,10 @@ type Server struct {
 	usage *usage.Store
 	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
 	stepUpWindow time.Duration
+	// members is project membership (members.go); nil until UseMembersDB.
+	members *members.Store
+	// users is the account store on a server with accounts; nil on loopback.
+	users *auth.UserStore
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -199,6 +204,7 @@ func (s *Server) notifyRoom(r *http.Request, evType, id string) {
 // UseAccounts switches the server from "whoever reaches loopback is the local
 // user" to real accounts. Call it before Handler.
 func (s *Server) UseAccounts(users *auth.UserStore) {
+	s.users = users
 	s.auth = auth.NewSessionAuth(users)
 	if s.pm != nil {
 		s.pm.SetRemote(true)

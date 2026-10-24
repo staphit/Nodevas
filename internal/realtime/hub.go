@@ -8,6 +8,7 @@ import (
 	"log"
 	"nodevas/internal/identity"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -67,6 +68,10 @@ type Hub struct {
 	// it up, which is why an unresolved client simply stays in the "all
 	// events" room instead of failing.
 	resolve func(name string) (string, error)
+
+	// access holds the project access check (access.go), an *accessHolder.
+	// Atomic rather than under mu: broadcast filters run with mu held.
+	access atomic.Value
 }
 
 type wsClient struct {
@@ -355,7 +360,7 @@ func (h *Hub) BroadcastRoom(room, evType, id string) {
 	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
 		client.mu.Lock()
 		defer client.mu.Unlock()
-		return client.room == "" || client.room == room
+		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
 	})
 }
 
@@ -395,7 +400,7 @@ func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
 	h.send(event, func(client *wsClient) bool {
 		client.mu.Lock()
 		defer client.mu.Unlock()
-		return client.room == "" || client.room == room
+		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
 	})
 }
 
@@ -900,7 +905,18 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 	}
 
 	client.mu.Lock()
+	actor := client.actor
 	previous := client.room
+	client.mu.Unlock()
+	if !h.mayWatch(actor, room) {
+		// Not the catch-all either: that would hand it every other room's
+		// events it may watch, and this one's it may not, by asking.
+		h.deny(client, previous, project)
+		return
+	}
+
+	client.mu.Lock()
+	previous = client.room
 	client.room = room
 	client.project = project
 	client.nodeID = ""

@@ -496,6 +496,7 @@ func serve(args []string) {
 	srv.UseAudit(audit.New(database))
 	srv.UseAgentsDB(database)
 	srv.UseRunnersDB(database)
+	srv.UseMembersDB(database)
 	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
 		log.Fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}
