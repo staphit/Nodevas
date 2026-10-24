@@ -83,10 +83,10 @@ func TestPostgresSchemaAndReopen(t *testing.T) {
 	if err := second.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&steps); err != nil {
 		t.Fatal(err)
 	}
-	// 0001-0003, 0005, 0007-0018: PostgreSQL has no counterpart to the
+	// 0001-0003, 0005, 0007-0018, 0020: PostgreSQL has no counterpart to the
 	// SQLite-only steps (the search index, 0006's data repair).
-	if steps != 16 {
-		t.Fatalf("schema_migrations has %d rows, want 16", steps)
+	if steps != 17 {
+		t.Fatalf("schema_migrations has %d rows, want 17", steps)
 	}
 	// The read pool is read-only on the server, as query_only makes it on
 	// SQLite.

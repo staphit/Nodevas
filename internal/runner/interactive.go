@@ -48,7 +48,7 @@ const (
 // capabilities is the hello's Capabilities: headless always, interactive when
 // this machine has a pseudo-terminal and the owner has not turned it off.
 func capabilities(cfg *Config) []string {
-	caps := []string{runnerwire.CapHeadless}
+	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan}
 	if (cfg == nil || cfg.InteractiveOn()) && ptySupported() {
 		caps = append(caps, runnerwire.CapInteractive)
 	}

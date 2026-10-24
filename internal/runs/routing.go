@@ -26,6 +26,7 @@ const (
 
 var jobKinds = map[string]bool{
 	runnerwire.JobImplement: true, runnerwire.JobReview: true, runnerwire.JobRevise: true,
+	runnerwire.JobPlan: true,
 }
 
 var routeMatches = map[string]bool{
@@ -101,7 +102,9 @@ func ValidateChain(chain []runnerwire.AgentModel, requireModel bool) error {
 	return nil
 }
 
-// ValidatePipeline checks a pipeline's steps and rounds.
+// ValidatePipeline checks a pipeline's steps, reviewers and rounds. Review is
+// checked only when it is the reviewer (no Reviewers); a pipeline with neither
+// and no Human is implement only.
 func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 	if p.MaxRounds < 1 || p.MaxRounds > runnerwire.MaxPipelineRounds {
 		return invalidf("pipeline maxRounds must be 1 to %d", runnerwire.MaxPipelineRounds)
@@ -109,7 +112,48 @@ func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 	if err := ValidateAgentModel(p.Implement, "pipeline implement", requireModel); err != nil {
 		return err
 	}
-	return ValidateAgentModel(p.Review, "pipeline review", requireModel)
+	if len(p.Reviewers) > runnerwire.MaxReviewers {
+		return invalidf("a pipeline has at most %d reviewers", runnerwire.MaxReviewers)
+	}
+	for i, am := range p.Reviewers {
+		if err := ValidateAgentModel(am, fmt.Sprintf("pipeline reviewer %d", i+1), requireModel); err != nil {
+			return err
+		}
+	}
+	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
+		if err := ValidateAgentModel(p.Review, "pipeline review", requireModel); err != nil {
+			return err
+		}
+	}
+	if n := len(runnerwire.ReviewersOf(p)); p.Quorum < 0 || p.Quorum > n {
+		return invalidf("pipeline quorum must be 0 (all) to %d, the number of reviewers", n)
+	}
+	return nil
+}
+
+// ResolvePipeline checks every step of p against a runner's hello and returns
+// it with each model resolved (see ResolveAgentModel). implementModel is the
+// implement step's, already resolved by the caller.
+func ResolvePipeline(info *runnerwire.Info, p runnerwire.Pipeline, implementModel string) (runnerwire.Pipeline, error) {
+	out := runnerwire.Pipeline{
+		Implement: runnerwire.AgentModel{Agent: p.Implement.Agent, Model: implementModel},
+		MaxRounds: p.MaxRounds, Quorum: p.Quorum, Human: p.Human,
+	}
+	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
+		model, err := ResolveAgentModel(info, p.Review)
+		if err != nil {
+			return runnerwire.Pipeline{}, fmt.Errorf("review: %w", err)
+		}
+		out.Review = runnerwire.AgentModel{Agent: p.Review.Agent, Model: model}
+	}
+	for i, am := range p.Reviewers {
+		model, err := ResolveAgentModel(info, am)
+		if err != nil {
+			return runnerwire.Pipeline{}, fmt.Errorf("reviewer %d: %w", i+1, err)
+		}
+		out.Reviewers = append(out.Reviewers, runnerwire.AgentModel{Agent: am.Agent, Model: model})
+	}
+	return out, nil
 }
 
 // ValidateRouting checks a whole rule list and fills in missing rule IDs. It

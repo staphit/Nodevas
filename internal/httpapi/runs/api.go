@@ -76,6 +76,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.PUT("/runs/routing", a.setRouting)
 	api.GET("/runs/route", a.route)
 	api.GET("/runs/pipelines/:id", a.pipeline)
+	api.POST("/runs/pipelines/:id/review", a.review)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -162,6 +163,16 @@ func (a *API) create(c *gin.Context) {
 		invalid(c, "mode must be \"\" or %q", runnerwire.ModeInteractive)
 		return
 	}
+	// A dispatch is an implement run or (W7) a plan run, which breaks the node
+	// into tasks on the board; review and revise runs are a pipeline's steps.
+	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan {
+		invalid(c, "kind must be \"\" or %q", runnerwire.JobPlan)
+		return
+	}
+	if body.Kind == runnerwire.JobPlan && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
+		invalid(c, "a plan run is one headless run, not a pipeline")
+		return
+	}
 	if err := runs.ValidateChain(body.Fallbacks, false); err != nil {
 		fail(c, err)
 		return
@@ -190,16 +201,17 @@ func (a *API) create(c *gin.Context) {
 	}
 	var pipeline *runnerwire.Pipeline
 	if body.Pipeline != nil {
-		reviewModel, err := runs.ResolveAgentModel(runner.Info, body.Pipeline.Review)
+		resolved, err := runs.ResolvePipeline(runner.Info, *body.Pipeline, model)
 		if err != nil {
-			invalid(c, "pipeline review: %v", err)
+			invalid(c, "pipeline %v", err)
 			return
 		}
-		pipeline = &runnerwire.Pipeline{
-			Implement: runnerwire.AgentModel{Agent: body.Agent, Model: model},
-			Review:    runnerwire.AgentModel{Agent: body.Pipeline.Review.Agent, Model: reviewModel},
-			MaxRounds: body.Pipeline.MaxRounds,
-		}
+		pipeline = &resolved
+	}
+	if body.Kind == runnerwire.JobPlan && !slices.Contains(runner.Info.Capabilities, runnerwire.CapPlan) {
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
+			errors.New("this runner cannot run plan jobs; update nodevas on it"), nil)
+		return
 	}
 	if !runs.Headless(runner.Info) {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
@@ -266,7 +278,7 @@ func (a *API) create(c *gin.Context) {
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: actor.ID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: steppedUpAt, Mode: body.Mode,
+		SteppedUpAt: steppedUpAt, Mode: body.Mode, Kind: body.Kind,
 	})
 	if err != nil {
 		if pipelineID != "" {

@@ -52,6 +52,12 @@ func checkKind(job *runnerwire.Job, cfg *Config) string {
 	switch job.Kind {
 	case runnerwire.JobImplement:
 		return ""
+	case runnerwire.JobPlan:
+		// A plan names no pull request and pushes nothing.
+		if job.Branch != "" || job.PRURL != "" || job.Review != "" {
+			return "a plan job names no pull request"
+		}
+		return ""
 	case runnerwire.JobReview, runnerwire.JobRevise:
 	default:
 		return fmt.Sprintf("job kind %q is not one this runner knows", job.Kind)

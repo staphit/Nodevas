@@ -86,15 +86,47 @@ const (
 	StepReview    = "review"
 )
 
-// Pipeline is implement → review (→ implement again with the review, up to
-// MaxRounds). The review step reads the implementer's PR diff and leaves a PR
-// comment; its verdict decides whether another implement round runs.
+// Pipeline is implement → review (→ revise with the review, up to MaxRounds).
+// Each review step reads the implementer's PR diff and leaves a PR comment;
+// the verdicts decide whether another round runs.
+//
+// W7: a round can have several reviewers, who review the same PR head in
+// parallel; Quorum of them must approve (0: all). With Human, a person then
+// approves or asks for changes (POST /api/runs/pipelines/:id/review). Review
+// alone, as in W5, is one reviewer. No reviewers and no Human (Review left
+// zero) is an implement-only pipeline: approved once its PR is open.
 type Pipeline struct {
 	Implement AgentModel `json:"implement"`
 	Review    AgentModel `json:"review"`
 	// MaxRounds bounds implement→review cycles; 1 means implement once and
 	// review once. At most MaxPipelineRounds.
 	MaxRounds int `json:"maxRounds"`
+	// Reviewers replaces Review when set (at most MaxReviewers).
+	Reviewers []AgentModel `json:"reviewers,omitempty"`
+	// Quorum is how many reviewers must approve; 0 means all of them.
+	Quorum int `json:"quorum,omitempty"`
+	// Human has a person approve after the reviewers' quorum (or alone).
+	Human bool `json:"human,omitempty"`
+}
+
+// ReviewersOf is a pipeline's reviewers: Reviewers, else Review when set.
+func ReviewersOf(p Pipeline) []AgentModel {
+	if len(p.Reviewers) > 0 {
+		return p.Reviewers
+	}
+	if p.Review.Agent != "" {
+		return []AgentModel{p.Review}
+	}
+	return nil
+}
+
+// QuorumOf is how many approvals a round needs from ReviewersOf(p).
+func QuorumOf(p Pipeline) int {
+	n := len(ReviewersOf(p))
+	if p.Quorum <= 0 || p.Quorum > n {
+		return n
+	}
+	return p.Quorum
 }
 
 // MaxPipelineRounds caps Pipeline.MaxRounds.
@@ -105,7 +137,17 @@ const MaxPipelineRounds = 3
 const (
 	VerdictApprove = "approve"
 	VerdictChanges = "changes"
+	// VerdictAbstain is a ReviewVote whose review run failed or gave no
+	// verdict: it counts toward neither side.
+	VerdictAbstain = "abstain"
 )
+
+// HumanReviewer is ReviewVote.Agent for a person's vote; Model is then the
+// person's name.
+const HumanReviewer = "human"
+
+// CapPlan is the runner capability for plan jobs (JobPlan).
+const CapPlan = "plan"
 
 // Job kinds. A headless implement run is the default (""), as in W1.
 const (
@@ -121,20 +163,30 @@ const (
 // PipelineState is a pipeline as the API shows it (Run.Pipeline on each of
 // its runs, and GET /api/runs/pipelines/:id).
 type PipelineState struct {
-	ID        string   `json:"id"`
-	NodeID    string   `json:"nodeId"`
-	Pipeline  Pipeline `json:"pipeline"`
-	Round     int      `json:"round"`
-	Status    string   `json:"status"` // running | approved | changes_left | failed | cancelled
-	RunIDs    []string `json:"runIds"`
-	CreatedAt string   `json:"createdAt"`
+	ID       string   `json:"id"`
+	NodeID   string   `json:"nodeId"`
+	Pipeline Pipeline `json:"pipeline"`
+	Round    int      `json:"round"`
+	// Status: running | waiting_human | approved | changes_left | failed |
+	// cancelled.
+	Status string   `json:"status"`
+	RunIDs []string `json:"runIds"`
+	// Votes are every round's review votes, oldest round first; a vote with
+	// Verdict "" is a review still running (W7).
+	Votes []ReviewVote `json:"votes,omitempty"`
+	// HumanVerdict is a person's verdict in the current round, if any.
+	HumanVerdict string `json:"humanVerdict,omitempty"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 // Pipeline statuses.
 const (
-	PipelineRunning     = "running"
-	PipelineApproved    = "approved"
-	PipelineChangesLeft = "changes_left" // rounds ran out with changes still requested
-	PipelineFailed      = "failed"
-	PipelineCancelled   = "cancelled"
+	PipelineRunning = "running"
+	// PipelineWaitingHuman: the reviewers' quorum approved (or there are
+	// none); a person decides next.
+	PipelineWaitingHuman = "waiting_human"
+	PipelineApproved     = "approved"
+	PipelineChangesLeft  = "changes_left" // rounds ran out with changes still requested
+	PipelineFailed       = "failed"
+	PipelineCancelled    = "cancelled"
 )

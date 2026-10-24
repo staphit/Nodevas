@@ -243,6 +243,9 @@ type CreateRunRequest struct {
 	Pipeline *Pipeline `json:"pipeline,omitempty"`
 	// Mode is ModeHeadless ("") or ModeInteractive (W2.5).
 	Mode string `json:"mode,omitempty"`
+	// Kind is JobImplement ("") or JobPlan (W7): a read-only run that breaks
+	// the node into task nodes and changes no files.
+	Kind string `json:"kind,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

@@ -321,7 +321,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	// repository's, open, and on the branch the job names, before anyone is
 	// asked to accept.
 	var check prCheck
-	if job.Kind != runnerwire.JobImplement {
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise {
 		var reason string
 		check, reason = j.checkPR(ctx, r)
 		if ctx.Err() != nil {
@@ -349,6 +349,9 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	case runnerwire.JobRevise:
 		j.executeRevise(ctx, r, check)
+		return
+	case runnerwire.JobPlan:
+		j.executePlan(ctx, r)
 		return
 	}
 
@@ -447,8 +450,13 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire
 
 	cfg := j.c.Config
 	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
-	if job.Kind == runnerwire.JobReview {
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
+		// A plan reads the code as a review does; what it writes goes on the
+		// board, through MCP, not into files.
 		mode, modeText = reviewPermission(cfg, job.Agent)
+		if job.Kind == runnerwire.JobPlan {
+			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
+		}
 	}
 	cmd, err := ad.Command(job, adapter.RunEnv{
 		Binary:         bin,

@@ -125,8 +125,11 @@ func Binary(kind string) string {
 // (runnerwire.JobRevise) gets the implementer's preamble on the PR's branch,
 // and after the task the review it must address.
 func Prompt(job runnerwire.Job, branch string) string {
-	if job.Kind == runnerwire.JobReview {
+	switch job.Kind {
+	case runnerwire.JobReview:
 		return reviewPrompt(job)
+	case runnerwire.JobPlan:
+		return planPrompt(job)
 	}
 	revise := job.Kind == runnerwire.JobRevise
 	var b strings.Builder
@@ -184,6 +187,44 @@ func reviewPrompt(job runnerwire.Job) string {
 	b.WriteString("5. The very last line of your final message must be exactly \"VERDICT: approve\" (ready to " +
 		"merge) or \"VERDICT: changes\" (needs another round).\n\n")
 	b.WriteString("The task the pull request implements:\n\n")
+	b.WriteString(job.Prompt)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// GoalTag is the tag a plan run puts on every task it creates for goal node
+// id: how the autopilot (W7) finds a goal's tasks.
+func GoalTag(id string) string { return "goal:" + id }
+
+// planPrompt is a plan job's preamble (W7): read the goal and the code, then
+// break the goal into tasks on the board with requires edges between them,
+// changing no files. Every task carries GoalTag, and the goal waits for the
+// tasks nothing else waits for, so it becomes ready when all of them are done.
+func planPrompt(job runnerwire.Job) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are running headless as a planner for Nodevas goal node %s", job.NodeID)
+	if job.NodeTitle != "" {
+		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
+	}
+	b.WriteString(", in a read-only checkout of the repository. Nobody is watching this terminal; " +
+		"there is no one to answer questions here.\n\n")
+	b.WriteString("Your job is to break the goal into tasks on the Nodevas board, not to do them. " +
+		"Other agents will implement each task later, one pull request per task.\n\n")
+	b.WriteString("Rules for this run:\n")
+	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push. Anything you change is thrown away.\n")
+	fmt.Fprintf(&b, "2. Read the goal with the nodevas MCP tool get_node (id %q), then read the code you need to plan well.\n", job.NodeID)
+	b.WriteString("3. Break the goal into small tasks, each one independently reviewable and mergeable as one pull request. " +
+		"Prefer a handful of well-scoped tasks over many tiny ones.\n")
+	fmt.Fprintf(&b, "4. Create each task with create_node: kind \"task\", a short title, a body saying what to change and how "+
+		"to tell it is done (files, acceptance checks), and tags including %q. Use dependsOn for the tasks it needs "+
+		"finished first (create those first so you have their ids), or link_nodes afterwards (from: the task that "+
+		"must finish first, to: the task that waits).\n", GoalTag(job.NodeID))
+	fmt.Fprintf(&b, "5. Add a requires edge only where one task really needs another's change; independent tasks run in parallel. "+
+		"Finally link every task that no other task waits for to the goal (link_nodes from: that task, to: %q), so the "+
+		"goal is done when all its tasks are.\n", job.NodeID)
+	b.WriteString("6. Do not claim, start or change the status of the goal or the tasks, and do not edit the goal node.\n")
+	b.WriteString("7. Finish with a short summary: the tasks you created (id and title) and the order they can run in.\n\n")
+	b.WriteString("The goal:\n\n")
 	b.WriteString(job.Prompt)
 	b.WriteString("\n")
 	return b.String()

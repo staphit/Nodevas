@@ -896,6 +896,37 @@ CREATE TABLE project_members (
 CREATE INDEX project_members_user ON project_members (user_id);
 `,
 	},
+	{
+		name: "0020_review_votes",
+		stmt: `
+-- Review consensus and human review (W7). A pipeline round may have several
+-- reviewers voting on the same PR head, and a person deciding after them.
+
+-- 'human' while a running pipeline waits for a person's review; '' else. The
+-- status stays 'running' so every other step's checks still hold.
+ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';
+
+-- One row per reviewer per round: agent reviewers by their position in the
+-- pipeline's list ('0', '1', …), a person as 'human'.
+CREATE TABLE review_votes (
+    pipeline_id TEXT NOT NULL,
+    round       INTEGER NOT NULL,
+    reviewer    TEXT NOT NULL,
+    agent       TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    -- '' while the review runs; abstain when it failed or gave no verdict.
+    verdict     TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes', 'abstain')),
+    run_id      TEXT NOT NULL DEFAULT '',
+    -- A person's comment (a review run's text is its run's summary).
+    comment     TEXT NOT NULL DEFAULT '',
+    actor_id    TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (pipeline_id, round, reviewer)
+) STRICT;
+CREATE INDEX review_votes_run ON review_votes (run_id);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

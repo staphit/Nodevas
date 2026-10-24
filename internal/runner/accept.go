@@ -151,6 +151,8 @@ func describeOffer(o Offer) string {
 		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", job.PRURL, job.Branch)
 	case runnerwire.JobRevise:
 		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
+	case runnerwire.JobPlan:
+		fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
 	default:
 		base := job.Base
 		if base == "" {

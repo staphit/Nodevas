@@ -139,6 +139,15 @@ func (d *Dispatcher) advance(ctx context.Context, r Record, notified bool) {
 		return
 	}
 	end := func(status, reason string) { d.endPipeline(ctx, p, r, status, reason, notified) }
+	if p.Status == runnerwire.PipelineWaitingHuman {
+		return // a person decides next; no run of this round is pending
+	}
+	// A review run that failed is a reviewer abstaining, not the pipeline
+	// failing: the others' votes may still carry the round.
+	if r.Kind == runnerwire.JobReview && r.Status == runnerwire.RunFailed {
+		d.reviewEnded(ctx, p, r, notified)
+		return
+	}
 	switch r.Status {
 	case runnerwire.RunCancelled:
 		end(runnerwire.PipelineCancelled, "run "+r.ID+" was cancelled")
@@ -162,7 +171,7 @@ func (d *Dispatcher) advance(ctx context.Context, r Record, notified bool) {
 				return // already moved on from this PR
 			}
 			p.Branch, p.PRURL = Truncate(r.Branch, maxShortField), Truncate(r.PRURL, MaxPRURLBytes)
-			d.step(ctx, p, r, runnerwire.JobReview, p.Pipeline.Review, "", notified)
+			d.startReviews(ctx, p, r, notified)
 		case r.PRError != "":
 			end(runnerwire.PipelineFailed, "the implement run opened no pull request: "+r.PRError)
 		case r.Commit == "":
@@ -171,52 +180,299 @@ func (d *Dispatcher) advance(ctx context.Context, r Record, notified bool) {
 			// Committed, PR not reported yet: the pr message moves it on.
 		}
 	case runnerwire.JobRevise:
-		d.step(ctx, p, r, runnerwire.JobReview, p.Pipeline.Review, "", notified)
+		d.startReviews(ctx, p, r, notified)
 	case runnerwire.JobReview:
-		switch r.Verdict {
+		d.reviewEnded(ctx, p, r, notified)
+	}
+}
+
+// startReviews starts a round's reviews on the pipeline's PR: one review run
+// per reviewer, in parallel, each with a pending vote. With no reviewers the
+// round goes straight to a person, or, without one, the pipeline is approved
+// as it stands (implement only). The caller holds the pipeline's lock.
+func (d *Dispatcher) startReviews(ctx context.Context, p PipelineRecord, from Record, notified bool) {
+	reviewers := runnerwire.ReviewersOf(p.Pipeline)
+	if len(reviewers) == 0 {
+		if p.Pipeline.Human {
+			d.awaitHuman(ctx, p, from, notified)
+			return
+		}
+		d.endPipeline(ctx, p, from, runnerwire.PipelineApproved, "no review asked for; the pull request is open", notified)
+		return
+	}
+	started := make([]Record, 0, len(reviewers))
+	for i, am := range reviewers {
+		next, ok := d.prepareStep(ctx, p, from, runnerwire.JobReview, am, "", notified)
+		if !ok {
+			// The pipeline failed; the reviews already queued have nothing
+			// left to decide.
+			for _, run := range started {
+				if _, err := d.Cancel(ctx, run.ID, "the pipeline failed"); err != nil {
+					slog.Warn("runs: cancel review", slog.String("run", run.ID), slog.Any("error", err))
+				}
+			}
+			return
+		}
+		if err := d.store.StartVote(ctx, p.ID, p.Round, i, runnerwire.AgentModel{Agent: am.Agent, Model: next.Model}, next.ID); err != nil {
+			slog.Warn("runs: start vote", slog.String("pipeline", p.ID), slog.Any("error", err))
+		}
+		started = append(started, next)
+	}
+	for _, next := range started {
+		d.note(ctx, from, fmt.Sprintf("pipeline round %d: review by %s/%s as run %s", p.Round, next.Agent, next.Model, next.ID))
+		d.Submit(ctx, next)
+	}
+	d.pipelineChanged(ctx, p.ID, from)
+}
+
+// reviewEnded records a review run's vote and, once the round's last vote is
+// in, decides the round: approved (or on to a person) when Quorum reviewers
+// approve, else revise with the reviews that asked for changes, or stop when
+// the rounds ran out. The caller holds the pipeline's lock.
+func (d *Dispatcher) reviewEnded(ctx context.Context, p PipelineRecord, r Record, notified bool) {
+	end := func(status, reason string) { d.endPipeline(ctx, p, r, status, reason, notified) }
+	verdict := runnerwire.VerdictAbstain
+	if r.Status == runnerwire.RunSucceeded && CleanVerdict(r.Verdict) != "" {
+		verdict = r.Verdict
+	}
+	settled, err := d.store.SettleVote(ctx, r.ID, verdict)
+	if err != nil {
+		slog.Warn("runs: settle vote", slog.String("run", r.ID), slog.Any("error", err))
+		return
+	}
+	if !settled {
+		// A review this pipeline never recorded a vote for (one started
+		// before W7): its verdict alone decides, as it did then.
+		d.legacyReviewEnded(ctx, p, r, notified)
+		return
+	}
+	votes, err := d.store.RoundVotes(ctx, p.ID, p.Round)
+	if err != nil {
+		slog.Warn("runs: read votes", slog.String("pipeline", p.ID), slog.Any("error", err))
+		return
+	}
+	var approvals, pending int
+	var approvers []string
+	var changes []Vote
+	for _, v := range votes {
+		if v.Reviewer == HumanReviewerKey {
+			continue
+		}
+		switch v.Verdict {
+		case "":
+			pending++
 		case runnerwire.VerdictApprove:
-			end(runnerwire.PipelineApproved, "approved by "+label(runnerwire.AgentModel{Agent: r.Agent, Model: r.Model}))
+			approvals++
+			approvers = append(approvers, label(runnerwire.AgentModel{Agent: v.Agent, Model: v.Model}))
 		case runnerwire.VerdictChanges:
-			if p.Round >= p.Pipeline.MaxRounds {
-				end(runnerwire.PipelineChangesLeft, fmt.Sprintf("changes still requested after %d round(s)", p.Round))
-				return
-			}
-			moved, err := d.store.NextRound(ctx, p.ID, p.Round)
-			if err != nil || !moved {
-				return
-			}
-			p.Round++
-			d.step(ctx, p, r, runnerwire.JobRevise, p.Pipeline.Implement, r.Summary, notified)
-		default:
-			end(runnerwire.PipelineFailed, "the review gave no verdict")
+			changes = append(changes, v)
 		}
 	}
+	d.pipelineChanged(ctx, p.ID, r)
+	if pending > 0 {
+		return
+	}
+	reviewers := len(runnerwire.ReviewersOf(p.Pipeline))
+	needed := runnerwire.QuorumOf(p.Pipeline)
+	tally := fmt.Sprintf("%d of %d approved, %d needed", approvals, reviewers, needed)
+	if approvals >= needed {
+		if p.Pipeline.Human {
+			d.awaitHuman(ctx, p, r, notified)
+			return
+		}
+		end(runnerwire.PipelineApproved, "approved by "+strings.Join(approvers, ", ")+" ("+tally+")")
+		return
+	}
+	if len(changes) == 0 {
+		end(runnerwire.PipelineFailed, "too few reviews approved and none asked for changes ("+tally+")")
+		return
+	}
+	if p.Round >= p.Pipeline.MaxRounds {
+		end(runnerwire.PipelineChangesLeft, fmt.Sprintf("changes still requested after %d round(s) (%s)", p.Round, tally))
+		return
+	}
+	moved, err := d.store.NextRound(ctx, p.ID, p.Round)
+	if err != nil || !moved {
+		return
+	}
+	p.Round++
+	d.step(ctx, p, r, runnerwire.JobRevise, p.Pipeline.Implement, d.combinedReview(ctx, changes), notified)
+}
+
+// legacyReviewEnded is W5's rule for a review with no vote: its verdict
+// decides the pipeline.
+func (d *Dispatcher) legacyReviewEnded(ctx context.Context, p PipelineRecord, r Record, notified bool) {
+	end := func(status, reason string) { d.endPipeline(ctx, p, r, status, reason, notified) }
+	if r.Status != runnerwire.RunSucceeded {
+		end(runnerwire.PipelineFailed, "run "+r.ID+" failed: "+r.Error)
+		return
+	}
+	switch r.Verdict {
+	case runnerwire.VerdictApprove:
+		end(runnerwire.PipelineApproved, "approved by "+label(runnerwire.AgentModel{Agent: r.Agent, Model: r.Model}))
+	case runnerwire.VerdictChanges:
+		if p.Round >= p.Pipeline.MaxRounds {
+			end(runnerwire.PipelineChangesLeft, fmt.Sprintf("changes still requested after %d round(s)", p.Round))
+			return
+		}
+		moved, err := d.store.NextRound(ctx, p.ID, p.Round)
+		if err != nil || !moved {
+			return
+		}
+		p.Round++
+		d.step(ctx, p, r, runnerwire.JobRevise, p.Pipeline.Implement, r.Summary, notified)
+	default:
+		end(runnerwire.PipelineFailed, "the review gave no verdict")
+	}
+}
+
+// combinedReview is what a revise run addresses: every review that asked for
+// changes, each under its reviewer's name.
+func (d *Dispatcher) combinedReview(ctx context.Context, changes []Vote) string {
+	text := func(v Vote) string {
+		if v.RunID != "" {
+			if run, err := d.store.Get(ctx, v.RunID); err == nil {
+				return run.Summary
+			}
+		}
+		return v.Comment
+	}
+	// One review is the review, as in W5: no heading to address.
+	if len(changes) == 1 && changes[0].Reviewer != HumanReviewerKey {
+		return text(changes[0])
+	}
+	var b strings.Builder
+	for i, v := range changes {
+		text := text(v)
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		who := label(runnerwire.AgentModel{Agent: v.Agent, Model: v.Model})
+		if v.Reviewer == HumanReviewerKey {
+			who = v.Model + " (a person)"
+		}
+		fmt.Fprintf(&b, "Review %d of %d, by %s:\n%s", i+1, len(changes), who, strings.TrimSpace(text))
+	}
+	return b.String()
+}
+
+// awaitHuman has the pipeline wait for a person's review. The caller holds
+// the pipeline's lock.
+func (d *Dispatcher) awaitHuman(ctx context.Context, p PipelineRecord, from Record, notified bool) {
+	ok, err := d.store.AwaitHuman(ctx, p.ID, p.Round)
+	if err != nil {
+		slog.Warn("runs: await human", slog.String("pipeline", p.ID), slog.Any("error", err))
+		return
+	}
+	if !ok {
+		return
+	}
+	d.note(ctx, from, fmt.Sprintf("pipeline round %d: waiting for a person to review %s", p.Round, p.PRURL))
+	d.pipelineChanged(ctx, p.ID, from)
+	d.notifyChanged(from)
+}
+
+// pipelineChanged tells observers the pipeline's current state, read back
+// from the store, with r as the run it concerns.
+func (d *Dispatcher) pipelineChanged(ctx context.Context, id string, r Record) {
+	p, err := d.store.Pipeline(ctx, id)
+	if err != nil {
+		slog.Warn("runs: read pipeline", slog.String("pipeline", id), slog.Any("error", err))
+		return
+	}
+	d.observed(Update{Run: r, Pipeline: &p})
+}
+
+// Reviewer is the person behind a human review.
+type Reviewer struct{ ID, Name string }
+
+// HumanReview records a person's verdict on a pipeline waiting for one:
+// approve ends it approved; changes starts a revise round with the comment as
+// the review, or ends it with changes left when the rounds ran out. A
+// pipeline not waiting for a person is ErrPrecondition.
+func (d *Dispatcher) HumanReview(ctx context.Context, id string, who Reviewer, verdict, comment string) (PipelineRecord, error) {
+	comment = strings.TrimSpace(comment)
+	if verdict == runnerwire.VerdictChanges && comment == "" {
+		return PipelineRecord{}, invalidf("say what to change: a review asking for changes needs a comment")
+	}
+	unlock := lockPipeline(id)
+	defer unlock()
+	p, err := d.store.Pipeline(ctx, id)
+	if err != nil {
+		return PipelineRecord{}, err
+	}
+	if p.Status != runnerwire.PipelineWaitingHuman {
+		return PipelineRecord{}, fmt.Errorf("%w: the pipeline is not waiting for a person's review", ErrPrecondition)
+	}
+	runs, err := d.store.PipelineRuns(ctx, id)
+	if err != nil {
+		return PipelineRecord{}, err
+	}
+	if len(runs) == 0 {
+		return PipelineRecord{}, fmt.Errorf("%w: the pipeline has no runs", ErrPrecondition)
+	}
+	last := runs[len(runs)-1]
+	if err := d.store.HumanVote(ctx, p.ID, p.Round, who.ID, who.Name, verdict, comment); err != nil {
+		return PipelineRecord{}, err
+	}
+	switch verdict {
+	case runnerwire.VerdictApprove:
+		d.endPipeline(ctx, p, last, runnerwire.PipelineApproved, "approved by "+who.Name, false)
+	case runnerwire.VerdictChanges:
+		if p.Round >= p.Pipeline.MaxRounds {
+			d.endPipeline(ctx, p, last, runnerwire.PipelineChangesLeft,
+				fmt.Sprintf("%s asked for changes after %d round(s)", who.Name, p.Round), false)
+			break
+		}
+		moved, err := d.store.NextRound(ctx, p.ID, p.Round)
+		if err != nil {
+			return PipelineRecord{}, err
+		}
+		if moved {
+			p.Round++
+			review := fmt.Sprintf("Review by %s (a person):\n%s", who.Name, comment)
+			d.step(ctx, p, last, runnerwire.JobRevise, p.Pipeline.Implement, review, false)
+		}
+	}
+	return d.store.Pipeline(ctx, id)
 }
 
 // step queues the pipeline's next run, on the same runner and repository as
 // the run before it. If it cannot, the pipeline fails.
 func (d *Dispatcher) step(ctx context.Context, p PipelineRecord, from Record, kind string, am runnerwire.AgentModel, review string, notified bool) {
+	next, ok := d.prepareStep(ctx, p, from, kind, am, review, notified)
+	if !ok {
+		return
+	}
+	d.note(ctx, from, fmt.Sprintf("pipeline round %d: %s step on %s/%s as run %s", p.Round, stepName(kind), am.Agent, next.Model, next.ID))
+	d.Submit(ctx, next)
+	d.pipelineChanged(ctx, p.ID, from)
+}
+
+// prepareStep records the pipeline's next run without offering it. If it
+// cannot, the pipeline fails and ok is false.
+func (d *Dispatcher) prepareStep(ctx context.Context, p PipelineRecord, from Record, kind string, am runnerwire.AgentModel, review string, notified bool) (Record, bool) {
 	fail := func(reason string) {
 		d.endPipeline(ctx, p, from, runnerwire.PipelineFailed, reason, notified)
 	}
 	runner, err := d.reg.Get(ctx, from.RunnerID)
 	if err != nil {
 		fail("the runner is gone")
-		return
+		return Record{}, false
 	}
 	model, err := ResolveAgentModel(runner.Info, am)
 	if err != nil {
 		fail(fmt.Sprintf("cannot start the %s step: %v", stepName(kind), err))
-		return
+		return Record{}, false
 	}
 	budget, err := d.store.BudgetStatus(ctx, from.OwnerID)
 	if err != nil {
 		fail("cannot read the budget: " + err.Error())
-		return
+		return Record{}, false
 	}
 	if budget.Exceeded != "" {
 		fail(BudgetMessage(budget))
-		return
+		return Record{}, false
 	}
 	jobPrompt := p.JobPrompt
 	var fallbacks []runnerwire.AgentModel
@@ -235,10 +491,9 @@ func (d *Dispatcher) step(ctx context.Context, p PipelineRecord, from Record, ki
 	})
 	if err != nil {
 		fail("cannot start the next step: " + err.Error())
-		return
+		return Record{}, false
 	}
-	d.note(ctx, from, fmt.Sprintf("pipeline round %d: %s step on %s/%s as run %s", p.Round, stepName(kind), am.Agent, model, next.ID))
-	d.Submit(ctx, next)
+	return next, true
 }
 
 func stepName(kind string) string {

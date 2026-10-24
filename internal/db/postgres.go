@@ -689,6 +689,28 @@ CREATE TABLE project_members (
 CREATE INDEX project_members_user ON project_members (user_id);
 `,
 	},
+	{
+		name: "0020_review_votes",
+		stmt: `
+ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE review_votes (
+    pipeline_id TEXT COLLATE "C" NOT NULL,
+    round       INTEGER NOT NULL,
+    reviewer    TEXT COLLATE "C" NOT NULL,
+    agent       TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    verdict     TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes', 'abstain')),
+    run_id      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    comment     TEXT NOT NULL DEFAULT '',
+    actor_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at  TEXT COLLATE "C" NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (pipeline_id, round, reviewer)
+);
+CREATE INDEX review_votes_run ON review_votes (run_id);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
