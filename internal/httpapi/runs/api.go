@@ -244,11 +244,26 @@ func (a *API) list(c *gin.Context) {
 // project the request targets. Anything else is a 404: probing IDs teaches
 // nothing.
 func (a *API) visible(c *gin.Context) (runs.Record, bool) {
+	return a.visibleTo(c, false)
+}
+
+// reviewable is visible, widened for reading a run's work to whoever may
+// review its pipeline: with humanAnyEditor, any editor of the project, who
+// cannot give a review without seeing what it is of.
+func (a *API) reviewable(c *gin.Context) (runs.Record, bool) {
+	return a.visibleTo(c, true)
+}
+
+func (a *API) visibleTo(c *gin.Context, reviewers bool) (runs.Record, bool) {
 	_, projectName, ok := a.requestProject(c)
 	if !ok {
 		return runs.Record{}, false
 	}
 	r, err := a.d.Store().Get(c.Request.Context(), c.Param("id"))
+	if err == nil && r.Project == projectName && !canSee(auth.ActorFrom(c.Request), r) &&
+		reviewers && a.anyEditorReviews(c, r.PipelineID) {
+		return r, true
+	}
 	if errors.Is(err, runs.ErrNotFound) || (err == nil && (r.Project != projectName || !canSee(auth.ActorFrom(c.Request), r))) {
 		notFound(c, "run")
 		return runs.Record{}, false
@@ -297,7 +312,7 @@ func (a *API) events(c *gin.Context) {
 // is null until the runner reports them, and stays null for a run that never
 // got that far.
 func (a *API) changes(c *gin.Context) {
-	r, ok := a.visible(c)
+	r, ok := a.reviewable(c)
 	if !ok {
 		return
 	}
@@ -308,6 +323,17 @@ func (a *API) changes(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, runnerwire.RunChangesResponse{Changes: changes})
+}
+
+// anyEditorReviews reports whether pipeline id lets any editor of its project
+// give the person's review (humanAnyEditor). The members gate has already
+// checked the caller may read the project this request targets.
+func (a *API) anyEditorReviews(c *gin.Context, id string) bool {
+	if id == "" || auth.ActorFrom(c.Request).IsAgent() {
+		return false
+	}
+	p, err := a.d.Store().Pipeline(c.Request.Context(), id)
+	return err == nil && p.Pipeline.Human && p.Pipeline.HumanAnyEditor
 }
 
 func queryInt(c *gin.Context, key string, fallback int64) (int64, error) {

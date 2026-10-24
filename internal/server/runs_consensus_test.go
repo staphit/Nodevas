@@ -199,6 +199,11 @@ func TestRunPipelineHumanReview(t *testing.T) {
 	if code, _ := f.humanReview(t, f.cal, impl.PipelineID, runnerwire.VerdictApprove, ""); code != http.StatusNotFound {
 		t.Fatalf("cal reviewing bea's pipeline = %d", code)
 	}
+	for _, path := range []string{"/api/runs/pipelines/" + impl.PipelineID, "/api/runs/" + impl.ID + "/changes"} {
+		if code := f.do(t, &f.cal, http.MethodGet, path, "", nil).Code; code != http.StatusNotFound {
+			t.Fatalf("cal reading %s of bea's pipeline = %d", path, code)
+		}
+	}
 	if code, _ := f.humanReview(t, f.bea, impl.PipelineID, runnerwire.VerdictChanges, "  "); code != http.StatusBadRequest {
 		t.Fatalf("changes without a comment = %d", code)
 	}
@@ -256,6 +261,16 @@ func TestRunPipelineHumanReviewAnyEditor(t *testing.T) {
 	implement(t, conn, impl.ID)
 	pingPong(t, conn)
 	f.waitPipeline(t, impl.PipelineID, runnerwire.PipelineWaitingHuman)
+	// A reviewer must be able to see what they review: the pipeline and its
+	// implement run's changes, though not the run's other routes.
+	for _, path := range []string{"/api/runs/pipelines/" + impl.PipelineID, "/api/runs/" + impl.ID + "/changes"} {
+		if code := f.do(t, &f.cal, http.MethodGet, path, "", nil).Code; code != http.StatusOK {
+			t.Fatalf("cal reading %s with humanAnyEditor = %d", path, code)
+		}
+	}
+	if code := f.do(t, &f.cal, http.MethodPost, "/api/runs/"+impl.ID+"/cancel", "", nil).Code; code != http.StatusNotFound {
+		t.Fatalf("cal cancelling bea's run = %d", code)
+	}
 	code, p := f.humanReview(t, f.cal, impl.PipelineID, runnerwire.VerdictApprove, "")
 	if code != http.StatusOK || p.Status != runnerwire.PipelineApproved {
 		t.Fatalf("cal reviewing with humanAnyEditor = %d %+v", code, p)

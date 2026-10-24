@@ -81,7 +81,8 @@ func (a *API) route(c *gin.Context) {
 	c.JSON(http.StatusOK, runs.Suggest(rules, runs.RouteNode{Project: projectName, Kind: node.Kind, Tags: node.Tags}))
 }
 
-// pipeline returns one pipeline, to whoever may see its runs.
+// pipeline returns one pipeline, to whoever may see its runs, and to whoever
+// may review it (humanAnyEditor: any editor of its project).
 func (a *API) pipeline(c *gin.Context) {
 	_, projectName, ok := a.requestProject(c)
 	if !ok {
@@ -90,7 +91,8 @@ func (a *API) pipeline(c *gin.Context) {
 	p, err := a.d.Store().Pipeline(c.Request.Context(), c.Param("id"))
 	actor := auth.ActorFrom(c.Request)
 	if errors.Is(err, runs.ErrNotFound) || (err == nil && (p.Project != projectName ||
-		!(actor.IsAdmin() || p.CreatedBy == actor.ID || p.OwnerID == actor.ID))) {
+		!(actor.IsAdmin() || p.CreatedBy == actor.ID || p.OwnerID == actor.ID ||
+			(p.Pipeline.Human && p.Pipeline.HumanAnyEditor && !actor.IsAgent())))) {
 		notFound(c, "pipeline")
 		return
 	}

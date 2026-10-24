@@ -72,6 +72,8 @@ type Hub struct {
 	// access holds the project access check (access.go), an *accessHolder.
 	// Atomic rather than under mu: broadcast filters run with mu held.
 	access atomic.Value
+	// writeAccess holds the write check (access.go), an *accessHolder.
+	writeAccess atomic.Value
 }
 
 type wsClient struct {
@@ -861,6 +863,13 @@ func (h *Hub) handleMessage(client *wsClient, message clientMessage) {
 	case "awareness":
 		h.relay(client, Event{Type: "awareness", Payload: message.Payload})
 	case "graph-drag":
+		client.mu.Lock()
+		actor, room := client.actor, client.room
+		client.mu.Unlock()
+		if !h.mayWrite(actor, room) {
+			// A ghost is a move being made; a viewer makes none.
+			return
+		}
 		h.relay(client, Event{Type: "graph-drag", Drag: &DragGhost{
 			IDs: message.IDs, DX: message.DX, DY: message.DY, Active: message.Active,
 		}})
@@ -946,6 +955,12 @@ func (h *Hub) acquireLock(client *wsClient, nodeID string, steal bool) {
 	actor := client.actor
 	client.mu.Unlock()
 
+	if !h.mayWrite(actor, room) {
+		// Holding (or stealing) a lock is editing; a viewer gets the answer a
+		// held lock gets, with nobody named.
+		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID})
+		return
+	}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()

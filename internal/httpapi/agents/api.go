@@ -53,6 +53,15 @@ func (a *API) fromRun(r *http.Request, actorID string) bool {
 	return (a.isRun != nil && a.isRun(r)) || strings.HasPrefix(strings.ToLower(actorID), "run:")
 }
 
+// unreadCount is the hub's count of sessionName's unread mail, as a run's
+// inbox when the request is a run's (CheckRunInbox).
+func (a *API) unreadCount(r *http.Request, projectKey, sessionName, actorID string) int {
+	if a.fromRun(r, actorID) {
+		return a.hub.RunUnreadCount(r.Context(), projectKey, sessionName, actorID)
+	}
+	return a.hub.UnreadCount(r.Context(), projectKey, sessionName, actorID)
+}
+
 // New builds the HTTP handler set for the agent network.
 func New(pm *project.ProjectManager, hub *agents.Hub) *API {
 	return &API{pm: pm, hub: hub}
@@ -172,7 +181,7 @@ func (a *API) getRoster(c *gin.Context) {
 	}
 	unread := 0
 	if callerSession != "" || callerActor != "" {
-		unread = a.hub.UnreadCount(c.Request.Context(), projectKey, callerSession, callerActor)
+		unread = a.unreadCount(c.Request, projectKey, callerSession, callerActor)
 	}
 	c.JSON(http.StatusOK, map[string]any{
 		"sessions":    sessions,
@@ -226,7 +235,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	unread := a.hub.UnreadCount(c.Request.Context(), projectKey, session.Name, actorID)
+	unread := a.unreadCount(c.Request, projectKey, session.Name, actorID)
 	// W6: the node this session holds, so `nodevas hook` reports its edits
 	// only while there is one to report them against.
 	claims, _ := a.liveClaimsAndUsers(c.Request)
@@ -416,7 +425,7 @@ func (a *API) postMessage(c *gin.Context) {
 	}
 	unread := 0
 	if !isHuman {
-		unread = a.hub.UnreadCount(c.Request.Context(), projectKey, body.FromSession, actorID)
+		unread = a.unreadCount(c.Request, projectKey, body.FromSession, actorID)
 	}
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":          true,
@@ -453,7 +462,11 @@ func (a *API) postInbox(c *gin.Context) {
 			errors.New("a run may not read a person's session inbox"), nil)
 		return
 	}
-	msgs, err := a.hub.CheckInbox(c.Request.Context(), projectKey, body.Session, actorID, wait)
+	checkInbox := a.hub.CheckInbox
+	if a.fromRun(c.Request, actorID) {
+		checkInbox = a.hub.CheckRunInbox
+	}
+	msgs, err := checkInbox(c.Request.Context(), projectKey, body.Session, actorID, wait)
 	if err != nil {
 		if errors.Is(err, c.Request.Context().Err()) {
 			return
@@ -499,6 +512,17 @@ func (a *API) postAsk(c *gin.Context) {
 	}
 	projectKey := a.projectKey(c.Request)
 	actorID, _ := resolveActor(c.Request, body.Actor)
+	fromRun := a.fromRun(c.Request, actorID)
+	sessionName := strings.TrimSpace(body.SessionName)
+	if sessionName == "" {
+		sessionName = strings.TrimSpace(body.SessionID)
+	}
+	if fromRun && a.hub.PersonSession(projectKey, sessionName) {
+		// The answer, and any approval it forwards, would be the person's.
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
+			errors.New("a run may not ask as a person's session"), nil)
+		return
+	}
 	timeout := time.Duration(body.TimeoutSeconds) * time.Second
 	if timeout <= 0 || timeout > agents.MaxAskTimeout {
 		timeout = agents.MaxAskTimeout
@@ -515,6 +539,7 @@ func (a *API) postAsk(c *gin.Context) {
 		Question:    body.Question,
 		AboutMsgID:  body.AboutMsgID,
 		NodeID:      body.NodeID,
+		FromRun:     fromRun,
 	}, timeout)
 	if err != nil {
 		if errors.Is(err, c.Request.Context().Err()) {
@@ -523,7 +548,7 @@ func (a *API) postAsk(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	unread := a.hub.UnreadCount(c.Request.Context(), projectKey, body.SessionName, actorID)
+	unread := a.unreadCount(c.Request, projectKey, body.SessionName, actorID)
 	c.JSON(http.StatusOK, map[string]any{
 		"ask":         decided,
 		"unreadCount": unread,
@@ -545,11 +570,7 @@ func (a *API) postAskAnswer(c *gin.Context) {
 		return
 	}
 	projectKey := a.projectKey(c.Request)
-	decidedBy := authed.ID
-	if decidedBy == "" {
-		decidedBy = "local"
-	}
-	ask, err := a.hub.Answer(c.Request.Context(), projectKey, c.Param("id"), body.Decision, body.Note, decidedBy)
+	ask, err := a.hub.Answer(c.Request.Context(), projectKey, c.Param("id"), body.Decision, body.Note, humanViewer(c.Request))
 	if err != nil {
 		fail(c, err)
 		return

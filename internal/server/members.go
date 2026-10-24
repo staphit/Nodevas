@@ -39,6 +39,9 @@ func (s *Server) UseMembersDB(database *db.DB) {
 		s.hub.SetAccess(func(actor identity.Actor, room string) bool {
 			return s.members.Access(actor, project.Key(room)).CanRead()
 		})
+		s.hub.SetWriteAccess(func(actor identity.Actor, room string) bool {
+			return s.members.Access(actor, project.Key(room)).CanWrite()
+		})
 		store.OnChange(func(string) { s.hub.RecheckAccess() })
 	}
 }

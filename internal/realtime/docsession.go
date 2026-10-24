@@ -405,7 +405,17 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 	}
 	client.mu.Lock()
 	room := client.room
+	actor := client.actor
 	client.mu.Unlock()
+
+	if !h.mayWrite(actor, room) {
+		// A reader is never a participant: every update a member sends is
+		// stored, relayed and, through the leader, flushed to the file. It
+		// reads the file instead and is told not to lead, as a client turned
+		// away from a full session is.
+		h.sendTo(client, Event{Type: "doc-state", ID: key, Seed: true})
+		return
+	}
 
 	h.sweepDocSessions(time.Now())
 	unlockPersistence := h.lockDocPersistence(room, key)
@@ -453,6 +463,15 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 		releaseRecoveryLocked()
 		h.mu.Unlock()
 		unlockPersistence()
+		return
+	}
+	if !h.mayWrite(actor, room) {
+		// Demoted while recovering: RecheckAccess may already have looked
+		// for this client's documents and found none.
+		releaseRecoveryLocked()
+		h.mu.Unlock()
+		unlockPersistence()
+		h.sendTo(client, Event{Type: "doc-state", ID: key, Seed: true})
 		return
 	}
 	session := h.docs[room][key]

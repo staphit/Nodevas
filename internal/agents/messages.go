@@ -480,8 +480,11 @@ func (h *Hub) getMessageByID(ctx context.Context, project, id string) (Message, 
 	return out[0], nil
 }
 
-// recipientAliases returns the inbox keys a session or actor checks.
-func recipientAliases(sessionName, actorID string) []string {
+// recipientAliases returns the inbox keys a session or actor checks. A run's
+// inbox is its own session's alone: it acts as its runner's owner, and mail
+// addressed to that person, or to everyone, is for the person's own sessions,
+// not for an agent working whatever the board told it to.
+func recipientAliases(sessionName, actorID string, run bool) []string {
 	var out []string
 	add := func(v string) {
 		v = strings.ToLower(strings.TrimSpace(v))
@@ -496,13 +499,28 @@ func recipientAliases(sessionName, actorID string) []string {
 		out = append(out, v)
 	}
 	add(sessionName)
-	add(actorID)
-	add(shortActor(actorID))
 	if sessionName != "" && actorID != "" {
 		add(shortActor(actorID) + "/" + sessionName)
 	}
+	if run {
+		return out
+	}
+	add(actorID)
+	add(shortActor(actorID))
 	add("*")
 	return out
+}
+
+// runInbox reports whether the inbox of sessionName, asked for as actorID, is
+// a run's: a "run:" actor, or a session a runner dispatched.
+func (h *Hub) runInbox(project, sessionName, actorID string) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(actorID)), "run:") {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessionByNameLocked(project, strings.TrimSpace(sessionName))
+	return s != nil && s.Run && strings.EqualFold(s.ActorID, strings.TrimSpace(actorID))
 }
 
 // inboxRefused reports whether actorID is asking for the inbox of a session
@@ -519,6 +537,16 @@ func (h *Hub) inboxRefused(project, sessionName, actorID string) bool {
 // ctx cancellation) before returning. Held and rejected messages are never
 // returned: only an approval puts a held one in the inbox.
 func (h *Hub) CheckInbox(ctx context.Context, project, sessionName, actorID string, wait time.Duration) ([]Message, error) {
+	return h.checkInbox(ctx, project, sessionName, actorID, wait, false)
+}
+
+// CheckRunInbox is CheckInbox for a run the transport recognised (a request
+// through a runner's proxy): it reads its own session's mail only.
+func (h *Hub) CheckRunInbox(ctx context.Context, project, sessionName, actorID string, wait time.Duration) ([]Message, error) {
+	return h.checkInbox(ctx, project, sessionName, actorID, wait, true)
+}
+
+func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID string, wait time.Duration, run bool) ([]Message, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	if wait > MaxInboxWait {
 		wait = MaxInboxWait
@@ -526,7 +554,7 @@ func (h *Hub) CheckInbox(ctx context.Context, project, sessionName, actorID stri
 	if h.inboxRefused(project, sessionName, actorID) {
 		return nil, fmt.Errorf("%w: session %q belongs to another actor", ErrRefused, sessionName)
 	}
-	aliases := recipientAliases(sessionName, actorID)
+	aliases := recipientAliases(sessionName, actorID, run || h.runInbox(project, sessionName, actorID))
 
 	deadline := time.Time{}
 	if wait > 0 {
@@ -642,11 +670,20 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 // actorID without marking them read. Used to append unread notices to MCP tool
 // responses. Held messages do not count: the agent cannot read them yet.
 func (h *Hub) UnreadCount(ctx context.Context, project, sessionName, actorID string) int {
+	return h.unreadCount(ctx, project, sessionName, actorID, false)
+}
+
+// RunUnreadCount is UnreadCount for a run (CheckRunInbox).
+func (h *Hub) RunUnreadCount(ctx context.Context, project, sessionName, actorID string) int {
+	return h.unreadCount(ctx, project, sessionName, actorID, true)
+}
+
+func (h *Hub) unreadCount(ctx context.Context, project, sessionName, actorID string, run bool) int {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	if h.inboxRefused(project, sessionName, actorID) {
 		return 0
 	}
-	aliases := recipientAliases(sessionName, actorID)
+	aliases := recipientAliases(sessionName, actorID, run || h.runInbox(project, sessionName, actorID))
 	if len(aliases) == 0 {
 		return 0
 	}

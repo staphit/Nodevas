@@ -402,6 +402,39 @@ func TestRestrictedProjectRealtime(t *testing.T) {
 	}
 }
 
+// A viewer watches a project's live documents but cannot write into them:
+// it is never a participant, so its CRDT updates reach neither the editor
+// nor, through the editor's leader, the file.
+func TestViewerCannotWriteThroughTheSocket(t *testing.T) {
+	f := newMembersFixture(t)
+	if response := f.setMember(t, f.bea, "cal", "viewer"); response.Code != http.StatusOK {
+		t.Fatalf("restricting: %d %s", response.Code, response.Body)
+	}
+	live := httptest.NewServer(f.handler)
+	t.Cleanup(live.Close)
+
+	bea := f.dialAs(t, live, f.bea)
+	bea.send(map[string]any{"type": "subscribe", "project": "other"})
+	bea.await("presence", nil)
+	if state := bea.openDoc("secret-plan"); !state.Leader {
+		t.Fatalf("the owner did not lead: %+v", state)
+	}
+	bea.send(map[string]any{"type": "lock", "nodeId": "secret-plan"})
+	bea.await("locks", nil)
+
+	cal := f.dialAs(t, live, f.cal)
+	cal.send(map[string]any{"type": "subscribe", "project": "other"})
+	cal.await("presence", nil)
+	if state := cal.openDoc("secret-plan"); state.Leader || !state.Seed {
+		t.Fatalf("the viewer was not given a read-only seed: %+v", state)
+	}
+	cal.send(map[string]any{"type": "doc-update", "nodeId": "secret-plan", "payload": "SU5KRUNURUQ="})
+	cal.send(map[string]any{"type": "lock", "nodeId": "secret-plan", "steal": true})
+	cal.await("lock-denied", nil)
+	bea.awaitNone("doc-update", 300*time.Millisecond)
+	bea.awaitNone("doc-leader", 50*time.Millisecond)
+}
+
 func userID(t *testing.T, f *membersFixture, name string) string {
 	t.Helper()
 	response := f.do(t, &f.ann, http.MethodGet, "/api/projects/members?project=other", "", nil)

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -321,5 +322,63 @@ func TestHeartbeatReportsModel(t *testing.T) {
 		`{"sessionId":"s1","model":"`+strings.Repeat("m", 65)+`"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("long model = %d, want 400", rec.Code)
+	}
+}
+
+// An ask is the asking person's to answer: another editor of the project
+// cannot decide it, nor send the approval it forwards in that person's name.
+func TestAskIsAnsweredOnlyByItsPerson(t *testing.T) {
+	router := testRouter(t)
+	heartbeat(t, router, "alice-agent", "claude:a1", "alice-bot")
+	asked := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		asked <- call(t, router, "alice-agent", http.MethodPost, "/api/agents/asks",
+			`{"sessionId":"claude:a1","sessionName":"alice-bot","question":"Ship it?","timeoutSeconds":5}`)
+	}()
+	var id string
+	for range 100 {
+		rec := call(t, router, "bob", http.MethodGet, "/api/agents/asks?status=pending", "")
+		var got struct {
+			Asks []agents.Ask `json:"asks"`
+		}
+		decodeJSON(t, rec, &got)
+		if len(got.Asks) == 1 {
+			id = got.Asks[0].ID
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if id == "" {
+		t.Fatal("the ask never became pending")
+	}
+	if rec := call(t, router, "bob", http.MethodPost, "/api/agents/asks/"+id+"/answer", `{"decision":"approve"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("bob answering alice's ask = %d, want 404: %s", rec.Code, rec.Body)
+	}
+	if rec := call(t, router, "alice", http.MethodPost, "/api/agents/asks/"+id+"/answer", `{"decision":"deny"}`); rec.Code != http.StatusOK {
+		t.Fatalf("alice answering her ask = %d: %s", rec.Code, rec.Body)
+	}
+	rec := <-asked
+	var got struct {
+		Ask agents.Ask `json:"ask"`
+	}
+	decodeJSON(t, rec, &got)
+	if got.Ask.Status != agents.AskDenied || got.Ask.DecidedBy != "alice" {
+		t.Fatalf("decided ask = %+v", got.Ask)
+	}
+	// Nor may bob ask as alice's session.
+	if rec := call(t, router, "bob-agent", http.MethodPost, "/api/agents/asks",
+		`{"sessionId":"claude:b1","sessionName":"alice-bot","question":"Ship it?","timeoutSeconds":1}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("bob asking as alice-bot = %d, want 403: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRunCannotAskAsAPersonsSession(t *testing.T) {
+	router := testRouter(t)
+	heartbeat(t, router, "alice-agent", "claude:a1", "alice-bot")
+	// An unauthenticated request names its actor; a "run:" one is a run's.
+	rec := call(t, router, "", http.MethodPost, "/api/agents/asks",
+		`{"actor":"run:claude","sessionName":"alice-bot","question":"Ship it?","timeoutSeconds":1}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a run asking as a person's session = %d, want 403: %s", rec.Code, rec.Body)
 	}
 }
