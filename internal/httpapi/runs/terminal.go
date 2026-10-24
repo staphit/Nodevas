@@ -25,7 +25,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/coder/websocket"
@@ -56,17 +55,10 @@ var (
 const termResizeCost = 64
 
 // validMode accepts the run modes POST /api/runs takes.
-func validMode(mode string) bool {
-	return mode == runnerwire.ModeHeadless || mode == runnerwire.ModeInteractive
-}
+func validMode(mode string) bool { return runs.ValidMode(mode) }
 
 // modeSupported reports whether a runner's hello lets it run a mode.
-func modeSupported(info *runnerwire.Info, mode string) bool {
-	if mode != runnerwire.ModeInteractive {
-		return true
-	}
-	return info != nil && slices.Contains(info.Capabilities, runnerwire.CapInteractive)
-}
+func modeSupported(info *runnerwire.Info, mode string) bool { return runs.ModeSupported(info, mode) }
 
 // mayType is who may type into a run's terminal: whoever dispatched it and the
 // runner's owner, never an agent.

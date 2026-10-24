@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	agentsapi "nodevas/internal/httpapi/agents"
+	autopilotapi "nodevas/internal/httpapi/autopilot"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
 	membersapi "nodevas/internal/httpapi/members"
@@ -76,6 +77,11 @@ func (s *Server) Handler() http.Handler {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
 		s.configureStepUp(runsAPI)
 		runsAPI.Register(api)
+		if s.autopilot != nil {
+			autopilotAPI := autopilotapi.New(s.pm, s.autopilot)
+			s.configureAutopilotStepUp(autopilotAPI)
+			autopilotAPI.Register(api)
+		}
 	} else {
 		s.configureStepUp(nil)
 	}

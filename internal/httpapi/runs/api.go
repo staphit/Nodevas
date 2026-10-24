@@ -9,12 +9,9 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,9 +29,8 @@ import (
 // Limits on POST /api/runs.
 const (
 	// MaxExtraPrompt caps the dispatcher's extra instructions.
-	MaxExtraPrompt = 8 << 10
+	MaxExtraPrompt = runs.MaxExtraPrompt
 	maxCreateBody  = 16 << 10
-	maxBaseLen     = 200
 	listLimit      = 50
 )
 
@@ -147,182 +143,49 @@ func (a *API) create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !engine.ValidNodeID(body.NodeID) {
-		invalid(c, "nodeId is not a valid node id")
-		return
-	}
-	if len(body.Prompt) > MaxExtraPrompt || !utf8.ValidString(body.Prompt) {
-		invalid(c, "prompt must be valid text of at most %d bytes", MaxExtraPrompt)
-		return
-	}
-	if !validBase(body.Base) {
-		invalid(c, "base is not a valid branch name")
-		return
-	}
-	if !validMode(body.Mode) {
-		invalid(c, "mode must be \"\" or %q", runnerwire.ModeInteractive)
-		return
-	}
-	// A dispatch is an implement run or (W7) a plan run, which breaks the node
-	// into tasks on the board; review and revise runs are a pipeline's steps.
-	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan {
-		invalid(c, "kind must be \"\" or %q", runnerwire.JobPlan)
-		return
-	}
-	if body.Kind == runnerwire.JobPlan && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
-		invalid(c, "a plan run is one headless run, not a pipeline")
-		return
-	}
-	if err := runs.ValidateChain(body.Fallbacks, false); err != nil {
-		fail(c, err)
-		return
-	}
-	if body.Pipeline != nil {
-		if err := runs.ValidatePipeline(*body.Pipeline, false); err != nil {
-			fail(c, err)
-			return
-		}
-		// The pipeline's implement step is the first run.
-		body.Agent, body.Model = body.Pipeline.Implement.Agent, body.Pipeline.Implement.Model
-	}
-
-	// The runner must be the caller's own, administrators included: a run
-	// executes on the owner's machine with the owner's logins, and nobody
-	// else gets to put work there.
-	runner, err := a.reg.Get(c.Request.Context(), body.RunnerID)
-	if err != nil || runner.OwnerID != actor.ID {
-		notFound(c, "runner")
-		return
-	}
-	model, repo, problem := checkAgainstHello(runner.Info, body)
-	if problem != "" {
-		invalid(c, "%s", problem)
-		return
-	}
-	var pipeline *runnerwire.Pipeline
-	if body.Pipeline != nil {
-		resolved, err := runs.ResolvePipeline(runner.Info, *body.Pipeline, model)
-		if err != nil {
-			invalid(c, "pipeline %v", err)
-			return
-		}
-		pipeline = &resolved
-	}
-	if body.Kind == runnerwire.JobPlan && !slices.Contains(runner.Info.Capabilities, runnerwire.CapPlan) {
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
-			errors.New("this runner cannot run plan jobs; update nodevas on it"), nil)
-		return
-	}
-	if !runs.Headless(runner.Info) {
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
-			errors.New("this runner does not take runs; update nodevas on it"), nil)
-		return
-	}
-	if !modeSupported(runner.Info, body.Mode) {
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
-			errors.New("this runner cannot run interactive sessions"), nil)
-		return
-	}
-	// The budget is the runner owner's: runs spend their subscription.
-	budget, err := a.d.Store().BudgetStatus(c.Request.Context(), runner.OwnerID)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	if budget.Exceeded != "" {
-		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
-			errors.New(runs.BudgetMessage(budget)), map[string]any{"exceeded": budget.Exceeded})
-		return
-	}
-
-	node, content, err := loadNode(st, body.NodeID)
-	if err != nil {
-		httpx.Err(c, http.StatusInternalServerError, err)
-		return
-	}
-	if node == nil {
-		notFound(c, "node")
-		return
-	}
-	title := node.Title
-	if title == "" {
-		title = node.ID
-	}
-	name := actor.Name
-	if name == "" {
-		name = actor.ID
-	}
-	jobPrompt := BuildPrompt(title, content, body.Prompt)
 	steppedUpAt := ""
 	if a.steppedUpAt != nil {
 		if at, ok := a.steppedUpAt(c.Request); ok {
 			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	pipelineID := ""
-	if pipeline != nil {
-		p, err := a.d.Store().CreatePipeline(c.Request.Context(), runs.NewPipeline{
-			OwnerID: runner.OwnerID, CreatedBy: actor.ID, Project: projectName, NodeID: node.ID,
-			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
-		})
-		if err != nil {
-			fail(c, err)
-			return
-		}
-		pipelineID = p.ID
-	}
-	record, err := a.d.Store().Create(c.Request.Context(), runs.New{
-		Project: projectName, NodeID: node.ID, NodeTitle: title,
-		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
-		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
-		Prompt: body.Prompt, JobPrompt: jobPrompt,
-		CreatedBy: actor.ID, CreatedByName: name,
-		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: steppedUpAt, Mode: body.Mode, Kind: body.Kind,
+	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
+		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
+		SteppedUpAt: steppedUpAt,
+		LoadNode: func() (string, string, bool, error) {
+			node, content, err := loadNode(st, body.NodeID)
+			if err != nil || node == nil {
+				return "", "", false, err
+			}
+			return node.Title, content, true, nil
+		},
 	})
 	if err != nil {
-		if pipelineID != "" {
-			_, _ = a.d.Store().EndPipeline(c.Request.Context(), pipelineID, runnerwire.PipelineFailed, err.Error())
-		}
-		fail(c, err)
+		startFailed(c, err)
 		return
 	}
-	record = a.d.Submit(c.Request.Context(), record)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, record.Run)
 }
 
-// checkAgainstHello resolves the request's agent, model and repo against what
-// the runner last reported. It returns the model to record and the repo, or a
-// reason the request does not fit.
-func checkAgainstHello(info *runnerwire.Info, body runnerwire.CreateRunRequest) (string, runnerwire.Repo, string) {
-	model, err := runs.ResolveAgentModel(info, runnerwire.AgentModel{Agent: body.Agent, Model: body.Model})
-	if err != nil {
-		return "", runnerwire.Repo{}, err.Error()
+// startFailed answers a refused or failed run start.
+func startFailed(c *gin.Context, err error) {
+	var refused *runs.StartError
+	if !errors.As(err, &refused) {
+		httpx.Err(c, http.StatusInternalServerError, err)
+		return
 	}
-	r := slices.IndexFunc(info.Repos, func(repo runnerwire.Repo) bool { return repo.ID == body.RepoID })
-	if body.RepoID == "" || r < 0 {
-		return "", runnerwire.Repo{}, "repoId is not one of the runner's repositories"
+	switch refused.Code {
+	case runs.StartNotFound:
+		notFound(c, refused.What)
+	case runs.StartPrecondition:
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", errors.New(refused.Msg), nil)
+	case runs.StartBudget:
+		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
+			errors.New(refused.Msg), map[string]any{"exceeded": refused.Budget.Exceeded})
+	default:
+		invalid(c, "%s", refused.Msg)
 	}
-	return model, info.Repos[r], ""
-}
-
-// validBase accepts "" (the repository's default) or a plausible branch
-// name. The runner checks again with git; this keeps junk out of the record
-// and anything that reads as an option off the runner's command line.
-func validBase(base string) bool {
-	if base == "" {
-		return true
-	}
-	if len(base) > maxBaseLen || strings.HasPrefix(base, "-") || strings.Contains(base, "..") {
-		return false
-	}
-	for _, r := range base {
-		if !(r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("._/-", r))) {
-			return false
-		}
-	}
-	return true
 }
 
 // loadNode returns the node and its body text, or a nil node when the graph
@@ -351,25 +214,8 @@ func loadNode(st *store.Store, id string) (*engine.Node, string, error) {
 	return node, file.Body, nil
 }
 
-const truncatedNote = "\n\n[node content truncated]"
-
-// BuildPrompt assembles the task a runner is offered: the node's title, its
-// content, and the dispatcher's extra instructions, within MaxPromptBytes.
-// The content gives way first, so the instructions typed for this run are
-// never the part that is cut.
-func BuildPrompt(title, content, extra string) string {
-	head := "# " + strings.TrimSpace(title) + "\n\n"
-	tail := ""
-	if extra = strings.TrimSpace(extra); extra != "" {
-		tail = "\n\nAdditional instructions:\n" + extra
-	}
-	content = strings.TrimSpace(content)
-	room := runnerwire.MaxPromptBytes - len(head) - len(tail)
-	if len(content) > room {
-		content = runs.Truncate(content, max(room-len(truncatedNote), 0)) + truncatedNote
-	}
-	return runs.Truncate(head+content+tail, runnerwire.MaxPromptBytes)
-}
+// BuildPrompt assembles the task a runner is offered (runs.BuildPrompt).
+func BuildPrompt(title, content, extra string) string { return runs.BuildPrompt(title, content, extra) }
 
 func (a *API) list(c *gin.Context) {
 	_, projectName, ok := a.requestProject(c)

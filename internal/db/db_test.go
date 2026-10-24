@@ -47,18 +47,19 @@ func TestOpenCreatesEverySchemaObject(t *testing.T) {
 		"runs", "run_events", "run_changes", "run_merges", "run_budgets",
 		"run_routes", "run_pipelines", "session_changes", "agent_message_files",
 		"agent_session_usage", "usage_prices", "project_members", "review_votes",
+		"autopilot_runs", "autopilot_tasks",
 	} {
 		if !present[want] {
 			t.Fatalf("table %q missing; have %v", want, present)
 		}
 	}
-	// Every step ran, the newest included: 0001-0018 and 0020 (0019 is the autopilot's, on its own branch).
+	// Every step ran, the newest included: 0001-0020.
 	var steps int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&steps); err != nil {
 		t.Fatal(err)
 	}
-	if steps != 19 || steps != len(migrations) {
-		t.Fatalf("schema_migrations has %d rows, want 19 (%d defined)", steps, len(migrations))
+	if steps != 20 || steps != len(migrations) {
+		t.Fatalf("schema_migrations has %d rows, want 20 (%d defined)", steps, len(migrations))
 	}
 }
 

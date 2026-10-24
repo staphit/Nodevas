@@ -690,6 +690,41 @@ CREATE INDEX project_members_user ON project_members (user_id);
 `,
 	},
 	{
+		name: "0019_autopilot",
+		stmt: `
+CREATE TABLE autopilot_runs (
+    id              TEXT COLLATE "C" PRIMARY KEY,
+    project         TEXT COLLATE "C" NOT NULL,
+    goal_node_id    TEXT COLLATE "C" NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
+    policy          TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    created_by      TEXT COLLATE "C" NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    stepped_up_at   TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at      TEXT COLLATE "C" NOT NULL,
+    updated_at      TEXT COLLATE "C" NOT NULL,
+    finished_at     TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX autopilot_runs_goal ON autopilot_runs (project, goal_node_id, created_at);
+CREATE UNIQUE INDEX autopilot_runs_live ON autopilot_runs (project, goal_node_id)
+    WHERE status IN ('running', 'paused');
+
+CREATE TABLE autopilot_tasks (
+    autopilot_id TEXT COLLATE "C" NOT NULL REFERENCES autopilot_runs(id),
+    node_id      TEXT COLLATE "C" NOT NULL,
+    state        TEXT NOT NULL,
+    run_id       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    pipeline_id  TEXT COLLATE "C" NOT NULL DEFAULT '',
+    data         TEXT NOT NULL,
+    updated_at   TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (autopilot_id, node_id)
+);
+CREATE INDEX autopilot_tasks_run ON autopilot_tasks (run_id);
+CREATE INDEX autopilot_tasks_pipeline ON autopilot_tasks (pipeline_id);
+`,
+	},
+	{
 		name: "0020_review_votes",
 		stmt: `
 ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';

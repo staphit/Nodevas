@@ -53,6 +53,8 @@ type Server struct {
 	usage *usage.Store
 	// llm relays copilot model calls to runners; nil until UseRunnersDB.
 	llm *runners.LLMRelay
+	// autopilot works goals' task DAGs (W7); nil until UseRunnersDB.
+	autopilot *autopilot.Orchestrator
 	// stepUpWindow is how long a step-up lasts (W6); zero is the default.
 	stepUpWindow time.Duration
 	// members is project membership (members.go); nil until UseMembersDB.
@@ -257,6 +259,7 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
 	// the same relay.
 	autopilot.RegisterLLMAdvisor(autopilot.NewLLMAdvisor(s.llm))
+	s.startAutopilot(database)
 }
 
 // RunnerLLM is the relay for copilot model calls made on runners, or nil

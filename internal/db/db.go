@@ -897,6 +897,49 @@ CREATE INDEX project_members_user ON project_members (user_id);
 `,
 	},
 	{
+		name: "0019_autopilot",
+		stmt: `
+-- Autopilot (W7, internal/autopilot): a goal node's tasks worked as a DAG.
+-- One row per autopilot run; at most one running or paused per goal.
+CREATE TABLE autopilot_runs (
+    id              TEXT PRIMARY KEY,
+    -- The project's name as ?project= takes it, as on runs.
+    project         TEXT NOT NULL,
+    goal_node_id    TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
+    -- runnerwire.AutopilotPolicy as JSON.
+    policy          TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    created_by      TEXT NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    -- The creator's step-up when the autopilot started, recorded on its
+    -- runs as POST /api/runs records the dispatcher's.
+    stepped_up_at   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    finished_at     TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE INDEX autopilot_runs_goal ON autopilot_runs (project, goal_node_id, created_at);
+CREATE UNIQUE INDEX autopilot_runs_live ON autopilot_runs (project, goal_node_id)
+    WHERE status IN ('running', 'paused');
+
+-- One row per task instance: runnerwire.TaskInstance as JSON, plus the
+-- columns an update is looked up by.
+CREATE TABLE autopilot_tasks (
+    autopilot_id TEXT NOT NULL REFERENCES autopilot_runs(id),
+    node_id      TEXT NOT NULL,
+    state        TEXT NOT NULL,
+    run_id       TEXT NOT NULL DEFAULT '',
+    pipeline_id  TEXT NOT NULL DEFAULT '',
+    data         TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (autopilot_id, node_id)
+) STRICT;
+CREATE INDEX autopilot_tasks_run ON autopilot_tasks (run_id);
+CREATE INDEX autopilot_tasks_pipeline ON autopilot_tasks (pipeline_id);
+`,
+	},
+	{
 		name: "0020_review_votes",
 		stmt: `
 -- Review consensus and human review (W7). A pipeline round may have several
