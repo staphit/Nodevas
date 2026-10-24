@@ -230,6 +230,9 @@ func TestTermInputAndResize(t *testing.T) {
 	s := j.terms.open("run-i", term)
 	go s.writeLoop()
 
+	// View only until remote typing is allowed.
+	j.termInput("run-i", &runnerwire.TermChunk{Data: []byte("whoami\r")})
+	s.typing.Store(true)
 	j.termInput("run-i", &runnerwire.TermChunk{Data: []byte("ls\r")})
 	j.termInput("run-i", &runnerwire.TermChunk{Data: bytes.Repeat([]byte("y"), runnerwire.MaxTermChunk+1)})
 	j.termInput("run-i", &runnerwire.TermChunk{Data: []byte("q")})
@@ -262,11 +265,8 @@ func TestTermInputAndResize(t *testing.T) {
 
 func TestInteractiveSetting(t *testing.T) {
 	cfg := &Config{}
-	if !cfg.InteractiveOn() {
-		t.Fatal("interactive is off by default")
-	}
-	if err := cfg.Set("interactive", []string{"false"}); err != nil || cfg.InteractiveOn() {
-		t.Fatalf("set false: %v", err)
+	if cfg.InteractiveOn() {
+		t.Fatal("interactive is on by default")
 	}
 	if slices.Contains(capabilities(cfg), runnerwire.CapInteractive) {
 		t.Fatal("interactive capability advertised while off")
@@ -274,8 +274,11 @@ func TestInteractiveSetting(t *testing.T) {
 	if err := cfg.Set("interactive", []string{"maybe"}); err == nil {
 		t.Fatal("accepted maybe")
 	}
-	if err := cfg.Set("interactive", []string{"default"}); err != nil || !cfg.InteractiveOn() {
+	if err := cfg.Set("interactive", []string{"default"}); err != nil || cfg.InteractiveOn() {
 		t.Fatalf("reset: %v", err)
+	}
+	if err := cfg.Set("interactive", []string{"true"}); err != nil || !cfg.InteractiveOn() {
+		t.Fatalf("set true: %v", err)
 	}
 	if got := slices.Contains(capabilities(cfg), runnerwire.CapInteractive); got != ptySupported() {
 		t.Fatalf("interactive capability %t, pty supported %t", got, ptySupported())
@@ -289,7 +292,7 @@ func TestDescribeInteractiveOffer(t *testing.T) {
 	}
 	job.Mode = runnerwire.ModeInteractive
 	text := describeOffer(Offer{Job: job})
-	if !strings.Contains(text, "INTERACTIVE run offered") || !strings.Contains(text, "can type into it") {
+	if !strings.Contains(text, "INTERACTIVE run offered") || !strings.Contains(text, "only if you allow") {
 		t.Fatalf("interactive offer:\n%s", text)
 	}
 }
@@ -313,6 +316,8 @@ type startedTerm struct {
 func startInteractiveRunner(t *testing.T, tweak func(*Client)) (*jobEnv, chan startedTerm) {
 	started := make(chan startedTerm, 4)
 	env := startJobRunner(t, func(c *Client) {
+		on := true
+		c.Config.Interactive = &on
 		prev := c.Adapter
 		c.Adapter = func(kind string) adapter.Adapter {
 			if a, ok := prev(kind).(fakeAgent); ok {
@@ -372,13 +377,21 @@ func hubHasEvent(env *jobEnv, runID, text string) bool {
 	return false
 }
 
+// typingAccepter says yes, and yes or no to remote typing.
+type typingAccepter struct {
+	acceptFunc
+	typing bool
+}
+
+func (a typingAccepter) AllowRemoteTyping(context.Context, Offer) bool { return a.typing }
+
 func TestInteractiveRun(t *testing.T) {
 	offered := make(chan Offer, 1)
 	env, started := startInteractiveRunner(t, func(c *Client) {
-		c.Accepter = acceptFunc(func(_ context.Context, o Offer) (bool, string) {
+		c.Accepter = typingAccepter{typing: true, acceptFunc: func(_ context.Context, o Offer) (bool, string) {
 			offered <- o
 			return true, ""
-		})
+		}}
 	})
 	hello := env.hub.hello()
 	if got := slices.Contains(hello.Hello.Capabilities, runnerwire.CapInteractive); got != ptySupported() {
@@ -510,8 +523,34 @@ func TestInteractiveOfferDeclined(t *testing.T) {
 	}
 }
 
+// Accepted by a person who did not allow remote typing: the hub watches, and
+// what it types never reaches the agent.
+func TestInteractiveRunViewOnly(t *testing.T) {
+	for _, accepter := range []Accepter{
+		acceptFunc(func(context.Context, Offer) (bool, string) { return true, "" }),
+		typingAccepter{acceptFunc: func(context.Context, Offer) (bool, string) { return true, "" }},
+	} {
+		env, started := startInteractiveRunner(t, func(c *Client) { c.Accepter = accepter })
+		env.hub.hello()
+		env.hub.offer(interactiveJob("run-view"))
+		st := waitStarted(t, started)
+		env.hub.wait("run-view", runnerwire.TypeAccept)
+		eventually(t, "view-only event", func() bool { return hubHasEvent(env, "run-view", "view only") })
+		env.hub.send(runnerwire.Envelope{Type: runnerwire.TypeTermIn, RunID: "run-view",
+			Term: &runnerwire.TermChunk{Data: []byte("rm -rf ~\r")}})
+		time.Sleep(100 * time.Millisecond)
+		if typed := st.term.typed(); typed != "" {
+			t.Fatalf("view-only terminal got %q", typed)
+		}
+		st.term.exit <- 0
+		env.hub.wait("run-view", runnerwire.TypeFinish)
+	}
+}
+
 func TestInteractiveDeclinedWithoutInteractiveAdapter(t *testing.T) {
 	env := startJobRunner(t, func(c *Client) {
+		on := true
+		c.Config.Interactive = &on
 		c.NewTerminal = func(*exec.Cmd, int, int) (Terminal, error) { return newFakeTerm(), nil }
 	})
 	env.hub.hello()

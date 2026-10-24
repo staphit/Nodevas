@@ -128,7 +128,7 @@ func newMergeEnv(t *testing.T, tweak func(*Config)) *mergeEnv {
 		t.Fatal(err)
 	}
 	env := &mergeEnv{gh: newMergeGH(), repo: repo, wt: wt, dataDir: dataDir, log: &safeLog{},
-		cfg: &Config{DataDir: dataDir, Repos: []runnerwire.Repo{{ID: "r1", Name: "demo", Path: repo}}}}
+		cfg: &Config{DataDir: dataDir, Repos: []runnerwire.Repo{{ID: "r1", Name: "demo", Path: repo}}, RemoteMerge: ptrTrue()}}
 	if tweak != nil {
 		tweak(env.cfg)
 	}
@@ -470,8 +470,11 @@ func TestMergeResultWaitsForConnection(t *testing.T) {
 
 func TestMergeConfig(t *testing.T) {
 	cfg := &Config{}
-	if !cfg.RemoteMergeOn() || cfg.MergeMethodOrDefault() != "squash" || cfg.DeleteBranchOnMerge {
+	if cfg.RemoteMergeOn() || cfg.MergeMethodOrDefault() != "squash" || cfg.DeleteBranchOnMerge {
 		t.Fatalf("defaults %+v", cfg)
+	}
+	if err := cfg.Set("remoteMerge", []string{"true"}); err != nil || !cfg.RemoteMergeOn() {
+		t.Fatalf("remoteMerge true: %v", err)
 	}
 	for key, value := range map[string]string{"remoteMerge": "false", "mergeMethod": "MERGE", "deleteBranchOnMerge": "true"} {
 		if err := cfg.Set(key, []string{value}); err != nil {
@@ -504,6 +507,7 @@ func TestMergeOverTheSocket(t *testing.T) {
 	var wtPath string
 	env := startPRRunner(t, nil, func(c *Client) {
 		c.Config.DataDir = dataDir
+		c.Config.RemoteMerge = ptrTrue()
 		c.PRPollInterval = time.Hour
 		cmds := c.Commands.(*fakeCommands)
 		cmds.paths["gh"] = "/bin/gh"
@@ -575,3 +579,5 @@ func TestMergeOverTheSocket(t *testing.T) {
 		t.Fatalf("merged %d times", len(calls))
 	}
 }
+
+func ptrTrue() *bool { on := true; return &on }

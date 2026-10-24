@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -27,6 +28,13 @@ const (
 	LegacyAutoAcceptWarning = "WARNING: runner.json had the old \"autoAccept\": true, which accepted everything. " +
 		"It now auto-accepts only the repositories added here and the agents installed here, headless only, " +
 		"and still WITHOUT a step-up. Require one with: nodevas runner autoaccept step-up required"
+	AllowShellWarning = "WARNING: auto-accept now also takes runs whose agent may run any shell command here " +
+		"(Codex danger-full-access, OpenCode/agy full, agy auto, Gemini yolo, Claude bypassPermissions/auto " +
+		"or Bash in allowedTools). A task or a file in the repository can talk such an agent into running " +
+		"anything as you. A step-up only proves the dispatcher re-entered a passcode; it does not protect " +
+		"you from a compromised hub. Undo with: nodevas runner autoaccept allow-shell off"
+	RemoteTypingWarning = "WARNING: the dispatcher may now type into auto-accepted interactive runs' terminals, " +
+		"answering the agent's permission prompts as you. Undo with: nodevas runner autoaccept remote-typing off"
 )
 
 // Modes as the CLI names them; the wire spells headless "".
@@ -158,6 +166,60 @@ func (c *Config) EnableAutoAccept(installed []string) {
 
 // SetStepUpRequired is `runner autoaccept step-up required|optional`.
 func (c *Config) SetStepUpRequired(required bool) { c.policy().RequireStepUp = required }
+
+// SetAllowShell is `runner autoaccept allow-shell on|off`.
+func (c *Config) SetAllowShell(on bool) { c.policy().AllowShell = on }
+
+// SetAllowRemoteTyping is `runner autoaccept remote-typing on|off`.
+func (c *Config) SetAllowRemoteTyping(on bool) { c.policy().AllowRemoteTyping = on }
+
+// bashTool matches Bash, or Bash(<pattern>), as one entry of a Claude Code
+// --allowedTools list.
+var bashTool = regexp.MustCompile(`(^|[\s,])Bash($|[\s,(])`)
+
+// ShellAccess says why job's agent, under this runner's permission settings,
+// may run any shell command it likes: "" when it cannot. Auto-accept leaves
+// such runs to a person unless the owner said otherwise (AllowShell).
+func (c *Config) ShellAccess(job runnerwire.Job) string {
+	mode := c.PermissionModeFor(job.Agent)
+	readOnly := job.Mode != runnerwire.ModeInteractive && (job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan)
+	if readOnly {
+		mode, _ = reviewPermission(c, job.Agent)
+	}
+	switch job.Agent {
+	case "codex":
+		if mode == "danger-full-access" {
+			return "codexSandbox danger-full-access"
+		}
+	case "gemini":
+		if mode == "yolo" {
+			return "geminiApprovalMode yolo"
+		}
+	case "opencode":
+		if mode == "full" {
+			return "opencodePermission full"
+		}
+	case "antigravity":
+		if mode == "full" || mode == "auto" {
+			return "antigravityMode " + mode
+		}
+	case "claude":
+		if readOnly {
+			// Reviews and plans run with Bash disallowed (claudeReadOnlyTools),
+			// which wins over any allow.
+			return ""
+		}
+		if mode == "bypassPermissions" || mode == "auto" {
+			return "permissionMode " + mode
+		}
+		for _, tool := range c.AllowedTools {
+			if bashTool.MatchString(strings.TrimSpace(tool)) {
+				return "allowedTools " + tool
+			}
+		}
+	}
+	return ""
+}
 
 // ResolveRepo finds one of this runner's repositories by ID, name (when only
 // one has it) or path.
@@ -364,6 +426,10 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 	}
 	if !slices.Contains(allowedModes(p), job.Mode) {
 		missing = append(missing, fmt.Sprintf("%s runs are not on this runner's auto-accept list", ModeName(job.Mode)))
+	}
+	if offer.Shell != "" && !p.AllowShell {
+		missing = append(missing, fmt.Sprintf("agent %s may run any shell command here (%s); "+
+			"auto-accept leaves that to a person (nodevas runner autoaccept allow-shell on)", job.Agent, offer.Shell))
 	}
 	if len(missing) > 0 {
 		return false, strings.Join(missing, "; ")

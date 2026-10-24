@@ -75,6 +75,9 @@ type run struct {
 	// publishing: the agent is done and its work is being committed and
 	// pushed; a cancel no longer applies.
 	publishing bool
+	// remoteTyping: the dispatcher may type into this interactive run's
+	// terminal (auto-accepted under AllowRemoteTyping, or a yes here).
+	remoteTyping bool
 
 	// Outbound, unsent, in this order. events is bounded: a run that talks a
 	// lot while the socket is down loses its oldest events, never its finish.
@@ -400,10 +403,15 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 // else asked at the terminal. With nobody there, the decline says what kept
 // auto-accept from applying.
 func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
-	offer := Offer{Job: r.job, Repo: r.repo}
-	auto, why := AutoAcceptDecision(j.c.Config.AutoAcceptPolicy(), offer)
+	offer := Offer{Job: r.job, Repo: r.repo, Shell: j.c.Config.ShellAccess(r.job)}
+	policy := j.c.Config.AutoAcceptPolicy()
+	auto, why := AutoAcceptDecision(policy, offer)
+	interactive := r.job.Mode == runnerwire.ModeInteractive
 	if auto {
 		j.c.logf("run %s: auto-accepted: %s", r.job.RunID, why)
+		if interactive {
+			j.setRemoteTyping(r, policy.AllowRemoteTyping)
+		}
 		return true, ""
 	}
 	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
@@ -411,10 +419,29 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 	if j.c.Accepter != nil {
 		ok, reason = j.c.Accepter.Accept(ctx, offer)
 	}
+	if ok && interactive {
+		typing := false
+		if asker, can := j.c.Accepter.(RemoteTypingAsker); can {
+			typing = asker.AllowRemoteTyping(ctx, offer)
+		}
+		j.setRemoteTyping(r, typing)
+	}
 	if !ok && reason == ReasonNoTerminal && why != ReasonAutoAcceptOff {
 		reason = why + " (and nobody is at the runner's terminal to accept)"
 	}
 	return ok, reason
+}
+
+// setRemoteTyping records whether the dispatcher may type into r's terminal.
+func (j *jobs) setRemoteTyping(r *run, on bool) {
+	j.mu.Lock()
+	r.remoteTyping = on
+	j.mu.Unlock()
+	if on {
+		j.c.logf("run %s: remote typing allowed", r.job.RunID)
+	} else {
+		j.c.logf("run %s: view only: typing from the hub is refused", r.job.RunID)
+	}
 }
 
 // runAgent starts the agent in the worktree and waits for it, a cancel or the

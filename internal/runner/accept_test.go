@@ -197,3 +197,19 @@ func TestConfigSet(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalAccepterRemoteTyping(t *testing.T) {
+	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
+		var out strings.Builder
+		a := &TerminalAccepter{In: strings.NewReader(in), Out: &out, Interactive: true, Timeout: 5 * time.Second}
+		if got := a.AllowRemoteTyping(context.Background(), Offer{}); got != want {
+			t.Errorf("answer %q: %t", in, got)
+		}
+		if !strings.Contains(out.String(), "Allow remote typing? [y/N]") {
+			t.Errorf("question: %q", out.String())
+		}
+	}
+	if (&TerminalAccepter{In: strings.NewReader("y\n"), Out: io.Discard}).AllowRemoteTyping(context.Background(), Offer{}) {
+		t.Error("no terminal, yet typing allowed")
+	}
+}

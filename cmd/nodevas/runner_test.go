@@ -162,7 +162,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	for _, want := range []string{"remoteMerge            true (a merge approved on the hub", "mergeMethod            squash",
+	for _, want := range []string{"remoteMerge            false (approvals on the hub are refused; merge on GitHub yourself (the default)", "mergeMethod            squash",
 		"deleteBranchOnMerge    false"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("default status missing %q:\n%s", want, stdout)
@@ -179,7 +179,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		{"set", "prDraft", "true"},
 		{"set", "prLabels", "nodevas,agent:{agent}", "model:{model}"},
 		{"set", "prPollSeconds", "60"},
-		{"set", "remoteMerge", "false"},
+		{"set", "remoteMerge", "true"},
 		{"set", "mergeMethod", "Rebase"},
 		{"set", "deleteBranchOnMerge", "true"},
 	} {
@@ -223,7 +223,7 @@ func TestRunnerSetAndStatus(t *testing.T) {
 		"codexSandbox           read-only", "codexIgnoreUserConfig  true (runs skip your Codex config.toml",
 		"geminiApprovalMode     yolo", "opencodePermission     full", "antigravityMode        full", "autoPR                 false (commit only", "prDraft                true",
 		"prLabels               nodevas, agent:{agent}, model:{model}", "prPollSeconds          60",
-		"remoteMerge            false (approvals on the hub are refused", "mergeMethod            rebase",
+		"remoteMerge            true (a merge approved on the hub", "mergeMethod            rebase",
 		"deleteBranchOnMerge    true"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)

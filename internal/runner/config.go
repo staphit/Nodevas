@@ -78,8 +78,8 @@ type Config struct {
 	// MigrateLegacyAutoAccept has not filled in the agents yet.
 	legacyAutoAccept bool
 	// Interactive takes interactive runs (W2.5): the agent's TUI in a terminal
-	// here that the dispatcher can type into. nil means the default, on; off,
-	// every interactive offer is declined.
+	// here that the dispatcher watches (and types into, when allowed). nil
+	// means the default, off: every interactive offer is declined.
 	Interactive *bool `json:"interactive,omitempty"`
 
 	// Pull requests, from W3 on.
@@ -99,7 +99,7 @@ type Config struct {
 
 	// RemoteMerge lets someone who approves a run's diff on the hub have this
 	// runner merge its PR (with the owner's gh login); nil means the default,
-	// on. Off, every approval is refused.
+	// off: every approval is refused.
 	RemoteMerge *bool `json:"remoteMerge,omitempty"`
 	// MergeMethod is how an approved PR is merged: squash (the default),
 	// merge or rebase. The hub's request never chooses.
@@ -149,8 +149,8 @@ var DefaultPRLabels = []string{"nodevas", "model:{model}"}
 // MergeMethods are the merge methods gh pr merge takes, the default first.
 var MergeMethods = []string{"squash", "merge", "rebase"}
 
-// RemoteMergeOn is RemoteMerge with its default (on) applied.
-func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge == nil || *c.RemoteMerge }
+// RemoteMergeOn is RemoteMerge with its default (off) applied.
+func (c *Config) RemoteMergeOn() bool { return c.RemoteMerge != nil && *c.RemoteMerge }
 
 // MergeMethodOrDefault is MergeMethod with its default applied; anything
 // unknown (a hand-edited file) falls back to squash.
@@ -161,8 +161,8 @@ func (c *Config) MergeMethodOrDefault() string {
 	return MergeMethods[0]
 }
 
-// InteractiveOn is Interactive with its default (on) applied.
-func (c *Config) InteractiveOn() bool { return c.Interactive == nil || *c.Interactive }
+// InteractiveOn is Interactive with its default (off) applied.
+func (c *Config) InteractiveOn() bool { return c.Interactive != nil && *c.Interactive }
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }

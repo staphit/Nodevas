@@ -303,3 +303,70 @@ func TestBuildInfoReportsPolicy(t *testing.T) {
 		t.Fatalf("policy = %+v", info.AutoAccept)
 	}
 }
+
+func TestShellAccess(t *testing.T) {
+	job := func(agent, kind string) runnerwire.Job {
+		j := testJob("run-1", "x")
+		j.Agent, j.Kind = agent, kind
+		return j
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+		job  runnerwire.Job
+		want string
+	}{
+		{"claude default", Config{}, job("claude", ""), ""},
+		{"claude bypass", Config{PermissionMode: "bypassPermissions"}, job("claude", ""), "bypassPermissions"},
+		{"claude Bash", Config{AllowedTools: []string{"Edit", "Bash"}}, job("claude", ""), "allowedTools Bash"},
+		{"claude Bash pattern", Config{AllowedTools: []string{"Bash(go test *)"}}, job("claude", ""), "Bash(go test *)"},
+		{"claude BashOutput is not Bash", Config{AllowedTools: []string{"BashOutput"}}, job("claude", ""), ""},
+		{"claude review, Bash allowed", Config{AllowedTools: []string{"Bash"}}, job("claude", runnerwire.JobReview), ""},
+		{"codex default", Config{}, job("codex", ""), ""},
+		{"codex full", Config{CodexSandbox: "danger-full-access"}, job("codex", ""), "danger-full-access"},
+		{"codex full review", Config{CodexSandbox: "danger-full-access"}, job("codex", runnerwire.JobReview), ""},
+		{"gemini yolo", Config{GeminiApprovalMode: "yolo"}, job("gemini", ""), "yolo"},
+		{"opencode full", Config{OpenCodePermission: "full"}, job("opencode", ""), "full"},
+		{"opencode full plan", Config{OpenCodePermission: "full"}, job("opencode", runnerwire.JobPlan), ""},
+		{"agy full", Config{AntigravityMode: "full"}, job("antigravity", ""), "full"},
+		{"agy auto", Config{AntigravityMode: "auto"}, job("antigravity", ""), "auto"},
+		{"agy default", Config{}, job("antigravity", ""), ""},
+	}
+	for _, c := range cases {
+		got := c.cfg.ShellAccess(c.job)
+		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
+			t.Errorf("%s: ShellAccess = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	policy := runnerwire.AutoAcceptPolicy{Enabled: true, Repos: []string{"r1"}, Agents: []string{"codex"}}
+	offer := Offer{Job: job("codex", ""), Repo: runnerwire.Repo{ID: "r1", Name: "demo"}, Shell: "codexSandbox danger-full-access"}
+	offer.Job.RepoID = "r1"
+	if ok, reason := AutoAcceptDecision(policy, offer); ok || !strings.Contains(reason, "allow-shell on") {
+		t.Fatalf("shell-capable offer: %v %q", ok, reason)
+	}
+	policy.AllowShell = true
+	if ok, reason := AutoAcceptDecision(policy, offer); !ok {
+		t.Fatalf("allowShell on: %q", reason)
+	}
+}
+
+// An auto-accepted interactive run is view only unless the policy allows
+// remote typing.
+func TestAskRemoteTyping(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		policy := &runnerwire.AutoAcceptPolicy{Enabled: true, Repos: []string{"r1"}, Agents: []string{"claude"},
+			Modes: []string{runnerwire.ModeInteractive}, AllowRemoteTyping: allow}
+		job := testJob("run-1", "x")
+		job.RepoID, job.Mode = "r1", runnerwire.ModeInteractive
+		r := &run{job: job, repo: runnerwire.Repo{ID: "r1", Name: "demo"}}
+		var log bytes.Buffer
+		j := &jobs{c: &Client{Config: &Config{AutoAccept: policy}, Log: &log}}
+		if ok, reason := j.ask(context.Background(), r); !ok {
+			t.Fatalf("not auto-accepted: %q", reason)
+		}
+		if r.remoteTyping != allow {
+			t.Fatalf("allowRemoteTyping %t: run typing %t", allow, r.remoteTyping)
+		}
+	}
+}

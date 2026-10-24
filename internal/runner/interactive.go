@@ -136,6 +136,14 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		return fail("could not start %s in a terminal: %v", job.Agent, err)
 	}
 	s := j.terms.open(job.RunID, term)
+	j.mu.Lock()
+	typing := r.remoteTyping
+	j.mu.Unlock()
+	s.typing.Store(typing)
+	if !typing {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: "view only: the runner's owner did not allow typing into this terminal from the hub"})
+	}
 	text := fmt.Sprintf("started %s interactively in a %dx%d terminal (model %s, %s)",
 		job.Agent, initialCols, initialRows, orDash(job.Model), permissionText(cfg, job.Agent))
 	if job.Agent == "codex" && cfg.CodexIgnoreUserConfig {
@@ -201,8 +209,8 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 }
 
 // termInput handles a TypeTermIn: keystrokes for an interactive run that is
-// running. Anything else (a headless run, one that ended, an oversized chunk)
-// is dropped.
+// running and whose owner allowed remote typing. Anything else (a headless
+// run, one that ended, a view-only one, an oversized chunk) is dropped.
 func (j *jobs) termInput(runID string, chunk *runnerwire.TermChunk) {
 	if chunk == nil || len(chunk.Data) == 0 {
 		return
@@ -215,6 +223,12 @@ func (j *jobs) termInput(runID string, chunk *runnerwire.TermChunk) {
 		j.c.logf("run %s: dropped %d bytes of terminal input (over %d)", runID, len(chunk.Data), runnerwire.MaxTermChunk)
 		return
 	}
+	if !s.typing.Load() {
+		j.c.logf("run %s: refused %d bytes of terminal input: view only", runID, len(chunk.Data))
+		return
+	}
+	// Size and time only, never what was typed: it may be a password.
+	j.c.logf("run %s: terminal input from the hub: %d bytes", runID, len(chunk.Data))
 	if !s.input(chunk.Data) {
 		j.c.logf("run %s: terminal input dropped: the agent is not reading it", runID)
 	}
@@ -322,6 +336,8 @@ type termSession struct {
 	stop  chan struct{}
 	// lastOutput is when output last arrived, as UnixNano.
 	lastOutput atomic.Int64
+	// typing: input from the hub reaches the program (remote typing allowed).
+	typing atomic.Bool
 
 	mu        sync.Mutex
 	pending   []byte

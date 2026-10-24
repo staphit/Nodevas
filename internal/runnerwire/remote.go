@@ -21,6 +21,14 @@ type AutoAcceptPolicy struct {
 	Agents []string `json:"agents,omitempty"`
 	// Modes: "" (headless) and/or "interactive". Empty means headless only.
 	Modes []string `json:"modes,omitempty"`
+	// AllowShell: auto-accept runs even when the agent's permission setting
+	// lets it run any shell command (Codex danger-full-access, OpenCode or
+	// agy full, agy auto, Gemini yolo, Claude bypassPermissions or Bash
+	// allowed). Default false: such offers are asked about at the terminal.
+	AllowShell bool `json:"allowShell,omitempty"`
+	// AllowRemoteTyping: the dispatcher may type into an auto-accepted
+	// interactive run's terminal. Default false: view only.
+	AllowRemoteTyping bool `json:"allowRemoteTyping,omitempty"`
 }
 
 // StepUpWindowSeconds is how long a step-up lasts by default; the server's

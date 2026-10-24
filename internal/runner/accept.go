@@ -18,6 +18,9 @@ import (
 type Offer struct {
 	Job  runnerwire.Job
 	Repo runnerwire.Repo
+	// Shell is why the agent may run any shell command here
+	// (Config.ShellAccess); "" when it cannot.
+	Shell string
 }
 
 // Accepter decides whether this machine takes a job. It is the point of the
@@ -125,6 +128,50 @@ func (t *TerminalAccepter) Accept(ctx context.Context, offer Offer) (bool, strin
 	}
 }
 
+// RemoteTypingAsker is an Accepter that can also ask, once an interactive
+// offer is accepted, whether the dispatcher may type into its terminal.
+type RemoteTypingAsker interface {
+	AllowRemoteTyping(ctx context.Context, offer Offer) bool
+}
+
+// AllowRemoteTyping asks "Allow remote typing? [y/N]". Anything but yes, a
+// timeout included, leaves the terminal view only.
+func (t *TerminalAccepter) AllowRemoteTyping(ctx context.Context, offer Offer) bool {
+	if !t.Interactive {
+		return false
+	}
+	t.init()
+	select {
+	case t.turn <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	}
+	defer func() { <-t.turn }()
+	fmt.Fprint(t.Out, "The dispatcher can watch this run's terminal. Typing into it answers the agent's\n"+
+		"prompts as you (approving commands, edits). Allow remote typing? [y/N]: ")
+	timeout := t.Timeout
+	if timeout <= 0 {
+		timeout = DefaultAcceptTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case line, ok := <-t.lines:
+		if !ok {
+			fmt.Fprintln(t.Out)
+			return false
+		}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes":
+			return true
+		}
+	case <-timer.C:
+		fmt.Fprintln(t.Out, "\nno answer; view only.")
+	case <-ctx.Done():
+	}
+	return false
+}
+
 // promptPreview is how much of the task the question shows.
 const promptPreview = 500
 
@@ -143,8 +190,11 @@ func describeOffer(o Offer) string {
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
 	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
 	if interactive {
-		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine, and the\n" +
-			"                dispatcher can type into it (answer its prompts, run what it lets them)\n")
+		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine; the\n" +
+			"                dispatcher watches it, and types into it only if you allow that next\n")
+	}
+	if o.Shell != "" {
+		fmt.Fprintf(&b, "  shell:        the agent may run ANY shell command here (%s)\n", o.Shell)
 	}
 	switch job.Kind {
 	case runnerwire.JobReview:

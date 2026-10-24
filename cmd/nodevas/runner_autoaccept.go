@@ -73,6 +73,23 @@ func runnerAutoAccept(args []string, stdout, stderr io.Writer) error {
 		default:
 			return fmt.Errorf("step-up must be required or optional")
 		}
+	case "allow-shell", "remote-typing":
+		if len(rest) != 1 {
+			return errUsage
+		}
+		var on bool
+		switch strings.ToLower(rest[0]) {
+		case "on":
+			on = true
+		case "off":
+		default:
+			return fmt.Errorf("%s must be on or off", sub)
+		}
+		if sub == "allow-shell" {
+			cfg.SetAllowShell(on)
+		} else {
+			cfg.SetAllowRemoteTyping(on)
+		}
 	case "repo", "agent", "mode":
 		if len(rest) != 2 || (rest[0] != "add" && rest[0] != "remove") {
 			return errUsage
@@ -144,6 +161,12 @@ func warnAutoAccept(w io.Writer, cfg *runner.Config, stepUpChanged bool) {
 	if !policy.RequireStepUp && (policy.Enabled || stepUpChanged) {
 		fmt.Fprintln(w, runner.StepUpOptionalWarning)
 	}
+	if policy.AllowShell {
+		fmt.Fprintln(w, runner.AllowShellWarning)
+	}
+	if policy.AllowRemoteTyping {
+		fmt.Fprintln(w, runner.RemoteTypingWarning)
+	}
 	if policy.Enabled && (len(policy.Repos) == 0 || len(policy.Agents) == 0) {
 		fmt.Fprintln(w, "note: no repository or no agent is on the auto-accept list, so nothing is auto-accepted yet.")
 	}
@@ -178,6 +201,16 @@ func printAutoAccept(w io.Writer, cfg *runner.Config) {
 	row("repos", listOrNone(repos))
 	row("agents", listOrNone(policy.Agents))
 	row("modes", listOrNone(runner.AutoAcceptModeNames(policy)))
+	if policy.AllowShell {
+		row("allowShell", "ON (runs whose agent may run any shell command are auto-accepted too)")
+	} else {
+		row("allowShell", "off (a run whose agent may run any shell command is asked about here)")
+	}
+	if policy.AllowRemoteTyping {
+		row("remoteTyping", "ON (the dispatcher may type into auto-accepted interactive runs)")
+	} else {
+		row("remoteTyping", "off (auto-accepted interactive runs are view only)")
+	}
 }
 
 func listOrNone(items []string) string {

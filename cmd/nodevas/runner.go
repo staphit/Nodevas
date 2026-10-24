@@ -92,16 +92,22 @@ func runnerUsage(w io.Writer) {
        nodevas runner autoaccept repo add|remove <id|name|path>
        nodevas runner autoaccept agent add|remove <kind>
        nodevas runner autoaccept mode add|remove headless|interactive
+       nodevas runner autoaccept allow-shell on|off
+       nodevas runner autoaccept remote-typing on|off
                                              an offer is auto-accepted only when auto-accept is on,
                                              the dispatcher stepped up on the hub (unless optional),
-                                             and its repo, agent and mode are all listed; anything
-                                             else is asked about at this terminal
+                                             its repo, agent and mode are all listed, and its agent
+                                             cannot run any shell command (unless allow-shell on);
+                                             anything else is asked about at this terminal. A step-up
+                                             does not protect you from a compromised hub.
+                                             remote-typing on lets the dispatcher type into
+                                             auto-accepted interactive runs (default: view only)
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
                                              maxConcurrent, runTimeoutMinutes, dataDir, autoAccept
                                              (true = autoaccept on with the defaults: step-up required,
                                              every repo here, installed agents, headless; false = off),
-                                             interactive (true|false: take runs whose agent TUI the
-                                             dispatcher can type into);
+                                             interactive (true|false, default false: take runs whose
+                                             agent TUI the dispatcher watches, typing only if allowed);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
@@ -115,7 +121,7 @@ func runnerUsage(w io.Writer) {
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
                                              prPollSeconds (30 or more);
-                                             remote merge: remoteMerge (true|false), mergeMethod
+                                             remote merge: remoteMerge (true|false, default false), mergeMethod
                                              (squash|merge|rebase), deleteBranchOnMerge (true|false);
                                              copilot: copilotProvider (anthropic|openai|none: this runner
                                              makes your voice copilot's model calls with a key kept here),
@@ -328,9 +334,10 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("maxConcurrent", cfg.MaxConcurrentRuns())
 	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
 	setting("dataDir", dataDir)
-	interactive := "interactive runs: the agent's TUI in a terminal here, which the dispatcher can type into"
+	interactive := "interactive runs: the agent's TUI in a terminal here; the dispatcher watches, " +
+		"and types only where you allowed it"
 	if !cfg.InteractiveOn() {
-		interactive = "interactive runs are declined; headless only"
+		interactive = "interactive runs are declined; headless only (the default)"
 	}
 	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
 	fmt.Fprintln(w, "claude runs:")
@@ -360,7 +367,7 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("prPollSeconds", int(cfg.PRPollInterval().Seconds()))
 	remote := "a merge approved on the hub is merged here with your gh login, once its CI is green"
 	if !cfg.RemoteMergeOn() {
-		remote = "approvals on the hub are refused; merge on GitHub yourself"
+		remote = "approvals on the hub are refused; merge on GitHub yourself (the default)"
 	}
 	setting("remoteMerge", fmt.Sprintf("%t (%s)", cfg.RemoteMergeOn(), remote))
 	setting("mergeMethod", cfg.MergeMethodOrDefault())
