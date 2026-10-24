@@ -292,9 +292,32 @@ export interface RunPipeline {
   implement: AgentModel;
   review: AgentModel;
   maxRounds: number;
+  /** W7: reviewers voting in parallel (review is the only one when empty),
+   * how many approvals pass a round (0: all), and whether a person decides
+   * after them. */
+  reviewers?: AgentModel[] | null;
+  quorum?: number;
+  human?: boolean;
 }
 
-export type PipelineStatus = "running" | "approved" | "changes_left" | "failed" | "cancelled";
+export type PipelineStatus =
+  | "running"
+  | "waiting_human"
+  | "approved"
+  | "changes_left"
+  | "failed"
+  | "cancelled";
+
+/** One vote on a pipeline's PR in a round (W7). "abstain": the review run
+ * failed or gave no verdict; "": still reviewing. A person's vote has agent
+ * "human" and their name as the model. */
+export interface PipelineVote {
+  agent: string;
+  model: string;
+  verdict: "approve" | "changes" | "abstain" | "";
+  runId?: string;
+  round: number;
+}
 
 /** Mirrors runnerwire.PipelineState: GET /api/runs/pipelines/:id. */
 export interface PipelineState {
@@ -305,14 +328,17 @@ export interface PipelineState {
   status: PipelineStatus | string;
   runIds: string[] | null;
   createdAt: string;
+  /** W7: the votes so far and a person's decision in the current round. */
+  votes?: PipelineVote[] | null;
+  humanVerdict?: string;
 }
 
 /** Whether a pipeline will not change any more. */
 export function pipelineEnded(status: string | undefined): boolean {
-  return Boolean(status) && status !== "running";
+  return Boolean(status) && status !== "running" && status !== "waiting_human";
 }
 
-export type RunKind = "" | "review" | "revise";
+export type RunKind = "" | "review" | "revise" | "plan";
 export type FailureKind =
   | "rate_limit"
   | "quota"

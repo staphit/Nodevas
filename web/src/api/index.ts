@@ -4,6 +4,7 @@
  * nor cares which file an endpoint now lives in.
  */
 import { agentsApi } from "./agents";
+import { autopilotApi, planApi } from "./autopilot";
 import { authApi } from "./auth";
 import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
@@ -134,6 +135,7 @@ export type {
   AgentModel,
   FailureKind,
   PipelineState,
+  PipelineVote,
   PipelineStatus,
   ReviewVerdict,
   RouteMatch,
@@ -163,6 +165,38 @@ export type {
   UsageSession,
   UsageSource,
 } from "./usage";
+export {
+  autopilotEnded,
+  MAX_AUTOPILOT_PARALLEL,
+  MAX_REVIEWERS,
+  REVIEW_MODES,
+  reviewHasAgents,
+  reviewHasHuman,
+  STAGE_STATUSES,
+  TASK_STAGES,
+  TASK_STATES,
+} from "./autopilot";
+export type {
+  AutopilotAction,
+  AutopilotAdvisor,
+  AutopilotPolicy,
+  AutopilotRun,
+  AutopilotStatus,
+  AutopilotTaskAction,
+  AutopilotView,
+  CreateAutopilotRequest,
+  HumanReviewRequest,
+  PlanRunRequest,
+  ReviewMode,
+  ReviewPolicy,
+  ReviewVote,
+  StageRecord,
+  StageStatus,
+  TaskCounts,
+  TaskInstance,
+  TaskStage,
+  TaskState,
+} from "./autopilot";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -193,4 +227,6 @@ export const api = {
   ...runsApi,
   ...usageApi,
   ...membersApi,
+  ...autopilotApi,
+  ...planApi,
 };

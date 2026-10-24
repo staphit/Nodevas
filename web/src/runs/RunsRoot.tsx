@@ -6,6 +6,7 @@ import { useRouting } from "./routingStore";
 import { RunToasts } from "./RunToasts";
 import { useRuns } from "./runStore";
 import { useSessions } from "./sessionStore";
+import { useAutopilot } from "../autopilot/autopilotStore";
 
 export { openNodeRuns } from "./openRuns";
 
@@ -27,6 +28,7 @@ export function RunsRoot() {
       previousProject.current = activeProject;
       useRuns.getState().reset();
       useSessions.getState().reset();
+      useAutopilot.getState().reset();
       // "This project" in a rule, and the hub's answer to a GET, follow it.
       useRouting.getState().reset();
     }

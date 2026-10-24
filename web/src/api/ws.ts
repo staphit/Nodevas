@@ -68,9 +68,13 @@ export type WSEvent = {
     | "run-events"
     | "run-notify"
     | "session-changes"
-    | "usage-changed";
+    | "usage-changed"
+    // W7: an autopilot run changed; the id is the autopilot run's.
+    | "autopilot-changed";
   id?: string;
   project?: string;
+  /** autopilot-changed: the goal node the autopilot run belongs to. */
+  goalNodeId?: string;
   peers?: Peer[];
   locks?: NodeLock[];
   actor?: Actor;

@@ -32,6 +32,7 @@
 @import "./styles/20-remote.css"; /* step-up, auto-accept policies, terminal sessions */
 @import "./styles/21-usage.css"; /* usage: tokens and estimated cost of runs and sessions */
 @import "./styles/21-members.css"; /* project members and the access banner */
+@import "./styles/22-autopilot.css"; /* W7 autopilot: goal panel, DAG grid, human review, card badge */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

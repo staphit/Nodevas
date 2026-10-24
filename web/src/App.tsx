@@ -26,6 +26,7 @@ import { useAgents } from "./agents/agentStore";
 import { RunnersModal } from "./runners/RunnersModal";
 import { UsageModal } from "./usage/UsageModal";
 import { useUsage } from "./usage/usageStore";
+import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
@@ -327,6 +328,13 @@ function MainApp() {
           useRuns.getState().onRunsChanged(ev.id);
           // A finished run's usage arrives only as runs-changed.
           useUsage.getState().onUsageEvent();
+          // A task's run moved: active autopilot runs held refetch.
+          useAutopilot.getState().onRunsChanged();
+          break;
+        case "autopilot-changed":
+          // The id is an autopilot run: refetched, coalesced; one not held
+          // yet is how its tasks get their card badges.
+          useAutopilot.getState().onChanged(ev.id, ev.goalNodeId);
           break;
         case "run-events":
           // The id is a run: an open run view fetches what came after its

@@ -10,6 +10,7 @@ import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types"
 import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { IconPlus, IconSend, IconTerminal } from "../../icons";
 import { openNodeRuns } from "../../runs/RunsRoot";
+import { openAutopilot } from "../../autopilot/openAutopilot";
 import { useRuns } from "../../runs/runStore";
 import { confirmAction } from "../ConfirmDialog";
 import type { LaneContextMenu } from "../LaneView";
@@ -136,6 +137,17 @@ export function NodeMenu({
         >
           <IconTerminal size={13} />
           <span>{t("nodeMenu.runs")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const nodeId = contextMenu.nodeId;
+            setContextMenu(null);
+            openAutopilot(nodeId);
+          }}
+        >
+          <IconSend size={13} />
+          <span>{t("nodeMenu.autopilot")}</span>
         </button>
       </div>
       {assignableLogicGates.length > 0 && (

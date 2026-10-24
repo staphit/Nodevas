@@ -9,6 +9,7 @@ import {
 import { api, type AgentFileUpload, type AgentMessage } from "../api";
 import { formatLocalizedDateTime, useI18n } from "../i18n";
 import { IconBell, IconClose, IconComputer, IconPaperclip, IconUsage } from "../icons";
+import { WaitingForYouButton } from "../autopilot/HumanReview";
 import { useApp } from "../store";
 import { AskCard } from "./AskCard";
 import { canManageSession, useAgents } from "./agentStore";
@@ -204,6 +205,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
             />
             <span>{t("agents.showOffline")}</span>
           </label>
+          <WaitingForYouButton />
           {/* Runners live here rather than in the top bar: they are where
               agents run, and the top bar has no room left at narrow widths. */}
           <button

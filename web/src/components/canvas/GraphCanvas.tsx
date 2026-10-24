@@ -68,6 +68,7 @@ import {
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
 import { RunCardBadge } from "../../runs/RunChanges";
+import { AutopilotCardBadge } from "../../autopilot/AutopilotCardBadge";
 
 type ConnectionHandlers = ReturnType<typeof useConnectionDrag>["handlers"];
 type CardResizeHandlers = ReturnType<typeof useCardResize>["handlers"];
@@ -601,6 +602,7 @@ export function GraphCanvas({
               {n.priority && <span className={`priority-dot ${n.priority}`} />}
               {errorNodes.has(n.id) && <span className="error-dot" />}
               <RunCardBadge nodeId={n.id} />
+              <AutopilotCardBadge nodeId={n.id} />
             </span>
             <span className="col-card-title">{n.title || n.id}</span>
             <span

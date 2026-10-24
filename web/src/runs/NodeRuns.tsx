@@ -567,7 +567,14 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
   );
 }
 
-const PIPELINE_STATUSES = new Set(["running", "approved", "changes_left", "failed", "cancelled"]);
+const PIPELINE_STATUSES = new Set([
+  "running",
+  "waiting_human",
+  "approved",
+  "changes_left",
+  "failed",
+  "cancelled",
+]);
 
 export function PipelineStatusChip({ status }: { status: string }) {
   const { t } = useI18n();
