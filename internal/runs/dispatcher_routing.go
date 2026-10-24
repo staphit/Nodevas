@@ -101,6 +101,12 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			d.note(ctx, r, "not falling back: "+err.Error())
 			return false
 		}
+		if r.Kind == runnerwire.JobReview {
+			// The reviewer's seat moves with it: the retry's verdict is its vote.
+			if err := d.store.MoveVote(ctx, r.ID, next.ID); err != nil {
+				slog.Warn("runs: move vote", slog.String("run", r.ID), slog.Any("error", err))
+			}
+		}
 		d.note(ctx, r, fmt.Sprintf("falling back to %s/%s (%s) as run %s", head.Agent, model, r.FailureKind, next.ID))
 		d.Submit(ctx, next)
 		return true
@@ -145,6 +151,12 @@ func (d *Dispatcher) advance(ctx context.Context, r Record, notified bool) {
 	// A review run that failed is a reviewer abstaining, not the pipeline
 	// failing: the others' votes may still carry the round.
 	if r.Kind == runnerwire.JobReview && r.Status == runnerwire.RunFailed {
+		// Only a failure of the review itself (no verdict, a session cut
+		// short) is worth a second try on the same agent; a quota or a
+		// missing model would fail the same way.
+		if r.RetryOf == "" && r.FailureKind == runnerwire.FailureTask && d.retryReview(ctx, r) {
+			return
+		}
 		d.reviewEnded(ctx, p, r, notified)
 		return
 	}
@@ -223,6 +235,41 @@ func (d *Dispatcher) startReviews(ctx context.Context, p PipelineRecord, from Re
 		d.Submit(ctx, next)
 	}
 	d.pipelineChanged(ctx, p.ID, from)
+}
+
+// retryReview runs a review that failed once more, on the same agent and
+// model, before it counts as an abstention: a reviewer that ended without a
+// verdict (its session cut short, a last line in the wrong form) usually
+// gives one on a second try, and one abstention can sink a round. It
+// reports whether it queued the retry. The caller holds the pipeline's lock.
+func (d *Dispatcher) retryReview(ctx context.Context, r Record) bool {
+	runner, err := d.reg.Get(ctx, r.RunnerID)
+	if err != nil {
+		return false
+	}
+	budget, err := d.store.BudgetStatus(ctx, r.OwnerID)
+	if err != nil || budget.Exceeded != "" {
+		return false
+	}
+	next, err := d.store.Create(ctx, New{
+		Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
+		RunnerID: r.RunnerID, RunnerName: runner.Name, OwnerID: r.OwnerID,
+		Agent: r.Agent, Model: r.Model, RepoID: r.RepoID, RepoName: r.RepoName, Base: r.Base,
+		Prompt: r.Prompt, JobPrompt: r.JobPrompt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
+		Kind: r.Kind, JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
+		RetryOf: r.ID, PipelineID: r.PipelineID,
+		SteppedUpAt: r.SteppedUpAt,
+	})
+	if err != nil {
+		d.note(ctx, r, "not retrying the review: "+err.Error())
+		return false
+	}
+	if err := d.store.MoveVote(ctx, r.ID, next.ID); err != nil {
+		slog.Warn("runs: move vote", slog.String("run", r.ID), slog.Any("error", err))
+	}
+	d.note(ctx, r, "the review ended without a verdict; trying it once more as run "+next.ID)
+	d.Submit(ctx, next)
+	return true
 }
 
 // reviewEnded records a review run's vote and, once the round's last vote is

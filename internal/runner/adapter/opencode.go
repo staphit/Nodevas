@@ -84,13 +84,18 @@ func openCodeConfig(env RunEnv, interactive bool) (string, error) {
 	if mode == "" {
 		mode = DefaultOpenCodePermission
 	}
-	permission := map[string]string{"edit": "allow", "bash": "deny", "webfetch": "allow"}
+	// external_directory (a path outside the worktree) defaults to ask, and a
+	// headless ask is a rejection that ends the session there and then (a
+	// review stops before its verdict); deny instead hands the model an error
+	// it works around (checked against opencode 1.18.23).
+	permission := map[string]string{"edit": "allow", "bash": "deny", "webfetch": "allow", "external_directory": "deny"}
 	switch mode {
 	case "read-only":
 		permission["edit"] = "deny"
 	case "edit":
 	case "full":
 		permission["bash"] = "allow"
+		permission["external_directory"] = "allow"
 	default:
 		return "", fmt.Errorf("opencode: unknown permission setting %q (want one of %s)",
 			mode, strings.Join(OpenCodePermissionModes, ", "))

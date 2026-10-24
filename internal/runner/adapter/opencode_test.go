@@ -155,7 +155,8 @@ func TestOpenCodeCommand(t *testing.T) {
 		t.Errorf("mcp = %s", raw)
 	}
 	// No setting is edit: edits yes, the shell no.
-	if p := config.Permission; p["edit"] != "allow" || p["bash"] != "deny" || p["webfetch"] != "allow" {
+	if p := config.Permission; p["edit"] != "allow" || p["bash"] != "deny" || p["webfetch"] != "allow" ||
+		p["external_directory"] != "deny" {
 		t.Errorf("permission = %v", p)
 	}
 
@@ -221,7 +222,8 @@ func TestOpenCodeInteractiveCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Someone is at the terminal: what headless denies is asked about.
-	if config.Permission["edit"] != "allow" || config.Permission["bash"] != "ask" {
+	if config.Permission["edit"] != "allow" || config.Permission["bash"] != "ask" ||
+		config.Permission["external_directory"] != "ask" {
 		t.Errorf("permission = %v", config.Permission)
 	}
 	if term, _ := envValue(cmd.Env, "TERM"); term != "xterm-256color" {

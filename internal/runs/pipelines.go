@@ -246,6 +246,19 @@ func (s *Store) SettleVote(ctx context.Context, runID, verdict string) (bool, er
 	return n == 1, err
 }
 
+// MoveVote hands a review's pending vote from one run to the run that
+// retries it (a fallback, or another try after no verdict), so the retry's
+// verdict settles the reviewer's seat. A vote already settled stays.
+func (s *Store) MoveVote(ctx context.Context, fromRunID, toRunID string) error {
+	if fromRunID == "" || toRunID == "" {
+		return invalidf("missing run")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE review_votes SET run_id = ?, updated_at = ? WHERE run_id = ? AND verdict = ''`,
+		toRunID, s.stamp(), fromRunID)
+	return err
+}
+
 // HumanVote records a person's verdict in round. A second vote in the same
 // round is refused (ErrPrecondition).
 func (s *Store) HumanVote(ctx context.Context, pipelineID string, round int, actorID, name, verdict, comment string) error {

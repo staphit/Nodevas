@@ -136,10 +136,27 @@ func TestRunPipelineConsensusWithoutChanges(t *testing.T) {
 	implement(t, conn, impl.ID)
 	reviews := reviewOffers(t, conn, 2)
 	review(t, conn, reviews["codex/gpt-5"].RunID, runnerwire.VerdictApprove, "Fine.\nVERDICT: approve")
-	accept(t, conn, reviews["claude/sonnet"].RunID, "x")
-	finish(t, conn, reviews["claude/sonnet"].RunID, runnerwire.RunResult{Status: runnerwire.RunFailed, Error: "no verdict"})
+	first := reviews["claude/sonnet"].RunID
+	accept(t, conn, first, "x")
+	finish(t, conn, first, runnerwire.RunResult{Status: runnerwire.RunFailed, Error: "no verdict",
+		FailureKind: runnerwire.FailureTask})
+	// A review that ends without a verdict gets one more try on the same
+	// agent; its seat (the pending vote) moves to the retry.
+	retry := nextOffer(t, conn)
+	if retry.Kind != runnerwire.JobReview || retry.Agent != "claude" || retry.Model != "sonnet" {
+		t.Fatalf("review retry = %+v", retry)
+	}
+	if got, _ := f.getRun(t, f.bea, retry.RunID); got.RetryOf != first || got.PipelineID != impl.PipelineID {
+		t.Fatalf("review retry run = %+v", got)
+	}
+	accept(t, conn, retry.RunID, "x")
+	finish(t, conn, retry.RunID, runnerwire.RunResult{Status: runnerwire.RunFailed, Error: "no verdict",
+		FailureKind: runnerwire.FailureTask})
 	pingPong(t, conn)
-	f.waitPipeline(t, impl.PipelineID, runnerwire.PipelineFailed)
+	p := f.waitPipeline(t, impl.PipelineID, runnerwire.PipelineFailed)
+	if countVotes(p, 1, runnerwire.VerdictAbstain) != 1 || countVotes(p, 1, runnerwire.VerdictApprove) != 1 {
+		t.Fatalf("failed pipeline = %+v", p)
+	}
 }
 
 // A person reviews after the agents' quorum, or alone: changes start a revise
