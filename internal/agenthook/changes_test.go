@@ -169,6 +169,13 @@ func hookServer(t *testing.T) (*httptest.Server, *agents.Hub, *project.ProjectMa
 }
 
 func TestHookReportsChangesOnlyWhileANodeIsClaimed(t *testing.T) {
+	// The snapshot shares one git budget across several calls; on a loaded
+	// test machine 4s runs out before the patch, which the hook then marks
+	// truncated (as it should). This test is about what is recorded, not
+	// the budget.
+	saved := gitTimeout
+	gitTimeout = time.Minute
+	t.Cleanup(func() { gitTimeout = saved })
 	repo := gitRepo(t)
 	srv, hub, pm := hookServer(t)
 	ctx := context.Background()

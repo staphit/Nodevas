@@ -263,8 +263,9 @@ func TestRunTerminalRelay(t *testing.T) {
 	}
 
 	// Every attach and detach is on the audit trail, with typing rights. The
-	// three viewers of the live terminal detach as their handlers return.
-	deadline := time.Now().Add(5 * time.Second)
+	// three viewers of the live terminal detach as their handlers return,
+	// which on a machine busy with the rest of the suite takes a while.
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		events, err := f.server.audit.Query(context.Background(), audit.Filter{ActionPrefix: "run.terminal."})
 		if err != nil {

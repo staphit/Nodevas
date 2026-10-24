@@ -23,7 +23,7 @@ import (
 // git call is bounded and every failure means "report nothing".
 
 // gitTimeout bounds one git call from the hook.
-const gitTimeout = 4 * time.Second
+var gitTimeout = 4 * time.Second // a var so tests on a loaded machine can widen it
 
 // editTools are the tools whose input names a file they write: Claude Code's
 // (Edit, Write, MultiEdit, NotebookEdit), Gemini CLI's (write_file, replace,
