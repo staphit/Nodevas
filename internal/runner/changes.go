@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"nodevas/internal/redact"
 	"nodevas/internal/runnerwire"
 )
 
@@ -36,7 +37,7 @@ const (
 // The title, not the summary's first line: agents open with "Done." as often
 // as with anything that says what changed, and the node is what the work was.
 func commitMessage(summary string, job runnerwire.Job) string {
-	summary = strings.TrimSpace(strings.ReplaceAll(summary, "\r\n", "\n"))
+	summary = strings.TrimSpace(strings.ReplaceAll(redact.String(summary), "\r\n", "\n"))
 	subject := subjectLine(oneLine(job.NodeTitle))
 	if subject == "" {
 		for _, line := range strings.Split(summary, "\n") {

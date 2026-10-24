@@ -239,3 +239,32 @@ func TestHookReportsChangesOnlyWhileANodeIsClaimed(t *testing.T) {
 		t.Fatalf("recorded after the release: %+v", got[0].Files)
 	}
 }
+
+// The snapshot goes to the hub: new secret files stay out of it, and token
+// shapes in what is left are redacted.
+func TestSnapshotLeavesSecretsOut(t *testing.T) {
+	repo := gitRepo(t)
+	key := "sk-ant-api03-" + strings.Repeat("Qw8", 12)
+	write(t, filepath.Join(repo, "a.go"), "package a\n\nvar key = \""+key+"\"\n")
+	for _, name := range []string{".env", ".env.local", "deploy/server.pem", "tls.key", "id_ed25519", "id_rsa.pub",
+		"creds/credentials.json", ".npmrc", ".pypirc", "cert.p12", "cert.pfx", "prod-kubeconfig.yaml"} {
+		write(t, filepath.Join(repo, filepath.FromSlash(name)), "SECRET_FILE_CONTENT="+name+"\n")
+	}
+	write(t, filepath.Join(repo, "notes.md"), "fine\n")
+
+	snap, ok := Snapshot(context.Background(), repo)
+	if !ok {
+		t.Fatal("no snapshot")
+	}
+	var paths []string
+	for _, f := range snap.Files {
+		paths = append(paths, f.Path)
+	}
+	if !reflect.DeepEqual(paths, []string{"a.go", "notes.md"}) {
+		t.Fatalf("files = %v", paths)
+	}
+	if strings.Contains(snap.Patch, "SECRET_FILE_CONTENT") || strings.Contains(snap.Patch, key) ||
+		!strings.Contains(snap.Patch, "[redacted]") {
+		t.Fatalf("patch = %s", snap.Patch)
+	}
+}

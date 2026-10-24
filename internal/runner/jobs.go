@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"nodevas/internal/redact"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -703,8 +704,9 @@ func minutesText(d time.Duration) string {
 
 // emit stamps an event and queues it.
 func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
-	ev.Text = adapter.Truncate(ev.Text, runnerwire.MaxEventText)
-	ev.Input = adapter.Truncate(ev.Input, runnerwire.MaxEventText)
+	// Whatever the agent read or printed, a key does not reach the hub.
+	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
+	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
 	r.seq++
 	ev.Seq = r.seq
@@ -732,6 +734,10 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	// Every failed run says why in a word the hub can route on; a failure
 	// nothing recognised (a worktree git refused, a push) is the task's.
+	result.Summary, result.Error = redact.String(result.Summary), redact.String(result.Error)
+	if pr != nil {
+		pr.Error = redact.String(pr.Error)
+	}
 	switch {
 	case result.Status != runnerwire.RunFailed:
 		result.FailureKind = ""

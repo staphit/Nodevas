@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"nodevas/internal/redact"
 	"nodevas/internal/runnerwire"
 )
 
@@ -237,9 +238,45 @@ func Snapshot(ctx context.Context, cwd string) (runnerwire.RunChanges, bool) {
 	case over:
 		changes.PatchTruncated = true
 	default:
-		changes.Patch = patch
+		changes.Patch = redact.String(patch)
 	}
 	return changes, true
+}
+
+// withoutSecretFiles drops, from `git ls-files -z` output, the untracked
+// files that look like they hold secrets: the snapshot goes to the hub, and
+// a new .env or key file is the commonest way one would get there.
+func withoutSecretFiles(list string) string {
+	var kept []string
+	for _, path := range strings.Split(list, "\x00") {
+		if path != "" && !secretFile(path) {
+			kept = append(kept, path)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\x00") + "\x00"
+}
+
+// secretFile reports whether path's name is one secrets are kept under.
+func secretFile(path string) bool {
+	name := strings.ToLower(filepath.Base(filepath.FromSlash(path)))
+	switch name {
+	case ".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials":
+		return true
+	}
+	for _, prefix := range []string{".env", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	for _, ext := range []string{".pem", ".key", ".p12", ".pfx"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return strings.Contains(name, "kubeconfig")
 }
 
 // scratchIndex copies the repository's index to a temporary file and marks
@@ -278,6 +315,7 @@ func scratchIndex(ctx context.Context, root string) ([]string, func()) {
 		cleanup()
 		return nil, nothing
 	}
+	untracked = withoutSecretFiles(untracked)
 	if untracked != "" && strings.Count(untracked, "\x00") <= runnerwire.MaxChangedFiles {
 		if _, err := git(ctx, root, env, strings.NewReader(untracked),
 			"add", "--intent-to-add", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
