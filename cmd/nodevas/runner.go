@@ -55,7 +55,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "agy-gate":
 		// Not for people: the PreToolUse hook of a headless Antigravity run
 		// (adapter.AntigravityGate). It never fails: agy reads its stdout.
-		fmt.Fprintln(stdout, adapter.AntigravityGate(agenthook.ReadStdin(stdin, agenthook.StdinLimit)))
+		fmt.Fprintln(stdout, adapter.AntigravityGate(agenthook.ReadStdin(stdin, agenthook.StdinLimit),
+			len(args) > 0 && args[0] == adapter.AntigravityGateReadOnly))
 		return 0
 	case "help", "-h", "--help":
 		runnerUsage(stdout)

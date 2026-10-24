@@ -30,6 +30,12 @@ import (
 // AntigravityGateArgs is the gate's command line after the nodevas binary.
 const AntigravityGateArgs = "runner agy-gate"
 
+// AntigravityGateReadOnly is the gate's flag for a read-only run (a review or
+// a plan): it also denies the tools that write files. agy's own plan mode is
+// not enough there: headless, agy 1.4.7 says "--mode plan has no effect
+// while slash command expansion is disabled" and edits anyway.
+const AntigravityGateReadOnly = "--read-only"
+
 // antigravityGateMatcher is the PreToolUse matcher: every tool the gate may
 // deny. Other tools never reach the hook.
 const antigravityGateMatcher = "run_command|send_command_input|call_mcp_tool|read_resource|list_resources|" +
@@ -51,6 +57,12 @@ var deniedTool = func() map[string]bool {
 	return set
 }()
 
+// antigravityWriteTools change files: denied in a read-only run.
+var antigravityWriteTools = map[string]bool{
+	"write_file": true, "write_to_file": true, "replace_file_content": true,
+	"multi_replace_file_content": true, "sed_file": true, "notebook_edit": true,
+}
+
 // antigravityFileTools are the tools that take a path. agy's stream and its
 // hooks do not always name a tool alike (read_file / view_file), so both.
 const antigravityFileTools = "read_file|view_file|list_dir|find_by_name|grep_search|write_file|write_to_file|" +
@@ -66,10 +78,14 @@ func antigravityGated(mode string) bool {
 
 // antigravityGateHooks is the hooks.json of a run's customization root, or
 // nil when the nodevas binary's path cannot go in a hook command.
-func antigravityGateHooks(exe string) map[string]any {
+func antigravityGateHooks(exe string, readOnly bool) map[string]any {
 	path := antigravityHookPath(exe)
 	if path == "" {
 		return nil
+	}
+	command := path + " " + AntigravityGateArgs
+	if readOnly {
+		command += " " + AntigravityGateReadOnly
 	}
 	return map[string]any{
 		"nodevas-run": map[string]any{
@@ -77,7 +93,7 @@ func antigravityGateHooks(exe string) map[string]any {
 				"matcher": antigravityGateMatcher,
 				"hooks": []any{map[string]any{
 					"type":    "command",
-					"command": path + " " + AntigravityGateArgs,
+					"command": command,
 					"timeout": 10,
 				}},
 			}},
@@ -90,8 +106,8 @@ const antigravityNoOpinion = `{"decision":"ask"}`
 
 // AntigravityGate answers one PreToolUse payload ({"toolCall": {"name": …,
 // "args": {…}}, "workspacePaths": […], …}) with agy's hook output: a denial
-// with a reason, or "ask" for no opinion.
-func AntigravityGate(payload []byte) string {
+// with a reason, or "ask" for no opinion. readOnly also denies file writes.
+func AntigravityGate(payload []byte, readOnly bool) string {
 	var in struct {
 		ToolCall struct {
 			Name string         `json:"name"`
@@ -116,6 +132,9 @@ func AntigravityGate(payload []byte) string {
 		reason = "Only the nodevas MCP server is available in this Nodevas run."
 	case strings.Contains(name, "browser"):
 		reason = "The browser is not available in this Nodevas run."
+	case readOnly && antigravityWriteTools[name]:
+		reason = "This Nodevas run is read-only (a review or a plan): it may not change files. " +
+			"Report what you found instead."
 	case deniedTool[name]:
 		reason = "The " + name + " tool is not available in this Nodevas run: it works only with the files " +
 			"in its worktree and the nodevas MCP server."

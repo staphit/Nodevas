@@ -61,7 +61,7 @@ func TestAntigravityGate(t *testing.T) {
 			`}},"workspacePaths":[` + jsonPath(ws) + `]}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			out := AntigravityGate([]byte(tc.payload))
+			out := AntigravityGate([]byte(tc.payload), false)
 			var got map[string]string
 			if err := json.Unmarshal([]byte(out), &got); err != nil {
 				t.Fatalf("output %q is not a JSON object: %v", out, err)
@@ -77,6 +77,44 @@ func TestAntigravityGate(t *testing.T) {
 				t.Fatal("a denial carries no reason")
 			}
 		})
+	}
+}
+
+// A read-only run's gate (reviews, plans) also denies file writes inside
+// the worktree; reads stay allowed. The implement gate leaves writes alone.
+func TestAntigravityGateReadOnly(t *testing.T) {
+	ws := t.TempDir()
+	for _, tc := range []struct {
+		tool     string
+		readOnly bool
+		deny     bool
+	}{
+		{"write_to_file", true, true},
+		{"replace_file_content", true, true},
+		{"multi_replace_file_content", true, true},
+		{"read_file", true, false},
+		{"write_to_file", false, false},
+	} {
+		payload := `{"toolCall":{"name":"` + tc.tool + `","args":{"TargetFile":"src/a.go"}},"workspacePaths":[` + jsonPath(ws) + `]}`
+		var got map[string]string
+		if err := json.Unmarshal([]byte(AntigravityGate([]byte(payload), tc.readOnly)), &got); err != nil {
+			t.Fatal(err)
+		}
+		if deny := got["decision"] == "deny"; deny != tc.deny {
+			t.Errorf("%s readOnly=%v: decision %q, want deny=%v", tc.tool, tc.readOnly, got["decision"], tc.deny)
+		}
+	}
+	// The hook command carries the flag only for a read-only run.
+	exe := filepath.Join(t.TempDir(), "nodevas.exe")
+	for _, readOnly := range []bool{false, true} {
+		hooks := antigravityGateHooks(exe, readOnly)
+		if hooks == nil {
+			t.Skip("no hook path on this machine")
+		}
+		data, _ := json.Marshal(hooks)
+		if has := strings.Contains(string(data), AntigravityGateReadOnly); has != readOnly {
+			t.Errorf("readOnly=%v: hook command %s", readOnly, data)
+		}
 	}
 }
 

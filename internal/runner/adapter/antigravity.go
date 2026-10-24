@@ -66,7 +66,8 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	// Headless, nobody can approve a command: the gate turns what agy would
 	// refuse, ending the turn, into a denial the agent can work around.
-	root, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode))
+	readOnly := ReadOnly(job)
+	root, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode) || readOnly, readOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func antigravityEnv(env RunEnv) ([]string, error) {
 // writeAntigravityRoot writes the run's customization root, which defines the
 // nodevas MCP server (and, with gate, the PreToolUse gate in
 // antigravity_gate.go), into the temp dir and returns its path.
-func writeAntigravityRoot(env RunEnv, gate bool) (string, error) {
+func writeAntigravityRoot(env RunEnv, gate, readOnly bool) (string, error) {
 	root := filepath.Join(env.TempDir, antigravityRootDir)
 	dir := filepath.Join(root, ".agents")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -148,7 +149,7 @@ func writeAntigravityRoot(env RunEnv, gate bool) (string, error) {
 	if err := os.WriteFile(filepath.Join(dir, "mcp_config.json"), config, 0o600); err != nil {
 		return "", fmt.Errorf("writing the Antigravity MCP config: %w", err)
 	}
-	if hooks := antigravityGateHooks(env.MCP.Command); gate && hooks != nil {
+	if hooks := antigravityGateHooks(env.MCP.Command, readOnly); gate && hooks != nil {
 		data, err := json.MarshalIndent(hooks, "", "  ")
 		if err != nil {
 			return "", err
