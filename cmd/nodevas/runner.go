@@ -133,7 +133,8 @@ func runnerUsage(w io.Writer) {
                                              none: a fast model here picks the agent and model for each
                                              autopilot task), advisorModel, advisorBaseURL (same rules as
                                              copilot). systemone is a System One endpoint: Laya on this PC
-                                             (pip install "laya[serve]", then laya-serve; base URL defaults
+                                             (in a venv: pip install "laya[serve]==0.4.14", then
+                                             LAYA_HOST=127.0.0.1 laya-serve; base URL defaults
                                              to http://127.0.0.1:8000) or TypeSafe's Jev (advisorBaseURL
                                              https://api.typesafe.ai, advisorModel jev-latest, advisor-key)
        nodevas runner copilot-key [--clear]  store the copilot's API key, read from stdin (never a flag);

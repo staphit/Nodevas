@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func (c *Client) gh() (*ghCLI, error) {
 func (g *ghCLI) call(ctx context.Context, dir, stdin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	return g.run.RunIn(ctx, dir, ghEnv, stdin, g.bin, args...)
+	return g.run.RunIn(ctx, dir, append(slices.Clone(ghEnv), gitConfigEnv()...), stdin, g.bin, args...)
 }
 
 // prRequest is one pull request to open.

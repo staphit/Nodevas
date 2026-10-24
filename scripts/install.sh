@@ -34,7 +34,7 @@ binary:
 
 hub and login:
   --hub <url>              the hub, e.g. https://nodevas.example.com
-                           runner token: $NODEVAS_RUNNER_TOKEN, else prompted
+                           runner token: prompted (hidden); $NODEVAS_RUNNER_TOKEN only for unattended installs
                            (create one on the hub: Runners -> Add runner)
   --name <label>           this machine's name in the hub's log lines
   --access-client-id <id>  Cloudflare Access service token in front of the hub;
@@ -382,6 +382,7 @@ step_login() {
 	else
 		printf '%s\n' "$token" | "$NV" "${args[@]}" | sed 's/^/    /'
 	fi
+	token="" secret=""
 	forget_status
 	NEEDS_RESTART=1
 }
@@ -725,6 +726,9 @@ cmd_install() {
 	fi
 	step_binary
 	step_login
+	# The secrets are in runner.json now. Nothing started from here on (the
+	# runner service, the agent CLIs it spawns) inherits them from this shell.
+	unset NODEVAS_RUNNER_TOKEN NODEVAS_ACCESS_CLIENT_SECRET
 	step_repos
 	step_settings
 	step_agents

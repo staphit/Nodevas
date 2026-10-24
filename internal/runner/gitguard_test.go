@@ -113,3 +113,23 @@ func TestCommitRunRefusesSwappedGitDir(t *testing.T) {
 		t.Fatalf("unrecorded: %v", err)
 	}
 }
+
+// gh runs git itself; the environment it gets keeps hooks off there too.
+func TestGitConfigEnvSkipsHooks(t *testing.T) {
+	repo := newTestRepo(t)
+	gitT(t, repo, "config", "core.hooksPath", ".husky")
+	marker := filepath.Join(t.TempDir(), "marker")
+	writeHook(t, filepath.Join(repo, ".husky"), "pre-commit", marker)
+	if err := os.WriteFile(filepath.Join(repo, "y.txt"), []byte("y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, repo, "add", "y.txt")
+	env := append([]string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test"}, gitConfigEnv()...)
+	if _, err := (SystemCommands{}).RunIn(context.Background(), repo, env, "", "git", "commit", "-q", "-m", "y"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the repository's hook ran under gitConfigEnv")
+	}
+}

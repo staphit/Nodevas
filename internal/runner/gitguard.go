@@ -103,3 +103,12 @@ func (j *jobs) guardGitDir(r *run, wt Worktree) bool {
 	}
 	return true
 }
+
+// gitConfigEnv is hardenedArgs' overrides as environment, for programs that
+// run git themselves (gh): command-scope config, which wins over the
+// repository's own.
+func gitConfigEnv() []string {
+	return []string{"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=" + noHooksPath(),
+		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false"}
+}

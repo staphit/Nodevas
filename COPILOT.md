@@ -292,10 +292,17 @@ instead: a model that answers typed questions (pick one option, score on a
 scale, yes or no) with calibrated probabilities in a fraction of a second, and
 generates no text. Two speak the same protocol (`POST /v1/systemone`):
 
-- **Laya**, open source (Apache-2.0), on your PC. `pip install "laya[serve]"`,
-  then `laya-serve` (listens on `0.0.0.0:8000`; set `LAYA_HOST=127.0.0.1` to
-  keep it on this machine). The first call downloads its checkpoint (the three
-  together are about 2.3 GB). No key unless you set `LAYA_API_KEY`.
+- **Laya**, open source (Apache-2.0), on your PC. Install a pinned version in
+  a virtual environment of its own, and start it with `LAYA_HOST=127.0.0.1`
+  (by default it listens on `0.0.0.0:8000`, open to your whole network). The
+  first call downloads its checkpoint (the three together are about 2.3 GB).
+  No key unless you set `LAYA_API_KEY`.
+
+  ```sh
+  python -m venv ~/.laya
+  ~/.laya/bin/pip install "laya[serve]==0.4.14"   # Windows: ~/.laya/Scripts/pip
+  LAYA_HOST=127.0.0.1 ~/.laya/bin/laya-serve
+  ```
 
   ```sh
   nodevas runner set advisorProvider systemone   # advisorBaseURL defaults to http://127.0.0.1:8000
