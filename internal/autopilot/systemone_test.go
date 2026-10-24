@@ -172,3 +172,50 @@ func TestSystemOneComplexity(t *testing.T) {
 		t.Error("an empty answer has a complexity")
 	}
 }
+
+// A local Laya spreads its implementer choice over every option (confidence
+// about 0.05) while its complexity score tells tasks apart; then the score
+// picks the tier. Numbers recorded from laya 0.4.14 on two tasks.
+func TestSystemOneUnsureChoiceFallsToComplexityTier(t *testing.T) {
+	unsure := func(score string) runnerwire.DecisionResponse {
+		return runnerwire.DecisionResponse{Model: "laya-rl-agent", Answers: map[string]runnerwire.DecisionAnswer{
+			"implementer": {Type: "choice", Choice: "o1", Confidence: 0.06,
+				Probabilities: map[string]float64{"o1": 0.27, "o2": 0.26, "o3": 0.25, "o4": 0.22}},
+			"complexity": {Type: "score", Score: json.RawMessage(score), Confidence: 0.3},
+		}}
+	}
+	relay := &fakeDecider{resp: unsure(`1.1906`)}
+	c, err := NewSystemOneAdvisor(relay).Choose(context.Background(), chooseInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Implement) != 2 || c.Implement[0] != (runnerwire.AgentModel{Agent: "claude", Model: "haiku"}) ||
+		c.Implement[1] != (runnerwire.AgentModel{Agent: "claude", Model: "opus"}) {
+		t.Fatalf("small task chain = %+v (%s)", c.Implement, c.Reason)
+	}
+	if !strings.Contains(c.Reason, "complexity small (score 1.19) → fast tier: claude/haiku") ||
+		!strings.Contains(c.Reason, "unsure (conf 0.06)") {
+		t.Fatalf("reason = %q", c.Reason)
+	}
+
+	relay.resp = unsure(`2.4652`)
+	c, err = NewSystemOneAdvisor(relay).Choose(context.Background(), chooseInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Implement) != 2 || c.Implement[0] != (runnerwire.AgentModel{Agent: "claude", Model: "opus"}) ||
+		c.Implement[1] != (runnerwire.AgentModel{Agent: "claude", Model: "haiku"}) {
+		t.Fatalf("complex task chain = %+v (%s)", c.Implement, c.Reason)
+	}
+
+	// A confident choice is taken as it is.
+	confident := unsure(`2.4652`)
+	a := confident.Answers["implementer"]
+	a.Confidence = 0.6
+	confident.Answers["implementer"] = a
+	relay.resp = confident
+	c, err = NewSystemOneAdvisor(relay).Choose(context.Background(), chooseInput())
+	if err != nil || c.Implement[0].Model != "default" {
+		t.Fatalf("confident choice: %+v %v", c, err)
+	}
+}

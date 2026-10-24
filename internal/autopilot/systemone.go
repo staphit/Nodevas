@@ -42,7 +42,22 @@ const (
 	maxSystemOneTaskBytes = 8 << 10
 	// minSystemOneFallback is the least probability a fallback needs.
 	minSystemOneFallback = 0.05
+	// minSystemOneConfidence is how sure the implementer choice must be to be
+	// taken as it is. Below it the task's complexity picks a tier instead:
+	// a local Laya (0.4) spreads its choice over every option (confidence
+	// about 0.05) while its complexity score still tells tasks apart.
+	minSystemOneConfidence = 0.35
 )
+
+// Model tiers, cheapest first.
+const (
+	tierUnknown = iota - 1
+	tierFast
+	tierBalanced
+	tierStrong
+)
+
+var tierNames = map[int]string{tierFast: "fast", tierBalanced: "balanced", tierStrong: "strong"}
 
 // complexityLevels is the complexity question's scale, mildest first.
 var complexityLevels = []string{"trivial", "small", "medium", "large", "risky"}
@@ -150,21 +165,17 @@ func (d systemOneDecision) choice(resp runnerwire.DecisionResponse) (Choice, err
 	if !ok {
 		return Choice{}, fmt.Errorf("%w: no implementer answer", ErrAdvisorAnswer)
 	}
-	type ranked struct {
-		key string
-		p   float64
-	}
-	var order []ranked
+	var order []rankedOption
 	for key, p := range answer.Probabilities {
 		if _, known := d.options[key]; known && !math.IsNaN(p) {
-			order = append(order, ranked{key, p})
+			order = append(order, rankedOption{key, p})
 		}
 	}
 	if len(order) == 0 {
 		if _, known := d.options[answer.Choice]; !known {
 			return Choice{}, fmt.Errorf("%w: it chose %q, not one of the options", ErrAdvisorAnswer, answer.Choice)
 		}
-		order = append(order, ranked{answer.Choice, 1})
+		order = append(order, rankedOption{answer.Choice, 1})
 	}
 	sort.SliceStable(order, func(i, j int) bool {
 		if order[i].p != order[j].p {
@@ -184,16 +195,113 @@ func (d systemOneDecision) choice(resp runnerwire.DecisionResponse) (Choice, err
 		c := d.options[r.key]
 		chain = append(chain, runnerwire.AgentModel{Agent: c.agent, Model: c.model})
 	}
-	top := d.options[order[0].key]
 	model := resp.Model
 	if model == "" {
 		model = "System One"
 	}
+	level, conf, hasLevel := complexityOf(resp.Answers["complexity"])
+	if answer.Confidence < minSystemOneConfidence && hasLevel {
+		if tiered, reason, ok := d.byComplexity(order, resp.Answers["complexity"], level); ok {
+			return Choice{Implement: tiered, Reason: fmt.Sprintf("System One (%s): %s; its own pick was unsure (conf %.2f)",
+				model, reason, answer.Confidence)}, nil
+		}
+	}
+	top := d.options[order[0].key]
 	reason := fmt.Sprintf("System One (%s): %s/%s p=%.2f", model, top.agent, top.model, order[0].p)
-	if level, conf, ok := complexityOf(resp.Answers["complexity"]); ok {
+	if hasLevel {
 		reason += fmt.Sprintf(", complexity %s (conf %.2f)", level, conf)
 	}
 	return Choice{Implement: chain, Reason: reason}, nil
+}
+
+// byComplexity picks the implementer from the task's complexity: trivial and
+// small tasks to the fast tier, medium to the balanced one, large and risky
+// to the strong one; within a tier in the order the choice ranked them, then
+// one fallback from the next tier up (down from the strongest). Candidates
+// whose tier the model's name does not tell are left out. ok is false when
+// no candidate has a known tier.
+func (d systemOneDecision) byComplexity(order []rankedOption, answer runnerwire.DecisionAnswer, level string) ([]runnerwire.AgentModel, string, bool) {
+	score := complexityScore(answer, level)
+	want := tierStrong
+	switch {
+	case score < 1.75:
+		want = tierFast
+	case score < 2.4:
+		want = tierBalanced
+	}
+	byTier := map[int][]advisorCandidate{}
+	for _, r := range order {
+		c := d.options[r.key]
+		if t := modelTier(c.model); t != tierUnknown {
+			byTier[t] = append(byTier[t], c)
+		}
+	}
+	// The wanted tier, then the nearest others: up first, as a stronger model
+	// can do a smaller task but not the other way round.
+	var tiers []int
+	for _, t := range []int{want, want + 1, want - 1, want + 2, want - 2} {
+		if t >= tierFast && t <= tierStrong {
+			tiers = append(tiers, t)
+		}
+	}
+	var chain []runnerwire.AgentModel
+	got := tierUnknown
+	for _, t := range tiers {
+		list := byTier[t]
+		if len(list) == 0 {
+			continue
+		}
+		if got == tierUnknown {
+			got = t
+			chain = append(chain, runnerwire.AgentModel{Agent: list[0].agent, Model: list[0].model})
+			continue
+		}
+		chain = append(chain, runnerwire.AgentModel{Agent: list[0].agent, Model: list[0].model})
+		break
+	}
+	if got == tierUnknown {
+		return nil, "", false
+	}
+	return chain, fmt.Sprintf("complexity %s (score %.2f) → %s tier: %s/%s",
+		level, score, tierNames[got], chain[0].Agent, chain[0].Model), true
+}
+
+// complexityScore is the complexity as a number on complexityLevels' scale.
+func complexityScore(a runnerwire.DecisionAnswer, level string) float64 {
+	var n float64
+	if json.Unmarshal(a.Score, &n) == nil && !math.IsNaN(n) {
+		return n
+	}
+	for i, l := range complexityLevels {
+		if strings.EqualFold(l, level) {
+			return float64(i)
+		}
+	}
+	return 2
+}
+
+// modelTier is a model's tier when its name tells, else tierUnknown.
+func modelTier(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case m == "" || m == "default":
+		return tierUnknown
+	case strings.Contains(m, "haiku"), strings.HasSuffix(m, "-free"), strings.Contains(m, "flash"),
+		strings.Contains(m, "mini"), strings.Contains(m, "lite"), strings.HasSuffix(m, "-low"):
+		return tierFast
+	case strings.Contains(m, "sonnet"), strings.HasSuffix(m, "-medium"):
+		return tierBalanced
+	case strings.Contains(m, "opus"), strings.Contains(m, "fable"), strings.Contains(m, "mythos"),
+		strings.Contains(m, "argon"), strings.Contains(m, "-pro"), strings.HasSuffix(m, "-high"):
+		return tierStrong
+	}
+	return tierUnknown
+}
+
+// rankedOption is an option and its probability.
+type rankedOption struct {
+	key string
+	p   float64
 }
 
 // optionIndex is an option key's position ("o3" → 3).
