@@ -127,6 +127,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
 		PermissionMode: cfg.PermissionModeFor(job.Agent),
 		AllowedTools:   cfg.AllowedTools,
+		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
 	})
 	if err != nil {
 		return fail("%v", err)

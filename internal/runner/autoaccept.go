@@ -205,7 +205,7 @@ func (c *Config) ShellAccess(job runnerwire.Job) string {
 		}
 	case "claude":
 		if readOnly {
-			// Reviews and plans run with Bash disallowed (claudeReadOnlyTools),
+			// Reviews and plans run with Bash disallowed (adapter.ClaudeReadOnlyDeny),
 			// which wins over any allow.
 			return ""
 		}

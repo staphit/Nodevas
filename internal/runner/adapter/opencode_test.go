@@ -154,15 +154,15 @@ func TestOpenCodeCommand(t *testing.T) {
 		server.Environment["NODEVAS_AGENT"] != "opencode" {
 		t.Errorf("mcp = %s", raw)
 	}
-	// No setting is edit: edits yes, the shell no.
-	if p := config.Permission; p["edit"] != "allow" || p["bash"] != "deny" || p["webfetch"] != "allow" ||
+	// No setting is edit: edits yes, the shell and the web no.
+	if p := config.Permission; p["edit"] != "allow" || p["bash"] != "deny" || p["webfetch"] != "deny" || p["websearch"] != "deny" ||
 		p["external_directory"] != "deny" {
 		t.Errorf("permission = %v", p)
 	}
 
 	for mode, want := range map[string]map[string]string{
-		"read-only": {"edit": "deny", "bash": "deny", "webfetch": "allow"},
-		"full":      {"edit": "allow", "bash": "allow", "webfetch": "allow"},
+		"read-only": {"edit": "deny", "bash": "deny", "webfetch": "deny", "websearch": "deny"},
+		"full":      {"edit": "allow", "bash": "allow", "webfetch": "allow", "websearch": "allow"},
 	} {
 		env.PermissionMode = mode
 		job.Model = "default"

@@ -262,3 +262,28 @@ func TestClaudeParserPermissionDenied(t *testing.T) {
 		t.Fatalf("events = %+v", events)
 	}
 }
+
+// A review or plan never gets a tool that writes a file or runs a command,
+// whatever the owner allowed; implement runs are as configured.
+func TestClaudeReadOnlyKinds(t *testing.T) {
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: "/w", TempDir: t.TempDir(),
+		PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash"}}
+	for kind, readOnly := range map[string]bool{
+		runnerwire.JobReview: true, runnerwire.JobPlan: true, runnerwire.JobRevise: false, "": false,
+	} {
+		cmd, err := Claude{}.Command(runnerwire.Job{RunID: "r", NodeID: "n", Kind: kind}, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.Index(cmd.Args, "--disallowedTools")
+		if readOnly != (i >= 0) {
+			t.Fatalf("kind %q: args %q", kind, cmd.Args)
+		}
+		if readOnly {
+			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell" || cmd.Args[i+2] != "--allowedTools" ||
+				cmd.Args[i+3] != NodevasMCPTools || cmd.Args[i-2] != "--setting-sources" || cmd.Args[i-1] != "user" {
+				t.Fatalf("kind %q: args %q", kind, cmd.Args)
+			}
+		}
+	}
+}

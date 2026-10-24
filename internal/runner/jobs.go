@@ -432,6 +432,27 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 	return ok, reason
 }
 
+// disabledMCP is, for an OpenCode run, every MCP server but the run's own,
+// to switch off. When OpenCode cannot say which it loads, the run goes on
+// with them and says so.
+func (j *jobs) disabledMCP(ctx context.Context, r *run, bin, dir string) []string {
+	if r.job.Agent != "opencode" {
+		return nil
+	}
+	names, err := adapter.OpenCodeMCPServers(ctx, bin, dir)
+	if err != nil {
+		j.c.logf("run %s: cannot list OpenCode's MCP servers to switch them off: %v", r.job.RunID, err)
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: "warning: could not switch off OpenCode's other MCP servers: " + adapter.Truncate(err.Error(), 300)})
+		return nil
+	}
+	if len(names) > 0 {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: "OpenCode MCP servers switched off for this run: " + strings.Join(names, ", ")})
+	}
+	return names
+}
+
 // setRemoteTyping records whether the dispatcher may type into r's terminal.
 func (j *jobs) setRemoteTyping(r *run, on bool) {
 	j.mu.Lock()
@@ -498,6 +519,7 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
+		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 	})
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)

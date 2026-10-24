@@ -21,8 +21,9 @@ import (
 //
 // Inline config is merged over the owner's own opencode.json (their providers,
 // default model and sign-ins, which runs share), and wins over it and over a
-// project config in the worktree, so the permissions are the run's. The
-// owner's own MCP servers still load, as Codex's config.toml does.
+// project config in the worktree, so the permissions are the run's. Every
+// other MCP server, the owner's or one a project config in the worktree
+// adds, is switched off (RunEnv.DisableMCP, from OpenCodeMCPServers).
 //
 // OpenCode takes its project directory from PWD when it is set, not from the
 // working directory it was started in (a runner started from a POSIX shell
@@ -33,8 +34,8 @@ import (
 type OpenCode struct{}
 
 // OpenCodePermissionModes are the runner's permission settings for OpenCode
-// runs: read-only (no edits, no shell), edit (edits, no shell) and full
-// (edits and any shell command, without asking).
+// runs: read-only (no edits, no shell, no web), edit (edits, no shell, no
+// web) and full (edits, any shell command and the web, without asking).
 var OpenCodePermissionModes = []string{"read-only", "edit", "full"}
 
 // DefaultOpenCodePermission lets the agent edit files in its worktree and
@@ -88,7 +89,11 @@ func openCodeConfig(env RunEnv, interactive bool) (string, error) {
 	// headless ask is a rejection that ends the session there and then (a
 	// review stops before its verdict); deny instead hands the model an error
 	// it works around (checked against opencode 1.18.23).
-	permission := map[string]string{"edit": "allow", "bash": "deny", "webfetch": "allow", "external_directory": "deny"}
+	//
+	// webfetch and websearch are denied short of full: a prompt-injected
+	// agent could otherwise send what it read in the worktree to any URL.
+	permission := map[string]string{"edit": "allow", "bash": "deny", "webfetch": "deny", "websearch": "deny",
+		"external_directory": "deny"}
 	switch mode {
 	case "read-only":
 		permission["edit"] = "deny"
@@ -96,6 +101,8 @@ func openCodeConfig(env RunEnv, interactive bool) (string, error) {
 	case "full":
 		permission["bash"] = "allow"
 		permission["external_directory"] = "allow"
+		permission["webfetch"] = "allow"
+		permission["websearch"] = "allow"
 	default:
 		return "", fmt.Errorf("opencode: unknown permission setting %q (want one of %s)",
 			mode, strings.Join(OpenCodePermissionModes, ", "))
@@ -108,16 +115,22 @@ func openCodeConfig(env RunEnv, interactive bool) (string, error) {
 		}
 	}
 	command := append([]string{env.MCP.Command}, env.MCP.Args...)
-	config, err := json.Marshal(map[string]any{
-		"mcp": map[string]any{
-			"nodevas": map[string]any{
-				"type":        "local",
-				"command":     command,
-				"enabled":     true,
-				"timeout":     openCodeToolTimeoutMs,
-				"environment": map[string]string{"NODEVAS_AGENT": "opencode"},
-			},
+	servers := map[string]any{
+		"nodevas": map[string]any{
+			"type":        "local",
+			"command":     command,
+			"enabled":     true,
+			"timeout":     openCodeToolTimeoutMs,
+			"environment": map[string]string{"NODEVAS_AGENT": "opencode"},
 		},
+	}
+	for _, name := range env.DisableMCP {
+		if name != "nodevas" {
+			servers[name] = map[string]any{"enabled": false}
+		}
+	}
+	config, err := json.Marshal(map[string]any{
+		"mcp":        servers,
 		"permission": permission,
 	})
 	if err != nil {

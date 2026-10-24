@@ -28,6 +28,11 @@ var ClaudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions",
 // not run arbitrary commands unless the owner allowed them (AllowedTools).
 const DefaultClaudePermissionMode = "acceptEdits"
 
+// ClaudeReadOnlyDeny is the --disallowedTools list of a review or plan run:
+// every built-in tool that writes a file or runs a command (PowerShell is
+// Claude Code's shell tool on Windows). Subagents inherit the deny.
+const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
+
 // NodevasMCPTools is the --allowedTools rule for every tool of the run's
 // nodevas MCP server.
 const NodevasMCPTools = "mcp__nodevas"
@@ -70,6 +75,15 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// server's tools are always allowed: the preamble tells the agent to claim
 	// its node, headless nobody can approve that, and the hub limits what
 	// those tools reach to the agent routes anyway.
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
+		// Read only, whatever the owner's permission mode and allowedTools:
+		// a deny wins over every allow, bypassPermissions included. The
+		// nodevas tools stay allowed; a plan writes through them.
+		// The worktree is a PR head or a base it only reads: its
+		// .claude/settings.json (hooks, permissions) is not trusted here.
+		args = append(args, "--setting-sources", "user")
+		args = append(args, "--disallowedTools", ClaudeReadOnlyDeny)
+	}
 	args = append(args, "--allowedTools", NodevasMCPTools)
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)

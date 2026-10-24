@@ -55,6 +55,9 @@ type RunEnv struct {
 	// IgnoreUserConfig runs Codex with --ignore-user-config: without the
 	// owner's config.toml (their own MCP servers, hooks, model), auth only.
 	IgnoreUserConfig bool
+	// DisableMCP names MCP servers to switch off for the run (OpenCode: the
+	// owner's and the worktree's own; see OpenCodeMCPServers).
+	DisableMCP []string
 }
 
 // MCPServer is a stdio MCP server: a command and its arguments.
