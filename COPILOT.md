@@ -321,6 +321,30 @@ reason. The chain is the options by probability, at most three, a fallback
 only above 5 %. An answer naming no option given, an endpoint error or more
 than 10 s means the rules decide instead (`internal/autopilot/systemone.go`).
 
+When the choice itself is unsure (confidence below 0.35), the complexity score
+picks a tier instead: trivial and small tasks go to the fast tier (Haiku, free
+and flash models), medium to the balanced one (Sonnet), large and risky to the
+strong one (Opus, Fable, pro and high models), each tier in the order the
+choice ranked its options, with one fallback from the next tier. Models whose
+name does not tell their tier are left out of this path.
+
+Measured against a real local Laya 0.4.14 on this project's Windows PC (CPU
+build of PyTorch, 2026-10-24):
+
+- **Latency** 4–6 s a decision on CPU, within the 10 s limit but far from the
+  0.1–0.5 s System One promises; a CUDA build of PyTorch on the GPU is what
+  gets there.
+- **The implementer choice is spread evenly** (confidence 0.01–0.15 across
+  checkpoints) and once picked Haiku for a 30-file OAuth migration, which is
+  why the tier path above exists.
+- **The complexity score separates tasks**: 1.19–1.59 for one-line file
+  changes, 2.47–2.81 for the migration. A real autopilot with Laya deciding
+  sent a one-line task to a free flash model and a README-and-file task to
+  Sonnet.
+
+Jev is the hosted model the protocol was made for; a confident Jev choice is
+taken as it is.
+
 ## Configuration (`nodevas.yaml`)
 
 ```yaml
