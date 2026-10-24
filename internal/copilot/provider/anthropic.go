@@ -49,6 +49,7 @@ func newAnthropic(cfg Config) *anthropicProvider {
 	opts := []option.RequestOption{
 		option.WithoutEnvironmentDefaults(),
 		option.WithAPIKey(cfg.APIKey),
+		option.WithHTTPClient(anthropicHTTPClient()),
 	}
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base != "" {
