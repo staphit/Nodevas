@@ -69,6 +69,7 @@ Open <http://127.0.0.1:5666>. For production builds, development mode, configura
 ## Documentation
 
 - [Getting started](./docs/getting-started.md): build, run, configure, and expose a server safely.
+- [Install a runner](./docs/install.md): `scripts/install.sh` sets up the machine your agents run on in one command.
 - [Concepts](./docs/concepts.md): nodes, edges, dependency gates, readiness, and node metadata.
 - [Timeline](./docs/timeline.md): planned milestones, actual events, and date assessment.
 - [MCP integration](./docs/mcp.md): connect Claude Code, Codex, or another MCP client.
