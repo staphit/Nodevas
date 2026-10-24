@@ -416,11 +416,11 @@ func (c *Client) flushInterval() time.Duration {
 	return defaultFlush
 }
 
-func (c *Client) runTimeout() time.Duration {
+func (c *Client) runTimeout(kind string) time.Duration {
 	if c.RunTimeout > 0 {
 		return c.RunTimeout
 	}
-	return c.Config.RunTimeout()
+	return c.Config.RunTimeoutFor(kind)
 }
 
 func (c *Client) prPollInterval() time.Duration {

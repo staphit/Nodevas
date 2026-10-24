@@ -213,3 +213,24 @@ func TestTerminalAccepterRemoteTyping(t *testing.T) {
 		t.Error("no terminal, yet typing allowed")
 	}
 }
+
+func TestRunTimeoutFor(t *testing.T) {
+	cfg := &Config{}
+	if cfg.RunTimeoutFor(runnerwire.JobReview) != 20*time.Minute || cfg.RunTimeoutFor(runnerwire.JobPlan) != 30*time.Minute ||
+		cfg.RunTimeoutFor("") != 60*time.Minute || cfg.RunTimeoutFor(runnerwire.JobRevise) != 60*time.Minute {
+		t.Fatal("defaults")
+	}
+	cfg.RunTimeoutMinutes = 15
+	if cfg.RunTimeoutFor(runnerwire.JobReview) != 15*time.Minute {
+		t.Fatal("a review's default outlasts the run timeout")
+	}
+	if err := cfg.Set("reviewTimeoutMinutes", []string{"45"}); err != nil || cfg.RunTimeoutFor(runnerwire.JobReview) != 45*time.Minute {
+		t.Fatalf("set review: %v", err)
+	}
+	if err := cfg.Set("planTimeoutMinutes", []string{"0"}); err == nil {
+		t.Fatal("0 accepted")
+	}
+	if err := cfg.Set("reviewTimeoutMinutes", []string{"default"}); err != nil || cfg.ReviewTimeoutMinutes != 0 {
+		t.Fatalf("reset: %v", err)
+	}
+}

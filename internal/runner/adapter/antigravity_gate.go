@@ -16,8 +16,9 @@ import (
 // modes that cannot run commands (plan, accept-edits) the run's
 // customization root gets a hook, `nodevas runner agy-gate`, that turns the
 // tools headless mode would refuse into denials with a reason: shell
-// commands, MCP servers other than nodevas, the browser, and files outside
-// the workspace. Anything else gets "ask", the hook's way of having no
+// commands, MCP servers other than nodevas, the browser, the web, other
+// agents and messages (antigravityDeniedTools), and files outside the
+// workspace. Anything else gets "ask", the hook's way of having no
 // opinion (an empty decision is a denial), which leaves it to agy's own
 // permissions: accept-edits for the worktree, the owner's allow rules.
 //
@@ -31,9 +32,24 @@ const AntigravityGateArgs = "runner agy-gate"
 
 // antigravityGateMatcher is the PreToolUse matcher: every tool the gate may
 // deny. Other tools never reach the hook.
-const antigravityGateMatcher = "run_command|send_command_input|call_mcp_tool|browser_.*|open_browser_url|" +
-	"execute_browser_javascript|click_browser_pixel|capture_browser_.*|read_browser_page|list_browser_pages|" +
-	antigravityFileTools
+const antigravityGateMatcher = "run_command|send_command_input|call_mcp_tool|read_resource|list_resources|" +
+	"browser_.*|open_browser_url|execute_browser_javascript|click_browser_pixel|capture_browser_.*|" +
+	"read_browser_page|list_browser_pages|" + antigravityDeniedTools + "|" + antigravityFileTools
+
+// antigravityDeniedTools reach beyond the worktree (the web, other agents,
+// messages, schedules, plugins, agy's knowledge store): never in a gated run.
+const antigravityDeniedTools = "read_url_content|search_web|notebook_execution|schedule|run_workflow|" +
+	"define_subagent|invoke_subagent|manage_subagents|send_message|manage_inbox|manage_task|generate_image|" +
+	"search_marketplace|list_plugin_accounts|delete_knowledge"
+
+// deniedTool is antigravityDeniedTools as a set.
+var deniedTool = func() map[string]bool {
+	set := map[string]bool{}
+	for _, name := range strings.Split(antigravityDeniedTools, "|") {
+		set[name] = true
+	}
+	return set
+}()
 
 // antigravityFileTools are the tools that take a path. agy's stream and its
 // hooks do not always name a tool alike (read_file / view_file), so both.
@@ -93,14 +109,16 @@ func AntigravityGate(payload []byte) string {
 	case name == "run_command" || name == "send_command_input":
 		reason = "Shell commands are not available in this Nodevas run: nobody can approve them here. " +
 			"Do the work with the file tools; the runner commits your changes when you finish."
-	case name == "call_mcp_tool":
-		server, _ := in.ToolCall.Args["ServerName"].(string)
-		if strings.TrimSpace(server) == "nodevas" {
+	case name == "call_mcp_tool" || name == "read_resource" || name == "list_resources":
+		if mcpServerArg(in.ToolCall.Args) == "nodevas" {
 			return antigravityNoOpinion
 		}
 		reason = "Only the nodevas MCP server is available in this Nodevas run."
 	case strings.Contains(name, "browser"):
 		reason = "The browser is not available in this Nodevas run."
+	case deniedTool[name]:
+		reason = "The " + name + " tool is not available in this Nodevas run: it works only with the files " +
+			"in its worktree and the nodevas MCP server."
 	default:
 		if outside := outsidePath(in.ToolCall.Args, in.WorkspacePaths); outside != "" {
 			reason = "This Nodevas run may only use files inside its worktree (the current directory); " +
@@ -114,6 +132,20 @@ func AntigravityGate(payload []byte) string {
 		return antigravityNoOpinion
 	}
 	return string(out)
+}
+
+// mcpServerArg is the MCP server a tool call names, lowercased and trimmed:
+// agy calls the argument ServerName; any spelling of it counts.
+func mcpServerArg(args map[string]any) string {
+	for key, v := range args {
+		k := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+		if k == "servername" || k == "server" {
+			if s, ok := v.(string); ok {
+				return strings.ToLower(strings.TrimSpace(s))
+			}
+		}
+	}
+	return ""
 }
 
 // outsidePath is the first absolute path among a file tool's arguments that

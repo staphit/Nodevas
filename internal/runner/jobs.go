@@ -546,7 +546,7 @@ func (j *jobs) runAgent(ctx context.Context, r *run, wt Worktree, job runnerwire
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timeout := j.c.runTimeout()
+	timeout := j.c.runTimeout(job.Kind)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	var waitErr error

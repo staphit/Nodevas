@@ -361,16 +361,22 @@ func reviewDiff(ctx context.Context, repoPath string, wt Worktree, base string) 
 }
 
 // verdictLine is a "VERDICT: approve|changes" line, allowing the markdown an
-// agent tends to wrap it in.
-var verdictLine = regexp.MustCompile("(?i)^[\\s*_`>#-]*verdict[\\s*_`]*[:：][\\s*_`]*(approve|changes)\\b")
+// agent tends to wrap it in, and nothing else.
+var verdictLine = regexp.MustCompile("(?i)^[\\s*_`>#-]*verdict[\\s*_`]*[:：][\\s*_`]*(approve|changes)[\\s*_`.]*$")
 
-// parseVerdict is the last verdict line's verdict, "" when there is none.
+// parseVerdict is the verdict on the final message's last non-empty line, ""
+// when that line is not a verdict. Only that line counts: a verdict quoted
+// from the diff or the repository, earlier in the message, never does.
 func parseVerdict(text string) string {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
 		if m := verdictLine.FindStringSubmatch(lines[i]); m != nil {
 			return strings.ToLower(m[1])
 		}
+		return ""
 	}
 	return ""
 }

@@ -51,6 +51,11 @@ type Config struct {
 	MaxConcurrent int `json:"maxConcurrent,omitempty"`
 	// RunTimeoutMinutes stops a run that goes on longer.
 	RunTimeoutMinutes int `json:"runTimeoutMinutes,omitempty"`
+	// ReviewTimeoutMinutes and PlanTimeoutMinutes stop a review or a plan
+	// sooner: they read, they do not build, and a run that reads for long is
+	// more likely stuck or being steered than working.
+	ReviewTimeoutMinutes int `json:"reviewTimeoutMinutes,omitempty"`
+	PlanTimeoutMinutes   int `json:"planTimeoutMinutes,omitempty"`
 	// DataDir holds run worktrees, under DataDir/worktrees/<run id>.
 	DataDir string `json:"dataDir,omitempty"`
 	// PermissionMode is Claude Code's --permission-mode for every run.
@@ -137,6 +142,8 @@ const (
 	DefaultMaxConcurrent     = 1
 	MaxMaxConcurrent         = 16
 	DefaultRunTimeoutMinutes = 60
+	DefaultReviewTimeoutMins = 20
+	DefaultPlanTimeoutMins   = 30
 	MaxRunTimeoutMinutes     = 24 * 60
 	DefaultPRPollSeconds     = 120
 	MinPRPollSeconds         = 30
@@ -218,6 +225,25 @@ func (c *Config) RunTimeout() time.Duration {
 	return time.Duration(min(minutes, MaxRunTimeoutMinutes)) * time.Minute
 }
 
+// RunTimeoutFor is the timeout of a run of kind: a review's or a plan's own
+// setting, by default the shorter of theirs and RunTimeout; RunTimeout for
+// everything else.
+func (c *Config) RunTimeoutFor(kind string) time.Duration {
+	var minutes, fallback int
+	switch kind {
+	case runnerwire.JobReview:
+		minutes, fallback = c.ReviewTimeoutMinutes, DefaultReviewTimeoutMins
+	case runnerwire.JobPlan:
+		minutes, fallback = c.PlanTimeoutMinutes, DefaultPlanTimeoutMins
+	default:
+		return c.RunTimeout()
+	}
+	if minutes <= 0 {
+		return min(time.Duration(fallback)*time.Minute, c.RunTimeout())
+	}
+	return time.Duration(min(minutes, MaxRunTimeoutMinutes)) * time.Minute
+}
+
 // RunTimeoutMins is the timeout in minutes, for messages.
 func (c *Config) RunTimeoutMins() int { return int(c.RunTimeout() / time.Minute) }
 
@@ -291,7 +317,7 @@ func (c *Config) PermissionModeFor(kind string) string {
 }
 
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
-var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
+var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "antigravityMode",
 	"autoAccept", "interactive",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
@@ -346,6 +372,20 @@ func (c *Config) Set(key string, values []string) error {
 			return fmt.Errorf("runTimeoutMinutes must be a number from 1 to %d", MaxRunTimeoutMinutes)
 		}
 		c.RunTimeoutMinutes = n
+	case "reviewTimeoutMinutes", "planTimeoutMinutes":
+		field := &c.ReviewTimeoutMinutes
+		if canonical == "planTimeoutMinutes" {
+			field = &c.PlanTimeoutMinutes
+		}
+		if reset {
+			*field = 0
+			return nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > MaxRunTimeoutMinutes {
+			return fmt.Errorf("%s must be a number from 1 to %d", canonical, MaxRunTimeoutMinutes)
+		}
+		*field = n
 	case "dataDir":
 		if reset {
 			c.DataDir = ""

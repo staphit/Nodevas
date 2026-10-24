@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"nodevas/internal/agenthook"
 	"nodevas/internal/runner"
@@ -103,7 +104,8 @@ func runnerUsage(w io.Writer) {
                                              remote-typing on lets the dispatcher type into
                                              auto-accepted interactive runs (default: view only)
        nodevas runner set <key> <value>      change a run setting ("default" resets it):
-                                             maxConcurrent, runTimeoutMinutes, dataDir, autoAccept
+                                             maxConcurrent, runTimeoutMinutes, reviewTimeoutMinutes
+                                             (default 20), planTimeoutMinutes (default 30), dataDir, autoAccept
                                              (true = autoaccept on with the defaults: step-up required,
                                              every repo here, installed agents, headless; false = off),
                                              interactive (true|false, default false: take runs whose
@@ -333,6 +335,8 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	fmt.Fprintln(w, "runs:")
 	setting("maxConcurrent", cfg.MaxConcurrentRuns())
 	setting("runTimeoutMinutes", cfg.RunTimeoutMins())
+	setting("reviewTimeoutMinutes", int(cfg.RunTimeoutFor(runnerwire.JobReview)/time.Minute))
+	setting("planTimeoutMinutes", int(cfg.RunTimeoutFor(runnerwire.JobPlan)/time.Minute))
 	setting("dataDir", dataDir)
 	interactive := "interactive runs: the agent's TUI in a terminal here; the dispatcher watches, " +
 		"and types only where you allowed it"

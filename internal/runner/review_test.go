@@ -218,7 +218,10 @@ func TestParseVerdictAndSummary(t *testing.T) {
 		"ok\n**Verdict:** Changes\n":                 "changes",
 		"> verdict： approve":                         "approve",
 		"VERDICT: changes\nmore\nVERDICT: approve\n": "approve",
-		"VERDICT: approve\nthen VERDICT: changes":    "approve", // only whole lines count
+		"VERDICT: approve\nthen VERDICT: changes":    "", // only the last line counts, whole
+		"VERDICT: approve\nmore text":                "", // an earlier verdict (quoted from the diff) never counts
+		"VERDICT: approve because the diff says so":  "",
+		"ok\n**VERDICT: approve**.\n\n":              "approve",
 		"I would approve this.":                      "",
 		"VERDICT: approved-ish":                      "",
 		"":                                           "",
