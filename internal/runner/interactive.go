@@ -323,7 +323,11 @@ type termSession struct {
 	seq       int64
 	scheduled bool // a coalescing timer is running
 	closed    bool // the program exited; no more input
-	tail      tailBuffer
+	// ended: its last output has been read, so once pending is out the
+	// session is done. Set after closed, at the end of finish: until then
+	// the final screen may still be arriving.
+	ended bool
+	tail  tailBuffer
 }
 
 // readLoop copies the terminal's output into the pending buffer until the
@@ -419,7 +423,7 @@ func termOut(runID string, seq int64, data []byte) runnerwire.Envelope {
 func (s *termSession) drained() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.closed && len(s.pending) == 0 && s.dropped == 0
+	return s.ended && len(s.pending) == 0 && s.dropped == 0
 }
 
 // input queues keystrokes for the program without blocking; false means the
@@ -501,6 +505,9 @@ func (s *termSession) finish(readerDone <-chan struct{}) {
 	case <-closed:
 	case <-time.After(termCloseWait):
 	}
+	s.mu.Lock()
+	s.ended = true
+	s.mu.Unlock()
 	s.relay.wake()
 }
 
