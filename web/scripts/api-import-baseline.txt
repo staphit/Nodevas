@@ -1,14 +1,11 @@
-BackupModal.tsx
 CommandPalette.tsx
 Drawer.tsx
 NodeLinkPicker.tsx
 NotifySettingsModal.tsx
 Sidebar.tsx
 SignIn.tsx
-backup/DriveImportTab.tsx
 backup/RemoteSyncBanner.tsx
 backup/useBackupConfig.ts
-backup/useDriveConnection.ts
 canvas/nodeTransfer.ts
 drawer/DocumentPreview.tsx
 drawer/DrawerTabs.tsx
@@ -28,3 +25,4 @@ explorer/useProjectDrag.ts
 explorer/useProjectTransfer.ts
 inspector/NodeHistory.tsx
 inspector/NodeRelations.tsx
+settings/TwoFactorEditor.tsx

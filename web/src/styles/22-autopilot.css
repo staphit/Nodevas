@@ -1,0 +1,590 @@
+/* W7 Autopilot: the goal's panel, the DAG grid, human review and the card
+   badge. Status colors reuse the board's --st-* pairs; the three states the
+   board has no pair for (waiting on someone, upstream failed, skipped as
+   Airflow paints it) get their own, every text pair at 4.5:1 or better on
+   its fill in both themes. Every color sits beside a glyph and a word. */
+
+:root {
+  --ap-waiting-fg: #6b3fa0;
+  --ap-waiting-bg: #f3eefa;
+  --ap-upstream-fg: #9a4a0b;
+  --ap-upstream-bg: #fdf0e3;
+  --ap-skipped-fg: #8a3f6e;
+  --ap-skipped-bg: #f8ecf3;
+  --ap-queued-fg: #5f5d58;
+  --ap-queued-bg: #f1f0ee;
+}
+[data-theme="dark"] {
+  --ap-waiting-fg: #c9adef;
+  --ap-waiting-bg: #2a2236;
+  --ap-upstream-fg: #f0ab6e;
+  --ap-upstream-bg: #36261a;
+  --ap-skipped-fg: #e0a3c8;
+  --ap-skipped-bg: #33212c;
+  --ap-queued-fg: var(--st-locked-fg);
+  --ap-queued-bg: var(--st-locked-bg);
+}
+
+/* The drawer tab's body, padded and scrolling like .node-runs beside it. */
+.ap-panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  overflow: auto;
+  background: var(--surface);
+  font-size: 12px;
+}
+.ap-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ap-panel-title,
+.ap-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ap-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.ap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ap-btn {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.ap-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.ap-btn.is-danger {
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
+}
+.ap-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.autopilot-error {
+  margin: 0;
+  color: var(--st-failed-fg);
+  font-size: 12px;
+}
+/* A guardrail the person is about to turn off, or a task held for them. */
+.autopilot-warning {
+  margin: 0;
+  color: var(--st-ready-fg);
+  font-size: 12px;
+}
+.ap-task-hold {
+  display: block;
+  max-width: 36ch;
+  color: var(--st-ready-fg);
+  white-space: normal;
+}
+.ap-problems {
+  padding-inline-start: 18px;
+}
+.ap-warning {
+  color: var(--st-ready-fg);
+}
+.ap-started {
+  margin: 0;
+  font-size: 12px;
+}
+.ap-muted {
+  color: var(--text-2, var(--text));
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* Policy editor */
+.autopilot-policy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+.autopilot-fieldset {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.autopilot-fieldset > legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.autopilot-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+}
+.autopilot-choice label,
+.autopilot-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+}
+.autopilot-check {
+  font-size: 12px;
+}
+.autopilot-check > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.autopilot-grid-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.autopilot-grid-fields > legend {
+  grid-column: 1 / -1;
+}
+.autopilot-grid-fields > .autopilot-check {
+  grid-column: 1 / -1;
+}
+.ap-breakdown-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+/* Run header */
+.ap-run {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.ap-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ap-run-title,
+.ap-run-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ap-run-status {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ap-run-status-running {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.ap-run-status-paused {
+  color: var(--ap-waiting-fg);
+  background: var(--ap-waiting-bg);
+}
+.ap-run-status-succeeded {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.ap-run-status-failed {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.ap-run-status-cancelled,
+.ap-run-status-unknown {
+  color: var(--ap-queued-fg);
+  background: var(--ap-queued-bg);
+}
+.ap-counts,
+.ap-policy-line {
+  margin: 0;
+  font-size: 12px;
+}
+.ap-policy-line {
+  color: var(--text-2, var(--text));
+}
+
+/* States: chips and badges */
+.ap-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ap-glyph {
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.ap-state-none,
+.ap-state-queued {
+  color: var(--ap-queued-fg);
+  background: var(--ap-queued-bg);
+}
+.ap-state-scheduled {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.ap-state-running {
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.ap-state-waiting_review,
+.ap-state-waiting_human {
+  color: var(--ap-waiting-fg);
+  background: var(--ap-waiting-bg);
+}
+.ap-state-success {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.ap-state-failed {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.ap-state-upstream_failed {
+  color: var(--ap-upstream-fg);
+  background: var(--ap-upstream-bg);
+}
+.ap-state-skipped {
+  color: var(--ap-skipped-fg);
+  background: var(--ap-skipped-bg);
+}
+
+/* Legend */
+.ap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 11px;
+}
+.ap-legend-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.ap-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* The grid: scrolls sideways inside its box, never the page. */
+.ap-grid-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.ap-grid-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ap-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ap-grid th,
+.ap-grid td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.ap-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--text-2, var(--text));
+  background: var(--surface);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ap-grid tbody tr:last-child th,
+.ap-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+.ap-grid tbody tr:hover {
+  background: var(--hover);
+}
+.ap-col-task {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 160px;
+  max-width: 260px;
+  background: var(--surface);
+}
+.ap-grid tbody tr:hover .ap-col-task {
+  background: var(--hover);
+}
+.ap-col-stage,
+.ap-cell-td {
+  padding-inline: 2px;
+  text-align: center;
+}
+.ap-stage-head {
+  display: inline-block;
+  min-width: 26px;
+}
+.ap-task-open {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 2px 0;
+  border: 0;
+  color: var(--text);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.ap-task-open:hover .ap-task-title {
+  text-decoration: underline;
+}
+.ap-task-title {
+  overflow: hidden;
+  max-width: 100%;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-task-after {
+  color: var(--text-2, var(--text));
+  font-size: 10.5px;
+  opacity: 0.85;
+}
+.ap-cell {
+  position: relative;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+}
+.ap-cell-empty {
+  border-color: var(--border);
+  background: transparent;
+}
+.ap-cell-pending {
+  border-color: var(--ap-queued-fg);
+  color: var(--ap-queued-fg);
+  background: var(--ap-queued-bg);
+}
+.ap-cell-running {
+  border-color: var(--st-progress-fg);
+  color: var(--st-progress-fg);
+  background: var(--st-progress-bg);
+}
+.ap-cell-success {
+  border-color: var(--st-done-fg);
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.ap-cell-failed {
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.ap-cell-skipped {
+  border-color: var(--ap-skipped-fg);
+  color: var(--ap-skipped-fg);
+  background: var(--ap-skipped-bg);
+}
+.ap-cell-waiting {
+  border-color: var(--ap-waiting-fg);
+  color: var(--ap-waiting-fg);
+  background: var(--ap-waiting-bg);
+}
+.ap-cell-rounds {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent);
+  font-size: 8.5px;
+  line-height: 12px;
+}
+.ap-state-running .ap-glyph,
+.ap-cell-running {
+  animation: ap-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ap-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-state-running .ap-glyph,
+  .ap-cell-running {
+    animation: none;
+  }
+}
+.ap-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ap-vote-approve {
+  color: var(--st-done-fg);
+}
+.ap-vote-changes {
+  color: var(--st-failed-fg);
+}
+.ap-vote-pending {
+  color: var(--ap-queued-fg);
+}
+.ap-votes-count {
+  margin-inline-start: 4px;
+  color: var(--text-2, var(--text));
+}
+.ap-col-pr {
+  white-space: nowrap;
+}
+.ap-col-pr a {
+  margin-inline-end: 4px;
+}
+.ap-col-actions {
+  white-space: nowrap;
+}
+
+/* Human review */
+.ap-review {
+  border-color: var(--ap-waiting-fg);
+}
+.ap-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ap-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ap-review-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.ap-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ap-review-title {
+  font-weight: 600;
+}
+.ap-waiting-pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid var(--ap-waiting-fg);
+  border-radius: 999px;
+  color: var(--ap-waiting-fg);
+  background: var(--ap-waiting-bg);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Graph card badge */
+.ap-card-badge {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 88px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
+}
+.ap-card-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .ap-section {
+    padding: 8px;
+  }
+  .ap-col-task {
+    min-width: 120px;
+    max-width: 160px;
+  }
+}
+
+/* The advisor's reason can be long (a System One decision): one line here,
+   the whole of it in the tooltip. */
+.ap-task-advisor {
+  display: block;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

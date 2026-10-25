@@ -1,0 +1,270 @@
+/* ---------- runners: machines that run agents for this hub ---------- */
+.runners-dialog {
+  width: min(600px, 100%);
+}
+.runners-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(62vh, 620px);
+  padding: 0 18px 16px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.runner-empty {
+  margin: 0;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  text-align: center;
+}
+.runner-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.runner-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.runner-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.runner-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: var(--text-2);
+  opacity: 0.5;
+}
+.runner-dot.online {
+  background: var(--st-done-fg);
+  opacity: 1;
+}
+.runner-card-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.runner-card-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runner-card-title span,
+.runner-meta,
+.runner-hint,
+.runner-empty-inline {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.runner-revoke,
+.runner-copy {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.runner-revoke:hover {
+  color: var(--st-failed-fg);
+  border-color: var(--st-failed-fg);
+}
+.runner-copy:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.runner-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runner-section-label {
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.runner-agents,
+.runner-repos {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.runner-agents li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.runner-agents li.missing {
+  opacity: 0.6;
+}
+.runner-agent-kind {
+  min-width: 52px;
+  font-weight: 600;
+}
+.runner-agent-version {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.runner-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.runner-model {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10.5px;
+}
+.runner-model.default {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+}
+.runner-repos li {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+.runner-repos li span {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runner-token {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.runner-token-warning {
+  margin: 0;
+  color: var(--st-failed-fg);
+  font-size: 11.5px;
+}
+.runner-token-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.runner-token-row input,
+.runner-add input {
+  min-width: 0;
+  min-height: 28px;
+  flex: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.runner-add input {
+  font-family: inherit;
+}
+.runner-token-row code {
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.runner-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+.runner-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runner-done,
+.runner-add button {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.runner-add button.primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.runner-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runner-add label {
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .runners-body {
+    max-height: 68vh;
+    padding: 0 14px 14px;
+  }
+  .runner-agents li {
+    align-items: flex-start;
+  }
+  .runner-copy span {
+    display: none;
+  }
+}
+
+/* Link a new device: above the Runners dialog, under the step-up one. */
+.runner-link-backdrop {
+  z-index: 85;
+}
+.runner-link-dialog {
+  width: min(560px, 100%);
+}
+.runner-access-form {
+  padding-top: 6px;
+}

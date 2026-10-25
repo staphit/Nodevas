@@ -75,6 +75,8 @@ web/e2e/.bin/
 # Screenshots from `npm run preview:mobile`: regenerated on demand, and a
 # binary that would churn on every layout tweak.
 web/mobile-preview/
+# Raw recordings from `npm run demo:videos`; the encoded clips are in docs/videos/.
+web/demo-videos/
 
 # Claude local state and agent worktrees: never part of a commit.
 /.claude/

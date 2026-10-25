@@ -13,7 +13,7 @@ import { PermissionCard } from "./PermissionCard";
 type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
 
 function AssistantBubble({ text, streaming }: { text: string; streaming?: boolean }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
+  const html = useMemo(() => renderMarkdown(text, { remoteMedia: false }), [text]);
   return (
     <div className={`copilot-bubble copilot-bubble-assistant${streaming ? " is-streaming" : ""}`}>
       <div

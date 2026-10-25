@@ -1,7 +1,6 @@
 package remoteapi
 
 import (
-	"nodevas/internal/auth"
 	"nodevas/internal/project"
 	"nodevas/internal/remote"
 )
@@ -11,10 +10,9 @@ import (
 type API struct {
 	pm      *project.ProjectManager
 	remotes *remote.RemoteManager
-	auth    auth.Authenticator
 }
 
 // New builds the handler set.
-func New(pm *project.ProjectManager, remotes *remote.RemoteManager, authenticator auth.Authenticator) *API {
-	return &API{pm: pm, remotes: remotes, auth: authenticator}
+func New(pm *project.ProjectManager, remotes *remote.RemoteManager) *API {
+	return &API{pm: pm, remotes: remotes}
 }

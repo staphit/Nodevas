@@ -62,6 +62,10 @@ type Settings struct {
 	BaseURL     string `json:"baseUrl"`
 	Effort      string `json:"effort"`
 	AllowBypass bool   `json:"allowBypass"`
+	// KeySource is where the model calls' key lives: KeySourceServer,
+	// KeySourceRunner or KeySourceAuto (remote.go). With the runner, the
+	// provider and model are the runner's, not these.
+	KeySource string `json:"keySource"`
 }
 
 // overrides is what an administrator saved. An empty string means "not
@@ -72,6 +76,7 @@ type overrides struct {
 	BaseURL     string `json:"baseUrl,omitempty"`
 	Effort      string `json:"effort,omitempty"`
 	AllowBypass *bool  `json:"allowBypass,omitempty"`
+	KeySource   string `json:"keySource,omitempty"`
 }
 
 // SettingsUpdate is a partial update from the settings API. A nil field is
@@ -84,6 +89,8 @@ type SettingsUpdate struct {
 	Effort      *string `json:"effort,omitempty"`
 	AllowBypass *bool   `json:"allowBypass,omitempty"`
 	APIKey      *string `json:"apiKey,omitempty"`
+	// KeySource is server, runner or auto ("" is auto).
+	KeySource *string `json:"keySource,omitempty"`
 }
 
 // SettingsView is what the admin settings API returns. The key itself is
@@ -93,6 +100,10 @@ type SettingsView struct {
 	Enabled      bool   `json:"enabled"`
 	HasAPIKey    bool   `json:"hasApiKey"`
 	APIKeySource string `json:"apiKeySource,omitempty"` // stored | environment
+	// EffectiveKeySource is KeySource with auto resolved: server or runner.
+	// A server key is a model credential an intruder on the server can take;
+	// the settings panel says so.
+	EffectiveKeySource string `json:"effectiveKeySource"`
 }
 
 // settingsStore resolves defaults, overrides and the key.
@@ -129,6 +140,7 @@ func (s *settingsStore) effective(saved overrides) Settings {
 		Provider:    firstNonEmpty(saved.Provider, s.defaults.Provider, "anthropic"),
 		Effort:      firstNonEmpty(saved.Effort, s.defaults.Effort, "low"),
 		AllowBypass: s.defaults.AllowBypass,
+		KeySource:   firstNonEmpty(saved.KeySource, KeySourceAuto),
 	}
 	sameVendor := settings.Provider == s.defaults.Provider
 	settings.Model = saved.Model
@@ -181,6 +193,7 @@ func (s *settingsStore) view(ctx context.Context) (SettingsView, error) {
 	return SettingsView{
 		Settings: settings, Enabled: s.defaults.Enabled,
 		HasAPIKey: key != "", APIKeySource: source,
+		EffectiveKeySource: effectiveKeySource(settings, key),
 	}, nil
 }
 
@@ -229,6 +242,17 @@ func (s *settingsStore) update(ctx context.Context, update SettingsUpdate) error
 	if update.AllowBypass != nil {
 		value := *update.AllowBypass
 		saved.AllowBypass = &value
+	}
+	if update.KeySource != nil {
+		value := strings.TrimSpace(*update.KeySource)
+		switch value {
+		case "", KeySourceAuto:
+			value = ""
+		case KeySourceServer, KeySourceRunner:
+		default:
+			return fmt.Errorf("%w: keySource must be server, runner or auto", ErrInvalidSettings)
+		}
+		saved.KeySource = value
 	}
 	if update.APIKey != nil {
 		key := strings.TrimSpace(*update.APIKey)

@@ -15,13 +15,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 	"unicode/utf16"
 
 	"nodevas/internal/agents"
+	"nodevas/internal/agentsetup"
 	"nodevas/internal/mcp"
+	"nodevas/internal/runnerwire"
 )
 
 // Events the hook understands, as named on the command line.
@@ -56,18 +60,46 @@ type Options struct {
 	// Windows forces (or, false, suppresses) ASCII-only JSON output. Nil
 	// follows runtime.GOOS.
 	Windows *bool
+	// ExclusionFile overrides where the folder exclusion list is read from
+	// (tests); empty is agentsetup.NetworkConfigPath().
+	ExclusionFile string
+	// Getenv reads the environment (tests); nil is os.Getenv.
+	Getenv func(string) string
 }
+
+// RunIDEnv is set by a runner on every agent run it starts. Such a session is
+// the runner's, on the network through the run's own MCP server; the owner's
+// global hooks firing inside it must not register it a second time.
+const RunIDEnv = "NODEVAS_RUN_ID"
 
 // Input is the part of an agent's hook payload the hook reads.
 type Input struct {
 	SessionID      string
 	Cwd            string
 	StopHookActive bool
+	// Model is the model the agent says it runs on, when its payload says.
+	Model string
+	// ToolName and Files (W6): on post-tool-use, the tool that ran and the
+	// files it wrote, as its input names them (see EditedFiles).
+	ToolName string
+	Files    []string
+	// TranscriptPath is the agent's transcript of the session, when its
+	// payload names it (Claude Code, Codex: transcript_path; Antigravity:
+	// transcriptPath): where SessionUsage reads the tokens used.
+	TranscriptPath string
+	// Usage is the session's usage as the agent passed it in (OpenCode's
+	// plugin), in place of a transcript.
+	Usage []mcp.SessionModelUsage
 }
 
 // ParseInput reads an agent's hook payload leniently: a byte-order mark
 // (Windows PowerShell pipes one in) is dropped, and unparseable input yields
 // an empty Input rather than an error.
+//
+// The Antigravity CLI's payload is camelCase protojson and names things its
+// own way: conversationId, workspacePaths (no cwd), modelName, toolCall
+// {name, args}, and on Stop executionNum (0 the first time a turn stops, 1
+// after a hook blocked that) and terminationReason.
 func ParseInput(raw []byte) Input {
 	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))
 	var v map[string]any
@@ -79,13 +111,68 @@ func ParseInput(raw []byte) Input {
 		return strings.TrimSpace(s)
 	}
 	in := Input{Cwd: str("cwd")}
-	for _, k := range []string{"session_id", "sessionId", "conversation_id"} {
+	if in.Cwd == "" {
+		// agy lists --add-dir folders before the one it was started in.
+		if paths, ok := v["workspacePaths"].([]any); ok {
+			for i := len(paths) - 1; i >= 0; i-- {
+				if s, _ := paths[i].(string); strings.TrimSpace(s) != "" {
+					in.Cwd = filepath.Clean(strings.TrimSpace(s))
+					break
+				}
+			}
+		}
+	}
+	// Claude Code names the model as a string on some events and as
+	// {"id": …, "display_name": …} on others.
+	switch model := v["model"].(type) {
+	case string:
+		in.Model = strings.TrimSpace(model)
+	case map[string]any:
+		if id, ok := model["id"].(string); ok {
+			in.Model = strings.TrimSpace(id)
+		}
+	}
+	if in.Model == "" {
+		// "auto" is Antigravity letting the model pick: no model to show.
+		if name := str("modelName"); name != "auto" {
+			in.Model = name
+		}
+	}
+	if len(in.Model) > agents.MaxModelLen {
+		in.Model = ""
+	}
+	for _, k := range []string{"session_id", "sessionId", "conversation_id", "conversationId"} {
 		if s := str(k); s != "" {
 			in.SessionID = s
 			break
 		}
 	}
+	for _, k := range []string{"transcript_path", "transcriptPath"} {
+		if s := str(k); s != "" {
+			in.TranscriptPath = filepath.Clean(s)
+			break
+		}
+	}
+	in.Usage = parseUsage(v["usage"])
 	in.StopHookActive, _ = v["stop_hook_active"].(bool)
+	if n, ok := v["executionNum"].(float64); ok && n > 0 {
+		in.StopHookActive = true
+	}
+	if reason := str("terminationReason"); reason != "" && reason != "NO_TOOL_CALL" {
+		// Stopped by an error, a cancel or a limit, not by finishing: no
+		// reason to keep it going for mail.
+		in.StopHookActive = true
+	}
+	in.ToolName = str("tool_name")
+	toolInput := v["tool_input"]
+	if call, ok := v["toolCall"].(map[string]any); ok && in.ToolName == "" {
+		name, _ := call["name"].(string)
+		in.ToolName = strings.TrimSpace(name)
+		toolInput = call["args"]
+	}
+	if in.ToolName != "" {
+		in.Files = EditedFiles(in.ToolName, toolInputMap(toolInput))
+	}
 	return in
 }
 
@@ -110,6 +197,13 @@ func ReadStdin(r io.Reader, limit time.Duration) []byte {
 // Run handles one hook invocation and returns what to print on stdout (empty
 // for nothing). Errors are swallowed by design.
 func Run(ctx context.Context, agent, event string, in Input, opts Options) string {
+	getenv := opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if strings.TrimSpace(getenv(RunIDEnv)) != "" {
+		return ""
+	}
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if in.SessionID == "" || agent == "" {
 		return ""
@@ -118,6 +212,19 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	case EventSessionStart, EventUserPromptSubmit, EventPostToolUse, EventStop, EventSessionEnd:
 	default:
 		return ""
+	}
+
+	// A session in an excluded folder is not on the network: nothing is
+	// reported, nothing printed, not even that it is excluded. The agent's
+	// own payload says where it runs; the hook's cwd is the fallback.
+	cwd := in.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if cwd != "" {
+		if folder, _ := agentsetup.ExcludedFolder(opts.ExclusionFile, cwd); folder != "" {
+			return ""
+		}
 	}
 
 	actor := strings.TrimSpace(opts.Actor)
@@ -130,6 +237,8 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 		Actor:      actor,
 		SessionID:  agent + ":" + in.SessionID,
 		AgentKind:  agent,
+		Model:      in.Model,
+		WorkDir:    cwd,
 		HTTPClient: opts.HTTPClient,
 		Timeout:    Timeout(event),
 	}
@@ -142,6 +251,9 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	}
 
 	if event == EventSessionEnd {
+		// The last word on what the session used, while it is still there
+		// to count it against.
+		reportUsage(ctx, client, agent, in)
 		_ = client.Leave(ctx)
 		return ""
 	}
@@ -150,11 +262,20 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	switch event {
 	case EventUserPromptSubmit:
 		state = agents.StateBusy
-	case EventSessionStart, EventStop:
+	case EventSessionStart:
 		state = agents.StateIdle
 	}
 	if err := client.Heartbeat(ctx, state, "", ""); err != nil {
 		return ""
+	}
+	reportChanges(ctx, client, event, in)
+	if event == EventStop {
+		reportUsage(ctx, client, agent, in)
+		// Idle now, still holding the node it holds: a turn ending is not the
+		// claim ending, and the next turn's edits belong to the same node.
+		if err := client.Heartbeat(ctx, agents.StateIdle, client.ClaimedNode(), ""); err != nil {
+			return ""
+		}
 	}
 
 	// A stop hook that already blocked once is running again because of that
@@ -186,16 +307,73 @@ func Run(ctx context.Context, agent, event string, in Input, opts Options) strin
 	return Format(agent, event, text, windows)
 }
 
+// reportChanges sends the hub what this event changed, if the session holds a
+// node (as the heartbeat just answered): the files an edit tool wrote, or at
+// Stop a snapshot of the working tree. Failures are dropped. A session in an
+// excluded folder never gets here: Run returns before it joins the network.
+func reportChanges(ctx context.Context, client *mcp.Client, event string, in Input) {
+	if client.ClaimedNode() == "" || in.Cwd == "" {
+		return
+	}
+	switch event {
+	case EventPostToolUse:
+		if len(in.Files) == 0 {
+			return
+		}
+		files := RepoRelative(ctx, in.Cwd, in.Files)
+		if len(files) > runnerwire.MaxSessionFiles {
+			files = files[:runnerwire.MaxSessionFiles]
+		}
+		_, _ = client.RecordSessionChanges(ctx, files, nil)
+	case EventStop:
+		// Leave time in the hook's budget for the idle heartbeat after it.
+		snapCtx, cancel := context.WithTimeout(ctx, gitTimeout)
+		snapshot, ok := Snapshot(snapCtx, in.Cwd)
+		cancel()
+		if ok {
+			_, _ = client.RecordSessionChanges(ctx, nil, &snapshot)
+		}
+	}
+}
+
+// reportUsage sends the hub the session's token usage so far, per model.
+// Failures are dropped, like every other report.
+func reportUsage(ctx context.Context, client *mcp.Client, agent string, in Input) {
+	if models := SessionUsage(ctx, agent, in); len(models) > 0 {
+		_ = client.RecordSessionUsage(ctx, agent, models)
+	}
+}
+
 // Format renders text as the JSON agent expects from this hook event to put it
 // in front of the model. Stop hooks block the stop with text as the reason, so
 // the agent takes another turn to read its mail. With asciiOnly, every
 // non-ASCII character is escaped: agents on Windows run hooks through
 // PowerShell, which can re-encode what passes through it.
+//
+// OpenCode's plugin (agentsetup) adds whatever the hook prints to the user's
+// message as is, so it gets the text alone. The Antigravity CLI injects steps:
+// a system message at session start, an ephemeral one before a model call
+// (its PreInvocation hook, which `nodevas setup-agent` wires to
+// user-prompt-submit), and on Stop a "continue" with the text as the reason.
 func Format(agent, event, text string, asciiOnly bool) string {
 	var out any
-	if event == EventStop {
+	switch {
+	case agent == "opencode":
+		return text
+	case agent == "antigravity":
+		switch event {
+		case EventSessionStart:
+			out = map[string]any{"injectSteps": []any{map[string]any{"systemMessage": map[string]any{"systemMessage": text}}}}
+		case EventUserPromptSubmit:
+			out = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": text}}}
+		case EventStop:
+			out = map[string]any{"decision": "continue", "reason": text}
+		default:
+			return ""
+		}
+	case event == EventStop:
 		out = map[string]any{"decision": "block", "reason": text}
-	} else {
+	default:
 		name := hookEventName(agent, event)
 		if name == "" {
 			return ""
@@ -216,6 +394,16 @@ func Format(agent, event, text string, asciiOnly bool) string {
 		s = EscapeNonASCII(s)
 	}
 	return s
+}
+
+// Fallback is what the hook prints when Run has nothing to say: the
+// Antigravity CLI reads every hook's stdout as a JSON object, so it gets an
+// empty one; the other agents get nothing.
+func Fallback(agent string) string {
+	if strings.ToLower(strings.TrimSpace(agent)) == "antigravity" {
+		return "{}"
+	}
+	return ""
 }
 
 func hookEventName(agent, event string) string {

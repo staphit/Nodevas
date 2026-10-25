@@ -6,12 +6,18 @@ import (
 	"github.com/gin-gonic/gin"
 
 	agentsapi "nodevas/internal/httpapi/agents"
+	autopilotapi "nodevas/internal/httpapi/autopilot"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
+	membersapi "nodevas/internal/httpapi/members"
 	"nodevas/internal/httpapi/node"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
+	runnersapi "nodevas/internal/httpapi/runners"
+	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/httpapi/system"
+	usageapi "nodevas/internal/httpapi/usage"
+	"nodevas/internal/usage"
 )
 
 // This file is the whole HTTP surface in one place. Each handler package owns
@@ -28,16 +34,60 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withAuditTrail)
+	router.Use(gin.Recovery(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withAuditTrail)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
 	node.New(s.pm, s.hub).Register(api)
-	project.New(s.pm).Register(api)
+	projectAPI := project.New(s.pm)
+	if s.members != nil {
+		projectAPI.UseMembers(projectAccess{s}, membershipHooks{s.members})
+		var find membersapi.FindAccount
+		if s.users != nil {
+			find = s.users.FindAccount
+		}
+		membersapi.New(s.pm, s.members, find).Register(api)
+	}
+	projectAPI.Register(api)
 	fsbrowse.New(s.auth, s.openDir).Register(api)
-	remoteapi.New(s.pm, s.remotes, s.auth).Register(api)
+	remoteapi.New(s.pm, s.remotes).Register(api)
 	if s.agents != nil {
-		agentsapi.New(s.pm, s.agents).Register(api)
+		agentsAPI := agentsapi.New(s.pm, s.agents)
+		agentsAPI.UseRunCheck(func(r *http.Request) bool {
+			_, proxied := runnerProxiedFrom(r.Context())
+			return proxied
+		})
+		if s.usage != nil {
+			agentsAPI.UseUsage(s.usage, func(projectKey string) {
+				if s.hub == nil {
+					return
+				}
+				if projectKey == "" {
+					s.hub.Broadcast(usage.ChangedEvent, "")
+					return
+				}
+				s.hub.BroadcastRoom(projectKey, usage.ChangedEvent, "")
+			})
+		}
+		agentsAPI.Register(api)
+	}
+	if s.usage != nil {
+		usageapi.New(s.pm, s.usage).Register(api)
+	}
+	if s.runners != nil {
+		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithLinks(s.runnerLinkOptions()).Register(api)
+	}
+	if s.runs != nil {
+		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
+		s.configureStepUp(runsAPI)
+		runsAPI.Register(api)
+		if s.autopilot != nil {
+			autopilotAPI := autopilotapi.New(s.pm, s.autopilot)
+			s.configureAutopilotStepUp(autopilotAPI)
+			autopilotAPI.Register(api)
+		}
+	} else {
+		s.configureStepUp(nil)
 	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {

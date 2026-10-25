@@ -16,6 +16,10 @@
 //
 // Passcodes are single use, expire in five minutes, and live only in memory —
 // a restart invalidates every outstanding one, which is the safe direction.
+//
+// An account may add an authenticator app as a second factor
+// (totp_session.go); for it, the right passcode opens a pending sign-in rather
+// than a session.
 
 package auth
 
@@ -26,7 +30,6 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
-	"nodevas/internal/identity"
 	"strings"
 	"time"
 )
@@ -110,6 +113,10 @@ type Challenge struct {
 	// Actor names the account, for the audit line the caller writes. The
 	// passcode itself must never be logged.
 	Actor string
+	// Method is how a step-up is proved: StepUpMethodEmail, with Code to mail
+	// to Email, or SecondFactorTOTP, with nothing to send — the person types a
+	// code from their authenticator app. Sign-in challenges leave it empty.
+	Method string
 }
 
 // newOTP draws a passcode from crypto/rand.
@@ -217,9 +224,12 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 	return Challenge{Code: code, Email: registered, Expires: expires, Actor: actor.Name}, nil
 }
 
-// LoginWithOTP completes the sign-in and, as the same step, signs out every
+// SignInWithOTP checks the mailed passcode and, for an account without an
+// authenticator, completes the sign-in: as the same step it signs out every
 // other session the account had, so the device that just proved it holds the
-// mailbox is the only one left signed in.
+// mailbox is the only one left signed in. For an account with an
+// authenticator it spends the passcode and returns a pending sign-in instead,
+// touching no session; CompleteSignIn finishes it (totp_session.go).
 //
 // That revocation is what replaces the one RequestOTP used to do. Here it is
 // earned: only somebody who read the passcode can trigger it. It is also how
@@ -231,7 +241,7 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 // An unknown address, no passcode outstanding, and a wrong passcode all give
 // the same ErrBadCredentials, after the same throttle charges, without a hash
 // pass on any of them, so neither the answer nor its timing says which.
-func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity.Actor, string, string, error) {
+func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInResult, error) {
 	source := ""
 	if r != nil {
 		source = ClientIP(r)
@@ -247,10 +257,10 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity
 	// keyed on what was typed, not on what was found, so an unregistered
 	// address throttles exactly like a registered one.
 	if !a.allowEmailLogin(key, source) {
-		return identity.Actor{}, "", "", ErrTooManyLogins
+		return SignInResult{}, ErrTooManyLogins
 	}
 	if addressErr != nil || len(otp) == 0 || len(otp) > MaxOTPBytes {
-		return identity.Actor{}, "", "", ErrBadCredentials
+		return SignInResult{}, ErrBadCredentials
 	}
 
 	actor, revision, _, ok := a.users.AccountByEmail(ctx, address)
@@ -259,14 +269,23 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity
 		// address, and recording it as one would put a failed sign-in in the
 		// trail for a person who simply closed the tab.
 		if err := contextFailure(ctx); err != nil {
-			return identity.Actor{}, "", "", err
+			return SignInResult{}, err
 		}
-		return identity.Actor{}, "", "", ErrBadCredentials
+		return SignInResult{}, ErrBadCredentials
+	}
+	// Read before the critical section, like the account itself. A failed
+	// read fails the sign-in: not knowing whether the second factor is
+	// required must never read as "it is not".
+	needsSecondFactor, err := a.users.TOTPEnabled(ctx, actor.ID)
+	if err != nil {
+		return SignInResult{}, err
 	}
 
+	// For a two-factor account the first token is the pending sign-in's
+	// ticket rather than a session.
 	token, csrf, err := newSessionTokens()
 	if err != nil {
-		return identity.Actor{}, "", "", err
+		return SignInResult{}, err
 	}
 
 	// Everything from here to the new session is one critical section: the
@@ -282,7 +301,7 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity
 	// cannot reach this map, so the check has to happen here.
 	if pending == nil || now.After(pending.expires) || pending.revision != revision {
 		delete(a.otps, actor.ID)
-		return identity.Actor{}, "", "", ErrBadCredentials
+		return SignInResult{}, ErrBadCredentials
 	}
 	offered := digestOTP(otp)
 	if subtle.ConstantTimeCompare(pending.digest[:], offered[:]) != 1 {
@@ -292,34 +311,25 @@ func (a *SessionAuth) LoginWithOTP(r *http.Request, email, otp string) (identity
 			// and which the account holder sees arrive in their inbox.
 			delete(a.otps, actor.ID)
 		}
-		return identity.Actor{}, "", "", ErrBadCredentials
+		return SignInResult{}, ErrBadCredentials
 	}
-	if err := a.sweepSessionsLocked(now); err != nil {
-		return identity.Actor{}, "", "", err
+	if needsSecondFactor {
+		// The passcode has done its job and is spent. Nothing else changes
+		// until the authenticator code arrives: a person with the mailbox and
+		// not the phone must not be able to sign the owner out.
+		delete(a.otps, actor.ID)
+		return SignInResult{Actor: actor, Pending: a.openPendingSignInLocked(actor, revision, token, now)}, nil
 	}
-	// The seat limit is checked before anything is spent or revoked, while the
-	// account's own sessions still count as its seat. Checking after the
-	// revocation would let a full server sign the person out of their other
-	// devices and then refuse them this one.
-	if !a.seatAvailableLocked(actor.ID, now) {
-		return identity.Actor{}, "", "", ErrTooManyActiveUsers
-	}
-	// Durable first, as everywhere sessions are destroyed: if the delete does
-	// not commit, nothing is forgotten in memory, the passcode is still good
-	// for a retry, and no session is opened beside the ones a restart would
-	// resurrect.
-	if err := a.store.removeUser(actor.ID); err != nil {
-		return identity.Actor{}, "", "", err
-	}
-	a.revokeUserLocked(actor.ID)
-	if err := a.openSessionLocked(actor, revision, token, now); err != nil {
-		return identity.Actor{}, "", "", err
+	// The seat check, the revocation and the new session; see
+	// finishSignInLocked. A failure there leaves the passcode good for a retry.
+	if err := a.finishSignInLocked(actor, revision, token, now); err != nil {
+		return SignInResult{}, err
 	}
 	// Single use. Spent only once the session exists, which is safe because
 	// the lock is still held: no replay can run between the check above and
 	// this delete.
 	delete(a.otps, actor.ID)
-	return actor, token, csrf, nil
+	return SignInResult{Actor: actor, Token: token, CSRF: csrf}, nil
 }
 
 // allowOTPRequest charges the global and per-source budgets for a passcode
@@ -386,6 +396,7 @@ func (a *SessionAuth) revokeUserLocked(userID string) {
 	for key, session := range a.sessions {
 		if session.actor.ID == userID {
 			delete(a.sessions, key)
+			delete(a.stepUps, key)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import {
 import { AuthError, api, onUnauthorized, type Actor } from "../api";
 import { IconSignOut } from "../icons";
 import { LANGUAGE_OPTIONS, useI18n } from "../i18n";
+import { compactSecondFactor, isSecondFactorCode } from "./secondFactor";
 
 /**
  * ViewerContext carries who this browser is signed in as.
@@ -201,7 +202,9 @@ export function SignIn({
   onSignedIn: (actor: Actor) => void;
 }) {
   const { language, setLanguage, t } = useI18n();
-  const [view, setView] = useState<"email" | "code">("email");
+  const [view, setView] = useState<"email" | "code" | "totp">("email");
+  const [secondCode, setSecondCode] = useState("");
+  const secondField = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState<"" | "send" | "login">("");
@@ -229,6 +232,7 @@ export function SignIn({
   // the code they were just sent belongs in.
   useEffect(() => {
     if (view === "code") otpField.current?.focus();
+    if (view === "totp") secondField.current?.focus();
   }, [view, expiresAt]);
 
   const address = email.trim();
@@ -265,9 +269,44 @@ export function SignIn({
     try {
       const result = await api.login(address, code);
       setOtp("");
-      onSignedIn(result.actor);
+      if (result.secondFactor === "totp") {
+        // The passcode was right and is spent; the authenticator is next.
+        setSecondCode("");
+        setNotice("");
+        setExpiresAt(0);
+        setView("totp");
+        return;
+      }
+      if (result.actor) onSignedIn(result.actor);
     } catch (failure) {
       setError(describe(failure, t));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const finishTotp = async () => {
+    if (busy !== "" || !isSecondFactorCode(secondCode)) return;
+    setBusy("login");
+    setError("");
+    try {
+      const result = await api.loginTotp(compactSecondFactor(secondCode));
+      setSecondCode("");
+      onSignedIn(result.actor);
+    } catch (failure) {
+      if (failure instanceof AuthError && failure.code === "SIGNIN_EXPIRED") {
+        // The pending sign-in is gone; only a new email code starts another.
+        setSecondCode("");
+        setView("email");
+        setError(t("auth.totp.signInExpired"));
+      } else if (failure instanceof AuthError && failure.status === 401) {
+        setError(t("auth.totp.wrongCode"));
+        secondField.current?.select();
+      } else if (failure instanceof AuthError && failure.status === 429) {
+        setError(t("auth.totp.throttled"));
+      } else {
+        setError(describe(failure, t));
+      }
     } finally {
       setBusy("");
     }
@@ -278,12 +317,14 @@ export function SignIn({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (view === "email") void sendOtp();
+    else if (view === "totp") void finishTotp();
     else void login();
   };
 
   const changeEmail = () => {
     setView("email");
     setOtp("");
+    setSecondCode("");
     setNotice("");
     setError("");
     setExpiresAt(0);
@@ -378,6 +419,36 @@ export function SignIn({
                     : t("auth.resendCode")}
               </button>
             </div>
+          </>
+        )}
+
+        {view === "totp" && (
+          <>
+            <p className="signin-notice" role="status">
+              {t("auth.totp.signInHint")}
+            </p>
+            <label htmlFor="signin-totp">{t("auth.totp.signInCode")}</label>
+            <input
+              id="signin-totp"
+              ref={secondField}
+              className="signin-otp"
+              value={secondCode}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              /* A recovery code with its dashes is the longest thing typed here. */
+              maxLength={24}
+              aria-describedby="signin-totp-hint"
+              onChange={(event) => setSecondCode(event.target.value)}
+            />
+            <p id="signin-totp-hint" className="signin-hint">
+              {t("auth.totp.useRecovery")}
+            </p>
+            <button type="submit" disabled={busy !== "" || !isSecondFactorCode(secondCode)}>
+              {busy === "login" ? t("auth.signingIn") : t("auth.signIn")}
+            </button>
           </>
         )}
 

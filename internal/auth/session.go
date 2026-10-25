@@ -36,6 +36,9 @@ type Session struct {
 	revision string
 	created  time.Time
 	expires  time.Time
+	// steppedUp is when this session last completed a step-up (zero: never).
+	// See stepup.go.
+	steppedUp time.Time
 }
 
 type loginBucket struct {
@@ -71,6 +74,18 @@ type SessionAuth struct {
 	// maxActiveUsers caps how many distinct accounts may hold a session at
 	// once; zero means no cap. See SetMaxActiveUsers.
 	maxActiveUsers int
+
+	// Step-up (stepup.go): one live passcode per session, keyed by session
+	// key; how long a step-up lasts; and the clock step-ups are judged by,
+	// which tests replace.
+	stepUps      map[string]*pendingOTP
+	stepUpWindow time.Duration
+	now          func() time.Time
+
+	// Two-factor sign-in (totp_session.go): pending sign-ins keyed by the
+	// ticket's digest, and recent wrong authenticator codes per account.
+	pendingSignIns map[string]*pendingSignIn
+	totpFailures   map[string][]time.Time
 }
 
 func NewSessionAuth(users *UserStore) *SessionAuth {
@@ -85,6 +100,11 @@ func NewSessionAuth(users *UserStore) *SessionAuth {
 		attempts:       map[string]*loginBucket{},
 		otps:           map[string]*pendingOTP{},
 		lastOTPRequest: map[string]time.Time{},
+		stepUps:        map[string]*pendingOTP{},
+		stepUpWindow:   DefaultStepUpWindow,
+		now:            time.Now,
+		pendingSignIns: map[string]*pendingSignIn{},
+		totpFailures:   map[string][]time.Time{},
 	}
 }
 
@@ -508,6 +528,7 @@ func (a *SessionAuth) removeSessionsLocked(keys ...string) error {
 	}
 	for _, key := range keys {
 		delete(a.sessions, key)
+		delete(a.stepUps, key)
 	}
 	return nil
 }

@@ -87,6 +87,11 @@ func (a *API) GetProjectExport(c *gin.Context) {
 		return
 	}
 	root := scope.Root()
+	if a.access != nil && !a.access.ReadableTree(c.Request, root.Path) {
+		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
+			fmt.Errorf("the export would include a project you are not a member of"), nil)
+		return
+	}
 	file, err := os.CreateTemp("", "nodevas-*.veproj")
 	if err != nil {
 		httpx.Err(c, http.StatusInternalServerError, err)

@@ -1,0 +1,118 @@
+/* ---------- Account security: two-factor authentication (TOTP) ---------- */
+
+.twofactor h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.twofactor-status {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.twofactor-status small {
+  color: var(--text-2);
+  font-weight: 400;
+}
+.twofactor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.twofactor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 12px;
+}
+.twofactor-actions button.primary {
+  border-color: var(--accent, var(--border-strong));
+  font-weight: 600;
+}
+.twofactor-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.twofactor-enroll,
+.twofactor-codes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 420px;
+}
+/* The QR code stays black on white in either theme: scanners need contrast. */
+.twofactor-qr {
+  width: 196px;
+  max-width: 100%;
+  height: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: #fff;
+  image-rendering: pixelated;
+}
+.twofactor-key {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.twofactor-key code {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.twofactor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.twofactor-field input {
+  max-width: 220px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+}
+.twofactor-field input[aria-invalid="true"] {
+  border-color: var(--st-failed-fg);
+}
+.twofactor-codes ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 4px 16px;
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.twofactor-codes code {
+  font-family: var(--mono);
+  font-size: 12px;
+  user-select: all;
+}
+.twofactor-error {
+  margin: 0;
+  color: var(--st-failed-fg);
+  font-size: 12px;
+}

@@ -44,7 +44,7 @@ func (s *Store) Load() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decrypt(key, blob)
+	return decrypt(key, blob, nil)
 }
 
 func (s *Store) Save(plain []byte) error {
@@ -54,7 +54,7 @@ func (s *Store) Save(plain []byte) error {
 	if err != nil {
 		return err
 	}
-	blob, err := encrypt(key, plain)
+	blob, err := encrypt(key, plain, nil)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func loadKey(keyPath string) ([]byte, error) {
 	return key, nil
 }
 
-func encrypt(key, plain []byte) ([]byte, error) {
+func encrypt(key, plain, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -145,10 +145,10 @@ func encrypt(key, plain []byte) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	return gcm.Seal(nonce, nonce, plain, nil), nil
+	return gcm.Seal(nonce, nonce, plain, aad), nil
 }
 
-func decrypt(key, blob []byte) ([]byte, error) {
+func decrypt(key, blob, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -160,5 +160,5 @@ func decrypt(key, blob []byte) ([]byte, error) {
 	if len(blob) < gcm.NonceSize() {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
-	return gcm.Open(nil, blob[:gcm.NonceSize()], blob[gcm.NonceSize():], nil)
+	return gcm.Open(nil, blob[:gcm.NonceSize()], blob[gcm.NonceSize():], aad)
 }

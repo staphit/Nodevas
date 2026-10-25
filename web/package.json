@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "preview:mobile": "playwright test --config playwright.mobile.config.ts"
+    "preview:mobile": "playwright test --config playwright.mobile.config.ts",
+    "demo:videos": "playwright test --config playwright.demo.config.ts && node e2e/demo-encode.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -22,6 +23,8 @@
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.7",
     "@uiw/react-codemirror": "^4.23.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "dompurify": "^3.4.12",
     "marked": "^18.0.7",
     "react": "^18.3.1",

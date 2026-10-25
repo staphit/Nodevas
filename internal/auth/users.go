@@ -66,6 +66,9 @@ type UserStore struct {
 	// owned records that this store opened the database and may close it. A
 	// handle passed in by a caller belongs to that caller.
 	owned bool
+	// keyPath is the machine key that seals authenticator secrets at rest; ""
+	// means secrets.MachineKeyPath. See UseSecretKey and totp_store.go.
+	keyPath string
 }
 
 // NewUserStore opens the workspace database and prepares the accounts table.
@@ -397,7 +400,9 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE id = ?`, id); err != nil {
 			return fmt.Errorf("delete account: %w", err)
 		}
-		return nil
+		// Its authenticator goes with it, so an account created later can
+		// never inherit a factor somebody else enrolled.
+		return deleteTOTPRows(ctx, tx, id)
 	})
 }
 
@@ -570,6 +575,25 @@ func (u *UserStore) ActorRevision(ctx context.Context, id string) (identity.Acto
 	}
 	user := users[0]
 	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, userRevision(user), true
+}
+
+// FindAccount resolves one account by its exact name or sign-in address. It
+// is how a project owner adds a member: they say who, and learn only whether
+// that one account exists, never the list of accounts on the server.
+func (u *UserStore) FindAccount(ctx context.Context, nameOrEmail string) (id, name string, ok bool) {
+	key := strings.TrimSpace(nameOrEmail)
+	if key == "" || len(key) > 320 {
+		return "", "", false
+	}
+	filter := accountByName
+	if strings.Contains(key, "@") {
+		filter = accountByEmail
+	}
+	users, err := u.accounts(ctx, filter, 1, key)
+	if err != nil || len(users) == 0 {
+		return "", "", false
+	}
+	return users[0].ID, users[0].Name, true
 }
 
 // userRevision binds a session to the credential that opened it. The sign-in

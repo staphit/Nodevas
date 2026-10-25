@@ -425,6 +425,347 @@ CREATE TABLE agent_asks (
 CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
 `,
 	},
+	{
+		name: "0009_runners",
+		stmt: `
+CREATE TABLE runners (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    owner_name    TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL DEFAULT '',
+    info          TEXT NOT NULL DEFAULT '',
+    revoked_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runners_owner ON runners (owner_id, created_at);
+
+CREATE TABLE runner_tokens (
+    token_hash  TEXT COLLATE "C" PRIMARY KEY,
+    runner_id   TEXT NOT NULL REFERENCES runners(id),
+    created_at  TEXT NOT NULL,
+    revoked_at  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
+`,
+	},
+	{
+		name: "0010_runs",
+		stmt: `
+CREATE TABLE runs (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    project          TEXT COLLATE "C" NOT NULL,
+    node_id          TEXT COLLATE "C" NOT NULL,
+    runner_id        TEXT COLLATE "C" NOT NULL,
+    runner_name      TEXT NOT NULL DEFAULT '',
+    owner_id         TEXT COLLATE "C" NOT NULL,
+    agent            TEXT NOT NULL,
+    model            TEXT NOT NULL DEFAULT '',
+    repo_id          TEXT NOT NULL,
+    repo_name        TEXT NOT NULL DEFAULT '',
+    base             TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    prompt           TEXT NOT NULL DEFAULT '',
+    node_title       TEXT NOT NULL DEFAULT '',
+    job_prompt       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
+    error            TEXT NOT NULL DEFAULT '',
+    summary          TEXT NOT NULL DEFAULT '',
+    exit_code        INTEGER NOT NULL DEFAULT 0,
+    usage            TEXT NOT NULL DEFAULT '',
+    pr_url           TEXT NOT NULL DEFAULT '',
+    ci_status        TEXT NOT NULL DEFAULT '',
+    created_by       TEXT COLLATE "C" NOT NULL,
+    created_by_name  TEXT NOT NULL DEFAULT '',
+    created_at       TEXT COLLATE "C" NOT NULL,
+    started_at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    finished_at      TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX runs_node ON runs (project, node_id, created_at);
+CREATE INDEX runs_runner ON runs (runner_id, status);
+
+CREATE TABLE run_events (
+    run_id   TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    seq      BIGINT NOT NULL,
+    type     TEXT NOT NULL,
+    at       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    payload  TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+`,
+	},
+	{
+		name: "0011_agent_network_w15",
+		stmt: `
+ALTER TABLE agent_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered' CHECK (status IN ('delivered', 'held', 'rejected'));
+ALTER TABLE agent_messages ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agent_messages ADD COLUMN recipient_actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_messages ADD COLUMN decided_at BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX agent_messages_status ON agent_messages (project, status, created_at);
+
+CREATE TABLE agent_message_files (
+    message_id  TEXT COLLATE "C" NOT NULL REFERENCES agent_messages(id),
+    name        TEXT COLLATE "C" NOT NULL,
+    size        BIGINT NOT NULL,
+    sha256      TEXT COLLATE "C" NOT NULL,
+    content     TEXT NOT NULL,
+    PRIMARY KEY (message_id, name)
+);
+`,
+	},
+	{
+		name: "0012_run_changes",
+		stmt: `
+ALTER TABLE runs ADD COLUMN commit_sha    TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN pr_state      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pr_error      TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE run_changes (
+    run_id          TEXT COLLATE "C" PRIMARY KEY REFERENCES runs(id),
+    commit_sha      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    base            TEXT NOT NULL DEFAULT '',
+    files           TEXT NOT NULL DEFAULT '[]',
+    additions       INTEGER NOT NULL DEFAULT 0,
+    deletions       INTEGER NOT NULL DEFAULT 0,
+    patch           TEXT NOT NULL DEFAULT '',
+    patch_truncated INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
+	{
+		name: "0013_run_merges_budgets",
+		stmt: `
+ALTER TABLE runs ADD COLUMN pr_head_sha TEXT COLLATE "C" NOT NULL DEFAULT '';
+CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
+
+CREATE TABLE run_merges (
+    id                TEXT COLLATE "C" PRIMARY KEY,
+    run_id            TEXT COLLATE "C" NOT NULL REFERENCES runs(id),
+    head_sha          TEXT COLLATE "C" NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
+    reason            TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT COLLATE "C" NOT NULL,
+    requested_by_name TEXT NOT NULL DEFAULT '',
+    created_at        TEXT COLLATE "C" NOT NULL,
+    finished_at       TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
+CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
+
+CREATE TABLE run_budgets (
+    owner_id        TEXT COLLATE "C" PRIMARY KEY,
+    daily_runs      INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    daily_tokens    BIGINT NOT NULL DEFAULT 0,
+    updated_at      TEXT COLLATE "C" NOT NULL
+);
+`,
+	},
+	{
+		name: "0014_run_routing",
+		stmt: `
+ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_of     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN pipeline_id  TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
+
+CREATE TABLE run_routes (
+    owner_id    TEXT COLLATE "C" NOT NULL,
+    position    INTEGER NOT NULL,
+    rule        TEXT NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, position)
+);
+
+CREATE TABLE run_pipelines (
+    id          TEXT COLLATE "C" PRIMARY KEY,
+    owner_id    TEXT COLLATE "C" NOT NULL,
+    created_by  TEXT COLLATE "C" NOT NULL,
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    pipeline    TEXT NOT NULL,
+    fallbacks   TEXT NOT NULL DEFAULT '',
+    job_prompt  TEXT NOT NULL DEFAULT '',
+    prompt      TEXT NOT NULL DEFAULT '',
+    branch      TEXT NOT NULL DEFAULT '',
+    pr_url      TEXT NOT NULL DEFAULT '',
+    round       INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT COLLATE "C" NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
+`,
+	},
+	{
+		name: "0015_run_mode",
+		stmt: `
+ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
+`,
+	},
+	{
+		name: "0016_w6",
+		stmt: `
+ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN stepped_up_at TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE session_changes (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    project       TEXT COLLATE "C" NOT NULL,
+    node_id       TEXT COLLATE "C" NOT NULL,
+    session_id    TEXT COLLATE "C" NOT NULL,
+    session_name  TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    actor_id      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    repo          TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    files         TEXT NOT NULL DEFAULT '[]',
+    snapshot      TEXT NOT NULL DEFAULT '',
+    created_at    TEXT COLLATE "C" NOT NULL,
+    updated_at    TEXT COLLATE "C" NOT NULL
+);
+CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
+CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
+`,
+	},
+	{
+		name: "0017_usage",
+		stmt: `
+CREATE TABLE agent_session_usage (
+    project            TEXT COLLATE "C" NOT NULL,
+    session_id         TEXT COLLATE "C" NOT NULL,
+    model              TEXT COLLATE "C" NOT NULL,
+    actor_id           TEXT COLLATE "C" NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    session_name       TEXT NOT NULL DEFAULT '',
+    agent              TEXT NOT NULL DEFAULT '',
+    input_tokens       BIGINT NOT NULL DEFAULT 0,
+    output_tokens      BIGINT NOT NULL DEFAULT 0,
+    cache_read_tokens  BIGINT NOT NULL DEFAULT 0,
+    cache_write_tokens BIGINT NOT NULL DEFAULT 0,
+    reported_cost_usd  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    first_at           TEXT COLLATE "C" NOT NULL,
+    updated_at         TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (project, session_id, model)
+);
+CREATE INDEX agent_session_usage_updated ON agent_session_usage (project, updated_at);
+CREATE INDEX runs_project_created ON runs (project, created_at);
+
+CREATE TABLE usage_prices (
+    model                 TEXT COLLATE "C" PRIMARY KEY,
+    input_per_mtok        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    output_per_mtok       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cache_read_per_mtok   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cache_write_per_mtok  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at            TEXT COLLATE "C" NOT NULL,
+    updated_by            TEXT NOT NULL DEFAULT ''
+);
+`,
+	},
+	{
+		name: "0018_project_members",
+		stmt: `
+CREATE TABLE project_members (
+    project    TEXT COLLATE "C" NOT NULL,
+    user_id    TEXT COLLATE "C" NOT NULL,
+    role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+    added_by   TEXT NOT NULL DEFAULT '',
+    created_at TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (project, user_id)
+);
+CREATE INDEX project_members_user ON project_members (user_id);
+`,
+	},
+	{
+		name: "0019_autopilot",
+		stmt: `
+CREATE TABLE autopilot_runs (
+    id              TEXT COLLATE "C" PRIMARY KEY,
+    project         TEXT COLLATE "C" NOT NULL,
+    goal_node_id    TEXT COLLATE "C" NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
+    policy          TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    created_by      TEXT COLLATE "C" NOT NULL,
+    created_by_name TEXT NOT NULL DEFAULT '',
+    stepped_up_at   TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at      TEXT COLLATE "C" NOT NULL,
+    updated_at      TEXT COLLATE "C" NOT NULL,
+    finished_at     TEXT COLLATE "C" NOT NULL DEFAULT ''
+);
+CREATE INDEX autopilot_runs_goal ON autopilot_runs (project, goal_node_id, created_at);
+CREATE UNIQUE INDEX autopilot_runs_live ON autopilot_runs (project, goal_node_id)
+    WHERE status IN ('running', 'paused');
+
+CREATE TABLE autopilot_tasks (
+    autopilot_id TEXT COLLATE "C" NOT NULL REFERENCES autopilot_runs(id),
+    node_id      TEXT COLLATE "C" NOT NULL,
+    state        TEXT NOT NULL,
+    run_id       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    pipeline_id  TEXT COLLATE "C" NOT NULL DEFAULT '',
+    data         TEXT NOT NULL,
+    updated_at   TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (autopilot_id, node_id)
+);
+CREATE INDEX autopilot_tasks_run ON autopilot_tasks (run_id);
+CREATE INDEX autopilot_tasks_pipeline ON autopilot_tasks (pipeline_id);
+`,
+	},
+	{
+		name: "0020_review_votes",
+		stmt: `
+ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE review_votes (
+    pipeline_id TEXT COLLATE "C" NOT NULL,
+    round       INTEGER NOT NULL,
+    reviewer    TEXT COLLATE "C" NOT NULL,
+    agent       TEXT NOT NULL DEFAULT '',
+    model       TEXT NOT NULL DEFAULT '',
+    verdict     TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes', 'abstain')),
+    run_id      TEXT COLLATE "C" NOT NULL DEFAULT '',
+    comment     TEXT NOT NULL DEFAULT '',
+    actor_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at  TEXT COLLATE "C" NOT NULL,
+    updated_at  TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (pipeline_id, round, reviewer)
+);
+CREATE INDEX review_votes_run ON review_votes (run_id);
+`,
+	},
+	{
+		name: "0021_account_totp",
+		stmt: `
+CREATE TABLE account_totp (
+    user_id      TEXT COLLATE "C" PRIMARY KEY,
+    secret       TEXT NOT NULL,
+    created_at   TEXT COLLATE "C" NOT NULL,
+    enabled_at   TEXT COLLATE "C" NOT NULL DEFAULT '',
+    last_counter BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE account_recovery_codes (
+    user_id    TEXT COLLATE "C" NOT NULL,
+    code_hash  TEXT COLLATE "C" NOT NULL,
+    created_at TEXT COLLATE "C" NOT NULL,
+    used_at    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    PRIMARY KEY (user_id, code_hash)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

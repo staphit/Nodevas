@@ -18,6 +18,8 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/runners"
+	"nodevas/internal/runnerwire"
 )
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
@@ -28,6 +30,15 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("X-Frame-Options", "DENY")
+	// A cross-origin page that opened this one keeps no handle on it (no
+	// tab-nabbing), and other origins cannot embed its responses.
+	c.Header("Cross-Origin-Opener-Policy", "same-origin")
+	c.Header("Cross-Origin-Resource-Policy", "same-origin")
+	// The voice copilot needs the microphone; nothing needs the rest.
+	c.Header("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)")
+	if auth.RequestIsSecure(r) {
+		c.Header("Strict-Transport-Security", "max-age=31536000")
+	}
 	// style-src keeps 'unsafe-inline' because React writes component styles as
 	// inline style attributes; there is no nonce to hang on them. Everything
 	// else is as narrow as the app actually needs:
@@ -38,6 +49,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	//   img-src keeps https: because markdown previews render remote images
 	//     (web/src/editor/livePreview.ts), but drops bare http: so a remote
 	//     image cannot downgrade the page or beacon the reader's IP in the clear.
+	//     Copilot answers render no remote media at all (web/src/markdown.ts).
 	c.Header(
 		"Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
@@ -64,8 +76,8 @@ func (s *Server) secureHTTP(c *gin.Context) {
 			httpx.Err(c, http.StatusForbidden, errors.New("cross-origin API request rejected"))
 			return
 		}
-		// Origin is absent on a top-level cross-site navigation, which is
-		// exactly how a state-changing GET gets attacked. Sec-Fetch-Site is
+		// Origin can be absent on a top-level cross-site form submission,
+		// which is exactly how a CSRF write gets attempted. Sec-Fetch-Site is
 		// set by the browser and unforgeable by page script, so it catches
 		// what Origin cannot. It is missing entirely on non-browser clients
 		// (agents, curl), which are not subject to CSRF in the first place.
@@ -105,8 +117,33 @@ func (s *Server) secureHTTP(c *gin.Context) {
 func (s *Server) withAuth(c *gin.Context) {
 	r := c.Request
 	guarded := strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws"
+	// A request the runner proxy re-dispatched (runner_proxy.go) was
+	// authenticated by its runner token on the way in and acts as the
+	// runner's owner, marked as an agent. There is no session to check and no
+	// browser for a CSRF token to protect.
+	if proxied, ok := runnerProxiedFrom(r.Context()); ok {
+		ctx := auth.WithRevalidator(auth.WithActor(r.Context(), proxied.actor), proxied.still)
+		c.Request = r.WithContext(ctx)
+		c.Next()
+		return
+	}
 	if !guarded || auth.PublicPaths[r.URL.Path] {
 		c.Next()
+		return
+	}
+	// Redeeming a device link takes neither a session nor a runner token: the
+	// new machine has no token yet, and the one-time code in the body is its
+	// credential (internal/httpapi/runners/link.go). Cloudflare Access still
+	// applies, ahead of this.
+	if r.URL.Path == runnerwire.LinkPath {
+		c.Next()
+		return
+	}
+	// Runner endpoints take a runner token and nothing else, and a runner
+	// token opens nothing else: a stolen token reaches the runner socket, not
+	// the board, and a browser session cannot pose as a runner.
+	if strings.HasPrefix(r.URL.Path, runnerPathPrefix) {
+		s.withRunnerAuth(c)
 		return
 	}
 	actor, err := s.auth.Authenticate(r)
@@ -148,6 +185,39 @@ func (s *Server) withAuth(c *gin.Context) {
 		})
 	}
 	c.Request = r.WithContext(requestContext)
+	c.Next()
+}
+
+// runnerPathPrefix is where the runner-token routes live. /api/runners (the
+// owner's management API) does not match it and takes a session as usual.
+const runnerPathPrefix = "/api/runner/"
+
+// withRunnerAuth admits a request carrying a valid runner token, acting as
+// the runner's owner marked as a worker agent.
+func (s *Server) withRunnerAuth(c *gin.Context) {
+	r := c.Request
+	if s.runners == nil {
+		httpx.Err(c, http.StatusNotFound, errors.New("runners are not enabled on this server"))
+		return
+	}
+	runner, err := s.runners.Authenticate(r.Context(), runners.BearerToken(r))
+	if err != nil {
+		if !errors.Is(err, runners.ErrUnauthenticated) {
+			httpx.Err(c, http.StatusInternalServerError, err)
+			return
+		}
+		httpx.Err(c, http.StatusUnauthorized, err)
+		return
+	}
+	// The proxy is served by running the request again as /api/<rest>; this
+	// request ends here and the rest of the chain applies to that one.
+	if strings.HasPrefix(r.URL.Path, runnerwire.ProxyPathPrefix) {
+		s.serveRunnerProxy(c, runner)
+		c.Abort()
+		return
+	}
+	ctx := runners.WithRunner(auth.WithActor(r.Context(), runners.ActorFor(runner)), runner)
+	c.Request = r.WithContext(ctx)
 	c.Next()
 }
 
@@ -210,23 +280,12 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	}
 }
 
-// stateChangingGETPaths are the GET routes that mutate server state. They are
-// listed rather than inferred because the method is the only signal the
-// transport layer has, and it lies about these.
-//
-// /api/remote/drive/auth mints a single-use OAuth state entry and redirects to
-// Google's consent screen, so a cross-site page that can reach it can both
-// exhaust that table and drive an administrator into an unexpected consent
-// flow. It stays a GET because the browser has to follow the 302 as a
-// navigation — a fetch cannot read a cross-origin redirect target, and a form
-// POST cannot carry the CSRF header a networked deployment requires.
-var stateChangingGETPaths = map[string]bool{
-	"/api/remote/drive/auth": true,
-}
-
+// stateChangingGET reports a GET that changes state: the method is the only
+// signal the transport layer has, and it lies about these. An interactive
+// run's terminal socket is opened with a GET and then carries keystrokes into
+// a process on the runner, so a cross-site page must not be able to open it.
 func stateChangingGET(r *http.Request) bool {
-	return (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-		stateChangingGETPaths[r.URL.Path]
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && runTerminalPath(r.URL.Path)
 }
 
 // allowsFetchSite reports whether a Sec-Fetch-Site value belongs to this

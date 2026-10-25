@@ -454,6 +454,11 @@ func (pm *ProjectManager) SwitchWorkspace(root string) error {
 // storeCacheKey normalizes a project directory into a cache key. Windows
 // compares paths case-insensitively, so "A/x" and "a/x" must land on the same
 // Store there; elsewhere they are different directories.
+// Key is a project's identity across the server: its directory, cleaned, and
+// case-folded on Windows. Membership (internal/members) and the store cache
+// both use it, so two spellings of one directory are one project.
+func Key(dir string) string { return storeCacheKey(dir) }
+
 func storeCacheKey(dir string) string {
 	clean := filepath.Clean(dir)
 	if runtime.GOOS == "windows" {

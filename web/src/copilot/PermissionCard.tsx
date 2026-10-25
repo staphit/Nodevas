@@ -37,13 +37,16 @@ export function PermissionCard({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey || request.submitting) return;
     const decision = keyToDecision(event.key);
-    if (!decision) return;
+    if (!decision || (decision === "allow_session" && request.everyTime)) return;
     event.preventDefault();
     event.stopPropagation();
     onDecide(decision);
   };
 
   const busy = Boolean(request.submitting);
+  // What dispatches work, or is risky, is approved on its full input: shown
+  // open, not behind a fold (the summary is cut short).
+  const showInput = Boolean(request.everyTime) || request.kind === "risky";
 
   return (
     <div
@@ -65,7 +68,7 @@ export function PermissionCard({
       </div>
       {request.summary && <p className="copilot-permission-summary">{request.summary}</p>}
       {request.input && (
-        <details className="copilot-tool-detail">
+        <details className="copilot-tool-detail" open={showInput}>
           <summary>{t("copilot.tool.input")}</summary>
           <pre>{request.input}</pre>
         </details>
@@ -74,9 +77,11 @@ export function PermissionCard({
         <button type="button" className="primary" disabled={busy} onClick={() => onDecide("allow")}>
           {t("copilot.permission.allow")} <kbd>1</kbd>
         </button>
-        <button type="button" disabled={busy} onClick={() => onDecide("allow_session")}>
-          {t("copilot.permission.allowSession")} <kbd>2</kbd>
-        </button>
+        {!request.everyTime && (
+          <button type="button" disabled={busy} onClick={() => onDecide("allow_session")}>
+            {t("copilot.permission.allowSession")} <kbd>2</kbd>
+          </button>
+        )}
         <button type="button" className="danger" disabled={busy} onClick={() => onDecide("deny")}>
           {t("copilot.permission.deny")} <kbd>3</kbd>
         </button>

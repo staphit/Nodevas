@@ -17,6 +17,7 @@ vi.mock("../api", async () => {
     api: {
       requestOtp: vi.fn(),
       login: vi.fn(),
+      loginTotp: vi.fn(),
       logout: vi.fn(),
       getAuthStatus: vi.fn(),
     },
@@ -25,7 +26,8 @@ vi.mock("../api", async () => {
 
 const mocked = vi.mocked(api as unknown as {
   requestOtp: (email: string) => Promise<{ ok: boolean }>;
-  login: (email: string, otp: string) => Promise<{ ok: boolean; actor: unknown }>;
+  login: (email: string, otp: string) => Promise<{ ok: boolean; actor?: unknown; secondFactor?: "totp" }>;
+  loginTotp: (code: string) => Promise<{ ok: boolean; actor: unknown }>;
   logout: () => Promise<{ ok: boolean }>;
   getAuthStatus: () => Promise<{
     mode: "local" | "accounts";
@@ -338,5 +340,79 @@ describe("AuthGate", () => {
 
     await user.click(screen.getByRole("button", { name: "重試" }));
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+  });
+});
+
+describe("SignIn with an authenticator app", () => {
+  beforeEach(() => {
+    useApp.setState({
+      preferences: { ...useApp.getState().preferences, language: "en" },
+    });
+    mocked.requestOtp.mockResolvedValue({ ok: true });
+    mocked.login.mockResolvedValue({ ok: false, secondFactor: "totp" });
+    mocked.loginTotp.mockResolvedValue({ ok: true, actor: { name: "Ming" } });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  async function passTheEmailStep(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText("Email"), "ming@example.com");
+    await user.click(screen.getByRole("button", { name: "Send verification code" }));
+    await user.type(screen.getByLabelText("Verification code"), "A7K2M9P4");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+  }
+
+  it("asks for the authenticator code after a right passcode, then signs in", async () => {
+    const user = userEvent.setup();
+    const onSignedIn = vi.fn();
+    render(<SignIn onSignedIn={onSignedIn} />);
+
+    await passTheEmailStep(user);
+    // The passcode alone does not sign in.
+    expect(onSignedIn).not.toHaveBeenCalled();
+    const field = await screen.findByLabelText("Authenticator code");
+    expect(field).toHaveFocus();
+    expect(field).toHaveAttribute("autocomplete", "one-time-code");
+    expect(screen.queryByLabelText("Verification code")).toBeNull();
+
+    const submit = screen.getByRole("button", { name: "Sign in" });
+    await user.type(field, "12345");
+    expect(submit).toBeDisabled();
+    await user.type(field, "6");
+    await user.click(submit);
+
+    expect(mocked.loginTotp).toHaveBeenCalledWith("123456");
+    expect(onSignedIn).toHaveBeenCalledWith({ name: "Ming" });
+  });
+
+  it("takes a recovery code, dashes and case forgiven", async () => {
+    const user = userEvent.setup();
+    render(<SignIn onSignedIn={vi.fn()} />);
+    await passTheEmailStep(user);
+
+    await user.type(await screen.findByLabelText("Authenticator code"), "abcd-efgh-jkmn-pqrs{Enter}");
+    expect(mocked.loginTotp).toHaveBeenCalledWith("ABCDEFGHJKMNPQRS");
+  });
+
+  it("words a wrong code and sends an expired sign-in back to the start", async () => {
+    const user = userEvent.setup();
+    mocked.loginTotp
+      .mockRejectedValueOnce(new AuthError(401, "that authenticator code is wrong", "BAD_CODE"))
+      .mockRejectedValueOnce(new AuthError(401, "this sign-in has expired", "SIGNIN_EXPIRED"));
+    render(<SignIn onSignedIn={vi.fn()} />);
+    await passTheEmailStep(user);
+
+    const field = await screen.findByLabelText("Authenticator code");
+    await user.type(field, "123456{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code is wrong, expired or already used.");
+
+    await user.clear(field);
+    await user.type(field, "654321{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This sign-in expired.");
+    expect(screen.queryByLabelText("Authenticator code")).toBeNull();
+    expect(screen.getByLabelText("Email")).not.toHaveAttribute("readonly");
   });
 });

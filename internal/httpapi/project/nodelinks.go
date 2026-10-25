@@ -33,7 +33,7 @@ func (a *API) GetNodeIndex(c *gin.Context) {
 	}
 	nodes := make([]indexedNode, 0, 128)
 	for _, info := range projects {
-		if info.IsFolder || len(nodes) >= maxIndexedNodes {
+		if info.IsFolder || len(nodes) >= maxIndexedNodes || !a.readable(c.Request, info.Path) {
 			continue
 		}
 		for _, node := range project.NodeTitles(info) {
@@ -69,6 +69,9 @@ func (a *API) GetNodeLinks(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
+	// Links in, or to, a project the caller may not read are not theirs to
+	// see: the scan only covers the projects they may.
+	projects = a.readableProjects(c.Request, projects)
 	links := project.ScanNodeLinks(projects)
 	known := project.NodeIDsByProject(projects)
 

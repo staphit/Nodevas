@@ -41,6 +41,29 @@ type Event struct {
 	Detail    map[string]any // free-form, stored as JSON text
 }
 
+// Two-factor authentication events (internal/auth/totp*.go). Every change to
+// an account's authenticator, and every spent recovery code, is one of these,
+// so "who turned it off, and how" always has an answer in the trail.
+const (
+	// ActionTOTPEnrollBegin: a session started enrolling an authenticator.
+	ActionTOTPEnrollBegin = "auth.totp.enroll"
+	// ActionTOTPEnable: the enrollment was confirmed; the factor is now required.
+	ActionTOTPEnable = "auth.totp.enable"
+	// ActionTOTPDisable: the account holder turned it off with a code.
+	ActionTOTPDisable = "auth.totp.disable"
+	// ActionTOTPReset: an operator turned it off with `nodevas account totp-reset`.
+	ActionTOTPReset = "auth.totp.reset"
+	// ActionTOTPRecoveryUsed: a recovery code was spent (sign-in, step-up or disable).
+	ActionTOTPRecoveryUsed = "auth.totp.recovery.used"
+	// ActionTOTPRecoveryRegenerated: the recovery codes were replaced.
+	ActionTOTPRecoveryRegenerated = "auth.totp.recovery.regenerate"
+	// ActionTOTPFailed: a refused authenticator or recovery code.
+	ActionTOTPFailed = "auth.totp.failed"
+	// ActionSignInPending: the passcode was right and the authenticator code
+	// is still to come.
+	ActionSignInPending = "auth.signin.pending"
+)
+
 // Paging bounds. The default keeps an unbounded caller from pulling a
 // multi-year trail into memory; the maximum is a hard ceiling because the only
 // caller that would ask for more is one with a bug or one being probed.

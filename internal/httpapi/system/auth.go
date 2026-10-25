@@ -52,14 +52,18 @@ func (a *API) postLogin(c *gin.Context) {
 	if !httpx.DecodeJSONLimit(c, &body, auth.MaxLoginBodyBytes) {
 		return
 	}
-	actor, token, csrf, err := accounts.LoginWithOTP(
+	result, err := accounts.SignInWithOTP(
 		c.Request, strings.TrimSpace(body.Email), strings.TrimSpace(body.OTP))
-	a.finishSignIn(c, actor, token, csrf, err)
+	if err == nil && result.Pending != nil {
+		a.answerPendingSignIn(c, result)
+		return
+	}
+	a.finishSignIn(c, result.Actor, result.Token, result.CSRF, err, nil)
 }
 
 // finishSignIn turns the outcome of a sign-in into the response, the audit
 // line and the cookie pair.
-func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf string, err error) {
+func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf string, err error, detail map[string]any) {
 	if err != nil {
 		status := http.StatusUnauthorized
 		switch {
@@ -70,6 +74,16 @@ func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf str
 			// is simply full, and the person can get in when a seat frees.
 			status = http.StatusConflict
 		case errors.Is(err, auth.ErrSessionPersistence):
+			status = http.StatusInternalServerError
+		case errors.Is(err, auth.ErrTOTPUnreadable):
+			// Nothing the person can type fixes it; the message says who can.
+			status = http.StatusConflict
+		case errors.Is(err, auth.ErrBadCredentials), errors.Is(err, auth.ErrTOTPCode),
+			errors.Is(err, auth.ErrSignInExpired),
+			errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		default:
+			// A database read that failed mid sign-in, say: the server's
+			// fault, and its text is not the client's business.
 			status = http.StatusInternalServerError
 		}
 		// A failed sign-in is the event an operator most wants after the fact,
@@ -82,7 +96,7 @@ func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf str
 		httpx.Err(c, status, err)
 		return
 	}
-	a.recordAuthEvent(c, "auth.signin", actor, nil)
+	a.recordAuthEvent(c, "auth.signin", actor, detail)
 	secure := auth.RequestIsSecure(c.Request)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     auth.SessionCookieName,
@@ -212,6 +226,12 @@ func authFailureReason(err error) string {
 		return "seat-limit"
 	case errors.Is(err, auth.ErrSessionPersistence):
 		return "persistence"
+	case errors.Is(err, auth.ErrTOTPCode):
+		return "bad-totp"
+	case errors.Is(err, auth.ErrSignInExpired):
+		return "signin-expired"
+	case errors.Is(err, auth.ErrTOTPUnreadable):
+		return "totp-unreadable"
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		// The client stopped waiting before the account lookup finished. No
 		// credential was rejected, and filing it as one would leave the trail

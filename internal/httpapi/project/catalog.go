@@ -175,11 +175,19 @@ func (a *API) GetProjects(c *gin.Context) {
 	}
 	active := ""
 	root := a.pm.Store().Root()
+	visible := projects[:0]
 	for _, p := range projects {
+		// A project the caller may not read is not listed at all; its
+		// folder still is, as a plain directory in the tree.
+		if !p.IsFolder && !a.readable(c.Request, p.Path) {
+			continue
+		}
 		if p.Path == root {
 			active = p.Name
 		}
+		visible = append(visible, p)
 	}
+	projects = visible
 	workspaces, err := a.pm.WorkspaceInfos()
 	if err != nil {
 		httpx.Err(c, http.StatusInternalServerError, err)

@@ -127,6 +127,7 @@ Use a secure stdin mechanism and do not put a real password in shell history. Fo
 
 - [Concepts](./concepts.md) — understand nodes, dependencies, and readiness.
 - [MCP integration](./mcp.md) — connect an AI agent.
+- [Install a runner](./install.md) — one script that sets up the machine your agents run on.
 - [Storage and collaboration](./collaboration.md) — share a workspace safely.
 - [OCI deployment](../deploy/oci/README.md) — run a shared cloud server.
 - [TrueNAS and Cloudflare Tunnel deployment](../deploy/truenas/README.md) — run containers without opening an inbound port.

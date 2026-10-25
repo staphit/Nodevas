@@ -1,5 +1,5 @@
 /**
- * The backup tab's editing state.
+ * The backup dialog's editing state.
  *
  * The server's config lives in the store; what sits here is the *draft* of it —
  * the values in the form between opening the dialog and pressing 儲存設定. The
@@ -23,7 +23,6 @@ export const MIN_RETAIN = 3;
 export interface BackupDraft {
   kind: RemoteKind;
   folder: string;
-  driveFolderId: string;
   autoBackup: boolean;
   intervalHours: number;
   /** Unticked is the server's -1: keep everything, delete nothing. */
@@ -34,7 +33,6 @@ export interface BackupDraft {
 const EMPTY_DRAFT: BackupDraft = {
   kind: "",
   folder: "",
-  driveFolderId: "",
   autoBackup: false,
   intervalHours: 24,
   pruneOld: true,
@@ -43,12 +41,8 @@ const EMPTY_DRAFT: BackupDraft = {
 
 export function draftFromConfig(config: RemoteConfig): BackupDraft {
   return {
-    // A finished OAuth round trip leaves Drive connected but not yet chosen as
-    // the backend. Preselecting it — and letting that read as unsaved — is the
-    // rest of the sentence the user started.
-    kind: config.kind || (config.driveConnected ? "drive" : ""),
+    kind: config.kind,
     folder: config.folder,
-    driveFolderId: config.driveFolderId,
     autoBackup: config.autoBackup,
     intervalHours: config.intervalHours > 0 ? config.intervalHours : 24,
     // A negative count is the server's "never delete anything"; keep the last
@@ -68,7 +62,6 @@ export function draftIsDirty(draft: BackupDraft, config: RemoteConfig): boolean 
   return (
     draft.kind !== config.kind ||
     draft.folder !== config.folder ||
-    draft.driveFolderId !== config.driveFolderId ||
     draft.autoBackup !== config.autoBackup ||
     draft.intervalHours !== (config.intervalHours > 0 ? config.intervalHours : 24) ||
     retentionOf(draft) !== config.retainBundles
@@ -90,12 +83,11 @@ export function useBackupConfig() {
   const [draft, setDraft] = useState<BackupDraft>(EMPTY_DRAFT);
   const [note, setNote] = useState<Note>(null);
 
-  // Three lanes, one disabled state: nothing in this dialog is safe to press
-  // while any of them is mid-flight [A-02].
+  // Two lanes, one disabled state: nothing in this dialog is safe to press
+  // while either of them is mid-flight [A-02].
   const configBusy = useOperationPending(remoteScope.config());
   const bundleBusy = useOperationPending(remoteScope.bundle());
-  const driveBusy = useOperationPending(remoteScope.drive());
-  const busy = configBusy || bundleBusy || driveBusy;
+  const busy = configBusy || bundleBusy;
 
   useEffect(() => {
     void refreshRemoteConfig().catch((error: unknown) =>
@@ -104,9 +96,8 @@ export function useBackupConfig() {
   }, [refreshRemoteConfig, t]);
 
   // Nothing has been pushed anywhere until a backend is chosen, so the listing
-  // is only worth a request once one is — or once Drive is connected and the
-  // form is about to preselect it.
-  const configured = Boolean(config && (config.kind || config.driveConnected));
+  // is only worth a request once one is.
+  const configured = Boolean(config?.kind);
   useEffect(() => {
     if (!configured) return;
     void refreshRemoteBundles().catch((error: unknown) =>
@@ -130,7 +121,6 @@ export function useBackupConfig() {
     const result = await saveRemoteConfig({
       kind: draft.kind,
       folder: draft.folder,
-      driveFolderId: draft.driveFolderId,
       autoBackup: draft.autoBackup,
       intervalHours: draft.intervalHours,
       retainBundles: retentionOf(draft),

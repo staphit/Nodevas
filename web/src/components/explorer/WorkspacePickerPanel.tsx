@@ -58,15 +58,6 @@ export function useWorkspacePicker({
     void browseTo("");
   };
 
-  // The Drive import lives in the cloud-backup dialog, which App owns. Asking
-  // App to open it (rather than mounting a copy here) is what keeps one dialog
-  // on screen at a time; the OAuth return is likewise App's to handle.
-  const openDriveWorkspace = () => {
-    if (importPathBusy) return;
-    setImportPathOpen(false);
-    window.dispatchEvent(new Event("nodevas-drive-import"));
-  };
-
   const createFSFolder = async () => {
     const parent = fsBrowse?.path;
     const name = fsNewFolderName.trim();
@@ -133,7 +124,6 @@ export function useWorkspacePicker({
     fsBrowse,
     browseTo,
     openWorkspacePicker,
-    openDriveWorkspace,
     createFSFolder,
     importFromDiskPath,
   };
@@ -157,7 +147,6 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
     fsNewFolderBusy,
     fsBrowse,
     browseTo,
-    openDriveWorkspace,
     createFSFolder,
     importFromDiskPath,
   } = picker;
@@ -195,13 +184,6 @@ export function WorkspacePickerPanel({ picker }: { picker: WorkspacePicker }) {
         disabled={importPathBusy}
         autoComplete="off"
       />
-      <div className="workspace-drive-connect">
-        <span>{t("explorer.driveQuestion")}</span>
-        <button type="button" onClick={openDriveWorkspace}>
-          {t("explorer.useDriveOAuth")}
-        </button>
-        <small>{t("explorer.driveHint")}</small>
-      </div>
       <div className="fs-browser">
         <div className="fs-browser-head">
           <button

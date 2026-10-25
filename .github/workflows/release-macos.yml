@@ -19,19 +19,18 @@ jobs:
   build-macos:
     runs-on: macos-14
     timeout-minutes: 35
+    # Protected environment: the user's required reviewer approves a release
+    # before the job (its token and the signing secrets) runs.
+    environment: release
+    # Secrets and the token are handed only to the steps that use them:
+    # builds and dependency installs never see them.
     env:
-      GH_TOKEN: ${{ github.token }}
       GH_OWNER: ${{ github.repository_owner }}
       ELECTRON_REPO_NAME: ${{ github.event.repository.name }}
-      MAC_CSC_LINK_SECRET: ${{ secrets.MAC_CSC_LINK }}
-      MAC_CSC_PASSWORD_SECRET: ${{ secrets.MAC_CSC_PASSWORD }}
-      MAC_APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
-      MAC_APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      MAC_APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # A manual run must build the requested tag, not the branch from
           # which the workflow was dispatched. Tag-push runs keep their event
@@ -89,13 +88,13 @@ jobs:
           echo "target_sha=${release_target_sha}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -105,8 +104,12 @@ jobs:
 
       - name: Build web interface
         shell: bash
+        # No dependency runs an install script (a compromised package's
+        # postinstall would run with this job's token); esbuild's, the one the
+        # build needs, runs explicitly from the lockfile's own copy.
         run: |
-          npm ci --prefix web
+          npm ci --ignore-scripts --prefix web
+          node web/node_modules/esbuild/install.js
           npm run build --prefix web
 
       - name: Build universal Go sidecar
@@ -126,26 +129,42 @@ jobs:
           chmod +x desktop/resources/bin/nodevas
           lipo -info desktop/resources/bin/nodevas
 
+      # electron-builder downloads the Electron it packages itself, and the
+      # dmg/zip targets need no package's install script.
       - name: Install desktop dependencies
-        run: npm ci --prefix desktop
+        run: npm ci --ignore-scripts --prefix desktop
+
+      # Which credentials are configured, as flags: secrets cannot appear in
+      # a step's if, and job-level env would hand them to every step.
+      - name: Check signing credentials
+        id: creds
+        shell: bash
+        env:
+          CSC_LINK_SET: ${{ secrets.MAC_CSC_LINK != '' }}
+          NOTARIZE_SET: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        run: |
+          echo "signing=${CSC_LINK_SET}" >> "${GITHUB_OUTPUT}"
+          echo "notarize=${NOTARIZE_SET}" >> "${GITHUB_OUTPUT}"
 
       - name: Build DMG without signing
-        if: ${{ env.MAC_CSC_LINK_SECRET == '' }}
+        if: ${{ steps.creds.outputs.signing != 'true' }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         shell: bash
         run: npm run pack:mac --prefix desktop
 
       - name: Build signed DMG
-        if: ${{ env.MAC_CSC_LINK_SECRET != '' }}
+        if: ${{ steps.creds.outputs.signing == 'true' }}
         env:
-          CSC_LINK: ${{ env.MAC_CSC_LINK_SECRET }}
-          CSC_KEY_PASSWORD: ${{ env.MAC_CSC_PASSWORD_SECRET }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_PASSWORD }}
         shell: bash
         run: npm run pack:mac --prefix desktop
 
       - name: Verify app and DMG
         shell: bash
+        env:
+          SIGNED: ${{ steps.creds.outputs.signing }}
         run: |
           app_path="$(find desktop/dist -maxdepth 3 -type d -name 'Nodevas.app' | head -n 1)"
           dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
@@ -154,18 +173,18 @@ jobs:
           test -n "${dmg_path}"
           test -n "${zip_path}"
           test -x "${app_path}/Contents/Resources/bin/nodevas"
-          if [[ -n "${MAC_CSC_LINK_SECRET}" ]]; then
+          if [[ "${SIGNED}" == "true" ]]; then
             codesign --verify --deep --strict "${app_path}"
           else
             echo "::warning::DMG is unsigned. Configure MAC_CSC_LINK for distributable updates."
           fi
 
       - name: Notarize and staple DMG
-        if: ${{ env.MAC_APPLE_ID_SECRET != '' && env.MAC_APPLE_PASSWORD_SECRET != '' && env.MAC_APPLE_TEAM_ID_SECRET != '' }}
+        if: ${{ steps.creds.outputs.notarize == 'true' }}
         env:
-          APPLE_ID: ${{ env.MAC_APPLE_ID_SECRET }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ env.MAC_APPLE_PASSWORD_SECRET }}
-          APPLE_TEAM_ID: ${{ env.MAC_APPLE_TEAM_ID_SECRET }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
           dmg_path="$(find desktop/dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
@@ -189,6 +208,7 @@ jobs:
       - name: Publish GitHub release
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TARGET_SHA: ${{ steps.release.outputs.target_sha }}
           RELEASE_PRERELEASE: ${{ steps.release.outputs.prerelease }}

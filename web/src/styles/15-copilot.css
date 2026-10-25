@@ -627,3 +627,65 @@
     animation: none;
   }
 }
+
+/* ---- waiting for the person's runner (the key lives there) ---------------- */
+
+.copilot-fab.is-offline {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+}
+.copilot-fab.is-offline:hover {
+  background: color-mix(in srgb, var(--surface) 85%, var(--text));
+}
+.copilot-runner-help {
+  height: auto;
+  bottom: auto;
+  max-height: 100vh;
+}
+.copilot-runner-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.copilot-runner-body p {
+  margin: 0;
+}
+.copilot-runner-reason {
+  color: var(--st-ready-fg);
+}
+.copilot-runner-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+.copilot-runner-steps code {
+  display: block;
+  margin-top: 3px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.copilot-runner-note {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.copilot-key-warning {
+  padding: 8px 10px;
+  border: 1px solid var(--st-failed-fg);
+  border-radius: 6px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-size: 12px;
+}
+.copilot-runner-steps code {
+  font-family: var(--mono);
+}

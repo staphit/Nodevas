@@ -31,3 +31,27 @@ The server watches project files and notifies connected browsers over WebSocket.
 For team workflows, deploy one shared Nodevas server so collaborators see the same workspace, task state, live document updates, and audit history. Git remains useful for versioning and reviewing the underlying project files.
 
 The default local server listens on loopback. For a shared deployment, follow the [getting started](./getting-started.md) network guidance or the [OCI deployment guide](../deploy/oci/README.md).
+
+## Project members
+
+On a server with accounts, every project starts **open**: everyone who can sign in can see and change it, as before. To limit a project to a team, open *Project settings → Members* and add people by account name or sign-in email. The first member added restricts the project, and whoever added them becomes its first **owner**.
+
+| Role | Can |
+| --- | --- |
+| Viewer | Read the board, its documents, runs and agent roster. Changes are refused with `403 PROJECT_READ_ONLY`; that includes their agents' heartbeats and messages. |
+| Editor | Everything a viewer can, plus change the board, dispatch runs and message agents. |
+| Owner | Everything an editor can, plus manage the member list. |
+
+Server administrators reach every project as owners. Agents act as the account they run for: an MCP session as its user, a runner's proxied calls as the runner's owner. Agents never manage members.
+
+Someone who is not a member of a restricted project gets `403 PROJECT_ACCESS_DENIED` from its routes. The project also disappears from their project list, search, link picker and exports, and its realtime events (graph changes, presence, document sessions) never reach their sockets. Removing a member moves their live connection out of the project at once.
+
+A project cannot be left without an owner while it has other members. *Open to everyone* removes every member and reopens the project. When an administrator moves a project, its members go with it. A copy gets the same members as the original. Deleting a project from disk forgets its members; detaching it keeps them in case it is added back.
+
+Membership is stored in the `project_members` table and keyed by the project's directory. If you rename a project directory outside Nodevas, it loses its members and becomes open. Use the project menu's move or rename instead.
+
+Membership only applies to servers with accounts. On a loopback server, the local user owns everything.
+
+What membership does not cover yet:
+- Hiding a restricted project hides only that project. Projects nested inside it are restricted separately, and a hidden project's folder name can still appear as the parent of a nested project in the tree.
+- The active project is server-wide. A non-member therefore sees the "not a member" banner until they pick a project they can open.

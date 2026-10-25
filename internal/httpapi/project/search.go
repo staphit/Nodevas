@@ -35,6 +35,9 @@ func (a *API) GetSearch(c *gin.Context) {
 		if len(results) >= 100 {
 			break
 		}
+		if !info.IsFolder && !a.readable(c.Request, info.Path) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(info.Label+" "+info.Name), normalized) {
 			results = append(results, project.SearchResult{
 				Project: info.Name,

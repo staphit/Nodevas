@@ -4,19 +4,36 @@ import { IconClose } from "../icons";
 import { useI18n } from "../i18n";
 import { OperationStatus, InlineNotice } from "./InteractionPrimitives";
 import { AppearanceEditor } from "./settings/AppearanceEditor";
+import { CopilotEditor } from "./settings/CopilotEditor";
 import { MilestoneTypeEditor } from "./settings/MilestoneTypeEditor";
 import { PeopleEditor } from "./settings/PeopleEditor";
 import { StatusVocabularyEditor } from "./settings/StatusVocabularyEditor";
+import { TwoFactorEditor } from "./settings/TwoFactorEditor";
+import { useViewer } from "./SignIn";
+import { MembersEditor } from "../members/MembersEditor";
 import type { SettingsNotify } from "./settings/notify";
 
-type SettingsTab = "workflow" | "milestones" | "people" | "appearance";
+type SettingsTab =
+  | "workflow"
+  | "milestones"
+  | "people"
+  | "members"
+  | "appearance"
+  | "copilot"
+  | "account";
 
 const TABS: { id: SettingsTab; labelKey: string; hintKey: string }[] = [
   { id: "workflow", labelKey: "settings.workflow", hintKey: "settings.workflowHint" },
   { id: "milestones", labelKey: "settings.milestones", hintKey: "settings.milestonesHint" },
   { id: "people", labelKey: "settings.people", hintKey: "settings.peopleHint" },
+  { id: "members", labelKey: "members.tab", hintKey: "members.tabHint" },
   { id: "appearance", labelKey: "settings.appearance", hintKey: "settings.appearanceHint" },
+  { id: "copilot", labelKey: "settings.copilot", hintKey: "settings.copilotHint" },
 ];
+
+/** The signed-in person's own account, not the project's: only on a server
+ * with accounts. */
+const ACCOUNT_TAB = { id: "account" as const, labelKey: "auth.totp.tab", hintKey: "auth.totp.tabHint" };
 
 /**
  * The single entry point for project-wide definitions [B-05].
@@ -28,6 +45,8 @@ const TABS: { id: SettingsTab; labelKey: string; hintKey: string }[] = [
 export function ProjectSettings({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const activeProject = useApp((s) => s.activeProject);
+  const viewer = useViewer();
+  const tabs = viewer ? [...TABS, ACCOUNT_TAB] : TABS;
   const workflowOperation = useOperation(operationScope.workflow());
 
   const [tab, setTab] = useState<SettingsTab>("workflow");
@@ -77,7 +96,7 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="settings-tabs" role="tablist" aria-label={t("settings.categories")}>
-          {TABS.map((entry) => (
+          {tabs.map((entry) => (
             <button
               key={entry.id}
               type="button"
@@ -106,7 +125,13 @@ export function ProjectSettings({ onClose }: { onClose: () => void }) {
 
           {tab === "people" && <PeopleEditor notify={notify} />}
 
+          {tab === "members" && <MembersEditor notify={notify} />}
+
           {tab === "appearance" && <AppearanceEditor notify={notify} />}
+
+          {tab === "copilot" && <CopilotEditor notify={notify} />}
+
+          {tab === "account" && viewer && <TwoFactorEditor notify={notify} />}
         </div>
       </div>
     </div>

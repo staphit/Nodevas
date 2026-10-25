@@ -30,7 +30,7 @@ type openaiProvider struct {
 
 func newOpenAI(cfg Config) *openaiProvider {
 	return &openaiProvider{
-		client: &http.Client{},
+		client: &http.Client{CheckRedirect: sameHostRedirects},
 		base:   strings.TrimRight(cfg.BaseURL, "/"),
 		key:    cfg.APIKey,
 		model:  cfg.Model,

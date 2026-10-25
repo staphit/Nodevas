@@ -48,7 +48,16 @@ export interface CopilotStatus {
   modes: CopilotMode[];
   allowBypass: boolean;
   reason?: string;
+  /** Where this person's model calls run: on the server, or on their own runner. */
+  keySource?: CopilotKeySource;
+  /** The runner that makes them, when keySource is "runner". */
+  runner?: string;
+  /** All set but this person's runner: offline, or no copilot key on it. */
+  needsRunner?: boolean;
 }
+
+/** Where the copilot's API key lives; "auto" is the server's when it has one. */
+export type CopilotKeySource = "server" | "runner";
 
 export interface CopilotConversation {
   id: string;
@@ -103,9 +112,17 @@ export interface CopilotSettings {
   allowBypass: boolean;
   /** The key itself is write-only; the server only says whether it has one. */
   hasApiKey?: boolean;
+  apiKeySource?: "stored" | "environment" | "";
+  /** The administrator's choice. */
+  keySource?: CopilotKeySource | "auto";
+  /** keySource with "auto" resolved. */
+  effectiveKeySource?: CopilotKeySource;
+  enabled?: boolean;
 }
 
-export type CopilotSettingsInput = Partial<Omit<CopilotSettings, "hasApiKey">> & {
+export type CopilotSettingsInput = Partial<
+  Omit<CopilotSettings, "hasApiKey" | "apiKeySource" | "effectiveKeySource" | "enabled">
+> & {
   /** Sent only to replace the stored key; never read back. */
   apiKey?: string;
 };
@@ -133,6 +150,8 @@ export type CopilotTurnEvent =
       kind: CopilotToolKind;
       input: unknown;
       summary: string;
+      /** Asked on every call (dispatching tools): no "allow for this session". */
+      everyTime?: boolean;
     }
   | { type: "permission_resolved"; requestId: string; decision: CopilotDecision | string }
   | { type: "client_tool_call"; callId: string; name: string; input: unknown }

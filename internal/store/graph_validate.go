@@ -5,6 +5,7 @@ package store
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"nodevas/internal/engine"
@@ -299,8 +300,8 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 				(style.Height != 0 && (style.Height < 52 || style.Height > 180)) {
 				return fmt.Errorf("node style %q has invalid dimensions", nodeID)
 			}
-			if len(style.Color) > 32 {
-				return fmt.Errorf("node style %q has an oversized color", nodeID)
+			if !safeCSSColor(style.Color) || !safeCSSColor(style.TextColor) || !safeCSSColor(style.BorderColor) {
+				return fmt.Errorf("node style %q has an invalid color", nodeID)
 			}
 		}
 		if len(g.UI.Groups) > 512 || len(g.UI.Annotations) > 512 {
@@ -321,8 +322,11 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 				x < 0 || y < 0 || width < 80 || width > 10000 || height < 60 || height > 10000 {
 				return fmt.Errorf("canvas decoration %q has invalid geometry", id)
 			}
-			if len(text) > 64<<10 || len(color) > 32 {
+			if len(text) > 64<<10 {
 				return fmt.Errorf("canvas decoration %q contains oversized content", id)
+			}
+			if !safeCSSColor(color) {
+				return fmt.Errorf("canvas decoration %q has an invalid color", id)
 			}
 			return nil
 		}
@@ -356,4 +360,14 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 		}
 	}
 	return nil
+}
+
+// cssColor is what a stored colour may contain: hex, a named colour or a
+// colour function (rgb(), hsl()...). The client puts these into CSS custom
+// properties, so a value must not be able to reach a url() or image-set():
+// no ':', '/', quotes or backslash escapes means no remote fetch.
+var cssColor = regexp.MustCompile(`^[#a-zA-Z0-9(),.% -]*$`)
+
+func safeCSSColor(v string) bool {
+	return len(v) <= 32 && cssColor.MatchString(v)
 }

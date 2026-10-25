@@ -107,10 +107,9 @@ var PublicPaths = map[string]bool{
 	// cannot be behind having one. Its own throttles are what keep it from
 	// being abused; see otp.go.
 	"/api/auth/otp/request": true,
-	// The Drive OAuth callback is a cross-site redirect from Google; the
-	// SameSite=Strict Session cookie is not sent on it, so the request cannot
-	// carry an identity. The single-use state token authenticates it instead.
-	"/api/remote/drive/callback": true,
+	// The second step of a two-factor sign-in: the browser has a pending
+	// sign-in ticket (an HttpOnly cookie), not an identity yet.
+	"/api/auth/login/totp": true,
 }
 
 // SignInPaths are the public endpoints that accept a credential from a
@@ -119,6 +118,7 @@ var PublicPaths = map[string]bool{
 var SignInPaths = map[string]bool{
 	"/api/auth/login":       true,
 	"/api/auth/otp/request": true,
+	"/api/auth/login/totp":  true,
 }
 
 const (

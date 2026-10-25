@@ -13,9 +13,10 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
-  // A screenshot run, not a test suite — it has its own config
-  // (playwright.mobile.config.ts) and has no place in an e2e pass.
-  testIgnore: /mobile-preview\.spec\.ts/,
+  // Screenshot and video runs, not test suites — they have their own configs
+  // (playwright.mobile.config.ts, playwright.demo.config.ts) and have no
+  // place in an e2e pass.
+  testIgnore: /(mobile-preview|demo-videos)\.spec\.ts/,
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false,
