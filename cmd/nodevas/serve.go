@@ -536,10 +536,12 @@ func serve(args []string) {
 	if relay := srv.RunnerLLM(); relay != nil {
 		runnerLLM = relay
 	}
-	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler, runnerLLM)
+	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler, runnerLLM,
+		copilotFollowups(srv, pm))
 	if err != nil {
 		log.Fatalf("copilot: %v", err)
 	}
+	observeCopilotFollowups(srv, copilotService)
 	srv.UseCopilot(copilotapi.New(copilotService))
 	// The wildcard-without-a-name case is refused above for a remote
 	// deployment; this catches the rest, and keeps the guarantee in the server
@@ -730,6 +732,7 @@ func newCopilotService(
 	database *db.DB,
 	router func() http.Handler,
 	runnerLLM copilot.RunnerLLM,
+	extra func(*copilot.Options),
 ) (*copilot.Service, error) {
 	apiKey, err := secretEnvironment("NODEVAS_COPILOT_API_KEY")
 	if err != nil {
@@ -750,7 +753,7 @@ func newCopilotService(
 		filepath.Join(secretDir, "copilot-"+hex.EncodeToString(sum[:])[:16]+".enc"),
 		filepath.Join(secretDir, "master.key"))
 
-	service := copilot.New(copilot.Options{
+	opts := copilot.Options{
 		Database: database,
 		Keys:     keys,
 		Defaults: copilot.Defaults{
@@ -777,7 +780,11 @@ func newCopilotService(
 		Handler:             router,
 		AgentRole:           identity.AgentClass(cfg.AgentRole),
 		MaxToolCallsPerTurn: cfg.MaxToolCallsPerTurn,
-	})
+	}
+	if extra != nil {
+		extra(&opts)
+	}
+	service := copilot.New(opts)
 	if status, err := service.Status(context.Background(), identity.Local, ""); err != nil {
 		slog.Warn("copilot settings could not be read", logging.Err(err))
 	} else if status.Enabled {

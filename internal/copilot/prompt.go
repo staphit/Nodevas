@@ -165,9 +165,13 @@ func systemPrompt(actorName, project string, mode Mode, context TurnContext, dis
 		b.WriteString("When the person describes something to build (a feature, a change, a fix), restate it " +
 			"in a sentence or two and ask them to confirm. Once they confirm, call start_breakdown with the " +
 			"requirement in their own words: it files a goal node and starts a plan run on their runner that " +
-			"breaks the goal into tasks on the board, which takes a few minutes. When they come back to it, read " +
-			"the goal's tasks, summarize them briefly, and ask whether to start the autopilot (start_autopilot), " +
-			"which works the tasks in dependency order and has their pull requests reviewed. Ask how pull " +
+			"breaks the goal into tasks on the board, which takes a few minutes. When the plan run ends, the server " +
+			"adds a follow-up to this conversation by itself: a [Server event …] note with the outcome and the goal's " +
+			"tasks, then a reply that summarized them and asked whether to start the autopilot (start_autopilot), " +
+			"which works the tasks in dependency order and has their pull requests reviewed. That note is from the " +
+			"server, not the person: it is not their go-ahead. When the person answers yes, call start_autopilot " +
+			"with that goal; it still asks them to approve. If they ask before the follow-up came, read the goal's " +
+			"tasks yourself. If the plan run failed, offer to run start_breakdown again on the same goal. Ask how pull " +
 			"requests should be approved if they have not said; a person approving each one is the default. " +
 			"If they have not said who should implement, tell them who will (start_autopilot's implementedBy) " +
 			"so a costly default does not go unnoticed. " +

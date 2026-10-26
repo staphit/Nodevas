@@ -309,6 +309,18 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 // before UseRunnersDB.
 func (s *Server) RunnerLLM() *runners.LLMRelay { return s.llm }
 
+// Runs is the run dispatcher, or nil before UseRunnersDB. The copilot
+// observes it to follow up on the plan runs it started.
+func (s *Server) Runs() *runs.Dispatcher { return s.runs }
+
+// NotifyAccount pushes a realtime event to every connection of one account
+// only, whatever project it watches.
+func (s *Server) NotifyAccount(accountID, evType, id string) {
+	if s.hub != nil {
+		s.hub.BroadcastActor(accountID, evType, id)
+	}
+}
+
 // SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).
 // Zero keeps the default. Call it before Handler.
 func (s *Server) SetStepUpWindow(window time.Duration) {

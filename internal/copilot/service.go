@@ -89,6 +89,22 @@ type Options struct {
 	// BrowserModelTimeout bounds one call to the browser's model; zero
 	// means 120 s.
 	BrowserModelTimeout time.Duration
+
+	// Follow-ups (followup.go): when a plan run a turn started ends, the
+	// copilot writes the outcome and the goal's tasks into the conversation
+	// by itself. LookupRun and GoalTasks are both needed; without them there
+	// is no follow-up.
+	//
+	// LookupRun reads a run; GoalTasks reads a goal node's title and its
+	// tasks in dependency order from a project's board.
+	LookupRun func(ctx context.Context, runID string) (RunInfo, error)
+	GoalTasks func(ctx context.Context, project, goalNodeID string) (Goal, error)
+	// NotifyFollowup tells the account's browsers a follow-up landed in a
+	// conversation. Optional.
+	NotifyFollowup func(accountID, conversationID string)
+	// FallbackWait is how long a failed plan run that may fall back is
+	// given before its failure is reported; zero means 3 s.
+	FallbackWait time.Duration
 }
 
 // Service is the copilot. One per server.
@@ -106,6 +122,11 @@ type Service struct {
 	// conversation and tool name. In memory on purpose: a restart is a fair
 	// moment to start asking again.
 	sessionAllowed map[string]map[string]bool
+	// deferred marks conversations a follow-up is waiting on: looked at
+	// again when the turn holding them ends (followup.go).
+	deferred map[string]bool
+	// background counts follow-up goroutines, so tests can wait for them.
+	background sync.WaitGroup
 }
 
 // New builds the service.
@@ -135,6 +156,7 @@ func New(opts Options) *Service {
 		turns:          map[string]*activeTurn{},
 		busy:           map[string]string{},
 		sessionAllowed: map[string]map[string]bool{},
+		deferred:       map[string]bool{},
 	}
 }
 
@@ -249,7 +271,14 @@ func (s *Service) Conversation(ctx context.Context, actor identity.Actor, id str
 		return Conversation{}, nil, err
 	}
 	entries, err := s.store.Entries(ctx, id)
-	return conversation, entries, err
+	if err != nil {
+		return Conversation{}, nil, err
+	}
+	// Opening it reads whatever follow-up landed in it.
+	if err := s.store.markFollowupsSeen(ctx, id); err != nil {
+		return Conversation{}, nil, err
+	}
+	return conversation, entries, nil
 }
 
 // UpdateConversation changes a conversation's mode or title.
@@ -322,9 +351,8 @@ func (s *Service) unregister(turn *activeTurn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.turns, turn.id)
-	if s.busy[turn.conversationID] == turn.id {
-		delete(s.busy, turn.conversationID)
-	}
+	// A follow-up that came due during the turn is written now.
+	s.releaseLocked(turn.conversationID, turn.id)
 }
 
 // lookup finds a turn the caller owns. Another account's turn, a turn on
