@@ -45,12 +45,12 @@ type derived struct {
 	queued        bool
 	// retryAt: the latest run waits, queued, for its agent's usage limit to
 	// reset (runs/handoff.go). The task is waiting, not failed.
-	retryAt string
-	ci            string
-	prURL         string
-	votes         []runnerwire.ReviewVote
-	stages        []runnerwire.StageRecord
-	latestRun     string
+	retryAt   string
+	ci        string
+	prURL     string
+	votes     []runnerwire.ReviewVote
+	stages    []runnerwire.StageRecord
+	latestRun string
 }
 
 // derive reads a try's runs. stamp is the time to give a stage the runs
