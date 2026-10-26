@@ -23,6 +23,7 @@ import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
 import { reportError, useApp } from "../store";
 import { buildActivity, type ActivityLane } from "./activity";
+import { StationControl } from "./StationControl";
 import { useStation } from "./stationStore";
 import { waitingRuns } from "./waiting";
 
@@ -55,6 +56,8 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
           {/* Goals first: a goal opened from a node's panel is why Station
               opened, and the goals under way are what to direct. */}
           <StationGoals />
+          {/* Everything under way, and the controls to stop it. */}
+          <StationControl />
           <Suspense fallback={<div className="station-live-loading">{t("station.loading")}</div>}>
             <GameStage skin={view} pack={pack} />
           </Suspense>

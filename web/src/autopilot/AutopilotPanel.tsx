@@ -20,6 +20,7 @@ import { BreakdownForm, eligibleRunners } from "./BreakdownForm";
 import { HumanReviewList } from "./HumanReview";
 import { usePlanningRun } from "./planningRun";
 import { PolicyEditor } from "./PolicyEditor";
+import { useAutopilotControl } from "./useAutopilotControl";
 import { defaultPolicy, normalizePolicy, policyProblems, type ImplementChoice } from "./policy";
 
 const KNOWN_STATUS = new Set(["running", "paused", "succeeded", "failed", "cancelled"]);
@@ -142,24 +143,7 @@ function StartForm({
   );
 }
 
-/**
- * What the goal gained or changed since the autopilot froze its task set: new
- * members, and pending tasks held because their node changed or left the
- * goal (a revision's replan does both). A plain resume keeps them out or
- * held; adopting takes the goal as it stands now.
- */
-export function revisedSincePause(view: AutopilotView): {
-  added: number;
-  changed: number;
-  removed: number;
-  total: number;
-} {
-  const tasks = view.tasks ?? [];
-  const added = view.added?.length ?? 0;
-  const changed = tasks.filter((task) => task.hold === "changed").length;
-  const removed = tasks.filter((task) => task.hold === "removed").length;
-  return { added, changed, removed, total: added + changed + removed };
-}
+export { revisedSincePause } from "./useAutopilotControl";
 
 /** A run's header, its controls, the human review queue and the grid. */
 function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void }) {
@@ -167,34 +151,9 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
   const run = view.run;
   const tasks = view.tasks ?? [];
   const ended = autopilotEnded(run.status);
-  const act = useAutopilot((s) => s.act);
   const taskAct = useAutopilot((s) => s.taskAct);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [acting, setActing] = useState(false);
-
-  const revision = revisedSincePause(view);
-  const control = async (action: "pause" | "resume" | "adopt" | "cancel") => {
-    if (action === "adopt") {
-      const ok = await confirmAction({
-        title: t("autopilot.adoptTitle"),
-        description: t("autopilot.adoptDescription", revision),
-        confirmLabel: t("autopilot.adopt"),
-      });
-      if (!ok) return;
-    }
-    if (action === "cancel") {
-      const ok = await confirmAction({
-        title: t("autopilot.cancelTitle"),
-        description: t("autopilot.cancelDescription"),
-        confirmLabel: t("autopilot.cancel"),
-        tone: "danger",
-      });
-      if (!ok) return;
-    }
-    setActing(true);
-    await act(run.id, action);
-    setActing(false);
-  };
+  const { acting, resumeAction, resumeLabel, control } = useAutopilotControl(view);
 
   const onTaskAction = async (task: TaskInstance, action: "retry" | "skip") => {
     if (action === "skip") {
@@ -247,9 +206,9 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
               type="button"
               className="ap-btn"
               disabled={acting}
-              onClick={() => void control(revision.total > 0 ? "adopt" : "resume")}
+              onClick={() => void control(resumeAction)}
             >
-              {revision.total > 0 ? t("autopilot.adopt") : t("autopilot.resume")}
+              {resumeLabel}
             </button>
           )}
           {!ended && (

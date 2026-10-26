@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { runCancellable, runFinal, type PipelineState, type Run, type RunEvent } from "../api";
-import { confirmAction } from "../components/ConfirmDialog";
+import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
 import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
@@ -527,21 +527,7 @@ export function RunDetail({
   }, [list.length]);
 
   const onCancel = async () => {
-    const confirmed = await confirmAction({
-      title: t("runs.cancelTitle"),
-      description: [
-        t(run.status === "running" ? "runs.cancelRunning" : "runs.cancelPending"),
-        // The hub cancels every step of a pipeline when one is cancelled.
-        run.pipelineId ? t("runs.cancelPipeline") : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-
-      confirmLabel: t("runs.cancel"),
-      cancelLabel: t("runs.keep"),
-      tone: "danger",
-    });
-    if (confirmed) await cancelRun(run.id);
+    if (await confirmCancelRun(t, run)) await cancelRun(run.id);
   };
 
   const hintKey = KNOWN_STATUSES.has(run.status) ? `runs.statusHint.${run.status}` : "";
