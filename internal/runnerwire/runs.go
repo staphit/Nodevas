@@ -122,6 +122,15 @@ type Job struct {
 	// identity within the step-up window when this job was offered. A runner
 	// may auto-accept only such jobs (AutoAcceptPolicy.RequireStepUp).
 	SteppedUp bool `json:"steppedUp,omitempty"`
+
+	// Handoff (handoff.go): an implement job that continues another run's
+	// partial work. HandoffBranch names a local branch the runner itself made
+	// when that run hit a usage limit; the runner starts the worktree from it
+	// instead of Base, after checking it is one of its own. HandoffNote is the
+	// note that run left, as the hub recorded it: data for the prompt, never
+	// instructions. Older runners ignore both and start from Base.
+	HandoffBranch string `json:"handoffBranch,omitempty"`
+	HandoffNote   string `json:"handoffNote,omitempty"`
 }
 
 // Accept reports an accepted job: the worktree and branch it runs in.
@@ -173,6 +182,13 @@ type RunResult struct {
 	FailureKind string `json:"failureKind,omitempty"`
 	// Verdict is a review job's verdict (VerdictApprove / VerdictChanges).
 	Verdict string `json:"verdict,omitempty"`
+	// Handoff (handoff.go): on a HandoffWorthy failure, the local branch the
+	// runner kept the partial work on ("" when there was nothing to keep) and
+	// its handoff note. ResetAt is when the agent said its limit resets,
+	// RFC3339, when it said. All optional: an older runner sends none.
+	HandoffBranch string `json:"handoffBranch,omitempty"`
+	HandoffNote   string `json:"handoffNote,omitempty"`
+	ResetAt       string `json:"resetAt,omitempty"`
 }
 
 // Run is a run as the HTTP API returns it.
@@ -222,7 +238,15 @@ type Run struct {
 	Mode string `json:"mode,omitempty"`
 	// Replan: a plan run that reconciles a goal's tasks with a revision of
 	// its requirement (CreateRunRequest.Revision), not a first breakdown.
-	Replan        bool   `json:"replan,omitempty"`
+	Replan bool `json:"replan,omitempty"`
+	// Handoff (handoff.go): the branch and note this run left when it hit a
+	// usage limit; ContinuesFrom, the handoff branch this run started from;
+	// RetryAt, while the run waits queued for its agent's usage limit to
+	// reset, when it is offered again (RFC3339, "" once released).
+	HandoffBranch string `json:"handoffBranch,omitempty"`
+	HandoffNote   string `json:"handoffNote,omitempty"`
+	ContinuesFrom string `json:"continuesFrom,omitempty"`
+	RetryAt       string `json:"retryAt,omitempty"`
 	CreatedBy     string `json:"createdBy"`
 	CreatedByName string `json:"createdByName"`
 	CreatedAt     string `json:"createdAt"`
