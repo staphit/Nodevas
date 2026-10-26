@@ -198,11 +198,11 @@ export function entryToItem(entry: CopilotEntry): TranscriptItem {
       return {
         kind: "user",
         id: entry.id,
-        text: entry.text,
+        text: entry.text ?? "",
         source: entry.source === "voice" ? "voice" : "text",
       };
     case "assistant":
-      return { kind: "assistant", id: entry.id, text: entry.text };
+      return { kind: "assistant", id: entry.id, text: entry.text ?? "" };
     case "tool":
       return {
         kind: "tool",
@@ -216,7 +216,7 @@ export function entryToItem(entry: CopilotEntry): TranscriptItem {
         status: entry.toolStatus || "ok",
       };
     default:
-      return { kind: "notice", id: entry.id, text: entry.text, tone: "info" };
+      return { kind: "notice", id: entry.id, text: entry.text ?? "", tone: "info" };
   }
 }
 
@@ -243,8 +243,14 @@ function updateTool(
  * stream are adopted (same text, now with the stored id) rather than shown
  * twice; an entry nothing on screen corresponds to is appended.
  */
+/** An assistant entry with no text only called tools: the tool cards show it. */
+function isSilentAssistant(entry: CopilotEntry): boolean {
+  return entry.kind === "assistant" && !entry.text;
+}
+
 function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptItem[] {
   if (items.some((item) => item.id === entry.id)) return items;
+  if (isSilentAssistant(entry)) return items;
   const stored = entryToItem(entry);
   const index = items.findIndex((item) => {
     if (!("live" in item) || !item.live || item.kind !== entry.kind) return false;
@@ -440,7 +446,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     set({
       activeId: conversation?.id ?? null,
       mode: conversation && isMode(conversation.mode) ? conversation.mode : get().defaultMode,
-      items: entries.map(entryToItem),
+      items: entries.filter((entry) => !isSilentAssistant(entry)).map(entryToItem),
       pending: [],
       lastReply: null,
     }),
