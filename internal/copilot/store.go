@@ -24,6 +24,10 @@ const (
 	EntryAssistant = "assistant"
 	EntryTool      = "tool"
 	EntryNotice    = "notice"
+	// EntryEvent is something that happened while nobody was talking: a plan
+	// run the conversation started has ended (followup.go). Its message is a
+	// user-role note for the model, written by the server, never the person.
+	EntryEvent = "event"
 )
 
 // Tool entry outcomes, as stored in copilot_entries.tool_status.
@@ -48,6 +52,9 @@ type Conversation struct {
 	Mode      Mode   `json:"mode"`
 	CreatedAt int64  `json:"createdAt"`
 	UpdatedAt int64  `json:"updatedAt"`
+	// Unread: a follow-up (followup.go) landed in it that the person has not
+	// opened yet. Set by ListConversations only.
+	Unread bool `json:"unread,omitempty"`
 }
 
 // Entry is one line of a transcript.
@@ -111,7 +118,9 @@ func scanConversation(row rowScanner) (Conversation, error) {
 // ListConversations returns an account's conversations, newest first. An
 // empty project lists every project's.
 func (s *Store) ListConversations(ctx context.Context, accountID, project string) ([]Conversation, error) {
-	query := `SELECT ` + conversationColumns + ` FROM copilot_conversations WHERE account_id = ?`
+	query := `SELECT ` + conversationColumns + `, CASE WHEN EXISTS (SELECT 1 FROM copilot_followups f
+WHERE f.conversation_id = copilot_conversations.id AND f.status = 'delivered' AND f.seen = 0) THEN 1 ELSE 0 END
+FROM copilot_conversations WHERE account_id = ?`
 	args := []any{accountID}
 	if project != "" {
 		query += ` AND project = ?`
@@ -125,10 +134,14 @@ func (s *Store) ListConversations(ctx context.Context, accountID, project string
 	defer rows.Close()
 	conversations := []Conversation{}
 	for rows.Next() {
-		conversation, err := scanConversation(rows)
-		if err != nil {
+		var conversation Conversation
+		var mode string
+		var unread int64
+		if err := rows.Scan(&conversation.ID, &conversation.AccountID, &conversation.Project,
+			&conversation.Title, &mode, &conversation.CreatedAt, &conversation.UpdatedAt, &unread); err != nil {
 			return nil, err
 		}
+		conversation.Mode, conversation.Unread = Mode(mode), unread != 0
 		conversations = append(conversations, conversation)
 	}
 	return conversations, rows.Err()

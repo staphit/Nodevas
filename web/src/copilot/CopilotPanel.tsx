@@ -149,6 +149,7 @@ export const CopilotPanel = forwardRef<
             <option value="">{t("copilot.conversation.new")}</option>
             {conversations.map((conversation) => (
               <option key={conversation.id} value={conversation.id}>
+                {conversation.unread ? "● " : ""}
                 {conversation.title || t("copilot.conversation.untitled")} ·{" "}
                 {formatLocalizedDateTime(toDate(conversation.updatedAt || conversation.createdAt))}
               </option>

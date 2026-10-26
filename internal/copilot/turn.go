@@ -246,6 +246,12 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 			handler: bridgeOptions.Handler, host: req.Host, cookie: req.Cookie, remoteAddr: req.RemoteAddr,
 			project: conversation.Project, accountID: req.Actor.ID,
 		}
+		if s.followupsOn() {
+			// The plan run's end comes back to this conversation by itself.
+			server.followup = func(goal, runID string) {
+				s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language)
+			}
+		}
 	}
 	tools, info := collectTools(bridge.Tools(), req.ClientTools, server != nil)
 	if plan.host == ModelHostBrowser {

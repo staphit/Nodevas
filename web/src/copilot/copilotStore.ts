@@ -126,6 +126,13 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   toggleOpen: () => void;
   setConversations: (conversations: CopilotConversation[]) => void;
   showConversation: (conversation: CopilotConversation | null, entries: CopilotEntry[]) => void;
+  /**
+   * Shows a conversation a follow-up just landed in (a plan run ended) and
+   * queues its reply to be spoken, as a finished turn's would be.
+   */
+  showFollowup: (conversation: CopilotConversation, entries: CopilotEntry[]) => void;
+  /** The person has seen a conversation's follow-up. */
+  markRead: (id: string) => void;
   setMode: (mode: CopilotMode) => void;
   setSpeakReplies: (speak: boolean) => void;
   setNotice: (notice: string | null) => void;
@@ -198,11 +205,14 @@ export function entryToItem(entry: CopilotEntry): TranscriptItem {
       return {
         kind: "user",
         id: entry.id,
-        text: entry.text,
+        text: entry.text ?? "",
         source: entry.source === "voice" ? "voice" : "text",
       };
     case "assistant":
-      return { kind: "assistant", id: entry.id, text: entry.text };
+      return { kind: "assistant", id: entry.id, text: entry.text ?? "" };
+    case "event":
+      // Written by the server, not the person: a plan run ended.
+      return { kind: "notice", id: entry.id, text: entry.text ?? "", tone: "info" };
     case "tool":
       return {
         kind: "tool",
@@ -216,7 +226,7 @@ export function entryToItem(entry: CopilotEntry): TranscriptItem {
         status: entry.toolStatus || "ok",
       };
     default:
-      return { kind: "notice", id: entry.id, text: entry.text, tone: "info" };
+      return { kind: "notice", id: entry.id, text: entry.text ?? "", tone: "info" };
   }
 }
 
@@ -243,8 +253,14 @@ function updateTool(
  * stream are adopted (same text, now with the stored id) rather than shown
  * twice; an entry nothing on screen corresponds to is appended.
  */
+/** An assistant entry with no text only called tools: the tool cards show it. */
+function isSilentAssistant(entry: CopilotEntry): boolean {
+  return entry.kind === "assistant" && !entry.text;
+}
+
 function adoptEntry(items: TranscriptItem[], entry: CopilotEntry): TranscriptItem[] {
   if (items.some((item) => item.id === entry.id)) return items;
+  if (isSilentAssistant(entry)) return items;
   const stored = entryToItem(entry);
   const index = items.findIndex((item) => {
     if (!("live" in item) || !item.live || item.kind !== entry.kind) return false;
@@ -440,10 +456,26 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     set({
       activeId: conversation?.id ?? null,
       mode: conversation && isMode(conversation.mode) ? conversation.mode : get().defaultMode,
-      items: entries.map(entryToItem),
+      items: entries.filter((entry) => !isSilentAssistant(entry)).map(entryToItem),
       pending: [],
       lastReply: null,
     }),
+  showFollowup: (conversation, entries) => {
+    const reply = [...entries].reverse().find((entry) => entry.kind === "assistant");
+    set({
+      activeId: conversation.id,
+      mode: isMode(conversation.mode) ? conversation.mode : get().defaultMode,
+      items: entries.map(entryToItem),
+      pending: [],
+      lastReply: reply?.text ? { turnId: `followup-${reply.id}`, text: reply.text } : null,
+    });
+  },
+  markRead: (id) =>
+    set((state) => ({
+      conversations: state.conversations.map((item) =>
+        item.id === id && item.unread ? { ...item, unread: false } : item,
+      ),
+    })),
   setMode: (mode) => {
     const prefs = { speakReplies: get().speakReplies, defaultMode: mode };
     writeCopilotPrefs(prefs);

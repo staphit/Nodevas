@@ -103,6 +103,9 @@ type serverToolEnv struct {
 	remoteAddr string
 	project    string
 	accountID  string
+	// followup, when set, records a plan run start_breakdown started, so the
+	// copilot follows up in the conversation when it ends (followup.go).
+	followup func(goalNodeID, runID string)
 }
 
 // maxServerToolResponse bounds a response a server tool reads.
@@ -363,11 +366,17 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 		}
 		return toolError(text, err)
 	}
+	note := "The plan run reads the repository and adds task nodes under the goal; it may take a few minutes. " +
+		"Its tasks need the person's review before the autopilot starts."
+	if env.followup != nil && run.ID != "" {
+		env.followup(goal, run.ID)
+		note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
+			"to start the autopilot. Tell the person you will come back to them then; they need not ask."
+	}
 	result := map[string]any{
 		"goalNodeId": goal, "goalCreated": created, "runId": run.ID, "runStatus": run.Status,
 		"runner": target.runner.Name, "agent": target.agent, "model": target.model, "repo": target.repo.Name,
-		"note": "The plan run reads the repository and adds task nodes under the goal; it may take a few minutes. " +
-			"Its tasks need the person's review before the autopilot starts.",
+		"note": note,
 	}
 	if title != "" {
 		result["goalTitle"] = title

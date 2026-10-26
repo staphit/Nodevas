@@ -137,6 +137,32 @@ func topoOrder(d dag) []string {
 	return append(order, cyclic...)
 }
 
+// Member is one of a goal's tasks as GoalMembers lists it.
+type Member struct {
+	ID    string
+	Title string
+	Kind  string
+	// After are the members it waits on, by id.
+	After []string
+}
+
+// GoalMembers is the goal's DAG in the order the autopilot works it: every
+// member, upstream first, with the members each waits on. The voice copilot
+// reads it to summarize a finished breakdown.
+func GoalMembers(g *engine.Graph, goal string) []Member {
+	d := buildDAG(g, goal)
+	out := make([]Member, 0, len(d.order))
+	for _, id := range d.order {
+		n := d.nodes[id]
+		m := Member{ID: id, Title: d.title(id), After: append([]string(nil), d.upstream[id]...)}
+		if n != nil {
+			m.Kind = n.Kind
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func (d dag) title(id string) string {
 	if n := d.nodes[id]; n != nil && n.Title != "" {
 		return n.Title

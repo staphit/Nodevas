@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotEntry } from "../api";
-import { readCopilotPrefs, reduceTurnEvent, useCopilot, type TurnState } from "./copilotStore";
+import { entryToItem, readCopilotPrefs, reduceTurnEvent, useCopilot, type TurnState } from "./copilotStore";
 
 const empty: TurnState = { items: [], pending: [], running: true, turnId: null, lastReply: null };
 
@@ -118,6 +118,14 @@ describe("reduceTurnEvent", () => {
     // An entry nothing on screen matches is appended.
     const notice: CopilotEntry = { id: "e3", seq: 3, kind: "notice", text: "Mode changed", createdAt: 1 };
     expect(apply(next, { type: "entry", entry: notice }).items[1]).toMatchObject({ kind: "notice", text: "Mode changed" });
+  });
+
+  it("an assistant entry with no text (only tool calls) adds no bubble", () => {
+    // The server omits an empty "text"; rendering it as markdown used to
+    // throw and blank the whole app.
+    const entry = { id: "e4", seq: 4, kind: "assistant", createdAt: 1 } as CopilotEntry;
+    expect(apply(empty, { type: "entry", entry }).items).toEqual([]);
+    expect(entryToItem(entry)).toEqual({ kind: "assistant", id: "e4", text: "" });
   });
 
   it("entry for a tool keeps the live card's title and call id", () => {

@@ -766,6 +766,25 @@ CREATE TABLE account_recovery_codes (
 );
 `,
 	},
+	{
+		name: "0022_copilot_followups",
+		stmt: `
+CREATE TABLE copilot_followups (
+    id               TEXT COLLATE "C" PRIMARY KEY,
+    conversation_id  TEXT COLLATE "C" NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    account_id       TEXT NOT NULL,
+    goal_node_id     TEXT NOT NULL,
+    run_id           TEXT COLLATE "C" NOT NULL,
+    language         TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'pending',
+    seen             BIGINT NOT NULL DEFAULT 0,
+    created_at       BIGINT NOT NULL,
+    delivered_at     BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
+CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

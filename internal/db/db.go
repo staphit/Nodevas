@@ -1002,6 +1002,34 @@ CREATE TABLE account_recovery_codes (
 ) STRICT;
 `,
 	},
+	{
+		name: "0022_copilot_followups",
+		stmt: `
+-- Plan runs a copilot turn started (start_breakdown), so the copilot can
+-- follow up in that conversation by itself when the run ends: the goal's new
+-- tasks and the question whether to start the autopilot (COPILOT.md,
+-- "Follow-up"). Kept in the database, not in memory, so a hub restart while a
+-- plan run is still going does not lose the follow-up.
+CREATE TABLE copilot_followups (
+    id               TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    -- The conversation's owner, who dispatched the run.
+    account_id       TEXT NOT NULL,
+    goal_node_id     TEXT NOT NULL,
+    run_id           TEXT NOT NULL,
+    -- The panel's language when the run was started, for the reply.
+    language         TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'pending', -- pending | delivered | dropped
+    -- 1 once the person opened the conversation after the follow-up landed;
+    -- until then the panel shows it as unread.
+    seen             INTEGER NOT NULL DEFAULT 0,
+    created_at       INTEGER NOT NULL,
+    delivered_at     INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
+CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.
