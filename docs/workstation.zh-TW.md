@@ -39,29 +39,29 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
 
 選 runner、agent 與模型，在 runner 上接受，看 OpenCode 透過 ACP 工作，讀 diff，合併 PR。
 
-[![把節點派給 OpenCode，看 run 進行、讀 diff 並合併](./videos/agent-run.gif)](./videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 ### 自動推進
 
 在節點面板按目標的 **自動推進**，就會在工作站開啟。目標拆成任務後，每個任務依序實作、跑 CI、由其他模型審查與修改，最後等你審查。
 
-[![自動推進讓任務經過實作、審查與人工審查](./videos/autopilot.gif)](./videos/autopilot.mp4)
+https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
 
 ### 兩步驟驗證與裝置連結
 
 在 **設定 → 我的帳號** 開啟驗證器 App、保存復原碼，再從 **設定 → Runner** 連結一台新電腦：step-up 改問 App，hub 產生一次性連結。
 
-[![設定兩步驟驗證，再建立裝置連結](./videos/two-factor-and-device-link.gif)](./videos/two-factor-and-device-link.mp4)
+https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
 
 ### Token 用量
 
 在 **設定 → 用量** 依日期、agent、模型與 session 看 token 用量與 API 等價成本；每日預算另有一頁。
 
-[![設定 → 用量：每日圖表、session 與價格，再看每日預算](./videos/usage.gif)](./videos/usage.mp4)
+https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
 ### Agent network
 
 誰在做什麼、agent 之間的訊息，以及一則等你放行的暫留訊息。
 
-[![Agent network 面板放行一則暫留訊息](./videos/agent-network.gif)](./videos/agent-network.mp4)
+https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 

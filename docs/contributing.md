@@ -29,6 +29,10 @@ npm --prefix web exec -- playwright install --with-deps chromium
 npm run e2e --prefix web
 ```
 
+## Demo videos
+
+`npm run demo:videos --prefix web` records the README's feature videos (dark theme, zoomed on each step, captioned) into `docs/videos/*.mp4`; it needs ffmpeg. GitHub plays a video in Markdown only from an attachment, so after re-recording, drag each MP4 into a GitHub comment box (don't post it), copy the `https://github.com/user-attachments/assets/…` URL it inserts, and put that URL on its own line where the video goes in `README*.md` or `docs/workstation*.md`.
+
 ## Main code locations
 
 - `cmd/nodevas/`: CLI and server entry points.

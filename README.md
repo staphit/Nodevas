@@ -53,7 +53,7 @@ Open <http://127.0.0.1:5666>. The same command starts a runner for coding agents
 
 ## Run agents on your machine
 
-[![Dispatch a node to an agent, watch the run, and merge the PR](./docs/videos/agent-run.gif)](./docs/videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 The server shows the board; a small **runner** on your PC runs the agents with your own logins, so your code never leaves your machine. Setup, security, autopilot, and more demos: [Agent workstation](./docs/workstation.md).
 

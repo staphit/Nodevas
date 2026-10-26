@@ -39,29 +39,29 @@ Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent
 
 Pick a runner, agent and model; accept it at the runner; watch OpenCode work over ACP; read the diff; merge the PR.
 
-[![Dispatch a node to OpenCode, watch the run, read the diff and merge](./videos/agent-run.gif)](./videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 ### Autopilot
 
 The goal's **Autopilot** pill in the node panel opens it in Station. The goal is broken into tasks; each one is implemented, checked by CI, reviewed by other models and revised, then waits for you.
 
-[![Autopilot moving tasks through implement, review and human review](./videos/autopilot.gif)](./videos/autopilot.mp4)
+https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
 
 ### Two-factor authentication and device links
 
 In **Settings → Your account**, turn on an authenticator app and save the recovery codes. Then link a new PC from **Settings → Runners**: step-up asks the app, and the hub hands back a one-time link.
 
-[![Setting up two-factor authentication, then creating a device link](./videos/two-factor-and-device-link.gif)](./videos/two-factor-and-device-link.mp4)
+https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
 
 ### Token usage
 
 Tokens and API-equivalent cost by day, agent, model and session, in **Settings → Usage**; the daily budget is a part of its own.
 
-[![Settings → Usage: daily chart, sessions and prices, then the daily budget](./videos/usage.gif)](./videos/usage.mp4)
+https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
 ### Agent network
 
 Who is working on what, messages between agents, and a held message waiting for your approval.
 
-[![The agent network panel approving a held message](./videos/agent-network.gif)](./videos/agent-network.mp4)
+https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 

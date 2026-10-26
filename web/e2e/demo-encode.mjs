@@ -1,6 +1,6 @@
 // Turns the demo recordings (playwright.demo.config.ts) into the README's
-// videos: an MP4 to watch at full size and a GIF that GitHub plays inline.
-// Needs ffmpeg on PATH.
+// videos: MP4s, uploaded to GitHub as attachments so the README plays them in
+// GitHub's video player (see docs/contributing.md). Needs ffmpeg on PATH.
 //
 //   node e2e/demo-encode.mjs [clip ...]
 //
@@ -9,8 +9,7 @@
 // frame is the app as a window with rounded corners on a dark backdrop; the
 // camera crops the recording and eases between keyframes; captions are set
 // below the window at output resolution, so zooming never shrinks them; a cut
-// becomes a cross-fade. Camera moves and fades play at half rate in the GIF,
-// which keeps it small.
+// becomes a cross-fade.
 
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -32,8 +31,6 @@ const FADE = 0.5; // the window's fade in and out
 const XFADE = 0.5; // a cut's cross-fade
 const TEXT_FADE = 0.25;
 const END_HOLD = 1.0;
-const GIF_FPS = 8;
-const GIF_W = 960;
 
 function ffmpeg(args, cwd) {
   const result = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], { stdio: "inherit", cwd });
@@ -294,28 +291,10 @@ function encode(name, dir, plates) {
 
   const mp4 = join(out, `${name}.mp4`);
   ffmpeg(["-i", master, "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", mp4]);
-  // The GIF: every frame of a camera move or a fade changes the whole picture,
-  // and those are most of its bytes, so it shows them at half its frame rate.
-  const moving = [
-    [TITLE - 0.2, TITLE + FADE],
-    [end - FADE, end],
-    ...segments.slice(1).map((segment) => [segment.at - XFADE, segment.at]),
-    ...film.camera.filter((key) => key.d > 0).map((key) => [map(key.t), map(key.t) + key.d]),
-  ];
-  const during = moving.map(([a, b]) => `between(t,${q(a)},${q(b)})`).join("+");
-  const gif = join(out, `${name}.gif`);
-  ffmpeg([
-    "-i", master,
-    "-filter_complex",
-    `fps=${GIF_FPS},select='if(${during},not(mod(n,2)),1)',scale=${GIF_W}:-1:flags=lanczos,split[a][b];` +
-      "[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
-    "-fps_mode", "vfr",
-    gif,
-  ]);
   rmSync(work, { recursive: true, force: true });
 
   const size = (file) => `${(statSync(file).size / 1024 / 1024).toFixed(1)} MB`;
-  console.log(`${name}: ${q(end)}s, ${size(mp4)} mp4, ${size(gif)} gif`);
+  console.log(`${name}: ${q(end)}s, ${size(mp4)} mp4`);
 }
 
 const prefix = "demo-videos-";
