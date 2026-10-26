@@ -42,12 +42,17 @@ func TestAdoptARevisedGoal(t *testing.T) {
 	if task(v, "x").NodeID != "" || task(v, "b").Hold != runnerwire.HoldChanged {
 		t.Fatalf("paused: %s, b %+v", states(v), task(v, "b"))
 	}
+	// The view says what a plain resume would leave out, so the panel can
+	// offer to adopt it.
+	if len(v.Added) != 1 || v.Added[0] != "x" {
+		t.Fatalf("added = %v", v.Added)
+	}
 	if err := h.o.Adopt(h.ctx, v.Run.ID); err != nil {
 		t.Fatal(err)
 	}
 	v = h.view(v.Run.ID)
-	if v.Run.Status != runnerwire.AutopilotRunning {
-		t.Fatalf("run = %+v", v.Run)
+	if v.Run.Status != runnerwire.AutopilotRunning || len(v.Added) != 0 {
+		t.Fatalf("run = %+v, added %v", v.Run, v.Added)
 	}
 	if c := task(v, "c"); c.State != runnerwire.TaskSkipped || !strings.Contains(c.Reason, "skipped on the board") {
 		t.Fatalf("c: %+v", c)

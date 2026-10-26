@@ -19,7 +19,7 @@ import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
 import { AutopilotCardBadge } from "./AutopilotCardBadge";
 import { AutopilotGrid, taskDepths } from "./AutopilotGrid";
-import { AutopilotPanel } from "./AutopilotPanel";
+import { AutopilotPanel, revisedSincePause } from "./AutopilotPanel";
 import { AutopilotPill } from "./AutopilotPill";
 import { AUTOPILOT_EVENT_DELAY_MS, deriveIndexes, useAutopilot } from "./autopilotStore";
 import { WaitingForYouButton } from "./HumanReview";
@@ -813,5 +813,52 @@ describe("planning", () => {
     );
     const row = screen.getByText("PDF export").closest("tr");
     expect(row?.className).toContain("ap-row-skipped");
+  });
+});
+
+describe("resume after a revision", () => {
+  it("resumes plainly when the goal is unchanged", async () => {
+    const paused = view({ status: "paused" });
+    vi.spyOn(api, "getAutopilotForGoal").mockResolvedValue(paused);
+    vi.spyOn(api, "getAutopilot").mockResolvedValue(paused);
+    const action = vi.spyOn(api, "autopilotAction").mockResolvedValue({});
+    render(<AutopilotPanel id="goal" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "resume"));
+    expect(screen.queryByRole("button", { name: "Resume with revised tasks" })).toBeNull();
+  });
+
+  it("adopts the revised tasks, after confirming, when the goal changed", async () => {
+    const held: TaskInstance = {
+      ...TASKS[2],
+      nodeId: "t4",
+      title: "Email",
+      state: "waiting_human",
+      hold: "changed",
+    };
+    const revised: AutopilotView = {
+      ...view({ status: "paused" }, [...TASKS, held]),
+      added: ["t9", "t10"],
+    };
+    expect(revisedSincePause(revised)).toEqual({ added: 2, changed: 1, removed: 0, total: 3 });
+    vi.spyOn(api, "getAutopilotForGoal").mockResolvedValue(revised);
+    vi.spyOn(api, "getAutopilot").mockResolvedValue(revised);
+    const action = vi.spyOn(api, "autopilotAction").mockResolvedValue({});
+    render(
+      <>
+        <ConfirmDialogHost />
+        <AutopilotPanel id="goal" />
+      </>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Resume with revised tasks" }));
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain(
+      "2 new tasks join, 1 changed tasks run as they are now, and 0 tasks",
+    );
+    expect(action).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume with revised tasks" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "adopt"));
+    expect(action).not.toHaveBeenCalledWith("ap1", "resume");
   });
 });

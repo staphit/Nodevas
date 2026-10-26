@@ -142,6 +142,25 @@ function StartForm({
   );
 }
 
+/**
+ * What the goal gained or changed since the autopilot froze its task set: new
+ * members, and pending tasks held because their node changed or left the
+ * goal (a revision's replan does both). A plain resume keeps them out or
+ * held; adopting takes the goal as it stands now.
+ */
+export function revisedSincePause(view: AutopilotView): {
+  added: number;
+  changed: number;
+  removed: number;
+  total: number;
+} {
+  const tasks = view.tasks ?? [];
+  const added = view.added?.length ?? 0;
+  const changed = tasks.filter((task) => task.hold === "changed").length;
+  const removed = tasks.filter((task) => task.hold === "removed").length;
+  return { added, changed, removed, total: added + changed + removed };
+}
+
 /** A run's header, its controls, the human review queue and the grid. */
 function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void }) {
   const { t } = useI18n();
@@ -153,7 +172,16 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [acting, setActing] = useState(false);
 
-  const control = async (action: "pause" | "resume" | "cancel") => {
+  const revision = revisedSincePause(view);
+  const control = async (action: "pause" | "resume" | "adopt" | "cancel") => {
+    if (action === "adopt") {
+      const ok = await confirmAction({
+        title: t("autopilot.adoptTitle"),
+        description: t("autopilot.adoptDescription", revision),
+        confirmLabel: t("autopilot.adopt"),
+      });
+      if (!ok) return;
+    }
     if (action === "cancel") {
       const ok = await confirmAction({
         title: t("autopilot.cancelTitle"),
@@ -219,9 +247,9 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
               type="button"
               className="ap-btn"
               disabled={acting}
-              onClick={() => void control("resume")}
+              onClick={() => void control(revision.total > 0 ? "adopt" : "resume")}
             >
-              {t("autopilot.resume")}
+              {revision.total > 0 ? t("autopilot.adopt") : t("autopilot.resume")}
             </button>
           )}
           {!ended && (

@@ -219,7 +219,14 @@ tasks (before the autopilot starts or while it runs).
 5. A yes leads to `start_autopilot`, which asks again and resumes the paused
    autopilot with the revised tasks (`Orchestrator.Adopt`: added tasks join,
    pending tasks take their changed content, skipped ones stay skipped; tasks
-   with a try going keep their record). Nothing resumes by itself.
+   with a try going keep their record). Nothing resumes by itself. The
+   Station goal panel does the same: when the view reports members that
+   joined after the start (`added`) or pending tasks held as changed/removed,
+   its Resume button becomes "Resume with revised tasks" and, after a
+   confirmation listing the counts, calls `adopt`; otherwise it calls plain
+   `resume`. Adopt is not a blanket replacement for resume: it lifts the
+   frozen-task-set guard, so it is used only when the person sees and
+   confirms what joins.
 
 The board shows it: while a plan run is going on the goal, the node panel's
 Autopilot pill reads "Revising…" (or "Breaking down…") and the Station goal

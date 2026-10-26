@@ -1056,9 +1056,17 @@ func (o *Orchestrator) View(ctx context.Context, id string) (runnerwire.Autopilo
 		return runnerwire.AutopilotView{}, err
 	}
 	order := map[string]int{}
+	var added []string
 	if g, _, err := o.opts.Board.Graph(rec.Project); err == nil {
+		have := map[string]bool{}
+		for _, t := range tasks {
+			have[t.NodeID] = true
+		}
 		for i, nodeID := range buildDAG(g, rec.GoalNodeID).order {
 			order[nodeID] = i
+			if !have[nodeID] {
+				added = append(added, nodeID)
+			}
 		}
 	}
 	sort.SliceStable(tasks, func(i, j int) bool {
@@ -1073,7 +1081,7 @@ func (o *Orchestrator) View(ctx context.Context, id string) (runnerwire.Autopilo
 		return tasks[i].NodeID < tasks[j].NodeID
 	})
 	rec.Counts = count(tasks)
-	return runnerwire.AutopilotView{Run: rec.AutopilotRun, Tasks: tasks}, nil
+	return runnerwire.AutopilotView{Run: rec.AutopilotRun, Tasks: tasks, Added: added}, nil
 }
 
 // count tallies tasks by state.
