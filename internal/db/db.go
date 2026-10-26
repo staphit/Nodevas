@@ -1030,6 +1030,18 @@ CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
 CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
 `,
 	},
+	{
+		name: "0023_copilot_followup_revisions",
+		stmt: `
+-- A follow-up is a breakdown's (start_breakdown) or a revision's
+-- (revise_goal): the person changed a goal's requirement, its autopilot was
+-- paused, and a replan run reconciles the goal's tasks. revision is what the
+-- follow-up needs to report the replan as a diff: the change, the autopilot
+-- and whether it was running, and the goal's tasks before (JSON).
+ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown';
+ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

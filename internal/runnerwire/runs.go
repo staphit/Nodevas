@@ -108,6 +108,8 @@ type Job struct {
 	// W5: what kind of job (JobImplement, JobReview, JobRevise; see
 	// routing.go). For review and revise, Branch is the existing PR branch and
 	// PRURL its pull request; Review is the review text a revise addresses.
+	// For a plan job (W7), Review is the revision a replan reconciles
+	// (CreateRunRequest.Revision); empty for a first breakdown.
 	Kind   string `json:"kind,omitempty"`
 	Branch string `json:"branch,omitempty"`
 	PRURL  string `json:"prUrl,omitempty"`
@@ -217,7 +219,10 @@ type Run struct {
 	RetryOf     string `json:"retryOf,omitempty"`
 	PipelineID  string `json:"pipelineId,omitempty"`
 	// W2.5: ModeHeadless ("") or ModeInteractive.
-	Mode          string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	// Replan: a plan run that reconciles a goal's tasks with a revision of
+	// its requirement (CreateRunRequest.Revision), not a first breakdown.
+	Replan        bool   `json:"replan,omitempty"`
 	CreatedBy     string `json:"createdBy"`
 	CreatedByName string `json:"createdByName"`
 	CreatedAt     string `json:"createdAt"`
@@ -246,6 +251,11 @@ type CreateRunRequest struct {
 	// Kind is JobImplement ("") or JobPlan (W7): a read-only run that breaks
 	// the node into task nodes and changes no files.
 	Kind string `json:"kind,omitempty"`
+	// Revision makes a plan run a replan: the change to the goal's
+	// requirement and the goal's tasks as they stand, which the planner
+	// reconciles (see replan.go). Only with Kind JobPlan; at most
+	// MaxRevisionBytes. The runner is offered it as Job.Review.
+	Revision string `json:"revision,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

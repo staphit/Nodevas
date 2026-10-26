@@ -197,6 +197,12 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 		return Record{}, err
 	}
 	now := s.stamp()
+	// A revise job's review is a run's summary; a plan job's is the revision
+	// it reconciles, which may be longer.
+	reviewCap := runnerwire.MaxSummaryBytes
+	if in.Kind == runnerwire.JobPlan {
+		reviewCap = runnerwire.MaxRevisionBytes
+	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
@@ -208,7 +214,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
 		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
-		Truncate(in.Review, runnerwire.MaxSummaryBytes), in.RetryOf, in.PipelineID, fallbacks,
+		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
 		Truncate(in.SteppedUpAt, 64), in.Mode)
 	if err != nil {
 		return Record{}, err
@@ -246,6 +252,8 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		}
 	}
 	r.Fallbacks = decodeChain(fallbacks)
+	// A plan run carrying a revision reconciles it (runnerwire.Run.Replan).
+	r.Replan = r.Kind == runnerwire.JobPlan && r.Review != ""
 	return r, nil
 }
 

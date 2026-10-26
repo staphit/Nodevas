@@ -162,7 +162,8 @@ orchestrator once the person agrees with the tasks.
 | Tool | Input | Effect |
 | --- | --- | --- |
 | `start_breakdown` | `{requirement, title?, goalNodeId?, runnerId?, agent?, model?, repoId?}` | creates the goal node (unless `goalNodeId` names one) and dispatches a plan run (`POST /api/runs`, `kind: "plan"`) on the speaker's online runner: first runner of theirs with the repo, agent order claude, codex, opencode, gemini, antigravity, the agent's default model |
-| `start_autopilot` | `{goalNodeId, maxParallel?, reviewMode?, reviewers?, quorum?, anyEditor?, autoMerge?, implement?, advisor?, runnerId?, repoId?}` | `POST /api/autopilot`; defaults: 2 tasks at a time, 2 review rounds, a person approves each PR, no auto-merge. Who implements: the `implement` chain when given, else `advisor`; with neither, the advisor the speaker's runner offers (System One, then its fast model), else the routing rules, whose last resort is the first installed agent's default model (often the most expensive). The result's `implementedBy` says which, and the prompt has the copilot tell the person. |
+| `start_autopilot` | `{goalNodeId, maxParallel?, reviewMode?, reviewers?, quorum?, anyEditor?, autoMerge?, implement?, advisor?, runnerId?, repoId?}` | `POST /api/autopilot`; defaults: 2 tasks at a time, 2 review rounds, a person approves each PR, no auto-merge. Who implements: the `implement` chain when given, else `advisor`; with neither, the advisor the speaker's runner offers (System One, then its fast model), else the routing rules, whose last resort is the first installed agent's default model (often the most expensive). The result's `implementedBy` says which, and the prompt has the copilot tell the person. When the goal's autopilot is **paused** (a revision pauses it) and is the speaker's, it resumes that one instead (`POST /api/autopilot/:id/adopt`: the goal's tasks as they stand now, under its original policy; `resumed: true`). |
+| `revise_goal` | `{goalNodeId, change, runnerId?, agent?, model?, repoId?}` | the requirement of a goal that already has tasks changes: pauses the goal's running autopilot (only the speaker's own; another's is refused), appends the change to the goal's body under a dated `## Revisions` heading (the original stays; a retry with the same change is not recorded twice), and dispatches a **replan run** (`kind: "plan"` with `revision`: the change and the goal's tasks with their states). Refused for a goal with no tasks (use `start_breakdown`) or while a plan run on it is still going. Offered only where the follow-up can apply the replan (below). |
 
 They are copilot-only: not MCP tools, so no agent (and nothing through the
 runner proxy) can call them, and they exist only on a server that gives the
@@ -172,14 +173,73 @@ in every mode that runs tools, `bypassPermissions` included (`plan` refuses
 them). The runner still applies its own acceptance rules (auto-accept, a
 person at its terminal) to what they dispatch. The system prompt walks the
 model through confirm → `start_breakdown` → (follow-up, below) → ask →
-`start_autopilot`.
+`start_autopilot`, and tells it to use `revise_goal` rather than
+`start_breakdown` when the person changes or adds to a goal that already has
+tasks (before the autopilot starts or while it runs).
+
+### Revising a goal mid-way (`internal/copilot/revise.go`)
+
+1. The person says how the requirement changes; the copilot restates it and,
+   on their confirmation, calls `revise_goal` (asks every time).
+2. The tool reads the goal as the person (`GET /api/graph?view=outline`,
+   `GET /api/runs?active=1`, `GET /api/autopilot?goal=`), pauses a running
+   autopilot (running tasks carry on; nothing new is dispatched), records the
+   change on the goal, and dispatches the replan run on the speaker's runner.
+   The follow-up is recorded with kind `revision`: the change, the autopilot
+   and whether it was running, and the goal's tasks before.
+3. The replan is a plan run whose job carries the revision (`Job.Review`; the
+   run shows `replan: true`). Its prompt (`adapter.replanPrompt`) keeps the
+   plan contract — read-only, new tasks with `create_node`/`link_nodes`, tagged
+   `goal:<id>`, no claiming, no status changes, no dispatch or merge — and adds
+   the reconciliation: for every existing task keep, change (not started
+   only), skip (not started only; never deleted) or flag (in progress), in a
+   block ending its final message (`runnerwire.ParseReconcile`):
+
+   ```
+   RECONCILE:
+   - keep t1
+   - change t2: also export the totals row
+   - skip t3: the PDF export was dropped
+   - flag t4: its run is in progress; it must also cover the header row
+   - add t9: Export the totals row
+   END RECONCILE
+   ```
+
+   The runner keeps the block in the run's summary however long the message.
+4. When the replan ends, the follow-up applies the block **on the server, by
+   fixed rules**: only tasks that were the goal's before and still are; a done
+   or skipped task is kept whatever the planner said; a task under way (board
+   status started/in progress, or a run going) is flagged, never changed; a
+   skip sets the board status `skipped` with a note (history kept); a change
+   appends a dated note under the task's `## Revisions`. A write the board
+   refuses is flagged. Then it writes the diff — kept / changed / skipped /
+   added (with dependencies) / flagged / left the goal — and asks whether to
+   resume the autopilot (or start one when there was none). A failed replan
+   changes no task, leaves the autopilot paused, and offers to try again.
+5. A yes leads to `start_autopilot`, which asks again and resumes the paused
+   autopilot with the revised tasks (`Orchestrator.Adopt`: added tasks join,
+   pending tasks take their changed content, skipped ones stay skipped; tasks
+   with a try going keep their record). Nothing resumes by itself. The
+   Station goal panel does the same: when the view reports members that
+   joined after the start (`added`) or pending tasks held as changed/removed,
+   its Resume button becomes "Resume with revised tasks" and, after a
+   confirmation listing the counts, calls `adopt`; otherwise it calls plain
+   `resume`. Adopt is not a blanket replacement for resume: it lifts the
+   frozen-task-set guard, so it is used only when the person sees and
+   confirms what joins.
+
+The board shows it: while a plan run is going on the goal, the node panel's
+Autopilot pill reads "Revising…" (or "Breaking down…") and the Station goal
+panel says a revision is being planned; skipped tasks are struck through in
+the task grid and carry the board's skipped style.
 
 ### Follow-up when the plan run ends (`internal/copilot/followup.go`)
 
 The copilot comes back to the conversation by itself; the person need not ask.
 
-1. `start_breakdown` succeeds → the turn records a follow-up
-   `{conversation, account, goalNodeId, runId, language}` in
+1. `start_breakdown` (or `revise_goal`, kind `revision`, above) succeeds →
+   the turn records a follow-up
+   `{conversation, account, goalNodeId, runId, language, kind, revision}` in
    `copilot_followups` (persisted: a hub restart while the plan run goes on
    loses nothing; `StartFollowups` delivers whatever came due at startup).
    The tool's result tells the model to say it will come back.
@@ -350,6 +410,13 @@ CREATE TABLE copilot_followups (
     created_at       INTEGER NOT NULL,
     delivered_at     INTEGER NOT NULL DEFAULT 0
 );
+```
+
+Migration 0023 (SQLite and PostgreSQL) adds what a revision's follow-up needs:
+
+```sql
+ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown'; -- breakdown | revision
+ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';      -- JSON: change, autopilot, tasks before
 ```
 
 `message` holds the provider-neutral `provider.Message` (with the vendor's raw

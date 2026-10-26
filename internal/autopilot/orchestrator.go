@@ -390,6 +390,10 @@ func (o *Orchestrator) syncMembers(w *work) {
 		switch {
 		case !w.dag.dispatchable(id):
 			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, "not a task ("+w.dag.nodes[id].Kind+"): nothing to implement")
+		case skippedOnBoard(statuses[id]):
+			// Set aside on the board (a revision's replan skips what it made
+			// obsolete): it settles what waits on it, and shows as skipped.
+			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[id])+" on the board")
 		case engine.Settled(statuses[id], boardStatuses(w.graph)):
 			setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, "already "+string(statuses[id])+" on the board")
 		case w.dag.inCycle(id):
@@ -1052,9 +1056,17 @@ func (o *Orchestrator) View(ctx context.Context, id string) (runnerwire.Autopilo
 		return runnerwire.AutopilotView{}, err
 	}
 	order := map[string]int{}
+	var added []string
 	if g, _, err := o.opts.Board.Graph(rec.Project); err == nil {
+		have := map[string]bool{}
+		for _, t := range tasks {
+			have[t.NodeID] = true
+		}
 		for i, nodeID := range buildDAG(g, rec.GoalNodeID).order {
 			order[nodeID] = i
+			if !have[nodeID] {
+				added = append(added, nodeID)
+			}
 		}
 	}
 	sort.SliceStable(tasks, func(i, j int) bool {
@@ -1069,7 +1081,7 @@ func (o *Orchestrator) View(ctx context.Context, id string) (runnerwire.Autopilo
 		return tasks[i].NodeID < tasks[j].NodeID
 	})
 	rec.Counts = count(tasks)
-	return runnerwire.AutopilotView{Run: rec.AutopilotRun, Tasks: tasks}, nil
+	return runnerwire.AutopilotView{Run: rec.AutopilotRun, Tasks: tasks, Added: added}, nil
 }
 
 // count tallies tasks by state.
@@ -1160,6 +1172,97 @@ func (o *Orchestrator) setStatus(ctx context.Context, id, from, to, reason strin
 	}
 	if o.opts.Changed != nil {
 		o.opts.Changed(rec.Project, rec.ID)
+	}
+	o.Reconcile(ctx, id)
+	return nil
+}
+
+// skippedOnBoard reports a board status that sets a task aside rather than
+// finishing it.
+func skippedOnBoard(status engine.Status) bool {
+	return status == engine.StatusSkipped || status == engine.StatusDeprecated
+}
+
+// Adopt resumes a paused autopilot with its goal as it stands now: after a
+// revision of the goal's requirement (the voice copilot's revise_goal), whose
+// replan added, changed and skipped tasks on the board. The task set is
+// otherwise frozen at the start so an edit cannot slip new work in unseen;
+// here the person who steers the autopilot asks for the edits, so they come
+// in: tasks that joined the goal are added, pending tasks take their current
+// content (a held change is accepted), and pending tasks that left the goal
+// or were skipped on the board are skipped. A task with a try going, or one
+// that ended, keeps its record as it is.
+func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
+	unlock := o.lock(id)
+	w, err := o.load(ctx, id)
+	if err != nil {
+		unlock()
+		return err
+	}
+	if w.rec.Status != runnerwire.AutopilotPaused {
+		unlock()
+		return conflictf("the autopilot is %s; only a paused one takes the goal's revised tasks", w.rec.Status)
+	}
+	before := snapshot(w)
+	statuses := engine.ComputeStatuses(w.graph, w.state)
+	content := func(nodeID string) (string, error) {
+		body, err := o.opts.Board.Content(w.rec.Project, nodeID)
+		if err != nil {
+			return "", fmt.Errorf("read task %s: %w", nodeID, err)
+		}
+		return contentHash(w.dag.title(nodeID), body), nil
+	}
+	for _, nodeID := range w.dag.order {
+		if w.tasks[nodeID] != nil {
+			continue
+		}
+		hash, err := content(nodeID)
+		if err != nil {
+			unlock()
+			return err
+		}
+		w.tasks[nodeID] = &runnerwire.TaskInstance{NodeID: nodeID, Title: w.dag.title(nodeID),
+			State: runnerwire.TaskNone, Upstream: slices.Clone(w.dag.upstream[nodeID]), ContentHash: hash}
+	}
+	todo := 0
+	for _, nodeID := range sortedIDs(w.tasks) {
+		t := w.tasks[nodeID]
+		if _, member := w.dag.nodes[nodeID]; member && w.dag.dispatchable(nodeID) {
+			todo++
+		}
+		if final1(t.State) || t.RunID != "" || t.PipelineID != "" {
+			continue
+		}
+		_, member := w.dag.nodes[nodeID]
+		switch {
+		case !member:
+			t.Hold = ""
+			setState(t, runnerwire.TaskSkipped, "", "left the goal in a revision")
+		case skippedOnBoard(statuses[nodeID]):
+			t.Hold = ""
+			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[nodeID])+" on the board")
+		default:
+			hash, err := content(nodeID)
+			if err != nil {
+				unlock()
+				return err
+			}
+			t.ContentHash = hash
+			if t.Hold == runnerwire.HoldChanged || t.Hold == runnerwire.HoldRemoved {
+				t.Hold, t.Stage = "", ""
+				setState(t, runnerwire.TaskNone, "", "")
+			}
+		}
+	}
+	if todo > runnerwire.MaxAutopilotTasks {
+		unlock()
+		return invalidf("the revised goal has %d tasks; an autopilot works at most %d: split the goal", todo, runnerwire.MaxAutopilotTasks)
+	}
+	w.rec.Status, w.rec.Reason, w.dirty = runnerwire.AutopilotRunning, "", true
+	err = o.save(ctx, w, before)
+	unlock()
+	if err != nil {
+		return err
 	}
 	o.Reconcile(ctx, id)
 	return nil

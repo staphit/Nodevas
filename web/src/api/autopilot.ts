@@ -203,6 +203,9 @@ export interface AutopilotView {
   run: AutopilotRun;
   /** In topological order: upstream before downstream, then by title. */
   tasks: TaskInstance[] | null;
+  /** Goal members that joined after the start (a revision adds them): a
+   * plain resume leaves them out; adopt takes them in. */
+  added?: string[];
 }
 
 /** Mirrors runnerwire.AutopilotListResponse: GET /api/autopilot without a
@@ -278,7 +281,9 @@ export function normalizeAutopilotView(raw: AutopilotView): AutopilotView {
   };
 }
 
-export type AutopilotAction = "pause" | "resume" | "cancel";
+/** adopt: resume a paused autopilot with the goal's tasks as they stand now
+ * (after a revision), rather than the set frozen at the start. */
+export type AutopilotAction = "pause" | "resume" | "adopt" | "cancel";
 export type AutopilotTaskAction = "retry" | "skip";
 
 const autopilotPath = (id: string) => `/api/autopilot/${encodeURIComponent(id)}`;

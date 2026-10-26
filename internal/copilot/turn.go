@@ -248,23 +248,27 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		}
 		if s.followupsOn() {
 			// The plan run's end comes back to this conversation by itself.
-			server.followup = func(goal, runID string) {
-				s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language)
+			server.followup = func(goal, runID string, revision *Revision) {
+				s.recordFollowup(storeCtx, conversation, req.Actor.ID, goal, runID, req.Context.Language, revision)
 			}
 		}
 	}
-	tools, info := collectTools(bridge.Tools(), req.ClientTools, server != nil)
+	var offered []string
+	if server != nil {
+		offered = s.serverToolsOffered()
+	}
+	tools, info := collectTools(bridge.Tools(), req.ClientTools, offered)
 	if plan.host == ModelHostBrowser {
 		model = &browserProvider{
 			service: s, turn: turn, emit: emit, timeout: s.opts.BrowserModelTimeout,
-			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context),
+			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
 		}
 	}
 	run := &turnRun{
 		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
 		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,
 		tools: tools, info: info,
-		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, server != nil),
+		system:  systemPrompt(req.Actor.Name, conversation.Project, mode, req.Context, offered),
 		history: appendMessage(history, userMessage),
 	}
 	stop, usage, err := run.loop()

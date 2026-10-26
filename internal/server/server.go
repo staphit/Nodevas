@@ -321,6 +321,13 @@ func (s *Server) NotifyAccount(accountID, evType, id string) {
 	}
 }
 
+// NotifyProject pushes an event to the project's room, as a change made
+// through its API would: the copilot's revision writes the board outside a
+// request.
+func (s *Server) NotifyProject(name, evType, id string) {
+	s.broadcastProject(name, evType, id)
+}
+
 // SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).
 // Zero keeps the default. Call it before Handler.
 func (s *Server) SetStepUpWindow(window time.Duration) {
