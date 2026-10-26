@@ -51,6 +51,10 @@ func (d *Dispatcher) afterEnd(ctx context.Context, r Record, notified bool) {
 			return
 		}
 	}
+	// A usage limit with no fallback left: wait for it to reset (handoff.go).
+	if d.waitForReset(ctx, r) {
+		return
+	}
 	if r.PipelineID != "" {
 		d.advance(ctx, r, notified)
 	}
@@ -88,6 +92,8 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			d.note(ctx, r, fmt.Sprintf("skipping fallback %s: %v", label(head), err))
 			continue
 		}
+		// The next model continues from the partial work, if any was kept.
+		branch, handoffNote := handoffOf(r)
 		next, err := d.store.Create(ctx, New{
 			Project: r.Project, NodeID: r.NodeID, NodeTitle: r.NodeTitle,
 			RunnerID: r.RunnerID, RunnerName: runner.Name, OwnerID: r.OwnerID,
@@ -95,7 +101,8 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			Prompt: r.Prompt, JobPrompt: r.JobPrompt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
 			Kind: r.Kind, JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
 			RetryOf: r.ID, PipelineID: r.PipelineID, Fallbacks: chain,
-			SteppedUpAt: r.SteppedUpAt,
+			SteppedUpAt:      r.SteppedUpAt,
+			JobHandoffBranch: branch, JobHandoffNote: handoffNote, LimitWaits: r.LimitWaits,
 		})
 		if err != nil {
 			d.note(ctx, r, "not falling back: "+err.Error())
@@ -107,7 +114,11 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 				slog.Warn("runs: move vote", slog.String("run", r.ID), slog.Any("error", err))
 			}
 		}
-		d.note(ctx, r, fmt.Sprintf("falling back to %s/%s (%s) as run %s", head.Agent, model, r.FailureKind, next.ID))
+		text := fmt.Sprintf("falling back to %s/%s (%s) as run %s", head.Agent, model, r.FailureKind, next.ID)
+		if branch != "" {
+			text += ", handing off the partial work on " + branch
+		}
+		d.note(ctx, r, text)
 		d.Submit(ctx, next)
 		return true
 	}

@@ -1042,6 +1042,24 @@ ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown';
 ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		name: "0024_run_handoff",
+		stmt: `
+-- Handoff (internal/runs/handoff.go): a run that hit its agent's usage limit
+-- names the local branch its runner kept the partial work on, and its note;
+-- the next run is offered them (job_handoff_*). retry_at is set while a run
+-- waits, queued, for that limit to reset: the dispatcher offers it once the
+-- time comes (or a person says "retry now"), so the wait survives a restart.
+-- limit_waits counts the waits in a task's lineage, to bound them.
+ALTER TABLE runs ADD COLUMN handoff_branch     TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN handoff_note       TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_handoff_branch TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_handoff_note   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_at           TEXT    NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

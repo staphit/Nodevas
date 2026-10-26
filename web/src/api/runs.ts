@@ -119,6 +119,15 @@ export interface Run {
   /** W7: a plan run that reconciles a goal's tasks with a revision of its
    * requirement (the voice copilot's revise_goal), not a first breakdown. */
   replan?: boolean;
+  /** Handoff: the local branch the runner kept this run's partial work on
+   * when it hit a usage limit, and its note for the next run. */
+  handoffBranch?: string;
+  handoffNote?: string;
+  /** Handoff: the branch this run continues another run's work from. */
+  continuesFrom?: string;
+  /** While the run waits, queued, for its agent's usage limit to reset: when
+   * it is offered again (RFC3339). Absent once released. */
+  retryAt?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -403,6 +412,9 @@ export const runsApi = {
     req<SessionChangesResponse>(`/api/nodes/${encodeURIComponent(nodeId)}/session-changes`),
   getRunChanges: (id: string) => req<RunChangesResponse>(`${runPath(id)}/changes`),
   cancelRun: (id: string) => req<Run>(`${runPath(id)}/cancel`, { method: "POST" }),
+  /** Ends a run's wait for a usage limit to reset: it is offered as soon as
+   * its runner has room (still within the budget). */
+  retryRunNow: (id: string) => req<Run>(`${runPath(id)}/retry-now`, { method: "POST" }),
   /** Approves merging the run's PR at `headSha`; 202 with the run, its
    * merge "pending" until the runner answers. */
   mergeRun: (id: string, headSha: string) =>

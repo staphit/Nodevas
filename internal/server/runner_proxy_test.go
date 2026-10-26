@@ -110,6 +110,7 @@ func TestRunnerProxyRefusesEverythingElse(t *testing.T) {
 		{http.MethodGet, "/api/runs"},
 		{http.MethodPost, "/api/runs"},
 		{http.MethodPost, "/api/runs/x/cancel"},
+		{http.MethodPost, "/api/runs/x/retry-now"},
 		{http.MethodGet, "/api/runner/connect"},
 		{http.MethodGet, "/api/runner/proxy/graph"},
 		{http.MethodPost, "/api/auth/logout"},

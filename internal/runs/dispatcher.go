@@ -254,6 +254,9 @@ func (d *Dispatcher) Pump(ctx context.Context, runnerID string) {
 		if room <= 0 {
 			return
 		}
+		if r.RetryAt != "" {
+			continue // waiting for a usage limit to reset (handoff.go)
+		}
 		if d.offer(ctx, r) {
 			room--
 		}
@@ -474,9 +477,13 @@ func (d *Dispatcher) Finish(ctx context.Context, runnerID, runID string, result 
 	if err != nil {
 		return err
 	}
-	d.notifyChanged(r)
 	d.finished(r)
+	// The follow-up (a fallback, a wait for a usage limit, a pipeline's next
+	// step) is recorded before the end is announced, so an observer that
+	// reads the task's runs on the announcement (the autopilot) sees the
+	// task carry on rather than fail.
 	d.afterEnd(ctx, r, r.Status == runnerwire.RunSucceeded || r.Status == runnerwire.RunFailed)
+	d.notifyChanged(r)
 	d.Pump(ctx, runnerID)
 	return nil
 }

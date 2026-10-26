@@ -312,6 +312,70 @@
   margin: 2px 0;
 }
 
+/* Handoff: partial work kept at a usage limit, the wait for the reset. */
+.run-handoff,
+.run-limit-wait {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.run-handoff {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.run-limit-wait {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-handoff-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+.run-handoff-panel:empty {
+  display: none;
+}
+.run-limit-wait-panel,
+.run-handoff-from,
+.run-handoff-to {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.run-limit-wait-panel {
+  border-color: color-mix(in srgb, var(--st-ready-fg) 40%, var(--border));
+}
+.run-limit-wait-panel p,
+.run-handoff-from p,
+.run-handoff-to p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-limit-wait-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.run-handoff-note pre {
+  max-height: 240px;
+  margin: 4px 0 0;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* A pipeline's runs under one header. */
 .run-pipeline {
   display: flex;
@@ -432,4 +496,22 @@
   .pipeline-rounds {
     max-width: none;
   }
+}
+.run-retry-now {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 11px;
+}
+.run-retry-now:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.run-retry-now:disabled {
+  cursor: progress;
+  opacity: 0.6;
 }

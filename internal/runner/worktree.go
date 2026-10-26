@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"nodevas/internal/runnerwire"
 )
 
 // Worktree is where one run works: its own checkout and branch, so the run
@@ -91,6 +93,15 @@ func slug(s string) string {
 // fetches the base first but carries on from the local branch when the fetch
 // fails: a laptop on a train can still run.
 func CreateWorktree(ctx context.Context, repoPath, dataDir, runID, nodeID, base string) (Worktree, error) {
+	return CreateWorktreeFrom(ctx, repoPath, dataDir, runID, nodeID, base, "")
+}
+
+// CreateWorktreeFrom is CreateWorktree whose branch starts at from, a local
+// handoff branch (handoff.go), instead of at the base. The base still says
+// what the run's changes are measured against and where its pull request
+// goes, so the next run's diff and PR cover the earlier run's work too. The
+// caller has checked from is a handoff branch this runner made.
+func CreateWorktreeFrom(ctx context.Context, repoPath, dataDir, runID, nodeID, base, from string) (Worktree, error) {
 	if !validRunID.MatchString(runID) {
 		return Worktree{}, fmt.Errorf("run id %q is not usable as a directory name", runID)
 	}
@@ -121,6 +132,17 @@ func CreateWorktree(ctx context.Context, repoPath, dataDir, runID, nodeID, base 
 		return Worktree{}, fmt.Errorf("base branch %q exists neither locally nor on origin", base)
 	}
 
+	start := baseRef
+	if from != "" {
+		if !runnerwire.ValidHandoffBranch(from) {
+			return Worktree{}, fmt.Errorf("%q is not a handoff branch", from)
+		}
+		start = "refs/heads/" + from
+		if !refExists(ctx, repoPath, start) {
+			return Worktree{}, fmt.Errorf("handoff branch %s does not exist", from)
+		}
+	}
+
 	wt := Worktree{
 		Path:    filepath.Join(dataDir, "worktrees", runID),
 		Branch:  BranchName(nodeID, runID),
@@ -130,7 +152,7 @@ func CreateWorktree(ctx context.Context, repoPath, dataDir, runID, nodeID, base 
 	if err := os.MkdirAll(filepath.Dir(wt.Path), 0o700); err != nil {
 		return Worktree{}, err
 	}
-	if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "-b", wt.Branch, "--", wt.Path, baseRef); err != nil {
+	if _, err := git(ctx, repoPath, "worktree", "add", "--quiet", "-b", wt.Branch, "--", wt.Path, start); err != nil {
 		return Worktree{}, err
 	}
 	if err := recordGitDir(ctx, &wt); err != nil {

@@ -43,11 +43,14 @@ type derived struct {
 	waitingReview bool
 	waitingHuman  bool
 	queued        bool
-	ci            string
-	prURL         string
-	votes         []runnerwire.ReviewVote
-	stages        []runnerwire.StageRecord
-	latestRun     string
+	// retryAt: the latest run waits, queued, for its agent's usage limit to
+	// reset (runs/handoff.go). The task is waiting, not failed.
+	retryAt   string
+	ci        string
+	prURL     string
+	votes     []runnerwire.ReviewVote
+	stages    []runnerwire.StageRecord
+	latestRun string
 }
 
 // derive reads a try's runs. stamp is the time to give a stage the runs
@@ -226,6 +229,9 @@ func derive(obs observation, stamp string) derived {
 	switch latest.Status {
 	case runnerwire.RunQueued, runnerwire.RunOffered:
 		out.queued = true
+		if latest.Status == runnerwire.RunQueued {
+			out.retryAt = latest.RetryAt
+		}
 	}
 
 	// The try's outcome.

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	"nodevas/internal/runnerwire"
 )
@@ -207,6 +208,13 @@ type claudeLine struct {
 	// system/permission_denied
 	ToolName string `json:"tool_name"`
 
+	// rate_limit_event: the subscription's window, and whether this request
+	// was let through.
+	RateLimit *struct {
+		Status   string `json:"status"`
+		ResetsAt int64  `json:"resetsAt"`
+	} `json:"rate_limit_info"`
+
 	// result
 	IsError      bool            `json:"is_error"`
 	Result       string          `json:"result"`
@@ -288,6 +296,13 @@ func (p *claudeParser) Parse(line []byte) []runnerwire.RunEvent {
 		return p.toolResults(msg)
 	case "result":
 		return p.result(msg)
+	case "rate_limit_event":
+		// Only a refusal says when the agent may go on; an "allowed" event's
+		// reset time is just the window's end.
+		if rl := msg.RateLimit; rl != nil && rl.ResetsAt > 0 && rl.Status != "" && !strings.HasPrefix(rl.Status, "allowed") {
+			p.outcome.ResetAt = time.Unix(rl.ResetsAt, 0)
+		}
+		return nil
 	}
 	return nil
 }

@@ -90,6 +90,9 @@ type run struct {
 	changes *runnerwire.RunChanges
 	pr      *runnerwire.PRInfo
 	finish  *runnerwire.RunResult
+
+	// trail is what a handoff note needs from the events (handoff.go).
+	trail handoffTrail
 }
 
 const (
@@ -362,6 +365,14 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		}
 	}
 
+	// A job continuing another run's partial work names a handoff branch:
+	// it must be one this runner made, for this repository (handoff.go).
+	if reason := j.prepareHandoff(ctx, r); reason != "" {
+		j.decline(r, reason)
+		return
+	}
+	job = r.job
+
 	ok, reason := j.ask(ctx, r)
 	if ctx.Err() != nil {
 		j.finish(r, cancelled(ctx))
@@ -386,7 +397,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	dataDir, err := j.c.Config.RunDataDir()
 	var wt Worktree
 	if err == nil {
-		wt, err = CreateWorktree(ctx, r.repo.Path, dataDir, job.RunID, job.NodeID, job.Base)
+		wt, err = CreateWorktreeFrom(ctx, r.repo.Path, dataDir, job.RunID, job.NodeID, job.Base, job.HandoffBranch)
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -403,9 +414,13 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	r.accept = &runnerwire.Accept{RunID: job.RunID, Base: wt.Base, Branch: wt.Branch}
 	j.mu.Unlock()
 	j.wake()
-	j.c.logf("run %s: accepted; worktree %s on %s from %s", job.RunID, wt.Path, wt.Branch, wt.BaseRef)
+	from := wt.BaseRef
+	if job.HandoffBranch != "" {
+		from = job.HandoffBranch + " (continuing the previous run's work; base " + wt.BaseRef + ")"
+	}
+	j.c.logf("run %s: accepted; worktree %s on %s from %s", job.RunID, wt.Path, wt.Branch, from)
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, wt.BaseRef)})
+		Text: fmt.Sprintf("worktree %s on branch %s from %s", wt.Path, wt.Branch, from)})
 
 	result, _ := j.runAgent(ctx, r, wt, job)
 	if result.Status == runnerwire.RunCancelled {
@@ -420,6 +435,14 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	j.mu.Lock()
 	r.publishing = true
 	j.mu.Unlock()
+	// Stopped at a usage limit: keep the partial work for the next run
+	// instead of publishing it (handoff.go). Nothing is pushed.
+	if result.Status == runnerwire.RunFailed && runnerwire.HandoffWorthy(result.FailureKind) &&
+		job.Mode != runnerwire.ModeInteractive {
+		changes := j.handOff(r, wt, &result)
+		j.finishWith(r, result, changes, nil)
+		return
+	}
 	changes, pr := j.publish(r, wt, result)
 	j.finishWith(r, result, changes, pr)
 }
@@ -643,6 +666,17 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		// What the CLI said, then its stderr: a login problem often shows only
 		// on stderr while the stream says something generic.
 		result.FailureKind = ad.Classify(outcome.Error + "\n" + errText)
+		// When a limit lifts, in this machine's zone: "resets 3pm" is the
+		// owner's 3pm, which only the runner knows.
+		if runnerwire.HandoffWorthy(result.FailureKind) {
+			reset := outcome.ResetAt
+			if reset.IsZero() {
+				reset, _ = runnerwire.ParseResetTime(outcome.Error+"\n"+errText, time.Now(), time.Local)
+			}
+			if !reset.IsZero() && reset.After(time.Now()) {
+				result.ResetAt = reset.UTC().Format(time.RFC3339)
+			}
+		}
 	}
 	return result, outcome.Text
 }
@@ -755,6 +789,7 @@ func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
 	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
+	r.trail.see(ev)
 	r.seq++
 	ev.Seq = r.seq
 	ev.At = time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
