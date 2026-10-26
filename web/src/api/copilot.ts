@@ -99,7 +99,8 @@ export interface CopilotEntry {
   seq: number;
   kind: CopilotEntryKind;
   source?: CopilotSource | "";
-  text: string;
+  /** Absent when empty: an assistant turn that only called tools. */
+  text?: string;
   toolName?: string;
   toolInput?: string;
   toolOutput?: string;
