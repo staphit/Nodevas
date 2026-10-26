@@ -665,3 +665,12 @@
     position: static;
   }
 }
+
+/* A breakdown or a revision's replan running on the goal. */
+.autopilot-pill.is-planning {
+  border-style: dashed;
+}
+.autopilot-pill-planning {
+  font-weight: 500;
+  color: var(--text-2);
+}

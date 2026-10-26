@@ -116,6 +116,9 @@ export interface Run {
   pipelineId?: string;
   /** W2.5: absent (headless) or "interactive". */
   mode?: RunMode | string;
+  /** W7: a plan run that reconciles a goal's tasks with a revision of its
+   * requirement (the voice copilot's revise_goal), not a first breakdown. */
+  replan?: boolean;
   createdBy: string;
   createdByName: string;
   createdAt: string;

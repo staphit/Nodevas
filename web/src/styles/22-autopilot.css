@@ -588,3 +588,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A breakdown or a revision's replan running on the goal. */
+.ap-planning {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--st-progress-fg);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--st-progress-fg) 8%, var(--surface));
+}
+
+/* A skipped task (by a person, or as obsolete in a revision) reads as set
+   aside: struck through, its history kept. */
+.ap-row-skipped .ap-task-title {
+  text-decoration: line-through;
+  color: var(--text-2);
+}
