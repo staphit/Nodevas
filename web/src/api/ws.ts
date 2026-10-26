@@ -74,7 +74,10 @@ export type WSEvent = {
     | "session-changes"
     | "usage-changed"
     // W7: an autopilot run changed; the id is the autopilot run's.
-    | "autopilot-changed";
+    | "autopilot-changed"
+    // The copilot followed up in one of this account's conversations (a plan
+    // run it started ended); the id is the conversation's.
+    | "copilot-followup";
   id?: string;
   project?: string;
   /** autopilot-changed: the goal node the autopilot run belongs to. */

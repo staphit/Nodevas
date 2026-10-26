@@ -171,8 +171,56 @@ as the person rather than as an in-process agent, and so they **always ask**,
 in every mode that runs tools, `bypassPermissions` included (`plan` refuses
 them). The runner still applies its own acceptance rules (auto-accept, a
 person at its terminal) to what they dispatch. The system prompt walks the
-model through confirm → `start_breakdown` → summarize the tasks → ask →
+model through confirm → `start_breakdown` → (follow-up, below) → ask →
 `start_autopilot`.
+
+### Follow-up when the plan run ends (`internal/copilot/followup.go`)
+
+The copilot comes back to the conversation by itself; the person need not ask.
+
+1. `start_breakdown` succeeds → the turn records a follow-up
+   `{conversation, account, goalNodeId, runId, language}` in
+   `copilot_followups` (persisted: a hub restart while the plan run goes on
+   loses nothing; `StartFollowups` delivers whatever came due at startup).
+   The tool's result tells the model to say it will come back.
+2. The run dispatcher's observer (`runs.Dispatcher.Observe`, wired in
+   `cmd/nodevas/copilot_followups.go`) calls `Service.RunChanged` for every
+   run change; only plan runs that reached a final state (succeeded, failed,
+   cancelled, declined) matter. A failed run that falls back is not reported:
+   the follow-up moves to the fallback run (`RetryOf`).
+3. Delivery takes the conversation's turn lock. A turn in progress keeps it;
+   the follow-up is written right after that turn ends, never between its
+   entries. It is written only when the run was dispatched by the
+   conversation's owner, on the recorded goal, in the conversation's project;
+   anything else is dropped.
+4. Two entries, no model call and no tool (so a follow-up cannot write or
+   dispatch, and it works with the browser's model while the browser is
+   closed):
+   - `event`: a user-role note for the model, from the server, never the
+     person: `[Server event, not the person: the plan run … for the goal node
+     … succeeded.]`, the goal's tasks in dependency order with ids and
+     dependencies (read server-side with `autopilot.GoalMembers`; titles
+     marked as data), and what to do on a yes. The panel shows its short text
+     ("Breakdown finished: 3 tasks") as a notice.
+   - `assistant`: a fixed template in the panel's language (en, zh-TW): the
+     task titles with "(after 1, 2)", then "Shall I start the autopilot? By
+     default it works on 2 tasks at a time, reviews each pull request for up
+     to 2 rounds, and you approve every pull request before it merges." A
+     failed, cancelled or declined run says so (with the error) and offers to
+     break the goal down again.
+5. The account's browsers get the realtime event `copilot-followup` (id: the
+   conversation), to that account only (`Hub.BroadcastActor`).
+
+The person's next turn replays both entries. The system prompt says the note
+is not the person's go-ahead; on a yes the model calls `start_autopilot`,
+which still asks for permission like every dispatch.
+
+In the panel: with that conversation open, the follow-up is fetched and shown
+at once (after a running turn, if any) and spoken when spoken replies are on.
+Otherwise the conversation is listed as `unread` (● in the picker, a dot on the
+mic button, a system notification when the browser allows one, reusing the
+agent-ask plumbing); the mic button then opens that conversation. Opening it
+(`GET /copilot/conversations/:id`) marks it read.
 
 ### Permission modes
 
@@ -202,9 +250,9 @@ All under `/api`, authenticated like every other route, JSON in.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/copilot/status?browserModel=` | `{enabled, provider, model, modes[], allowBypass, reason?, keySource, modelHost, automatic?, localServer?, serverIsLocal?, runner?, needsRunner?, needsDownload?, needsSetup?, reasonCode?}`; `browserModel` is the browser's Prompt API availability |
-| `GET` | `/copilot/conversations?project=` | the caller's conversations, newest first |
+| `GET` | `/copilot/conversations?project=` | the caller's conversations, newest first; `unread: true` on one with a follow-up not yet opened |
 | `POST` | `/copilot/conversations` | `{project, mode}` → conversation |
-| `GET` | `/copilot/conversations/:id` | conversation + transcript entries |
+| `GET` | `/copilot/conversations/:id` | conversation + transcript entries; marks its follow-ups read |
 | `DELETE` | `/copilot/conversations/:id` | delete (own only) |
 | `PATCH` | `/copilot/conversations/:id` | `{mode?, title?}` |
 | `POST` | `/copilot/conversations/:id/turns` | start a turn, streamed response (below) |
@@ -274,7 +322,7 @@ CREATE TABLE copilot_entries (
     id               TEXT PRIMARY KEY,
     conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
     seq              INTEGER NOT NULL,
-    kind             TEXT NOT NULL,      -- user | assistant | tool | notice
+    kind             TEXT NOT NULL,      -- user | assistant | tool | notice | event
     source           TEXT NOT NULL DEFAULT '', -- voice | text (user entries)
     text             TEXT NOT NULL DEFAULT '',
     tool_name        TEXT NOT NULL DEFAULT '',
@@ -284,6 +332,23 @@ CREATE TABLE copilot_entries (
     message          TEXT NOT NULL DEFAULT '', -- provider.Message JSON, for replay
     created_at       INTEGER NOT NULL,
     UNIQUE (conversation_id, seq)
+);
+```
+
+Migration `copilot_followups` (0022) adds the plan runs a conversation waits on:
+
+```sql
+CREATE TABLE copilot_followups (
+    id               TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+    account_id       TEXT NOT NULL,
+    goal_node_id     TEXT NOT NULL,
+    run_id           TEXT NOT NULL,
+    language         TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'pending', -- pending | delivered | dropped
+    seen             INTEGER NOT NULL DEFAULT 0,       -- 1 once the conversation was opened
+    created_at       INTEGER NOT NULL,
+    delivered_at     INTEGER NOT NULL DEFAULT 0
 );
 ```
 
@@ -459,6 +524,8 @@ copilot:
   to install or set).
 - Permission card inline in the transcript: Allow / Allow for this conversation
   / Deny, keyboard `1`/`2`/`3`, or voice.
+- A follow-up (a plan run ended) shows live in its open conversation, else
+  as a dot on the mic button and ● in the conversation picker.
 - Strings in `web/src/i18n.ts` (`copilot.*`, en and zh-TW).
 - Speech recognition language follows the UI language (`zh-TW`, `en-US`).
 

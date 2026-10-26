@@ -12,7 +12,7 @@ import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
 import { IconMic } from "./icons";
 import { OPEN_KEYS, RunnerHelp } from "./RunnerHelp";
-import { decide, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
+import { decide, openUnread, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
 import { cancelSpeech, useSpeechRecognition, useSpeechSynthesis } from "./speech";
 
 // The panel (and the markdown renderer it pulls in) loads on first open.
@@ -41,6 +41,8 @@ export function CopilotRoot() {
   const speakReplies = useCopilot((s) => s.speakReplies);
   const firstPending = useCopilot((s) => s.pending.find((request) => !request.submitting)?.requestId);
   const activeProject = useApp((s) => s.activeProject);
+  // A follow-up (a plan run ended) waits in one of this project's conversations.
+  const unread = useCopilot((s) => s.conversations.some((conversation) => conversation.unread));
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fabRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -190,13 +192,14 @@ export function CopilotRoot() {
           ref={fabRef}
           type="button"
           className={`copilot-fab${speech.listening ? " is-listening" : ""}${running ? " is-running" : ""}`}
-          onClick={() => setOpen(true)}
-          aria-label={t("copilot.open")}
+          onClick={() => (unread ? void openUnread() : setOpen(true))}
+          aria-label={unread ? `${t("copilot.open")} · ${t("copilot.followup.unread")}` : t("copilot.open")}
           aria-expanded={false}
           aria-controls="copilot-panel"
           title={`${t("copilot.open")} (Ctrl+Shift+Space) · ${t("copilot.pushToTalk")} (Alt+Space)`}
         >
           <IconMic size={20} />
+          {unread && <span className="copilot-fab-badge" aria-hidden data-testid="copilot-unread" />}
         </button>
       )}
       {open && (

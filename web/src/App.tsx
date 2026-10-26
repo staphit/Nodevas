@@ -21,7 +21,7 @@ import { StartScreen } from "./components/StartScreen";
 import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
-import { runnersChanged as copilotRunnersChanged } from "./copilot/session";
+import { followupArrived as copilotFollowupArrived, runnersChanged as copilotRunnersChanged } from "./copilot/session";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
 import { useUsage } from "./usage/usageStore";
@@ -304,6 +304,11 @@ function MainApp() {
           // The id is a delivered message sent with notify=true: toast it,
           // and raise a system notification when this browser allows one.
           void useAgents.getState().handleNotify(ev.id ?? "");
+          break;
+        case "copilot-followup":
+          // The copilot came back by itself (a plan run ended): shown live
+          // when its conversation is open, else as unread.
+          void copilotFollowupArrived(ev.id ?? "");
           break;
         case "agent-ask":
           // The id is a new question: toast it to whoever may answer, with a

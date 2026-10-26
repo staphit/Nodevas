@@ -17,6 +17,7 @@ import {
   type CopilotTurnContext,
   type CopilotTurnEvent,
 } from "../api";
+import { showSystemNotification } from "../agents/systemNotify";
 import { translate } from "../i18n";
 import { useApp } from "../store";
 import {
@@ -31,6 +32,8 @@ import { cancelSpeech } from "./speech";
 let controller: AbortController | null = null;
 /** Set when the project changed under a running turn: end the conversation after it. */
 let endAfterTurn = false;
+/** A follow-up landed in the open conversation while a turn ran: show it after. */
+let followupAfterTurn: string | null = null;
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : translate("copilot.error.generic");
@@ -155,9 +158,86 @@ export async function openConversation(id: string): Promise<void> {
   try {
     const { conversation, entries } = await api.getCopilotConversation(id);
     useCopilot.getState().showConversation(conversation, entries);
+    // Opening it read whatever follow-up it had.
+    useCopilot.getState().markRead(id);
   } catch (error) {
     useCopilot.getState().setNotice(errorText(error));
   }
+}
+
+/**
+ * Shows a conversation with the follow-up the server wrote into it, and has
+ * the reply spoken when spoken replies are on. Fetching it marks it read.
+ */
+async function showFollowup(id: string): Promise<boolean> {
+  try {
+    const { conversation, entries } = await api.getCopilotConversation(id);
+    const copilot = useCopilot.getState();
+    // A turn started meanwhile: it owns the transcript; show this after it.
+    if (copilot.running) {
+      if (copilot.activeId === id) followupAfterTurn = id;
+      return false;
+    }
+    copilot.showFollowup(conversation, entries);
+    copilot.markRead(id);
+    return true;
+  } catch (error) {
+    useCopilot.getState().setNotice(errorText(error));
+    return false;
+  }
+}
+
+/**
+ * A `copilot-followup` push: the copilot came back to a conversation by
+ * itself, after a plan run it started ended. Shown (and spoken) at once when
+ * that conversation is on screen; otherwise it waits as unread, with a
+ * system notification when this browser allows one.
+ */
+export async function followupArrived(id: string): Promise<void> {
+  if (!id) return;
+  const copilot = useCopilot.getState();
+  if (copilot.open && copilot.activeId === id) {
+    if (copilot.running) {
+      followupAfterTurn = id;
+      return;
+    }
+    const shown = await showFollowup(id);
+    if (shown && typeof document !== "undefined" && document.hidden) {
+      const title =
+        useCopilot.getState().conversations.find((item) => item.id === id)?.title ||
+        translate("copilot.conversation.untitled");
+      showSystemNotification(translate("copilot.followup.notifyTitle"), title, `copilot-followup-${id}`, () =>
+        useCopilot.getState().setOpen(true),
+      );
+    }
+    return;
+  }
+  await loadConversations();
+  const conversation = useCopilot.getState().conversations.find((item) => item.id === id);
+  const title = conversation?.title || translate("copilot.conversation.untitled");
+  if (conversation && copilot.open) {
+    useCopilot.getState().setNotice(translate("copilot.followup.elsewhere", undefined, { title }));
+  }
+  showSystemNotification(
+    translate("copilot.followup.notifyTitle"),
+    conversation ? title : translate("copilot.followup.otherProject"),
+    `copilot-followup-${id}`,
+    () => {
+      if (conversation) void openUnread(id);
+    },
+  );
+}
+
+/**
+ * Opens the panel on a conversation a follow-up landed in: the one named,
+ * else the newest unread one. Without one it only opens the panel.
+ */
+export async function openUnread(id?: string): Promise<void> {
+  const copilot = useCopilot.getState();
+  copilot.setOpen(true);
+  if (copilot.running) return;
+  const target = id ?? copilot.conversations.find((item) => item.unread)?.id;
+  if (target) await showFollowup(target);
 }
 
 /** Clears the panel; the conversation itself is created by the first turn. */
@@ -323,6 +403,9 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
     modelAbort.abort();
     if (controller === abort) controller = null;
     finishConversationIfEnded();
+    const followup = followupAfterTurn;
+    followupAfterTurn = null;
+    if (followup && followup === useCopilot.getState().activeId) void showFollowup(followup);
     // The server may have titled the conversation from its first turn.
     void loadConversations();
   }

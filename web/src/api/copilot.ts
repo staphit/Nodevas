@@ -85,9 +85,12 @@ export interface CopilotConversation {
   mode: CopilotMode;
   createdAt: number;
   updatedAt: number;
+  /** A follow-up landed in it (a plan run ended) that the person has not opened yet. */
+  unread?: boolean;
 }
 
-export type CopilotEntryKind = "user" | "assistant" | "tool" | "notice";
+/** "event": written by the server, not the person (a plan run ended). */
+export type CopilotEntryKind = "user" | "assistant" | "tool" | "notice" | "event";
 
 /** One stored transcript row: the display columns of `copilot_entries`. */
 export interface CopilotEntry {

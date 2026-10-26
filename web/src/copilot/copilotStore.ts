@@ -126,6 +126,13 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   toggleOpen: () => void;
   setConversations: (conversations: CopilotConversation[]) => void;
   showConversation: (conversation: CopilotConversation | null, entries: CopilotEntry[]) => void;
+  /**
+   * Shows a conversation a follow-up just landed in (a plan run ended) and
+   * queues its reply to be spoken, as a finished turn's would be.
+   */
+  showFollowup: (conversation: CopilotConversation, entries: CopilotEntry[]) => void;
+  /** The person has seen a conversation's follow-up. */
+  markRead: (id: string) => void;
   setMode: (mode: CopilotMode) => void;
   setSpeakReplies: (speak: boolean) => void;
   setNotice: (notice: string | null) => void;
@@ -203,6 +210,9 @@ export function entryToItem(entry: CopilotEntry): TranscriptItem {
       };
     case "assistant":
       return { kind: "assistant", id: entry.id, text: entry.text };
+    case "event":
+      // Written by the server, not the person: a plan run ended.
+      return { kind: "notice", id: entry.id, text: entry.text, tone: "info" };
     case "tool":
       return {
         kind: "tool",
@@ -444,6 +454,22 @@ export const useCopilot = create<CopilotState>((set, get) => ({
       pending: [],
       lastReply: null,
     }),
+  showFollowup: (conversation, entries) => {
+    const reply = [...entries].reverse().find((entry) => entry.kind === "assistant");
+    set({
+      activeId: conversation.id,
+      mode: isMode(conversation.mode) ? conversation.mode : get().defaultMode,
+      items: entries.map(entryToItem),
+      pending: [],
+      lastReply: reply?.text ? { turnId: `followup-${reply.id}`, text: reply.text } : null,
+    });
+  },
+  markRead: (id) =>
+    set((state) => ({
+      conversations: state.conversations.map((item) =>
+        item.id === id && item.unread ? { ...item, unread: false } : item,
+      ),
+    })),
   setMode: (mode) => {
     const prefs = { speakReplies: get().speakReplies, defaultMode: mode };
     writeCopilotPrefs(prefs);
