@@ -5,6 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	// Named zones in reset messages ("resets 3pm (Europe/London)") must
+	// resolve on a Windows runner, which has no zoneinfo of its own.
+	_ "time/tzdata"
 )
 
 // Handoff: when an implement run stops because its agent hit a usage limit
