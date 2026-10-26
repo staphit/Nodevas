@@ -785,6 +785,13 @@ CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
 CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
 `,
 	},
+	{
+		name: "0023_copilot_followup_revisions",
+		stmt: `
+ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown';
+ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

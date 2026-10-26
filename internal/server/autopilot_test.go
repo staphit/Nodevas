@@ -56,6 +56,20 @@ func TestAutopilotThroughTheDispatcher(t *testing.T) {
 	if code := f.do(t, &f.cal, http.MethodPost, "/api/autopilot/"+id+"/pause", "", nil).Code; code != http.StatusForbidden {
 		t.Fatalf("cal pausing: %d", code)
 	}
+	// Adopting a revised goal resumes a paused autopilot, its creator's only.
+	if code := f.do(t, &f.bea, http.MethodPost, "/api/autopilot/"+id+"/adopt", "", nil).Code; code != http.StatusConflict {
+		t.Fatalf("adopting a running autopilot: %d", code)
+	}
+	if code := f.do(t, &f.bea, http.MethodPost, "/api/autopilot/"+id+"/pause", "", nil).Code; code != http.StatusOK {
+		t.Fatalf("bea pausing: %d", code)
+	}
+	if code := f.do(t, &f.cal, http.MethodPost, "/api/autopilot/"+id+"/adopt", "", nil).Code; code != http.StatusForbidden {
+		t.Fatalf("cal adopting: %d", code)
+	}
+	if response := f.do(t, &f.bea, http.MethodPost, "/api/autopilot/"+id+"/adopt", "", nil); response.Code != http.StatusOK ||
+		!json.Valid(response.Body.Bytes()) {
+		t.Fatalf("bea adopting: %d %s", response.Code, response.Body)
+	}
 
 	work := func(node string) {
 		t.Helper()

@@ -54,9 +54,13 @@ func checkKind(job *runnerwire.Job, cfg *Config) string {
 	case runnerwire.JobImplement:
 		return ""
 	case runnerwire.JobPlan:
-		// A plan names no pull request and pushes nothing.
-		if job.Branch != "" || job.PRURL != "" || job.Review != "" {
+		// A plan names no pull request and pushes nothing. Its Review, if
+		// any, is the revision a replan reconciles (adapter.replanPrompt).
+		if job.Branch != "" || job.PRURL != "" {
 			return "a plan job names no pull request"
+		}
+		if len(job.Review) > runnerwire.MaxRevisionBytes {
+			return "a replan's revision is too long"
 		}
 		return ""
 	case runnerwire.JobReview, runnerwire.JobRevise:

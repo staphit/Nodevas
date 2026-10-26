@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,6 +37,10 @@ import (
 //
 // Then the account's browsers are told (NotifyFollowup), and the panel shows
 // it live or as unread.
+//
+// revise_goal's replan run is followed up the same way (kind revision): its
+// reconciliation is applied on the board by fixed rules first, the only
+// writes a follow-up makes, and the entries report the diff (revise.go).
 
 // FollowupEvent is the realtime event that tells an account's browsers a
 // follow-up landed; its id is the conversation's.
@@ -72,6 +77,9 @@ type RunInfo struct {
 	// MayFallBack: the run failed in a way its fallback chain retries, and
 	// it has one.
 	MayFallBack bool
+	// Summary is the run's final message; a replan's ends with its
+	// reconciliation (runnerwire.ReconcileStart).
+	Summary string
 }
 
 // GoalTask is one task under a goal, as the follow-up lists it.
@@ -80,6 +88,11 @@ type GoalTask struct {
 	Title string
 	// After are the ids of the tasks it waits on.
 	After []string
+	// Status is the node's status on the board ("ready", "in_progress",
+	// "done", "skipped"…); Active: a run (not a plan run) on it has not
+	// ended. A revision never changes a task that is settled or under way.
+	Status string
+	Active bool
 }
 
 // Goal is a goal node and its tasks in dependency order.
@@ -87,6 +100,12 @@ type Goal struct {
 	Title string
 	Tasks []GoalTask
 }
+
+// Follow-up kinds, as stored in copilot_followups.kind.
+const (
+	followupBreakdown = "breakdown" // start_breakdown's plan run
+	followupRevision  = "revision"  // revise_goal's replan run (revise.go)
+)
 
 // Followup is a plan run a conversation waits on.
 type Followup struct {
@@ -98,23 +117,44 @@ type Followup struct {
 	Language       string
 	Status         string
 	CreatedAt      int64
+	// Kind is followupBreakdown or followupRevision; Revision is set for a
+	// revision.
+	Kind     string
+	Revision *Revision
 }
 
-const followupColumns = `id, conversation_id, account_id, goal_node_id, run_id, language, status, created_at`
+const followupColumns = `id, conversation_id, account_id, goal_node_id, run_id, language, status, created_at, kind, revision`
 
 func scanFollowup(row rowScanner) (Followup, error) {
 	var f Followup
+	var revision string
 	err := row.Scan(&f.ID, &f.ConversationID, &f.AccountID, &f.GoalNodeID, &f.RunID, &f.Language,
-		&f.Status, &f.CreatedAt)
+		&f.Status, &f.CreatedAt, &f.Kind, &revision)
+	if err == nil && revision != "" {
+		var r Revision
+		if json.Unmarshal([]byte(revision), &r) == nil {
+			f.Revision = &r
+		}
+	}
 	return f, err
 }
 
 func (s *Store) addFollowup(ctx context.Context, f Followup) (Followup, error) {
 	f.ID, f.Status, f.CreatedAt = newID(), followupPending, nowMillis()
+	revision := ""
+	f.Kind = followupBreakdown
+	if f.Revision != nil {
+		raw, err := json.Marshal(f.Revision)
+		if err != nil {
+			return Followup{}, err
+		}
+		f.Kind, revision = followupRevision, string(raw)
+	}
 	_, err := s.database.ExecContext(ctx, `
 INSERT INTO copilot_followups (`+followupColumns+`)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, f.ConversationID, f.AccountID, f.GoalNodeID, f.RunID, f.Language, f.Status, f.CreatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.ConversationID, f.AccountID, f.GoalNodeID, f.RunID, f.Language, f.Status, f.CreatedAt,
+		f.Kind, revision)
 	return f, err
 }
 
@@ -174,15 +214,17 @@ func (s *Service) followupsOn() bool {
 	return s.opts.LookupRun != nil && s.opts.GoalTasks != nil
 }
 
-// recordFollowup remembers a plan run a turn started. It is delivered after
-// the turn, at the earliest: the turn holds the conversation.
-func (s *Service) recordFollowup(ctx context.Context, conversation Conversation, accountID, goal, runID, language string) {
+// recordFollowup remembers a plan run a turn started: a breakdown's, or a
+// revision's replan when revision is set. It is delivered after the turn, at
+// the earliest: the turn holds the conversation.
+func (s *Service) recordFollowup(ctx context.Context, conversation Conversation, accountID, goal, runID, language string,
+	revision *Revision) {
 	if !s.followupsOn() || goal == "" || runID == "" {
 		return
 	}
 	if _, err := s.store.addFollowup(ctx, Followup{
 		ConversationID: conversation.ID, AccountID: accountID, GoalNodeID: goal, RunID: runID,
-		Language: clip(language),
+		Language: clip(language), Revision: revision,
 	}); err != nil {
 		slog.Warn("copilot: record follow-up", slog.String("run", runID), slog.Any("error", err))
 		return
@@ -356,7 +398,12 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 		slog.Warn("copilot: follow-up tasks", slog.String("goal", current.GoalNodeID), slog.Any("error", goalErr))
 		goal = Goal{}
 	}
-	note, shown, reply := followupTexts(current, run, goal, goalErr != nil)
+	var note, shown, reply string
+	if current.Kind == followupRevision {
+		note, shown, reply = s.revisionFollowup(ctx, current, run, goal, goalErr != nil)
+	} else {
+		note, shown, reply = followupTexts(current, run, goal, goalErr != nil)
+	}
 	if _, err := s.store.AppendEntry(ctx, Entry{
 		ConversationID: conversation.ID, Kind: EntryEvent, Text: shown,
 		Message: mustJSON(provider.Message{Role: provider.RoleUser, Blocks: []provider.Block{{

@@ -1,6 +1,7 @@
 // Package autopilot serves /api/autopilot: starting an autopilot on a goal
-// node, following its task instances, and steering it (pause, resume,
-// cancel, retry or skip a task, a person's review). See internal/autopilot.
+// node, following its task instances, and steering it (pause, resume, adopt
+// a revised goal, cancel, retry or skip a task, a person's review). See
+// internal/autopilot.
 package autopilot
 
 import (
@@ -50,6 +51,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/autopilot/:id", a.get)
 	api.POST("/autopilot/:id/pause", a.pause)
 	api.POST("/autopilot/:id/resume", a.resume)
+	api.POST("/autopilot/:id/adopt", a.adopt)
 	api.POST("/autopilot/:id/cancel", a.cancel)
 	api.POST("/autopilot/:id/tasks/:node/retry", a.retry)
 	api.POST("/autopilot/:id/tasks/:node/skip", a.skip)
@@ -252,6 +254,12 @@ func (a *API) pause(c *gin.Context) {
 
 func (a *API) resume(c *gin.Context) {
 	a.act(c, func(rec ap.Record) error { return a.o.Resume(c.Request.Context(), rec.ID) })
+}
+
+// adopt resumes a paused autopilot with its goal's tasks as they stand now,
+// after a revision of the goal (Orchestrator.Adopt).
+func (a *API) adopt(c *gin.Context) {
+	a.act(c, func(rec ap.Record) error { return a.o.Adopt(c.Request.Context(), rec.ID) })
 }
 
 func (a *API) cancel(c *gin.Context) {

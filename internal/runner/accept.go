@@ -202,7 +202,11 @@ func describeOffer(o Offer) string {
 	case runnerwire.JobRevise:
 		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
 	case runnerwire.JobPlan:
-		fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
+		if strings.TrimSpace(job.Review) != "" {
+			fmt.Fprintf(&b, "  kind:         REPLAN: reconciles the goal's tasks with a revised requirement; reads the code, changes no files\n")
+		} else {
+			fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
+		}
 	default:
 		base := job.Base
 		if base == "" {
@@ -219,12 +223,16 @@ func describeOffer(o Offer) string {
 	for _, line := range strings.Split(prompt, "\n") {
 		b.WriteString("    " + line + "\n")
 	}
-	if job.Kind == runnerwire.JobRevise {
-		review := strings.TrimSpace(job.Review)
+	if review := strings.TrimSpace(job.Review); review != "" &&
+		(job.Kind == runnerwire.JobRevise || job.Kind == runnerwire.JobPlan) {
 		if utf8.RuneCountInString(review) > promptPreview {
 			review = string([]rune(review)[:promptPreview]) + " …"
 		}
-		b.WriteString("  review to address:\n")
+		if job.Kind == runnerwire.JobPlan {
+			b.WriteString("  revision:\n")
+		} else {
+			b.WriteString("  review to address:\n")
+		}
 		for _, line := range strings.Split(review, "\n") {
 			b.WriteString("    " + line + "\n")
 		}

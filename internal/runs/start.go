@@ -97,6 +97,14 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if body.Kind == runnerwire.JobPlan && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
 		return Record{}, refuse(StartInvalid, "a plan run is one headless run, not a pipeline")
 	}
+	// A replan's revision (runnerwire.ReconcileStart) rides on a plan run
+	// only, and is offered to the runner as the job's Review.
+	if body.Revision != "" && body.Kind != runnerwire.JobPlan {
+		return Record{}, refuse(StartInvalid, "revision is for plan runs only")
+	}
+	if len(body.Revision) > runnerwire.MaxRevisionBytes || !utf8.ValidString(body.Revision) {
+		return Record{}, refuse(StartInvalid, "revision must be valid text of at most 16384 bytes")
+	}
 	if err := ValidateChain(body.Fallbacks, false); err != nil {
 		return Record{}, refuse(StartInvalid, err.Error())
 	}
@@ -178,7 +186,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: req.ActorID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: body.Kind,
+		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: body.Kind, Review: strings.TrimSpace(body.Revision),
 	})
 	if err != nil {
 		if pipelineID != "" {

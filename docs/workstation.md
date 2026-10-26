@@ -45,6 +45,8 @@ Pick a runner, agent and model; accept it at the runner; watch OpenCode work ove
 
 The goal's **Autopilot** pill in the node panel opens it in Station. The goal is broken into tasks; each one is implemented, checked by CI, reviewed by other models and revised, then waits for you.
 
+The requirement can change mid-way. Tell the voice copilot how it changes: it pauses the goal's autopilot, records the change on the goal under **Revisions**, and a replan run re-evaluates the tasks — done ones stay, obsolete ones are skipped (kept with their history), ones in progress are only flagged, new ones are added. While it runs the pill reads **Revising…**. When it ends, the copilot tells you what was kept, changed, skipped and added, and asks whether to resume; nothing resumes until you say yes. See [COPILOT.md](../COPILOT.md#revising-a-goal-mid-way-internalcopilotrevisego).
+
 [![Autopilot moving tasks through implement, review and human review](./videos/autopilot.gif)](./videos/autopilot.mp4)
 
 ### Two-factor authentication and device links

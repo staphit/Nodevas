@@ -138,6 +138,15 @@ func TestHelperProcess(t *testing.T) {
 			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
 		fmt.Println(string(raw))
 		os.Exit(0)
+	case "replan":
+		// A planner with a long final message ending in its reconciliation:
+		// the cap on the summary must not cut the block.
+		text := strings.Repeat("I read the code and the goal's tasks. ", 200) +
+			"\n\nRECONCILE:\n- keep t1\n- skip t3: the PDF export was dropped\n- add t9: Add the SSO button\nEND RECONCILE"
+		raw, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": false, "result": text,
+			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
+		fmt.Println(string(raw))
+		os.Exit(0)
 	case "race":
 		// Someone pushes to the PR branch while the agent works: the runner's
 		// push must then be refused, not forced.

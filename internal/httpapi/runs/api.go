@@ -30,8 +30,9 @@ import (
 const (
 	// MaxExtraPrompt caps the dispatcher's extra instructions.
 	MaxExtraPrompt = runs.MaxExtraPrompt
-	maxCreateBody  = 16 << 10
-	listLimit      = 50
+	// Room for the extra prompt and a replan's revision (MaxRevisionBytes).
+	maxCreateBody = 48 << 10
+	listLimit     = 50
 )
 
 // API exposes runs over HTTP.

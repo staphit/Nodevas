@@ -105,6 +105,16 @@ type Options struct {
 	// FallbackWait is how long a failed plan run that may fall back is
 	// given before its failure is reported; zero means 3 s.
 	FallbackWait time.Duration
+
+	// Revisions (revise.go): what applying a replan's reconciliation writes
+	// on the board once the run ends, as the hub on the person's behalf.
+	// revise_goal is offered only with both (and the follow-up hooks above).
+	//
+	// SkipTask sets a task's status to skipped with a note; NoteTask appends
+	// a dated note to a task's body under "Revisions" (AppendRevision), as
+	// the account.
+	SkipTask func(ctx context.Context, project, nodeID, by, note string) error
+	NoteTask func(ctx context.Context, project, nodeID, accountID, note string) error
 }
 
 // Service is the copilot. One per server.
