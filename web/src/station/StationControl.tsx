@@ -153,55 +153,28 @@ export function StationControl() {
         <p className="station-empty">{t("station.control.empty")}</p>
       )}
       {live.length + ended.length > 0 && (
-        <table className="station-control-table">
-          <thead className={live.length === 0 ? "sr-only" : undefined}>
-            <tr>
-              <th scope="col">{t("station.control.col.node")}</th>
-              <th scope="col">{t("station.control.col.kind")}</th>
-              <th scope="col">{t("station.control.col.agent")}</th>
-              <th scope="col">{t("station.control.col.runner")}</th>
-              <th scope="col">{t("station.control.col.status")}</th>
-              <th scope="col">{t("station.control.col.elapsed")}</th>
-              <th scope="col">{t("station.control.col.usage")}</th>
-              <th scope="col">{t("station.control.col.goal")}</th>
-              <th scope="col">
-                <span className="sr-only">
-                  {t("station.control.col.actions")}
-                </span>
-              </th>
-            </tr>
-          </thead>
-          {live.length > 0 && (
-            <tbody>
-              {live.map((row) => (
-                <ControlRunRow
-                  key={row.run.id}
-                  row={row}
-                  now={now}
-                  titleOf={titleOf}
-                />
-              ))}
-            </tbody>
-          )}
-          {/* Ended in the last hour: folded away, in the same columns. */}
-          {ended.length > 0 && (
-            <tbody id={endedId} className="station-control-ended">
-              <tr className="station-control-toggle-row">
-                <td colSpan={9}>
-                  <button
-                    type="button"
-                    className="run-link-button station-control-toggle"
-                    aria-expanded={showEnded}
-                    aria-controls={endedId}
-                    onClick={() => setShowEnded((open) => !open)}
-                  >
-                    {showEnded ? "▾" : "▸"}{" "}
-                    {t("station.control.ended", { count: ended.length })}
-                  </button>
-                </td>
+        <div className="station-control-scroll">
+          <table className="station-control-table">
+            <thead className={live.length === 0 ? "sr-only" : undefined}>
+              <tr>
+                <th scope="col">{t("station.control.col.node")}</th>
+                <th scope="col">{t("station.control.col.kind")}</th>
+                <th scope="col">{t("station.control.col.agent")}</th>
+                <th scope="col">{t("station.control.col.runner")}</th>
+                <th scope="col">{t("station.control.col.status")}</th>
+                <th scope="col">{t("station.control.col.elapsed")}</th>
+                <th scope="col">{t("station.control.col.usage")}</th>
+                <th scope="col">{t("station.control.col.goal")}</th>
+                <th scope="col">
+                  <span className="sr-only">
+                    {t("station.control.col.actions")}
+                  </span>
+                </th>
               </tr>
-              {showEnded &&
-                ended.map((row) => (
+            </thead>
+            {live.length > 0 && (
+              <tbody>
+                {live.map((row) => (
                   <ControlRunRow
                     key={row.run.id}
                     row={row}
@@ -209,9 +182,38 @@ export function StationControl() {
                     titleOf={titleOf}
                   />
                 ))}
-            </tbody>
-          )}
-        </table>
+              </tbody>
+            )}
+            {/* Ended in the last hour: folded away, in the same columns. */}
+            {ended.length > 0 && (
+              <tbody id={endedId} className="station-control-ended">
+                <tr className="station-control-toggle-row">
+                  <td colSpan={9}>
+                    <button
+                      type="button"
+                      className="run-link-button station-control-toggle"
+                      aria-expanded={showEnded}
+                      aria-controls={endedId}
+                      onClick={() => setShowEnded((open) => !open)}
+                    >
+                      {showEnded ? "▾" : "▸"}{" "}
+                      {t("station.control.ended", { count: ended.length })}
+                    </button>
+                  </td>
+                </tr>
+                {showEnded &&
+                  ended.map((row) => (
+                    <ControlRunRow
+                      key={row.run.id}
+                      row={row}
+                      now={now}
+                      titleOf={titleOf}
+                    />
+                  ))}
+              </tbody>
+            )}
+          </table>
+        </div>
       )}
 
       <h3 className="station-control-sub">{t("station.control.autopilots")}</h3>

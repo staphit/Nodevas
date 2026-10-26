@@ -709,6 +709,11 @@
 .station-control-result .run-link-button {
   margin-left: auto;
 }
+/* The table never widens the panel: a wide row scrolls inside it. */
+.station-control-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
 .station-control-table {
   width: 100%;
   border-collapse: collapse;
@@ -829,7 +834,7 @@
 
 /* Narrow (a phone, or a squeezed centre column): each run is a card of
    labelled lines instead of a row of nine columns. */
-@container (max-width: 720px) {
+@container (max-width: 900px) {
   .station-control-table thead {
     position: absolute;
     width: 1px;
