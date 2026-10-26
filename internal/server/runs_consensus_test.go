@@ -380,3 +380,34 @@ func TestRunPlanDispatch(t *testing.T) {
 		t.Fatalf("finished plan = %+v", done)
 	}
 }
+
+// A replan is a plan run with a revision: the revision reaches the runner as
+// the job's Review and the run says it is a replan. A revision on any other
+// kind of run, or one too long, is refused.
+func TestRunReplanDispatch(t *testing.T) {
+	f := newRunsFixture(t)
+	hello := routingHello(1)
+	hello.Hello.Capabilities = append(hello.Hello.Capabilities, runnerwire.CapPlan)
+	conn := f.connect(t, hello)
+	for name, body := range map[string]string{
+		"a revision on an implement run": f.createBody(func(r *runnerwire.CreateRunRequest) { r.Revision = "drop the PDF export" }),
+		"a revision too long": f.createBody(func(r *runnerwire.CreateRunRequest) {
+			r.Kind, r.Revision = runnerwire.JobPlan, strings.Repeat("x", runnerwire.MaxRevisionBytes+1)
+		}),
+	} {
+		if response := f.do(t, &f.bea, http.MethodPost, "/api/runs", body, nil); response.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, response.Code, response.Body)
+		}
+	}
+	revision := "Change to the requirement: drop the PDF export.\n- t3 [pending] \"Add PDF export\"\n" + strings.Repeat("y", 6000)
+	run := f.dispatch(t, f.bea, f.createBody(func(r *runnerwire.CreateRunRequest) {
+		r.Kind, r.Revision = runnerwire.JobPlan, revision
+	}))
+	if run.Kind != runnerwire.JobPlan || !run.Replan {
+		t.Fatalf("replan run = %+v", run)
+	}
+	job := nextOffer(t, conn)
+	if job.Kind != runnerwire.JobPlan || job.Review != revision || job.PRURL != "" {
+		t.Fatalf("replan job = %+v", job)
+	}
+}

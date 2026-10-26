@@ -295,6 +295,15 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
+	// Runs waiting for an agent's usage limit to reset are offered again
+	// when it has (internal/runs/handoff.go); the waits are stored, so this
+	// picks up those a restart interrupted.
+	retries, stopRetries := context.WithCancel(context.Background())
+	go func() {
+		<-s.stop
+		stopRetries()
+	}()
+	go s.runs.RunRetries(retries, runs.RetryInterval)
 	s.llm = runners.NewLLMRelay(s.runners)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
@@ -319,6 +328,13 @@ func (s *Server) NotifyAccount(accountID, evType, id string) {
 	if s.hub != nil {
 		s.hub.BroadcastActor(accountID, evType, id)
 	}
+}
+
+// NotifyProject pushes an event to the project's room, as a change made
+// through its API would: the copilot's revision writes the board outside a
+// request.
+func (s *Server) NotifyProject(name, evType, id string) {
+	s.broadcastProject(name, evType, id)
 }
 
 // SetStepUpWindow sets how long a step-up lasts (serve --step-up-minutes).

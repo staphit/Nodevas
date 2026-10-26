@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { runCancellable, runFinal, type PipelineState, type Run, type RunEvent } from "../api";
-import { confirmAction } from "../components/ConfirmDialog";
+import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
-import { formatLocalizedDateTime, useI18n } from "../i18n";
+import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
 import { relativeTime } from "../runners/RunnersModal";
 import {
   formatCompact,
@@ -64,6 +64,18 @@ export interface RetryInfo {
   /** Its number in the list; 0 when unknown or not listed. */
   number: number;
   failureKind?: string;
+  /** The retry continues the earlier run's partial work (a handoff). */
+  continues?: boolean;
+}
+
+/** Whether a run waits, queued, for its agent's usage limit to reset. */
+export function runWaitsForLimit(run: Run): boolean {
+  return run.status === "queued" && Boolean(run.retryAt);
+}
+
+/** "agent/model", or the agent alone. */
+function agentLabel(run: { agent: string; model?: string }): string {
+  return run.model ? `${run.agent}/${run.model}` : run.agent;
 }
 
 const KNOWN_FAILURES = new Set([
@@ -98,6 +110,11 @@ export function retryText(
   t: (key: string, values?: Record<string, string | number>) => string,
   retry: RetryInfo,
 ): string {
+  if (retry.continues) {
+    return retry.number > 0
+      ? t("runs.continuesFrom", { number: retry.number })
+      : t("runs.continuesFromUnknown");
+  }
   const reason = retry.failureKind ? failureLabel(t, retry.failureKind) : "";
   if (retry.number > 0) {
     return reason
@@ -109,12 +126,23 @@ export function retryText(
 
 /** The W5 line under a run: its job kind, a review's verdict, why it failed
  * and which run it falls back from. Nothing for a plain W1 run. */
-function RunTags({ run, retry }: { run: Run; retry: RetryInfo | null }) {
-  const { t } = useI18n();
+function RunTags({
+  run,
+  retry,
+  next = null,
+}: {
+  run: Run;
+  retry: RetryInfo | null;
+  /** The run that took this one's work on, if any. */
+  next?: Run | null;
+}) {
+  const { t, language } = useI18n();
   const failure = run.status === "failed" && run.failureKind ? run.failureKind : "";
   const kind = run.kind === "review" || run.kind === "revise";
   const verdict = run.verdict === "approve" || run.verdict === "changes";
-  if (!kind && !verdict && !failure && !retry) return null;
+  const waiting = runWaitsForLimit(run);
+  const handedTo = run.handoffBranch && next ? next : null;
+  if (!kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
   return (
     <span className="run-row-tags">
       <RunKindBadge kind={run.kind} />
@@ -123,7 +151,107 @@ function RunTags({ run, retry }: { run: Run; retry: RetryInfo | null }) {
         <span className={`run-failure run-failure-${failure}`}>{failureLabel(t, failure)}</span>
       )}
       {retry && <span className="run-retry">{retryText(t, retry)}</span>}
+      {handedTo && (
+        <span className="run-handoff">{t("runs.handedOffTo", { target: agentLabel(handedTo) })}</span>
+      )}
+      {waiting && run.retryAt && (
+        <span className="run-limit-wait" title={formatLocalizedDateTime(run.retryAt, language)}>
+          {t("runs.limitWait", { time: formatLocalizedTime(run.retryAt, language) })}
+        </span>
+      )}
     </span>
+  );
+}
+
+/** A run's handoff, in its detail: the wait for a usage limit (with retry
+ * now and cancel), the partial work it kept and who took it on, and the run
+ * whose work it continues. A note is the earlier run's own account, shown as
+ * plain text, as the next agent got it. */
+function RunHandoff({
+  run,
+  prev,
+  next,
+  prevNumber,
+  nextNumber,
+  onSelect,
+  onCancel,
+}: {
+  run: Run;
+  prev: Run | null;
+  next: Run | null;
+  prevNumber: number;
+  nextNumber: number;
+  onSelect?: (runId: string) => void;
+  onCancel: () => void;
+}) {
+  const { t, language } = useI18n();
+  const retrying = useRuns((s) => Boolean(s.retrying[run.id]));
+  const cancelling = useRuns((s) => Boolean(s.cancelling[run.id]));
+  const retryRunNow = useRuns((s) => s.retryRunNow);
+  const waiting = runWaitsForLimit(run) && run.retryAt;
+  if (!waiting && !run.handoffBranch && !run.continuesFrom) return null;
+  const link = (target: Run, number: number) => (
+    <button type="button" className="run-link-button" onClick={() => onSelect?.(target.id)}>
+      {number > 0 ? `${t("runs.number", { number })} · ` : ""}
+      {agentLabel(target)}
+    </button>
+  );
+  const note = (text: string | undefined) =>
+    text ? (
+      <details className="run-handoff-note">
+        <summary>{t("runs.handoffNote")}</summary>
+        <pre>{text}</pre>
+      </details>
+    ) : null;
+  return (
+    <div className="run-handoff-panel">
+      {waiting && (
+        <div className="run-limit-wait-panel" role="status">
+          <p>
+            <b>{t("runs.limitWait", { time: formatLocalizedTime(waiting, language) })}</b>
+          </p>
+          <p>{t("runs.limitWaitHint", { time: formatLocalizedDateTime(waiting, language) })}</p>
+          <div className="run-limit-wait-actions">
+            <button
+              type="button"
+              className="run-retry-now"
+              disabled={retrying || cancelling}
+              onClick={() => void retryRunNow(run.id)}
+            >
+              {retrying ? t("runs.retrying") : t("runs.retryNow")}
+            </button>
+            <button
+              type="button"
+              className="run-cancel"
+              disabled={retrying || cancelling}
+              onClick={onCancel}
+            >
+              {cancelling ? t("runs.cancelling") : t("runs.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+      {run.continuesFrom && (
+        <div className="run-handoff-from">
+          <p>
+            {t("runs.continuesLead")}{" "}
+            {prev ? link(prev, prevNumber) : <span className="mono">{run.continuesFrom}</span>}
+          </p>
+          {note(prev?.handoffNote)}
+        </div>
+      )}
+      {run.handoffBranch && (
+        <div className="run-handoff-to">
+          <p>{t("runs.handoffKept", { branch: run.handoffBranch })}</p>
+          {next && (
+            <p>
+              {t("runs.handedOffLead")} {link(next, nextNumber)}
+            </p>
+          )}
+          {note(run.handoffNote)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -133,6 +261,7 @@ function RunRow({
   selected,
   onSelect,
   retry = null,
+  next = null,
 }: {
   run: Run;
   /** 1 for the node's first run; 0 when unknown. */
@@ -140,6 +269,7 @@ function RunRow({
   selected: boolean;
   onSelect: () => void;
   retry?: RetryInfo | null;
+  next?: Run | null;
 }) {
   const { t, language } = useI18n();
   const branch = run.branch || run.base;
@@ -171,7 +301,7 @@ function RunRow({
             {relativeTime(run.createdAt)}
           </time>
         </span>
-        <RunTags run={run} retry={retry} />
+        <RunTags run={run} retry={retry} next={next} />
         <span className="run-row-meta">
           <span>{run.runnerName || run.runnerId}</span>
           <span>{run.repoName || run.repoId}</span>
@@ -336,7 +466,24 @@ function atEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
 }
 
-export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo | null }) {
+export function RunDetail({
+  run,
+  retry = null,
+  prev = null,
+  next = null,
+  prevNumber = 0,
+  nextNumber = 0,
+  onSelect,
+}: {
+  run: Run;
+  retry?: RetryInfo | null;
+  /** The run this one retries, and the one that retries it, when listed. */
+  prev?: Run | null;
+  next?: Run | null;
+  prevNumber?: number;
+  nextNumber?: number;
+  onSelect?: (runId: string) => void;
+}) {
   const { t, language } = useI18n();
   const events = useRuns((s) => s.eventsByRun[run.id]);
   const eventError = useRuns((s) => s.eventErrors[run.id]);
@@ -380,21 +527,7 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
   }, [list.length]);
 
   const onCancel = async () => {
-    const confirmed = await confirmAction({
-      title: t("runs.cancelTitle"),
-      description: [
-        t(run.status === "running" ? "runs.cancelRunning" : "runs.cancelPending"),
-        // The hub cancels every step of a pipeline when one is cancelled.
-        run.pipelineId ? t("runs.cancelPipeline") : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-
-      confirmLabel: t("runs.cancel"),
-      cancelLabel: t("runs.keep"),
-      tone: "danger",
-    });
-    if (confirmed) await cancelRun(run.id);
+    if (await confirmCancelRun(t, run)) await cancelRun(run.id);
   };
 
   const hintKey = KNOWN_STATUSES.has(run.status) ? `runs.statusHint.${run.status}` : "";
@@ -410,14 +543,14 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
             {run.agent}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
-          <RunTags run={run} retry={retry} />
+          <RunTags run={run} retry={retry} next={next} />
           {stopRequested ? (
             <span>{t("runs.stopRequested")}</span>
           ) : (
             hintKey && <span>{t(hintKey)}</span>
           )}
         </div>
-        {runCancellable(run.status) && !stopRequested && (
+        {runCancellable(run.status) && !stopRequested && !runWaitsForLimit(run) && (
           <button
             type="button"
             className="run-cancel"
@@ -429,6 +562,15 @@ export function RunDetail({ run, retry = null }: { run: Run; retry?: RetryInfo |
         )}
       </div>
       <MergeControl run={run} className="run-detail-merge" />
+      <RunHandoff
+        run={run}
+        prev={prev}
+        next={next}
+        prevNumber={prevNumber}
+        nextNumber={nextNumber}
+        onSelect={onSelect}
+        onCancel={() => void onCancel()}
+      />
 
       {(runHasChanges(run) || run.prUrl || run.prError) && (
         <div className="run-detail-changes">
@@ -689,10 +831,15 @@ export function NodeRuns({ id }: { id: string }) {
   const numberAt = (index: number) => (list.length < RUN_LIST_CAP ? list.length - index : 0);
   const retryOf = (run: Run): RetryInfo | null => {
     if (!run.retryOf) return null;
+    const continues = Boolean(run.continuesFrom);
     const index = list.findIndex((item) => item.id === run.retryOf);
-    if (index === -1) return { number: 0 };
-    return { number: numberAt(index), failureKind: list[index].failureKind };
+    if (index === -1) return { number: 0, continues };
+    return { number: numberAt(index), failureKind: list[index].failureKind, continues };
   };
+  const nextOf = (run: Run): Run | null => list.find((item) => item.retryOf === run.id) ?? null;
+  const prevOf = (run: Run): Run | null =>
+    run.retryOf ? (list.find((item) => item.id === run.retryOf) ?? null) : null;
+  const numberOf = (run: Run | null) => (run ? numberAt(list.indexOf(run)) : 0);
   const row = (run: Run, index: number) => (
     <RunRow
       key={run.id}
@@ -701,6 +848,7 @@ export function NodeRuns({ id }: { id: string }) {
       selected={run.id === selected?.id}
       onSelect={() => selectRun(id, run.id)}
       retry={retryOf(run)}
+      next={nextOf(run)}
     />
   );
 
@@ -745,7 +893,18 @@ export function NodeRuns({ id }: { id: string }) {
               ),
             )}
           </ul>
-          {selected && <RunDetail key={selected.id} run={selected} retry={retryOf(selected)} />}
+          {selected && (
+            <RunDetail
+              key={selected.id}
+              run={selected}
+              retry={retryOf(selected)}
+              prev={prevOf(selected)}
+              next={nextOf(selected)}
+              prevNumber={numberOf(prevOf(selected))}
+              nextNumber={numberOf(nextOf(selected))}
+              onSelect={(runId) => selectRun(id, runId)}
+            />
+          )}
         </>
       )}
 

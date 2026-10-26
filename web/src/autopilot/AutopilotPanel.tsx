@@ -18,7 +18,9 @@ import { AutopilotGrid, AutopilotLegend } from "./AutopilotGrid";
 import { useAutopilot } from "./autopilotStore";
 import { BreakdownForm, eligibleRunners } from "./BreakdownForm";
 import { HumanReviewList } from "./HumanReview";
+import { usePlanningRun } from "./planningRun";
 import { PolicyEditor } from "./PolicyEditor";
+import { useAutopilotControl } from "./useAutopilotControl";
 import { defaultPolicy, normalizePolicy, policyProblems, type ImplementChoice } from "./policy";
 
 const KNOWN_STATUS = new Set(["running", "paused", "succeeded", "failed", "cancelled"]);
@@ -141,31 +143,17 @@ function StartForm({
   );
 }
 
+export { revisedSincePause } from "./useAutopilotControl";
+
 /** A run's header, its controls, the human review queue and the grid. */
 function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void }) {
   const { t } = useI18n();
   const run = view.run;
   const tasks = view.tasks ?? [];
   const ended = autopilotEnded(run.status);
-  const act = useAutopilot((s) => s.act);
   const taskAct = useAutopilot((s) => s.taskAct);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [acting, setActing] = useState(false);
-
-  const control = async (action: "pause" | "resume" | "cancel") => {
-    if (action === "cancel") {
-      const ok = await confirmAction({
-        title: t("autopilot.cancelTitle"),
-        description: t("autopilot.cancelDescription"),
-        confirmLabel: t("autopilot.cancel"),
-        tone: "danger",
-      });
-      if (!ok) return;
-    }
-    setActing(true);
-    await act(run.id, action);
-    setActing(false);
-  };
+  const { acting, resumeAction, resumeLabel, control } = useAutopilotControl(view);
 
   const onTaskAction = async (task: TaskInstance, action: "retry" | "skip") => {
     if (action === "skip") {
@@ -218,9 +206,9 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
               type="button"
               className="ap-btn"
               disabled={acting}
-              onClick={() => void control("resume")}
+              onClick={() => void control(resumeAction)}
             >
-              {t("autopilot.resume")}
+              {resumeLabel}
             </button>
           )}
           {!ended && (
@@ -270,6 +258,32 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
 }
 
 /**
+ * A breakdown or a revision's replan running on the goal: its tasks are
+ * about to change, and after a revision nothing resumes until the person
+ * says so (the copilot asks when the replan ends).
+ */
+export function PlanningNotice({ goalNodeId }: { goalNodeId: string }) {
+  const { t } = useI18n();
+  const run = usePlanningRun(goalNodeId);
+  if (!run) return null;
+  return (
+    <p className={`ap-planning${run.replan ? " is-revision" : ""}`} role="status">
+      <span className="ap-glyph" aria-hidden="true">
+        ◌
+      </span>{" "}
+      {t(run.replan ? "autopilot.revisingNotice" : "autopilot.planningNotice")}{" "}
+      <button
+        type="button"
+        className="run-link-button"
+        onClick={() => openNodeRuns(goalNodeId, run.id)}
+      >
+        {t("autopilot.viewRun")}
+      </button>
+    </p>
+  );
+}
+
+/**
  * The Autopilot tab of a node: with no run yet, break the goal down (plan
  * run) and start the autopilot with a policy; with one, its controls, the
  * tasks waiting for a person and the DAG grid.
@@ -299,6 +313,7 @@ export function AutopilotPanel({ id }: { id: string }) {
           {error}
         </p>
       )}
+      <PlanningNotice goalNodeId={id} />
       {!known && loading && <p className="run-hint">{t("autopilot.loading")}</p>}
       {known && (!view || newRun) && (
         <>

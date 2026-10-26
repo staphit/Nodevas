@@ -90,3 +90,34 @@ func TestCheckKindPlan(t *testing.T) {
 		t.Fatal("a plan naming a PR passed")
 	}
 }
+
+// A replan (a plan job with a revision) gets the reconciliation rules and
+// the revision in its prompt, and its summary keeps the reconciliation block
+// however long the final message is: the hub applies it from there.
+func TestReplanJob(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	job := testJob("run-replan", "replan: Build the export feature\n\n## Revisions\n\nDrop the PDF export.")
+	job.Kind = runnerwire.JobPlan
+	job.Review = "Change to the requirement: drop the PDF export.\n- t1 [done] \"Add the table\"\n- t3 [pending] \"Add PDF export\""
+	env.hub.offer(job)
+	result := env.hub.wait("run-replan", runnerwire.TypeFinish).Result
+	if result.Status != runnerwire.RunSucceeded {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(result.Summary) > runnerwire.MaxSummaryBytes ||
+		!strings.HasSuffix(result.Summary, "RECONCILE:\n- keep t1\n- skip t3: the PDF export was dropped\n- add t9: Add the SSO button\nEND RECONCILE") {
+		t.Fatalf("summary (%d bytes) lost its block: …%s", len(result.Summary), result.Summary[max(len(result.Summary)-200, 0):])
+	}
+	stdin := env.recorded(t, "run-replan", "stdin")
+	for _, want := range []string{"reconcile the goal's tasks with the revised requirement", "keep (still needed",
+		"flag (a task marked running", `"goal:n-1"`, "RECONCILE:\n- keep <id>", "END RECONCILE",
+		"do not dispatch or merge anything", `t3 [pending] "Add PDF export"`, "drop the PDF export", "## Revisions"} {
+		if !strings.Contains(stdin, want) {
+			t.Errorf("prompt missing %q:\n%s", want, stdin)
+		}
+	}
+	if items, ok := runnerwire.ParseReconcile(result.Summary); !ok || len(items) != 3 {
+		t.Fatalf("items = %+v", items)
+	}
+}

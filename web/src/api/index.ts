@@ -8,6 +8,7 @@ import { agentsApi } from "./agents";
 import { auditApi } from "./audit";
 import { autopilotApi, planApi } from "./autopilot";
 import { authApi } from "./auth";
+import { controlApi } from "./control";
 import { copilotApi } from "./copilot";
 import { foldersApi } from "./folders";
 import { graphApi } from "./graph";
@@ -232,6 +233,13 @@ export type {
   TaskStage,
   TaskState,
 } from "./autopilot";
+export type {
+  ControlSkipReason,
+  ControlTarget,
+  ControlTargetKind,
+  PauseAllRequest,
+  PauseAllResponse,
+} from "./control";
 export { connectWS, documentKey } from "./ws";
 export type { DragGhost, LiveConnection, NodeLock, Peer, WSEvent } from "./ws";
 // W2.5: interactive runs and their terminal socket.
@@ -267,4 +275,5 @@ export const api = {
   ...packsApi,
   ...autopilotApi,
   ...planApi,
+  ...controlApi,
 };

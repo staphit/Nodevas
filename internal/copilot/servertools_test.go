@@ -24,6 +24,13 @@ type fakeAPI struct {
 	runsStatus int
 	runsError  string
 	autopilot  string // the body POST /api/autopilot answers with
+	// For revise_goal (revise_test.go): the board outline GET /api/graph
+	// answers with, the runs still going, the goal's latest autopilot (GET
+	// /api/autopilot?goal=; empty is none) and the goal node's content.
+	graph       string
+	active      []runnerwire.Run
+	latest      string
+	goalContent string
 }
 
 type recorded struct {
@@ -65,6 +72,27 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			answer = `{"id":"ap-1","status":"running"}`
 		}
 		_, _ = w.Write([]byte(answer))
+	case "GET /api/graph":
+		if f.graph == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(f.graph))
+	case "GET /api/runs":
+		_ = json.NewEncoder(w).Encode(runnerwire.RunListResponse{Runs: f.active})
+	case "GET /api/autopilot":
+		if f.latest == "" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"autopilot not found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(f.latest))
+	case "GET /api/nodes/node-0042":
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "node-0042", "content": f.goalContent, "rev": "rev-1"})
+	case "PUT /api/nodes/node-0042":
+		_, _ = w.Write([]byte(`{"ok":true,"rev":"rev-2"}`))
+	case "POST /api/autopilot/ap-1/pause", "POST /api/autopilot/ap-1/adopt":
+		_, _ = w.Write([]byte(`{"run":{"id":"ap-1","status":"running","counts":{"total":4}},"tasks":[]}`))
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"no such route"}`))
@@ -329,18 +357,18 @@ func TestStartAutopilotImplementer(t *testing.T) {
 // The server tools are offered only where the copilot has the router, and
 // never as MCP tools: an agent cannot reach them.
 func TestServerToolsAreCopilotOnly(t *testing.T) {
-	_, without := collectTools(nil, nil, false)
+	_, without := collectTools(nil, nil, nil)
 	if _, ok := without["start_breakdown"]; ok {
 		t.Fatal("server tools offered without a router")
 	}
-	tools, info := collectTools(nil, nil, true)
-	for _, name := range []string{"start_breakdown", "start_autopilot"} {
+	tools, info := collectTools(nil, nil, serverToolNames())
+	for _, name := range []string{"start_breakdown", "start_autopilot", "revise_goal"} {
 		ti, ok := info[name]
 		if !ok || !ti.server || !ti.alwaysAsk || ti.kind != toolbridge.KindRisky {
 			t.Fatalf("%s info = %+v", name, ti)
 		}
 	}
-	if len(tools) != 2 {
+	if len(tools) != 3 {
 		t.Fatalf("tools = %+v", tools)
 	}
 

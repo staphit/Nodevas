@@ -210,6 +210,10 @@ const MaxAutopilotTasks = 25
 type AutopilotView struct {
 	Run   AutopilotRun   `json:"run"`
 	Tasks []TaskInstance `json:"tasks"`
+	// Added are the goal's members that joined after the autopilot started
+	// (a revision's replan adds them): the frozen task set leaves them out
+	// until the autopilot is resumed with adopt.
+	Added []string `json:"added,omitempty"`
 }
 
 // AutopilotListResponse is GET /api/autopilot without ?goal=: the project's

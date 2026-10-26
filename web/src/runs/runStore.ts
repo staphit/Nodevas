@@ -88,6 +88,9 @@ export interface RunStoreState {
   /** Creates a run; throws the API error so the dialog can show it. */
   createRun: (body: CreateRunRequest) => Promise<Run>;
   cancelRun: (runId: string) => Promise<boolean>;
+  /** Ends a run's wait for its agent's usage limit to reset. */
+  retryRunNow: (runId: string) => Promise<boolean>;
+  retrying: Record<string, boolean>;
   /** Approves merging a run's PR at the head the approver saw. */
   mergeRun: (runId: string, headSha: string) => Promise<boolean>;
   clearMergeError: (runId: string) => void;
@@ -227,6 +230,7 @@ const initial = {
   selectedRun: {},
   cancelling: {},
   cancelErrors: {},
+  retrying: {},
   stopRequested: {},
   merging: {},
   mergeErrors: {},
@@ -518,6 +522,32 @@ export const useRuns = create<RunStoreState>((set, get) => ({
         const cancelling = { ...state.cancelling };
         delete cancelling[runId];
         return { cancelling };
+      });
+    }
+  },
+
+  retryRunNow: async (runId) => {
+    if (get().retrying[runId]) return false;
+    set((state) => {
+      const cancelErrors = { ...state.cancelErrors };
+      delete cancelErrors[runId];
+      return { retrying: { ...state.retrying, [runId]: true }, cancelErrors };
+    });
+    try {
+      const run = await api.retryRunNow(runId);
+      set((state) => ({
+        runsByNode: upsertRun(state.runsByNode, run),
+        latestByNode: foldLatest(state.latestByNode, [run]),
+      }));
+      return true;
+    } catch (error) {
+      set((state) => ({ cancelErrors: { ...state.cancelErrors, [runId]: message(error) } }));
+      return false;
+    } finally {
+      set((state) => {
+        const retrying = { ...state.retrying };
+        delete retrying[runId];
+        return { retrying };
       });
     }
   },

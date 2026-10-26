@@ -785,6 +785,25 @@ CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
 CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
 `,
 	},
+	{
+		name: "0023_copilot_followup_revisions",
+		stmt: `
+ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown';
+ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		name: "0024_run_handoff",
+		stmt: `
+ALTER TABLE runs ADD COLUMN handoff_branch     TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN handoff_note       TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_handoff_branch TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN job_handoff_note   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN retry_at           TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

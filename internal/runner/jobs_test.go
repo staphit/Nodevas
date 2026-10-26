@@ -96,6 +96,38 @@ func TestHelperProcess(t *testing.T) {
 	case "codex-ok":
 		fixture("codex_stream.jsonl")
 		os.Exit(0)
+	case "edit-quota", "quota":
+		// Some work, a plan, a command that printed secrets, then Claude
+		// Code's usage limit (handoff_test.go).
+		if mode == "edit-quota" {
+			edit()
+		}
+		line := func(v any) { raw, _ := json.Marshal(v); fmt.Println(string(raw)) }
+		type m = map[string]any
+		assistant := func(blocks ...m) {
+			line(m{"type": "assistant", "message": m{"role": "assistant", "content": blocks}})
+		}
+		assistant(m{"type": "text", "text": "I added hello.txt; next I wire it into the README."})
+		assistant(m{"type": "tool_use", "id": "t1", "name": "TodoWrite", "input": m{"todos": []m{
+			{"content": "Add hello.txt", "status": "completed"},
+			{"content": "Wire hello into the README", "status": "in_progress"},
+			{"content": "Write the tests", "status": "pending"},
+		}}})
+		assistant(m{"type": "tool_use", "id": "t2", "name": "Bash", "input": m{"command": "env | grep TOKEN"}})
+		line(m{"type": "user", "message": m{"role": "user", "content": []m{{"type": "tool_result", "tool_use_id": "t2",
+			"content": "API_TOKEN=supersecretvalue\nGH=ghp_abcdefghijklmnopqrstuvwxyz0123"}}}})
+		line(m{"type": "result", "subtype": "success", "is_error": true,
+			"result": fmt.Sprintf("Claude AI usage limit reached|%d", time.Now().Add(2*time.Hour).Unix())})
+		os.Exit(1)
+	case "continue":
+		// What the worktree starts from, then more work on top.
+		out, _ := exec.Command("git", "-C", wd, "log", "--format=%s").Output()
+		put("log", string(out))
+		if err := os.WriteFile(filepath.Join(wd, "more.txt"), []byte("more\n"), 0o644); err != nil {
+			os.Exit(9)
+		}
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
 	case "repoconfig":
 		// Which of the repository's own agent config the agent found, then
 		// some of its own, written into the worktree.
@@ -134,6 +166,15 @@ func TestHelperProcess(t *testing.T) {
 		case "review-silent":
 			text = "Looks fine to me."
 		}
+		raw, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": false, "result": text,
+			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
+		fmt.Println(string(raw))
+		os.Exit(0)
+	case "replan":
+		// A planner with a long final message ending in its reconciliation:
+		// the cap on the summary must not cut the block.
+		text := strings.Repeat("I read the code and the goal's tasks. ", 200) +
+			"\n\nRECONCILE:\n- keep t1\n- skip t3: the PDF export was dropped\n- add t9: Add the SSO button\nEND RECONCILE"
 		raw, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": false, "result": text,
 			"usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
 		fmt.Println(string(raw))

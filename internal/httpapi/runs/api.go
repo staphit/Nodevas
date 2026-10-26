@@ -30,8 +30,9 @@ import (
 const (
 	// MaxExtraPrompt caps the dispatcher's extra instructions.
 	MaxExtraPrompt = runs.MaxExtraPrompt
-	maxCreateBody  = 16 << 10
-	listLimit      = 50
+	// Room for the extra prompt and a replan's revision (MaxRevisionBytes).
+	maxCreateBody = 48 << 10
+	listLimit     = 50
 )
 
 // API exposes runs over HTTP.
@@ -64,6 +65,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/events", a.events)
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
+	api.POST("/runs/:id/retry-now", a.retryNow)
 	api.POST("/runs/:id/merge", a.merge)
 	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
@@ -372,6 +374,33 @@ func (a *API) cancel(c *gin.Context) {
 		}
 	}
 	updated, err := a.d.Cancel(c.Request.Context(), r.ID, "cancelled by "+name)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, updated.Run)
+}
+
+// retryNow ends a run's wait for its agent's usage limit to reset: the run
+// is offered as soon as its runner has room, still subject to the budget and
+// to the runner's own acceptance. Only a person may: it starts code on
+// someone's machine, as a dispatch does.
+func (a *API) retryNow(c *gin.Context) {
+	actor := auth.ActorFrom(c.Request)
+	if actor.IsAgent() {
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot retry runs"), nil)
+		return
+	}
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	name := actor.Name
+	if name == "" {
+		name = actor.ID
+	}
+	updated, err := a.d.RetryNow(c.Request.Context(), r.ID, name)
 	if err != nil {
 		fail(c, err)
 		return

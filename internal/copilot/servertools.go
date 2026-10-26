@@ -23,7 +23,9 @@ import (
 // Copilot-only tools (W7): turning what the person dictated into work on
 // their own machine. start_breakdown files the requirement as a goal node and
 // dispatches a plan run that breaks it into tasks; start_autopilot hands the
-// goal's tasks to the orchestrator.
+// goal's tasks to the orchestrator (or resumes its paused autopilot);
+// revise_goal changes a goal's requirement mid-way and has a replan run
+// reconcile its tasks (revise.go).
 //
 // They are not MCP tools (internal/mcp), so no agent reaches them, through the
 // runner proxy or otherwise: agents cannot dispatch runs. Only a copilot turn
@@ -82,6 +84,22 @@ var serverTools = map[string]serverToolSpec{
 			`"required":["goalNodeId"],"additionalProperties":false}`,
 		run: runStartAutopilot,
 	},
+	"revise_goal": {
+		title: "Revise a goal",
+		description: "Change the requirement of a goal that already has tasks, as the person dictated it, and have " +
+			"a replan run re-evaluate the tasks on their runner. It pauses the goal's autopilot if it is running, " +
+			"records the change on the goal under Revisions (the original requirement stays), and starts a plan run " +
+			"that keeps done tasks, adjusts or skips pending ones, flags ones in progress and adds new ones; it " +
+			"changes no files and resumes nothing. Use it only after the person confirmed the change. For a new " +
+			"goal, use start_breakdown.",
+		schema: `{"type":"object","properties":{` +
+			`"goalNodeId":{"type":"string","description":"The goal node whose requirement changes"},` +
+			`"change":{"type":"string","description":"How the requirement changes, in the person's own words"},` +
+			`"runnerId":{"type":"string"},"agent":{"type":"string"},"model":{"type":"string"},` +
+			`"repoId":{"type":"string","description":"Repository on the runner; the runner's first when omitted"}},` +
+			`"required":["goalNodeId","change"],"additionalProperties":false}`,
+		run: runReviseGoal,
+	},
 }
 
 // serverToolNames lists serverTools in a stable order.
@@ -103,9 +121,10 @@ type serverToolEnv struct {
 	remoteAddr string
 	project    string
 	accountID  string
-	// followup, when set, records a plan run start_breakdown started, so the
-	// copilot follows up in the conversation when it ends (followup.go).
-	followup func(goalNodeID, runID string)
+	// followup, when set, records a plan run start_breakdown or revise_goal
+	// started (revision set for the latter), so the copilot follows up in the
+	// conversation when it ends (followup.go, revise.go).
+	followup func(goalNodeID, runID string, revision *Revision)
 }
 
 // maxServerToolResponse bounds a response a server tool reads.
@@ -168,7 +187,8 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 		if text == "" {
 			text = http.StatusText(recorder.Code)
 		}
-		return fmt.Errorf("%s %s: %s (HTTP %d)", method, path, truncateUTF8(text, 500), recorder.Code)
+		return &apiError{status: recorder.Code,
+			text: fmt.Sprintf("%s %s: %s (HTTP %d)", method, path, truncateUTF8(text, 500), recorder.Code)}
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
@@ -176,6 +196,20 @@ func (e *serverToolEnv) do(ctx context.Context, method, path string, body, out a
 		}
 	}
 	return nil
+}
+
+// apiError is a non-2xx answer from the API.
+type apiError struct {
+	status int
+	text   string
+}
+
+func (e *apiError) Error() string { return e.text }
+
+// isStatus reports whether err is the API answering with status.
+func isStatus(err error, status int) bool {
+	var answer *apiError
+	return errors.As(err, &answer) && answer.status == status
 }
 
 func toolError(format string, args ...any) toolbridge.Result {
@@ -369,7 +403,7 @@ func runStartBreakdown(ctx context.Context, env *serverToolEnv, input json.RawMe
 	note := "The plan run reads the repository and adds task nodes under the goal; it may take a few minutes. " +
 		"Its tasks need the person's review before the autopilot starts."
 	if env.followup != nil && run.ID != "" {
-		env.followup(goal, run.ID)
+		env.followup(goal, run.ID, nil)
 		note += " When it ends, this conversation gets a follow-up by itself: its tasks and the question whether " +
 			"to start the autopilot. Tell the person you will come back to them then; they need not ask."
 	}
@@ -418,6 +452,15 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 	goal := strings.TrimSpace(in.GoalNodeID)
 	if goal == "" {
 		return toolError("give the goalNodeId")
+	}
+	// A paused autopilot on the goal (revise_goal pauses it) is resumed with
+	// the goal's tasks as they stand, rather than refused as a second one.
+	live, err := liveAutopilot(ctx, env, goal)
+	if err != nil {
+		return toolError("Could not read the goal's autopilot: %v", err)
+	}
+	if live != nil && live.Status == runnerwire.AutopilotPaused {
+		return resumeAutopilot(ctx, env, goal, *live)
 	}
 	policy := runnerwire.AutopilotPolicy{
 		MaxParallel: in.MaxParallel, MaxRounds: defaultAutopilotRounds, AutoMerge: in.AutoMerge,
@@ -487,7 +530,7 @@ func runStartAutopilot(ctx context.Context, env *serverToolEnv, input json.RawMe
 		Status string                   `json:"status"`
 		Run    *runnerwire.AutopilotRun `json:"run"`
 	}
-	err := env.do(ctx, http.MethodPost, "/api/autopilot", runnerwire.CreateAutopilotRequest{
+	err = env.do(ctx, http.MethodPost, "/api/autopilot", runnerwire.CreateAutopilotRequest{
 		GoalNodeID: goal, Policy: policy,
 	}, &answer)
 	if err != nil {
@@ -543,9 +586,9 @@ func chainText(chain []runnerwire.AgentModel) string {
 	return strings.Join(parts, ", ")
 }
 
-// serverToolDefs are the provider tools for the server tools, in order.
-func serverToolDefs() []provider.Tool {
-	names := serverToolNames()
+// serverToolDefs are the provider tools for the named server tools, in
+// order.
+func serverToolDefs(names []string) []provider.Tool {
 	tools := make([]provider.Tool, 0, len(names))
 	for _, name := range names {
 		spec := serverTools[name]

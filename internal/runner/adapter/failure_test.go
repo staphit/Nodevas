@@ -109,3 +109,18 @@ func TestClassifyTables(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code's rate_limit_event says when a refused window resets; an
+// allowed one says nothing about a failure.
+func TestClaudeRateLimitEventReset(t *testing.T) {
+	p := Claude{}.NewParser()
+	p.Parse([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792785600,"rateLimitType":"five_hour"}}`))
+	if !p.Outcome().ResetAt.IsZero() {
+		t.Fatalf("allowed event set a reset: %v", p.Outcome().ResetAt)
+	}
+	p.Parse([]byte(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1792785600,"rateLimitType":"five_hour"}}`))
+	p.Parse([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"Claude AI usage limit reached|1792785600"}`))
+	if got := p.Outcome(); got.ResetAt.Unix() != 1792785600 || !got.IsError {
+		t.Fatalf("outcome = %+v", got)
+	}
+}

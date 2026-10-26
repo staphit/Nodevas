@@ -49,7 +49,12 @@ func (j *jobs) executePlan(ctx context.Context, r *run) {
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 		Text: fmt.Sprintf("plan: worktree %s from %s (read only; thrown away after)", wt.Path, wt.BaseRef)})
 
-	result, _ := j.runAgent(ctx, r, wt, job)
+	result, text := j.runAgent(ctx, r, wt, job)
+	if strings.TrimSpace(job.Review) != "" {
+		// A replan's reconciliation ends its final message; the hub reads it
+		// off the summary, so the summary's cap must not cut it.
+		result.Summary = planSummary(text, result.Summary)
+	}
 	if err := checkGitDir(j.ctx, wt); err != nil {
 		cleanup()
 		j.finish(r, runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1,
@@ -61,4 +66,28 @@ func (j *jobs) executePlan(ctx context.Context, r *run) {
 	}
 	cleanup()
 	j.finish(r, result)
+}
+
+// planSummary is a replan's final message as RunResult.Summary carries it:
+// cut to its cap, but keeping the reconciliation block at the end where the
+// cut would lose it. fallback is the summary as the adapter made it, for an
+// agent whose final text did not come through.
+func planSummary(text, fallback string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = strings.TrimSpace(fallback)
+	}
+	if len(text) <= runnerwire.MaxSummaryBytes {
+		return text
+	}
+	items, ok := runnerwire.ParseReconcile(text)
+	if !ok {
+		return adapter.Truncate(text, runnerwire.MaxSummaryBytes)
+	}
+	const gap = "\n…\n\n"
+	block := runnerwire.FormatReconcile(items, runnerwire.MaxSummaryBytes-len(gap))
+	if i := strings.LastIndex(text, runnerwire.ReconcileStart); i >= 0 {
+		text = strings.TrimSpace(text[:i])
+	}
+	return adapter.Truncate(text, max(runnerwire.MaxSummaryBytes-len(block)-len(gap), 0)) + gap + block
 }
