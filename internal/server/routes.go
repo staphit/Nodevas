@@ -7,6 +7,7 @@ import (
 
 	agentsapi "nodevas/internal/httpapi/agents"
 	autopilotapi "nodevas/internal/httpapi/autopilot"
+	controlapi "nodevas/internal/httpapi/control"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/graph"
 	membersapi "nodevas/internal/httpapi/members"
@@ -103,6 +104,8 @@ func (s *Server) Handler() http.Handler {
 			s.configureAutopilotStepUp(autopilotAPI)
 			autopilotAPI.Register(api)
 		}
+		// Station's control center: pause everything the viewer may.
+		controlapi.New(s.pm, s.runs, s.autopilot).Register(api)
 	} else {
 		s.configureStepUp(nil)
 	}
