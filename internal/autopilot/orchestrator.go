@@ -568,6 +568,8 @@ func (o *Orchestrator) act(ctx context.Context, w *work, t *runnerwire.TaskInsta
 			setState(t, runnerwire.TaskWaitingHuman, runnerwire.StageHuman, "")
 		case d.waitingReview:
 			setState(t, runnerwire.TaskWaitingReview, "", "")
+		case d.queued && d.retryAt != "":
+			setState(t, runnerwire.TaskQueued, "", "waiting for the usage limit to reset; retry at "+d.retryAt)
 		case d.queued:
 			setState(t, runnerwire.TaskQueued, "", "")
 		default:

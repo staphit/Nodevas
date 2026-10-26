@@ -77,6 +77,14 @@ type Record struct {
 	// stepped up when the run was made ("" not). W6: offers vouch for the
 	// dispatcher only within the step-up window from it (Dispatcher.SteppedUp).
 	SteppedUpAt string
+	// Handoff (handoff.go): the handoff branch and note this run is offered
+	// to continue from (the API shows the branch as Run.ContinuesFrom), and
+	// how many usage-limit waits its lineage has had. ResetAt is what the
+	// runner's finish said about the limit's reset; it is not stored.
+	JobHandoffBranch string
+	JobHandoffNote   string
+	LimitWaits       int
+	ResetAt          string
 }
 
 // Job is the offer for this run.
@@ -86,7 +94,8 @@ func (r Record) Job() runnerwire.Job {
 		Prompt: r.JobPrompt, Agent: r.Agent, Model: r.Model, RepoID: r.RepoID,
 		Base: r.Base, RequestedBy: r.CreatedByName,
 		Kind: r.Kind, Branch: r.JobBranch, PRURL: r.JobPRURL, Review: r.Review,
-		Mode: r.Mode,
+		Mode:          r.Mode,
+		HandoffBranch: r.JobHandoffBranch, HandoffNote: r.JobHandoffNote,
 	}
 }
 
@@ -170,6 +179,12 @@ type New struct {
 	SteppedUpAt string
 	// Mode is runnerwire.ModeHeadless or ModeInteractive (W2.5).
 	Mode string
+	// Handoff (handoff.go): the handoff to continue from; RetryAt, for a run
+	// that waits for a usage limit to reset, when it may be offered; and the
+	// lineage's waits so far.
+	JobHandoffBranch, JobHandoffNote string
+	RetryAt                          string
+	LimitWaits                       int
 }
 
 // Create records a queued run.
@@ -192,6 +207,15 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	// Only a handoff branch name, and only for an implement run: the runner
+	// checks it is its own, the hub that it is one at all.
+	handoffBranch := ""
+	if in.JobHandoffBranch != "" {
+		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || in.Kind != runnerwire.JobImplement {
+			return Record{}, fmt.Errorf("%w: handoff branch %q", ErrInvalid, in.JobHandoffBranch)
+		}
+		handoffBranch = in.JobHandoffBranch
+	}
 	id, err := newID()
 	if err != nil {
 		return Record{}, err
@@ -208,14 +232,15 @@ INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
-                  stepped_up_at, mode)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
 		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
 		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
-		Truncate(in.SteppedUpAt, 64), in.Mode)
+		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
+		Truncate(in.RetryAt, 64), int64(in.LimitWaits))
 	if err != nil {
 		return Record{}, err
 	}
@@ -228,22 +253,26 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        started_at, finished_at, commit_sha, files_changed, additions, deletions,
        pr_number, pr_state, pr_error, pr_head_sha,
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
-       stepped_up_at, mode`
+       stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
+       retry_at, limit_waits`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var usage, fallbacks string
-	var exit, files, additions, deletions, prNumber int64
+	var exit, files, additions, deletions, prNumber, limitWaits int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
 		&r.CreatedBy, &r.CreatedByName, &r.CreatedAt, &r.StartedAt, &r.FinishedAt,
 		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA,
 		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
-		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode); err != nil {
+		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
+		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)
+	r.LimitWaits = int(limitWaits)
+	r.ContinuesFrom = r.JobHandoffBranch
 	r.FilesChanged, r.Additions, r.Deletions, r.PRNumber = int(files), int(additions), int(deletions), int(prNumber)
 	if usage != "" {
 		var parsed runnerwire.Usage
@@ -383,6 +412,9 @@ type Change struct {
 	// FailureKind and Verdict are what a finish reports (W5).
 	FailureKind string
 	Verdict     string
+	// HandoffBranch and HandoffNote are a handoff a finish reports.
+	HandoffBranch string
+	HandoffNote   string
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -424,6 +456,10 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.Verdict != "" {
 		set("verdict", change.Verdict)
+	}
+	if change.HandoffBranch != "" {
+		set("handoff_branch", change.HandoffBranch)
+		set("handoff_note", Truncate(change.HandoffNote, runnerwire.MaxHandoffNoteBytes))
 	}
 	if change.ExitCode != nil {
 		set("exit_code", int64(*change.ExitCode))
@@ -474,11 +510,23 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	if result.Status == runnerwire.RunFailed {
 		failureKind = CleanFailureKind(result.FailureKind)
 	}
-	return s.Transition(ctx, id, result.Status, Change{
+	// A handoff is a failed run's, and only ever a handoff branch's name: a
+	// runner cannot have the hub hand on any other ref.
+	handoffBranch, handoffNote := "", ""
+	if result.Status == runnerwire.RunFailed && runnerwire.HandoffWorthy(failureKind) &&
+		runnerwire.ValidHandoffBranch(result.HandoffBranch) {
+		handoffBranch, handoffNote = result.HandoffBranch, result.HandoffNote
+	}
+	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
 		FailureKind: failureKind, Verdict: CleanVerdict(result.Verdict),
+		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
 	})
+	if err == nil && result.Status == runnerwire.RunFailed {
+		r.ResetAt = Truncate(result.ResetAt, 64)
+	}
+	return r, err
 }
 
 // cleanEvent clamps an event to the limits before it is stored.
