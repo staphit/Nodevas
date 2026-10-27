@@ -133,11 +133,45 @@ export interface Run {
   /** While the run waits, queued, for its agent's usage limit to reset: when
    * it is offered again (RFC3339). Absent once released. */
   retryAt?: string;
+  /** Agent roles: the role the run acted in (absent: legacy), its verify
+   * result (red/green), a judge's checks, and a person's stage override. */
+  role?: string;
+  verify?: VerifyResult | null;
+  checks?: CheckResult[] | null;
+  override?: string;
   createdBy: string;
   createdByName: string;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+/** Mirrors runnerwire.VerifyResult: one run of the repo's test command. */
+export interface VerifyResult {
+  phase: "red" | "green" | "goal" | string;
+  head?: string;
+  exitCode: number;
+  /** Relative to the phase: red passes when the tests fail. */
+  passed: boolean;
+  durationMs: number;
+  output?: string;
+  noCommand?: boolean;
+}
+
+/** Mirrors runnerwire.CheckResult: a judge's verdict on one criterion. */
+export interface CheckResult {
+  id: string;
+  pass: boolean;
+  note?: string;
+}
+
+/** Mirrors runnerwire.GuardReport: the executor diff check. */
+export interface GuardReport {
+  testFiles?: string[];
+  touched?: string[];
+  sensitive?: string[];
+  approved?: boolean;
+  approvedBy?: string;
 }
 
 /** Mirrors the runnerwire Merge* statuses. */
@@ -258,6 +292,10 @@ export interface CreateRunRequest {
   /** W2.5: omitted for headless. "interactive" needs the runner's
    * "interactive" capability; the hub answers 409 otherwise. */
   mode?: RunMode;
+  /** Agent roles: the role the run acts in, and a person's reason for a
+   * plain run past enabled stages (at most 200 characters). */
+  role?: string;
+  override?: string;
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.
@@ -270,7 +308,7 @@ export interface AgentModel {
 }
 
 /** Route match kinds, tried in this order by the hub. */
-export type RouteMatch = "tag" | "kind" | "project" | "default";
+export type RouteMatch = "tag" | "kind" | "project" | "default" | "role";
 export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "project", "default"];
 
 /** Mirrors runnerwire.RouteRule. Project "" applies in every project. */
@@ -348,6 +386,12 @@ export interface PipelineState {
   /** W7: the votes so far and a person's decision in the current round. */
   votes?: PipelineVote[] | null;
   humanVerdict?: string;
+  /** Staged pipeline: the frozen stages, the phase, the Tester's files and
+   * the executor diff guard. Absent on a legacy pipeline. */
+  stages?: { preset: string; stages: Record<string, boolean>; judge?: string } | null;
+  phase?: string;
+  testFiles?: string[] | null;
+  guard?: GuardReport | null;
 }
 
 /** Whether a pipeline will not change any more. */

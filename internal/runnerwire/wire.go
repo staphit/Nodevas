@@ -188,6 +188,9 @@ type Repo struct {
 	Path string `json:"path,omitempty"`
 	// Remote is the origin URL, when there is one.
 	Remote string `json:"remote,omitempty"`
+	// Verify says the runner has a test command for this repo. The command
+	// itself stays on the runner.
+	Verify bool `json:"verify,omitempty"`
 }
 
 // Limits on what a hello may carry, enforced by the hub.

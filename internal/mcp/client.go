@@ -172,7 +172,10 @@ type ClientOptions struct {
 	// reads as a human session. Like Actor it is fixed for the process, so a
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
-	Timeout   time.Duration
+	// Role is the agent role every request declares (auth.RoleHeaderName);
+	// empty sends no header. RED PHASE STUB: unused.
+	Role    string
+	Timeout time.Duration
 	// Model is the model the agent runs on, reported in heartbeats; empty
 	// falls back to NODEVAS_MODEL.
 	Model string

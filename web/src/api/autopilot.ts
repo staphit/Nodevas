@@ -84,6 +84,12 @@ export interface AutopilotRun {
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
+  /** Agent roles: the stages frozen at start (absent: legacy), the goal's
+   * phase and its QA round. */
+  stages?: { preset: string; stages: Record<string, boolean>; maxQaRounds?: number } | null;
+  goalPhase?: "acceptance" | "plan" | "tasks" | "qa" | "human" | "done" | string;
+  qaRound?: number;
+  qaRunId?: string;
 }
 
 /** A task instance's state, as Airflow names them. */

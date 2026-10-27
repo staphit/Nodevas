@@ -35,6 +35,11 @@ type StartRequest struct {
 	// LoadNode returns the node's title, content and type; found false means
 	// the graph has no such node. It is called once the runner checks pass.
 	LoadNode func() (NodeInfo, bool, error)
+	// Agent roles: the project's resolved roles (tool allowlists for the
+	// job), and the hook that locks the node's acceptance when an Executor
+	// is dispatched (store.LockAcceptance). RED PHASE STUB: unused.
+	Roles          []engine.AgentRole
+	LockAcceptance func() error
 }
 
 // NodeInfo is what a run needs to know about its node. Type is the node
@@ -47,6 +52,10 @@ type NodeInfo struct {
 	// setting), already summarized; ReferencesTruncated says more exist.
 	References          []Reference
 	ReferencesTruncated bool
+	// Agent roles: the node's acceptance criteria and its effective workflow
+	// (nil: legacy). RED PHASE STUB: unused.
+	Acceptance *engine.Acceptance
+	Workflow   *engine.Workflow
 }
 
 // Reference is one reference note as a run's prompt shows it. It mirrors the
@@ -76,6 +85,9 @@ type StartError struct {
 	// NodeType and AgentMode name the refusing type for StartNodeType.
 	NodeType  string
 	AgentMode engine.AgentMode
+	// Reason is the shared error code for a role or stage refusal
+	// (ACCEPTANCE_REQUIRED). RED PHASE STUB: never set.
+	Reason string
 }
 
 func (e *StartError) Error() string { return e.Msg }

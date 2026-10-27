@@ -112,6 +112,9 @@ type Pipeline struct {
 	// runner's owner or an administrator may: an approval can have the
 	// owner's runner merge, the way a merge approval does (W4).
 	HumanAnyEditor bool `json:"humanAnyEditor,omitempty"`
+	// Tester writes the failing tests of a staged pipeline (agent roles).
+	// RED PHASE STUB: unused.
+	Tester AgentModel `json:"tester,omitempty"`
 }
 
 // ReviewersOf is a pipeline's reviewers: Reviewers, else Review when set.
@@ -182,6 +185,23 @@ type PipelineState struct {
 	// HumanVerdict is a person's verdict in the current round, if any.
 	HumanVerdict string `json:"humanVerdict,omitempty"`
 	CreatedAt    string `json:"createdAt"`
+	// Staged pipeline (roles.go): the frozen stages (nil: legacy pipeline),
+	// the phase, the Tester's files and the executor diff guard.
+	Stages    *StagesSnapshot `json:"stages,omitempty"`
+	Phase     string          `json:"phase,omitempty"`
+	TestFiles []string        `json:"testFiles,omitempty"`
+	Guard     *GuardReport    `json:"guard,omitempty"`
+}
+
+// StagesSnapshot is the workflow a staged pipeline froze when it was made,
+// the wire copy of engine.Workflow.
+type StagesSnapshot struct {
+	Preset                 string          `json:"preset"`
+	Stages                 map[string]bool `json:"stages"`
+	ReviewerSkipBelowLines int             `json:"reviewerSkipBelowLines,omitempty"`
+	MaxGreenTries          int             `json:"maxGreenTries,omitempty"`
+	MaxTesterRounds        int             `json:"maxTesterRounds,omitempty"`
+	Judge                  string          `json:"judge,omitempty"`
 }
 
 // Pipeline statuses.

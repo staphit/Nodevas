@@ -61,6 +61,10 @@ type GraphOp struct {
 
 	// Ref is the target of add-ref/remove-ref: NodeID uses Ref as context.
 	Ref string `json:"ref,omitempty"`
+
+	// Acceptance is the acceptance op's new list (agent roles).
+	// RED PHASE STUB: the op is not applied yet.
+	Acceptance *engine.Acceptance `json:"acceptance,omitempty"`
 }
 
 // ApplyGraphOps applies a batch of commands atomically and returns the new

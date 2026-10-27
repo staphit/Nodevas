@@ -131,6 +131,16 @@ type Job struct {
 	// instructions. Older runners ignore both and start from Base.
 	HandoffBranch string `json:"handoffBranch,omitempty"`
 	HandoffNote   string `json:"handoffNote,omitempty"`
+
+	// Agent roles (roles.go): the role the run acts in ("" legacy), the
+	// hub-resolved tool allowlist for `nodevas mcp --tools`, the Tester's
+	// files an Executor must not change, the acceptance items (data for the
+	// prompt) and, for a verify or goal judge job, what to verify.
+	Role       string           `json:"role,omitempty"`
+	Tools      []string         `json:"tools,omitempty"`
+	TestFiles  []string         `json:"testFiles,omitempty"`
+	Acceptance []AcceptanceItem `json:"acceptance,omitempty"`
+	Verify     *VerifySpec      `json:"verify,omitempty"`
 }
 
 // Accept reports an accepted job: the worktree and branch it runs in.
@@ -189,6 +199,11 @@ type RunResult struct {
 	HandoffBranch string `json:"handoffBranch,omitempty"`
 	HandoffNote   string `json:"handoffNote,omitempty"`
 	ResetAt       string `json:"resetAt,omitempty"`
+	// Agent roles (roles.go): a verify job's test run, a judge's CHECK
+	// lines, and a review's "TESTS: approve-changes" acknowledgement.
+	Verify   *VerifyResult `json:"verify,omitempty"`
+	Checks   []CheckResult `json:"checks,omitempty"`
+	GuardAck bool          `json:"guardAck,omitempty"`
 }
 
 // Run is a run as the HTTP API returns it.
@@ -247,11 +262,17 @@ type Run struct {
 	HandoffNote   string `json:"handoffNote,omitempty"`
 	ContinuesFrom string `json:"continuesFrom,omitempty"`
 	RetryAt       string `json:"retryAt,omitempty"`
-	CreatedBy     string `json:"createdBy"`
-	CreatedByName string `json:"createdByName"`
-	CreatedAt     string `json:"createdAt"`
-	StartedAt     string `json:"startedAt,omitempty"`
-	FinishedAt    string `json:"finishedAt,omitempty"`
+	// Agent roles (roles.go): the run's role ("" legacy), its verify result
+	// and judge checks, and a person's stage override reason.
+	Role          string        `json:"role,omitempty"`
+	Verify        *VerifyResult `json:"verify,omitempty"`
+	Checks        []CheckResult `json:"checks,omitempty"`
+	Override      string        `json:"override,omitempty"`
+	CreatedBy     string        `json:"createdBy"`
+	CreatedByName string        `json:"createdByName"`
+	CreatedAt     string        `json:"createdAt"`
+	StartedAt     string        `json:"startedAt,omitempty"`
+	FinishedAt    string        `json:"finishedAt,omitempty"`
 }
 
 // CreateRunRequest is the body of POST /api/runs (project from ?project=).
@@ -280,6 +301,11 @@ type CreateRunRequest struct {
 	// reconciles (see replan.go). Only with Kind JobPlan; at most
 	// MaxRevisionBytes. The runner is offered it as Job.Review.
 	Revision string `json:"revision,omitempty"`
+	// Role is the role the run acts in ("" legacy). Override is a person's
+	// reason for dispatching a plain implement run past enabled stages
+	// (at most 200 characters); recorded on the run and the audit trail.
+	Role     string `json:"role,omitempty"`
+	Override string `json:"override,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

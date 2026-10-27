@@ -57,6 +57,13 @@ type Options struct {
 	// Toolset picks the tools served: ToolsetFull (or empty), every tool, or
 	// ToolsetRun, the few a runner's run needs. See toolset.go.
 	Toolset string
+	// Role is the agent role the session acts in (`nodevas mcp --role`):
+	// it serves only the role's tools and declares the role on every request
+	// (auth.RoleHeaderName). Tools (`--tools a,b,c`) is the hub-resolved
+	// allowlist a runner's run passes; it wins over the role's defaults.
+	// RED PHASE STUB: unused.
+	Role  string
+	Tools []string
 }
 
 // DefaultActor names an agent when the operator did not.

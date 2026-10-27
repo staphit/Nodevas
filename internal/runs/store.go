@@ -185,6 +185,9 @@ type New struct {
 	JobHandoffBranch, JobHandoffNote string
 	RetryAt                          string
 	LimitWaits                       int
+	// Agent roles: the role the run acts in ("" legacy) and a person's stage
+	// override reason. RED PHASE STUB: not stored yet.
+	Role, Override string
 }
 
 // Create records a queued run.

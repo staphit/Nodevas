@@ -230,6 +230,9 @@ type RouteNode struct {
 	Project string
 	Kind    string
 	Tags    []string
+	// Role is the job's role ("" legacy, which routes like an executor).
+	// RED PHASE STUB: not matched yet.
+	Role string
 }
 
 // Suggest picks the rule for a node. Match kinds are tried in priority order

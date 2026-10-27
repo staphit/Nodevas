@@ -60,6 +60,7 @@ func (f *fakeRuns) Start(_ context.Context, req runs.StartRequest) (runs.Record,
 	r.Project, r.NodeID, r.RunnerID, r.RunnerName = req.Project, req.Body.NodeID, req.Body.RunnerID, "pc"
 	r.Agent, r.Model, r.Status, r.CreatedAt = req.Body.Agent, req.Body.Model, runnerwire.RunOffered, f.stamp()
 	r.CreatedBy = req.ActorID
+	r.Kind, r.Role = req.Body.Kind, req.Body.Role
 	if req.Body.Pipeline != nil {
 		p := &runs.PipelineRecord{}
 		p.ID = "pipe-" + r.ID
@@ -258,6 +259,8 @@ type fakeBoard struct {
 	bodies map[string]string
 	// refs are the reference notes a node's run is given.
 	refs map[string][]runs.Reference
+	// createdBy is the run that created a node (roles_test.go).
+	createdBy map[string]string
 }
 
 // newBoard builds a graph: nodes by id (kind after a colon: "x:gate"), and

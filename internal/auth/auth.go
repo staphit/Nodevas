@@ -49,6 +49,17 @@ var (
 // so a header the local user's own tools set is as trustworthy as the request.
 const AgentRoleHeaderName = "X-Nodevas-Agent-Role"
 
+// RoleHeaderName declares the agent role (engine roles: planner, qa, tester,
+// executor, reviewer, researcher, custom-role-*) an external loopback session
+// acts in. Like AgentRoleHeaderName it is honored only by LocalOnly; a role
+// never raises the declared class.
+// RED PHASE STUB: not read yet.
+const RoleHeaderName = "X-Nodevas-Role"
+
+// ErrInvalidRole is returned for a RoleHeaderName value that is not a
+// well-formed role id.
+var ErrInvalidRole = errors.New("invalid " + RoleHeaderName + ": send a built-in role or custom-role-<id>")
+
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
 type LocalOnly struct{}

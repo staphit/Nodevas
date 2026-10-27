@@ -39,6 +39,9 @@ type SubgraphNode struct {
 	Tags        []string `json:"tags,omitempty"`
 	DependsOn   []string `json:"dependsOn,omitempty"`
 	Refs        []string `json:"refs,omitempty"`
+	// Acceptance is the node's acceptance criteria, one line each.
+	// RED PHASE STUB: not stored yet.
+	Acceptance []string `json:"acceptance,omitempty"`
 }
 
 // SubgraphEdge makes an existing node (To) wait for From, a key or an id.
