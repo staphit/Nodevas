@@ -9,7 +9,7 @@ import {
 import { connectWS } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
-import { reportError, useApp, useLastOperation, usePreference } from "./store";
+import { reportError, useApp, usePreference } from "./store";
 import { Sidebar, SidebarBackdrop } from "./components/Sidebar";
 import { GraphPane } from "./components/GraphPane";
 import { TimelinePane } from "./components/TimelinePane";
@@ -29,7 +29,6 @@ import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
-import { ModeSwitch } from "./station/ModeSwitch";
 import { openSettings } from "./settings/openSettings";
 import { usePacks } from "./game/packStore";
 import { useStation } from "./station/stationStore";
@@ -41,19 +40,11 @@ import {
   DocumentPersistenceBanner,
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
-import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
-import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
+import { AuthGate } from "./components/SignIn";
+import { ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
-import { PresenceAvatars } from "./components/PresenceAvatars";
-import { TopbarOverflow, useNarrowViewport } from "./components/TopbarOverflow";
+import { TopBar } from "./components/topbar/TopBar";
 import { useI18n } from "./i18n";
-import {
-  IconHelp,
-  IconMoon,
-  IconSignOut,
-  IconSun,
-  IconTree,
-} from "./icons";
 
 const Drawer = lazy(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
@@ -76,18 +67,12 @@ function MainApp() {
   const refreshState = useApp((s) => s.refreshState);
   const refreshTrash = useApp((s) => s.refreshTrash);
   const refreshProjects = useApp((s) => s.refreshProjects);
-  const switchProject = useApp((s) => s.switchProject);
   const notifyDiskChange = useApp((s) => s.notifyDiskChange);
   const saveTab = useApp((s) => s.saveTab);
   const activeTab = useApp((s) => s.activeTab);
   const undoLast = useApp((s) => s.undoLast);
   const redoLast = useApp((s) => s.redoLast);
   const theme = useApp((s) => s.theme);
-  const toggleTheme = useApp((s) => s.toggleTheme);
-  const viewer = useViewer();
-  const signOut = useSignOut();
-  const graph = useApp((s) => s.graph);
-  const projects = useApp((s) => s.projects);
   const activeProject = useApp((s) => s.activeProject);
   const paneOpen = useApp((s) => s.paneOpen);
   const togglePane = useApp((s) => s.togglePane);
@@ -96,11 +81,6 @@ function MainApp() {
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const explorerCollapsed = usePreference("explorerCollapsed");
   const projectMode = usePreference("projectMode");
-  const workspace = useApp((s) => s.workspace);
-  const workspaceLabel = useApp(
-    (s) => s.workspaces.find((entry) => entry.active)?.label ?? "",
-  );
-  const lastOperation = useLastOperation();
   // Agents seen in this workspace turn the workstation on.
   useWorkstationAutoEnable();
   const [degradedDocuments, dispatchDocumentPersistence] = useReducer(
@@ -113,10 +93,6 @@ function MainApp() {
   const preferredExplorerWidth = usePreference("explorerWidth");
   const [explorerWidth, setExplorerWidth] = useState(preferredExplorerWidth);
   useEffect(() => setExplorerWidth(preferredExplorerWidth), [preferredExplorerWidth]);
-
-  const toggleExplorer = () => {
-    updateUIPreference("explorerCollapsed", !explorerCollapsed);
-  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -419,9 +395,6 @@ function MainApp() {
 
   // Presence follows the open document: which node, and whether it is being
   // edited rather than just read.
-  // The presence cluster keeps fewer faces on a phone-width bar; same
-  // breakpoint the overflow menu uses, so the bar collapses as one thing.
-  const narrowTopbar = useNarrowViewport();
   const editingTab = useApp((s) => (s.activeTab ? s.tabs.find((tab) => tab.id === s.activeTab) : null));
   useEffect(() => {
     if (!live) return;
@@ -430,128 +403,7 @@ function MainApp() {
 
   return (
     <div className={`app mode-${projectMode}`}>
-      <header className="topbar">
-        <button
-          type="button"
-          className="icon-btn explorer-toggle"
-          hidden={projectMode !== "info"}
-          onClick={toggleExplorer}
-          title={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
-          aria-label={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
-          aria-expanded={!explorerCollapsed}
-          aria-controls="project-explorer"
-        >
-          <IconTree size={15} />
-          <span aria-hidden>{explorerCollapsed ? "»" : "«"}</span>
-        </button>
-        <span className="brand-mark">
-          <IconTree size={17} />
-        </span>
-        <h1>Nodevas</h1>
-
-        {/* Breadcrumb, not a bare dropdown: the workspace is named, and the
-            control says what switching it does [B-03]. */}
-        <nav className="file-ops project-breadcrumb" aria-label={t("topbar.currentLocation")}>
-          <span className="crumb-workspace" title={workspace}>
-            {workspaceLabel || t("topbar.workspace")}
-          </span>
-          <span className="crumb-separator" aria-hidden>
-            ／
-          </span>
-          <label className="crumb-label" htmlFor="project-quick-switch">
-            {t("topbar.project")}
-          </label>
-          <select
-            id="project-quick-switch"
-            className="project-select"
-            value={activeProject}
-            title={t("topbar.switchProject")}
-            onChange={(e) => {
-              if (e.target.value) void switchProject(e.target.value).catch(reportError);
-            }}
-          >
-            {projects
-              .filter((p) => !p.isFolder)
-              .map((p) => (
-                <option key={p.name} value={p.name}>
-                  {`${"　".repeat(p.depth)}${p.label} (${p.nodes})`}
-                </option>
-              ))}
-          </select>
-        </nav>
-
-        <ModeSwitch />
-        {graph?.type && <span className="project-type">{graph.type}</span>}
-        {lastOperation && (
-          <OperationStatus
-            status={lastOperation.status}
-            message={
-              lastOperation.status === "error" || lastOperation.status === "conflict"
-                ? lastOperation.message
-                : undefined
-            }
-          />
-        )}
-        <PresenceAvatars narrow={narrowTopbar} />
-        <div className="topbar-actions">
-          <button
-            className="command-trigger"
-            type="button"
-            onClick={() => window.dispatchEvent(new Event("nodevas-command-palette"))}
-            title={`${t("topbar.searchOrCommand")} (Ctrl/⌘ K)`}
-          >
-            {t("topbar.searchOrCommand")} <kbd>Ctrl/⌘ K</kbd>
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="tour-replay"
-            onClick={() => window.dispatchEvent(new CustomEvent("nodevas-tour-start"))}
-            title={t("topbar.replayTour")}
-            aria-label={t("topbar.replayTour")}
-          >
-            <IconHelp size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="theme"
-            onClick={toggleTheme}
-            title={theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode")}
-          >
-            {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
-          </button>
-          {/* Renders nothing on a loopback server, where there is no session. */}
-          <SignOutButton />
-          {/* Same five actions, one button wide, for the phone row. The
-              buttons above are hidden by CSS there rather than unmounted, so
-              nothing about the desktop bar changes. */}
-          <TopbarOverflow
-            items={[
-              {
-                id: "tour-replay",
-                label: t("topbar.replayTour"),
-                icon: <IconHelp size={16} />,
-                onSelect: () => window.dispatchEvent(new CustomEvent("nodevas-tour-start")),
-              },
-              {
-                id: "theme",
-                label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
-                icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
-                onSelect: toggleTheme,
-              },
-              ...(viewer
-                ? [
-                    {
-                      id: "sign-out",
-                      label: t("topbar.signOut", { name: viewer.name || viewer.role }),
-                      icon: <IconSignOut size={16} />,
-                      onSelect: signOut,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </div>
-      </header>
+      <TopBar />
       <DocumentPersistenceBanner documents={degradedDocuments} />
       <ProjectAccessBanner />
       <RemoteSyncBanner onOpenBackup={() => openSettings("backup")} />

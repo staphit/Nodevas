@@ -940,15 +940,15 @@ test("usage", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
-  const settings = modes.getByRole("button", { name: "Settings" });
+  const account = page.getByRole("button", { name: "Account and settings" });
   say("Usage lives in Settings", "Next to runners, routing and the daily budget.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 600 });
+  await focus(page, account, { pad: 80, minW: 640, hold: 600 });
   const parts = page.getByRole("navigation", { name: "Settings" });
   const region = page.getByRole("region", { name: "Usage" });
   await cut(page, async () => {
-    await glide(page, settings);
+    await glide(page, account);
+    await glide(page, page.getByRole("menuitem", { name: "Settings" }));
     await expect(parts).toBeVisible();
     await pause(page, 300);
     await focus(page, parts, { pad: 40, minW: 720, d: 0 });
@@ -1147,13 +1147,14 @@ test("two-factor-and-device-link", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Two-factor and device links", "Lock your account down, then link a new runner.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
+  const account = page.getByRole("button", { name: "Account and settings" });
   const parts = page.getByRole("navigation", { name: "Settings" });
   say("Your account, in Settings", "Turn on an authenticator app as a second factor.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 400 });
+  await focus(page, account, { pad: 80, minW: 640, hold: 400 });
   await cut(page, async () => {
-    await glide(page, modes.getByRole("button", { name: "Settings" }));
+    await glide(page, account);
+    await glide(page, page.getByRole("menuitem", { name: "Settings" }));
     await expect(parts).toBeVisible();
     await glide(page, parts.getByRole("button", { name: "Your account" }));
     await pause(page, 600);

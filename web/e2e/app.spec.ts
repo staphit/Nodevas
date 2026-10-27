@@ -6,7 +6,7 @@ async function openApp(page: Page) {
   await declineTour(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
 }
 
 test.describe("main flows", () => {
@@ -117,7 +117,8 @@ test.describe("main flows", () => {
     await expect(page.getByText("自訂實際狀態在「設定 → 狀態、里程碑與人員」")).toBeVisible();
 
     // The legend also offers a way in, so match the toolbar button exactly.
-    await page.getByRole("button", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
+    await page.getByRole("menuitem", { name: "設定", exact: true }).click();
     const dialog = page.getByRole("region", { name: "專案設定" });
     await expect(dialog).toBeVisible();
 

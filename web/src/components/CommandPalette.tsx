@@ -5,6 +5,7 @@ import {
   IconClock,
   IconCompass,
   IconDoc,
+  IconFolderOpen,
   IconGear,
   IconHelp,
   IconMoon,
@@ -14,9 +15,11 @@ import {
   IconSave,
   IconSaveAll,
   IconSidebar,
+  IconSpark,
   IconSun,
   IconTree,
   IconUndo,
+  IconWarning,
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
@@ -30,8 +33,29 @@ import {
   useStageSkinChoices,
   useStationView,
 } from "../game/stageSkin";
+import { openSettings, type SettingsSection } from "../settings/openSettings";
+import { useControl } from "../station/controlStore";
+import { confirmAction } from "./ConfirmDialog";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
-import { useViewer } from "./SignIn";
+import { useTeamServer, useViewer } from "./SignIn";
+import { COMMAND_PALETTE_EVENT, type CommandPaletteView } from "./topbar/actions";
+
+/**
+ * Station's emergency stop, from the palette: confirmed, then the same
+ * pause-all Station sends, leaving running runs running (Station's own dialog
+ * can cancel those too). Station opens to show what it did.
+ */
+async function pauseAllAgents(t: (key: string, values?: Record<string, string | number>) => string) {
+  const confirmed = await confirmAction({
+    title: t("station.control.pauseAllTitle"),
+    description: `${t("station.control.pauseAllIntro")} ${t("topbar.cmd.pauseAllKeepsRunning")}`,
+    confirmLabel: t("station.control.pauseAll"),
+    tone: "danger",
+  });
+  if (!confirmed) return;
+  setProjectMode("station");
+  await useControl.getState().pauseAll(false);
+}
 
 type SearchResult = Awaited<ReturnType<typeof api.search>>["results"][number];
 
@@ -134,6 +158,19 @@ export function CommandPalette() {
   const skinChoices = useStageSkinChoices();
   const packs = usePacks((s) => s.packs);
   const stationPack = usePreference("stationPack");
+  const projects = useApp((state) => state.projects);
+  const workspaces = useApp((state) => state.workspaces);
+  const switchWorkspace = useApp((state) => state.switchWorkspace);
+  const teamServer = useTeamServer();
+  // The parts of Settings without a command of their own above, offered as
+  // Settings offers them (SettingsView's PARTS): the Agents ones only with the
+  // workstation shown, the server ones only to who may see them.
+  const settingsParts = useMemo<SettingsSection[]>(() => {
+    const parts: SettingsSection[] = ["appearance", "backup", "copilot", "workstation"];
+    if (teamServer && viewer) parts.push("account");
+    if (teamServer && viewer?.role === "admin") parts.push("server", "audit");
+    return parts;
+  }, [teamServer, viewer]);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "help">("list");
   const [query, setQuery] = useState("");
@@ -143,7 +180,12 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
+    // The account menu's "Help and shortcuts" opens straight on the help view.
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ view?: CommandPaletteView } | null>).detail;
+      if (detail?.view === "help") setView("help");
+      setOpen(true);
+    };
     const onKey = (event: KeyboardEvent) => {
       if (
         (event.ctrlKey || event.metaKey) &&
@@ -154,10 +196,10 @@ export function CommandPalette() {
         setOpen((value) => !value);
       }
     };
-    window.addEventListener("nodevas-command-palette", onOpen);
+    window.addEventListener(COMMAND_PALETTE_EVENT, onOpen);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("nodevas-command-palette", onOpen);
+      window.removeEventListener(COMMAND_PALETTE_EVENT, onOpen);
       window.removeEventListener("keydown", onKey);
     };
   }, []);
@@ -257,6 +299,18 @@ export function CommandPalette() {
         icon: theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />,
         run: () => toggleTheme(),
       },
+      ...(projectMode !== "settings"
+        ? [
+            {
+              key: "open-settings",
+              title: t("topbar.cmd.openSettings"),
+              detail: t("mode.settings.detail"),
+              keywords: "settings preferences options 設定 偏好 選項",
+              icon: <IconGear size={15} />,
+              run: () => setProjectMode("settings"),
+            },
+          ]
+        : []),
       {
         key: "project-settings",
         title: t("palette.settings"),
@@ -312,16 +366,26 @@ export function CommandPalette() {
           ]
         : []),
     ];
-    // Info and Station, and Station's views; what is showing is not offered
+    // Board and Station, and Station's views; what is showing is not offered
     // again.
-    if (projectMode === "station") {
+    if (projectMode !== "info") {
       list.push({
         key: "project-mode-info",
-        title: t("mode.toInfo"),
+        title: t("topbar.cmd.openBoard"),
         detail: t("mode.info.detail"),
         keywords: "info board graph timeline cards 資訊 看板 圖 時間軸 卡片",
         icon: <IconTree size={15} />,
         run: () => setProjectMode("info"),
+      });
+    }
+    if (projectMode !== "station") {
+      list.push({
+        key: "open-station",
+        title: t("topbar.cmd.openStation"),
+        detail: t("mode.station.detail"),
+        keywords: "station agents waiting runs today 工作站 等你 執行",
+        icon: <IconSpark size={15} />,
+        run: () => setProjectMode("station"),
       });
     }
     for (const skin of skinChoices) {
@@ -346,6 +410,8 @@ export function CommandPalette() {
         run: () => setStationPack(pack),
       });
     }
+    // The top bar's Runners and Usage icons went into its runner pill; these
+    // reach their pages, and the agent controls with them, by name.
     if (workstation) {
       list.push(
         {
@@ -353,16 +419,57 @@ export function CommandPalette() {
           title: t("topbar.runners"),
           detail: t("palette.runnersDetail"),
           keywords: "runner agent machine 執行器 agent",
-          run: () => void window.dispatchEvent(new Event("nodevas-open-runners")),
+          run: () => openSettings("runners"),
+        },
+        {
+          key: "add-runner",
+          title: t("topbar.cmd.addRunner"),
+          detail: t("topbar.cmd.addRunnerDetail"),
+          keywords: "add new pair runner machine device 新增 配對 執行器 電腦",
+          icon: <IconPlus size={15} />,
+          run: () => openSettings("runners"),
         },
         {
           key: "usage",
           title: t("topbar.usage"),
           detail: t("palette.usageDetail"),
-          keywords: "usage tokens cost 用量 費用",
-          run: () => void window.dispatchEvent(new Event("nodevas-open-usage")),
+          keywords: "usage tokens cost spend today 用量 費用 花費 今天",
+          run: () => openSettings("usage"),
+        },
+        {
+          key: "budget",
+          title: t("topbar.cmd.budget"),
+          detail: t("topbar.cmd.budgetDetail"),
+          keywords: "budget daily limit cost spend 預算 每日 上限 花費",
+          run: () => openSettings("budget"),
+        },
+        {
+          key: "routing",
+          title: t("topbar.cmd.routing"),
+          detail: t("topbar.cmd.routingDetail"),
+          keywords: "routing rules route agent model 路由 規則 分派",
+          run: () => openSettings("routing"),
+        },
+        {
+          key: "pause-all",
+          title: t("topbar.cmd.pauseAll"),
+          detail: t("topbar.cmd.pauseAllDetail"),
+          keywords: "pause stop emergency halt agents autopilot runs 暫停 停止 緊急 全部",
+          icon: <IconWarning size={15} />,
+          run: () => pauseAllAgents(t),
         },
       );
+    }
+    // Every other part of Settings, by its own name.
+    for (const part of settingsParts) {
+      list.push({
+        key: `settings-${part}`,
+        title: t("topbar.cmd.settingsPart", { part: t(`settingsPage.part.${part}`) }),
+        detail: t("topbar.cmd.settingsPartDetail"),
+        keywords: `settings ${part} 設定`,
+        icon: <IconGear size={15} />,
+        run: () => openSettings(part),
+      });
     }
     // Off until asked for or in use; once in use it cannot be hidden, since
     // seeing a runner or a run turns it straight back on.
@@ -453,6 +560,34 @@ export function CommandPalette() {
         },
       },
     );
+    // Last, since there can be many: the other projects and workspaces, which
+    // the top bar's project menu also lists.
+    for (const project of projects) {
+      if (project.isFolder || project.name === activeProject) continue;
+      list.push({
+        key: `switch-project-${project.name}`,
+        title: t("topbar.cmd.switchProject", { name: project.label || project.name }),
+        detail: t("topbar.nodeCount", { count: project.nodes }),
+        keywords: `project switch open ${project.name} 專案 切換`,
+        icon: <IconTree size={15} />,
+        run: async () => {
+          await switchProject(project.name);
+        },
+      });
+    }
+    for (const entry of workspaces) {
+      if (entry.active) continue;
+      list.push({
+        key: `switch-workspace-${entry.path}`,
+        title: t("topbar.cmd.switchWorkspace", { name: entry.label || entry.path }),
+        detail: entry.path,
+        keywords: "workspace switch open folder 工作區 切換",
+        icon: <IconFolderOpen size={15} />,
+        run: async () => {
+          await switchWorkspace(entry.path);
+        },
+      });
+    }
     return list;
   }, [
     activeProject,
@@ -460,6 +595,11 @@ export function CommandPalette() {
     canCreateProjects,
     createNode,
     explorerCollapsed,
+    projects,
+    workspaces,
+    switchProject,
+    switchWorkspace,
+    settingsParts,
     loadAll,
     minimap,
     paneOpen.graph,
