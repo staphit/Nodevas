@@ -6,10 +6,11 @@ import { expect, freshProject, test } from "./fixture";
 // Station's war room against the real binary. The project's nodes,
 // dependencies, a logic gate and statuses are written through the real API;
 // the routes a runner or an agent would feed (runners, runs, autopilot,
-// budget, the agent network) are answered here, so no runner has to exist.
+// budget, Agent chat, the other projects' offices) are answered here, so no
+// runner has to exist.
 //
-// Set GAME_SHOTS_DIR to also write screenshots of it in both themes and on a
-// phone.
+// Set GAME_SHOTS_DIR to also write screenshots of it in every office style,
+// in both themes, and on a phone.
 
 const TITLES = [
   "DB schema",
@@ -361,10 +362,74 @@ async function mockWorkstation(page: Page, ids: Ids) {
   );
 }
 
-async function openStaged(page: Page, prefs: Record<string, string> = {}) {
+/** The other projects' offices, as GET /api/station/building answers. */
+function buildingProjects(extra: boolean) {
+  const now = Date.now();
+  const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const run = (id: string, title: string, fields: Record<string, unknown> = {}) => ({
+    id,
+    nodeId: `n-${id}`,
+    title,
+    agent: "claude",
+    model: "opus",
+    kind: "",
+    status: "running",
+    runnerId: "rn1",
+    runnerName: "mac-mini",
+    createdAt: iso(300_000),
+    ...fields,
+  });
+  const office = (name: string, label: string, fields: Record<string, unknown> = {}) => ({
+    name,
+    label,
+    layout: "workflow",
+    officeStyle: "engineering",
+    officeStyleSet: false,
+    runs: [],
+    runsTruncated: false,
+    othersActive: 0,
+    sessions: [],
+    waiting: { asks: 0, held: 0, reviews: 0, total: 0 },
+    asks: [],
+    reviews: [],
+    ...fields,
+  });
+  const projects = [
+    office("billing-app", "billing-app", {
+      officeStyle: "studio",
+      officeStyleSet: true,
+      runs: [run("b1", "Invoice PDF"), run("b2", "Tax rules", { agent: "codex", model: "gpt-5", runnerId: "rn2", runnerName: "build-box" })],
+      waiting: { asks: 1, held: 0, reviews: 0, total: 1 },
+      asks: [{ id: "ba1", sessionId: "bs1", sessionName: "billing-claude", agent: "claude", question: "Round to cents?", nodeId: "", createdAt: now - 60_000 }],
+    }),
+    office("handbook", "handbook", { layout: "story", officeStyle: "study" }),
+  ];
+  if (extra) {
+    projects.push(
+      office("novel", "novel", {
+        layout: "story",
+        officeStyle: "study",
+        runs: [run("n1", "Chapter 3", { agent: "gemini", model: "2.5-pro", status: "queued", retryAt: iso(-600_000) })],
+        sessions: [{ id: "ns1", name: "novel-codex", agent: "codex", model: "o3", state: "idle", nodeId: "", doing: "", runId: "", lastSeen: now - 5_000, online: true }],
+      }),
+      office("cafe-menu", "café menu", {
+        officeStyle: "cafe",
+        officeStyleSet: true,
+        runs: [run("c1", "Menu board", { agent: "opencode", model: "", status: "offered" }), run("c2", "Prices", { kind: "plan" })],
+        othersActive: 2,
+      }),
+      office("site", "site", { officeStyle: "default", officeStyleSet: true }),
+      office("infra", "infra"),
+    );
+  }
+  return { projects, truncated: false, total: projects.length + 1 };
+}
+
+async function openStaged(page: Page, prefs: Record<string, string> = {}, extraOffices = false) {
   await freshProject(page, TITLES);
   const ids = await stageGraph(page);
   await mockWorkstation(page, ids);
+  await page.route(/\/api\/station\/building$/, (route) => route.fulfill({ json: buildingProjects(extraOffices) }));
   await page.addInitScript((values) => {
     localStorage.setItem("vised-language", "en");
     localStorage.setItem("vised-pane-timeline", "0");
@@ -378,7 +443,7 @@ async function openStaged(page: Page, prefs: Record<string, string> = {}) {
 /** The agent panel opens itself on a new ask (the staged agent has one);
  * close it to see the board. */
 async function closeAgentPanel(page: Page) {
-  const close = page.getByRole("button", { name: "Close Agent Network" });
+  const close = page.getByRole("button", { name: "Close Agent chat" });
   await close.click({ timeout: 15_000 });
   await expect(page.locator("#agent-network-panel")).toBeHidden();
 }
@@ -396,11 +461,23 @@ test("war room: Station draws it straight away, a character opens its node and i
   // No view to pick: the room is the view.
   await expect(page.getByRole("button", { name: /^View: / })).toHaveCount(0);
 
-  const claude = stage.getByRole("button", { name: /Claude opus in mac-mini: working, on “Auth API”/ });
+  // The project's office: who works at a desk, who is in a meeting with a
+  // question, who waits at the door.
+  const office = stage.getByRole("region", { name: /^Office / });
+  const work = office.getByRole("group", { name: "Work area" });
+  const meeting = office.getByRole("group", { name: "Meeting room" });
+  const entrance = office.getByRole("group", { name: "Entrance" });
+  const claude = work.getByRole("button", { name: /Claude opus in mac-mini: working, on “Auth API”/ });
   await expect(claude).toBeVisible();
-  await expect(stage.getByRole("button", { name: /Codex gpt-5 in mac-mini: waiting to be accepted/ })).toBeVisible();
-  await expect(stage.getByRole("button", { name: /Gemini 2\.5-pro in build-box: working.*Took over from Claude opus/ })).toBeVisible();
-  await expect(stage.getByRole("button", { name: /Claude sonnet in Terminals: waiting for your answer/ })).toBeVisible();
+  await expect(entrance.getByRole("button", { name: /Codex gpt-5 in mac-mini: waiting to be accepted/ })).toBeVisible();
+  await expect(work.getByRole("button", { name: /Gemini 2\.5-pro in build-box: working.*Took over from Claude opus/ })).toBeVisible();
+  await expect(meeting.getByRole("button", { name: /Claude sonnet in Terminals: waiting for your answer/ })).toBeVisible();
+
+  // The other projects: a busy one at a glance, an idle one as a door sign.
+  const others = stage.getByRole("list", { name: "Other offices" });
+  const billing = others.getByRole("button", { name: /^billing-app: 2 working, 1 waiting on you/ });
+  await expect(billing).toContainText("✋ 1");
+  await expect(stage.getByRole("list", { name: "Quiet offices" }).getByRole("button", { name: /^handbook: nobody in/ })).toBeVisible();
 
   // A character's menu holds its run's actions, as the list's rows did.
   await claude.click();
@@ -422,9 +499,16 @@ test("war room: Station draws it straight away, a character opens its node and i
   const waitingFold = stage.getByRole("button", { name: /tasks waiting on prerequisites/ });
   await waitingFold.click();
   await expect(stage.getByText(/^Waiting on /).first()).toBeVisible();
+
+  // A rack in the server room is the runners' settings.
+  await stage
+    .getByRole("region", { name: "Server room" })
+    .getByRole("button", { name: /^Runner mac-mini: Online/ })
+    .click();
+  await expect(page.getByRole("region", { name: "Agents", exact: true })).toBeVisible();
 });
 
-test("station: what waits on you, the war room, who is working, the agent messages and the last hour", async ({ page }) => {
+test("station: what waits on you, the war room, who is working, Agent chat and the last hour", async ({ page }) => {
   await openStaged(page, { "vised-project-mode": "station" });
   // Nothing floats over Station: the agent panel is docked in its column.
   await expect(page.locator("#agent-network-panel")).toHaveCount(0);
@@ -446,11 +530,11 @@ test("station: what waits on you, the war room, who is working, the agent messag
   // Who is working unfolds from Today.
   await page.getByRole("button", { name: /working · \d+ in all/ }).click();
   await expect(page.locator(".station-actor").first()).toBeVisible();
-  // The agent messages are one line until opened; open, the panel is docked.
-  const messages = page.getByRole("button", { name: /Agent messages/ });
+  // Agent chat is one line until opened; open, the panel is docked.
+  const messages = page.getByRole("button", { name: /^Agent chat/ });
   await expect(messages).toHaveAttribute("aria-expanded", "false");
   await messages.click();
-  await expect(page.getByRole("region", { name: "Agent Network" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Agent chat" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Who worked on what · last hour" })).toBeVisible();
 
   // Info is the board as it was: the cards, the explorer toggle back.
@@ -459,24 +543,46 @@ test("station: what waits on you, the war room, who is working, the agent messag
   await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
 });
 
-test("war room: screenshots in both themes and on a phone", async ({ page }) => {
+const STYLES = ["default", "engineering", "study", "studio", "cafe"] as const;
+
+/** Sets the project's office style through the real graph save. */
+async function setOfficeStyle(page: Page, style: string) {
+  const response = await (await page.request.get("/api/graph")).json();
+  const put = await page.request.put("/api/graph", {
+    data: { graph: { ...response.graph, officeStyle: style }, baseRev: response.rev },
+  });
+  expect(put.ok(), await put.text()).toBeTruthy();
+}
+
+test("war room: screenshots in every office style, both themes and on a phone", async ({ page }) => {
   const dir = process.env.GAME_SHOTS_DIR;
   test.skip(!dir, "set GAME_SHOTS_DIR to write screenshots");
   mkdirSync(dir!, { recursive: true });
-  test.setTimeout(120_000);
+  test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await openStaged(page, { "vised-explorer-collapsed": "1", "vised-project-mode": "station" });
-  for (const theme of ["light", "dark"] as const) {
-    await page.evaluate((t) => localStorage.setItem("vised-theme", t), theme);
-    await page.reload();
-    const room = page.getByRole("region", { name: "War room" });
-    await expect(room).toBeVisible({ timeout: 15_000 });
-    // Bubbles and badges settle.
-    await page.waitForTimeout(1_200);
-    await room.screenshot({ path: join(dir!, `station-warroom-${theme}.png`) });
-    await page.screenshot({ path: join(dir!, `station-${theme}.png`) });
+  await openStaged(page, { "vised-explorer-collapsed": "1", "vised-project-mode": "station" }, true);
+  for (const style of STYLES) {
+    await setOfficeStyle(page, style);
+    for (const theme of ["light", "dark"] as const) {
+      await page.evaluate((t) => localStorage.setItem("vised-theme", t), theme);
+      await page.reload();
+      const room = page.getByRole("region", { name: "War room" });
+      await expect(room).toBeVisible({ timeout: 15_000 });
+      await expect(room.locator(`.px-office-room.px-style--${style}`)).toBeVisible();
+      // Bubbles and badges settle.
+      await page.waitForTimeout(1_200);
+      await room.locator(".px-office-room").screenshot({ path: join(dir!, `station-office-${style}-${theme}.png`) });
+      if (style === "engineering") {
+        await page.screenshot({ path: join(dir!, `station-${theme}.png`) });
+        await room.locator(".px-others").screenshot({ path: join(dir!, `station-others-${theme}.png`) });
+        await room.locator(".px-ground").screenshot({ path: join(dir!, `station-ground-${theme}.png`) });
+        await room.locator(".px-sign").click();
+        await room.locator(".px-style-popover").screenshot({ path: join(dir!, `station-style-picker-${theme}.png`) });
+        await page.keyboard.press("Escape");
+      }
+    }
   }
-  // A phone, light: the rooms stack and each scrolls inside itself; the page
+  // A phone, light: the offices stack, the compact ones wrap; the page
   // scrolls sideways no more than it does with the cards.
   await page.setViewportSize({ width: 390, height: 844 });
   const pageOverflow = () =>
@@ -487,7 +593,7 @@ test("war room: screenshots in both themes and on a phone", async ({ page }) => 
   });
   await page.reload();
   // At phone width the panel may or may not have opened itself by now.
-  const close = page.getByRole("button", { name: "Close Agent Network" });
+  const close = page.getByRole("button", { name: "Close Agent chat" });
   if (await close.isVisible({ timeout: 5_000 }).catch(() => false)) await close.click();
   const baseline = await pageOverflow();
   await page.evaluate(() => localStorage.setItem("vised-project-mode", "station"));
@@ -498,5 +604,7 @@ test("war room: screenshots in both themes and on a phone", async ({ page }) => 
   expect(await pageOverflow()).toBeLessThanOrEqual(baseline);
   const right = await room.evaluate((element) => element.getBoundingClientRect().right);
   expect(right).toBeLessThanOrEqual(390 + 1);
-  await page.screenshot({ path: join(dir!, "station-warroom-phone.png"), fullPage: true });
+  for (const part of ["px-office-room", "px-others", "px-ground"]) {
+    await room.locator(`.${part}`).screenshot({ path: join(dir!, `station-phone-${part.slice(3)}.png`) });
+  }
 });

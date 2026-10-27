@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -433,6 +434,84 @@ func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, erro
 	}
 	defer rows.Close()
 	var out []Ask
+	for rows.Next() {
+		var a Ask
+		if err := rows.Scan(
+			&a.ID, &a.Project, &a.SessionID, &a.SessionName, &a.ActorID, &a.Agent,
+			&a.Question, &a.AboutMsgID, &a.NodeID, &a.Status, &a.DecidedBy, &a.Note,
+			&a.CreatedAt, &a.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// maxBuildingRows caps the cross-project listings Station's building reads:
+// counts beyond it would not change what a person sees at a glance.
+const maxBuildingRows = 2000
+
+// normalizeProjectKeys trims each key the way the hub stores it and drops
+// empties and repeats.
+func normalizeProjectKeys(projects []string) []string {
+	seen := make(map[string]bool, len(projects))
+	out := make([]string, 0, len(projects))
+	for _, p := range projects {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// PendingAsksIn returns the pending asks of several projects in one query,
+// newest first. Project keys are store roots, as for ListAsks.
+func (h *Hub) PendingAsksIn(ctx context.Context, projects []string) ([]Ask, error) {
+	projects = normalizeProjectKeys(projects)
+	out := []Ask{}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	if h.database == nil {
+		want := make(map[string]bool, len(projects))
+		for _, p := range projects {
+			want[p] = true
+		}
+		h.mu.Lock()
+		for _, a := range h.memAsks {
+			if want[a.Project] && a.Status == AskPending {
+				out = append(out, *a)
+			}
+		}
+		h.mu.Unlock()
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].CreatedAt != out[j].CreatedAt {
+				return out[i].CreatedAt > out[j].CreatedAt
+			}
+			return out[i].ID > out[j].ID
+		})
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+2)
+	for _, p := range projects {
+		args = append(args, p)
+	}
+	args = append(args, AskPending, maxBuildingRows)
+	rows, err := h.database.QueryContext(ctx, `
+		SELECT id, project, session_id, session_name, actor_id, agent,
+		       question, about_msg_id, node_id, status, decided_by, note,
+		       created_at, decided_at
+		  FROM agent_asks
+		 WHERE project IN (?`+strings.Repeat(", ?", len(projects)-1)+`) AND status = ?
+		 ORDER BY created_at DESC, id DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	for rows.Next() {
 		var a Ask
 		if err := rows.Scan(

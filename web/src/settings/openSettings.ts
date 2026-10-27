@@ -42,6 +42,7 @@ export type SettingsRow =
   | "accessToken"
   | "statuses"
   | "nodeTypes"
+  | "officeStyle"
   | "milestones"
   | "people"
   | "backup"

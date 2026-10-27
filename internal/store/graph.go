@@ -67,6 +67,9 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 	if err := checkNodeTypesEdit(actor, currentGraph.NodeTypes, g.NodeTypes); err != nil {
 		return "", err
 	}
+	if err := checkOfficeStyleEdit(actor, currentGraph.OfficeStyle, g.OfficeStyle); err != nil {
+		return "", err
+	}
 	data, err := s.marshalGraph(g)
 	if err != nil {
 		return "", err

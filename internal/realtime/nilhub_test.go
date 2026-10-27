@@ -12,6 +12,7 @@ func TestANilHubSwallowsBroadcasts(t *testing.T) {
 	h.BroadcastActor("actor", "x", "")
 	h.BroadcastRoom("r", "x", "")
 	h.BroadcastRoom("", "x", "")
+	h.BroadcastReaders("r", "x", "")
 	h.BroadcastOps("r", "peer", json.RawMessage(`[{"kind":"move"}]`))
 	h.BroadcastOps("r", "peer", nil)
 	h.send(Event{Type: "x"}, func(*wsClient) bool { return true })

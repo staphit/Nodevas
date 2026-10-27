@@ -37,6 +37,9 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	if err := engine.ValidateNodeTypeDefs(g.NodeTypes); err != nil {
 		return err
 	}
+	if !engine.ValidOfficeStyle(g.OfficeStyle) {
+		return fmt.Errorf("office_style: unknown style %q", g.OfficeStyle)
+	}
 	userIDs := make(map[string]struct{}, len(g.Users))
 	userNames := make(map[string]struct{}, len(g.Users))
 	for index, user := range g.Users {

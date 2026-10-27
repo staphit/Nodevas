@@ -56,7 +56,10 @@ type Graph struct {
 	// NodeTypes is the project's sparse type list: every custom type, plus a
 	// built-in only when its shape or colour is overridden (nodetypes.go).
 	NodeTypes []NodeTypeDef `yaml:"node_types,omitempty" json:"nodeTypes,omitempty"`
-	UI        *UIState      `yaml:"ui,omitempty" json:"ui,omitempty"`
+	// OfficeStyle is how the project's office looks in Station
+	// (officestyle.go). Empty means the default for the layout.
+	OfficeStyle string   `yaml:"office_style,omitempty" json:"officeStyle,omitempty"`
+	UI          *UIState `yaml:"ui,omitempty" json:"ui,omitempty"`
 }
 
 // User is a project-level assignable person. ID stays stable when the display

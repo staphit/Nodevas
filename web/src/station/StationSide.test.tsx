@@ -12,20 +12,20 @@ import { useUsage } from "../usage/usageStore";
 import { StationSide } from "./StationSide";
 
 const world = {
-  office: {
+  building: {
     actors: [
       {
         id: "a1",
         agent: "claude",
         model: "opus",
         pose: "working",
-        roomId: "room1",
+        area: "work",
+        runnerName: "mac-mini",
         nodeId: "api",
         runId: "",
         nodeTitle: "Auth API",
       },
     ],
-    rooms: [{ id: "room1", name: "mac-mini" }],
   },
 } as unknown as World;
 
@@ -57,9 +57,11 @@ beforeEach(() => {
     asks: [],
     held: [],
     messages: [
-      { id: "m1", from: "a", to: "b", body: "hi", createdAt: 1 } as AgentMessage,
-      { id: "m2", from: "b", to: "a", body: "yo", createdAt: 2 } as AgentMessage,
+      { id: "m1", from: "a", to: "b", body: "hi", createdAt: 1, senderAgent: "claude" } as AgentMessage,
+      { id: "m2", from: "b", to: "a", body: "yo", createdAt: 2, senderAgent: "codex" } as AgentMessage,
     ],
+    seenAt: 0,
+    seenProject: "p",
   });
 });
 
@@ -94,6 +96,7 @@ describe("StationSide", () => {
     fireEvent.click(fold);
     const roster = screen.getByRole("list", { name: "Agents" });
     expect(within(roster).getByRole("button", { name: /Claude opus/ })).toBeInTheDocument();
+    expect(within(roster).getByText("Work area · mac-mini")).toBeInTheDocument();
   });
 
   it("lists the runners, and manages them in Settings", () => {
@@ -106,30 +109,32 @@ describe("StationSide", () => {
     expect(useApp.getState().preferences.settingsSection).toBe("runners");
   });
 
-  it("keeps the agent messages folded to a count until opened", () => {
+  it("keeps Agent chat folded to what is unread until opened, and reads it when open", () => {
     render(<StationSide world={world} />);
-    const toggle = screen.getByRole("button", { name: /Agent messages/ });
+    const toggle = screen.getByRole("button", { name: /^Agent chat/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveTextContent("2 messages · 0 online");
-    expect(screen.queryByRole("region", { name: "Agent Network" })).not.toBeInTheDocument();
+    expect(toggle).toHaveTextContent("2 unread · 0 online");
+    expect(screen.queryByRole("region", { name: "Agent chat" })).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const panel = screen.getByRole("region", { name: "Agent Network" });
+    const panel = screen.getByRole("region", { name: "Agent chat" });
     // Its own controls live inside the card.
     expect(within(panel).getByRole("checkbox", { name: /offline/i })).toBeInTheDocument();
     expect(within(panel).getByRole("combobox")).toBeInTheDocument();
+    // Open, what it shows is read.
+    expect(toggle).toHaveTextContent("0 unread · 0 online");
   });
 
   it("unfolds when something asks for the agent panel", () => {
     render(<StationSide world={world} />);
-    expect(screen.queryByRole("region", { name: "Agent Network" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Agent chat" })).not.toBeInTheDocument();
     act(() => useAgents.getState().setOpen(true));
-    expect(screen.getByRole("region", { name: "Agent Network" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent chat" })).toBeInTheDocument();
     // Consumed once: the next Ctrl+Shift+A asks again rather than clearing
     // it, and no floating panel waits on the board.
     expect(useAgents.getState().open).toBe(false);
     act(() => useAgents.getState().toggleOpen());
     expect(useAgents.getState().open).toBe(false);
-    expect(screen.getByRole("region", { name: "Agent Network" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent chat" })).toBeInTheDocument();
   });
 });

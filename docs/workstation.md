@@ -7,7 +7,7 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
 - **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
 - **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens and any permission it asks for is refused, since nobody is at a headless run to grant it.
 - **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run.
-- **Agent network.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
+- **Agent chat.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
 - **Station.** Each project's Station (the top bar's Info | Station | Settings switch) puts all of this in one place:
   - the agents and what each is doing;
   - the war room;
@@ -73,9 +73,9 @@ Tokens and API-equivalent cost by day, agent, model and session, in **Settings â
 
 [![Settings â†’ Usage: daily chart, sessions and prices, then the daily budget](./videos/usage.gif)](./videos/usage.mp4)
 
-### Agent network
+### Agent chat
 
 Who is working on what, messages between agents, and a held message waiting for your approval.
 
-[![The agent network panel approving a held message](./videos/agent-network.gif)](./videos/agent-network.mp4)
+[![The Agent chat panel approving a held message](./videos/agent-network.gif)](./videos/agent-network.mp4)
 

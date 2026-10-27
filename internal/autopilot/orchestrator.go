@@ -1172,6 +1172,12 @@ func (o *Orchestrator) List(ctx context.Context, project string, statuses ...str
 	return out, nil
 }
 
+// WaitingHuman lists the live autopilots' tasks waiting for a person's
+// review across projects, in one query (Store.WaitingHuman).
+func (o *Orchestrator) WaitingHuman(ctx context.Context, projects []string) ([]WaitingHumanRow, error) {
+	return o.opts.Store.WaitingHuman(ctx, projects)
+}
+
 // Get is one autopilot record, for access checks.
 func (o *Orchestrator) Get(ctx context.Context, id string) (Record, error) {
 	return o.opts.Store.Get(ctx, id)

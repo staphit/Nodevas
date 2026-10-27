@@ -1,8 +1,8 @@
 // The glue between the app's stores and the pure world model: selects the
 // slices buildWorld reads, loads what the board does not load at start
-// (runners, the budget, live autopilots, the project's unfinished runs), and
-// keeps a presence clock so sessions age and speech bubbles expire while the
-// view stays open. Everything live comes through the stores' existing
+// (runners, the budget, live autopilots, the project's unfinished runs, the
+// other projects' offices), and keeps a presence clock so sessions age and
+// speech bubbles expire while the view stays open. Everything live comes through the stores' existing
 // WebSocket handlers (App.tsx); this hook only reads.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +13,8 @@ import { useAutopilot } from "../autopilot/autopilotStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
 import { useRunners } from "../runners/runnerStore";
+import { useBuilding } from "../station/buildingStore";
+import { useWaitingItems } from "../station/useWaitingItems";
 import { useApp } from "../store";
 import { buildWorld } from "./buildWorld";
 import { BUBBLE_MS, msUntilNextTick, presenceTick } from "./presence";
@@ -105,6 +107,18 @@ function useWorldLoads(activeProject: string, tick: number) {
     void useBudget.getState().load();
   }, [activeProject, tick]);
 
+  // The other projects' offices are pushed (building-changed), but a session
+  // that times out sends nothing: read them again on each later tick while
+  // Station watches. The first tick is the mount, which loads already.
+  const firstTick = useRef(true);
+  useEffect(() => {
+    if (firstTick.current) {
+      firstTick.current = false;
+      return;
+    }
+    if (useBuilding.getState().watching) void useBuilding.getState().load();
+  }, [tick]);
+
   // A fallback run's seat swap needs the run it replaced, which has ended and
   // so is not in the active list; a meeting table needs its pipeline. Both
   // are asked for once per node or pipeline while the view is open.
@@ -150,6 +164,13 @@ export function useWorld(): World {
   const held = useAgents((s) => s.held);
   const messages = useAgents((s) => s.messages);
   const budget = useBudget((s) => s.status);
+  const remote = useBuilding((s) => s.data);
+  const projects = useApp((s) => s.projects);
+  const waitingItems = useWaitingItems();
+  const projectLabel = useMemo(
+    () => projects.find((project) => project.name === activeProject)?.label || activeProject,
+    [projects, activeProject],
+  );
 
   const tick = usePresenceTick();
   // Bumped when the first visible speech bubble expires, between ticks.
@@ -173,6 +194,10 @@ export function useWorld(): World {
         messages,
         pipelines,
         budget,
+        activeProject,
+        projectLabel,
+        remote,
+        waitingItems,
         // The real clock, not the tick: a message that arrived mid-tick must
         // show its bubble now, not at the next boundary.
         now: Date.now(),
@@ -188,6 +213,10 @@ export function useWorld(): World {
       messages,
       pipelines,
       budget,
+      activeProject,
+      projectLabel,
+      remote,
+      waitingItems,
       tick,
       bubbleClock,
     ],
@@ -197,7 +226,7 @@ export function useWorld(): World {
   // a tick), so it does not hang on until the next tick.
   useEffect(() => {
     let first = Infinity;
-    for (const actor of world.office.actors) {
+    for (const actor of world.building.actors) {
       if (actor.bubble) first = Math.min(first, actor.bubble.createdAt + BUBBLE_MS);
     }
     if (!Number.isFinite(first)) return;

@@ -20,6 +20,7 @@ import type {
   CustomNodeTypeId,
   NodeStyle,
   NodeTypeDef,
+  OfficeStyle,
   SavedView,
   StatusDefinition,
 } from "../types";
@@ -107,7 +108,10 @@ export type WorkflowCommand =
       id: string;
       patch: Partial<Omit<NodeTypeDef, "id">>;
     }
-  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId };
+  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId }
+  /** The project's office look in Station; null goes back to the layout's
+   * default. */
+  | { type: "workflow.setOfficeStyle"; style: OfficeStyle | null };
 
 export type CanvasCommand =
   | {
@@ -264,6 +268,10 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return nodeTypes.updateNodeType(graph, command.id, command.patch);
     case "workflow.removeNodeType":
       return nodeTypes.removeNodeType(graph, command.id);
+    case "workflow.setOfficeStyle":
+      if (command.style) graph.officeStyle = command.style;
+      else delete graph.officeStyle;
+      return;
 
     case "canvas.moveNodes":
       if (command.shift) canvas.shiftBoard(graph, command.shift);
@@ -363,6 +371,7 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "workflow.addNodeType": "新增節點類型",
   "workflow.updateNodeType": "修改節點類型",
   "workflow.removeNodeType": "刪除節點類型",
+  "workflow.setOfficeStyle": "設定辦公室風格",
   "canvas.moveNodes": "移動節點",
   "canvas.setTimelineOrder": "調整時間軸順序",
   "canvas.setGatePlacement": "移動條件閘",

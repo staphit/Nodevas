@@ -356,6 +356,98 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
 	return out, nil
 }
 
+// BuildingFilter narrows ListBuilding: Station's building view of every
+// project the viewer may read at once.
+type BuildingFilter struct {
+	// Projects are the project names to include; none means no runs.
+	Projects []string
+	// Viewer, when set, keeps that person's runs (as Filter.Viewer).
+	Viewer string
+	// Since keeps ended runs made at or after it, in the store's own stamp
+	// form (FormatStamp). Runs that have not ended are always kept.
+	Since string
+	// Limit caps the result; 0 or more than 5000 means 2000.
+	Limit int
+}
+
+// FormatStamp writes t the way the store writes created_at, so a caller's
+// bound compares with stored times as text.
+func FormatStamp(t time.Time) string { return formatStamp(t) }
+
+// placeholders is "?, ?, …" for n values.
+func placeholders(n int) string {
+	return "?" + strings.Repeat(", ?", n-1)
+}
+
+// ListBuilding returns the runs of several projects in one query, newest
+// first: every run that has not ended, plus those made since f.Since.
+func (s *Store) ListBuilding(ctx context.Context, f BuildingFilter) ([]Record, error) {
+	if len(f.Projects) == 0 {
+		return []Record{}, nil
+	}
+	query := `SELECT ` + runColumns + ` FROM runs WHERE project IN (` + placeholders(len(f.Projects)) + `)`
+	args := make([]any, 0, len(f.Projects)+7)
+	for _, project := range f.Projects {
+		args = append(args, project)
+	}
+	query += ` AND (status IN (?, ?, ?) OR created_at >= ?)`
+	args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning, f.Since)
+	if f.Viewer != "" {
+		query += ` AND (created_by = ? OR owner_id = ?)`
+		args = append(args, f.Viewer, f.Viewer)
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 5000 {
+		limit = 2000
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	out, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]*Record, len(out))
+	for i := range out {
+		refs[i] = &out[i]
+	}
+	if err := s.attachMerges(ctx, refs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CountOthersActive counts, per project, the runs that have not ended and
+// that the viewer may not see (neither made them nor owns their runner).
+// Projects without any are absent from the map.
+func (s *Store) CountOthersActive(ctx context.Context, projects []string, viewer string) (map[string]int, error) {
+	out := map[string]int{}
+	if len(projects) == 0 || viewer == "" {
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+5)
+	for _, project := range projects {
+		args = append(args, project)
+	}
+	args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning, viewer, viewer)
+	rows, err := s.db.QueryContext(ctx, `SELECT project, COUNT(*) FROM runs
+		WHERE project IN (`+placeholders(len(projects))+`) AND status IN (?, ?, ?)
+		AND NOT (created_by = ? OR owner_id = ?)
+		GROUP BY project`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var project string
+		var n int
+		if err := rows.Scan(&project, &n); err != nil {
+			return nil, err
+		}
+		out[project] = n
+	}
+	return out, rows.Err()
+}
+
 // ForRunner returns the runner's runs in the given statuses, oldest first.
 func (s *Store) ForRunner(ctx context.Context, runnerID string, statuses ...string) ([]Record, error) {
 	if len(statuses) == 0 {

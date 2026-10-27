@@ -60,8 +60,9 @@ describe("useWorld", () => {
   it("puts the active runs at desks", () => {
     seedScene(NOW);
     const { result } = renderHook(() => useWorld());
-    const office = result.current.office;
-    expect(office.actors.map((actor) => actor.id)).toContain(`run:${RUN_WORKING}`);
+    const { building } = result.current;
+    expect(building.actors.map((actor) => actor.id)).toContain(`run:${RUN_WORKING}`);
+    expect(building.current?.work).toContain(`run:${RUN_WORKING}`);
   });
 
   it("fetches the pipeline of a review run and the node of a fallback run once", () => {
@@ -90,7 +91,7 @@ describe("useWorld", () => {
     seedScene(NOW);
     useAgents.setState({ asks: [], held: [] });
     const { result } = renderHook(() => useWorld());
-    const laptop = () => result.current.office.actors.find((actor) => actor.id === "session:s1");
+    const laptop = () => result.current.building.actors.find((actor) => actor.id === "session:s1");
     expect(laptop()?.pose).toBe("working");
     act(() => {
       vi.advanceTimersByTime(SESSION_TTL_MS + PRESENCE_TICK_MS);
@@ -101,7 +102,7 @@ describe("useWorld", () => {
   it("shows a fresh message as a bubble and drops it when it runs out, between ticks", () => {
     seedScene(NOW);
     const { result } = renderHook(() => useWorld());
-    const claude = () => result.current.office.actors.find((actor) => actor.id === `run:${RUN_WORKING}`);
+    const claude = () => result.current.building.actors.find((actor) => actor.id === `run:${RUN_WORKING}`);
     expect(claude()?.bubble?.body).toBe("Schema is ready.");
     act(() => {
       vi.advanceTimersByTime(BUBBLE_MS);
@@ -133,7 +134,7 @@ describe("useWorld", () => {
         ],
       });
     });
-    const claude = result.current.office.actors.find((actor) => actor.id === `run:${RUN_WORKING}`);
+    const claude = result.current.building.actors.find((actor) => actor.id === `run:${RUN_WORKING}`);
     expect(claude?.bubble?.body).toBe("New one");
   });
 });

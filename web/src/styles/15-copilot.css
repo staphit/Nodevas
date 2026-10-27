@@ -15,10 +15,12 @@
   right: max(18px, env(safe-area-inset-right, 0px));
   bottom: max(18px, env(safe-area-inset-bottom, 0px));
   z-index: var(--copilot-z);
-  display: grid;
-  place-items: center;
-  width: 48px;
+  /* A pill: the mic and its name, so it says what it is. */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 48px;
+  padding: 0 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--border-strong));
   border-radius: 999px;
   background: var(--accent);
@@ -32,6 +34,28 @@
 .copilot-fab:focus-visible {
   outline: 2px solid var(--st-progress-fg);
   outline-offset: 3px;
+}
+.copilot-fab-label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* A phone keeps the round button; the name stays its accessible label. */
+@media (max-width: 480px) {
+  .copilot-fab {
+    padding: 0;
+    width: 48px;
+    justify-content: center;
+  }
+  .copilot-fab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 /* A follow-up (a plan run ended) waits unread. */
 .copilot-fab-badge {

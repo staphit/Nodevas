@@ -51,8 +51,9 @@ describe("CopilotRoot", () => {
   it("shows the mic button and toggles the panel with Ctrl+Shift+Space", async () => {
     stubServer(200);
     render(<CopilotRoot />);
-    const fab = await screen.findByRole("button", { name: "Open copilot" });
-    expect(fab).toBeInTheDocument();
+    const fab = await screen.findByRole("button", { name: "Voice Copilot · Open copilot" });
+    // Its name is on it, not only in a tooltip.
+    expect(fab).toHaveTextContent("Voice Copilot");
     fireEvent.keyDown(window, { key: " ", code: "Space", ctrlKey: true, shiftKey: true });
     expect(await screen.findByRole("dialog", { name: "Copilot" })).toBeInTheDocument();
     await vi.waitFor(() =>
@@ -70,7 +71,7 @@ describe("CopilotRoot", () => {
         <CopilotRoot />
       </>,
     );
-    await screen.findByRole("button", { name: "Open copilot" });
+    await screen.findByRole("button", { name: "Voice Copilot · Open copilot" });
     const other = screen.getByRole("textbox", { name: "other" });
     fireEvent.keyDown(other, { key: " ", code: "Space", altKey: true });
     expect(useCopilot.getState().open).toBe(false);

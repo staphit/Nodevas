@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Graph } from "../types";
+import { graphCommandToOps } from "../state/graphOps";
 import { applyGraphCommand, describeGraphCommand } from "./commands";
 import { CommandError } from "./errors";
 import { milestoneTypeUsage } from "./usage";
@@ -708,5 +709,20 @@ describe("references", () => {
       },
     });
     expect(g.nodes![0].refs).toEqual(["b"]);
+  });
+});
+
+describe("office style", () => {
+  it("sets the project's office style and clears it back to the layout's default", () => {
+    const g = graph();
+    applyGraphCommand(g, { type: "workflow.setOfficeStyle", style: "study" });
+    expect(g.officeStyle).toBe("study");
+    applyGraphCommand(g, { type: "workflow.setOfficeStyle", style: null });
+    expect(g).not.toHaveProperty("officeStyle");
+    expect(describeGraphCommand({ type: "workflow.setOfficeStyle", style: "cafe" })).toBe("設定辦公室風格");
+  });
+
+  it("is saved with the whole-file PUT: no graph op carries it", () => {
+    expect(graphCommandToOps({ type: "workflow.setOfficeStyle", style: "studio" })).toBeNull();
   });
 });

@@ -176,10 +176,11 @@ export function CopilotRoot() {
         type="button"
         className="copilot-fab is-offline"
         onClick={() => setOpen(true)}
-        aria-label={t(waitingKey)}
+        aria-label={`${t("copilot.fab.label")} · ${t(waitingKey)}`}
         title={t(waitingKey)}
       >
         <IconMic size={20} />
+        <span className="copilot-fab-label">{t("copilot.fab.label")}</span>
       </button>
     );
   }
@@ -193,12 +194,15 @@ export function CopilotRoot() {
           type="button"
           className={`copilot-fab${speech.listening ? " is-listening" : ""}${running ? " is-running" : ""}`}
           onClick={() => (unread ? void openUnread() : setOpen(true))}
-          aria-label={unread ? `${t("copilot.open")} · ${t("copilot.followup.unread")}` : t("copilot.open")}
+          aria-label={`${t("copilot.fab.label")} · ${
+            unread ? `${t("copilot.open")} · ${t("copilot.followup.unread")}` : t("copilot.open")
+          }`}
           aria-expanded={false}
           aria-controls="copilot-panel"
           title={`${t("copilot.open")} (Ctrl+Shift+Space) · ${t("copilot.pushToTalk")} (Alt+Space)`}
         >
           <IconMic size={20} />
+          <span className="copilot-fab-label">{t("copilot.fab.label")}</span>
           {unread && <span className="copilot-fab-badge" aria-hidden data-testid="copilot-unread" />}
         </button>
       )}

@@ -5,24 +5,20 @@
 // where they always did: the war room's ask and held-mail dialogs, a
 // goal's review, a node's Runs tab.
 
-import { useMemo } from "react";
-
-import { canManageSession, excerpt, useAgents } from "../agents/agentStore";
+import { excerpt } from "../agents/agentStore";
 import type { Run } from "../api";
-import { useAutopilot } from "../autopilot/autopilotStore";
 import { openAutopilot } from "../autopilot/openAutopilot";
 import { useGameActions } from "../game/GameActions";
 import { agentWho } from "../game/labels";
 import { useI18n } from "../i18n";
-import { useBudget } from "../runs/budgetStore";
 import { confirmCancelRun } from "../runs/confirmCancelRun";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
-import { useStation } from "./stationStore";
 import { useTitleOf } from "./StationControl";
 import { StationTile, StationTiles } from "./StationTile";
-import { waitingKey, waitingOnYou, type WaitingItem } from "./waiting";
+import { useWaitingItems } from "./useWaitingItems";
+import { waitingKey, type WaitingItem } from "./waiting";
 
 interface Action {
   label: string;
@@ -41,31 +37,10 @@ interface Row {
 
 export function StationWaiting() {
   const { t } = useI18n();
-  const runs = useStation((s) => s.runs);
-  const active = useRuns((s) => s.activeRuns);
-  const asks = useAgents((s) => s.asks);
-  const held = useAgents((s) => s.held);
-  const viewer = useAgents((s) => s.viewer);
-  const reviews = useAutopilot((s) => s.waiting);
-  const exceeded = useBudget((s) => s.status?.exceeded);
   const cancelling = useRuns((s) => s.cancelling);
   const { dispatch } = useGameActions();
   const titleOf = useTitleOf();
-
-  const items = useMemo(
-    () =>
-      waitingOnYou({
-        runs,
-        active,
-        asks,
-        held,
-        reviews,
-        budgetExceeded: exceeded,
-        canAnswer: (ask) => canManageSession(ask, viewer),
-        now: Date.now(),
-      }),
-    [runs, active, asks, held, reviews, exceeded, viewer],
-  );
+  const items = useWaitingItems();
 
   const openRun = (run: Run): Action => ({
     label: t("station.waiting.openRun"),

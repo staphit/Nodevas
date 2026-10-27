@@ -11,6 +11,7 @@ import { localizedPlanStatusLabel, useI18n } from "../i18n";
 import { RunNotifySettings } from "../runs/RunToasts";
 import { useApp } from "../store";
 import { isBuiltinKind } from "../domain/graph/nodeTypes";
+import { defaultOfficeStyle } from "../game/officeStyle";
 import type { SettingsPage, SettingsRow } from "./openSettings";
 import { listValue, SettingsDisclosure } from "./SettingsDisclosure";
 
@@ -92,6 +93,18 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
         onToggle={() => toggleRow("nodeTypes")}
       >
         <ProjectSettings tab="nodeTypes" />
+      </SettingsDisclosure>
+      <SettingsDisclosure
+        label={t("settings.officeStyle")}
+        value={
+          graph?.officeStyle
+            ? t(`office.style.${graph.officeStyle}`)
+            : t("office.style.auto", { style: t(`office.style.${defaultOfficeStyle(graph?.type)}`) })
+        }
+        open={row === "officeStyle"}
+        onToggle={() => toggleRow("officeStyle")}
+      >
+        <ProjectSettings tab="officeStyle" />
       </SettingsDisclosure>
       <SettingsDisclosure
         label={t("settings.milestones")}

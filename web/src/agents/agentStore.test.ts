@@ -6,6 +6,8 @@ import {
   canManageSession,
   excerpt,
   resetAnnouncedForTests,
+  seenKey,
+  unseenCount,
   useAgents,
 } from "./agentStore";
 import {
@@ -413,5 +415,63 @@ describe("attachments", () => {
     expect(validAttachmentName("")).toBe(false);
     expect(validAttachmentName("a".repeat(128))).toBe(true);
     expect(validAttachmentName("a".repeat(129))).toBe(false);
+  });
+});
+
+describe("unread in Agent chat", () => {
+  const alice = { id: "alice", name: "Alice", role: "member" } as never;
+  /** A time in ms, `n` seconds into the test's day. */
+  const T = (n: number) => 1_700_000_000_000 + n * 1_000;
+
+  beforeEach(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      /* no storage */
+    }
+    useAgents.setState({ messages: [], seenAt: 0, seenProject: "" });
+  });
+
+  it("counts delivered messages after the mark that the viewer did not write", () => {
+    const messages = [
+      message({ id: "old", createdAt: T(1) }),
+      message({ id: "new", createdAt: T(3) }),
+      message({ id: "held", createdAt: T(3), status: "held" }),
+      message({ id: "mine", createdAt: T(3), senderAgent: "human", senderActor: "alice" }),
+      message({ id: "theirs", createdAt: T(3), senderAgent: "human", senderActor: "bob" }),
+      // An older hub's seconds.
+      message({ id: "secs", createdAt: T(4) / 1_000 }),
+    ];
+    expect(unseenCount(messages, T(2), alice)).toBe(3);
+    expect(unseenCount(messages, T(5), alice)).toBe(0);
+  });
+
+  it("remembers per project how far the chat was read, from now on a first visit", () => {
+    vi.useFakeTimers({ now: T(10) });
+    try {
+      useAgents.getState().loadSeen("alpha");
+      expect(useAgents.getState()).toMatchObject({ seenAt: T(10), seenProject: "alpha" });
+      expect(localStorage.getItem(seenKey("alpha"))).toBe(String(T(10)));
+
+      useAgents.setState({ messages: [message({ createdAt: T(12) }), message({ id: "m2", createdAt: T(11) })] });
+      expect(unseenCount(useAgents.getState().messages, useAgents.getState().seenAt, null)).toBe(2);
+      useAgents.getState().markSeen();
+      expect(useAgents.getState().seenAt).toBe(T(12));
+      expect(localStorage.getItem(seenKey("alpha"))).toBe(String(T(12)));
+
+      // Another project starts on its own; coming back reads the mark kept.
+      useAgents.getState().loadSeen("beta");
+      expect(useAgents.getState().seenProject).toBe("beta");
+      useAgents.getState().loadSeen("alpha");
+      expect(useAgents.getState().seenAt).toBe(T(12));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never moves the mark back", () => {
+    useAgents.setState({ seenAt: T(50), seenProject: "alpha", messages: [message({ createdAt: T(1) })] });
+    useAgents.getState().markSeen();
+    expect(useAgents.getState().seenAt).toBe(T(50));
   });
 });

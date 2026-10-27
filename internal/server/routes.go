@@ -16,6 +16,7 @@ import (
 	"nodevas/internal/httpapi/remoteapi"
 	runnersapi "nodevas/internal/httpapi/runners"
 	runsapi "nodevas/internal/httpapi/runs"
+	stationapi "nodevas/internal/httpapi/station"
 	"nodevas/internal/httpapi/system"
 	usageapi "nodevas/internal/httpapi/usage"
 	"nodevas/internal/usage"
@@ -106,6 +107,12 @@ func (s *Server) Handler() http.Handler {
 		controlapi.New(s.pm, s.runs, s.autopilot).Register(api)
 	} else {
 		s.configureStepUp(nil)
+	}
+	if s.pm != nil {
+		// Station's building: every readable project at once. It checks each
+		// project itself, so it is exempt from the per-request project gate,
+		// and it is not on the runner proxy's allowlist.
+		stationapi.New(s.pm, stationapi.NewSources(s.pm, s.runs, s.autopilot, s.agents), s.projectReadable).Register(api)
 	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {

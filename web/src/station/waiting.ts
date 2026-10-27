@@ -4,7 +4,7 @@
 // ready to merge, a PR whose CI went red, an offer the runner has not taken
 // yet) and a spent budget. Plain data, tested without React.
 
-import type { AgentAsk, AgentMessage, Run, RunBudgetLimit } from "../api";
+import type { AgentAsk, AgentMessage, Run, RunBudgetLimit, WaitingRunLike } from "../api";
 import type { WaitingTask } from "../autopilot/autopilotStore";
 
 /** Older than this is not waiting any more, just history. */
@@ -12,11 +12,15 @@ export const WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 export type WaitingRunKind = "limit" | "merge" | "ci";
 
-export interface WaitingRun {
+export type { WaitingRunLike };
+
+/** A run waiting on someone. Generic so the building's summaries of other
+ * projects' runs (api/station BuildingRun) are counted the same way. */
+export interface WaitingRun<R extends WaitingRunLike = Run> {
   kind: WaitingRunKind;
-  run: Run;
+  run: R;
   /** A limit run: the fallback run that took over, if one did. */
-  tookOver?: Run;
+  tookOver?: R;
 }
 
 function millis(value: string | undefined): number {
@@ -33,11 +37,15 @@ function millis(value: string | undefined): number {
  * PR is not "ready to merge" while a newer run is still going or came back
  * without one (pending CI, a failure).
  */
-export function waitingRuns(runs: Run[], now: number, windowMs = WAITING_WINDOW_MS): WaitingRun[] {
-  const byRetry = new Map<string, Run>();
+export function waitingRuns<R extends WaitingRunLike>(
+  runs: R[],
+  now: number,
+  windowMs = WAITING_WINDOW_MS,
+): WaitingRun<R>[] {
+  const byRetry = new Map<string, R>();
   for (const run of runs) if (run.retryOf) byRetry.set(run.retryOf, run);
   const seen = new Set<string>();
-  const out: WaitingRun[] = [];
+  const out: WaitingRun<R>[] = [];
   const sorted = [...runs].sort(
     (a, b) => (millis(b.finishedAt) || millis(b.createdAt)) - (millis(a.finishedAt) || millis(a.createdAt)),
   );
@@ -65,19 +73,19 @@ export function waitingRuns(runs: Run[], now: number, windowMs = WAITING_WINDOW_
   return out;
 }
 
-export type WaitingItem =
+export type WaitingItem<R extends WaitingRunLike = Run> =
   | { kind: "budget"; limit: RunBudgetLimit | string }
   | { kind: "ask"; ask: AgentAsk }
   | { kind: "held"; message: AgentMessage }
   | { kind: "review"; task: WaitingTask }
-  | { kind: "offer"; run: Run }
-  | WaitingRun;
+  | { kind: "offer"; run: R }
+  | WaitingRun<R>;
 
-export interface WaitingInput {
+export interface WaitingInput<R extends WaitingRunLike = Run> {
   /** The project's recent runs (Station's store). */
-  runs: Run[];
+  runs: R[];
   /** The runs not ended yet: offers come from here. */
-  active: Run[];
+  active: R[];
   asks: AgentAsk[];
   /** Held messages the viewer may decide (the store keeps only those). */
   held: AgentMessage[];
@@ -91,7 +99,7 @@ export interface WaitingInput {
 }
 
 /** A stable key per item, for lists and tests. */
-export function waitingKey(item: WaitingItem): string {
+export function waitingKey<R extends WaitingRunLike>(item: WaitingItem<R>): string {
   switch (item.kind) {
     case "budget":
       return "budget";
@@ -112,8 +120,8 @@ export function waitingKey(item: WaitingItem): string {
  * autopilot is stopped on, PRs to merge or fix, offers not yet taken, and
  * usage limits last (a fallback usually took over).
  */
-export function waitingOnYou(input: WaitingInput): WaitingItem[] {
-  const out: WaitingItem[] = [];
+export function waitingOnYou<R extends WaitingRunLike = Run>(input: WaitingInput<R>): WaitingItem<R>[] {
+  const out: WaitingItem<R>[] = [];
   if (input.budgetExceeded) out.push({ kind: "budget", limit: input.budgetExceeded });
   for (const ask of input.asks) {
     if (ask.status === "pending" && input.canAnswer(ask)) out.push({ kind: "ask", ask });
