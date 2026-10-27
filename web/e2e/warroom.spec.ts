@@ -474,6 +474,7 @@ test("war room: screenshots in both themes and on a phone", async ({ page }) => 
     // Bubbles and badges settle.
     await page.waitForTimeout(1_200);
     await room.screenshot({ path: join(dir!, `station-warroom-${theme}.png`) });
+    await page.screenshot({ path: join(dir!, `station-${theme}.png`) });
   }
   // A phone, light: the rooms stack and each scrolls inside itself; the page
   // scrolls sideways no more than it does with the cards.

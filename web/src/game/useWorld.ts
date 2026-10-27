@@ -83,15 +83,22 @@ function useWorldLoads(activeProject: string, tick: number) {
 
   // A project switch resets the run and autopilot stores (RunsRoot), which
   // may happen after this view mounted: whenever they come back unloaded,
-  // ask again.
-  const activeRunsLoaded = useRuns((s) => s.activeRunsLoaded);
-  const autopilotsLoaded = useAutopilot((s) => s.activeLoaded);
+  // ask again. Subscribed, not read in render: two resets between renders
+  // would leave the flag false on both and an effect keyed on it asleep.
   useEffect(() => {
-    if (!activeRunsLoaded) void useRuns.getState().loadActiveRuns();
-  }, [activeRunsLoaded, activeProject]);
+    const ensure = () => {
+      if (!useRuns.getState().activeRunsLoaded) void useRuns.getState().loadActiveRuns();
+    };
+    ensure();
+    return useRuns.subscribe(ensure);
+  }, [activeProject]);
   useEffect(() => {
-    if (!autopilotsLoaded) void useAutopilot.getState().loadActive();
-  }, [autopilotsLoaded, activeProject]);
+    const ensure = () => {
+      if (!useAutopilot.getState().activeLoaded) void useAutopilot.getState().loadActive();
+    };
+    ensure();
+    return useAutopilot.subscribe(ensure);
+  }, [activeProject]);
 
   // The budget is not pushed: it is read again on every presence tick.
   useEffect(() => {

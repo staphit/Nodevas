@@ -25,7 +25,7 @@
 
 ![工作站：agent 名單、戰情室、誰做了什麼，以及等你處理的事](./docs/screenshots/station-warroom.png)
 
-![戰情室：每台 runner 是一間辦公室，每個 agent 坐在座位上](./docs/screenshots/game-warroom.png)
+![戰情室：每台 runner 是一間像素風辦公室，能同時跑幾個工作就有幾張桌子](./docs/screenshots/game-warroom.png)
 
 戰情室裡的每個角色都能點進真正的節點、run、diff 或 PR。agent 問你問題、用量達上限，或每日預算用完時，瀏覽器會通知你。
 

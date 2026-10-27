@@ -31,6 +31,10 @@ export const FALLBACK_FAILURE_KINDS: ReadonlySet<string> = new Set([
  * red, a merge in flight) keeps its seat. */
 export const FINISHED_RUN_SEAT_MS = 24 * 60 * 60 * 1000;
 
+/** How long a run that succeeded keeps its seat, cheering, before it
+ * leaves the room. */
+export const FINISHED_SHOW_MS = 10 * 60 * 1000;
+
 export interface OfficeInputs {
   /** Runs from every source the view holds (the active list, latest per
    * node, a node's full list), duplicates allowed: the last copy of a run
@@ -107,17 +111,22 @@ export function dedupeRuns(runs: Run[]): Run[] {
   return [...byId.values()];
 }
 
-/** The runs that get a character: every run that has not ended, and a
- * finished one that still needs someone, unless a later run on its node
- * replaced it (a fallback of it, or new work outside its pipeline) or it
- * finished more than FINISHED_RUN_SEAT_MS ago. */
+/** The runs that get a character: every run that has not ended, a finished
+ * one that still needs someone, and one that just succeeded, unless a later
+ * run on its node replaced it (a fallback of it, or new work outside its
+ * pipeline) or it finished more than FINISHED_RUN_SEAT_MS (a success:
+ * FINISHED_SHOW_MS) ago. */
 export function seatedRuns(runs: Run[], now: number): Run[] {
   const retried = new Set(runs.map((run) => run.retryOf).filter(Boolean) as string[]);
   return runs.filter((run) => {
     if (!runFinal(run.status)) return true;
-    if (!finishedRunStaysInRoom(run) || retried.has(run.id)) return false;
+    if (retried.has(run.id)) return false;
     const finished = time(run.finishedAt);
-    if (Number.isFinite(finished) && now - finished > FINISHED_RUN_SEAT_MS) return false;
+    if (finishedRunStaysInRoom(run)) {
+      if (Number.isFinite(finished) && now - finished > FINISHED_RUN_SEAT_MS) return false;
+    } else if (run.status !== "succeeded" || !Number.isFinite(finished) || now - finished > FINISHED_SHOW_MS) {
+      return false;
+    }
     const created = time(run.createdAt);
     return !runs.some(
       (other) =>
@@ -187,6 +196,7 @@ function roomFor(runner: Runner): Room {
     agentKinds: (runner.info?.agents ?? [])
       .filter((agent) => agent.installed)
       .map((agent) => agent.kind),
+    slots: runner.info?.maxConcurrent || undefined,
     actorIds: [],
   };
 }

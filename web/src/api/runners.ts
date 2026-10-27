@@ -50,6 +50,8 @@ export interface RunnerInfo {
   capabilities?: string[];
   /** W6: absent from a runner that predates auto-accept policies. */
   autoAccept?: AutoAcceptPolicy | null;
+  /** How many runs it takes at once; absent from an older runner. */
+  maxConcurrent?: number;
 }
 
 export interface Runner {

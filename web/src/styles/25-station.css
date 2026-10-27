@@ -208,6 +208,9 @@
 .station-actor.tone-bad .station-avatar {
   border-color: var(--st-failed-fg);
 }
+.station-actor.tone-done .station-avatar {
+  border-color: var(--st-done-fg);
+}
 .station-avatar.agent-claude {
   background: #f6e6dc;
   color: #8a4a22;
@@ -465,6 +468,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 12px;
 }
 .station-warroom-extras:empty {
   display: none;

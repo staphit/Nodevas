@@ -21,10 +21,12 @@ const POSE_TONE: Record<Actor["pose"], string> = {
   offline: "muted",
   "asking-user": "ask",
   failed: "bad",
+  limit: "wait",
   "awaiting-accept": "wait",
   "waiting-ci": "wait",
   reviewing: "review",
   working: "work",
+  finished: "done",
   idle: "muted",
 };
 

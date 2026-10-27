@@ -25,7 +25,7 @@ Every project has three faces, switched in the top bar:
 
 ![Station: the agents, the war room, who worked on what, and what waits on you](./docs/screenshots/station-warroom.png)
 
-![War room: each runner is an office, each agent at a desk](./docs/screenshots/game-warroom.png)
+![War room: each runner is a pixel-art office, a desk for each run it takes at once](./docs/screenshots/game-warroom.png)
 
 Every character in the war room opens the real node, run, diff, or PR. When an agent asks you something, hits its usage limit, or the budget runs out, the browser tells you.
 

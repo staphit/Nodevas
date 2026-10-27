@@ -4,6 +4,7 @@ import {
   buildOffice,
   dedupeRuns,
   FINISHED_RUN_SEAT_MS,
+  FINISHED_SHOW_MS,
   runActorId,
   runnerRoomId,
   seatedRuns,
@@ -61,6 +62,14 @@ describe("rooms", () => {
     expect(mini.agentKinds).toEqual(["claude"]);
     expect(box).toMatchObject({ online: false, agentKinds: [] });
     expect(terminal).toMatchObject({ kind: "terminal", online: null, actorIds: [] });
+    // A runner that does not say how many runs it takes has no slots known.
+    expect(mini.slots).toBeUndefined();
+  });
+
+  it("gives a runner's room as many desks as it takes runs at once", () => {
+    const runner = makeRunner();
+    const world = office({ runners: [{ ...runner, info: { ...runner.info!, maxConcurrent: 3 } }] });
+    expect(world.rooms[0].slots).toBe(3);
   });
 
   it("opens a room of unknown state for a run on a runner the caller cannot list", () => {
@@ -306,6 +315,15 @@ describe("which runs get a seat", () => {
     // Work on another node does not.
     const elsewhere = makeRun({ nodeId: "schema", createdAt: ago(10_000) });
     expect(seatedRuns([failed, elsewhere], NOW)).toEqual([failed, elsewhere]);
+  });
+
+  it("keeps a run that just succeeded for a moment, cheering", () => {
+    const done = makeRun({ status: "succeeded", finishedAt: ago(FINISHED_SHOW_MS - 1) });
+    expect(seatedRuns([done], NOW)).toEqual([done]);
+    expect(office({ runs: [done] }).actors[0].pose).toBe("finished");
+    expect(seatedRuns([{ ...done, finishedAt: ago(FINISHED_SHOW_MS + 1) }], NOW)).toEqual([]);
+    // Cancelled or declined runs leave at once.
+    expect(seatedRuns([{ ...done, status: "cancelled" }], NOW)).toEqual([]);
   });
 
   it("lets a finished run go after a day", () => {

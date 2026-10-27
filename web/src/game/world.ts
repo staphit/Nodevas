@@ -31,24 +31,31 @@ export type Pose =
   | "asking-user"
   /** The run failed, or its PR's CI went red. */
   | "failed"
+  /** Queued again after its agent hit a usage limit: asleep until the
+   * limit resets (Run.retryAt). */
+  | "limit"
   /** Waiting for someone at the runner to accept the offer (queued or
    * offered), or for an approved merge to land. */
   | "awaiting-accept"
   /** Its PR is open and CI is running. */
   | "waiting-ci"
-  /** A review run at work: a seat at the meeting table. */
+  /** A review run at work. */
   | "reviewing"
   | "working"
+  /** The run succeeded a moment ago (office.FINISHED_SHOW_MS). */
+  | "finished"
   | "idle";
 
 export const POSES: readonly Pose[] = [
   "offline",
   "asking-user",
   "failed",
+  "limit",
   "awaiting-accept",
   "waiting-ci",
   "reviewing",
   "working",
+  "finished",
   "idle",
 ];
 
@@ -69,8 +76,11 @@ export interface Room {
   /** null when the runner is not one the caller can list (an
    * administrator's view of someone else's runner): nothing is known. */
   online: boolean | null;
-  /** Agent kinds installed on the runner, for the desks it has. */
+  /** Agent kinds installed on the runner. */
   agentKinds: string[];
+  /** How many runs the runner takes at once (its hello's maxConcurrent):
+   * the desks it has. Absent when not known. */
+  slots?: number;
   /** Actor ids in this room, in display order. */
   actorIds: string[];
 }

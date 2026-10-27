@@ -1,0 +1,420 @@
+/* The pixel war room. Loaded with its chunk only (Station imports the room
+ * lazily). One art pixel is --px CSS pixels, a whole number, so every sprite
+ * is drawn on the pixel grid and nothing is scaled by a fraction. Colours are
+ * the --px-* tokens (pixel/palette.ts), redefined for [data-theme="dark"].
+ * Every animated state has a still picture that says the same (frame 0),
+ * and reduced motion, a background tab and a room with its lights off stop
+ * all of it. */
+
+.px-office {
+  --px: 3px;
+  /* A desk's cell, and the floor's margin, in whole art pixels. */
+  --px-cell: calc(40 * var(--px));
+  --px-pad: calc(4 * var(--px));
+
+  --px-outline: #2b2433;
+  --px-skin: #f2c29b;
+  --px-hair: #5a3a28;
+  --px-eye: #2b2433;
+  --px-pants: #3d4a63;
+  --px-desk: #c58b52;
+  --px-desk-dark: #94623a;
+  --px-monitor: #4a5060;
+  --px-screen-off: #26303d;
+  --px-screen-on: #173042;
+  --px-code: #7fe0a0;
+  --px-code-alt: #8cc8ff;
+  --px-fail: #d9463b;
+  --px-ok: #2f9e52;
+  --px-amber: #f2b632;
+  --px-chair: #5b6b80;
+  --px-chair-dark: #3f4b5c;
+  --px-bubble: #ffffff;
+  --px-bubble-ink: #2b2433;
+  --px-ink: #2b2433;
+  --px-glare: rgba(255, 255, 255, 0.4);
+  --px-wall: #ebe3d4;
+  --px-wall-trim: #b9a689;
+  --px-window: #a9dcf2;
+  --px-window-star: #a9dcf2;
+  --px-door: #9a6b42;
+  --px-doorway: #3a2d26;
+  --px-floor: #dcc8a3;
+  --px-floor-line: #d3bd95;
+
+  --agent-claude: #d97757;
+  --agent-codex: #10a37f;
+  --agent-gemini: #4285f4;
+  --agent-opencode: #7c8798;
+  --agent-antigravity: #8b5cf6;
+  --agent-other: #64748b;
+}
+
+[data-theme="dark"] .px-office {
+  --px-outline: #0b0d12;
+  --px-skin: #e2b48f;
+  --px-hair: #47301f;
+  --px-eye: #0b0d12;
+  --px-pants: #2b3448;
+  --px-desk: #8f6443;
+  --px-desk-dark: #694830;
+  --px-monitor: #353c4a;
+  --px-screen-off: #141a23;
+  --px-screen-on: #10263a;
+  --px-code: #6fd894;
+  --px-code-alt: #7ab8f0;
+  --px-fail: #e0574b;
+  --px-ok: #3fae60;
+  --px-amber: #f0b43a;
+  --px-chair: #4a5870;
+  --px-chair-dark: #323c4e;
+  --px-bubble: #eef2f5;
+  --px-bubble-ink: #1a1d24;
+  --px-ink: #e7edf1;
+  --px-glare: rgba(255, 255, 255, 0.22);
+  --px-wall: #2b313d;
+  --px-wall-trim: #404a5c;
+  --px-window: #1d2f50;
+  --px-window-star: #f3e7a8;
+  --px-door: #6f4c30;
+  --px-doorway: #0b0d12;
+  --px-floor: #252a35;
+  --px-floor-line: #2d3340;
+}
+
+/* The agent's colour: its shirt, hat or headset. */
+.px-desk {
+  --px-agent: var(--agent-other);
+  --px-agent-dark: color-mix(in srgb, var(--px-agent) 68%, #000);
+}
+.px-desk.agent--claude { --px-agent: var(--agent-claude); }
+.px-desk.agent--codex { --px-agent: var(--agent-codex); }
+.px-desk.agent--gemini { --px-agent: var(--agent-gemini); }
+.px-desk.agent--opencode { --px-agent: var(--agent-opencode); }
+.px-desk.agent--antigravity { --px-agent: var(--agent-antigravity); }
+
+/* ---------- empty states, the day's tokens ---------- */
+.px-empty {
+  max-width: 520px;
+  margin: 32px auto;
+  padding: 0 16px;
+  text-align: center;
+  color: var(--text);
+}
+.px-empty-hint {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.px-empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.px-hud {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.px-hud-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.px-meter {
+  display: block;
+  width: 48px;
+  height: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.px-meter.is-wide {
+  display: inline-block;
+  width: 140px;
+  max-width: 40vw;
+  height: 8px;
+  border: 2px solid var(--border-strong);
+  vertical-align: middle;
+}
+.px-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--st-done-fg);
+}
+.px-meter > span.is-full {
+  background: var(--st-failed-fg);
+}
+
+/* ---------- rooms ---------- */
+.px-rooms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+/* As wide as its desks (three to five a row), never wider than the page:
+   on a phone the rooms stack and their desks wrap. */
+.px-room {
+  flex: 0 1 auto;
+  width: calc(var(--px-cols, 3) * var(--px-cell) + 2 * var(--px-pad) + 4px);
+  max-width: 100%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+}
+.px-room-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border-strong);
+  font-size: 12px;
+  line-height: 16px;
+}
+.px-room-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.px-room-meta {
+  color: var(--text-2);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.px-chip {
+  padding: 0 6px;
+  border: 2px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.px-chip.is-online {
+  color: var(--st-done-fg);
+}
+.px-chip.is-offline {
+  color: var(--text-2);
+}
+
+.px-scene {
+  position: relative;
+}
+/* The back wall: windows on a skirting board. It clips at a whole window. */
+.px-wall {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 calc(12 * var(--px));
+  height: calc(18 * var(--px));
+  padding: calc(3 * var(--px)) calc(8 * var(--px)) 0;
+  overflow: hidden;
+  background: var(--px-wall);
+  border-bottom: calc(2 * var(--px)) solid var(--px-wall-trim);
+}
+.px-floor {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  padding: var(--px-pad);
+  background-color: var(--px-floor);
+  background-image:
+    linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)),
+    linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  background-size: calc(20 * var(--px)) calc(10 * var(--px));
+  background-position: var(--px-pad) var(--px-pad);
+}
+
+.px-sprite {
+  display: block;
+  width: calc(var(--px-w) * var(--px));
+  height: calc(var(--px-h) * var(--px));
+  overflow: visible;
+}
+
+/* ---------- desks ---------- */
+.px-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--px-cell);
+  padding-bottom: calc(2 * var(--px));
+}
+.px-cell.is-free {
+  opacity: 0.8;
+}
+.px-desk {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: var(--px) 0 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.px-desk:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+.px-art {
+  position: relative;
+  display: block;
+}
+/* A one-pixel hop under the pointer, or while its menu is open. */
+.px-desk:hover .px-art,
+.px-desk[aria-expanded="true"] .px-art {
+  transform: translateY(calc(-1 * var(--px)));
+}
+
+/* The name tag: real text, two short lines that never run wide. */
+.px-tag {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: calc(var(--px-cell) - 2 * var(--px));
+  margin-top: calc(-2 * var(--px));
+  padding: 1px 6px 2px;
+  background: var(--surface);
+  border: 2px solid var(--border-strong);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+}
+.px-desk:hover .px-tag,
+.px-desk[aria-expanded="true"] .px-tag {
+  border-color: var(--accent);
+}
+.px-tag-who,
+.px-tag-what {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.px-tag-who {
+  font-weight: 700;
+}
+.px-tag-what,
+.px-tag-tokens {
+  color: var(--text-2);
+}
+.px-tag-tokens {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.px-tag .px-meter {
+  margin: 2px 0 1px;
+}
+
+.px-badge {
+  position: absolute;
+  padding: 0 3px;
+  border: 2px solid var(--px-outline);
+  background: var(--px-bubble);
+  color: var(--px-bubble-ink);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.px-badge.is-mail {
+  left: calc(5 * var(--px));
+  top: calc(5 * var(--px));
+}
+.px-badge.is-swap {
+  left: 0;
+  bottom: calc(4 * var(--px));
+}
+/* What the agent just said, for a few seconds. */
+.px-say {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 3 * var(--px));
+  z-index: 2;
+  width: max-content;
+  max-width: 150px;
+  padding: 2px 6px;
+  transform: translateX(-50%);
+  border: 2px solid var(--px-outline);
+  background: var(--px-bubble);
+  color: var(--px-bubble-ink);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: left;
+  pointer-events: none;
+}
+
+/* Offline (a session that went away): grey and faded. */
+.px-desk.pose-offline .px-sprite {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+/* A runner that is offline: its room with the lights off. The name tags
+   stay readable. */
+.px-room.is-lights-off .px-wall,
+.px-room.is-lights-off .px-sprite {
+  filter: brightness(0.45) saturate(0.4);
+}
+.px-room.is-lights-off .px-floor {
+  background-color: #1b1f28;
+  background-image: none;
+}
+.px-room.is-lights-off .px-tag {
+  opacity: 0.85;
+}
+
+/* ---------- animation: frames that take turns ---------- */
+.px-f {
+  opacity: 0;
+}
+.px-f0of2,
+.px-f0of3 {
+  opacity: 1;
+}
+.px-office[data-motion="full"] .px-anim .px-f {
+  animation: px-of2 var(--px-loop, 600ms) steps(1, end) infinite;
+}
+.px-office[data-motion="full"] .px-anim .px-f1of2 {
+  animation-delay: calc(var(--px-loop, 600ms) / 2);
+}
+.px-office[data-motion="full"] .px-anim :is(.px-f0of3, .px-f1of3, .px-f2of3) {
+  animation-name: px-of3;
+}
+.px-office[data-motion="full"] .px-anim .px-f1of3 {
+  animation-delay: calc(var(--px-loop, 600ms) / 3);
+}
+.px-office[data-motion="full"] .px-anim .px-f2of3 {
+  animation-delay: calc(var(--px-loop, 600ms) * 2 / 3);
+}
+@keyframes px-of2 {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes px-of3 {
+  0% { opacity: 1; }
+  33.333% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* A page in the background holds still; a dark room does not move. */
+.px-office[data-paused="true"] .px-f {
+  animation-play-state: paused !important;
+}
+.px-room.is-lights-off .px-f {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .px-office .px-f {
+    animation: none !important;
+  }
+  .px-desk:hover .px-art,
+  .px-desk[aria-expanded="true"] .px-art {
+    transform: none;
+  }
+}

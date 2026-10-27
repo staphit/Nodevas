@@ -140,6 +140,7 @@ export {
   MAX_RUN_PROMPT_BYTES,
   MAX_RUN_PROMPT_CHARS,
   runCancellable,
+  runWaitsForLimit,
   runFinal,
 } from "./runs";
 export type {
