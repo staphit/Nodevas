@@ -2,7 +2,7 @@
  * A node's short menu [B-06]: right-click on a card, or the card's `⋯`.
  *
  * The everyday actions only. Dependencies used to fill this menu as a form;
- * "Add dependency…" now opens that editor (NodeMenu) in the menu's place, and
+ * "Add dependency…" now opens the node's panel on its Dependencies view, and
  * the agent actions sit together under one submenu. The two submenus open in
  * place, below their row, so the menu never grows a second floating panel
  * that a phone has no room for.
@@ -23,6 +23,7 @@ import {
 import { IconSend, IconTerminal } from "../../icons";
 import { useI18n } from "../../i18n";
 import { openAutopilot } from "../../autopilot/openAutopilot";
+import { openNodeDetail } from "../drawer/openNodeDetail";
 import { openNodeRuns } from "../../runs/RunsRoot";
 import { useRuns } from "../../runs/runStore";
 import { useWorkstationVisible } from "../../runners/workstation";
@@ -201,10 +202,9 @@ export function NodeActionsMenu({
         type="button"
         role="menuitem"
         className="node-actions-item"
-        // The dependency editor takes this menu's place, at the same spot.
-        onClick={() =>
-          setContextMenu({ kind: "node", nodeId, x: contextMenu.x, y: contextMenu.y })
-        }
+        // The node's panel, on its Dependencies view: prerequisites, what
+        // this node blocks and the advanced conditions, all in one place.
+        onClick={run(() => openNodeDetail(nodeId, "dependencies"))}
       >
         <span>{t("board.nodeMenu.addDependency")}</span>
       </button>

@@ -252,12 +252,8 @@ describe("LaneView", () => {
     for (const name of ["開啟", "新增相依…", "建立副本", "移到或複製到專案", "移到垃圾桶"]) {
       expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
     }
-    // The dependency form is one step further in, not the menu itself.
+    // The dependency form lives in the node's panel, not in the menu.
     expect(within(menu).queryByText("相依關係")).not.toBeInTheDocument();
-    await user.click(within(menu).getByRole("menuitem", { name: "新增相依…" }));
-    expect(
-      container.ownerDocument.querySelector(".lane-context-menu.condition-menu"),
-    ).not.toBeNull();
 
     await user.keyboard("{Escape}");
     expect(container.ownerDocument.querySelector(".lane-context-menu")).toBeNull();

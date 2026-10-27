@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
+import { useNodeDetailView } from "../drawer/openNodeDetail";
 import { NodeActionsMenu, type NodeActionsMenuProps } from "./NodeActionsMenu";
 
 beforeEach(() => {
@@ -55,11 +56,15 @@ describe("NodeActionsMenu", () => {
     expect(props.openTab).toHaveBeenCalledWith("a");
   });
 
-  it("swaps itself for the dependency editor at the same spot", async () => {
+  it("opens the node's panel on its Dependencies view", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab });
     const user = userEvent.setup();
     const props = menu();
     await user.click(screen.getByRole("menuitem", { name: "Add dependency…" }));
-    expect(props.setContextMenu).toHaveBeenCalledWith({ kind: "node", nodeId: "a", x: 10, y: 20 });
+    expect(props.setContextMenu).toHaveBeenCalledWith(null);
+    expect(useNodeDetailView.getState().request).toMatchObject({ nodeId: "a", view: "dependencies" });
+    expect(openTab).toHaveBeenCalledWith("a");
   });
 
   it("keeps runs and autopilot under Dispatch to agent", async () => {
