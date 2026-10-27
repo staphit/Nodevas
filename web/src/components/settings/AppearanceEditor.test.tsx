@@ -26,6 +26,18 @@ describe("AppearanceEditor", () => {
     window.removeEventListener("nodevas-tour-start", started);
   });
 
+  // The bar has no help icon any more: General holds it, beside the tour.
+  it("opens the palette on its help view", () => {
+    const opened = vi.fn();
+    const listener = (event: Event) => opened((event as CustomEvent).detail);
+    window.addEventListener("nodevas-command-palette", listener);
+    render(<AppearanceEditor />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Help and shortcuts" }));
+    expect(opened).toHaveBeenCalledWith({ view: "help" });
+    window.removeEventListener("nodevas-command-palette", listener);
+  });
+
   it("edits the same editor preferences the drawer uses", () => {
     render(<LayoutEditor notify={notify()} />);
 

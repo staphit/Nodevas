@@ -214,6 +214,50 @@ header.topbar {
   font-size: 11px;
 }
 
+/* Settings, in words: one click in, pressed (accent) while it is open, a
+   second click back. The theme toggle beside it is the same height, an icon. */
+.topbar-settings,
+.topbar-theme {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar-settings {
+  padding: 0 10px 0 8px;
+}
+.topbar-settings svg,
+.topbar-theme {
+  color: var(--text-2);
+}
+.topbar-theme {
+  width: 28px;
+  padding: 0;
+}
+.topbar-settings:hover,
+.topbar-theme:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.topbar-settings.active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.topbar-settings.active svg {
+  color: var(--text);
+}
+
 /* Runners and today's spend; the dot is the runners dialog's (17-runners.css). */
 .topbar-runner-pill {
   display: inline-flex;
@@ -1289,6 +1333,16 @@ header.topbar {
   .topbar-avatar {
     width: 44px;
     height: 44px;
+  }
+  /* The gear alone; its name stays "Settings". */
+  .topbar-settings,
+  .topbar-theme {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  .topbar-settings-text {
+    display: none;
   }
   .topbar-menu-item {
     min-height: 44px;

@@ -52,7 +52,7 @@ export const TOUR_CHAPTERS: TourChapter[] = [
         id: "shell-replay",
         target: '[data-tour="tour-replay"]',
         title: "隨時重看",
-        body: "右上角的帳號選單隨時可以重播導覽,設定、主題與說明也都在裡面。接下來點進各區塊,會有對應的簡短教學。",
+        body: "右上角的「設定」一按就開,在「一般」裡隨時可以重播導覽或查看說明與快捷鍵;旁邊的小圖示切換深淺色主題。接下來點進各區塊,會有對應的簡短教學。",
         placement: "bottom",
       },
     ],

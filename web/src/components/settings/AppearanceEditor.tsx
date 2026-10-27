@@ -1,14 +1,14 @@
 import { useApp, usePreference } from "../../store";
-import { setProjectMode } from "../../game/stageSkin";
 import { LANGUAGE_OPTIONS, useI18n } from "../../i18n";
 import { EDITOR_FONT_SIZE, EDITOR_MODES } from "../../preferences/schema";
 import { confirmAction } from "../ConfirmDialog";
+import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
 import { ViewPacksEditor } from "./ViewPacksEditor";
 
 /** Local preferences only — nothing here reaches the project files. The
- * theme, the language and the tour; the rest of the local preferences are
- * LayoutEditor's, a row of their own in Settings. */
+ * theme, the language, the tour and help; the rest of the local preferences
+ * are LayoutEditor's, a row of their own in Settings. */
 export function AppearanceEditor() {
   const { language, setLanguage, t } = useI18n();
   const theme = useApp((s) => s.theme);
@@ -41,15 +41,15 @@ export function AppearanceEditor() {
       </div>
       <div className="settings-row">
         <span>{t("appearance.tour")}</span>
-        <button
-          type="button"
-          onClick={() => {
-            // The tour points at the board, so it plays in Info.
-            setProjectMode("info");
-            window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
-          }}
-        >
+        {/* The tour points at the board, so it plays there. */}
+        <button type="button" onClick={replayTour}>
           {t("appearance.replayTour")}
+        </button>
+      </div>
+      <div className="settings-row">
+        <span>{t("appearance.help")}</span>
+        <button type="button" onClick={openShortcutsHelp}>
+          {t("topbar.helpShortcuts")}
         </button>
       </div>
     </section>

@@ -30,7 +30,7 @@ test.describe("responsive", () => {
       await openApp(page);
 
       await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
-      await expect(page.getByRole("button", { name: "帳號與設定", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "設定", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: /新增節點/ }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
@@ -61,10 +61,10 @@ test.describe("theme", () => {
 
     const root = page.locator("html");
     const initial = await root.getAttribute("data-theme");
-    // The theme lives in the account menu.
-    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
-    const toggle = page.getByRole("menuitem", {
-      name: initial === "dark" ? /切換淺色模式/ : /切換深色模式/,
+    // The theme is a button on the bar, beside Settings.
+    const toggle = page.getByRole("button", {
+      name: initial === "dark" ? "切換淺色模式" : "切換深色模式",
+      exact: true,
     });
     await toggle.click();
 
@@ -83,8 +83,7 @@ test.describe("theme", () => {
     await page.keyboard.press("Shift+ArrowRight");
     await expect(handle).not.toHaveAttribute("aria-valuenow", "304");
 
-    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
-    await page.getByRole("menuitem", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
     await page.getByRole("button", { name: /^編輯器、版面與主題包/ }).click();
     const dialog = page.getByRole("region", { name: "編輯器、版面與主題包", exact: true });

@@ -122,8 +122,7 @@ test.describe("main flows", () => {
     await expect(page.getByText("自訂實際狀態在「設定 → 這個專案」")).toBeVisible();
 
     // The legend also offers a way in, so match the toolbar button exactly.
-    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
-    await page.getByRole("menuitem", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^這個專案/ }).click();
     await page.getByRole("button", { name: /^里程碑類型/ }).click();
     const dialog = page.getByRole("region", { name: "里程碑類型", exact: true });

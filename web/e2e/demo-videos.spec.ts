@@ -948,15 +948,14 @@ test("usage", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
-  const account = page.getByRole("button", { name: "Account and settings" });
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
   say("Usage lives in Settings", "Agents › Advanced, beside routing and the daily budget.");
   await pause(page, 1200);
-  await focus(page, account, { pad: 80, minW: 640, hold: 600 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 600 });
   const parts = page.getByRole("navigation", { name: "Settings" });
   const region = page.getByRole("region", { name: "Usage", exact: true });
   await cut(page, async () => {
-    await glide(page, account);
-    await glide(page, page.getByRole("menuitem", { name: "Settings" }));
+    await glide(page, settings);
     await expect(parts).toBeVisible();
     await pause(page, 300);
     await focus(page, parts, { pad: 40, minW: 720, d: 0 });
@@ -1157,14 +1156,13 @@ test("two-factor-and-device-link", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Two-factor and device links", "Lock your account down, then link a new runner.");
-  const account = page.getByRole("button", { name: "Account and settings" });
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
   const parts = page.getByRole("navigation", { name: "Settings" });
   say("Your account, in Settings", "Turn on an authenticator app as a second factor.");
   await pause(page, 1200);
-  await focus(page, account, { pad: 80, minW: 640, hold: 400 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 400 });
   await cut(page, async () => {
-    await glide(page, account);
-    await glide(page, page.getByRole("menuitem", { name: "Settings" }));
+    await glide(page, settings);
     await expect(parts).toBeVisible();
     await glide(page, parts.getByRole("button", { name: /^Account/ }));
     await pause(page, 600);

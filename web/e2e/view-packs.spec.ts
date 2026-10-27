@@ -31,8 +31,7 @@ test("view pack: installed from settings, drawn in Station, removed", async ({ p
   // Any earlier run's pack would make this one a reinstall.
   await page.request.delete("/api/packs/candy-dungeon");
 
-  await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
-  await page.getByRole("menuitem", { name: "設定", exact: true }).click();
+  await page.getByRole("button", { name: "設定", exact: true }).click();
   await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
   await page.getByRole("button", { name: /^編輯器、版面與主題包/ }).click();
   const dialog = page.getByRole("region", { name: "編輯器、版面與主題包", exact: true });

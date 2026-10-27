@@ -39,7 +39,7 @@ import { useControl } from "../station/controlStore";
 import { confirmAction } from "./ConfirmDialog";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
 import { useTeamServer, useViewer } from "./SignIn";
-import { COMMAND_PALETTE_EVENT, type CommandPaletteView } from "./topbar/actions";
+import { COMMAND_PALETTE_EVENT, replayTour, type CommandPaletteView } from "./topbar/actions";
 
 /**
  * Station's emergency stop, from the palette: confirmed, then the same
@@ -182,7 +182,7 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // The account menu's "Help and shortcuts" opens straight on the help view.
+    // Settings' "Help and shortcuts" opens straight on the help view.
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<{ view?: CommandPaletteView } | null>).detail;
       if (detail?.view === "help") setView("help");
@@ -571,9 +571,7 @@ export function CommandPalette() {
         detail: t("palette.tourDetail"),
         keywords: "tour onboarding guide 導覽 教學 新手 引導",
         icon: <IconCompass size={15} />,
-        run: () => {
-          window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
-        },
+        run: replayTour,
       },
     );
     // Last, since there can be many: the other projects and workspaces, which
