@@ -1,12 +1,13 @@
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { useViewer } from "../components/SignIn";
 import { useI18n } from "../i18n";
 import { IconClose } from "../icons";
 import { useApp, usePreference } from "../store";
 import { useAgents } from "./agentStore";
 import { useWorkstationVisible } from "../runners/workstation";
+import { lazyWithRetry } from "../lazyWithRetry";
 
-const AgentPanel = lazy(() =>
+const AgentPanel = lazyWithRetry(() =>
   import("./AgentPanel").then((m) => ({ default: m.AgentPanel })),
 );
 

@@ -19,17 +19,29 @@ export function isChunkLoadError(error: unknown): boolean {
 interface Props {
   children: ReactNode;
   resetKey?: unknown;
+  /**
+   * For a floating panel or dialog: a small notice with Reload, which can be
+   * dismissed until the resetKey changes, instead of a page-sized panel where
+   * the floating thing used to be.
+   */
+  compact?: boolean;
+  /**
+   * The root boundary's way out of a crash tied to what the app opens on:
+   * shown as "Reset view", it is expected to forget that and reload.
+   */
+  onResetView?: () => void;
 }
 
 interface State {
   error: unknown;
+  dismissed: boolean;
 }
 
 export class ViewErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, dismissed: false };
 
-  static getDerivedStateFromError(error: unknown): State {
-    return { error: error ?? new Error("unknown error") };
+  static getDerivedStateFromError(error: unknown): Partial<State> {
+    return { error: error ?? new Error("unknown error"), dismissed: false };
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
@@ -38,18 +50,37 @@ export class ViewErrorBoundary extends Component<Props, State> {
 
   componentDidUpdate(previous: Props) {
     if (this.state.error && previous.resetKey !== this.props.resetKey) {
-      this.setState({ error: null });
+      this.setState({ error: null, dismissed: false });
     }
   }
 
   render() {
-    const { error } = this.state;
+    const { error, dismissed } = this.state;
     if (!error) return this.props.children;
-    return <ViewError error={error} onRetry={() => this.setState({ error: null })} />;
+    if (this.props.compact) {
+      return dismissed ? null : (
+        <CompactViewError error={error} onDismiss={() => this.setState({ dismissed: true })} />
+      );
+    }
+    return (
+      <ViewError
+        error={error}
+        onRetry={() => this.setState({ error: null })}
+        onResetView={this.props.onResetView}
+      />
+    );
   }
 }
 
-function ViewError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+function ViewError({
+  error,
+  onRetry,
+  onResetView,
+}: {
+  error: unknown;
+  onRetry: () => void;
+  onResetView?: () => void;
+}) {
   const { t } = useI18n();
   const chunk = isChunkLoadError(error);
   const message = error instanceof Error ? error.message : String(error);
@@ -66,11 +97,33 @@ function ViewError({ error, onRetry }: { error: unknown; onRetry: () => void }) 
             {t("viewError.retry")}
           </button>
         )}
+        {onResetView && (
+          <button type="button" onClick={onResetView} title={t("viewError.resetViewHint")}>
+            {t("viewError.resetView")}
+          </button>
+        )}
       </div>
       <details>
         <summary>{t("viewError.details")}</summary>
         <pre>{message}</pre>
       </details>
+    </div>
+  );
+}
+
+function CompactViewError({ error, onDismiss }: { error: unknown; onDismiss: () => void }) {
+  const { t } = useI18n();
+  const chunk = isChunkLoadError(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    <div className="view-error-compact" role="alert" title={message}>
+      <span>{t(chunk ? "viewError.compactChunk" : "viewError.compact")}</span>
+      <button type="button" className="view-error-primary" onClick={() => window.location.reload()}>
+        {t("viewError.reload")}
+      </button>
+      <button type="button" className="view-error-dismiss" onClick={onDismiss} aria-label={t("viewError.dismiss")}>
+        ×
+      </button>
     </div>
   );
 }

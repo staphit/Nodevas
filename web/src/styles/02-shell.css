@@ -1220,3 +1220,33 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* A floating panel or dialog that crashed (ViewErrorBoundary compact): a
+   small notice in the corner, not a page-sized panel. */
+.view-error-compact {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 4px 16px var(--shadow);
+}
+.view-error-compact span {
+  flex: 1;
+}
+.view-error-compact .view-error-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+}

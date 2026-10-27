@@ -27,7 +27,7 @@ import { StationControl } from "./StationControl";
 import { useStation } from "./stationStore";
 import { waitingRuns } from "./waiting";
 
-const GameStage = lazy(() => import("../game/GameStage"));
+const GameStage = lazy(() => import("../lazyWithRetry").then(({ retryImport }) => retryImport(() => import("../game/GameStage"))));
 
 export default function StationView({ drawer }: { drawer: ReactNode }) {
   const { t } = useI18n();

@@ -97,6 +97,23 @@ function writeGraph(
   return operation;
 }
 
+/**
+ * A logic gate's inputs are always an array here. An older or hand-edited
+ * graph.yaml, or a peer's op, can carry a gate whose inputs are null or
+ * missing, and the board iterates them without checking.
+ */
+export function normalizeGraph<G extends Graph | null | undefined>(graph: G): G {
+  const gates = graph?.ui?.logicGates;
+  if (!graph || !gates || gates.every((gate) => Array.isArray(gate.inputs))) return graph;
+  return {
+    ...graph,
+    ui: {
+      ...graph.ui,
+      logicGates: gates.map((gate) => (Array.isArray(gate.inputs) ? gate : { ...gate, inputs: [] })),
+    },
+  };
+}
+
 export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   error: null,
   clearError: () => set({ error: null }),
@@ -116,7 +133,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         // Dropped when a project switch happened while this was in flight.
         if (generation !== generations.load) return;
         set({
-          graph: g.graph,
+          graph: normalizeGraph(g.graph),
           graphRev: g.rev,
           issues: g.issues ?? [],
           error: null,
@@ -138,7 +155,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     // Only the graph: statuses and issues are derived from it plus the run
     // state, and a move or a rename changes neither. A peer edit that could
     // change them arrives as graph-changed instead.
-    set({ graph: next });
+    set({ graph: normalizeGraph(next) });
     return true;
   },
 
@@ -175,7 +192,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // what changed without this browser being told about its own edit.
           const res = await api.graphOps(ops, get().selfPeerID);
           set({
-            graph: res.graph,
+            graph: normalizeGraph(res.graph),
             graphRev: res.rev,
             statuses: res.statuses,
             issues: res.issues ?? [],

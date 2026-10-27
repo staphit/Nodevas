@@ -5,8 +5,9 @@
  * no copilot.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useRef } from "react";
 import { languageLocale, useI18n } from "../i18n";
+import { lazyWithRetry } from "../lazyWithRetry";
 import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
@@ -16,7 +17,7 @@ import { decide, openUnread, projectChanged, refreshCopilotStatus, sendTurn } fr
 import { cancelSpeech, useSpeechRecognition, useSpeechSynthesis } from "./speech";
 
 // The panel (and the markdown renderer it pulls in) loads on first open.
-const CopilotPanel = lazy(() =>
+const CopilotPanel = lazyWithRetry(() =>
   import("./CopilotPanel").then((module) => ({ default: module.CopilotPanel })),
 );
 

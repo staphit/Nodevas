@@ -1,5 +1,4 @@
 import {
-  lazy,
   Suspense,
   useEffect,
   useReducer,
@@ -48,6 +47,7 @@ import { useTouchContextMenu } from "./components/touch";
 import { PresenceAvatars } from "./components/PresenceAvatars";
 import { TopbarOverflow, useNarrowViewport } from "./components/TopbarOverflow";
 import { useI18n } from "./i18n";
+import { lazyWithRetry } from "./lazyWithRetry";
 import {
   IconHelp,
   IconMoon,
@@ -56,12 +56,12 @@ import {
   IconTree,
 } from "./icons";
 
-const Drawer = lazy(() =>
+const Drawer = lazyWithRetry(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
 );
-const StationView = lazy(() => import("./station/StationView"));
-const SettingsView = lazy(() => import("./settings/SettingsView"));
-const PopoutEditor = lazy(() =>
+const StationView = lazyWithRetry(() => import("./station/StationView"));
+const SettingsView = lazyWithRetry(() => import("./settings/SettingsView"));
+const PopoutEditor = lazyWithRetry(() =>
   import("./components/PopoutEditor").then((module) => ({
     default: module.PopoutEditor,
   })),
@@ -588,7 +588,7 @@ function MainApp() {
             </Suspense>
           </ViewErrorBoundary>
         ) : (
-          <>
+          <ViewErrorBoundary resetKey={`info:${activeProject}`}>
         {/* Phone-width only (the component renders nothing when wide): dims
             the board the explorer overlay covers and gives a tap anywhere
             outside the panel the obvious meaning — close it. */}
@@ -629,17 +629,35 @@ function MainApp() {
           />
         )}
         <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
-          </>
+          </ViewErrorBoundary>
         )}
       </div>
-      <ConfirmDialogHost />
-      <ProjectPickerHost />
-      <CommandPalette />
-      <StartScreen />
-      <OnboardingTour />
-      <CopilotRoot />
-      <AgentNetworkRoot />
-      <RunsRoot />
+      {/* Each floating root in its own boundary: one that crashes becomes a
+          small notice, and the page and the others carry on. */}
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <ConfirmDialogHost />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <ProjectPickerHost />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <CommandPalette />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <StartScreen />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <OnboardingTour />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <CopilotRoot />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <AgentNetworkRoot />
+      </ViewErrorBoundary>
+      <ViewErrorBoundary compact resetKey={activeProject}>
+        <RunsRoot />
+      </ViewErrorBoundary>
     </div>
   );
 }
@@ -667,6 +685,7 @@ function ResizableStage({
   const [activePane, setActivePane] = useState<"graph" | "timeline" | null>(null);
   const bothOpen = paneOpen.graph && paneOpen.timeline;
   const activeTab = useApp((state) => state.activeTab);
+  const activeProject = useApp((state) => state.activeProject);
 
   useEffect(
     () => () => {
@@ -697,15 +716,19 @@ function ResizableStage({
 
   return (
     <main ref={stageRef} className={`stage split${bothOpen ? " has-open-split" : ""}`}>
-      <GraphPane
-        collapsed={!paneOpen.graph}
-        onToggle={() => togglePane("graph")}
-        paneStyle={bothOpen ? { flex: `0 0 ${split}%` } : undefined}
-        selectedNodeId={selectedNodeId}
-        onSelectedNodeChange={setSelectedNodeId}
-        keyboardActive={activePane === "graph"}
-        onActivate={() => setActivePane("graph")}
-      />
+      {/* Each pane in its own boundary, so one that crashes leaves the
+          other working. */}
+      <ViewErrorBoundary resetKey={`graph:${activeProject}`}>
+        <GraphPane
+          collapsed={!paneOpen.graph}
+          onToggle={() => togglePane("graph")}
+          paneStyle={bothOpen ? { flex: `0 0 ${split}%` } : undefined}
+          selectedNodeId={selectedNodeId}
+          onSelectedNodeChange={setSelectedNodeId}
+          keyboardActive={activePane === "graph"}
+          onActivate={() => setActivePane("graph")}
+        />
+      </ViewErrorBoundary>
       <ResizeHandle
         className={`pane-resizer${bothOpen ? "" : " disabled"}`}
         orientation="horizontal"
@@ -730,14 +753,16 @@ function ResizableStage({
           document.body.classList.toggle("pane-resizing", resizing)
         }
       />
-      <TimelinePane
-        collapsed={!paneOpen.timeline}
-        onToggle={() => togglePane("timeline")}
-        selectedNodeId={selectedNodeId}
-        onSelectedNodeChange={setSelectedNodeId}
-        keyboardActive={activePane === "timeline"}
-        onActivate={() => setActivePane("timeline")}
-      />
+      <ViewErrorBoundary resetKey={`timeline:${activeProject}`}>
+        <TimelinePane
+          collapsed={!paneOpen.timeline}
+          onToggle={() => togglePane("timeline")}
+          selectedNodeId={selectedNodeId}
+          onSelectedNodeChange={setSelectedNodeId}
+          keyboardActive={activePane === "timeline"}
+          onActivate={() => setActivePane("timeline")}
+        />
+      </ViewErrorBoundary>
       {activeTab !== null && (
         <ViewErrorBoundary resetKey={activeTab}>
           <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>

@@ -296,12 +296,14 @@ export const autopilotApi = {
         body: JSON.stringify(body),
       }),
     ),
-  /** The goal's latest autopilot run, or null when it never had one. */
+  /** The goal's latest autopilot run, or null when it never had one (the hub
+   * answers null; an older one answered 404). */
   getAutopilotForGoal: async (goalNodeId: string): Promise<AutopilotView | null> => {
     try {
-      return normalizeAutopilotView(
-        await req<AutopilotView>(`/api/autopilot?goal=${encodeURIComponent(goalNodeId)}`),
+      const view = await req<AutopilotView | null>(
+        `/api/autopilot?goal=${encodeURIComponent(goalNodeId)}`,
       );
+      return view?.run ? normalizeAutopilotView(view) : null;
     } catch (error) {
       if (error instanceof RequestError && error.status === 404) return null;
       throw error;

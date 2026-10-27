@@ -151,9 +151,28 @@ export function writePreference<K extends PreferenceKey>(
   return normalized;
 }
 
+/**
+ * The preferences that pick which view opens: Info, Station or Settings, the
+ * Settings section, and the Station view. A view that crashes as it renders
+ * opens again on every reload while these point at it; the root error
+ * boundary's "Reset view" drops them so the app starts on the board.
+ */
+export const VIEW_SELECTION_PREFERENCES: readonly PreferenceKey[] = [
+  "projectMode",
+  "settingsSection",
+  "stationPack",
+  "stageSkin",
+];
+
 /** Drops stored values so the defaults apply again. */
-export function resetPreferences(scope?: PreferenceScope): PreferenceValues {
-  const keys = scope ? preferenceKeysInScope(scope) : PREFERENCE_KEYS;
+export function resetPreferences(
+  scope?: PreferenceScope | readonly PreferenceKey[],
+): PreferenceValues {
+  const keys = Array.isArray(scope)
+    ? (scope as readonly PreferenceKey[])
+    : scope
+      ? preferenceKeysInScope(scope as PreferenceScope)
+      : PREFERENCE_KEYS;
   for (const key of keys) {
     try {
       storage.removeItem(PREFERENCE_SCHEMA[key].key);

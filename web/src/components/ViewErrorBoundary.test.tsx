@@ -51,4 +51,47 @@ describe("ViewErrorBoundary", () => {
     expect(screen.getByText("other view")).toBeInTheDocument();
     spy.mockRestore();
   });
+
+  it("shows a floating panel's crash as a small notice that stays dismissed until the resetKey changes", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    shouldThrow = true;
+    const { rerender } = render(
+      <ViewErrorBoundary compact resetKey="p1">
+        <Flaky />
+      </ViewErrorBoundary>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("A panel stopped working");
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(
+      <ViewErrorBoundary compact resetKey="p1">
+        <Flaky />
+      </ViewErrorBoundary>,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    shouldThrow = false;
+    rerender(
+      <ViewErrorBoundary compact resetKey="p2">
+        <Flaky />
+      </ViewErrorBoundary>,
+    );
+    expect(screen.getByText("view content")).toBeInTheDocument();
+    spy.mockRestore();
+  });
+
+  it("offers Reset view only where the root asks for it", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    shouldThrow = true;
+    const resetView = vi.fn();
+    render(
+      <ViewErrorBoundary onResetView={resetView}>
+        <Flaky />
+      </ViewErrorBoundary>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Reset view" }));
+    expect(resetView).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
 });
