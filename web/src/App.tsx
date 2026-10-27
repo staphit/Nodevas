@@ -18,6 +18,7 @@ import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
 import { StartScreen } from "./components/StartScreen";
+import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
 import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
@@ -565,21 +566,27 @@ function MainApp() {
       )}
       <div className="main">
         {projectMode === "settings" ? (
-          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
-            <SettingsView />
-          </Suspense>
+          <ViewErrorBoundary resetKey={projectMode}>
+            <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+              <SettingsView />
+            </Suspense>
+          </ViewErrorBoundary>
         ) : projectMode === "station" ? (
-          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
-            <StationView
-              drawer={
-                activeTab !== null && (
-                  <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
-                    <Drawer />
-                  </Suspense>
-                )
-              }
-            />
-          </Suspense>
+          <ViewErrorBoundary resetKey={projectMode}>
+            <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+              <StationView
+                drawer={
+                  activeTab !== null && (
+                    <ViewErrorBoundary resetKey={activeTab}>
+                      <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
+                        <Drawer />
+                      </Suspense>
+                    </ViewErrorBoundary>
+                  )
+                }
+              />
+            </Suspense>
+          </ViewErrorBoundary>
         ) : (
           <>
         {/* Phone-width only (the component renders nothing when wide): dims
@@ -732,9 +739,11 @@ function ResizableStage({
         onActivate={() => setActivePane("timeline")}
       />
       {activeTab !== null && (
-        <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
-          <Drawer />
-        </Suspense>
+        <ViewErrorBoundary resetKey={activeTab}>
+          <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
+            <Drawer />
+          </Suspense>
+        </ViewErrorBoundary>
       )}
     </main>
   );

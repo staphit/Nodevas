@@ -1185,3 +1185,38 @@
     background: var(--hover);
   }
 }
+
+/* A view that crashed or whose chunk failed to load (ViewErrorBoundary). */
+.view-error {
+  flex: 1;
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 24px;
+  color: var(--text);
+}
+.view-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.view-error p {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.view-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.view-error-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.view-error details {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.view-error pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
