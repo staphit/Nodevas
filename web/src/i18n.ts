@@ -6195,3 +6195,8 @@ export function useI18n() {
 }
 
 export const LANGUAGE_OPTIONS: readonly Language[] = ["en", "zh-TW"];
+
+/** Whether language's own catalog has key (no fallback to English). */
+export function hasMessage(language: Language, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(messages[language], key);
+}

@@ -23,6 +23,8 @@ const (
 const (
 	SourceSession = "session"
 	SourceRun     = "run"
+	// SourceCopilot is a copilot conversation's model use.
+	SourceCopilot = "copilot"
 )
 
 // Bucket is usage summed over some slice of a report.
@@ -70,15 +72,20 @@ type SessionEntry struct {
 
 // Report is GET /api/usage.
 type Report struct {
-	Days       int            `json:"days"`
-	Since      string         `json:"since"`
-	Currency   string         `json:"currency"`
-	PricesAsOf string         `json:"pricesAsOf"`
-	Totals     Bucket         `json:"totals"`
-	ByAgent    []KeyBucket    `json:"byAgent"`
-	ByModel    []KeyBucket    `json:"byModel"`
-	ByDay      []KeyBucket    `json:"byDay"`
-	Sessions   []SessionEntry `json:"sessions"`
+	Days       int         `json:"days"`
+	Since      string      `json:"since"`
+	Currency   string      `json:"currency"`
+	PricesAsOf string      `json:"pricesAsOf"`
+	Totals     Bucket      `json:"totals"`
+	ByAgent    []KeyBucket `json:"byAgent"`
+	ByModel    []KeyBucket `json:"byModel"`
+	ByDay      []KeyBucket `json:"byDay"`
+	// ByRole is usage by the run's role (legacy runs by their kind;
+	// "session" and "copilot" for those); ByNode the top nodes by cost
+	// across all their runs.
+	ByRole   []KeyBucket    `json:"byRole"`
+	ByNode   []KeyBucket    `json:"byNode"`
+	Sessions []SessionEntry `json:"sessions"`
 }
 
 // Query is what a report covers.

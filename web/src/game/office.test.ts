@@ -416,3 +416,31 @@ describe("which runs get a seat", () => {
     expect(seatedRuns([recent], NOW)).toEqual([recent]);
   });
 });
+
+// W-18: a run character's role is its run's (its kind's for a legacy run);
+// its pipeline's latest verify shows as red or green; a session has neither.
+describe("roles in the office", () => {
+  it("gives run characters their run's role and test state, and sessions none", () => {
+    const tester = makeRun({ id: "t1", status: "running", role: "tester", kind: "test", pipelineId: "p1", createdAt: ago(60_000) });
+    const verify = makeRun({
+      id: "v1",
+      status: "succeeded",
+      kind: "verify",
+      pipelineId: "p1",
+      createdAt: ago(30_000),
+      finishedAt: ago(20_000),
+      verify: { phase: "red", exitCode: 1, passed: true, durationMs: 900 },
+    });
+    const legacyReview = makeRun({ id: "lr", status: "running", kind: "review", nodeId: "schema" });
+    const built = office({
+      runs: [tester, verify, legacyReview],
+      sessions: [makeSession({ id: "s9", name: "laptop", nodeId: "docs", role: "reviewer" } as never)],
+    });
+    expect(actor(built.actors, runActorId("t1"))).toMatchObject({ role: "tester", testState: "red" });
+    expect(actor(built.actors, runActorId("lr")).role).toBe("reviewer");
+    expect(actor(built.actors, runActorId("lr")).testState).toBeUndefined();
+    const session = actor(built.actors, sessionActorId("s9"));
+    expect(session.role).toBeUndefined();
+    expect(session.testState).toBeUndefined();
+  });
+});

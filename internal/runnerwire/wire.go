@@ -116,6 +116,10 @@ type Envelope struct {
 	// System One decisions; see decide.go.
 	Decide     *DecideRequest `json:"decide,omitempty"`
 	DecideDone *DecideDone    `json:"decideDone,omitempty"`
+
+	// Read-only repo browsing; see repobrowse.go.
+	Repo     *RepoRequest `json:"repo,omitempty"`
+	RepoDone *RepoDone    `json:"repoDone,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.

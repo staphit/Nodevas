@@ -433,7 +433,9 @@ func TestLightRunsImplementOnly(t *testing.T) {
 func TestEvidencePersisted(t *testing.T) {
 	f := newRoleFixture(t, true)
 	var evidence []string
-	f.d.SetEvidence(func(project, nodeID, kind, summary string) { evidence = append(evidence, kind+": "+summary) })
+	f.d.SetEvidence(func(project, nodeID, runID, kind, outcome, summary string) {
+		evidence = append(evidence, kind+": "+summary)
+	})
 	first := f.stagedStart(t, standardStages(), nil)
 	verify := f.complete(t, first, stepOutcome{files: []runnerwire.FileChange{testFile("pkg/x_test.go")}, head: head1})
 	f.complete(t, verify, stepOutcome{result: red()})

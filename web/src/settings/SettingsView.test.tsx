@@ -215,4 +215,24 @@ describe("Settings", () => {
     expect(screen.getByText(/This install is standalone/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Audit log/ })).not.toBeInTheDocument();
   });
+  // W-08: Agent performance is a row of Agents › Advanced, after Usage.
+  it("offers Agent performance under Agents › Advanced, by name and by search", async () => {
+    const user = userEvent.setup();
+    act(() => openSettings("analytics" as Parameters<typeof openSettings>[0]));
+    render(<SettingsView />);
+    expect(useApp.getState().preferences.settingsSection).toBe("analytics");
+    const advanced = screen.getByRole("region", { name: "Advanced" });
+    const row = within(advanced).getByRole("button", { name: /^Agent performance/ });
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    const labels = within(advanced)
+      .getAllByRole("button", { expanded: false })
+      .concat(row)
+      .map((button) => button.querySelector("span")?.textContent ?? "");
+    expect(labels).toContain("Usage");
+    expect(labels).toContain("Agent performance");
+
+    const search = within(nav()).getByRole("searchbox", { name: "Search settings" });
+    await user.type(search, "performance");
+    expect(within(nav()).getByRole("button", { name: /Agent performance\s*Agents › Advanced/ })).toBeInTheDocument();
+  });
 });

@@ -25,6 +25,7 @@
     {"method": "POST", "pattern": "/api/agents/inbox", "cap": "message"},
     {"method": "POST", "pattern": "/api/agents/asks", "cap": "message"},
     {"method": "POST", "pattern": "/api/agents/sessions/*/changes", "cap": "message"},
-    {"method": "POST", "pattern": "/api/agents/sessions/*/usage", "cap": "message"}
+    {"method": "POST", "pattern": "/api/agents/sessions/*/usage", "cap": "message"},
+    {"method": "POST", "pattern": "/api/verdicts", "cap": "verdict"}
   ]
 }

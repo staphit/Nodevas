@@ -404,7 +404,7 @@ func (s *Server) auditRun(entry runs.AuditEntry) {
 
 // recordEvidence appends a staged pipeline's evidence (red/green runs, the
 // diff guard, judge checks) to its node's journal.
-func (s *Server) recordEvidence(project, nodeID, kind, summary string) {
+func (s *Server) recordEvidence(project, nodeID, runID, kind, outcome, summary string) {
 	if s.pm == nil {
 		return
 	}

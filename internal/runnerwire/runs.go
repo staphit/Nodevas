@@ -264,15 +264,22 @@ type Run struct {
 	RetryAt       string `json:"retryAt,omitempty"`
 	// Agent roles (roles.go): the run's role ("" legacy), its verify result
 	// and judge checks, and a person's stage override reason.
-	Role          string        `json:"role,omitempty"`
-	Verify        *VerifyResult `json:"verify,omitempty"`
-	Checks        []CheckResult `json:"checks,omitempty"`
-	Override      string        `json:"override,omitempty"`
-	CreatedBy     string        `json:"createdBy"`
-	CreatedByName string        `json:"createdByName"`
-	CreatedAt     string        `json:"createdAt"`
-	StartedAt     string        `json:"startedAt,omitempty"`
-	FinishedAt    string        `json:"finishedAt,omitempty"`
+	Role     string        `json:"role,omitempty"`
+	Verify   *VerifyResult `json:"verify,omitempty"`
+	Checks   []CheckResult `json:"checks,omitempty"`
+	Override string        `json:"override,omitempty"`
+	// Agent analytics: the run's cost in USD (reported by the CLI, or
+	// estimated from its tokens when CostEstimated), and the node's type and
+	// acceptance size when it was dispatched (difficulty).
+	CostUSD         float64 `json:"costUsd"`
+	CostEstimated   bool    `json:"costEstimated"`
+	NodeType        string  `json:"nodeType,omitempty"`
+	AcceptanceCount int     `json:"acceptanceCount"`
+	CreatedBy       string  `json:"createdBy"`
+	CreatedByName   string  `json:"createdByName"`
+	CreatedAt       string  `json:"createdAt"`
+	StartedAt       string  `json:"startedAt,omitempty"`
+	FinishedAt      string  `json:"finishedAt,omitempty"`
 }
 
 // CreateRunRequest is the body of POST /api/runs (project from ?project=).
@@ -306,6 +313,10 @@ type CreateRunRequest struct {
 	// (at most 200 characters); recorded on the run and the audit trail.
 	Role     string `json:"role,omitempty"`
 	Override string `json:"override,omitempty"`
+	// RoutePick is the auto-routing pick (RouteSuggestion.RuleID "auto:<id>"
+	// without the prefix) this dispatch followed, so the pick is linked to
+	// its run. Another owner's or a used pick is ignored.
+	RoutePick string `json:"routePick,omitempty"`
 }
 
 // RunListResponse is the body of GET /api/runs?nodeId=.

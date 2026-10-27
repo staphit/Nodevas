@@ -226,10 +226,14 @@ func (d *Dispatcher) SetOnApproved(fn func(project, nodeID, evidence string)) { 
 
 // SetEvidence sets the hook that records a pipeline evidence event on a
 // node's journal (store.AppendEvidence). Call it before serving.
-func (d *Dispatcher) SetEvidence(fn func(project, nodeID, kind, summary string)) { d.evidence = fn }
+func (d *Dispatcher) SetEvidence(fn func(project, nodeID, runID, kind, outcome, summary string)) {
+	d.evidence = fn
+}
 
 func (d *Dispatcher) recordEvidence(r Record, kind, summary string) {
+	// TODO(green): store a run_evidence row with its outcome and name the
+	// run in the journal note.
 	if d.evidence != nil {
-		d.evidence(r.Project, r.NodeID, kind, summary)
+		d.evidence(r.Project, r.NodeID, r.ID, kind, "", summary)
 	}
 }

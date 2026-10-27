@@ -234,6 +234,10 @@ type New struct {
 	// override reason, and the job's role fields.
 	Role, Override string
 	JobRoles
+	// Agent analytics: the node's type and acceptance size when the run was
+	// made. Both empty copies them from the newest run on the same node.
+	NodeType        string
+	AcceptanceCount int
 }
 
 // Create records a queued run.

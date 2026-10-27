@@ -139,6 +139,13 @@ export interface Run {
   verify?: VerifyResult | null;
   checks?: CheckResult[] | null;
   override?: string;
+  /** Agent analytics: the run's cost (the CLI's own figure, or estimated
+   * from its tokens when costEstimated), and the node's type and acceptance
+   * size when it was dispatched. Absent from an older hub. */
+  costUsd?: number;
+  costEstimated?: boolean;
+  nodeType?: string;
+  acceptanceCount?: number;
   createdBy: string;
   createdByName: string;
   createdAt: string;
@@ -311,6 +318,9 @@ export interface CreateRunRequest {
    * plain run past enabled stages (at most 200 characters). */
   role?: string;
   override?: string;
+  /** The auto-routing pick this dispatch followed (RouteSuggestion.ruleId
+   * "auto:<id>" without the prefix), so the hub links it to the run. */
+  routePick?: string;
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.
@@ -324,6 +334,8 @@ export interface AgentModel {
 
 /** Route match kinds, tried in this order by the hub. */
 export type RouteMatch = "tag" | "kind" | "project" | "default" | "role";
+/** RouteSuggestion.match for an auto-routing pick; never a stored rule's. */
+export const ROUTE_AUTO = "auto";
 export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "role", "project", "default"];
 
 /** Mirrors runnerwire.RouteRule. Project "" applies in every project. */

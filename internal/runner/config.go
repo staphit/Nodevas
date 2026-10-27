@@ -97,6 +97,10 @@ type Config struct {
 	// whose modes are headless only unless the owner adds interactive, and
 	// typing from the hub stays off unless the owner allows it.
 	Interactive *bool `json:"interactive,omitempty"`
+	// RepoBrowse answers the hub's read-only repo browsing for the
+	// Explorer (repobrowse.go): nil means the default, on; false refuses it
+	// and leaves runnerwire.CapRepoBrowse out of the hello.
+	RepoBrowse *bool `json:"repoBrowse,omitempty"`
 
 	// Pull requests, from W3 on.
 

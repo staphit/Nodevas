@@ -1,5 +1,5 @@
 {
-  "capabilities": ["read", "claim", "status", "body", "create", "link", "meta", "acceptance", "message"],
+  "capabilities": ["read", "claim", "status", "body", "create", "link", "meta", "acceptance", "message", "verdict"],
   "toolCapabilities": {
     "get_node": ["read"],
     "get_graph_outline": ["read"],
@@ -22,7 +22,8 @@
     "check_inbox": ["message"],
     "send_message": ["message"],
     "list_team": ["message"],
-    "save_attachment": ["message"]
+    "save_attachment": ["message"],
+    "submit_verdict": ["verdict"]
   },
   "roles": [
     {
@@ -34,10 +35,10 @@
     },
     {
       "id": "qa", "label": "QA", "builtin": true, "rank": "orchestrator",
-      "tools": ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message"],
+      "tools": ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message", "submit_verdict"],
       "writeTypes": ["task", "scene", "event"],
       "acceptanceTypes": ["goal"],
-      "caps": ["read", "create", "link", "acceptance", "message"]
+      "caps": ["read", "create", "link", "acceptance", "message", "verdict"]
     },
     {
       "id": "tester", "label": "Tester", "builtin": true, "rank": "worker",
@@ -55,10 +56,10 @@
     },
     {
       "id": "reviewer", "label": "Reviewer", "builtin": true, "rank": "worker",
-      "tools": ["get_node", "check_inbox", "send_message"],
+      "tools": ["get_node", "check_inbox", "send_message", "submit_verdict"],
       "writeTypes": [],
       "acceptanceTypes": [],
-      "caps": ["read", "message"]
+      "caps": ["read", "message", "verdict"]
     },
     {
       "id": "researcher", "label": "Researcher", "builtin": true, "rank": "worker",

@@ -17,6 +17,9 @@ const (
 	RouteKind    = "kind"
 	RouteProject = "project"
 	RouteDefault = "default"
+	// RouteAuto is RouteSuggestion.Match for an auto-routing pick
+	// (internal/analytics). It is never a stored rule's match.
+	RouteAuto = "auto"
 )
 
 // RouteRule is one routing rule. Rules are per owner; Project "" applies in
