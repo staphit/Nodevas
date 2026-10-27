@@ -15,6 +15,10 @@ export interface ControlStoreState {
   result: PauseAllResponse | null;
   error: string;
   pauseAll: (cancelRunning: boolean) => Promise<boolean>;
+  /** "Resume all": resumes each paused autopilot given, one by one, the way
+   * its goal's own Resume does. The hub has no resume-all of its own, and
+   * runs pause-all withdrew stay withdrawn. */
+  resumeAll: (ids: string[]) => Promise<boolean>;
   dismiss: () => void;
 }
 
@@ -40,6 +44,18 @@ export const useControl = create<ControlStoreState>((set, get) => ({
     } catch (error) {
       set({ error: message(error) });
       return false;
+    } finally {
+      set({ pausing: false });
+    }
+  },
+
+  resumeAll: async (ids) => {
+    if (get().pausing || ids.length === 0) return false;
+    set({ pausing: true, error: "", result: null });
+    try {
+      const act = useAutopilot.getState().act;
+      const done = await Promise.all(ids.map((id) => act(id, "resume")));
+      return done.every(Boolean);
     } finally {
       set({ pausing: false });
     }

@@ -10,6 +10,7 @@ import { useCallback } from "react";
 import type { OverflowMenuItem } from "../components/menus/OverflowMenu";
 import { useI18n } from "../i18n";
 import type { ViewPack } from "../api";
+import { useStation } from "../station/stationStore";
 import { useApp, usePreference } from "../store";
 import { usePacks } from "./packStore";
 
@@ -51,11 +52,13 @@ export function setProjectMode(mode: ProjectMode): void {
   if (mode === "station") updateUIPreference("agentWorkstation", true);
 }
 
-/** Opens Station on one of its built-in views. */
+/** Opens Station on one of its built-in views (its "In progress" card
+ * draws it instead of its list). */
 export function setStageSkin(view: StationView): void {
   const { updateUIPreference } = useApp.getState();
   updateUIPreference("stageSkin", view);
   updateUIPreference("stationPack", "");
+  useStation.getState().setLiveView("game");
   setProjectMode("station");
 }
 
@@ -64,6 +67,7 @@ export function setStationPack(pack: Pick<ViewPack, "id" | "layout">): void {
   const { updateUIPreference } = useApp.getState();
   updateUIPreference("stageSkin", pack.layout === "rooms" ? "warroom" : "dungeon");
   updateUIPreference("stationPack", pack.id);
+  useStation.getState().setLiveView("game");
   setProjectMode("station");
 }
 

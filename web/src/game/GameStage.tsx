@@ -33,15 +33,21 @@ export interface GameStageProps {
   skin: StationView;
   /** The view pack drawing it (docs/view-packs.md); null: the built-in art. */
   pack?: ViewPack | null;
+  /** false: no view switch or list toggle of its own. Station's "In
+   * progress" card holds both in its view menu and passes listView. */
+  controls?: boolean;
+  /** The same world as text, while the switch lives outside (controls false). */
+  listView?: boolean;
 }
 
-export default function GameStage({ skin, pack = null }: GameStageProps) {
+export default function GameStage({ skin, pack = null, controls = true, listView: textView = false }: GameStageProps) {
   const { language, t } = useI18n();
   const packs = usePacks((s) => s.packs);
   const reduced = useReducedMotion();
   const hidden = usePageHidden();
   const workstation = useWorkstationVisible();
-  const [listView, setListView] = useState(false);
+  const [ownListView, setOwnListView] = useState(false);
+  const listView = controls ? ownListView : textView;
   const choices = useStageSkinChoices();
   const title = pack ? packName(pack, language) : t(STAGE_SKIN_LABEL[skin]);
   // A pack's palette, as variables game.css reads; only colours get here.
@@ -64,39 +70,43 @@ export default function GameStage({ skin, pack = null }: GameStageProps) {
       >
         <div className="board-title game-head">
           <div className="board-title-controls">
-            <div className="game-skin-switch" role="group" aria-label={t("game.skin.label")}>
-              {choices.map((choice) => (
+            {controls && (
+              <>
+                <div className="game-skin-switch" role="group" aria-label={t("game.skin.label")}>
+                  {choices.map((choice) => (
+                    <button
+                      key={choice}
+                      type="button"
+                      className={!pack && choice === skin ? "active" : ""}
+                      aria-pressed={!pack && choice === skin}
+                      onClick={() => setStageSkin(choice)}
+                    >
+                      {t(STAGE_SKIN_LABEL[choice])}
+                    </button>
+                  ))}
+                  {packs.map((item) => (
+                    <button
+                      key={`pack-${item.id}`}
+                      type="button"
+                      className={pack?.id === item.id ? "active" : ""}
+                      aria-pressed={pack?.id === item.id}
+                      onClick={() => setStationPack(item)}
+                      title={t("packs.switchTitle")}
+                    >
+                      {packName(item, language)}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={choice}
                   type="button"
-                  className={!pack && choice === skin ? "active" : ""}
-                  aria-pressed={!pack && choice === skin}
-                  onClick={() => setStageSkin(choice)}
+                  className={`board-tool-button${listView ? " active" : ""}`}
+                  aria-pressed={listView}
+                  onClick={() => setOwnListView((value) => !value)}
                 >
-                  {t(STAGE_SKIN_LABEL[choice])}
+                  {t("game.listView")}
                 </button>
-              ))}
-              {packs.map((item) => (
-                <button
-                  key={`pack-${item.id}`}
-                  type="button"
-                  className={pack?.id === item.id ? "active" : ""}
-                  aria-pressed={pack?.id === item.id}
-                  onClick={() => setStationPack(item)}
-                  title={t("packs.switchTitle")}
-                >
-                  {packName(item, language)}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className={`board-tool-button${listView ? " active" : ""}`}
-              aria-pressed={listView}
-              onClick={() => setListView((value) => !value)}
-            >
-              {t("game.listView")}
-            </button>
+              </>
+            )}
             <span className="station-live-hint">{t("station.live.hint")}</span>
           </div>
         </div>
