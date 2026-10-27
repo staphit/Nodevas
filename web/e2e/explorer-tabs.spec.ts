@@ -106,6 +106,10 @@ test("the Explorer fits a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockExplorer(page);
   await freshProject(page, ["設計稿"]);
+  // A phone starts with the explorer folded away (an overlay); open it.
+  const expand = page.locator(".lane-wrap.graph").getByRole("button", { name: "展開專案總管" });
+  await expect(expand).toBeVisible();
+  await expand.click();
   await page.getByRole("group", { name: "側邊欄分頁" }).getByRole("button", { name: "檔案" }).click();
   await expect(page.getByText("alpha.md")).toBeVisible();
   await expectNoHorizontalOverflow(page);

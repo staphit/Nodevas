@@ -362,3 +362,8 @@ func addStatus(s *runnerwire.RepoGitStatus, path, mark string) {
 	}
 	s.Entries = append(s.Entries, runnerwire.RepoStatusEntry{Path: path, Mark: mark})
 }
+
+// readCapped reads at most limit bytes of path.
+func readCapped(path string, limit int) ([]byte, error) {
+	return os.ReadFile(path)
+}

@@ -227,3 +227,75 @@ func hiddenOf(d runnerwire.RepoDone) int {
 	}
 	return d.Diff.Hidden
 }
+
+// A filter driver whose name has capitals (git keeps a config subsection's
+// case) never runs either: blanking it under a lowercased name would miss it.
+func TestRepoBrowseMixedCaseFilterNeverRuns(t *testing.T) {
+	repo := newTestRepo(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := filepath.Join(t.TempDir(), "evil.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ran > '"+filepath.ToSlash(marker)+"'\ncat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, ".gitattributes", []byte("*.txt filter=EvilFilter\n"))
+	writeFile(t, repo, "a.txt", []byte("one\n"))
+	gitT(t, repo, "add", ".gitattributes", "a.txt")
+	gitT(t, repo, "commit", "-q", "-m", "filtered")
+	gitT(t, repo, "config", "filter.EvilFilter.clean", "sh '"+filepath.ToSlash(script)+"'")
+	writeFile(t, repo, "a.txt", []byte("two\n"))
+
+	cfg := &Config{Repos: []runnerwire.Repo{{ID: "r1", Name: "repo", Path: repo}}}
+	if got := browse(cfg, runnerwire.RepoOpStatus, ""); got.Code != "" {
+		t.Fatalf("status = %+v", got)
+	}
+	if got := browse(cfg, runnerwire.RepoOpDiff, ""); got.Code != "" {
+		t.Fatalf("diff = %+v", got)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a mixed-case filter driver the repo configured ran")
+	}
+	// Control: plain git runs it, so the test proves something.
+	gitT(t, repo, "diff", "--", "a.txt")
+	if _, err := os.Stat(marker); err != nil {
+		t.Skipf("the filter never runs here, so this proves nothing: %v", err)
+	}
+}
+
+// A nested repository's .git (a vendored or submodule checkout) is never
+// listed or read, like the root's.
+func TestRepoBrowseNestedGitHidden(t *testing.T) {
+	cfg, dir := browseRepo(t)
+	writeFile(t, dir, "vendor/lib/.git/config", []byte("[remote \"origin\"]\nurl = https://user:token@example.test/x\n"))
+	writeFile(t, dir, "vendor/lib/main.go", []byte("package lib\n"))
+	done := browse(cfg, runnerwire.RepoOpList, "vendor/lib")
+	if done.Listing == nil {
+		t.Fatalf("list = %+v", done)
+	}
+	for _, e := range done.Listing.Entries {
+		if e.Name == ".git" {
+			t.Fatal("a nested .git is listed")
+		}
+	}
+	if got := browse(cfg, runnerwire.RepoOpRead, "vendor/lib/.git/config"); got.Code == "" || got.File != nil {
+		t.Fatalf("read nested .git/config = %+v, want refused", got)
+	}
+}
+
+// An untracked file in a worktree diff is read only up to the patch cap,
+// never whole.
+func TestRepoBrowseUntrackedReadCapped(t *testing.T) {
+	if got := len(untrackedRead(t)); got > runnerwire.MaxRepoPatchBytes+1 {
+		t.Fatalf("read %d bytes of an untracked file, want at most the patch cap", got)
+	}
+}
+
+func untrackedRead(t *testing.T) []byte {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, dir, "huge.txt", []byte(strings.Repeat("y", runnerwire.MaxRepoPatchBytes*3)))
+	data, err := readCapped(filepath.Join(dir, "huge.txt"), runnerwire.MaxRepoPatchBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

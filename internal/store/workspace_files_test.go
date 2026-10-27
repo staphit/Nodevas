@@ -96,3 +96,29 @@ func TestHistoryGitBackends(t *testing.T) {
 		t.Fatalf("files backend = %+v, %v", got, err)
 	}
 }
+
+// A file inside a dot directory is refused even when the file's name repeats
+// the directory's (".vised/.vised" is still inside .vised).
+func TestWorkspaceFileInsideDotDirSameName(t *testing.T) {
+	root := t.TempDir()
+	s := NewStore(root)
+	workspaceFile(t, root, ".vised/.vised", []byte("internal\n"))
+	workspaceFile(t, root, ".gitignore", []byte("node_modules\n"))
+	if _, err := s.ReadWorkspaceFile(".vised/.vised"); !errors.Is(err, ErrBadPath) {
+		t.Fatalf("read .vised/.vised = %v, want ErrBadPath", err)
+	}
+	if f, err := s.ReadWorkspaceFile(".gitignore"); err != nil || f.Content != "node_modules\n" {
+		t.Fatalf("read .gitignore = %+v %v", f, err)
+	}
+}
+
+// A workspace commit's patch never shows a file that may hold secrets.
+func TestDropSecretPatchSections(t *testing.T) {
+	patch := "diff --git a/nodes/a.md b/nodes/a.md\n--- a/nodes/a.md\n+++ b/nodes/a.md\n@@ -1 +1 @@\n-x\n+y\n" +
+		"diff --git a/.env b/.env\nnew file mode 100644\n--- /dev/null\n+++ b/.env\n@@ -0,0 +1 @@\n+TOKEN=secret\n" +
+		"diff --git a/keys/server.pem b/keys/server.pem\n+++ b/keys/server.pem\n+-----BEGIN-----\n"
+	got := dropSecretPatchSections(patch)
+	if strings.Contains(got, "TOKEN") || strings.Contains(got, "BEGIN") || !strings.Contains(got, "+y") {
+		t.Fatalf("patch = %q", got)
+	}
+}
