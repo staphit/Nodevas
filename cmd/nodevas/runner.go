@@ -17,6 +17,8 @@ import (
 	"nodevas/internal/runner"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
+
+	"golang.org/x/term"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -740,7 +742,10 @@ func stdinIsTerminal(r io.Reader) bool {
 	return ok && isTerminal(f)
 }
 
+// isTerminal reports whether f is a terminal (a console on Windows). A
+// character device is not enough: NUL and /dev/null are character devices,
+// and they are what Electron's ignored stdio and systemd's StandardInput=null
+// hand serve, which must then stop on the first Ctrl+C.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return f != nil && term.IsTerminal(int(f.Fd()))
 }

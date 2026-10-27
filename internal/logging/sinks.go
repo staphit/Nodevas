@@ -16,12 +16,22 @@ import (
 // RotatingFile is an append-only log file that moves itself aside to
 // path+".1" (replacing the previous one) when it would grow past maxBytes, so
 // a hub left running for months keeps at most two files' worth of log.
+//
+// A move that fails (on Windows, another process holding serve.log or
+// serve.log.1 open) leaves both files as they were and the log appending to
+// the current one; the next try waits until another maxBytes has been written,
+// rather than closing and reopening the file on every line.
 type RotatingFile struct {
 	mu       sync.Mutex
 	path     string
 	maxBytes int64
 	file     *os.File
 	size     int64
+	// rotateAt is the size past which the next write rotates: maxBytes, or
+	// maxBytes past the size at a rotation that failed.
+	rotateAt int64
+	// rename is os.Rename; tests make it fail.
+	rename func(oldpath, newpath string) error
 	// onOpen is told about every file it opens, after a rotation too; serve
 	// points the runtime's crash output at it.
 	onOpen func(*os.File)
@@ -33,12 +43,16 @@ func OpenRotatingFile(path string, maxBytes int64, onOpen func(*os.File)) (*Rota
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	r := &RotatingFile{path: path, maxBytes: maxBytes, onOpen: onOpen}
+	r := &RotatingFile{path: path, maxBytes: maxBytes, rotateAt: maxBytes, rename: os.Rename, onOpen: onOpen}
+	movedAside := true
 	if info, err := os.Stat(path); err == nil && maxBytes > 0 && info.Size() >= maxBytes {
-		_ = os.Rename(path, path+".1")
+		movedAside = r.rename(path, path+".1") == nil
 	}
 	if err := r.openLocked(); err != nil {
 		return nil, err
+	}
+	if !movedAside {
+		r.rotateAt = r.size + maxBytes
 	}
 	return r, nil
 }
@@ -69,7 +83,7 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	if r.file == nil {
 		return 0, os.ErrClosed
 	}
-	if r.maxBytes > 0 && r.size > 0 && r.size+int64(len(p)) > r.maxBytes {
+	if r.maxBytes > 0 && r.size > 0 && r.size+int64(len(p)) > r.rotateAt {
 		r.rotateLocked()
 	}
 	if r.file == nil {
@@ -83,16 +97,26 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 // rotateLocked closes the file, moves it to .1 and opens a fresh one. Windows
 // cannot rename an open file, and the crash output holds a duplicate of the
 // handle, so onOpen(nil) lets that go first.
+//
+// The rename replaces an existing .1 on every OS (MoveFileEx with
+// MOVEFILE_REPLACE_EXISTING on Windows); .1 is never deleted first, so a
+// rename that fails loses nothing. The same path is then reopened for
+// appending, and rotation waits for another maxBytes.
 func (r *RotatingFile) rotateLocked() {
 	if r.onOpen != nil {
 		r.onOpen(nil)
 	}
 	_ = r.file.Close()
 	r.file = nil
-	_ = os.Remove(r.path + ".1")
-	_ = os.Rename(r.path, r.path+".1")
+	moved := r.rename(r.path, r.path+".1") == nil
 	// A failed reopen leaves the sink closed; the console still has the log.
-	_ = r.openLocked()
+	if err := r.openLocked(); err != nil {
+		return
+	}
+	r.rotateAt = r.maxBytes
+	if !moved {
+		r.rotateAt = r.size + r.maxBytes
+	}
 }
 
 // Close closes the file. Later writes fail.

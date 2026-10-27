@@ -416,10 +416,10 @@ func serve(args []string) {
 
 	// Logging is set up before anything else can fail, so a startup error is
 	// itself a structured record rather than the one line that escapes the
-	// pipeline. It also goes to a file under the catalog root, with the
-	// runtime's crash output (serve_console.go).
+	// pipeline. A standalone hub's log also goes to a file under the catalog
+	// root, with the runtime's crash output (serve_console.go).
 	standalone := !isRemoteDeployment(*listen, *behindProxy)
-	logs := openServeLogs(os.Stderr)
+	logs := openServeLogs(os.Stderr, standalone)
 	defer logs.close()
 	logger, err := logging.Setup(logs.writer, logging.Config{
 		Level:   *logLevel,
@@ -680,10 +680,6 @@ func serve(args []string) {
 	confirmStop := standalone && isTerminal(os.Stdin)
 	ctx, stop := serveContext(confirmStop, os.Stderr)
 	defer stop()
-	if standalone && localRunnerConfig != "" {
-		// A click in the console must not pause the runner's prompt.
-		defer disableQuickEdit()()
-	}
 	// Bound before serving, so a local runner started next finds the hub
 	// already listening.
 	listener, err := net.Listen("tcp", addr)
@@ -706,6 +702,19 @@ func serve(args []string) {
 			stopRunner = stop
 		}
 	}
+	// A click in the console must not pause the runner's prompt. Only once
+	// the hub is listening and its runner is up, so a startup failure leaves
+	// the console as it found it; from here on every exit puts it back,
+	// fatal (which skips deferred calls) included.
+	restoreConsole := func() {}
+	if standalone && localRunnerConfig != "" {
+		restoreConsole = disableQuickEdit()
+	}
+	defer func() { restoreConsole() }()
+	fatal := func(format string, args ...any) {
+		restoreConsole()
+		logs.fatal(format, args...)
+	}
 	if standalone {
 		logs.consoleNonBlocking()
 	}
@@ -714,7 +723,7 @@ func serve(args []string) {
 	case err := <-errCh:
 		stopRunner()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logs.fatal("serve: %v", err)
+			fatal("serve: %v", err)
 		}
 	case <-ctx.Done():
 		log.Print("shutting down")

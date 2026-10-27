@@ -2,8 +2,10 @@ package logging
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +61,114 @@ func TestRotatingFileAppendsAndRotatesAnOversizedFileAtOpen(t *testing.T) {
 	_ = file.Close()
 	if got, _ := os.ReadFile(path + ".1"); string(got) != "old\nnew\n" {
 		t.Fatalf("an oversized file was not rotated at open: %q", got)
+	}
+}
+
+// A rename that fails (another process holding the log open) keeps the old
+// .1, keeps appending to the current file, and is not tried again on the very
+// next write: only once another maxBytes has been written.
+func TestRotatingFileBacksOffAfterAFailedRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "serve.log")
+	if err := os.WriteFile(path+".1", []byte("older\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opens := 0
+	file, err := OpenRotatingFile(path, 32, func(f *os.File) {
+		if f != nil {
+			opens++
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	renames := 0
+	failing := true
+	file.rename = func(oldpath, newpath string) error {
+		renames++
+		if failing {
+			return errors.New("held open")
+		}
+		return os.Rename(oldpath, newpath)
+	}
+	line := []byte(strings.Repeat("x", 9) + "\n") // 10 bytes
+	write := func(times int) {
+		t.Helper()
+		for range times {
+			if _, err := file.Write(line); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// 30 bytes fit; the 4th line tries to rotate and fails.
+	write(4)
+	if renames != 1 || opens != 2 {
+		t.Fatalf("after the first failure: renames=%d opens=%d, want 1 and 2", renames, opens)
+	}
+	// 30 + 32: no retry until a write would take the file past 62 bytes.
+	write(2)
+	if renames != 1 || opens != 2 {
+		t.Fatalf("retried before another maxBytes: renames=%d opens=%d", renames, opens)
+	}
+	if got, _ := os.ReadFile(path + ".1"); string(got) != "older\n" {
+		t.Fatalf("the old .1 was lost: %q", got)
+	}
+	if got, _ := os.ReadFile(path); len(got) != 60 {
+		t.Fatalf("current file has %d bytes, want every line (60)", len(got))
+	}
+	failing = false
+	write(1)
+	if renames != 2 {
+		t.Fatalf("renames=%d, want a retry past 62 bytes", renames)
+	}
+	if got, _ := os.ReadFile(path + ".1"); len(got) != 60 {
+		t.Fatalf("rotated file has %d bytes, want 60", len(got))
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(line) {
+		t.Fatalf("current file = %q", got)
+	}
+	// Rotated for real: back to the plain limit.
+	write(3)
+	if renames != 3 {
+		t.Fatalf("renames=%d, want a rotation at the plain limit again", renames)
+	}
+}
+
+// On Windows a second handle on serve.log is what makes the rename fail.
+func TestRotatingFileHeldOpenOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows refuses to rename an open file")
+	}
+	path := filepath.Join(t.TempDir(), "serve.log")
+	if err := os.WriteFile(path+".1", []byte("older\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := OpenRotatingFile(path, 32, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	held, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	for range 6 {
+		if _, err := file.Write([]byte(strings.Repeat("x", 9) + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := os.ReadFile(path + ".1"); string(got) != "older\n" {
+		t.Fatalf("the old .1 was lost: %q", got)
+	}
+	if got, _ := os.ReadFile(path); len(got) != 60 {
+		t.Fatalf("current file has %d bytes, want 60", len(got))
+	}
+	file.mu.Lock()
+	rotateAt := file.rotateAt
+	file.mu.Unlock()
+	if rotateAt != 30+32 {
+		t.Fatalf("rotateAt = %d, want 62 (backed off from the failed rename at 30)", rotateAt)
 	}
 }
 

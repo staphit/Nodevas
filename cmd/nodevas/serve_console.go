@@ -35,17 +35,22 @@ type serveLogs struct {
 
 // openServeLogs sets up serve's log sinks.
 //
-// The file is in addition to the console, never instead of it: a hosted hub
-// in a container still writes its JSON to stderr for docker, unchanged, and
-// gets the file only where the catalog root is writable.
+// Only a standalone hub (loopback, no proxy: the one that authenticates as
+// auth.LocalOnly) gets the file, and always in addition to the console, never
+// instead of it. A hosted hub, in a container or behind a proxy, logs to
+// stderr exactly as before: no file, and not a word more on stderr, since
+// docker or the service manager already keeps that log.
 //
 // The runtime's crash output also goes to the file (debug.SetCrashOutput), so
 // an unrecovered panic or a fatal error leaves its stack trace there even when
 // the console window that showed it has closed.
-func openServeLogs(stderr *os.File) *serveLogs {
+func openServeLogs(stderr *os.File, standalone bool) *serveLogs {
 	logs := &serveLogs{stderr: stderr}
 	logs.console.set(stderr)
 	logs.writer = &logs.console
+	if !standalone {
+		return logs
+	}
 	root, err := project.DefaultCatalogRoot()
 	if err != nil {
 		fmt.Fprintf(stderr, "no serve log file (%v); logging to the console only\n", err)
@@ -183,16 +188,46 @@ const localRunnerUnderServeEnv = "NODEVAS_RUNNER_UNDER_SERVE"
 // serve started it. Under serve, a Ctrl+C reaches every process on the
 // terminal, and the runner must not end on the first one serve asks to
 // confirm; Notify (not Ignore, which on Windows lets the console's default
-// handler end the process) swallows it.
+// handler end the process) swallows it. It also ends when serve does
+// (watchServeParent), where the OS does not already see to that.
+//
+// The variable is read once and removed, so neither the agents this runner
+// starts nor a runner one of them starts takes itself for serve's.
 func runnerStopContext() (context.Context, context.CancelFunc) {
-	if os.Getenv(localRunnerUnderServeEnv) == "1" {
+	underServe := os.Getenv(localRunnerUnderServeEnv) == "1"
+	_ = os.Unsetenv(localRunnerUnderServeEnv)
+	if underServe {
 		interrupts := make(chan os.Signal, 1)
 		signal.Notify(interrupts, os.Interrupt)
 		go func() {
 			for range interrupts {
 			}
 		}()
-		return signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+		watchServeParent(ctx, stop)
+		return ctx, stop
 	}
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// stopWhenParentChanges calls stop once getppid stops answering what it did at
+// the start: the parent exited and the process was handed to another. It
+// returns at once; the polling ends with ctx.
+func stopWhenParentChanges(ctx context.Context, stop context.CancelFunc, getppid func() int, every time.Duration) {
+	parent := getppid()
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if getppid() != parent {
+					stop()
+					return
+				}
+			}
+		}
+	}()
 }

@@ -118,18 +118,44 @@ function requestModule(url) {
   return new URL(url).protocol === "https:" ? https : http;
 }
 
-function waitForBackend(url) {
+// waitForBackend resolves once url answers. Given the child that is to
+// answer, it rejects as soon as that child exits or fails to start: a wait
+// must not outlive its process and be answered, or timed out, by the next one.
+function waitForBackend(url, child = null) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error) => {
+      if (settled) return;
+      settled = true;
+      if (child) {
+        child.removeListener("exit", onExit);
+        child.removeListener("error", onError);
+      }
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = (code, signal) =>
+      settle(new Error(`後端服務在回應前結束 (exit=${code ?? "unknown"}, signal=${signal ?? "none"})`));
+    const onError = (error) => settle(error);
+    if (child) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        onExit(child.exitCode, child.signalCode);
+        return;
+      }
+      child.once("exit", onExit);
+      child.once("error", onError);
+    }
     const probe = () => {
+      if (settled) return;
       if (Date.now() >= deadline) {
-        reject(new Error("後端服務啟動逾時"));
+        settle(new Error("後端服務啟動逾時"));
         return;
       }
       const request = requestModule(url).get(url, (response) => {
         response.resume();
         if (response.statusCode && response.statusCode < 500) {
-          resolve();
+          settle();
           return;
         }
         setTimeout(probe, 180);
@@ -174,13 +200,22 @@ function spawnBackend() {
   backendStartedAt = Date.now();
   child.stdout.on("data", (chunk) => log.info(String(chunk).trim()));
   child.stderr.on("data", (chunk) => log.info(String(chunk).trim()));
-  child.once("error", (error) => log.error("Nodevas backend could not start", error));
-  child.once("exit", (code, signal) => {
+  let ended = false;
+  const onEnd = (code, signal) => {
+    if (ended) return;
+    ended = true;
     if (backend === child) backend = null;
     if (quitting) return;
     log.error("Nodevas backend stopped", { code, signal });
     scheduleBackendRespawn({ code, signal });
+  };
+  child.once("error", (error) => {
+    log.error("Nodevas backend could not start", error);
+    // A process that never started sends no exit; end it here instead.
+    if (child.pid === undefined) onEnd(null, null);
   });
+  child.once("exit", onEnd);
+  return child;
 }
 
 // The local service ended on its own (a crash, a fatal error): start it again
@@ -205,16 +240,20 @@ function scheduleBackendRespawn(exit) {
   respawnTimer = setTimeout(async () => {
     respawnTimer = null;
     if (quitting) return;
+    let child = null;
     try {
-      spawnBackend();
-      await waitForBackend(backendURL);
+      child = spawnBackend();
+      await waitForBackend(backendURL, child);
       log.info("Nodevas backend is back");
       if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(backendURL);
     } catch (error) {
-      // The exit handler of a process that died schedules the next try; one
-      // still running that never answered is stopped, which does the same.
+      if (quitting) return;
+      // A child that exited (or never started) has already scheduled the
+      // next try from its exit handler; one still running that never
+      // answered is stopped, and its exit does the same. Anything else is
+      // not this attempt's to stop.
       log.error("Nodevas backend did not come back", error);
-      if (backend) void stopBackend();
+      if (child && backend === child) void stopBackend();
     }
   }, delay);
 }
