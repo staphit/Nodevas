@@ -209,19 +209,40 @@ func cleanWorkspacePath(rel string) (string, error) {
 	return strings.Join(segs, "/"), nil
 }
 
+// workspaceVisible refuses a path inside a dot directory (bad path) or one
+// that may hold secrets (hidden). A dot file at any level is fine.
+func workspaceVisible(rel string) error {
+	segs := strings.Split(rel, "/")
+	for _, seg := range segs[:len(segs)-1] {
+		if strings.HasPrefix(seg, ".") && !SecretName(seg) {
+			return fmt.Errorf("%w: inside a hidden directory", ErrBadPath)
+		}
+	}
+	if secretRel(rel) {
+		return ErrHiddenFile
+	}
+	return nil
+}
+
 // ReadWorkspaceFile reads one file under the project root.
 func (s *Store) ReadWorkspaceFile(rel string) (WorkspaceFile, error) {
 	clean, err := cleanWorkspacePath(rel)
 	if err != nil {
 		return WorkspaceFile{}, err
 	}
-	for _, seg := range strings.Split(clean, "/") {
-		if strings.HasPrefix(seg, ".") && !SecretName(seg) && seg != path.Base(clean) {
-			return WorkspaceFile{}, fmt.Errorf("%w: inside a hidden directory", ErrBadPath)
-		}
+	if err := workspaceVisible(clean); err != nil {
+		return WorkspaceFile{}, err
 	}
-	if secretRel(clean) {
-		return WorkspaceFile{}, ErrHiddenFile
+	// The name asked for may not be the file's own (a Windows short name, a
+	// different case, a link inside the root): its real path is checked too.
+	if realRoot, err := filepath.EvalSymlinks(s.root); err == nil {
+		if real, err := filepath.EvalSymlinks(filepath.Join(s.root, filepath.FromSlash(clean))); err == nil {
+			if rel, err := filepath.Rel(realRoot, real); err == nil {
+				if err := workspaceVisible(filepath.ToSlash(rel)); err != nil {
+					return WorkspaceFile{}, err
+				}
+			}
+		}
 	}
 	file, info, err := OpenProjectFile(s.root, filepath.Join(s.root, filepath.FromSlash(clean)))
 	if err != nil {

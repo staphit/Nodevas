@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -32,7 +33,11 @@ func repoGitArgs(ctx context.Context, root string, args []string) []string {
 	return append(front, args...)
 }
 
-var filterKey = regexp.MustCompile(`^filter\.(.+)\.(clean|smudge|process|required)$`)
+// filterKey matches a filter driver's config key. Git lowercases a key's
+// section and variable but keeps its subsection (the driver's name) as
+// written, and "-c" overrides match the name exactly, so the name keeps its
+// case.
+var filterKey = regexp.MustCompile(`^(?i:filter)\.(.+)\.(?i:clean|smudge|process|required)$`)
 
 // repoFilterDrivers names the filter drivers git's config defines for root.
 // Reading config runs nothing.
@@ -49,7 +54,7 @@ func repoFilterDrivers(ctx context.Context, root string) []string {
 	var names []string
 	for _, key := range strings.Split(string(out), "\x00") {
 		key = strings.TrimSpace(key)
-		m := filterKey.FindStringSubmatch(strings.ToLower(key))
+		m := filterKey.FindStringSubmatch(key)
 		if m == nil || seen[m[1]] || strings.ContainsAny(m[1], "=\x00\n") {
 			continue
 		}
@@ -327,9 +332,16 @@ func newFilePatch(root, rel string) (string, error) {
 	if err != nil || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("not a file")
 	}
-	data, err := os.ReadFile(real)
+	// Only as much as a patch can carry is read: the patch is cut there.
+	data, err := readCapped(real, runnerwire.MaxRepoPatchBytes)
 	if err != nil {
 		return "", err
+	}
+	if len(data) > runnerwire.MaxRepoPatchBytes {
+		data = data[:runnerwire.MaxRepoPatchBytes]
+		for cut := 0; cut < utf8.UTFMax && len(data) > 0 && !utf8.Valid(data); cut++ {
+			data = data[:len(data)-1]
+		}
 	}
 	header := fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n", rel, rel, rel)
 	if bytes.IndexByte(data[:min(len(data), binarySniffBytes)], 0) >= 0 || !utf8.Valid(data) {
@@ -363,7 +375,13 @@ func addStatus(s *runnerwire.RepoGitStatus, path, mark string) {
 	s.Entries = append(s.Entries, runnerwire.RepoStatusEntry{Path: path, Mark: mark})
 }
 
-// readCapped reads at most limit bytes of path.
+// readCapped reads at most limit+1 bytes of path: enough to know it is
+// over limit, never a whole huge file.
 func readCapped(path string, limit int) ([]byte, error) {
-	return os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, int64(max(limit, 0))+1))
 }

@@ -225,10 +225,15 @@ func resolveRepoPath(root, rel string) (string, error) {
 	return real, nil
 }
 
-// gitPath reports whether rel is in the repo's .git directory.
+// gitPath reports whether rel is in a .git directory: the repo's own or a
+// nested checkout's.
 func gitPath(rel string) bool {
-	first, _, _ := strings.Cut(rel, "/")
-	return strings.EqualFold(first, ".git")
+	for _, seg := range strings.Split(rel, "/") {
+		if strings.EqualFold(seg, ".git") {
+			return true
+		}
+	}
+	return false
 }
 
 func listRepo(root, rel string) (runnerwire.RepoListing, error) {
@@ -254,7 +259,7 @@ func listRepo(root, rel string) (runnerwire.RepoListing, error) {
 	out := runnerwire.RepoListing{Path: clean, Entries: []runnerwire.RepoEntry{}}
 	for _, e := range entries {
 		name := e.Name()
-		if clean == "" && strings.EqualFold(name, ".git") {
+		if strings.EqualFold(name, ".git") {
 			continue
 		}
 		if secretName(name) {

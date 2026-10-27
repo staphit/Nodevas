@@ -141,9 +141,47 @@ func (s *Store) HistoryCommitPatch(ctx context.Context, sha string) (WorkspaceCo
 		return WorkspaceCommitPatch{}, err
 	}
 	return WorkspaceCommitPatch{WorkspaceCommit: WorkspaceCommit{SHA: parts[0], At: parts[1], Author: parts[2], Subject: parts[3]},
-		Patch: patch, Truncated: truncated}, nil
+		Patch: dropSecretPatchSections(patch), Truncated: truncated}, nil
 }
 
 // dropSecretPatchSections removes the sections of a patch that touch a
-// file that may hold secrets.
-func dropSecretPatchSections(patch string) string { return patch }
+// file that may hold secrets. A header's path fields are each checked, so a
+// name with spaces errs toward hiding.
+func dropSecretPatchSections(patch string) string {
+	var b strings.Builder
+	for _, section := range splitPatchSections(patch) {
+		header, _, _ := strings.Cut(section, "\n")
+		secret := false
+		for _, field := range strings.Fields(strings.TrimPrefix(header, "diff --git ")) {
+			field = strings.Trim(field, `"`)
+			field = strings.TrimPrefix(strings.TrimPrefix(field, "a/"), "b/")
+			if secretRel(field) {
+				secret = true
+				break
+			}
+		}
+		if !secret {
+			b.WriteString(section)
+		}
+	}
+	return b.String()
+}
+
+// splitPatchSections cuts a patch before each "diff --git " line.
+func splitPatchSections(patch string) []string {
+	var out []string
+	start := 0
+	for start < len(patch) {
+		next := strings.Index(patch[start+1:], "\ndiff --git ")
+		if next < 0 {
+			break
+		}
+		cut := start + 1 + next + 1
+		out = append(out, patch[start:cut])
+		start = cut
+	}
+	if start < len(patch) {
+		out = append(out, patch[start:])
+	}
+	return out
+}
