@@ -29,12 +29,14 @@ export function NodeActivity({
   onRestored: () => void | Promise<void>;
 }) {
   const { t } = useI18n();
-  // Runs exist only once the agent workstation is on.
+  // Runs exist only once the agent workstation is on. They come first: a live
+  // run is what "View runs" and a fresh dispatch land here for, and its
+  // terminal only draws while it is on screen.
   const workstation = useWorkstationVisible();
   return (
     <div className="node-activity" role="tabpanel" aria-label={t("drawer.activity")}>
-      <NodeTimeline id={id} />
       {workstation && <NodeRuns id={id} />}
+      <NodeTimeline id={id} />
       <div className="node-activity-history">
         {/* Status changes are already in the timeline above; the history here
             is the document's saved versions. */}
