@@ -382,11 +382,13 @@ async function closeAgentPanel(page: Page) {
   await expect(page.locator("#agent-network-panel")).toBeHidden();
 }
 
-test("war room: opened in Station from the graph menu, a character opens its node", async ({ page }) => {
+test("war room: opened in Station from the command palette, a character opens its node", async ({ page }) => {
   await openStaged(page);
   await closeAgentPanel(page);
-  await page.getByRole("button", { name: "More graph tools" }).click();
-  await page.getByRole("menuitem", { name: "Station: War room" }).click();
+  // The graph's ⋯ menu no longer carries Station's views; the palette does.
+  await page.evaluate(() => window.dispatchEvent(new Event("nodevas-command-palette")));
+  await page.getByPlaceholder(/Search projects, nodes/).fill("Station: War room");
+  await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Station" })).toHaveAttribute("aria-pressed", "true");
   const stage = page.getByRole("region", { name: "War room" });
   await expect(stage).toBeVisible();

@@ -346,8 +346,12 @@ async function openBoard(page: Page) {
     const x = box.x + box.width / 2;
     await drag(page, { x, y: box.y + box.height / 2 }, { x, y: VH - 110 });
   }
-  const fit = page.getByRole("button", { name: "Fit all" }).first();
-  if (await fit.isVisible().catch(() => false)) await fit.click();
+  // Fit all lives in the graph header's ⋯ menu.
+  const more = page.getByRole("button", { name: "More graph tools" }).first();
+  if (await more.isVisible().catch(() => false)) {
+    await more.click();
+    await page.getByRole("menuitem", { name: "Fit all" }).click();
+  }
   await page.mouse.move(VW / 2, VH / 2);
   mouse = { x: VW / 2, y: VH / 2 };
   await pause(page, 900);

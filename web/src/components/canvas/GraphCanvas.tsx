@@ -10,9 +10,8 @@
 
 import { Fragment } from "react";
 import { reportError } from "../../store";
-import { StatusShape, statusTheme } from "../../statusTheme";
+import { StatusShape } from "../../statusTheme";
 import { localizedStatusLabel, useI18n } from "../../i18n";
-import { kindIcon } from "../../icons";
 import type {
   CanvasAnnotation,
   CanvasGroup,
@@ -225,6 +224,38 @@ export function GraphCanvas({
       agentByNodeId.set(s.nodeId, { name: s.name, agent: s.agent });
     }
   }
+
+  // A card carries one marker at most, the one that changes what to do next:
+  // waiting beats blocking-others beats being a starting point. Everything else
+  // the card used to print — the status word, kind, priority, tags, the error
+  // dot — is in its tooltip (cardDetails) and in the drawer.
+  const cardMarker = (id: string) =>
+    analysis.blocked.has(id)
+      ? { kind: "waiting", label: t("board.card.waiting") }
+      : analysis.blocking.has(id)
+        ? { kind: "blocking", label: t("board.card.blocking") }
+        : analysis.entryNodeIds.has(id)
+          ? { kind: "start", label: t("canvas.entryLabel") }
+          : null;
+  const cardDetails = (node: GraphNode, status: Status, assigned: string) => [
+    node.title || node.id,
+    `${localizedStatusLabel(status, customStatuses)} · ${assigned}`,
+    ...(analysis.blocked.has(node.id) ? [t("board.card.waitingDetail")] : []),
+    ...(analysis.blocking.has(node.id) ? [t("board.card.blockingDetail")] : []),
+    ...(analysis.entryNodeIds.has(node.id)
+      ? [
+          typeof graph?.ui?.entryOverrides?.[node.id] === "boolean"
+            ? t("canvas.entry.manual")
+            : t("canvas.entry.auto"),
+        ]
+      : []),
+    ...(errorNodes.has(node.id) ? [t("board.card.errorDetail")] : []),
+    ...(node.priority
+      ? [t("board.card.priority", { priority: t(`graphTools.${node.priority}`) })]
+      : []),
+    ...(node.tags?.length ? [t("board.card.tags", { tags: node.tags.join(", ") })] : []),
+  ];
+
   // A marquee grabs cards, but a wire between two grabbed cards belongs to the
   // same selection: it is drawn selected so the picked set reads as one shape.
   const selectedEdgeKeys = new Set<string>();
@@ -554,6 +585,20 @@ export function GraphCanvas({
               if (!selectedGraphNodeIDs.has(n.id)) selectNode(n.id);
             }}
             onKeyDown={(event) => {
+              // The menu key and Shift+F10 open the node menu, as a right
+              // click would, at the card's own corner.
+              if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                setContextMenu({
+                  kind: "node-actions",
+                  nodeId: n.id,
+                  x: rect.left + 8,
+                  y: rect.bottom + 4,
+                });
+                return;
+              }
               if (event.key !== "Enter") return;
               event.preventDefault();
               event.stopPropagation();
@@ -564,7 +609,7 @@ export function GraphCanvas({
               event.stopPropagation();
               selectNode(n.id);
               setContextMenu({
-                kind: "node",
+                kind: "node-actions",
                 nodeId: n.id,
                 x: event.clientX,
                 y: event.clientY,
@@ -575,42 +620,54 @@ export function GraphCanvas({
               if (connectionDrag?.sourceId === n.id) connectionHandlers.cancel();
             }}
             aria-selected={selectedGraphNodeIDs.has(n.id)}
-            data-blocked-label={analysis.blocked.has(n.id) ? t("canvas.blockedBadge") : undefined}
-            data-blocking-label={analysis.blocking.has(n.id) ? t("canvas.blockingBadge") : undefined}
-            title={`${n.title || n.id} · ${assigned}`}
+            title={cardDetails(n, st, assigned).join("\n")}
           >
             <span className="col-card-head">
-              {analysis.entryNodeIds.has(n.id) && (
-                <span
-                  className="entry-flag"
-                  title={
-                    typeof graph?.ui?.entryOverrides?.[n.id] === "boolean"
-                      ? t("canvas.entry.manual")
-                      : t("canvas.entry.auto")
-                  }
-                >
-                  {t("canvas.entryLabel")}
-                </span>
-              )}
               <StatusShape status={st} definitions={customStatuses} />
-              <span
-                className="col-card-st"
-                style={{ color: statusTheme(st, customStatuses).color }}
-              >
-                {localizedStatusLabel(st, customStatuses)}
-              </span>
-              <span className="lane-kind">{kindIcon(n.kind || "task", 11)}</span>
-              {n.priority && <span className={`priority-dot ${n.priority}`} />}
-              {errorNodes.has(n.id) && <span className="error-dot" />}
+              <span className="col-card-title">{n.title || n.id}</span>
               <RunCardBadge nodeId={n.id} />
               <AutopilotCardBadge nodeId={n.id} />
+              {/* The menu for a pointer that does not right-click: shown on
+                  hover, focus or selection, and stopped before the card can
+                  read its press as the start of a drag. */}
+              <button
+                type="button"
+                className="col-card-more"
+                aria-label={t("board.nodeMenu.more", { title: n.title || n.id })}
+                title={t("board.nodeMenu.more", { title: n.title || n.id })}
+                aria-haspopup="menu"
+                onPointerDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  selectNode(n.id);
+                  setContextMenu({
+                    kind: "node-actions",
+                    nodeId: n.id,
+                    x: rect.left,
+                    y: rect.bottom + 4,
+                  });
+                }}
+              >
+                ⋯
+              </button>
             </span>
-            <span className="col-card-title">{n.title || n.id}</span>
-            <span
-              className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
-              data-assignee-prefix={t("canvas.assigneePrefix")}
-            >
-              {assigned}
+            <span className="col-card-meta">
+              <span
+                className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
+                data-assignee-prefix={t("canvas.assigneePrefix")}
+              >
+                {assigned}
+              </span>
+              {(() => {
+                const marker = cardMarker(n.id);
+                return (
+                  marker && (
+                    <span className={`col-card-marker ${marker.kind}`}>{marker.label}</span>
+                  )
+                );
+              })()}
             </span>
             {agentByNodeId.has(n.id) && (
               <span
@@ -619,9 +676,6 @@ export function GraphCanvas({
               >
                 ● {agentByNodeId.get(n.id)!.name}
               </span>
-            )}
-            {!!n.tags?.length && (
-              <span className="col-card-tags">{n.tags.slice(0, 2).join(" · ")}</span>
             )}
           </div>
           {selectedGraphNodeIDs.has(n.id) && (

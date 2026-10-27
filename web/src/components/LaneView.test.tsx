@@ -150,34 +150,139 @@ describe("LaneView", () => {
     });
   });
 
-  // The header keeps what a first board needs; the rest is one press away
-  // and still all there.
+  // The header keeps what a first board needs — create, Filter, Problems —
+  // and the rest is one press away in ⋯, still all there.
   it("keeps the graph header short and the rest in its ⋯ menu", async () => {
     const user = userEvent.setup();
-    render(<LaneView variant="graph" {...paneProps} />);
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
 
-    for (const name of [/新增節點/, "全部置中", "篩選與檢視"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
-    }
-    for (const name of ["選取置中", "貼齊格線", "全部對齊", "縮圖"]) {
+    expect(screen.getByRole("button", { name: /新增節點/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "篩選" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "問題：0 項" })).toBeInTheDocument();
+    for (const name of ["全部置中", "選取置中", "貼齊格線", "全部對齊", "縮圖", "操作提示", /分析/]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
-    // The gesture sentence waits behind its ? button.
-    const hintToggle = screen.getByRole("button", { name: "操作提示" });
-    expect(hintToggle).toHaveAttribute("aria-expanded", "false");
-    await user.click(hintToggle);
-    expect(hintToggle).toHaveAttribute("aria-expanded", "true");
 
     await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
     const menu = screen.getByRole("menu", { name: "更多關係圖工具" });
-    for (const name of [/分析/, "選取置中", /對齊輔助/, "貼齊格線", "全部對齊", "縮圖"]) {
+    for (const name of ["全部置中", "選取置中", /對齊輔助/, "貼齊格線", "全部對齊", "縮圖", "時間軸", "操作說明"]) {
       expect(
         within(menu).queryByRole("menuitem", { name }) ??
           within(menu).getByRole("menuitemcheckbox", { name }),
       ).toBeInTheDocument();
     }
+    // The game views are Station's, opened from its own switch.
+    expect(within(menu).queryByRole("menuitem", { name: /工作站/ })).not.toBeInTheDocument();
     // Nothing selected, so there is nothing to fit to.
     expect(within(menu).getByRole("menuitem", { name: "選取置中" })).toBeDisabled();
+
+    // Help shows the gesture sentence the ? button used to.
+    const help = within(menu).getByRole("menuitemcheckbox", { name: "操作說明" });
+    await user.click(help);
+    expect(help).toHaveAttribute("aria-checked", "true");
+    expect(container.querySelector(".board-title-hint.open")).not.toBeNull();
+  });
+
+  it("filters from a popover and counts the filters that are on", async () => {
+    const user = userEvent.setup();
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    await user.click(screen.getByRole("button", { name: "篩選" }));
+    const panel = screen.getByRole("dialog", { name: "篩選" });
+    // The first field takes the keyboard.
+    expect(within(panel).getByRole("textbox", { name: /篩選 ID/ })).toHaveFocus();
+    await user.type(within(panel).getByRole("textbox", { name: /篩選 ID/ }), "設計");
+    expect(screen.getByRole("button", { name: "篩選（1）" })).toBeInTheDocument();
+    // Saving a view is still part of it.
+    expect(within(panel).getByRole("button", { name: "儲存檢視" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /篩選/ })).not.toBeInTheDocument();
+  });
+
+  it("gathers validation warnings and analysis in the Problems panel", async () => {
+    const user = userEvent.setup();
+    const openTab = vi.fn(async () => {});
+    useApp.setState({
+      openTab,
+      issues: [{ severity: "error", nodeId: "a", field: "requires", msg: "未知的節點" }],
+    });
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+
+    const problems = screen.getByRole("button", { name: "問題：1 項" });
+    await user.click(problems);
+    expect(problems).toHaveAttribute("aria-expanded", "true");
+    const panel = screen.getByRole("complementary", { name: "問題" });
+    expect(within(panel).getByText("驗證警告")).toBeInTheDocument();
+    expect(within(panel).getByText("排程分析")).toBeInTheDocument();
+    // Beside the board, not on top of it.
+    expect(container.querySelector(".lane-body > .problems-panel")).not.toBeNull();
+
+    await user.click(within(panel).getByRole("button", { name: /未知的節點/ }));
+    expect(openTab).toHaveBeenCalledWith("a");
+
+    await user.click(within(panel).getByRole("button", { name: "關閉問題面板" }));
+    expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
+  });
+
+  it("draws a card as status, title and assignee with one marker", () => {
+    useApp.setState({
+      graph: graph([{ id: "a", title: "設計稿", tags: ["ui", "spec"], priority: "high" }]),
+    });
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const card = container.querySelector<HTMLElement>(".col-card")!;
+
+    // Nothing points at it, so it is a start node: that is its one marker.
+    expect(card.querySelectorAll(".col-card-marker")).toHaveLength(1);
+    expect(card.querySelector(".col-card-marker")).toHaveTextContent("起點");
+    // Tags, priority and the status word are in the tooltip, not on the face.
+    expect(card).not.toHaveTextContent("ui");
+    expect(card.querySelector(".col-card-st, .col-card-tags, .entry-flag")).toBeNull();
+    expect(card.title).toContain("標籤：ui, spec");
+    expect(card.title).toContain("起始節點");
+  });
+
+  it("opens a short node menu from a right click or the card's ⋯", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const card = container.querySelector<HTMLElement>(".col-card")!;
+
+    fireEvent.contextMenu(card);
+    const menu = container.ownerDocument.querySelector<HTMLElement>(".lane-context-menu")!;
+    for (const name of ["開啟", "新增相依…", "建立副本", "移到或複製到專案", "移到垃圾桶"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
+    }
+    // The dependency form is one step further in, not the menu itself.
+    expect(within(menu).queryByText("相依關係")).not.toBeInTheDocument();
+    await user.click(within(menu).getByRole("menuitem", { name: "新增相依…" }));
+    expect(
+      container.ownerDocument.querySelector(".lane-context-menu.condition-menu"),
+    ).not.toBeNull();
+
+    await user.keyboard("{Escape}");
+    expect(container.ownerDocument.querySelector(".lane-context-menu")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "節點選單：設計稿" }));
+    expect(
+      container.ownerDocument.querySelector(".lane-context-menu.node-actions-menu"),
+    ).not.toBeNull();
+  });
+
+  it("keeps the batch toolbar for two or more nodes", () => {
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const card = container.querySelector<HTMLElement>(".col-card")!;
+    act(() => card.focus());
+    expect(card).toHaveAttribute("aria-selected", "true");
+    expect(container.querySelector(".graph-batch-toolbar")).toBeNull();
+  });
+
+  it("brings a folded explorer back from the graph header", async () => {
+    const user = userEvent.setup();
+    act(() => useApp.getState().updateUIPreference("explorerCollapsed", true));
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    await user.click(screen.getByRole("button", { name: "展開專案總管" }));
+    expect(useApp.getState().preferences.explorerCollapsed).toBe(false);
+    expect(screen.queryByRole("button", { name: "展開專案總管" })).not.toBeInTheDocument();
   });
 
   it("keeps the display scale off the timeline, which sizes its own cells", () => {

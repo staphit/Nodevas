@@ -368,14 +368,250 @@
   padding: 0 6px;
 }
 
-/* The destructive action sits apart from the rest and reads as destructive. */
+/* The destructive action reads as destructive. Clear selection is the one
+   pushed to the far end, by the spacer, so it is never next to Delete. */
 .graph-batch-toolbar button.danger {
-  margin-left: auto;
   border-color: var(--st-failed-fg);
   color: var(--st-failed-fg);
 }
 .graph-batch-toolbar button.danger:hover:not(:disabled) {
   background: var(--st-failed-bg);
+}
+.graph-batch-spacer {
+  flex: 1;
+}
+/* The two menus in the row reuse the board's ⋯ menu, which otherwise pushes
+   itself to the end of its header. */
+.graph-batch-toolbar .board-overflow {
+  margin-left: 0;
+}
+.graph-batch-toolbar .graph-batch-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---------- a node's short menu (NodeActionsMenu) ---------- */
+.lane-context-menu.node-actions-menu {
+  width: min(240px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+.node-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.node-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.node-actions-item > span:first-of-type {
+  flex: 1;
+}
+.node-actions-item svg {
+  flex: none;
+  color: var(--text-2);
+}
+.node-actions-item:hover,
+.node-actions-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.node-actions-item[aria-expanded="true"] {
+  background: var(--surface-2);
+}
+.node-actions .node-actions-item.danger {
+  border: 0;
+  background: transparent;
+  color: var(--st-failed-fg);
+}
+.node-actions .node-actions-item.danger:hover,
+.node-actions .node-actions-item.danger:focus-visible {
+  background: var(--st-failed-bg);
+}
+.node-actions-chevron {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.node-actions-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 2px 12px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+.node-actions-separator {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border);
+}
+
+/* ---------- board body: the canvas and, beside it, the Problems panel ---------- */
+.lane-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.lane-body > .board {
+  flex: 1;
+  min-width: 0;
+}
+.problems-panel {
+  --problems-w: 320px;
+  display: flex;
+  flex: 0 0 var(--problems-w);
+  flex-direction: column;
+  gap: 12px;
+  width: var(--problems-w);
+  min-height: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  outline: none;
+}
+.lane-body.problems-open .graph-minimap {
+  right: calc(320px + 14px);
+}
+.problems-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.problems-panel-head h3 {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+.problems-count {
+  margin-left: 4px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.problems-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.problems-close:hover,
+.problems-close:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+.problems-empty {
+  margin: 0;
+  color: var(--st-done-fg);
+  font-size: 12px;
+}
+.problems-section h4 {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.problems-issues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.problems-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: left;
+}
+button.problems-issue {
+  cursor: pointer;
+}
+button.problems-issue:hover,
+button.problems-issue:focus-visible {
+  outline: 1px solid currentColor;
+}
+.problems-issue svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.problems-issue b,
+.problems-issue small {
+  display: block;
+}
+.problems-issue small {
+  color: var(--text);
+  font-size: 11px;
+}
+.problems-issue.issue-error {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.problems-issue.issue-warning {
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+}
+/* The analysis was a strip above the board; in the panel it is one column
+   and as tall as it needs. */
+.problems-panel .graph-analysis-panel {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.problems-panel .analysis-items {
+  grid-template-columns: minmax(0, 1fr);
+}
+.problems-panel .analysis-path {
+  font-size: 11px;
+  line-height: 1.6;
+}
+@media (max-width: 720px) {
+  /* No room beside the board on a phone: the panel covers it, and closing it
+     gives the board back. */
+  .problems-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    width: auto;
+    border-left: 0;
+  }
+  .lane-body.problems-open .graph-minimap {
+    display: none;
+  }
 }
 .graph-tools-panel {
   display: flex;
@@ -387,6 +623,35 @@
 .graph-tools-panel > input {
   width: 230px;
   padding: 3px 8px;
+}
+/* In the header's Filter popover: one column of full-width fields. */
+.board-filter .board-overflow-panel {
+  width: 280px;
+}
+.board-filter .graph-tools-panel {
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: stretch;
+  overflow: visible;
+  border-bottom: 0;
+  background: transparent;
+  padding: 10px;
+}
+.board-filter .graph-tools-panel > input,
+.board-filter .graph-tools-panel > select {
+  width: 100%;
+}
+.board-filter .saved-view-create {
+  display: flex;
+  margin-top: 4px;
+}
+.board-filter .saved-view-create input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.board-filter .saved-view-chip {
+  align-self: flex-start;
 }
 .saved-view-create,
 .saved-view-chip {
@@ -478,24 +743,6 @@
 .col-card.analysis-violation {
   outline: 2px solid var(--st-failed-fg);
   outline-offset: 2px;
-}
-.col-card.analysis-blocked::after {
-  content: attr(data-blocked-label);
-  position: absolute;
-  right: 5px;
-  bottom: 4px;
-  color: var(--st-failed-fg);
-  font-size: calc(8px * var(--card-font-scale, 1));
-  font-weight: 700;
-}
-.col-card.analysis-blocking::before {
-  content: attr(data-blocking-label);
-  position: absolute;
-  right: 5px;
-  top: 4px;
-  color: var(--st-ready-fg);
-  font-size: calc(8px * var(--card-font-scale, 1));
-  font-weight: 700;
 }
 /* Only reachable through a deprecated wire: kept on the board, out of play. */
 .col-card.is-deprecated {

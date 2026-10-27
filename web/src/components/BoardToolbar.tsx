@@ -2,26 +2,28 @@
  * Board toolbar [B-06].
  *
  * The controls above a pane: collapse, primary create action, zoom, graph
- * filters and analysis, timeline orientation and cell size, and the pane's
- * notice line. Presentational — every action arrives as a callback.
+ * filters and problems, timeline orientation and cell size, and the pane's
+ * notice line. Presentational apart from the two layout preferences it flips
+ * itself (the explorer and the timeline pane) — every other action arrives as
+ * a callback.
  *
- * Two tiers. The header itself keeps what a first board needs — create, fit,
- * filter, and for the timeline its direction — and everything else sits in
- * the `⋯` menu at the end of the row: toggles such as snapping and the
- * minimap, the axis sides, and the sliders for card and cell size.
+ * Two tiers. The graph header keeps what a first board needs — create, Filter,
+ * and Problems with its count — and everything else sits in the `⋯` menu at
+ * the end of the row: fitting, the drag aids, the minimap, the timeline pane
+ * and the gesture help, with the sliders for card size under them. The
+ * timeline header keeps its direction up front for the same reason.
  */
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import { IconAlignGuides, IconPlus, IconResizeHorizontal } from "../icons";
-import type { GraphAnalysis } from "../analysis";
 import { InlineNotice } from "./InteractionPrimitives";
 import { OverflowMenu, type OverflowMenuItem } from "./menus/OverflowMenu";
 import { GRAPH_GESTURE_MODES, type GraphGestureMode } from "./canvas/gestureMode";
 import { useCoarsePointer, useTouchCapable } from "./touch";
 import type { LaneContextMenu } from "./LaneView";
 import { useI18n } from "../i18n";
-import { useStageSkinItems } from "../game/stageSkin";
+import { useApp, usePreference } from "../store";
 
 /**
  * How far the graph will stretch its cards and their text away from the sizes
@@ -54,11 +56,14 @@ export interface BoardToolbarProps {
   resetCardScale: () => void;
 
   /** Graph tools */
-  graphToolsOpen: boolean;
-  setGraphToolsOpen: (update: (open: boolean) => boolean) => void;
-  analysisOpen: boolean;
-  setAnalysisOpen: (update: (open: boolean) => boolean) => void;
-  analysis: GraphAnalysis;
+  /** The filter fields and saved views, drawn in the Filter popover. */
+  filterPanel: ReactNode;
+  /** How many filters are on, for the Filter button's label. */
+  activeFilters: number;
+  /** Rows in the Problems panel: analysis findings and validation warnings. */
+  problemCount: number;
+  problemsOpen: boolean;
+  setProblemsOpen: (update: (open: boolean) => boolean) => void;
   fitGraph: (selectionOnly: boolean) => void;
   snapToGrid: boolean;
   setSnapToGrid: (value: boolean) => void;
@@ -113,11 +118,11 @@ export function BoardToolbar({
   cardFontScale,
   setCardFontScale,
   resetCardScale,
-  graphToolsOpen,
-  setGraphToolsOpen,
-  analysisOpen,
-  setAnalysisOpen,
-  analysis,
+  filterPanel,
+  activeFilters,
+  problemCount,
+  problemsOpen,
+  setProblemsOpen,
   fitGraph,
   snapToGrid,
   setSnapToGrid,
@@ -171,19 +176,23 @@ export function BoardToolbar({
       ? t("board.hint.graphTouch")
       : t("board.hint.graphMouse")
     : t("board.hint.timeline");
-  const alerts = analysis.overdue.size + analysis.violations.length;
-  // The pane's other skins (war room, boss map), last in the graph's menu.
-  const skinItems = useStageSkinItems();
+  // The explorer used to be folded from the top bar; the board is what it sits
+  // beside, so the board's header is where it comes back from. The timeline is
+  // the other pane under this one, toggled from the same menu.
+  const explorerCollapsed = usePreference("explorerCollapsed");
+  const updateUIPreference = useApp((state) => state.updateUIPreference);
+  const timelineOpen = useApp((state) => state.paneOpen.timeline);
+  const togglePane = useApp((state) => state.togglePane);
 
-  // The graph's second tier. Ordered by how often each is reached for: the
-  // analysis panel (also a button of its own while it has something to say),
-  // then fitting, then the drag aids, then the minimap.
+  // The graph's second tier. Ordered by how often each is reached for:
+  // fitting, then the drag aids, then what else is on screen, then help. The
+  // war room and boss map are Station's own views and its switch (and the
+  // command palette) is where they are opened from.
   const graphOverflowItems: OverflowMenuItem[] = [
     {
-      id: "analysis",
-      label: t("board.analysis", { count: String(alerts || "") }).trim(),
-      checked: analysisOpen,
-      onSelect: () => setAnalysisOpen((open) => !open),
+      id: "fit-all",
+      label: t("board.fitAll"),
+      onSelect: () => fitGraph(false),
     },
     {
       id: "fit-selected",
@@ -222,7 +231,21 @@ export function BoardToolbar({
       separatorBefore: true,
       onSelect: () => setMinimapVisible(!minimapVisible),
     },
-    ...skinItems,
+    {
+      id: "timeline",
+      label: t("board.timelinePane"),
+      title: t("board.timelinePaneTitle"),
+      checked: timelineOpen,
+      onSelect: () => togglePane("timeline"),
+    },
+    {
+      id: "help",
+      label: t("board.help"),
+      title: t("board.hintToggle"),
+      checked: hintOpen,
+      separatorBefore: true,
+      onSelect: () => setHintOpen((open) => !open),
+    },
   ];
 
   // The timeline's: which side each axis sits on, and whether empty days fold.
@@ -288,15 +311,36 @@ export function BoardToolbar({
           the board would otherwise lose. The notices stay outside it: they are
           the one thing here that has to be seen without a swipe. */}
       <div className="board-title-controls">
+        {/* The explorer's way back once it is folded: always in the graph
+            header, which is drawn even while the graph pane itself is folded. */}
+        {isGraph && explorerCollapsed && (
+          <button
+            type="button"
+            className="board-explorer-toggle"
+            onClick={() => updateUIPreference("explorerCollapsed", false)}
+            title={t("board.expandExplorer")}
+            aria-label={t("board.expandExplorer")}
+            aria-expanded={false}
+            aria-controls="project-explorer"
+          >
+            »
+          </button>
+        )}
         <button
+          type="button"
           className="pane-toggle"
           onClick={onToggle}
           title={collapsed ? t("board.expandPane") : t("board.collapsePane")}
+          aria-label={collapsed ? t("board.expandPane") : t("board.collapsePane")}
           aria-expanded={!collapsed}
         >
           {collapsed ? "▸" : "▾"}
         </button>
-        <span className="board-title-main">
+        {/* An open graph needs no caption — the cards say what it is — but a
+            folded one is a single row and the name is all it shows. */}
+        <span
+          className={`board-title-main${isGraph && !collapsed ? " visually-hidden" : ""}`}
+        >
           {isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         </span>
         {/* A folded pane is one line of header; the chevron alone is easy to
@@ -334,34 +378,34 @@ export function BoardToolbar({
           </div>
         )}
         {isGraph && !collapsed && (
-          <>
-            <button type="button" className="board-tool-button" onClick={() => fitGraph(false)}>
-              {t("board.fitAll")}
-            </button>
-            <button
-              type="button"
-              className={`board-tool-button${graphToolsOpen ? " active" : ""}`}
-              onClick={() => setGraphToolsOpen((open) => !open)}
-              aria-expanded={graphToolsOpen}
+          // The filter fields used to open as a strip that pushed the board
+          // down; as a popover they cover a corner for as long as they are
+          // used, and the count on the button says when any are still on.
+          <span className="board-filter">
+            <OverflowMenu
+              className="board-overflow"
+              triggerClassName={`board-tool-button${activeFilters ? " active" : ""}`}
+              placement="fixed"
+              align="start"
+              popover
+              label={
+                activeFilters
+                  ? t("board.filterCount", { count: String(activeFilters) })
+                  : t("board.filter")
+              }
+              trigger={
+                <span title={t("board.filterTitle")}>
+                  {activeFilters
+                    ? t("board.filterCount", { count: String(activeFilters) })
+                    : t("board.filter")}{" "}
+                  ▾
+                </span>
+              }
+              items={[]}
             >
-              {t("board.filterView")}
-            </button>
-            {/* Out of the way until it has something to report: an overdue
-                node or a broken dependency puts the count back in the header,
-                and the menu always has it. */}
-            {(alerts > 0 || analysisOpen) && (
-              <button
-                type="button"
-                className={`board-tool-button analysis${analysisOpen ? " active" : ""}${
-                  alerts ? " alert" : ""
-                }`}
-                onClick={() => setAnalysisOpen((open) => !open)}
-                aria-expanded={analysisOpen}
-              >
-                {t("board.analysis", { count: String(alerts || "") })}
-              </button>
-            )}
-          </>
+              {filterPanel}
+            </OverflowMenu>
+          </span>
         )}
         {!isGraph && selectedNodeId && (
           <span className="board-title-message selection">
@@ -435,20 +479,23 @@ export function BoardToolbar({
           <>
             {/* The gestures used to be spelled out in a sentence across the
                 header, all the time. They are one press away instead, at every
-                width: a real button rather than a tooltip, because the touch
+                width: a real control rather than a tooltip, because the touch
                 wording is the only place these gestures are taught and a
-                finger cannot hover to read a title. */}
-            <button
-              type="button"
-              className="board-hint-toggle"
-              onClick={() => setHintOpen((open) => !open)}
-              aria-expanded={hintOpen}
-              aria-controls={hintId}
-              aria-label={t("board.hintToggle")}
-              title={t("board.hintToggle")}
-            >
-              ?
-            </button>
+                finger cannot hover to read a title. The graph keeps it in its
+                ⋯ menu as Help; the timeline, with fewer controls, keeps its ?. */}
+            {!isGraph && (
+              <button
+                type="button"
+                className="board-hint-toggle"
+                onClick={() => setHintOpen((open) => !open)}
+                aria-expanded={hintOpen}
+                aria-controls={hintId}
+                aria-label={t("board.hintToggle")}
+                title={t("board.hintToggle")}
+              >
+                ?
+              </button>
+            )}
             <span
               id={hintId}
               className={`board-title-hint${hintOpen ? " open" : ""}`}
@@ -456,6 +503,27 @@ export function BoardToolbar({
             >
               {hint}
             </span>
+          </>
+        )}
+        {isGraph && !collapsed && (
+          <>
+            <span className="board-title-spacer" aria-hidden />
+            {/* Always there, so where problems are found never moves: the count
+                is the badge, and it turns to the alert colour when non-zero. */}
+            <button
+              type="button"
+              className={`board-tool-button board-problems${problemsOpen ? " active" : ""}${
+                problemCount ? " has-problems" : ""
+              }`}
+              onClick={() => setProblemsOpen((open) => !open)}
+              aria-expanded={problemsOpen}
+              aria-label={t("board.problemsLabel", { count: String(problemCount) })}
+            >
+              {t("board.problems")}
+              <span className="board-problems-badge" aria-hidden>
+                {problemCount}
+              </span>
+            </button>
           </>
         )}
         {isGraph && !collapsed && (

@@ -50,10 +50,6 @@ function nodeMenu(
     controllingLogicGate: options.controllingLogicGate,
     assignableLogicGates: options.controllingLogicGate ? [options.controllingLogicGate] : [],
     assignExistingLogicGateToNode: vi.fn(),
-    openTab: vi.fn(async () => {}),
-    selectNode: vi.fn(),
-    duplicateNode: vi.fn(async () => "copy"),
-    deleteNode: vi.fn(async () => {}),
     setContextMenu: vi.fn(),
   };
   const view = render(<NodeMenu {...props} />);

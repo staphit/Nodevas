@@ -60,6 +60,19 @@ export interface OverflowMenuProps {
   alert?: boolean;
   /** Extra controls under the items — sliders and the like, not menu items. */
   children?: ReactNode;
+  /**
+   * What the trigger shows instead of the `⋯` glyph: words, for a menu that is
+   * a named control of its own (the board's Filter, Move or copy) rather than
+   * an overflow.
+   */
+  trigger?: ReactNode;
+  /** Which edge of the trigger a fixed panel lines up with. */
+  align?: "start" | "end";
+  /**
+   * A panel of form controls rather than a list of actions: no menu is drawn,
+   * the panel is a labelled dialog, and its first field takes focus on open.
+   */
+  popover?: boolean;
 }
 
 /**
@@ -79,6 +92,9 @@ export function OverflowMenu({
   placement = "anchored",
   alert = false,
   children,
+  trigger,
+  align = "end",
+  popover = false,
 }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const [panelStyle, setPanelStyle] = useState<CSSProperties | undefined>(undefined);
@@ -106,8 +122,14 @@ export function OverflowMenu({
   const ready = open && (placement !== "fixed" || panelStyle !== undefined);
   useEffect(() => {
     if (!ready) return;
+    if (popover) {
+      panelRef.current
+        ?.querySelector<HTMLElement>("input, select, textarea, button:not(:disabled)")
+        ?.focus();
+      return;
+    }
     menuItems()[0]?.focus();
-  }, [ready, menuItems]);
+  }, [ready, menuItems, popover]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +166,10 @@ export function OverflowMenu({
       if (!trigger || !panel) return;
       const rect = trigger.getBoundingClientRect();
       const point = clampToViewport(
-        { left: rect.right - panel.offsetWidth, top: rect.bottom + 6 },
+        {
+          left: align === "start" ? rect.left : rect.right - panel.offsetWidth,
+          top: rect.bottom + 6,
+        },
         panel.offsetWidth,
         panel.offsetHeight,
       );
@@ -158,7 +183,7 @@ export function OverflowMenu({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open, placement]);
+  }, [open, placement, align]);
 
   const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -230,13 +255,23 @@ export function OverflowMenu({
         onClick={() => setOpen((was) => !was)}
         title={label}
         aria-label={label}
-        aria-haspopup="menu"
+        aria-haspopup={popover ? "dialog" : "menu"}
         aria-expanded={open}
       >
-        <IconMore size={16} />
+        {trigger ?? <IconMore size={16} />}
       </button>
       {open &&
-        (children ? (
+        (popover ? (
+          <div
+            className={`${className}-panel`}
+            ref={panelRef}
+            style={placedStyle}
+            role="dialog"
+            aria-label={label}
+          >
+            {children}
+          </div>
+        ) : children ? (
           <div className={`${className}-panel`} ref={panelRef} style={placedStyle}>
             {menu}
             <div className={`${className}-extra`}>{children}</div>

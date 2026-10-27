@@ -72,7 +72,6 @@ export function Sidebar() {
   const { t } = useI18n();
   const graph = useApp((state) => state.graph);
   const statuses = useApp((state) => state.statuses);
-  const issues = useApp((state) => state.issues);
   const trash = useApp((state) => state.trash);
   const workspace = useApp((state) => state.workspace);
   const workspaces = useApp((state) => state.workspaces);
@@ -117,7 +116,6 @@ export function Sidebar() {
   const canCreateProjects = !viewer || viewer.role === "admin";
   const toolsId = useId();
   const workspaceExpanded = usePreference("explorerWorkspaceExpanded");
-  const [validationExpanded, setValidationExpanded] = useState(false);
   const [projectTransferNotice, setProjectTransferNotice] = useState<string | null>(
     null,
   );
@@ -281,10 +279,6 @@ export function Sidebar() {
           ]
         : [];
 
-  useEffect(() => {
-    setValidationExpanded(issues.length > 0);
-  }, [activeProject, issues.length > 0]);
-
   const toggleNodes = () => {
     updateUIPreference("explorerNodesExpanded", !nodesExpanded);
   };
@@ -341,6 +335,19 @@ export function Sidebar() {
           <span className="explorer-project-count">
             {t("sidebar.projectCount", { count: String(projects.length) })}
           </span>
+          {/* Folding the explorer lives with the explorer; the board's header
+              has the matching » to bring it back. */}
+          <button
+            type="button"
+            className="explorer-collapse"
+            onClick={() => updateUIPreference("explorerCollapsed", true)}
+            title={t("board.collapseExplorer")}
+            aria-label={t("board.collapseExplorer")}
+            aria-expanded
+            aria-controls="project-explorer"
+          >
+            «
+          </button>
         </div>
         {/* One action up front — a first project is all a new workspace needs —
             and the rest one press away. The fold is remembered, so someone
@@ -492,7 +499,6 @@ export function Sidebar() {
         toggleNodeSelection={toggleNodeSelection}
         statuses={statuses}
         customStatuses={customStatuses}
-        issues={issues}
         userNames={userNames}
         activeNodes={activeNodes}
         visibleNodes={visibleNodes}
@@ -517,8 +523,6 @@ export function Sidebar() {
         }
         trash={trash}
         restoreTrash={restoreTrash}
-        validationExpanded={validationExpanded}
-        setValidationExpanded={setValidationExpanded}
       />
       </section>
 
