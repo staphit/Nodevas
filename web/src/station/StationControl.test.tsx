@@ -8,7 +8,9 @@ import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
 import { controlRows, formatElapsed, pauseAllPlan } from "./control";
 import { useControl } from "./controlStore";
-import { StationControl } from "./StationControl";
+import type { World } from "../game/world";
+import { useRunners } from "../runners/runnerStore";
+import { StationControl, StationControlReport, StationPauseButton } from "./StationControl";
 import { useStation } from "./stationStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
@@ -107,47 +109,91 @@ beforeEach(() => {
   useStation.getState().reset();
   useControl.setState({ pausing: false, result: null, error: "" });
   vi.spyOn(api, "listProjectRuns").mockResolvedValue({ runs: [] });
+  vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+  // A runner is there: the list, not the call to add one.
+  useRunners.setState({ loaded: true, loading: false, error: null, runners: [{ id: "r1" } as never] });
+  useStation.getState().setLiveView("list");
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount() {
+function mount(world?: World) {
   return render(
     <>
-      <StationControl />
+      <StationPauseButton />
+      <StationControlReport />
+      <StationControl world={world} />
       <ConfirmDialogHost />
     </>,
   );
 }
 
+/** The "In progress" rows, in order. */
+async function rows() {
+  const list = await screen.findByRole("list", { name: "In progress" });
+  return within(list).getAllByRole("listitem");
+}
+
+/** Opens a row's ⋯ menu. */
+function menuOf(row: HTMLElement) {
+  fireEvent.click(within(row).getByRole("button", { name: /^Actions for / }));
+  return screen.getByRole("menu");
+}
+
 describe("StationControl", () => {
-  it("lists the active runs from the store with their autopilot and a count", async () => {
+  it("lists the active runs and autopilots one line each, and a count", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
     mount();
 
-    const table = await screen.findByRole("table");
-    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(3));
-    const [, first, second] = within(table).getAllByRole("row");
-    // Not started yet first, then running.
+    await waitFor(async () => expect(await rows()).toHaveLength(3));
+    const [first, second, pilot] = await rows();
+    // Not started yet first, then running, then the autopilot.
     expect(within(first).getByText("Fix the login")).toBeInTheDocument();
-    expect(within(first).getByText("Implement")).toBeInTheDocument();
-    expect(within(first).getByText("Claude opus")).toBeInTheDocument();
-    expect(within(first).getByText("desktop")).toBeInTheDocument();
-    expect(within(second).getByText("Review")).toBeInTheDocument();
-    expect(within(second).getByText("Codex gpt-5")).toBeInTheDocument();
-    expect(within(second).getByText("laptop")).toBeInTheDocument();
-    expect(within(second).getByText(/12\.3K tokens/)).toBeInTheDocument();
-    expect(within(second).getByText("$0.042")).toBeInTheDocument();
+    expect(within(first).getByText(/^Implement · Claude opus · desktop · /)).toBeInTheDocument();
+    expect(within(first).getByText("Awaiting acceptance")).toBeInTheDocument();
+    expect(within(second).getByText("Add a test")).toBeInTheDocument();
     // The review run is a step of the autopilot's task (by its pipeline).
-    expect(await within(second).findByRole("button", { name: "Ship login" })).toBeInTheDocument();
-    expect(within(second).getByRole("button", { name: "Pause autopilot" })).toBeInTheDocument();
-    expect(within(first).queryByRole("button", { name: "Pause autopilot" })).not.toBeInTheDocument();
+    expect(
+      await within(second).findByText(/^Review · Codex gpt-5 · laptop · .* · 12\.3K tokens · \$0\.042 · Ship login$/),
+    ).toBeInTheDocument();
+    expect(within(pilot).getByText("Ship login")).toBeInTheDocument();
+    expect(within(pilot).getByText("1 of 4 tasks done")).toBeInTheDocument();
     expect(screen.getByTitle("2 active runs")).toHaveTextContent("2");
-    // And the autopilot in the list below, with its progress.
-    expect(screen.getByText("1 of 4 tasks done")).toBeInTheDocument();
+
+    // Each row keeps its actions behind one ⋯.
+    expect(within(second).getAllByRole("button")).toHaveLength(1);
+    const menu = menuOf(second);
+    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "View changes" })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Open goal “Ship login”" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Pause autopilot" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Cancel run" })).toBeInTheDocument();
+    // Escape closes it and hands focus back.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(within(second).getByRole("button", { name: /^Actions for / })).toHaveFocus();
+
+    expect(within(menuOf(first)).queryByRole("menuitem", { name: "Pause autopilot" })).not.toBeInTheDocument();
+    // An outside click closes it too.
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens the goal from a row and steers its autopilot", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
+    const action = vi.spyOn(api, "autopilotAction").mockResolvedValue(undefined as never);
+    vi.spyOn(api, "getAutopilot").mockResolvedValue(makePilot({ status: "paused" }));
+    mount();
+
+    const [pilot] = await rows();
+    fireEvent.click(within(menuOf(pilot)).getByRole("menuitem", { name: "Open goal “Ship login”" }));
+    expect(useStation.getState().goal).toBe("goal");
+    fireEvent.click(within(menuOf(pilot)).getByRole("menuitem", { name: "Pause autopilot" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "pause"));
   });
 
   it("asks the Runs tab's question before cancelling a run", async () => {
@@ -156,8 +202,8 @@ describe("StationControl", () => {
     const cancel = vi.spyOn(api, "cancelRun").mockResolvedValue(makeRun({ status: "cancelled" }));
     mount();
 
-    const table = await screen.findByRole("table");
-    fireEvent.click(await within(table).findByRole("button", { name: "Cancel run" }));
+    const [row] = await rows();
+    fireEvent.click(within(menuOf(row)).getByRole("menuitem", { name: "Cancel run" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Cancel this run?")).toBeInTheDocument();
     expect(
@@ -216,6 +262,22 @@ describe("StationControl", () => {
     await waitFor(() => expect(pauseAll).toHaveBeenCalledWith({ cancelRunning: false }));
   });
 
+  it("turns into Resume all once only paused autopilots are left, and asks first", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot({ status: "paused" })]);
+    const action = vi.spyOn(api, "autopilotAction").mockResolvedValue(undefined as never);
+    vi.spyOn(api, "getAutopilot").mockResolvedValue(makePilot());
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Resume all" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Resume all?" });
+    expect(action).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume all" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "resume"));
+    // Running again: the emergency stop is back.
+    expect(await screen.findByRole("button", { name: "Pause everything" })).toBeEnabled();
+  });
+
   it("follows runs-changed", async () => {
     const list = vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [offered] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
@@ -226,6 +288,65 @@ describe("StationControl", () => {
     useRuns.getState().onRunsChanged("beta");
     await waitFor(() => expect(screen.getByTitle("2 active runs")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Add a test")).toBeInTheDocument();
+  });
+
+  it("folds the tasks waiting on prerequisites into one line", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    const world = {
+      dungeon: {
+        monsters: [
+          { nodeId: "beta", title: "Add a test", state: "locked", blockers: ["alpha"] },
+          { nodeId: "alpha", title: "Fix the login", state: "attackable", blockers: [] },
+        ],
+      },
+    } as unknown as World;
+    mount(world);
+
+    const expand = await screen.findByRole("button", { name: "Expand" });
+    expect(screen.getByText("1 tasks waiting on prerequisites")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting on Fix the login")).not.toBeInTheDocument();
+    fireEvent.click(expand);
+    expect(screen.getByRole("button", { name: "Collapse" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Waiting on Fix the login")).toBeInTheDocument();
+  });
+
+  it("offers one view menu: the list, the war room, the boss map", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [offered] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    mount();
+    await rows();
+
+    fireEvent.click(screen.getByRole("button", { name: "View: List" }));
+    const menu = screen.getByRole("menu", { name: "View: List" });
+    expect(within(menu).getByRole("menuitemradio", { name: "List" })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: "War room" })).toHaveAttribute("aria-checked", "false");
+    expect(within(menu).queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Boss map" }));
+    expect(useApp.getState().preferences.stageSkin).toBe("dungeon");
+    expect(useStation.getState().liveView).toBe("game");
+    expect(screen.queryByRole("list", { name: "In progress" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View: Boss map" }));
+    const again = screen.getByRole("menu");
+    expect(within(again).getByRole("menuitemcheckbox", { name: "Show as text" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    fireEvent.click(within(again).getByRole("menuitemradio", { name: "List" }));
+    expect(useStation.getState().liveView).toBe("list");
+    expect(await screen.findByRole("list", { name: "In progress" })).toBeInTheDocument();
+  });
+
+  it("asks for a runner instead of empty views when there is none", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    useRunners.setState({ loaded: false, runners: [], error: null });
+    mount();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add a runner" }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
   });
 });
 

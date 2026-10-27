@@ -152,27 +152,33 @@ for (const [name, viewport] of Object.entries({
     await page.reload();
 
     const panel = page.locator(".station-control");
-    await expect(panel.getByRole("heading", { name: "Control" })).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByRole("heading", { name: "In progress" })).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByTitle("3 active runs")).toHaveText("3");
-    const table = panel.getByRole("table");
-    // Header, three live runs, and the fold for the ended one.
-    await expect(table.getByRole("row")).toHaveCount(5);
-    await expect(table.getByText("Codex gpt-5")).toBeVisible();
-    await expect(table.getByText("Review")).toBeVisible();
+    const list = panel.getByRole("list", { name: "In progress" });
+    // Three live runs and the autopilot, one line each.
+    await expect(list.getByRole("listitem")).toHaveCount(4);
+    await expect(list.getByText(/Codex gpt-5/)).toBeVisible();
     // The review run belongs to the autopilot's task, by its pipeline.
-    await expect(table.getByRole("button", { name: "Ship login" })).toBeVisible();
+    await expect(list.getByText(/^Review · .* · Ship login$/)).toBeVisible();
     await expect(panel.getByText("1 of 3 tasks done")).toBeVisible();
+    // Its actions sit behind one ⋯.
+    const review = list.getByRole("listitem").filter({ hasText: "Review · " });
+    await review.getByRole("button", { name: /^Actions for / }).click();
+    await expect(page.getByRole("menuitem", { name: "Pause autopilot" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
     // The recently ended run is folded away until asked for.
     const toggle = panel.getByRole("button", { name: /Recently ended \(1\)/ });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expect(table.getByRole("row")).toHaveCount(6);
-    await expect(table.getByText("Succeeded")).toBeVisible();
+    await expect(panel.getByRole("list", { name: "Recently ended (1)" }).getByRole("listitem")).toHaveCount(1);
+    await expect(panel.getByText("Succeeded")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, `${name}-control`);
 
-    await panel.getByRole("button", { name: "Pause everything" }).click();
+    // The emergency stop is the one button of Station's header.
+    await page.getByRole("button", { name: "Pause everything" }).click();
     const dialog = page.getByRole("alertdialog", { name: "Pause everything?" });
     await expect(dialog.getByText("Pause 1 running autopilots")).toBeVisible();
     await expect(dialog.getByText("Cancel 1 runs that have not started")).toBeVisible();
@@ -180,7 +186,7 @@ for (const [name, viewport] of Object.entries({
     await expect(dialog.getByRole("checkbox")).not.toBeChecked();
     await shot(page, `${name}-pause-all`);
     await dialog.getByRole("button", { name: "Pause everything" }).click();
-    await expect(panel.getByText("Paused 1 autopilots and cancelled 1 runs; 2 left alone.")).toBeVisible();
+    await expect(page.getByText("Paused 1 autopilots and cancelled 1 runs; 2 left alone.")).toBeVisible();
     expect(bodies).toEqual([{ cancelRunning: false }]);
   });
 }

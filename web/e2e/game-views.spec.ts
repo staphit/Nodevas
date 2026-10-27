@@ -401,8 +401,12 @@ test("war room: opened in Station from the graph menu, a character opens its nod
   await page.getByRole("menuitem", { name: "Open “Auth API”" }).click();
   await expect(page.locator(".drawer").getByText("Auth API").first()).toBeVisible();
 
-  // The same world as a list.
-  await stage.getByRole("button", { name: "List view" }).click();
+  // The same world as text, from the view menu of "In progress" (under the
+  // node's panel until that closes).
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".drawer")).toHaveCount(0);
+  await page.getByRole("button", { name: "View: War room" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Show as text" }).click();
   await expect(stage.getByText(/Claude opus in mac-mini: working, on “Auth API”/)).toBeVisible();
 });
 
@@ -430,16 +434,25 @@ test("boss map: opened in Station from the command palette, a locked monster ope
   await expect(page.locator(".drawer").getByText("Auth API").first()).toBeVisible();
 });
 
-test("station: the roster, what waits on you and who worked on what", async ({ page }) => {
+test("station: what waits on you, who is working, the agent messages and the last hour", async ({ page }) => {
   await openStaged(page, { "vised-project-mode": "station" });
   // Nothing floats over Station: the agent panel is docked in its column.
   await expect(page.locator("#agent-network-panel")).toHaveCount(0);
-  const docked = page.getByRole("region", { name: "Agent Network" });
-  await expect(docked).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
-  await expect(page.locator(".station-actor").first()).toBeVisible();
-  // The staged agent's question is waiting, and the switch counts it.
+  // The staged agent's question waits first, and the switch counts it.
+  const waiting = page.getByRole("region", { name: "Waiting on you" });
+  await expect(waiting.getByRole("button", { name: "Answer" }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: /^Station/ }).locator(".mode-switch-badge")).toHaveText(/\d+/);
+  // The list is the default view; the game views are one menu away.
+  await expect(page.getByRole("button", { name: "View: List" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
+  // Who is working unfolds from Today.
+  await page.getByRole("button", { name: /working · \d+ in all/ }).click();
+  await expect(page.locator(".station-actor").first()).toBeVisible();
+  // The agent messages are one line until opened; open, the panel is docked.
+  const messages = page.getByRole("button", { name: /Agent messages/ });
+  await expect(messages).toHaveAttribute("aria-expanded", "false");
+  await messages.click();
+  await expect(page.getByRole("region", { name: "Agent Network" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Who worked on what · last hour" })).toBeVisible();
 
   // Info is the board as it was: the cards, the explorer toggle back.
@@ -471,7 +484,8 @@ async function mockPacks(page: Page, ids: string[]) {
 test("view pack: Station draws the war room with an installed pack", async ({ page }) => {
   await mockPacks(page, ["neon-station"]);
   await openStaged(page, { "vised-project-mode": "station" });
-  await page.getByRole("button", { name: "Neon station" }).click();
+  await page.getByRole("button", { name: "View: List" }).click();
+  await page.getByRole("menuitemradio", { name: "Neon station" }).click();
   const stage = page.getByRole("region", { name: "Neon station" });
   await expect(stage).toBeVisible({ timeout: 15_000 });
   await expect(stage).toHaveAttribute("data-pack", "neon-station");
@@ -489,7 +503,8 @@ test("view pack: Station draws the war room with an installed pack", async ({ pa
   // Remembered across a reload, and the built-in view is one click away.
   await page.reload();
   await expect(page.getByRole("region", { name: "Neon station" })).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "War room", exact: true }).click();
+  await page.getByRole("button", { name: "View: Neon station" }).click();
+  await page.getByRole("menuitemradio", { name: "War room" }).click();
   await expect(page.getByRole("region", { name: "War room" })).toBeVisible();
   await expect(page.locator(".station img.pack-sprite")).toHaveCount(0);
 });
@@ -501,7 +516,12 @@ test("game views: screenshots in both themes", async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockPacks(page, ["neon-station", "candy-dungeon"]);
-  await openStaged(page, { "vised-explorer-collapsed": "1", "vised-project-mode": "station" });
+  // Station's "In progress" draws its game view rather than its list.
+  await openStaged(page, {
+    "vised-explorer-collapsed": "1",
+    "vised-project-mode": "station",
+    "nodevas-station-view": "game",
+  });
   for (const [pack, name] of [
     ["neon-station", "Neon station"],
     ["candy-dungeon", "Candy dungeon"],

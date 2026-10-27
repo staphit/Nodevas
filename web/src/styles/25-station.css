@@ -55,18 +55,47 @@
   color: var(--text-2);
 }
 
-/* Roster | live view and timeline | waiting and the agent panel. */
+/* The header with its one emergency button; then waiting, in progress and
+   the last hour | today, runners and the agent messages. */
 .station {
   flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) minmax(320px, 380px);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 12px 16px;
+  padding: 12px 16px 16px;
   background: var(--bg);
   align-items: start;
+  /* Rows take their content's height; the space left stays at the end. */
+  align-content: start;
+}
+.station-head,
+.station-report {
+  grid-column: 1 / -1;
+}
+.station-report:empty {
+  display: none;
+}
+.station-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+.station-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.station-head-stop {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .station-center,
 .station-side {
@@ -79,6 +108,7 @@
   position: sticky;
   top: 0;
   max-height: calc(100vh - 80px);
+  overflow-y: auto;
 }
 
 .station-panel {
@@ -123,14 +153,10 @@
   line-height: 1.5;
 }
 
-/* Roster */
-.station-roster {
-  position: sticky;
-  top: 0;
-}
+/* Roster, unfolded from the Today card. */
 .station-roster-list {
   list-style: none;
-  margin: 0;
+  margin: 4px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -228,18 +254,14 @@
   color: var(--st-failed-fg);
   font-weight: 600;
 }
-.station-roster-foot {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-/* Live view: the game stage, sized as a card rather than a pane. */
+/* Live view: the game stage, filling the "In progress" card under its
+   header rather than a pane of its own. */
 .station .lane-wrap.game-stage.station-live {
   height: clamp(420px, 58vh, 760px);
+  margin: 0 -12px -12px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 10px 10px;
   overflow: hidden;
 }
 .station-live-hint {
@@ -405,6 +427,305 @@
   font-size: 12px;
   color: var(--text-2);
 }
+.station-waiting-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+/* Something waits: the card says so before its rows are read. */
+.station-waiting.is-attention {
+  border-color: var(--st-ready-fg);
+  box-shadow: inset 3px 0 0 var(--st-ready-fg);
+}
+.station .ap-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.station .ap-btn.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, var(--text));
+}
+
+/* A fold: a line that opens what is under it. */
+.station-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.station-fold:hover {
+  color: var(--text);
+}
+.station-fold.is-heading {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.station-head-gap {
+  flex: 1;
+}
+.station-head-end {
+  margin-left: auto;
+}
+
+/* In progress: one line per run or autopilot, its actions behind ⋯. */
+.station-progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.station-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text);
+}
+.station-progress-list.is-ended .station-progress-row,
+.station-progress-list.is-locked .station-progress-row {
+  color: var(--text-2);
+}
+.station-progress-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.station-progress-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  text-align: left;
+}
+.station-progress-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.station-progress-bar {
+  width: min(220px, 100%);
+  height: 4px;
+  accent-color: var(--st-progress-fg);
+}
+.station-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-progress-fg);
+}
+.station-dot.status-queued,
+.station-dot.status-offered,
+.station-dot.status-paused {
+  background: var(--st-ready-fg);
+}
+.station-dot.status-failed {
+  background: var(--st-failed-fg);
+}
+.station-dot.status-succeeded {
+  background: var(--st-done-fg);
+}
+.station-dot.status-cancelled,
+.station-dot.status-declined,
+.station-dot.is-off {
+  background: var(--st-locked-fg);
+}
+.station-locked-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border-top: 1px solid var(--border);
+}
+.station-locked-line .station-progress-meta {
+  flex: 1;
+}
+.station-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.station-cta p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* The ⋯ and view menus (StationMenu). */
+.station-menu {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.station-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.station-menu-trigger.is-icon {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+}
+.station-menu-trigger.is-text {
+  padding: 2px 8px;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.station-menu-trigger:hover,
+.station-menu-trigger[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.station-menu-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.station-menu-panel {
+  z-index: var(--z-popover, 60);
+  display: flex;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.station-menu-item {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.station-menu-item > span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.station-menu-item:hover:not(:disabled),
+.station-menu-item:focus-visible {
+  background: var(--hover);
+}
+.station-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.station-menu-item.is-danger {
+  color: var(--st-failed-fg);
+}
+.station-menu-check {
+  width: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.station-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* Side column: today, runners, agent messages. */
+.station-today-spend {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.station-budget-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  accent-color: var(--accent);
+}
+.station-today .station-panel-meta {
+  margin: 4px 0 0;
+}
+.station-runner-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.station-runner-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 13px;
+}
+.station-runner-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.station-network-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.station-network-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+}
+.station-network.is-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 /* The agent panel, docked: in the column instead of over the board. */
 .agent-panel.is-docked {
   position: static;
@@ -428,28 +749,30 @@
   }
 }
 
-/* Narrower: the side column moves under the live view. */
-@media (max-width: 1180px) {
-  .station {
-    grid-template-columns: 230px minmax(0, 1fr);
-  }
-  .station-side {
-    grid-column: 1 / -1;
-    position: static;
-    max-height: none;
-  }
-}
-/* Phone: one column. */
-@media (max-width: 760px) {
+/* Narrower: one column, the side cards under the main ones. */
+@media (max-width: 900px) {
   .station {
     grid-template-columns: minmax(0, 1fr);
-    padding: 8px;
   }
-  .station-roster {
+  .station-side {
     position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+/* Phone: tighter, and a waiting row's buttons go under its text. */
+@media (max-width: 760px) {
+  .station {
+    padding: 8px;
   }
   .station-lane {
     grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .station-waiting-item {
+    flex-wrap: wrap;
+  }
+  .station-waiting-actions {
+    justify-content: flex-start;
   }
 }
 /* The top bar is full at these widths: the switch keeps its icons (and the
@@ -675,10 +998,7 @@
   color: var(--text-2);
 }
 
-/* Control: every run under way, its autopilot, and the emergency stop. */
-.station-control {
-  container-type: inline-size;
-}
+/* Control: the active count, the pause-all report and its dialog. */
 .station-control-count {
   min-width: 20px;
   padding: 0 6px;
@@ -690,10 +1010,6 @@
   line-height: 18px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-.station-control-stop {
-  margin-left: auto;
-  font-weight: 600;
 }
 .station-control-result {
   display: flex;
@@ -709,108 +1025,10 @@
 .station-control-result .run-link-button {
   margin-left: auto;
 }
-/* The table never widens the panel: a wide row scrolls inside it. */
-.station-control-scroll {
-  max-width: 100%;
-  overflow-x: auto;
-}
-.station-control-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  color: var(--text);
-}
-.station-control-table th {
-  padding: 4px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-2);
-  text-align: left;
-  white-space: nowrap;
-}
-.station-control-table td {
-  padding: 6px;
-  border-top: 1px solid var(--border);
-  vertical-align: middle;
-}
-/* Runner and status stay on one line; the node and agent may wrap. */
-.station-control-row td:nth-child(4),
-.station-control-row td:nth-child(5) {
-  white-space: nowrap;
-}
-.station-control-row.status-cancelled td,
-.station-control-row.status-declined td {
-  color: var(--text-2);
-}
-.station-control-node {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-.station-control-num {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .station-control-note {
   display: block;
   font-size: 11px;
   color: var(--text-2);
-}
-.station-control-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: flex-end;
-  align-items: center;
-}
-.station-control-actions-cell .station-control-actions .ap-btn {
-  white-space: nowrap;
-}
-.station-control-toggle-row td {
-  padding-top: 10px;
-}
-.station-control-sub {
-  margin: 14px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-.station-control-pilots {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.station-control-pilot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto;
-  gap: 6px 10px;
-  align-items: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-}
-.station-control-pilot > .autopilot-error {
-  grid-column: 1 / -1;
-}
-.station-control-pilot-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.station-control-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.station-control-progress progress {
-  width: 100%;
-  height: 6px;
-  accent-color: var(--st-progress-fg);
 }
 .station-control-dialog-body {
   padding: 0 18px 12px;
@@ -830,66 +1048,4 @@
 }
 .station-control-dialog-body .run-hint {
   margin: 8px 0 0;
-}
-
-/* Narrow (a phone, or a squeezed centre column): each run is a card of
-   labelled lines instead of a row of nine columns. */
-@container (max-width: 900px) {
-  .station-control-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-  .station-control-table,
-  .station-control-table tbody,
-  .station-control-table tr,
-  .station-control-table td {
-    display: block;
-    width: auto;
-  }
-  .station-control-table tr {
-    padding: 6px 0;
-    border-top: 1px solid var(--border);
-  }
-  .station-control-table td {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 2px 0;
-    border-top: 0;
-    min-width: 0;
-  }
-  .station-control-table td[data-label]::before {
-    content: attr(data-label);
-    flex: 0 0 auto;
-    font-size: 11px;
-    color: var(--text-2);
-  }
-  .station-control-table td > * {
-    min-width: 0;
-  }
-  .station-control-node {
-    max-width: 100%;
-  }
-  .station-control-actions {
-    justify-content: flex-start;
-    padding-top: 4px;
-  }
-  .station-control-table td.station-control-actions-cell {
-    display: block;
-    width: auto;
-  }
-  .station-control-toggle-row {
-    border-top: 0;
-  }
-  .station-control-pilot {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .station-control-pilot .station-control-actions {
-    justify-content: flex-start;
-  }
 }

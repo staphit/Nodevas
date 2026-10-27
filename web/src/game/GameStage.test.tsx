@@ -181,6 +181,16 @@ describe("war room", () => {
     stage("warroom");
     fireEvent.click(screen.getByRole("button", { name: "Boss map" }));
     expect(useApp.getState().preferences.stageSkin).toBe("dungeon");
+    expect(useStation.getState().liveView).toBe("game");
+  });
+
+  it("leaves the switch to Station when it holds it, and draws the list it is told to", () => {
+    const { rerender } = render(<GameStage skin="warroom" controls={false} />);
+    expect(screen.queryByRole("group", { name: "Board view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "List view" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Claude opus in mac-mini: working/)).not.toBeInTheDocument();
+    rerender(<GameStage skin="warroom" controls={false} listView />);
+    expect(screen.getByText(/^Claude opus in mac-mini: working, on “Auth API”/)).toBeInTheDocument();
   });
 });
 
