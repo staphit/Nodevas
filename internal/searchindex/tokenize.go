@@ -170,3 +170,52 @@ func matchFoldAt(text, lower string) bool {
 	}
 	return true
 }
+
+// maxRankTokens bounds the OR query a ranked search sends to FTS5. A CJK
+// character yields two tokens (itself and its bigram), so 32 would drop the
+// tail of any question over 16 characters; 64 keeps a 32-character question
+// whole and is still a small OR for FTS5.
+const maxRankTokens = 64
+
+// rankTokens is what a ranked search looks for: any of these, scored by BM25,
+// rather than all of them. A whole question ("林雨的妹妹叫什麼名字？") then
+// finds the passage that shares most of its words instead of nothing at all.
+//
+// Per run, in text order: a CJK character on its own (a Chinese word is often
+// one character, and the index holds every one), then the bigram starting at
+// it. A Latin letter alone is not a term worth scoring, so only its bigrams
+// are. A one-rune run is its own token either way. The index tokens are
+// unchanged: these are a different selection of the same vocabulary.
+func rankTokens(query string) []string {
+	tokens := make([]string, 0, maxRankTokens)
+	seen := make(map[string]struct{}, maxRankTokens)
+	add := func(token string) {
+		if len(tokens) == maxRankTokens {
+			return
+		}
+		if _, ok := seen[token]; ok {
+			return
+		}
+		seen[token] = struct{}{}
+		tokens = append(tokens, token)
+	}
+	forEachRun(query, func(run []rune) {
+		if len(run) == 1 {
+			add(string(run))
+			return
+		}
+		for i := range run {
+			if isCJK(run[i]) {
+				add(string(run[i : i+1]))
+			}
+			if i+1 < len(run) {
+				add(string(run[i : i+2]))
+			}
+		}
+	})
+	return tokens
+}
+
+// isCJK reports whether r is from the CJK blocks (radicals onwards), where a
+// single character carries meaning.
+func isCJK(r rune) bool { return r >= 0x2E80 }

@@ -313,3 +313,33 @@ export function setNodeRequires(
     }
   }
 }
+
+/** Mirrors `maxNodeRefs` in internal/store/store.go. */
+export const MAX_NODE_REFS = 32;
+
+/**
+ * Makes `nodeId` use `ref` as context — a Note it should be read with. Never a
+ * dependency: nothing about readiness changes. Adding one already there is a
+ * no-op, the same as the server's `add-ref` op.
+ */
+export function addNodeRef(graph: Graph, nodeId: string, ref: string): void {
+  const node = findNode(graph, nodeId);
+  findNode(graph, ref);
+  if (ref === nodeId) throw invalid("節點不能參考自己。");
+  const refs = node.refs ?? [];
+  if (refs.includes(ref)) return;
+  if (refs.length >= MAX_NODE_REFS) {
+    throw invalid(`每個節點最多 ${MAX_NODE_REFS} 個參考。`);
+  }
+  node.refs = [...refs, ref];
+}
+
+/**
+ * Drops a reference. The target need not exist any more: a reference left
+ * dangling by a hand edit has to be removable too.
+ */
+export function removeNodeRef(graph: Graph, nodeId: string, ref: string): void {
+  const node = findNode(graph, nodeId);
+  const refs = (node.refs ?? []).filter((candidate) => candidate !== ref);
+  node.refs = refs.length ? refs : undefined;
+}

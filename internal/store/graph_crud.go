@@ -18,6 +18,17 @@ import (
 )
 
 func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
+	ids, err := s.nextNodeIDsLocked(g, 1)
+	if err != nil {
+		return "", err
+	}
+	return ids[0], nil
+}
+
+// nextNodeIDsLocked picks n fresh automatic ids, skipping ids in the graph, in
+// the trash and on disk. The used set is built once, so a batch of a hundred
+// costs one trash listing.
+func (s *Store) nextNodeIDsLocked(g *engine.Graph, n int) ([]string, error) {
 	used := make(map[string]bool, len(g.Nodes))
 	for _, node := range g.Nodes {
 		if node != nil {
@@ -26,14 +37,15 @@ func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
 	}
 	trash, err := s.ListTrash()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, item := range trash {
 		if item.NodeID != "" {
 			used[item.NodeID] = true
 		}
 	}
-	for number := 1; number <= 9_999_999; number++ {
+	ids := make([]string, 0, n)
+	for number := 1; number <= 9_999_999 && len(ids) < n; number++ {
 		id := fmt.Sprintf("node-%04d", number)
 		if used[id] {
 			continue
@@ -41,11 +53,15 @@ func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
 		if _, err := s.statPath(s.NodePath(id)); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", err
+			return nil, err
 		}
-		return id, nil
+		used[id] = true
+		ids = append(ids, id)
 	}
-	return "", errors.New("automatic node id space exhausted")
+	if len(ids) < n {
+		return nil, errors.New("automatic node id space exhausted")
+	}
+	return ids, nil
 }
 
 func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (string, error) {
@@ -156,6 +172,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	}
 	duplicate.Title += "（副本）"
 	duplicate.Tags = append([]string(nil), source.Tags...)
+	duplicate.Refs = append([]string(nil), source.Refs...)
 	duplicate.Effects = append([]engine.Effect(nil), source.Effects...)
 
 	content, err := s.ReadFile(s.NodePath(sourceID))
@@ -407,8 +424,24 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 // dependency loses that operand rather than blocking the deletion. An
 // expression that consisted only of removed nodes clears entirely; a gate whose
 // output or last input is going away is dropped with it. kept is the node slice
-// as it looks after the removal.
+// as it looks after the removal. References to a removed node are dropped
+// too; they never block a deletion.
 func detachRemovedNodes(g *engine.Graph, kept []*engine.Node, removing map[string]bool) {
+	for _, node := range kept {
+		if node == nil || len(node.Refs) == 0 {
+			continue
+		}
+		refs := node.Refs[:0:0]
+		for _, ref := range node.Refs {
+			if !removing[ref] {
+				refs = append(refs, ref)
+			}
+		}
+		if len(refs) == 0 {
+			refs = nil
+		}
+		node.Refs = refs
+	}
 	for _, node := range kept {
 		if node == nil || node.Requires == "" {
 			continue

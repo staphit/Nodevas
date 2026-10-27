@@ -74,6 +74,9 @@ func (a *API) postHistoryRestore(c *gin.Context) {
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
 	if err := st.RestoreHistory(auth.ActorFrom(c.Request), body.Path, body.Version); err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		httpx.Err(c, 400, err)
 		return
 	}

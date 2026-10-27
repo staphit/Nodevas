@@ -51,6 +51,9 @@ type Board interface {
 	Graph(project string) (*engine.Graph, *engine.RunState, error)
 	Content(project, nodeID string) (string, error)
 	SetStatus(project, nodeID string, status engine.Status, by, note string) error
+	// References are the notes a node uses as context, summarized for its
+	// run prompt; the bool says more exist than were summarized.
+	References(project, nodeID string) ([]runs.Reference, bool, error)
 }
 
 // Options are the orchestrator's collaborators.
@@ -856,7 +859,14 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 		// runs.Start passes; it is still stated rather than assumed.
 		LoadNode: func() (runs.NodeInfo, bool, error) {
 			nodeType := w.dag.nodeType(t.NodeID)
-			return runs.NodeInfo{Title: t.Title, Content: content, Type: nodeType.ID, AgentMode: nodeType.AgentMode}, true, nil
+			refs, truncated, err := o.opts.Board.References(rec.Project, t.NodeID)
+			if err != nil {
+				return runs.NodeInfo{}, false, err
+			}
+			return runs.NodeInfo{
+				Title: t.Title, Content: content, Type: nodeType.ID, AgentMode: nodeType.AgentMode,
+				References: refs, ReferencesTruncated: truncated,
+			}, true, nil
 		},
 	})
 	if err != nil {

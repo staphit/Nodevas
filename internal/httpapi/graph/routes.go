@@ -13,6 +13,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/graph", httpx.ETag(a.getGraph))
 	api.PUT("/graph", a.putGraph)
 	api.POST("/graph/ops", a.postGraphOps)
+	api.POST("/graph/subgraph", a.postSubgraph)
 	api.GET("/state", httpx.ETag(a.getState))
 	api.GET("/validate", a.getValidate)
 	// The ready queue changes whenever anyone finishes anything, which is a

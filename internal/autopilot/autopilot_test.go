@@ -256,6 +256,8 @@ type fakeBoard struct {
 	sets  []string
 	// bodies overrides a node's content ("Do <id>." otherwise).
 	bodies map[string]string
+	// refs are the reference notes a node's run is given.
+	refs map[string][]runs.Reference
 }
 
 // newBoard builds a graph: nodes by id (kind after a colon: "x:gate"), and
@@ -303,6 +305,12 @@ func (b *fakeBoard) Content(_, id string) (string, error) {
 		return body, nil
 	}
 	return "Do " + id + ".", nil
+}
+
+func (b *fakeBoard) References(_, id string) ([]runs.Reference, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.refs[id], false, nil
 }
 
 // edit changes a node's content.
@@ -940,5 +948,26 @@ func TestAGoalTypedGoalIsStillMarkedDoneByTheAutopilot(t *testing.T) {
 	v = h.view(v.Run.ID)
 	if v.Run.Status != runnerwire.AutopilotSucceeded || h.board.status("goal") != engine.StatusDone {
 		t.Fatalf("run %s goal=%s states=%s", v.Run.Status, h.board.status("goal"), states(v))
+	}
+}
+
+func TestAScenesReferenceNotesReachItsRun(t *testing.T) {
+	b := newBoard([]string{"goal:goal", "s:scene", "n:note"}, []string{"s>goal"})
+	b.refs = map[string][]runs.Reference{"s": {{ID: "n", Title: "林曉", TypeLabel: "Note", Summary: "怕水"}}}
+	h := newHarness(t, b)
+	v := h.create(runnerwire.AutopilotPolicy{})
+	if task(v, "s").State != runnerwire.TaskQueued {
+		t.Fatalf("scene not dispatched: %s", states(v))
+	}
+	info, found, err := h.runs.lastStart("s").LoadNode()
+	if err != nil || !found {
+		t.Fatalf("LoadNode: %v %v", found, err)
+	}
+	if len(info.References) != 1 || info.References[0].Summary != "怕水" {
+		t.Fatalf("references = %+v", info.References)
+	}
+	prompt := runs.BuildPrompt(info.Title, info.Content, runs.ReferencesBlock(info.References, info.ReferencesTruncated), "")
+	if !strings.Contains(prompt, "## Reference notes") || !strings.Contains(prompt, "### 林曉 (n, Note)") {
+		t.Fatalf("prompt = %q", prompt)
 	}
 }

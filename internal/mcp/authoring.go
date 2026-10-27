@@ -41,6 +41,27 @@ func (c *Client) CreateNode(ctx context.Context, node NewNode) (string, error) {
 	return response.ID, nil
 }
 
+// SubgraphResult is what create_subgraph's server call answers: the new ids by
+// the caller's keys, and what was made.
+type SubgraphResult struct {
+	IDs          map[string]string       `json:"ids"`
+	Created      []store.SubgraphCreated `json:"created"`
+	Rev          string                  `json:"rev"`
+	Issues       []engine.Issue          `json:"issues"`
+	Dependencies int                     `json:"dependencies"`
+	References   int                     `json:"references"`
+}
+
+// CreateSubgraph creates many nodes and their wiring in one all-or-nothing
+// call.
+func (c *Client) CreateSubgraph(ctx context.Context, spec store.SubgraphSpec) (*SubgraphResult, error) {
+	result := &SubgraphResult{}
+	if err := c.post(ctx, "/api/graph/subgraph", nil, spec, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // WriteNodeBody replaces a node's markdown, refusing if somebody changed it
 // since baseRev.
 func (c *Client) WriteNodeBody(ctx context.Context, id, content, baseRev string) (string, error) {
@@ -73,6 +94,8 @@ type OutlineNode struct {
 	Status   string `json:"status"`
 	Priority string `json:"priority,omitempty"`
 	Assignee string `json:"assignee,omitempty"`
+	// Refs are the notes this node uses as context; they never block.
+	Refs []string `json:"refs,omitempty"`
 }
 
 // OutlineEdge is one dependency.
@@ -143,6 +166,7 @@ func (c *Client) GraphOutline(ctx context.Context, filter OutlineFilter) (*Outli
 			Status:   status,
 			Priority: node.Priority,
 			Assignee: node.Assignee,
+			Refs:     node.Refs,
 		})
 	}
 	sort.Slice(outline.Nodes, func(a, b int) bool {

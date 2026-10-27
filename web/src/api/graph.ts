@@ -23,7 +23,9 @@ export interface GraphOp {
     | "add-edge"
     | "remove-edge"
     | "set-edge-style"
-    | "timeline-order";
+    | "timeline-order"
+    | "add-ref"
+    | "remove-ref";
   nodeId?: string;
   x?: number;
   y?: number;
@@ -42,6 +44,8 @@ export interface GraphOp {
   relation?: "" | "optional" | "deprecated";
   line?: "" | "solid" | "dashed" | "dotted";
   order?: string[];
+  /** add-ref / remove-ref: the node `nodeId` uses as context. */
+  ref?: string;
 }
 
 export interface GraphOpsResponse {

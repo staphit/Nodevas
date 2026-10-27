@@ -132,7 +132,7 @@ lists the tools and maps them to `provider.Tool` plus a permission `Kind`:
 | Kind | Tools |
 | --- | --- |
 | `read` | every tool with `ReadOnlyHint` |
-| `write` | `create_node`, `link_nodes`, `update_node_meta`, `set_node_status`, `claim_task`, `release_task`, `index_documents` |
+| `write` | `create_node`, `create_subgraph`, `link_nodes`, `update_node_meta`, `set_node_status`, `claim_task`, `release_task`, `index_documents` |
 | `risky` | `update_node_body` (replaces a page wholesale) |
 
 Unknown non-read-only tools default to `risky`.
@@ -189,7 +189,7 @@ tasks (before the autopilot starts or while it runs).
    and whether it was running, and the goal's tasks before.
 3. The replan is a plan run whose job carries the revision (`Job.Review`; the
    run shows `replan: true`). Its prompt (`adapter.replanPrompt`) keeps the
-   plan contract — read-only, new tasks with `create_node`/`link_nodes`, tagged
+   plan contract — read-only, new tasks with `create_subgraph` (or `create_node`/`link_nodes`), tagged
    `goal:<id>`, no claiming, no status changes, no dispatch or merge — and adds
    the reconciliation: for every existing task keep, change (not started
    only), skip (not started only; never deleted) or flag (in progress), in a

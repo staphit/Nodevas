@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -538,4 +539,96 @@ func (ix *projectIndex) reconcile(ctx context.Context) (bool, error) {
 		changed = true
 	}
 	return changed, nil
+}
+
+// Ranked is one result of a ranked search. Match is the tier it ranked in:
+// "title" (the query is the node's title), "phrase" (the text contains the
+// whole query) or "terms" (it shares some of the query's terms). Score is
+// BM25 negated, so higher is better; an exact title the terms did not reach
+// scores 0.
+type Ranked struct {
+	NodeID string
+	Title  string
+	Text   string
+	Match  string
+	Score  float64
+}
+
+// Ranked-search tiers, best first.
+const (
+	MatchTitle  = "title"
+	MatchPhrase = "phrase"
+	MatchTerms  = "terms"
+)
+
+func matchTier(match string) int {
+	switch match {
+	case MatchTitle:
+		return 0
+	case MatchPhrase:
+		return 1
+	}
+	return 2
+}
+
+// rank answers a query with the best documents first: an exact title, then
+// the whole query as a phrase, then any shared terms, each tier by BM25 and
+// then by graph order. Unlike query, a document need not contain every term,
+// which is what lets a question typed as a sentence find anything.
+func (ix *projectIndex) rank(ctx context.Context, query string, limit int) ([]Ranked, error) {
+	trimmed := strings.TrimSpace(query)
+	lowered := strings.ToLower(trimmed)
+	candidates, err := ix.store.rankedCandidates(ctx, ix.project, rankTokens(lowered), limit)
+	if err != nil {
+		return nil, err
+	}
+	position := make(map[string]int, len(ix.order))
+	for index, id := range ix.order {
+		position[id] = index
+	}
+	byID := make(map[string]*rankedDoc, len(candidates))
+	for _, doc := range candidates {
+		if _, live := position[doc.nodeID]; live {
+			byID[doc.nodeID] = doc
+		}
+	}
+	// An exact title always comes first, even when the terms did not fetch it.
+	for _, id := range ix.order {
+		doc := ix.docs[id]
+		if doc == nil || byID[id] != nil || !strings.EqualFold(strings.TrimSpace(doc.title), trimmed) {
+			continue
+		}
+		stored, err := ix.store.document(ctx, ix.project, id)
+		if err != nil {
+			return nil, err
+		}
+		if stored != nil {
+			byID[id] = &rankedDoc{storedDoc: *stored}
+		}
+	}
+	out := make([]Ranked, 0, len(byID))
+	for id, doc := range byID {
+		text := doc.text()
+		match := MatchTerms
+		switch {
+		case strings.EqualFold(strings.TrimSpace(doc.title), trimmed):
+			match = MatchTitle
+		case containsFold(text, lowered):
+			match = MatchPhrase
+		}
+		out = append(out, Ranked{NodeID: id, Title: doc.title, Text: text, Match: match, Score: -doc.bm25})
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if ta, tb := matchTier(out[a].Match), matchTier(out[b].Match); ta != tb {
+			return ta < tb
+		}
+		if out[a].Score != out[b].Score {
+			return out[a].Score > out[b].Score
+		}
+		return position[out[a].NodeID] < position[out[b].NodeID]
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }

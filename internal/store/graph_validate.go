@@ -68,62 +68,8 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 		if _, exists := ids[node.ID]; exists {
 			return fmt.Errorf("duplicate node id %q", node.ID)
 		}
-		if len(node.Requires) > 64<<10 || len(node.Title) > 64<<10 {
-			return fmt.Errorf("node %q contains an oversized title or requirement", node.ID)
-		}
-		// An unknown kind is kept (it reads as Task), including a legacy
-		// free-text one ("bug", "伏筆"), so old graphs stay saveable; only its
-		// size and control characters are checked here. New unknown kinds are
-		// refused on the write paths.
-		if len(node.Kind) > 64 || strings.IndexFunc(node.Kind, unicode.IsControl) >= 0 {
-			return fmt.Errorf("node %q has an invalid type %q", node.ID, node.Kind)
-		}
-		switch node.Priority {
-		case "", "urgent", "high", "medium", "low":
-		default:
-			return fmt.Errorf("node %q has invalid priority %q", node.ID, node.Priority)
-		}
-		// Every write path funnels through here, so "all" arriving from any
-		// client normalizes to the stored zero value before the enum check.
-		node.WriteAccess = normalizeWriteAccess(node.WriteAccess)
-		switch node.WriteAccess {
-		case engine.WriteAccessAll, engine.WriteAccessWorker,
-			engine.WriteAccessOrchestrator, engine.WriteAccessHumanOnly:
-		default:
-			return fmt.Errorf("node %q has invalid write_access %q", node.ID, node.WriteAccess)
-		}
-		if len(node.Tags) > 64 {
-			return fmt.Errorf("node %q has too many tags", node.ID)
-		}
-		for _, tag := range node.Tags {
-			if strings.TrimSpace(tag) == "" || len(tag) > 128 {
-				return fmt.Errorf("node %q contains an empty or oversized tag", node.ID)
-			}
-		}
-		if node.Assignee != "" {
-			if _, exists := userIDs[node.Assignee]; !exists {
-				return fmt.Errorf("node %q references unknown assignee %q", node.ID, node.Assignee)
-			}
-		}
-		for _, effect := range node.Effects {
-			if len(effect.Set) > 4096 {
-				return fmt.Errorf("node %q contains an oversized effect", node.ID)
-			}
-		}
-		if len(node.Links) > maxNodeLinks {
-			return fmt.Errorf("node %q has too many links (maximum %d)", node.ID, maxNodeLinks)
-		}
-		for _, link := range node.Links {
-			if !engine.ValidNodeID(link.Node) {
-				return fmt.Errorf("node %q links to invalid node id %q", node.ID, link.Node)
-			}
-			label := strings.TrimSpace(link.Label)
-			if label == "" || len(label) > 128 {
-				return fmt.Errorf("node %q has a link with an empty or oversized label", node.ID)
-			}
-			if link.Project != "" && !engine.ValidProjectRef(link.Project) {
-				return fmt.Errorf("node %q links to invalid project %q", node.ID, link.Project)
-			}
+		if err := validateNodeForStorage(node, userIDs); err != nil {
+			return err
 		}
 		ids[node.ID] = struct{}{}
 	}
@@ -369,6 +315,89 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 				return fmt.Errorf("saved view %q has invalid sort %q", view.ID, view.Sort)
 			}
 		}
+	}
+	return nil
+}
+
+// validateNodeForStorage checks one node's own fields (not its id or its
+// uniqueness, which need the whole graph). create_subgraph calls it per new
+// node so an error can name the offending entry.
+func validateNodeForStorage(node *engine.Node, userIDs map[string]struct{}) error {
+	if len(node.Requires) > 64<<10 || len(node.Title) > 64<<10 {
+		return fmt.Errorf("node %q contains an oversized title or requirement", node.ID)
+	}
+	// An unknown kind is kept (it reads as Task), including a legacy
+	// free-text one ("bug", "伏筆"), so old graphs stay saveable; only its
+	// size and control characters are checked here. New unknown kinds are
+	// refused on the write paths.
+	if len(node.Kind) > 64 || strings.IndexFunc(node.Kind, unicode.IsControl) >= 0 {
+		return fmt.Errorf("node %q has an invalid type %q", node.ID, node.Kind)
+	}
+	switch node.Priority {
+	case "", "urgent", "high", "medium", "low":
+	default:
+		return fmt.Errorf("node %q has invalid priority %q", node.ID, node.Priority)
+	}
+	// Every write path funnels through here, so "all" arriving from any
+	// client normalizes to the stored zero value before the enum check.
+	node.WriteAccess = normalizeWriteAccess(node.WriteAccess)
+	switch node.WriteAccess {
+	case engine.WriteAccessAll, engine.WriteAccessWorker,
+		engine.WriteAccessOrchestrator, engine.WriteAccessHumanOnly:
+	default:
+		return fmt.Errorf("node %q has invalid write_access %q", node.ID, node.WriteAccess)
+	}
+	if len(node.Tags) > 64 {
+		return fmt.Errorf("node %q has too many tags", node.ID)
+	}
+	for _, tag := range node.Tags {
+		if strings.TrimSpace(tag) == "" || len(tag) > 128 {
+			return fmt.Errorf("node %q contains an empty or oversized tag", node.ID)
+		}
+	}
+	if node.Assignee != "" {
+		if _, exists := userIDs[node.Assignee]; !exists {
+			return fmt.Errorf("node %q references unknown assignee %q", node.ID, node.Assignee)
+		}
+	}
+	for _, effect := range node.Effects {
+		if len(effect.Set) > 4096 {
+			return fmt.Errorf("node %q contains an oversized effect", node.ID)
+		}
+	}
+	if len(node.Links) > maxNodeLinks {
+		return fmt.Errorf("node %q has too many links (maximum %d)", node.ID, maxNodeLinks)
+	}
+	for _, link := range node.Links {
+		if !engine.ValidNodeID(link.Node) {
+			return fmt.Errorf("node %q links to invalid node id %q", node.ID, link.Node)
+		}
+		label := strings.TrimSpace(link.Label)
+		if label == "" || len(label) > 128 {
+			return fmt.Errorf("node %q has a link with an empty or oversized label", node.ID)
+		}
+		if link.Project != "" && !engine.ValidProjectRef(link.Project) {
+			return fmt.Errorf("node %q links to invalid project %q", node.ID, link.Project)
+		}
+	}
+	if len(node.Refs) > maxNodeRefs {
+		return fmt.Errorf("node %q has too many references (maximum %d)", node.ID, maxNodeRefs)
+	}
+	// Only the syntax of a reference is checked: a dangling one (a hand edit,
+	// a deleted note) is tolerated so a project never fails to load. The
+	// write paths that add references refuse unknown targets.
+	seenRefs := make(map[string]struct{}, len(node.Refs))
+	for _, ref := range node.Refs {
+		if !engine.ValidNodeID(ref) {
+			return fmt.Errorf("node %q references invalid node id %q", node.ID, ref)
+		}
+		if ref == node.ID {
+			return fmt.Errorf("node %q references itself", node.ID)
+		}
+		if _, exists := seenRefs[ref]; exists {
+			return fmt.Errorf("node %q references %q twice", node.ID, ref)
+		}
+		seenRefs[ref] = struct{}{}
 	}
 	return nil
 }

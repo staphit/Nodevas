@@ -42,7 +42,10 @@ func TestAgentPayloadMeasurements(t *testing.T) {
 	// tools, with their descriptions already cut to the bone. 18500: node
 	// types added the kind vocabulary to create_node and the board's layout
 	// and nodeTypes to get_graph_outline, which a planner needs to pick types.
-	if len(raw) > 18500 || len(instructions("fixture", false)) > 600 {
+	// 22500: create_subgraph (about 2 KB: a planner's whole breakdown in one
+	// call instead of dozens), reference notes on get_node and link_nodes,
+	// and the type-aware wording on the tools agents misread without it.
+	if len(raw) > 22500 || len(instructions("fixture", false)) > 600 {
 		t.Fatal("agent catalog exceeded its context budget")
 	}
 	for _, name := range []string{"get_node", "get_graph_outline"} {

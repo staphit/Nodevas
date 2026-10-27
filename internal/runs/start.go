@@ -43,6 +43,16 @@ type StartRequest struct {
 type NodeInfo struct {
 	Title, Content, Type string
 	AgentMode            engine.AgentMode
+	// References are the notes the node uses as context (characters,
+	// setting), already summarized; ReferencesTruncated says more exist.
+	References          []Reference
+	ReferencesTruncated bool
+}
+
+// Reference is one reference note as a run's prompt shows it. It mirrors the
+// store's summary so this package stays free of the store.
+type Reference struct {
+	ID, Title, TypeLabel, Summary string
 }
 
 // Start-refusal codes (StartError.Code).
@@ -191,7 +201,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if name == "" {
 		name = req.ActorID
 	}
-	jobPrompt := BuildPrompt(title, content, body.Prompt)
+	jobPrompt := BuildPrompt(title, content, ReferencesBlock(node.References, node.ReferencesTruncated), body.Prompt)
 	pipelineID := ""
 	if pipeline != nil {
 		p, err := d.store.CreatePipeline(ctx, NewPipeline{
@@ -281,19 +291,51 @@ func ModeSupported(info *runnerwire.Info, mode string) bool {
 const truncatedNote = "\n\n[node content truncated]"
 
 // BuildPrompt assembles the task a runner is offered: the node's title, its
-// content, and the dispatcher's extra instructions, within MaxPromptBytes.
-// The content gives way first, so the instructions typed for this run are
-// never the part that is cut.
-func BuildPrompt(title, content, extra string) string {
+// content, its reference notes (refs, from ReferencesBlock) and the
+// dispatcher's extra instructions, within MaxPromptBytes. The content gives
+// way first, so the instructions typed for this run, and the notes the
+// writing must agree with, are never the part that is cut.
+func BuildPrompt(title, content, refs, extra string) string {
 	head := "# " + strings.TrimSpace(title) + "\n\n"
 	tail := ""
 	if extra = strings.TrimSpace(extra); extra != "" {
 		tail = "\n\nAdditional instructions:\n" + extra
 	}
 	content = strings.TrimSpace(content)
-	room := runnerwire.MaxPromptBytes - len(head) - len(tail)
+	room := runnerwire.MaxPromptBytes - len(head) - len(refs) - len(tail)
 	if len(content) > room {
 		content = Truncate(content, max(room-len(truncatedNote), 0)) + truncatedNote
 	}
-	return Truncate(head+content+tail, runnerwire.MaxPromptBytes)
+	return Truncate(head+content+refs+tail, runnerwire.MaxPromptBytes)
+}
+
+// ReferencesBlock renders a node's reference notes for its run prompt, or ""
+// when it has none. The store caps the notes (8, 4000 runes of summary), so
+// the block stays near 12 KB at most.
+func ReferencesBlock(refs []Reference, truncated bool) string {
+	if len(refs) == 0 && !truncated {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Reference notes\n")
+	b.WriteString("Read these before writing; they are this project's source of truth (characters, setting). get_node <id> returns the full text.\n")
+	for _, ref := range refs {
+		label := ref.TypeLabel
+		if label == "" {
+			label = "Note"
+		}
+		b.WriteString("\n### " + oneLine(ref.Title) + " (" + ref.ID + ", " + label + ")\n")
+		if summary := strings.TrimSpace(ref.Summary); summary != "" {
+			b.WriteString(summary + "\n")
+		}
+	}
+	if truncated {
+		b.WriteString("\n(More references exist; get_node <node id> lists them.)\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// oneLine keeps a title on its heading line.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }

@@ -51,6 +51,7 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/nodes/*/release"},
 	{http.MethodPost, "/api/nodes/*/status"},
 	{http.MethodPost, "/api/graph/ops"},
+	{http.MethodPost, "/api/graph/subgraph"},
 	{http.MethodGet, "/api/agents"},
 	{http.MethodPost, "/api/agents/heartbeat"},
 	{http.MethodPost, "/api/agents/leave"},

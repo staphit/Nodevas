@@ -30,6 +30,18 @@ func (e *ErrNodeWriteDenied) Error() string {
 		e.NodeID, e.Access, e.Class)
 }
 
+// ErrAgentRestoreDenied is returned when an agent tries a history restore
+// that only a person may make: graph.yaml, or a node file that cannot be
+// checked against the node as it stands.
+type ErrAgentRestoreDenied struct {
+	Path, Msg string
+}
+
+func (e *ErrAgentRestoreDenied) Error() string { return e.Msg }
+
+// CodeAgentRestoreDenied is the API code for ErrAgentRestoreDenied.
+const CodeAgentRestoreDenied = "AGENT_RESTORE_DENIED"
+
 // writeAccessRank orders a node's requirement. Unknown values rank as
 // unrestricted, but validation refuses them before they can be stored.
 func writeAccessRank(access string) int {

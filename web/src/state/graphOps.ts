@@ -82,6 +82,11 @@ export function graphCommandToOps(
       return [op];
     }
 
+    case "node.addRef":
+      return [{ kind: "add-ref", nodeId: command.nodeId, ref: command.ref }];
+    case "node.removeRef":
+      return [{ kind: "remove-ref", nodeId: command.nodeId, ref: command.ref }];
+
     case "node.setStyle": {
       // The node-size op only carries width+height. A resize sets exactly those;
       // a colour/shape/alignment change carries other keys and must stay on the

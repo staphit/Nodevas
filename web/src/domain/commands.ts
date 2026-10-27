@@ -62,6 +62,9 @@ export type NodeCommand =
       refs: string[] | null;
     }
   | { type: "node.setLinks"; nodeId: string; links: NodeLinkRef[] }
+  /** `nodeId` uses `ref` as context (a Note); never blocks. */
+  | { type: "node.addRef"; nodeId: string; ref: string }
+  | { type: "node.removeRef"; nodeId: string; ref: string }
   | { type: "node.setUserEmail"; userId: string; email?: string };
 
 export type PlanCommand =
@@ -211,6 +214,10 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       );
     case "node.setLinks":
       return node.setNodeLinks(graph, command.nodeId, command.links);
+    case "node.addRef":
+      return node.addNodeRef(graph, command.nodeId, command.ref);
+    case "node.removeRef":
+      return node.removeNodeRef(graph, command.nodeId, command.ref);
     case "node.setUserEmail":
       return node.setUserEmail(graph, command.userId, command.email);
 
@@ -340,6 +347,8 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "node.addDependency": "建立前置關係",
   "node.setRequires": "修改前置條件",
   "node.setLinks": "編輯節點連結",
+  "node.addRef": "新增參考",
+  "node.removeRef": "移除參考",
   "node.setUserEmail": "修改成員信箱",
   "plan.upsert": "設定預期里程碑",
   "plan.move": "調整預期里程碑日期",

@@ -118,6 +118,24 @@ func (m *Manager) SearchContext(ctx context.Context, root, lowered string) ([]Ma
 	return e.index.query(ctx, lowered)
 }
 
+// RankContext is the ranked search: the project's best limit matches for a
+// query of keywords or a whole sentence (see projectIndex.rank). The locking
+// and the fallback contract are SearchContext's.
+func (m *Manager) RankContext(ctx context.Context, root, query string, limit int) ([]Ranked, error) {
+	docs, err := m.docs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	e := m.entryFor(root)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.ensureLocked(ctx, docs); err != nil {
+		return nil, err
+	}
+	e.size.Store(e.index.bytes)
+	return e.index.rank(ctx, query, limit)
+}
+
 // Update applies a watcher event. An empty nodeID means graph.yaml changed.
 //
 // A project with nothing cached is left alone: there is no index to patch, and

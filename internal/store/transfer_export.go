@@ -68,6 +68,7 @@ func (s *Store) ExportNodes(ids []string, forMove bool) (*nodeTransferPayload, e
 		copied := *node
 		copied.Tags = append([]string(nil), node.Tags...)
 		copied.Effects = append([]engine.Effect(nil), node.Effects...)
+		copied.Refs = append([]string(nil), node.Refs...)
 		payload.nodes = append(payload.nodes, &copied)
 	}
 	for _, id := range unique {

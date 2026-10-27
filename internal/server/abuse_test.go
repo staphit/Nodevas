@@ -189,6 +189,7 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/api/history/version", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/history/restore", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/trash/restore", ClassExpensive, 2.0},
+		{http.MethodPost, "/api/graph/subgraph", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/notify/test", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit/health", ClassExpensive, 2.0},

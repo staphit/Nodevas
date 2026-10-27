@@ -50,7 +50,7 @@ func listedTools(t *testing.T, session *sdk.ClientSession) ([]string, map[string
 
 // fullTools is every tool without RAG, which needs --chroma-url.
 var fullTools = []string{
-	"ask_user", "check_inbox", "claim_task", "create_node", "get_graph_outline", "get_node",
+	"ask_user", "check_inbox", "claim_task", "create_node", "create_subgraph", "get_graph_outline", "get_node",
 	"get_ready_tasks", "link_nodes", "list_projects", "list_team", "release_task", "save_attachment",
 	"search_nodes", "send_message", "set_node_status", "update_node_body", "update_node_meta", "validate_graph",
 }
@@ -60,7 +60,7 @@ func TestFullToolsetListsEveryTool(t *testing.T) {
 	for _, toolset := range []string{"", ToolsetFull} {
 		names, _ := listedTools(t, toolsetSession(t, url, toolset))
 		if !slices.Equal(names, fullTools) {
-			t.Errorf("toolset %q lists %d tools %q, want the 18 %q", toolset, len(names), names, fullTools)
+			t.Errorf("toolset %q lists %d tools %q, want the 19 %q", toolset, len(names), names, fullTools)
 		}
 	}
 }
@@ -69,7 +69,7 @@ func TestRunToolsetListsOnlyWhatRunsUse(t *testing.T) {
 	url, _ := liveServer(t)
 	run := toolsetSession(t, url, ToolsetRun)
 	names, defs := listedTools(t, run)
-	want := []string{"ask_user", "check_inbox", "claim_task", "create_node", "get_node",
+	want := []string{"ask_user", "check_inbox", "claim_task", "create_node", "create_subgraph", "get_node",
 		"link_nodes", "release_task", "send_message", "set_node_status"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("run toolset lists %q, want %q", names, want)

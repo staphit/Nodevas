@@ -345,7 +345,13 @@ type Lock struct {
 
 // Broadcast queues an event for every client, whatever project they watch. Use
 // it for workspace-level news; project changes belong in BroadcastRoom.
+//
+// Every broadcast method is safe on a nil *Hub, which is what a store or a
+// watcher running without a server (tests, the remote package) hands in.
 func (h *Hub) Broadcast(evType, id string) {
+	if h == nil {
+		return // no hub (tests, tools): nobody to tell
+	}
 	h.send(Event{Type: evType, ID: id}, func(*wsClient) bool { return true })
 }
 
@@ -353,6 +359,9 @@ func (h *Hub) Broadcast(evType, id string) {
 // whatever project they watch: news that is that person's alone, such as
 // their current project moving, which nobody else should be pulled along by.
 func (h *Hub) BroadcastActor(actorID, evType, id string) {
+	if h == nil {
+		return
+	}
 	if actorID == "" {
 		return
 	}
@@ -369,6 +378,9 @@ func (h *Hub) BroadcastActor(actorID, evType, id string) {
 // the popout editor) do not send a subscription, and going silent on them
 // would look like the server stopped noticing their edits.
 func (h *Hub) BroadcastRoom(room, evType, id string) {
+	if h == nil {
+		return
+	}
 	if room == "" {
 		h.Broadcast(evType, id)
 		return
@@ -404,6 +416,9 @@ func (h *Hub) relay(from *wsClient, event Event) {
 // where it stands instead of reloading the graph. `from` is the peer that made
 // the change, echoed back so it can ignore its own.
 func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
+	if h == nil {
+		return
+	}
 	if len(ops) == 0 {
 		h.BroadcastRoom(room, "graph-changed", "")
 		return
@@ -421,6 +436,9 @@ func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
 }
 
 func (h *Hub) send(event Event, want func(*wsClient) bool) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)
@@ -445,6 +463,9 @@ func (h *Hub) send(event Event, want func(*wsClient) bool) {
 
 // sendTo delivers one event to a single client.
 func (h *Hub) sendTo(client *wsClient, event Event) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)

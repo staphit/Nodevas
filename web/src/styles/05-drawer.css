@@ -538,6 +538,16 @@
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
 }
+/* A reference whose node is gone: still listed, so it can be removed. */
+.node-reference-missing {
+  color: var(--text-2);
+  font-style: italic;
+  font-weight: 400;
+  cursor: default;
+}
+.node-dependency-list .col-card-type {
+  flex: none;
+}
 .node-dependency-add {
   display: flex;
   gap: 6px;

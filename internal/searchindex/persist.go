@@ -538,3 +538,86 @@ func matchExpression(tokens []string) string {
 	}
 	return out.String()
 }
+
+// rankedDoc is a candidate with its BM25 score (FTS5's bm25(): lower, that is
+// more negative, is better).
+type rankedDoc struct {
+	storedDoc
+	bm25 float64
+}
+
+// matchAnyExpression is matchExpression joined with OR: a ranked search
+// scores documents that hold any of the tokens. The quoting argument is the
+// same, and so is the reason it cannot be abused.
+func matchAnyExpression(tokens []string) string {
+	if len(tokens) > maxRankTokens {
+		tokens = tokens[:maxRankTokens]
+	}
+	var out strings.Builder
+	for i, token := range tokens {
+		if i > 0 {
+			out.WriteString(" OR ")
+		}
+		out.WriteByte('"')
+		out.WriteString(strings.ReplaceAll(token, `"`, `""`))
+		out.WriteByte('"')
+	}
+	return out.String()
+}
+
+// rankedCandidates returns the project's documents holding any of the tokens,
+// best BM25 first, a few times more than limit so the tiers above BM25 (an
+// exact title, the whole phrase) have something to reorder.
+//
+// The IDF behind bm25() is the whole table's, which is every project in the
+// workspace database: ranking within one project is sound, a score compared
+// across projects is approximate.
+func (s *docStore) rankedCandidates(ctx context.Context, project string, tokens []string, limit int) ([]*rankedDoc, error) {
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	fetch := min(max(limit*3, 50), 300)
+	rows, err := s.reader().QueryContext(ctx, `
+SELECT d.node_id, d.title, c.meta, c.body, bm25(search_fts, 1.0, 1.0) AS score
+FROM search_fts
+JOIN search_documents d ON d.rowid = search_fts.rowid
+JOIN search_content c ON c.doc_id = search_fts.rowid
+WHERE search_fts MATCH ? AND d.project = ?
+ORDER BY score
+LIMIT ?`, matchAnyExpression(tokens), project, fetch)
+	if err != nil {
+		return nil, fmt.Errorf("ranked search: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*rankedDoc, 0, 16)
+	for rows.Next() {
+		doc := &rankedDoc{}
+		if err := rows.Scan(&doc.nodeID, &doc.title, &doc.meta, &doc.body, &doc.bm25); err != nil {
+			return nil, fmt.Errorf("scan ranked result: %w", err)
+		}
+		out = append(out, doc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ranked search: %w", err)
+	}
+	return out, nil
+}
+
+// document reads one node's row, for an exact-title hit the token query did
+// not rank high enough to fetch. A node without a row yields nil.
+func (s *docStore) document(ctx context.Context, project, nodeID string) (*storedDoc, error) {
+	doc := &storedDoc{}
+	err := s.reader().QueryRowContext(ctx, `
+SELECT d.node_id, d.title, c.meta, c.body
+FROM search_documents d
+JOIN search_content c ON c.doc_id = d.rowid
+WHERE d.project = ? AND d.node_id = ?
+LIMIT 1`, project, nodeID).Scan(&doc.nodeID, &doc.title, &doc.meta, &doc.body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read search document: %w", err)
+	}
+	return doc, nil
+}

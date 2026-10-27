@@ -92,3 +92,60 @@ describe("NodeDependencies", () => {
     expect(screen.getByText("進階條件").closest("details")).toHaveAttribute("open");
   });
 });
+
+describe("NodeDependencies references", () => {
+  function withNotes(): Graph {
+    const g = graph();
+    g.nodes = [
+      ...g.nodes!,
+      { id: "world", title: "世界設定", kind: "note" },
+      { id: "hero", title: "角色卡：林曉", kind: "note" },
+    ];
+    g.nodes.find((node) => node.id === "design")!.refs = ["hero", "gone"];
+    return g;
+  }
+
+  beforeEach(() => {
+    useApp.setState({ graph: withNotes() });
+  });
+
+  it("lists the references apart from the dependencies, missing ones included", () => {
+    render(<NodeDependencies id="design" />);
+    const list = screen.getByRole("list", { name: "參考" });
+    expect(within(list).getByRole("button", { name: "角色卡：林曉" })).toBeInTheDocument();
+    expect(within(list).getByText("筆記")).toBeInTheDocument();
+    expect(within(list).getByText("找不到節點 gone")).toBeInTheDocument();
+    // The dependency list is unchanged: one prerequisite.
+    expect(within(screen.getAllByRole("list")[0]).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("removes a reference from its own button", async () => {
+    const user = userEvent.setup();
+    render(<NodeDependencies id="design" />);
+    await user.click(screen.getByRole("button", { name: "移除對「角色卡：林曉」的參考" }));
+    expect(updateNode).toHaveBeenCalledWith({ type: "node.removeRef", nodeId: "design", ref: "hero" });
+    await user.click(screen.getByRole("button", { name: "移除對「gone」的參考" }));
+    expect(updateNode).toHaveBeenCalledWith({ type: "node.removeRef", nodeId: "design", ref: "gone" });
+  });
+
+  it("offers Notes first, then the other nodes, and adds the pick", async () => {
+    const user = userEvent.setup();
+    render(<NodeDependencies id="design" />);
+    const picker = screen.getByLabelText("選擇參考節點");
+    const groups = within(picker).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("label"))).toEqual(["筆記", "其他節點"]);
+    // Neither the node itself nor what it already references is offered.
+    expect(within(groups[0]).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "世界設定",
+    ]);
+    expect(within(groups[1]).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "企劃",
+      "審查",
+      "上線",
+    ]);
+    expect(picker).toHaveValue("world");
+
+    await user.click(screen.getByRole("button", { name: "加入參考" }));
+    expect(updateNode).toHaveBeenCalledWith({ type: "node.addRef", nodeId: "design", ref: "world" });
+  });
+});

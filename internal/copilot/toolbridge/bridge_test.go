@@ -126,6 +126,7 @@ func TestOpenListsToolsWithPermissionKinds(t *testing.T) {
 		"search_nodes":      KindRead,
 		"validate_graph":    KindRead,
 		"create_node":       KindWrite,
+		"create_subgraph":   KindWrite,
 		"link_nodes":        KindWrite,
 		"update_node_meta":  KindWrite,
 		"set_node_status":   KindWrite,

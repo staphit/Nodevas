@@ -9,7 +9,7 @@
  * the others' data.
  */
 
-import type { PageFormat } from "../../api";
+import type { PageFormat } from "../../api/nodes";
 import { useI18n } from "../../i18n";
 import { NodeRuns } from "../../runs/NodeRuns";
 import { useWorkstationVisible } from "../../runners/workstation";

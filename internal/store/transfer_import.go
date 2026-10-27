@@ -49,6 +49,7 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		copied.ID = newID
 		copied.Tags = append([]string(nil), node.Tags...)
 		copied.Effects = append([]engine.Effect(nil), node.Effects...)
+		copied.Refs = nil // remapped below, once every new id is known
 		result.IDs[node.ID] = newID
 		result.Order = append(result.Order, newID)
 		imported = append(imported, &copied)
@@ -84,6 +85,7 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 			warn("節點「%s」的前置條件指向未一併帶走的節點，已清除", transferNodeLabel(source))
 		}
 		node.Requires = requires
+		node.Refs = rewriteRefs(source.Refs, payload.selection, rename)
 	}
 
 	for _, edge := range payload.edges {

@@ -113,6 +113,12 @@ export interface GraphNode {
   tags?: string[];
   effects?: { set?: string }[];
   links?: NodeLinkRef[];
+  /**
+   * Nodes this one uses as context — usually Notes (character sheets,
+   * setting). A reference never blocks: readiness, the critical path, entry
+   * points and Problems all ignore it. Stored on the node that uses the note.
+   */
+  refs?: string[];
 }
 
 export interface GraphUser {
@@ -290,7 +296,8 @@ export interface Graph {
 }
 
 export interface Issue {
-  severity: "error" | "warning";
+  /** "info" is a hint: listed, never counted as a problem. */
+  severity: "error" | "warning" | "info";
   nodeId?: string;
   field?: string;
   offset?: number;

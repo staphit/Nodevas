@@ -482,7 +482,7 @@ nodes:
 		switch {
 		case issue.NodeID == "lore" && strings.Contains(issue.Msg, "not connected"):
 			notConnected = true
-		case issue.NodeID == "odd" && issue.Severity == "warning" && strings.Contains(issue.Msg, "unknown node type"):
+		case issue.NodeID == "odd" && issue.Severity == "info" && strings.Contains(issue.Msg, `"bug" ×1`):
 			unknown = true
 		case issue.Field == "node_types" && issue.Severity == "error":
 			typeError = true
@@ -492,7 +492,7 @@ nodes:
 		t.Error("an unconnected note was flagged")
 	}
 	if !unknown {
-		t.Error("unknown kind not warned")
+		t.Error("unknown kind not hinted")
 	}
 	if !typeError {
 		t.Error("bad node_types not reported")

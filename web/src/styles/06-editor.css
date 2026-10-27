@@ -335,3 +335,11 @@
     margin: -9px 0 0 -9px;
   }
 }
+/* A legacy free-text kind: why this node behaves as Task. */
+.node-type-unknown-hint {
+  max-width: 240px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.4;
+}

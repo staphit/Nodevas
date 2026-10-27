@@ -202,13 +202,72 @@ func (s *Store) RestoreHistory(actor identity.Actor, rel, version string) error 
 		return err
 	}
 	s.mu.Lock()
-	err = s.writeVersionedLocked(actor, "restore", target, data)
+	if actor.IsAgent() {
+		data, err = s.checkAgentRestoreLocked(actor, filepath.ToSlash(rel), data)
+	}
+	if err == nil {
+		err = s.writeVersionedLocked(actor, "restore", target, data)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	backend.commitSoon()
 	return nil
+}
+
+// checkAgentRestoreLocked holds an agent's restore to the rules of a normal
+// write. graph.yaml is refused outright: an old graph would bring back kinds,
+// write access and types without any of the checks that guard them. A node
+// file needs write access to the node as it is now, and a main document's
+// frontmatter is rewritten from the graph, so a restored snapshot can never
+// make its kind or write_access disagree with graph.yaml. Caller holds s.mu.
+func (s *Store) checkAgentRestoreLocked(actor identity.Actor, rel string, data []byte) ([]byte, error) {
+	if rel == "graph.yaml" {
+		return nil, &ErrAgentRestoreDenied{Path: rel, Msg: "agents may not restore graph.yaml; ask a person"}
+	}
+	id, mainDoc, ok := historyNodeID(rel)
+	if !ok {
+		return nil, &ErrAgentRestoreDenied{Path: rel, Msg: fmt.Sprintf("agents may not restore %q", rel)}
+	}
+	g, _, err := s.loadGraphLocked()
+	if err != nil {
+		return nil, err
+	}
+	n := g.NodeByID(id)
+	if n == nil {
+		return nil, &ErrAgentRestoreDenied{Path: rel,
+			Msg: fmt.Sprintf("node %q is not on the board; a person can restore it from the trash", id)}
+	}
+	if err := checkNodeWrite(actor, n); err != nil {
+		return nil, err
+	}
+	if !mainDoc {
+		return data, nil
+	}
+	nf, err := engine.ParseNodeFile(data)
+	if err != nil {
+		return nil, &ErrAgentRestoreDenied{Path: rel,
+			Msg: fmt.Sprintf("this version of %q cannot be read (%v); ask a person to restore it", rel, err)}
+	}
+	engine.SyncFrontmatter(nf, n)
+	return engine.ComposeNodeFile(nf)
+}
+
+// historyNodeID names the node a history path belongs to and whether it is
+// the node's main document (nodes/<id>.md) rather than a subpage
+// (nodes/<id>.pages/<page>). historyDir has already validated the shape.
+func historyNodeID(rel string) (id string, mainDoc, ok bool) {
+	tail, isNode := strings.CutPrefix(rel, "nodes/")
+	if !isNode {
+		return "", false, false
+	}
+	if directory, _, isPage := strings.Cut(tail, "/"); isPage {
+		id, ok = strings.CutSuffix(directory, ".pages")
+		return id, false, ok
+	}
+	id, ok = strings.CutSuffix(tail, ".md")
+	return id, true, ok
 }
 
 // ReadHistory returns the bytes of one version, for previewing it before

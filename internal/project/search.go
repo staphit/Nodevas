@@ -30,6 +30,10 @@ type SearchResult struct {
 	Title   string `json:"title"`
 	Snippet string `json:"snippet,omitempty"`
 	Kind    string `json:"kind"`
+	// Score and Match come from the ranked search: Score is higher for a
+	// better match; Match is "title", "phrase" or "terms".
+	Score float64 `json:"score,omitempty"`
+	Match string  `json:"match,omitempty"`
 }
 
 func searchSnippet(content, query string) string {
@@ -117,6 +121,30 @@ func (si *searchIndex) search(project ProjectInfo, normalized string) ([]SearchR
 	return out, nil
 }
 
+func (si *searchIndex) rank(project ProjectInfo, query string, limit int) ([]SearchResult, error) {
+	if si == nil {
+		return nil, os.ErrInvalid
+	}
+	ranked, err := si.indexes().RankContext(context.Background(), project.Path, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	tokens := searchindex.RankTokens(query)
+	out := make([]SearchResult, 0, len(ranked))
+	for _, match := range ranked {
+		out = append(out, SearchResult{
+			Project: project.Name,
+			NodeID:  match.NodeID,
+			Title:   match.Title,
+			Snippet: searchindex.Excerpt(match.Text, tokens, searchindex.ExcerptWidth),
+			Kind:    "node",
+			Score:   match.Score,
+			Match:   match.Match,
+		})
+	}
+	return out, nil
+}
+
 func readSearchTextDirect(root, path string) string {
 	data, err := store.ReadProjectFileLimit(root, path, searchPageContentLimit)
 	if err != nil {
@@ -168,6 +196,25 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 
 func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
 	return pm.getSearchIndex().search(project, normalized)
+}
+
+// RankProjectNodes is the ranked search over one project: its best limit
+// nodes for keywords or a whole sentence, each with the excerpt that matched.
+// A project the index cannot open falls back to the direct scan, whose hits
+// all contain the query as a phrase.
+func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit int) ([]SearchResult, error) {
+	results, err := pm.getSearchIndex().rank(info, query, limit)
+	if err == nil {
+		return results, nil
+	}
+	direct := SearchProjectNodesDirect(info, strings.ToLower(strings.TrimSpace(query)))
+	if limit > 0 && len(direct) > limit {
+		direct = direct[:limit]
+	}
+	for i := range direct {
+		direct[i].Match = searchindex.MatchPhrase
+	}
+	return direct, nil
 }
 
 func (pm *ProjectManager) invalidateSearch(projectPath, nodeID string) {

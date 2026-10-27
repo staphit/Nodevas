@@ -21,6 +21,11 @@ export interface ImportedNode {
   /** Existing user id; ignored when the project has no such user. */
   assignee?: string;
   tags?: string[];
+  /**
+   * Notes this node uses as context, already renamed to ids in this project.
+   * Anything that does not name a node here is dropped, never guessed at.
+   */
+  refs?: string[];
 }
 
 export interface ImportedEdge {
@@ -52,6 +57,10 @@ export function applyImport(graph: Graph, payload: ImportPayload): void {
         ? imported.assignee
         : undefined;
       node.tags = imported.tags?.length ? imported.tags : undefined;
+      const refs = [...new Set(imported.refs ?? [])].filter(
+        (ref) => ref !== node.id && graph.nodes?.some((candidate) => candidate.id === ref),
+      );
+      node.refs = refs.length ? refs : undefined;
     }
     graph.ui.positions[imported.id] = {
       x: Math.max(0, imported.position.x),

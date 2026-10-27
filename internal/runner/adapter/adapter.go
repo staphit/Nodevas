@@ -154,7 +154,7 @@ func Prompt(job runnerwire.Job, branch string) string {
 			"address that review, on top of the work already on the branch.\n\n", job.PRURL)
 	}
 	b.WriteString("Rules for this run:\n")
-	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node.\n", job.NodeID)
+	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, and read the reference notes it lists before writing.\n", job.NodeID)
 	b.WriteString("2. Work only inside this worktree (the current directory). Do not touch other checkouts.\n")
 	if revise {
 		b.WriteString("3. Do not push, and do not open pull requests: the runner pushes your work to the " +
@@ -246,7 +246,7 @@ const planOutlineStep = "2b. Call get_graph_outline once to read `layout` and `n
 const planKindRule = "choose each node's kind: in a story-layout board, writing units are \"scene\" and plot beats " +
 	"or turning points are \"event\"; a person's approval or editorial/proofreading pass is \"gate\"; a branch is " +
 	"\"choice\"; reference material (character sheets, settings, research) is \"note\" and is never linked to the goal " +
-	"or given dependencies; otherwise \"task\"; a custom type from nodeTypes may be used by id when it fits. Only nodes " +
+	"or given dependencies: the nodes that use a note list it in refs instead; otherwise \"task\"; a custom type from nodeTypes may be used by id when it fits. Only nodes " +
 	"whose agentMode is dispatch are worked by agents."
 
 func planPrompt(job runnerwire.Job) string {
@@ -268,10 +268,10 @@ func planPrompt(job runnerwire.Job) string {
 	b.WriteString(planOutlineStep)
 	b.WriteString("3. Break the goal into small tasks, each one independently reviewable and mergeable as one pull request. " +
 		"Prefer a handful of well-scoped tasks over many tiny ones.\n")
-	fmt.Fprintf(&b, "4. Create each task with create_node: %s Give it a short title, a body saying what to change and how "+
-		"to tell it is done (files, acceptance checks), and tags including %q. Use dependsOn for the tasks it needs "+
-		"finished first (create those first so you have their ids), or link_nodes afterwards (from: the task that "+
-		"must finish first, to: the task that waits).\n", planKindRule, GoalTag(job.NodeID))
+	fmt.Fprintf(&b, "4. Create the tasks in one create_subgraph call (create_node for a single one): %s Give each a key, "+
+		"a short title, a body saying what to change and how to tell it is done (files, acceptance checks), and tags "+
+		"including %q. dependsOn names the tasks it needs finished first, by key or existing id; refs names existing "+
+		"Notes (character sheets, settings) it uses as context.\n", planKindRule, GoalTag(job.NodeID))
 	fmt.Fprintf(&b, "5. Add a requires edge only where one task really needs another's change; independent tasks run in parallel. "+
 		"Finally link every non-note node that no other node waits for to the goal (link_nodes from: that node, to: %q), so the "+
 		"goal is done when all its tasks are.\n", job.NodeID)
@@ -310,10 +310,10 @@ func replanPrompt(job runnerwire.Job) string {
 		"done is kept, whatever the change), change (still needed but its scope changes; only a task that has not " +
 		"started), skip (no longer needed; only a task that has not started; a task is never deleted), or flag (a " +
 		"task marked running that the change affects: it is not changed; say what the change means for it).\n")
-	fmt.Fprintf(&b, "4. Create only the new work the change needs, with create_node: %s Give it a short title, a "+
-		"body saying what to change and how to tell it is done, and tags including %q. Use dependsOn for the tasks "+
-		"it needs finished first, new or existing, or link_nodes afterwards (from: the task that must finish first, "+
-		"to: the task that waits). Do not recreate a task that exists.\n", planKindRule, GoalTag(job.NodeID))
+	fmt.Fprintf(&b, "4. Create only the new work the change needs, in one create_subgraph call (create_node for a "+
+		"single one): %s Give each a key, a short title, a body saying what to change and how to tell it is done, and "+
+		"tags including %q. dependsOn names the tasks it needs finished first, new or existing, by key or id; refs "+
+		"names existing Notes it uses as context. Do not recreate a task that exists.\n", planKindRule, GoalTag(job.NodeID))
 	fmt.Fprintf(&b, "5. Link every new non-note node that no other node waits for to the goal (link_nodes from: that node, to: %q). "+
 		"Do not remove existing links.\n", job.NodeID)
 	b.WriteString("6. Do not claim, start or change the status of the goal or any task, do not edit any existing " +

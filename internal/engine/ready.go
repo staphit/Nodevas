@@ -230,6 +230,12 @@ func blockedWithFlags(g *Graph, statuses map[string]Status, flags map[string]any
 // explicit status: each becomes done once its own condition holds. One
 // settling can release the next, so it repeats until nothing changes; every
 // pass settles at least one node or stops, which bounds it.
+//
+// Effects run only on a journaled done (store.setStatusLocked). An automatic
+// node's done is derived and never journaled, so applying its effects would
+// make flags exist server-side only and diverge from the editor's analysis;
+// they are deliberately not applied. Validate warns about effects on such a
+// node instead.
 func deriveAutoStatuses(g *Graph, rs *RunState, out map[string]Status, auto []string) {
 	if len(auto) == 0 {
 		return

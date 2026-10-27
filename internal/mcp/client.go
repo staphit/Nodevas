@@ -47,6 +47,16 @@ const (
 	CodeAuthRequired      = "AUTH_REQUIRED"
 	CodePermissionDenied  = "PERMISSION_DENIED"
 	CodeServerError       = "SERVER_ERROR"
+
+	// Node-type refusals (store.CodeNodeType*), and the rest of the codes the
+	// planning tools can meet.
+	CodeNodeTypePeopleOnly   = "NODE_TYPE_PEOPLE_ONLY"
+	CodeNodeTypeNoStatus     = "NODE_TYPE_NO_STATUS"
+	CodeNodeTypeForbidsAgent = "NODE_TYPE_FORBIDS_AGENT"
+	CodeUnknownNodeType      = "UNKNOWN_NODE_TYPE"
+	CodeAgentRestoreDenied   = "AGENT_RESTORE_DENIED"
+	CodeInvalidSubgraph      = "INVALID_SUBGRAPH"
+	CodeSubgraphTooLarge     = "SUBGRAPH_TOO_LARGE"
 )
 
 // APIError is a failed call to the Nodevas server, carrying whatever the agent

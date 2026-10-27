@@ -13,6 +13,8 @@ import (
 //	set: name += 2   (numeric increment; -= too)
 //
 // Unparseable effects are ignored — effects are authored data, not code.
+// Only a journaled done applies them, so an automatic (Start/End) node's
+// effects never run; see deriveAutoStatuses.
 func ApplyEffects(n *Node, flags map[string]any) {
 	if n == nil || flags == nil {
 		return

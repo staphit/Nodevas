@@ -62,6 +62,20 @@ function applyOne(graph: Graph, op: GraphOp): boolean {
       // semantic ops are broadcast as graph-changed and an old server event
       // deliberately falls back to a reload.
       return false;
+    case "add-ref": {
+      // A reference is a plain list on the node: nothing else is derived
+      // from it, so replaying it is exact.
+      if (!node || !op.ref || !nodes.some((item) => item.id === op.ref)) return false;
+      if (!(node.refs ?? []).includes(op.ref)) node.refs = [...(node.refs ?? []), op.ref];
+      return true;
+    }
+    case "remove-ref": {
+      // The target need not exist: the server removes a dangling ref too.
+      if (!node || !op.ref) return false;
+      const refs = (node.refs ?? []).filter((ref) => ref !== op.ref);
+      node.refs = refs.length ? refs : undefined;
+      return true;
+    }
     case "timeline-order": {
       if (!op.order) return false;
       if (op.order.some((id) => !nodes.some((item) => item.id === id))) return false;

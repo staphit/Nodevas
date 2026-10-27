@@ -47,6 +47,7 @@ export interface PeerPointer {
   point: Point;
 }
 import { GateWiring, type Gate } from "./GateWiring";
+import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
 import { StandaloneLogicGate } from "./LogicGate";
 import type { useCardDrag, CardDragState } from "./useCardDrag";
 import type { useCardResize, CardResizeState } from "./useCardResize";
@@ -239,6 +240,18 @@ export function GraphCanvas({
         : analysis.entryNodeIds.has(id)
           ? { kind: "start", label: t("canvas.entryLabel") }
           : null;
+  // The notes a card is written against, by title: the first five, then a count.
+  const titleOf = new Map((graph?.nodes ?? []).map((node) => [node.id, node.title || node.id]));
+  const referenceTitles = (refs: string[]) => {
+    const titles = refs.map((ref) => titleOf.get(ref) ?? ref);
+    return titles.length > 5
+      ? `${titles.slice(0, 5).join(", ")} +${titles.length - 5}`
+      : titles.join(", ");
+  };
+  // The cards whose references are drawn lit: what is selected and what is
+  // open. The card under the pointer joins them inside ReferenceLines.
+  const referenceActiveIds = new Set(selectedGraphNodeIDs);
+  if (activeTab) referenceActiveIds.add(activeTab);
   const cardDetails = (
     node: GraphNode,
     status: Status,
@@ -263,6 +276,7 @@ export function GraphCanvas({
       ? [t("board.card.priority", { priority: t(`graphTools.${node.priority}`) })]
       : []),
     ...(node.tags?.length ? [t("board.card.tags", { tags: node.tags.join(", ") })] : []),
+    ...(node.refs?.length ? [t("board.card.refs", { titles: referenceTitles(node.refs) })] : []),
   ];
 
   // A marquee grabs cards, but a wire between two grabbed cards belongs to the
@@ -349,6 +363,15 @@ export function GraphCanvas({
             <path d="M 0 0 L 8 4 L 0 8 z" className="arrowhead-fill muted" />
           </marker>
         </defs>
+        {/* Under everything else: a reference is context, never a wire to
+            click, and every dependency paints over it. */}
+        <ReferenceLines
+          graph={graph}
+          colOf={colOf}
+          centerX={centerX}
+          rowTop={rowTop}
+          activeIds={referenceActiveIds}
+        />
         {connectionHover && !connectionDrag && (
           <circle
             className="connection-port-preview"
@@ -592,7 +615,9 @@ export function GraphCanvas({
             onPointerCancel={(event) => {
               if (!finishConnectionDrag(event, false)) cardDragHandlers.cancel();
             }}
+            onPointerEnter={() => setHoveredReferenceCard(n.id)}
             onPointerLeave={() => {
+              setHoveredReferenceCard(null);
               if (connectionHover?.nodeId === n.id && !connectionDrag) {
                 connectionHandlers.clearHover();
               }

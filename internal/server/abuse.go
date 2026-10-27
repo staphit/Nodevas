@@ -476,7 +476,9 @@ func isExpensivePath(path string) bool {
 	if path == "/api/search" || path == "/api/validate" || path == "/api/dsl/check" ||
 		path == "/api/history/version" || path == "/api/history/restore" ||
 		path == "/api/trash/restore" || path == "/api/notify/test" ||
-		path == "/api/audit" || path == "/api/audit/health" {
+		path == "/api/audit" || path == "/api/audit/health" ||
+		// One call may create a hundred nodes and validates the graph twice.
+		path == "/api/graph/subgraph" {
 		return true
 	}
 	return strings.HasPrefix(path, "/api/remote/") &&

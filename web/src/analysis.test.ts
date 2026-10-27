@@ -460,3 +460,44 @@ describe("node types in the analysis", () => {
     expect(analysis.criticalPath).toEqual(["b"]);
   });
 });
+
+describe("references", () => {
+  // A reference is context, not an edge: adding refs — even ones that would
+  // close a loop, or point at a deprecated branch — changes nothing here.
+  const base = (): Graph => ({
+    version: 1,
+    nodes: [
+      { id: "note", kind: "note" },
+      { id: "s1", kind: "scene" },
+      { id: "s2", kind: "scene", requires: "s1" },
+      { id: "s3", kind: "scene" },
+      { id: "old", kind: "scene" },
+    ],
+    edges: [
+      { from: "s1", to: "s2" },
+      { from: "s2", to: "s3" },
+      { from: "s3", to: "old", relation: "deprecated" },
+    ],
+  });
+  const snapshot = (graph: Graph) => {
+    const analysis = analyzeGraph(graph, { s1: "in_progress" }, new Date("2026-01-01T00:00:00"));
+    return {
+      entry: [...analysis.entryNodeIds].sort(),
+      blocked: [...analysis.blocked.entries()],
+      blocking: [...analysis.blocking.entries()],
+      critical: analysis.criticalPath,
+      hasCycle: analysis.hasCycle,
+      deprecated: [...analysis.deprecatedNodeIds].sort(),
+    };
+  };
+
+  it("leaves entry points, blocking, the critical path and fading alone", () => {
+    const withRefs = base();
+    const byId = new Map(withRefs.nodes!.map((node) => [node.id, node]));
+    byId.get("s1")!.refs = ["note", "s3"];
+    byId.get("s3")!.refs = ["note", "s1"];
+    byId.get("old")!.refs = ["s1"];
+    byId.get("note")!.refs = ["old"];
+    expect(snapshot(withRefs)).toEqual(snapshot(base()));
+  });
+});

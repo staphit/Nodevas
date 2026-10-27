@@ -166,6 +166,10 @@ export function analyzeGraph(
       .map((node) => node.id),
   );
   const nodes = allNodes.filter((node) => !outsideFlow.has(node.id));
+  // `node.refs` (a scene using a Note as context) is deliberately never read
+  // here: a reference is not an edge, so it cannot block, enter the critical
+  // path, make an entry point or fade a node. Only `graph.edges` and
+  // `requires` drive this analysis, the same as the server's readiness.
   const statusDefinitions = graph.ui?.customStatuses ?? [];
   const settled = (status: Status) => isSettledStatus(status, statusDefinitions);
   const requiredEdges = (graph.edges ?? []).filter(

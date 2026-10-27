@@ -255,3 +255,30 @@
   stroke-width: 3.5;
 }
 
+/* ---------- reference wires: context, never a dependency ---------- */
+/* Thin, dotted, no arrowhead, and never a hit target: a scene leaning on a
+   character sheet must not read as waiting for it. */
+.reference-lines {
+  pointer-events: none;
+}
+.reference-wire {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+.reference-wire.active {
+  stroke: var(--accent);
+  opacity: 0.95;
+}
+.reference-dot {
+  fill: var(--text-2);
+  opacity: 0.5;
+}
+.reference-dot.active {
+  fill: var(--accent);
+  opacity: 0.95;
+}

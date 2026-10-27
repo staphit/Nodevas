@@ -71,6 +71,14 @@ describe("verifyGraphResponse", () => {
     expect((caught as ApiShapeError).endpoint).toBe("/api/graph");
   });
 
+  it("accepts a node's references and rejects one that is not an id", () => {
+    const body = graphBody();
+    (body.graph.nodes as unknown[])[0] = { id: "alpha", refs: ["note-01"] };
+    expect(() => verifyGraphResponse(body, "/api/graph")).not.toThrow();
+    (body.graph.nodes as unknown[])[0] = { id: "alpha", refs: [7] };
+    expect(() => verifyGraphResponse(body, "/api/graph")).toThrow(/graph\.nodes\[0\]\.refs\[0\]/);
+  });
+
   it("rejects a status map whose values stopped being status names", () => {
     const body = { ...graphBody(), statuses: { alpha: { status: "ready" } } };
     expect(() => verifyGraphResponse(body, "/api/graph")).toThrow(

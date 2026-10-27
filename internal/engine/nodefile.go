@@ -96,6 +96,9 @@ func SyncFrontmatter(nf *NodeFile, n *Node) {
 	setOrDelete(nf.Meta, "write_access", n.WriteAccess, n.WriteAccess != "")
 	setOrDelete(nf.Meta, "requires", n.Requires, n.Requires != "")
 	setOrDelete(nf.Meta, "tags", n.Tags, len(n.Tags) > 0)
+	// refs is a snapshot only; hydrateNodeFromMeta never reads it back. A
+	// note's own "summary" key is the author's and is never touched here.
+	setOrDelete(nf.Meta, "refs", n.Refs, len(n.Refs) > 0)
 	if len(n.Effects) > 0 {
 		effs := make([]map[string]any, 0, len(n.Effects))
 		for _, e := range n.Effects {

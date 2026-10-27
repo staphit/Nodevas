@@ -40,6 +40,9 @@ func (a *API) getDocuments(c *gin.Context) {
 	c.JSON(200, map[string]any{"documents": documents})
 }
 
+// maxReferencedBy caps the users of a note a context lists.
+const maxReferencedBy = 50
+
 // getNodeContext projects one node's metadata, body and prerequisites. Unlike
 // getNode, graph membership is required: a deleted node is a 404, not an empty file.
 func (a *API) getNodeContext(c *gin.Context) {
@@ -81,10 +84,23 @@ func (a *API) getNodeContext(c *gin.Context) {
 			downstream = append(downstream, edge.To)
 		}
 	}
+	references, referencesTruncated, err := st.ReferenceSummaries(g, id)
+	if err != nil {
+		httpx.Err(c, 500, err)
+		return
+	}
+	referencedBy := g.ReferencedBy(id)
+	if len(referencedBy) > maxReferencedBy {
+		referencedBy = referencedBy[:maxReferencedBy]
+	}
 	c.JSON(200, map[string]any{
 		"node": n, "content": content, "rev": rev,
 		"status":   engine.ComputeStatuses(g, state)[id],
 		"nodeType": g.TypeOf(n),
 		"upstream": upstream, "downstream": downstream,
+		// references are the notes this node uses as context, summarized;
+		// referencedBy the nodes that use this one.
+		"references": references, "referencesTruncated": referencesTruncated,
+		"referencedBy": referencedBy,
 	})
 }

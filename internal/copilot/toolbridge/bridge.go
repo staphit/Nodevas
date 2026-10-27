@@ -126,6 +126,7 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 // about until someone decides it deserves less.
 var writeTools = map[string]bool{
 	"create_node":      true,
+	"create_subgraph":  true,
 	"link_nodes":       true,
 	"update_node_meta": true,
 	"set_node_status":  true,

@@ -86,6 +86,11 @@ type Node struct {
 	// are not dependencies: nothing waits on them. Documents insert them by
 	// label with `/`, and the editor writes `[[…]]` into the markdown.
 	Links []NodeLinkRef `yaml:"links,omitempty" json:"links,omitempty"`
+	// Refs are the nodes this node uses as context — a Scene's character
+	// sheets, a chapter's setting notes. Stored on the node that uses them.
+	// They never block: readiness, requires, cycles, the critical path and
+	// Problems all ignore them.
+	Refs []string `yaml:"refs,omitempty" json:"refs,omitempty"`
 }
 
 // NodeLinkRef is one named reference. Project empty means this node's own
@@ -322,6 +327,30 @@ func (g *Graph) NodeByID(id string) *Node {
 		}
 	}
 	return nil
+}
+
+// HasRef reports whether the node already uses id as a reference.
+func (n *Node) HasRef(id string) bool {
+	if n == nil {
+		return false
+	}
+	for _, ref := range n.Refs {
+		if ref == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ReferencedBy lists, in graph order, the nodes that use id as a reference.
+func (g *Graph) ReferencedBy(id string) []string {
+	var out []string
+	for _, n := range g.Nodes {
+		if n != nil && n.HasRef(id) {
+			out = append(out, n.ID)
+		}
+	}
+	return out
 }
 
 // RequiresExpr parses the node's requires field. nil Expr = unconstrained.

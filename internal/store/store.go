@@ -30,7 +30,10 @@ const (
 	maxNodePages  = 256
 	// maxNodeLinks bounds a node's named references; they are a menu for the
 	// `/` inserter, not a database.
-	maxNodeLinks        = 64
+	maxNodeLinks = 64
+	// maxNodeRefs bounds the notes a node uses as context (Node.Refs); a
+	// run's prompt summarizes at most MaxReferenceNotes of them anyway.
+	maxNodeRefs         = 32
 	maxJournalLineBytes = 64 << 10
 	// maxJournalBytes is only an absolute sanity bound on one journal
 	// segment. Compaction (see journal.go) rotates the file at

@@ -31,7 +31,7 @@ const maxGraphOps = 2_000
 // GraphOp is one change to graph.yaml.
 type GraphOp struct {
 	// Kind is one of: move | node-size | node-metadata | add-edge |
-	// remove-edge | set-edge-style | timeline-order.
+	// remove-edge | set-edge-style | timeline-order | add-ref | remove-ref.
 	Kind string `json:"kind"`
 
 	NodeID string   `json:"nodeId,omitempty"`
@@ -58,6 +58,9 @@ type GraphOp struct {
 	Line     *string `json:"line,omitempty"`
 
 	Order []string `json:"order,omitempty"`
+
+	// Ref is the target of add-ref/remove-ref: NodeID uses Ref as context.
+	Ref string `json:"ref,omitempty"`
 }
 
 // ApplyGraphOps applies a batch of commands atomically and returns the new
@@ -334,6 +337,52 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if op.Line != nil {
 			selected.Line = *op.Line
 		}
+	case "add-ref":
+		// A reference is stored on the node that uses it, so that node's
+		// access is the one that matters, as add-edge checks To.
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return fmt.Errorf("node %q not found", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if graph.NodeByID(op.Ref) == nil {
+			return fmt.Errorf("reference target %q not found", op.Ref)
+		}
+		if op.Ref == node.ID {
+			return fmt.Errorf("a node cannot reference itself")
+		}
+		if node.HasRef(op.Ref) {
+			return nil // idempotent
+		}
+		if len(node.Refs) >= maxNodeRefs {
+			return fmt.Errorf("node %q has too many references (maximum %d)", node.ID, maxNodeRefs)
+		}
+		node.Refs = append(node.Refs, op.Ref)
+		touched[node.ID] = true
+	case "remove-ref":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return fmt.Errorf("node %q not found", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if !node.HasRef(op.Ref) {
+			return nil
+		}
+		kept := make([]string, 0, len(node.Refs))
+		for _, ref := range node.Refs {
+			if ref != op.Ref {
+				kept = append(kept, ref)
+			}
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		node.Refs = kept
+		touched[node.ID] = true
 	case "timeline-order":
 		order := make([]string, 0, len(op.Order))
 		for _, id := range op.Order {

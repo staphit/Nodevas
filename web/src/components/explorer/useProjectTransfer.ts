@@ -324,6 +324,7 @@ export function useProjectTransfer({
               priority: node.priority,
               assignee: node.assignee,
               tags: node.tags,
+              refs: node.refs,
             },
           };
         }),
@@ -380,6 +381,7 @@ export function useProjectTransfer({
             priority?: string;
             assignee?: string;
             tags?: string[];
+            refs?: string[];
           };
         }>;
         edges?: Array<{ fromNode: string; toNode: string; label?: string }>;
@@ -436,6 +438,12 @@ export function useProjectTransfer({
             priority: source.vised?.priority as GraphNode["priority"],
             assignee: source.vised?.assignee,
             tags: source.vised?.tags,
+            // Only references into the imported set survive, renamed; one
+            // pointing elsewhere would land on an unrelated node here.
+            refs: (source.vised?.refs ?? []).flatMap((ref) => {
+              const id = typeof ref === "string" ? idMap.get(ref) : undefined;
+              return id ? [id] : [];
+            }),
           })),
           edges: (parsed.edges ?? []).flatMap((edge) => {
             const from = idMap.get(edge.fromNode);

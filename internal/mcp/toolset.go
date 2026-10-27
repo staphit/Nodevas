@@ -32,8 +32,8 @@ var Toolsets = []string{ToolsetFull, ToolsetRun}
 //     interactive prompts name them; review reads the node with get_node.
 //   - release_task: a run that cannot finish gives its task back with it;
 //     set_node_status refuses anything else and says so.
-//   - create_node, link_nodes: a plan run writes its tasks and their
-//     requires edges to the board with these.
+//   - create_node, create_subgraph, link_nodes: a plan run writes its tasks,
+//     their requires edges and their reference notes to the board with these.
 //   - ask_user: a headless run's one way to reach a person; the adapters'
 //     tool timeouts are sized for it.
 //   - check_inbox: a late ask_user answer arrives as a message, and every
@@ -46,6 +46,7 @@ var RunTools = []string{
 	"set_node_status",
 	"release_task",
 	"create_node",
+	"create_subgraph",
 	"link_nodes",
 	"ask_user",
 	"check_inbox",

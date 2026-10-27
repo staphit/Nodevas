@@ -12,7 +12,7 @@ import (
 
 // Issue is a validation finding.
 type Issue struct {
-	Severity string `json:"severity"` // "error" | "warning"
+	Severity string `json:"severity"` // "error" | "warning" | "info"
 	NodeID   string `json:"nodeId,omitempty"`
 	Field    string `json:"field,omitempty"`  // e.g. "requires"
 	Offset   int    `json:"offset,omitempty"` // byte offset within the field, -1 if n/a
@@ -21,6 +21,10 @@ type Issue struct {
 
 // Validate checks the whole graph: DSL syntax, dangling references,
 // duplicate ids, dependency cycles, and disconnected nodes.
+//
+// Node.Refs (a node's reference notes) are deliberately not read here: a
+// reference never blocks, so it cannot form a cycle, dangle into Problems or
+// connect a node to the flow.
 func Validate(g *Graph) []Issue {
 	var issues []Issue
 	add := func(sev, nodeID, field string, off int, format string, args ...any) {
@@ -38,6 +42,13 @@ func Validate(g *Graph) []Issue {
 	}
 
 	ids := map[string]bool{}
+	// Legacy free-text kinds ("bug", "伏筆") are summarized once per project
+	// as a hint instead of a warning per node, so an old story graph does not
+	// drown Problems in them.
+	var unknownKinds []string
+	unknownKindCount := map[string]int{}
+	unknownKindFirst := ""
+	unknownKindNodes := 0
 	for index, n := range g.Nodes {
 		if n == nil {
 			add("error", "", "nodes", -1, "node at index %d is null", index)
@@ -65,13 +76,42 @@ func Validate(g *Graph) []Issue {
 		}
 		ids[n.ID] = true
 		if !g.KnownNodeKind(NormalizeNodeKind(n.Kind)) {
-			add("warning", n.ID, "kind", -1, "unknown node type %q; treated as Task", n.Kind)
+			if unknownKindCount[n.Kind] == 0 {
+				unknownKinds = append(unknownKinds, n.Kind)
+			}
+			if unknownKindFirst == "" {
+				unknownKindFirst = n.ID
+			}
+			unknownKindCount[n.Kind]++
+			unknownKindNodes++
+		}
+		// Effects run only on a journaled done; an automatic or status-less
+		// node never has one (see deriveAutoStatuses).
+		if completion := g.TypeOf(n).Completion; len(n.Effects) > 0 &&
+			(completion == CompletionAuto || completion == CompletionNone) {
+			add("warning", n.ID, "effects", -1,
+				"effects never run on a %s node: it has no status change of its own; move them to a node before it",
+				g.TypeOf(n).Label)
 		}
 		for i, effect := range n.Effects {
 			if err := ValidateEffect(effect.Set); err != nil {
 				add("error", n.ID, fmt.Sprintf("effects[%d]", i), -1, "%s", err)
 			}
 		}
+	}
+
+	if unknownKindNodes > 0 {
+		parts := make([]string, 0, 6)
+		for i, kind := range unknownKinds {
+			if i == 5 {
+				parts = append(parts, "…")
+				break
+			}
+			parts = append(parts, fmt.Sprintf("%q ×%d", kind, unknownKindCount[kind]))
+		}
+		add("info", unknownKindFirst, "kind", -1,
+			"%d node(s) use types this project does not define (%s); they behave as Task. Pick a type for them, or add a custom type with that name.",
+			unknownKindNodes, strings.Join(parts, ", "))
 	}
 
 	// requires: syntax + references. deps collects node-ref edges for cycle

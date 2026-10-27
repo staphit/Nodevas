@@ -159,9 +159,14 @@ func (a *API) create(c *gin.Context) {
 			if err != nil || node == nil {
 				return runs.NodeInfo{}, false, err
 			}
+			refs, truncated, err := loadReferences(st, body.NodeID)
+			if err != nil {
+				return runs.NodeInfo{}, false, err
+			}
 			return runs.NodeInfo{
 				Title: node.Title, Content: content,
 				Type: nodeType.ID, AgentMode: nodeType.AgentMode,
+				References: refs, ReferencesTruncated: truncated,
 			}, true, nil
 		},
 	})
@@ -223,8 +228,38 @@ func loadNode(st *store.Store, id string) (*engine.Node, engine.NodeType, string
 	return node, nodeType, file.Body, nil
 }
 
-// BuildPrompt assembles the task a runner is offered (runs.BuildPrompt).
-func BuildPrompt(title, content, extra string) string { return runs.BuildPrompt(title, content, extra) }
+// loadReferences summarizes the notes a node uses as context, for its prompt.
+func loadReferences(st *store.Store, id string) ([]runs.Reference, bool, error) {
+	graph, _, err := st.LoadGraph()
+	if err != nil {
+		return nil, false, err
+	}
+	summaries, truncated, err := st.ReferenceSummaries(graph, id)
+	if err != nil {
+		return nil, false, err
+	}
+	return RunReferences(summaries), truncated, nil
+}
+
+// RunReferences maps the store's reference summaries onto a run's.
+func RunReferences(summaries []store.ReferenceSummary) []runs.Reference {
+	if len(summaries) == 0 {
+		return nil
+	}
+	out := make([]runs.Reference, 0, len(summaries))
+	for _, summary := range summaries {
+		out = append(out, runs.Reference{
+			ID: summary.ID, Title: summary.Title, TypeLabel: summary.TypeLabel, Summary: summary.Summary,
+		})
+	}
+	return out
+}
+
+// BuildPrompt assembles the task a runner is offered (runs.BuildPrompt); refs
+// is a runs.ReferencesBlock.
+func BuildPrompt(title, content, refs, extra string) string {
+	return runs.BuildPrompt(title, content, refs, extra)
+}
 
 func (a *API) list(c *gin.Context) {
 	_, projectName, ok := a.requestProject(c)

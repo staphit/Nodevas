@@ -43,13 +43,20 @@ The same bridge can be used by Claude Code, Codex, or another MCP client:
 
 An agent can work the queue safely:
 
-1. Call `get_ready_tasks`.
+1. Call `get_ready_tasks`. It lists only the node types agents are dispatched to;
+   reviews, decisions and goals wait for a person and are counted in `forPeople`.
 2. Call `claim_task` before doing the work.
 3. Call `get_node` to read the body, metadata, and relationships. When `truncated`
    is true, continue with `offset: nextOffset` before replacing the whole file.
    If `rev` changes between pages, restart the read to avoid mixing versions.
+   `references` lists the notes the node uses as context (character sheets,
+   setting), each with a summary of up to 400 characters (a note's frontmatter
+   `summary`, or the start of its body); read them before drafting, and
+   `get_node` a note for its full text.
 4. Use `update_node_body` with the revision returned by `get_node`, or use `update_node_meta` for fields.
 5. Call `set_node_status` with `done`, `failed`, or `skipped`, including a useful note.
+   A people-only type (review, decision, goal) is refused with
+   `NODE_TYPE_PEOPLE_ONLY`: release it for a person instead.
 6. Call `release_task` if the work cannot be completed.
 
 Available capabilities include project listing, ready-task discovery, node reading and search, graph outlines, graph validation, task claiming and release, status updates, node creation, body and metadata updates, dependency links, and multi-agent collaboration (`list_team`, `send_message`, `check_inbox`, `ask_user`). MCP also exposes project and node resources plus the `work_the_queue` prompt. It intentionally has no delete tool.
@@ -89,6 +96,28 @@ It configures Claude Code (`claude mcp add --scope user`, hooks and `permissions
 A runner's runs (`nodevas runner`) do not need any of this: each run gets its own `nodevas mcp` server, given to the agent for that run only (`--mcp-config` for Claude Code, `-c mcp_servers.nodevas.*` for Codex, `OPENCODE_CONFIG_CONTENT` for OpenCode, a customization root added with `--add-dir` for agy, settings for Gemini CLI). Reviews and plans run in a worktree whose content is not yours, so the agent loads no MCP servers, hooks or plugins from the repository there: see "Reviews and plans run read only" in [install.md](install.md).
 
 The MCP process follows the agent's session as it changes: after Claude Code's `/clear` it re-reads `~/.claude/sessions/<CLAUDE_PID>.json`, moves to the new conversation under the same name and signs the old one off; under Codex, whose single MCP process serves every thread, each tool call's `_meta.sessionId` selects the thread's own session.
+
+### Planning tools
+
+- `create_node` takes `kind`, a type id: `task` (default), `goal`, `scene`,
+  `event`, `gate` (review), `choice` (decision), `start`, `end`, `note`, or a
+  project's `custom-type-*` id. `get_graph_outline` lists the project's types
+  in `nodeTypes`, with each type's `agentMode` and `completion`.
+- `create_subgraph` creates up to 100 nodes and their wiring in one
+  all-or-nothing call. Each node has a `key`; `dependsOn` and `refs` name keys
+  of the same call or existing node ids, and `edges` make existing nodes wait
+  for new ones. It answers the new ids by key. It is not idempotent: after a
+  transport error, check `get_graph_outline` before retrying.
+- `link_nodes` adds or removes a dependency, or, with `relation: "reference"`,
+  makes `to` use `from` as context (a Note). A reference never blocks: it is
+  ignored by the ready queue, the critical path and validation.
+- `search_nodes` takes keywords or a whole question in any language. Results
+  are ranked: exact title, then the whole query as a phrase, then shared terms
+  by BM25, each with a `score`, its `match` tier and the best-matching excerpt
+  as `snippet`.
+- `validate_graph` returns hints (severity `info`, such as nodes whose kind
+  the project does not define) alongside problems, but does not count them as
+  problems.
 
 Reads use small defaults: `get_node` returns up to 2,000 body characters, and
 `get_graph_outline` returns 25 nodes per page. Use `maxBodyChars` (up to 60,000)

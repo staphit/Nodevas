@@ -653,3 +653,60 @@ describe("wire decoration cleanup", () => {
     expect(g.ui!.wireVertices?.["b->a"]).toBeUndefined();
   });
 });
+
+describe("references", () => {
+  it("adds and removes a reference without touching dependencies", () => {
+    const g = graph();
+    applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "b" });
+    applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "b" });
+    expect(g.nodes![0].refs).toEqual(["b"]);
+    // A reference is not a prerequisite: no edge, no condition.
+    expect(g.edges).toEqual([]);
+    expect(g.nodes![0].requires).toBeUndefined();
+
+    applyGraphCommand(g, { type: "node.removeRef", nodeId: "a", ref: "b" });
+    expect(g.nodes![0].refs).toBeUndefined();
+    expect(describeGraphCommand({ type: "node.addRef", nodeId: "a", ref: "b" })).toBe("新增參考");
+    expect(describeGraphCommand({ type: "node.removeRef", nodeId: "a", ref: "b" })).toBe(
+      "移除參考",
+    );
+  });
+
+  it("refuses itself, a missing node and more than 32", () => {
+    const g = graph();
+    expect(() => applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "a" })).toThrow(
+      CommandError,
+    );
+    expect(() =>
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "ghost" }),
+    ).toThrow(CommandError);
+    g.nodes!.push(
+      ...Array.from({ length: 33 }, (_, index) => ({ id: `n${index}`, title: `N${index}` })),
+    );
+    for (let index = 0; index < 32; index++) {
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: `n${index}` });
+    }
+    expect(() =>
+      applyGraphCommand(g, { type: "node.addRef", nodeId: "a", ref: "n32" }),
+    ).toThrow(/32/);
+  });
+
+  it("removes a reference whose node is gone", () => {
+    const g = graph();
+    g.nodes![0].refs = ["gone"];
+    applyGraphCommand(g, { type: "node.removeRef", nodeId: "a", ref: "gone" });
+    expect(g.nodes![0].refs).toBeUndefined();
+  });
+
+  it("keeps imported references only when they name a node here", () => {
+    const g = graph();
+    applyGraphCommand(g, {
+      type: "graph.applyImport",
+      payload: {
+        nodes: [{ id: "a", position: { x: 0, y: 0 }, refs: ["b", "ghost", "a", "b"] }],
+        edges: [],
+      },
+    });
+    expect(g.nodes![0].refs).toEqual(["b"]);
+  });
+});

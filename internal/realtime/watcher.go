@@ -141,7 +141,9 @@ func emitEvent(hub *Hub, root, path string, onEvent func(string, string)) {
 		if onEvent != nil {
 			onEvent(eventType, id)
 		}
-		hub.BroadcastRoom(root, eventType, id)
+		if hub != nil {
+			hub.BroadcastRoom(root, eventType, id)
+		}
 	}
 	if strings.HasPrefix(rel, store.DataDir+"/") || strings.Contains(rel, "/"+store.TmpPrefix) || strings.HasPrefix(filepath.Base(rel), store.TmpPrefix) {
 		return // internal bookkeeping — never broadcast

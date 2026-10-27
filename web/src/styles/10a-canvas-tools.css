@@ -885,3 +885,11 @@ button.problems-issue:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Hints: a legacy type that reads as Task, say. Listed last, never counted. */
+.problems-issue.issue-info {
+  background: transparent;
+  color: var(--text-2);
+}
+.problems-issue.issue-info small {
+  color: var(--text-2);
+}

@@ -55,6 +55,9 @@ type ReadyResult struct {
 	Waiting int                `json:"waiting"`
 	Busy    int                `json:"busy"`
 	Cursor  string             `json:"cursor,omitempty"`
+	// ForPeople counts ready nodes withheld from an agent because their type
+	// is not worked by agents (reviews, decisions, goals).
+	ForPeople int `json:"forPeople,omitempty"`
 }
 
 // ReadyQuery narrows the queue.
@@ -145,6 +148,22 @@ type NodeContext struct {
 	// NodeType is the node's resolved type; a server older than node types
 	// sends none.
 	NodeType *engine.NodeType `json:"nodeType,omitempty"`
+	// References are the notes this node uses as context, summarized;
+	// ReferencedBy the nodes that use this one.
+	References          []ReferenceSummary `json:"references,omitempty"`
+	ReferencesTruncated bool               `json:"referencesTruncated,omitempty"`
+	ReferencedBy        []string           `json:"referencedBy,omitempty"`
+}
+
+// ReferenceSummary is one reference note as the server summarizes it
+// (store.ReferenceSummary, mirrored so this package reads the wire format).
+type ReferenceSummary struct {
+	ID        string `json:"id"`
+	Title     string `json:"title,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	TypeLabel string `json:"typeLabel,omitempty"`
+	Summary   string `json:"summary"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 func (c *Client) NodeContext(ctx context.Context, id string) (*NodeContext, error) {
@@ -168,23 +187,36 @@ func (c *Client) DocumentSources(ctx context.Context) ([]rag.Source, error) {
 	return out.Documents, nil
 }
 
-// SearchHit is one match.
+// SearchHit is one match. Score (higher is better) and Match ("title",
+// "phrase" or "terms") come from the ranked search; Snippet is the
+// best-matching excerpt.
 type SearchHit struct {
-	Project string `json:"project"`
-	NodeID  string `json:"nodeId,omitempty"`
-	Title   string `json:"title"`
-	Snippet string `json:"snippet,omitempty"`
-	Kind    string `json:"kind,omitempty"`
+	Project string  `json:"project"`
+	NodeID  string  `json:"nodeId,omitempty"`
+	Title   string  `json:"title"`
+	Snippet string  `json:"snippet,omitempty"`
+	Kind    string  `json:"kind,omitempty"`
+	Score   float64 `json:"score,omitempty"`
+	Match   string  `json:"match,omitempty"`
 }
 
-// Search looks through the workspace.
+// Search ranks the project's nodes against a query: keywords or a whole
+// question, in any language.
 //
-// The endpoint searches every project on the server, so the results are
-// filtered back down to the one this process is pinned to. Letting them through
-// would quietly hand the agent node ids it cannot then read.
-func (c *Client) Search(ctx context.Context, term string) ([]SearchHit, error) {
+// The endpoint can search every project on the server, so the query names
+// this process's project, and the results are still filtered back down to it.
+// Letting others through would quietly hand the agent node ids it cannot then
+// read.
+func (c *Client) Search(ctx context.Context, term string, limit int) ([]SearchHit, error) {
 	values := url.Values{}
 	values.Set("q", term)
+	values.Set("mode", "ranked")
+	if limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	if c.project != "" {
+		values.Set("project", c.project)
+	}
 	var payload struct {
 		Results []SearchHit `json:"results"`
 	}

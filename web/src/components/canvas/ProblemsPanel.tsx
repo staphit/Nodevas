@@ -15,9 +15,17 @@ import { useI18n } from "../../i18n";
 import type { Issue } from "../../types";
 import { GraphAnalysisPanel } from "../lane/GraphAnalysisPanel";
 
-/** What the header's Problems button counts: the rows this panel lists. */
+/**
+ * What the header's Problems button counts: the rows this panel lists as
+ * problems. An "info" issue is a hint — a legacy type that behaves as Task —
+ * shown at the bottom and never counted.
+ */
 export function problemCount(analysis: GraphAnalysis, issues: Issue[]): number {
-  return analysis.overdue.size + analysis.violations.length + issues.length;
+  return (
+    analysis.overdue.size +
+    analysis.violations.length +
+    issues.filter((issue) => issue.severity !== "info").length
+  );
 }
 
 export interface ProblemsPanelProps {
@@ -38,6 +46,8 @@ export function ProblemsPanel({
 }: ProblemsPanelProps) {
   const { t } = useI18n();
   const count = problemCount(analysis, issues);
+  const problems = issues.filter((issue) => issue.severity !== "info");
+  const hints = issues.filter((issue) => issue.severity === "info");
   const ref = useRef<HTMLElement>(null);
 
   // Opened from a button in the header: the keyboard follows it in, so the
@@ -73,11 +83,11 @@ export function ProblemsPanel({
         </button>
       </header>
       {count === 0 && <p className="problems-empty">{t("board.problemsNone")}</p>}
-      {issues.length > 0 && (
+      {problems.length > 0 && (
         <section className="problems-section" aria-label={t("board.problemsValidation")}>
           <h4>{t("board.problemsValidation")}</h4>
           <ul className="problems-issues">
-            {issues.map((issue, index) => {
+            {problems.map((issue, index) => {
               const body = (
                 <>
                   <IconWarning size={12} />
@@ -111,6 +121,30 @@ export function ProblemsPanel({
         <h4>{t("board.problemsSchedule")}</h4>
         <GraphAnalysisPanel analysis={analysis} selectNode={onPick} nodeTitle={nodeTitle} />
       </section>
+      {hints.length > 0 && (
+        <section className="problems-section problems-hints" aria-label={t("board.problemsHints")}>
+          <h4>{t("board.problemsHints")}</h4>
+          <ul className="problems-issues">
+            {hints.map((issue, index) => (
+              <li key={`hint-${issue.nodeId ?? "graph"}-${issue.field ?? ""}-${index}`}>
+                {issue.nodeId ? (
+                  <button
+                    type="button"
+                    className="problems-issue issue-info"
+                    onClick={() => onPick(issue.nodeId!)}
+                  >
+                    <small>{issue.msg}</small>
+                  </button>
+                ) : (
+                  <div className="problems-issue issue-info">
+                    <small>{issue.msg}</small>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </aside>
   );
 }

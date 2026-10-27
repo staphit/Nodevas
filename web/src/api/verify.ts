@@ -102,6 +102,11 @@ function checkGraph(check: Check, value: unknown, field: string): void {
     const node = check.object(entry, `${field}.nodes[${index}]`);
     check.string(node.id, `${field}.nodes[${index}].id`);
     check.optionalString(node.title, `${field}.nodes[${index}].title`);
+    check
+      .nullableArray(node.refs, `${field}.nodes[${index}].refs`)
+      .forEach((ref, refIndex) =>
+        check.string(ref, `${field}.nodes[${index}].refs[${refIndex}]`),
+      );
   });
   const edges = check.nullableArray(graph.edges, `${field}.edges`);
   edges.forEach((entry, index) => {

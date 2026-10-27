@@ -23,7 +23,7 @@ import (
 type createNodeInput struct {
 	Title       string   `json:"title" jsonschema:"what the task is, in a few words"`
 	Body        string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
-	Kind        string   `json:"kind,omitempty" jsonschema:"type id: task (default), goal, scene, event, gate (review: a person approves), choice (decision), start, end, note (reference, no status), or a project custom-type-* id from get_graph_outline nodeTypes"`
+	Kind        string   `json:"kind,omitempty" jsonschema:"type id: task (default), goal, scene, event, gate (review, a person finishes it), choice (decision), start, end (complete automatically), note (reference material, no status); or a custom-type-* id listed in get_graph_outline nodeTypes"`
 	Priority    string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
 	Assignee    string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
 	Deadline    string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
@@ -53,7 +53,7 @@ type updateBodyOutput struct {
 type updateMetaInput struct {
 	ID          string   `json:"id" jsonschema:"the node id"`
 	Title       *string  `json:"title,omitempty"`
-	Kind        *string  `json:"kind,omitempty" jsonschema:"type id, as create_node's kind"`
+	Kind        *string  `json:"kind,omitempty" jsonschema:"type id as in create_node; agents cannot move a node into or out of a people-only/automatic/no-status type"`
 	Priority    *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
 	Assignee    *string  `json:"assignee,omitempty"`
 	Deadline    *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`
@@ -70,13 +70,46 @@ type updateMetaOutput struct {
 type linkNodesInput struct {
 	From   string `json:"from" jsonschema:"the node that must finish first"`
 	To     string `json:"to" jsonschema:"the node that waits for it"`
-	Remove bool   `json:"remove,omitempty" jsonschema:"remove this dependency instead of adding it"`
+	Remove bool   `json:"remove,omitempty" jsonschema:"remove this dependency (or reference) instead of adding it"`
+	// Relation picks what the link means. "reference" is stored on to, the
+	// node that uses from as context, and never blocks it.
+	Relation string `json:"relation,omitempty" jsonschema:"\"\" (default): to waits for from; \"reference\": to uses from as context (e.g. a Note); never blocks"`
 }
 
 type linkNodesOutput struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Note string `json:"note"`
+}
+
+type subgraphNodeInput struct {
+	Key         string   `json:"key" jsonschema:"your name for it in this call: [A-Za-z0-9_.-]{1,64}"`
+	Title       string   `json:"title"`
+	Kind        string   `json:"kind,omitempty" jsonschema:"as create_node"`
+	Body        string   `json:"body,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Priority    string   `json:"priority,omitempty"`
+	Assignee    string   `json:"assignee,omitempty"`
+	Deadline    string   `json:"deadline,omitempty"`
+	WriteAccess string   `json:"writeAccess,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty" jsonschema:"keys or node ids to finish first"`
+	Refs        []string `json:"refs,omitempty" jsonschema:"keys or node ids of Notes it uses as context"`
+}
+
+type subgraphEdgeInput struct {
+	From string `json:"from" jsonschema:"key or node id"`
+	To   string `json:"to" jsonschema:"existing node id that waits for from"`
+}
+
+type createSubgraphInput struct {
+	Nodes []subgraphNodeInput `json:"nodes"`
+	Edges []subgraphEdgeInput `json:"edges,omitempty"`
+}
+
+type createSubgraphOutput struct {
+	IDs     map[string]string       `json:"ids"`
+	Created []store.SubgraphCreated `json:"created"`
+	Note    string                  `json:"note"`
 }
 
 type searchInput struct {
@@ -98,6 +131,9 @@ type outlineInput struct {
 	Cursor   string `json:"cursor,omitempty" jsonschema:"continue after this node id"`
 }
 
+// maxSearchLimit is the most hits search_nodes returns (the server's cap).
+const maxSearchLimit = 100
+
 type validateInput struct{}
 
 type validateOutput struct {
@@ -108,7 +144,7 @@ type validateOutput struct {
 func registerAuthoringTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_node",
-		Description: "Create a node with actionable instructions in body. dependsOn lists prerequisites. writeAccess sets permission: human > orchestrator > worker.",
+		Description: "Create a node with actionable instructions in body. dependsOn lists prerequisites. writeAccess sets permission: human > orchestrator > worker. Notes hold reference material (character sheets, setting) and never block; link them as references. For several nodes use create_subgraph.",
 		Annotations: &mcp.ToolAnnotations{Title: "Create a node"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createNodeInput) (*mcp.CallToolResult, createNodeOutput, error) {
 		if strings.TrimSpace(in.Title) == "" {
@@ -126,7 +162,7 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 			WriteAccess: in.WriteAccess,
 		})
 		if err != nil {
-			return nil, createNodeOutput{}, err
+			return nil, createNodeOutput{}, guide(err)
 		}
 		note := "Created."
 		if len(in.DependsOn) > 0 {
@@ -173,7 +209,7 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_node_meta",
-		Description: "Update supplied metadata fields only. writeAccess enforces human > orchestrator > worker. Use update_node_body for text.",
+		Description: "Update supplied metadata fields only. writeAccess enforces human > orchestrator > worker. kind takes a type id from get_graph_outline nodeTypes. Use update_node_body for text.",
 		Annotations: &mcp.ToolAnnotations{Title: "Edit a node's fields"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in updateMetaInput) (*mcp.CallToolResult, updateMetaOutput, error) {
 		if strings.TrimSpace(in.ID) == "" {
@@ -201,41 +237,96 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 			}
 		}
 		if err := client.ApplyOps(ctx, []store.GraphOp{op}); err != nil {
-			return nil, updateMetaOutput{}, err
+			return nil, updateMetaOutput{}, guide(err)
 		}
 		return nil, updateMetaOutput{ID: in.ID, Changed: changed, Note: "Updated."}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "link_nodes",
-		Description: "Make to wait for from, or remove that required dependency. Optional/deprecated links require the editor.",
+		Description: "Make to wait for from, or remove that required dependency. relation \"reference\" instead makes to use from as context (a Note: character sheet, setting) without blocking. Optional/deprecated links require the editor.",
 		Annotations: &mcp.ToolAnnotations{Title: "Link two nodes"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in linkNodesInput) (*mcp.CallToolResult, linkNodesOutput, error) {
 		from, to := strings.TrimSpace(in.From), strings.TrimSpace(in.To)
 		if from == "" || to == "" {
 			return nil, linkNodesOutput{}, &APIError{Code: CodeInvalidArgument, Message: "from and to are required"}
 		}
-		if from == to {
+		relation := strings.TrimSpace(in.Relation)
+		if relation != "" && relation != "reference" {
 			return nil, linkNodesOutput{}, &APIError{
 				Code:    CodeInvalidArgument,
-				Message: "a node cannot depend on itself",
+				Message: `relation must be "" or "reference"; optional/deprecated need the editor`,
 			}
 		}
-		kind := "add-edge"
-		note := fmt.Sprintf("%s now waits for %s.", to, from)
-		if in.Remove {
-			kind = "remove-edge"
-			note = fmt.Sprintf("%s no longer waits for %s.", to, from)
+		if from == to {
+			message := "a node cannot depend on itself"
+			if relation == "reference" {
+				message = "a node cannot reference itself"
+			}
+			return nil, linkNodesOutput{}, &APIError{Code: CodeInvalidArgument, Message: message}
 		}
-		if err := client.ApplyOps(ctx, []store.GraphOp{{Kind: kind, From: from, To: to}}); err != nil {
-			return nil, linkNodesOutput{}, err
+		var op store.GraphOp
+		var note string
+		switch {
+		case relation == "reference" && in.Remove:
+			op = store.GraphOp{Kind: "remove-ref", NodeID: to, Ref: from}
+			note = fmt.Sprintf("%s no longer references %s.", to, from)
+		case relation == "reference":
+			op = store.GraphOp{Kind: "add-ref", NodeID: to, Ref: from}
+			note = fmt.Sprintf("%s now uses %s as a reference.", to, from)
+		case in.Remove:
+			op = store.GraphOp{Kind: "remove-edge", From: from, To: to}
+			note = fmt.Sprintf("%s no longer waits for %s.", to, from)
+		default:
+			op = store.GraphOp{Kind: "add-edge", From: from, To: to}
+			note = fmt.Sprintf("%s now waits for %s.", to, from)
+		}
+		if err := client.ApplyOps(ctx, []store.GraphOp{op}); err != nil {
+			return nil, linkNodesOutput{}, guide(err)
 		}
 		return nil, linkNodesOutput{From: from, To: to, Note: note}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "create_subgraph",
+		Description: "Create up to 100 nodes and their wiring in one all-or-nothing call. Give each node a key; " +
+			"dependsOn and refs may name keys or existing node ids. refs makes the node use a Note (character sheet, " +
+			"setting) as context without blocking it. Returns the new ids by key. Not idempotent: after a transport " +
+			"error, check get_graph_outline before retrying.",
+		Annotations: &mcp.ToolAnnotations{Title: "Create several nodes at once"},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in createSubgraphInput) (*mcp.CallToolResult, createSubgraphOutput, error) {
+		if len(in.Nodes) == 0 {
+			return nil, createSubgraphOutput{}, &APIError{Code: CodeInvalidArgument, Message: "nodes is required"}
+		}
+		spec := store.SubgraphSpec{
+			Nodes: make([]store.SubgraphNode, 0, len(in.Nodes)),
+			Edges: make([]store.SubgraphEdge, 0, len(in.Edges)),
+		}
+		for _, node := range in.Nodes {
+			spec.Nodes = append(spec.Nodes, store.SubgraphNode{
+				Key: node.Key, Title: node.Title, Kind: node.Kind, Body: node.Body, Tags: node.Tags,
+				Priority: node.Priority, Assignee: node.Assignee, Deadline: node.Deadline,
+				WriteAccess: node.WriteAccess, DependsOn: node.DependsOn, Refs: node.Refs,
+			})
+		}
+		for _, edge := range in.Edges {
+			spec.Edges = append(spec.Edges, store.SubgraphEdge{From: edge.From, To: edge.To})
+		}
+		result, err := client.CreateSubgraph(ctx, spec)
+		if err != nil {
+			return nil, createSubgraphOutput{}, guide(err)
+		}
+		return nil, createSubgraphOutput{
+			IDs:     result.IDs,
+			Created: result.Created,
+			Note: fmt.Sprintf("Created %d nodes, %d dependencies and %d references.",
+				len(result.Created), result.Dependencies, result.References),
+		}, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search_nodes",
-		Description: "Find nodes by text in their titles and bodies. Searches only this project.",
+		Description: "Find nodes by keywords or a whole question, Chinese or English. Ranked: exact title, then exact phrase, then shared terms (BM25). snippet is the best-matching excerpt. Searches only this project.",
 		Annotations: readOnly("Search"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 		term := strings.TrimSpace(in.Query)
@@ -245,25 +336,29 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 				Message: "query must be at least two characters",
 			}
 		}
-		hits, err := client.Search(ctx, term)
-		if err != nil {
-			return nil, searchOutput{}, err
-		}
 		limit := in.Limit
 		if limit <= 0 {
 			limit = 20
+		}
+		limit = min(limit, maxSearchLimit)
+		hits, err := client.Search(ctx, term, limit)
+		if err != nil {
+			return nil, searchOutput{}, err
 		}
 		out := searchOutput{Total: len(hits), Results: hits}
 		if len(hits) > limit {
 			out.Results = hits[:limit]
 			out.Note = fmt.Sprintf("Showing %d of %d matches; narrow the query for the rest.", limit, len(hits))
 		}
+		if len(out.Results) > 0 && out.Results[0].Match == "terms" {
+			out.Note = strings.TrimSpace(out.Note + " No exact phrase match; ranked by shared terms. Check with get_node.")
+		}
 		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_graph_outline",
-		Description: "Page through node summaries and edges within the page. Large boards require status, assignee or tag filters.",
+		Description: "Page through node summaries and edges within the page. Large boards require status, assignee or tag filters. nodeTypes lists the types (built-in and this project's custom-type-*), with agentMode and completion; refs are a node's reference notes.",
 		Annotations: readOnly("Board outline"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in outlineInput) (*mcp.CallToolResult, Outline, error) {
 		outline, err := client.GraphOutline(ctx, OutlineFilter{
@@ -288,10 +383,22 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 		if err != nil {
 			return nil, validateOutput{}, err
 		}
+		// Hints (severity info) are returned but are not problems.
+		problems, hints := 0, 0
+		for _, issue := range issues {
+			if issue.Severity == "info" {
+				hints++
+			} else {
+				problems++
+			}
+		}
 		note := "No problems found."
-		if len(issues) > 0 {
+		if problems > 0 {
 			note = fmt.Sprintf("%d problem(s). Fix them before relying on the ready queue: "+
-				"a cycle or a dangling reference makes it wrong, not just untidy.", len(issues))
+				"a cycle or a dangling reference makes it wrong, not just untidy.", problems)
+		}
+		if hints > 0 {
+			note += fmt.Sprintf(" (%d hint(s))", hints)
 		}
 		return nil, validateOutput{Issues: issues, Note: note}, nil
 	})
