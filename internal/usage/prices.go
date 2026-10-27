@@ -77,6 +77,11 @@ var builtinPrices = []Price{
 	price("haiku", 0.10, 0.50, 0.01, 0.125),
 	// OpenCode's free models cost nothing.
 	price("opencode/*-free", 0, 0, 0, 0),
+	// Estimates for CLIs that report no cost (estimate.go).
+	estimatePrice("gpt-5.5", 1.25, 10, 0.125, 0),
+	estimatePrice("gpt-5.4-mini", 0.25, 2, 0.025, 0),
+	estimatePrice("gemini-2.5-pro", 1.25, 10, 0.31, 0),
+	estimatePrice("gemini-2.5-flash", 0.30, 2.50, 0.075, 0),
 }
 
 func price(model string, in, out, read, write float64) Price {

@@ -60,6 +60,7 @@ var roleRoutes = []roleRoute{
 	{http.MethodPost, "/api/agents/asks", string(engine.CapMessage)},
 	{http.MethodPost, "/api/agents/sessions/*/changes", string(engine.CapMessage)},
 	{http.MethodPost, "/api/agents/sessions/*/usage", string(engine.CapMessage)},
+	{http.MethodPost, "/api/verdicts", string(engine.CapVerdict)},
 }
 
 // roleRouteCapability is the capability (engine.Capability, or "ops" for
@@ -100,10 +101,17 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 	// A run works its own project: the node it was dispatched on, and the
 	// role it got, are that project's. Another project's node that happens
 	// to share the id is not its node.
-	// (A run whose project no longer resolves cannot have its node anywhere.)
-	if proxied, ok := runnerProxiedFrom(r.Context()); ok && proxied.runProject != "" && s.pm != nil && st != nil &&
+	// A run whose project no longer resolves cannot have its node anywhere:
+	// it is refused, never waved through.
+	if proxied, ok := runnerProxiedFrom(r.Context()); ok && proxied.runProject != "" && s.pm != nil &&
 		httpx.ProjectScopedPath(r.URL.Path) {
-		if own, err := s.pm.StoreFor(proxied.runProject); err == nil && own.Root() != st.Root() {
+		own, err := s.pm.StoreFor(proxied.runProject)
+		if err != nil || st == nil {
+			httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
+				fmt.Errorf("the run's project %q no longer exists", proxied.runProject), map[string]any{"role": actor.AgentRole})
+			return
+		}
+		if own.Root() != st.Root() {
 			httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
 				fmt.Errorf("role %s works only in its run's project %q", actor.AgentRole, proxied.runProject), map[string]any{"role": actor.AgentRole})
 			return

@@ -377,6 +377,13 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 		interactive += " (the default)"
 	}
 	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
+	repoBrowse := "the hub's Explorer may list and read your registered repos, read-only, secrets hidden"
+	if !cfg.RepoBrowseOn() {
+		repoBrowse = "repo browsing from the hub is refused"
+	} else if cfg.RepoBrowse == nil {
+		repoBrowse += " (the default)"
+	}
+	setting("repoBrowse", fmt.Sprintf("%t (%s)", cfg.RepoBrowseOn(), repoBrowse))
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)

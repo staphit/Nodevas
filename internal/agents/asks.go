@@ -114,6 +114,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if err := h.insertPendingAsk(ctx, ask); err != nil {
 		return Ask{}, err
 	}
+	h.LogAction(project, sessionID, h.sessionRunID(project, sessionID), ActionAsk, ask.NodeID, capBytes(question, 200))
 
 	waitCh := make(chan Ask, 1)
 	h.mu.Lock()

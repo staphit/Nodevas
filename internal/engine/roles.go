@@ -46,10 +46,12 @@ const (
 	CapMeta       Capability = "meta"
 	CapAcceptance Capability = "acceptance"
 	CapMessage    Capability = "message"
+	// CapVerdict: a reviewer's or QA's structured verdict (submit_verdict).
+	CapVerdict Capability = "verdict"
 )
 
 // Capabilities lists every capability in display order.
-var Capabilities = []Capability{CapRead, CapClaim, CapStatus, CapBody, CapCreate, CapLink, CapMeta, CapAcceptance, CapMessage}
+var Capabilities = []Capability{CapRead, CapClaim, CapStatus, CapBody, CapCreate, CapLink, CapMeta, CapAcceptance, CapMessage, CapVerdict}
 
 // ToolCapabilities maps each MCP tool to the capabilities it needs. The single
 // source: the MCP server and the hub both read it.
@@ -76,6 +78,7 @@ var ToolCapabilities = map[string][]Capability{
 	"send_message":      {CapMessage},
 	"list_team":         {CapMessage},
 	"save_attachment":   {CapMessage},
+	"submit_verdict":    {CapVerdict},
 }
 
 // AgentRoleDef is the stored (sparse) form, Graph.AgentRoles.
@@ -115,7 +118,7 @@ var builtinAgentRoles = []AgentRole{
 		[]string{"task", "scene", "event", "note", "gate", "choice"},
 		[]string{"task", "scene", "event", "goal"}),
 	builtinRole(RoleQA, "QA", identity.AgentOrchestrator,
-		[]string{"get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message"},
+		[]string{"get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message", "submit_verdict"},
 		[]string{"task", "scene", "event"},
 		[]string{"goal"}),
 	builtinRole(RoleTester, "Tester", identity.AgentWorker,
@@ -125,7 +128,7 @@ var builtinAgentRoles = []AgentRole{
 		[]string{"claim_task", "get_node", "set_node_status", "release_task", "ask_user", "check_inbox", "send_message"},
 		[]string{"task", "scene", "event"}, []string{}),
 	builtinRole(RoleReviewer, "Reviewer", identity.AgentWorker,
-		[]string{"get_node", "check_inbox", "send_message"},
+		[]string{"get_node", "check_inbox", "send_message", "submit_verdict"},
 		[]string{}, []string{}),
 	builtinRole(RoleResearcher, "Researcher", identity.AgentWorker,
 		[]string{"get_node", "get_graph_outline", "search_nodes", "search_documents", "create_node", "update_node_body", "link_nodes", "ask_user", "check_inbox", "send_message"},

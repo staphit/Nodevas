@@ -133,6 +133,17 @@ type RepoDone struct {
 // ValidRepoRef reports whether ref may be a git_diff ref: "" (the worktree
 // against HEAD) or a full 40- or 64-hex commit id.
 func ValidRepoRef(ref string) bool {
-	// TODO(green): implement.
-	return false
+	if ref == "" {
+		return true
+	}
+	if len(ref) != 40 && len(ref) != 64 {
+		return false
+	}
+	for i := 0; i < len(ref); i++ {
+		c := ref[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -24,6 +24,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/usage"
 )
 
 var (
@@ -153,11 +154,22 @@ type Store struct {
 	// instant twice, and two runs with one created_at would have no order.
 	mu   sync.Mutex
 	last time.Time
+
+	// usage prices run costs (cost.go); its table is cached for a minute.
+	usage      *usage.Store
+	priceMu    sync.Mutex
+	prices     usage.Table
+	pricesAt   time.Time
+	pricesRead bool
 }
 
 // NewStore builds a store over the workspace database.
 func NewStore(database *db.DB) *Store {
-	return &Store{db: database, now: time.Now}
+	s := &Store{db: database, now: time.Now}
+	if database != nil {
+		s.usage = usage.NewStore(database)
+	}
+	return s
 }
 
 // stamp is RFC3339 with microseconds, fixed width so the text sorts in time
@@ -295,14 +307,25 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if in.Kind == runnerwire.JobPlan {
 		reviewCap = runnerwire.MaxRevisionBytes
 	}
+	nodeType, acceptanceCount := in.NodeType, in.AcceptanceCount
+	if nodeType == "" && acceptanceCount == 0 {
+		// Follow-up runs (fallbacks, pipeline steps, handoffs) carry the
+		// node's shape from the run before them.
+		err := s.db.QueryRowContext(ctx, `
+SELECT node_type, acceptance_count FROM runs WHERE project = ? AND node_id = ?
+ ORDER BY created_at DESC LIMIT 1`, in.Project, in.NodeID).Scan(&nodeType, &acceptanceCount)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Record{}, err
+		}
+	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
                   stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
-                  role, override, job_roles)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  role, override, job_roles, node_type, acceptance_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
@@ -310,7 +333,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
 		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
-		in.Role, in.Override, jobRoles)
+		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)))
 	if err != nil {
 		return Record{}, err
 	}
@@ -324,12 +347,13 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        pr_number, pr_state, pr_error, pr_head_sha,
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
-       retry_at, limit_waits, role, verify, checks, override, job_roles`
+       retry_at, limit_waits, role, verify, checks, override, job_roles,
+       cost_usd, cost_estimated, node_type, acceptance_count`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
 	var usage, fallbacks, verify, checks, jobRoles string
-	var exit, files, additions, deletions, prNumber, limitWaits int64
+	var exit, files, additions, deletions, prNumber, limitWaits, acceptanceCount int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
@@ -338,9 +362,11 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
 		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
 		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
-		&r.Role, &verify, &checks, &r.Override, &jobRoles); err != nil {
+		&r.Role, &verify, &checks, &r.Override, &jobRoles,
+		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount); err != nil {
 		return Record{}, err
 	}
+	r.AcceptanceCount = int(acceptanceCount)
 	r.ExitCode = int(exit)
 	r.LimitWaits = int(limitWaits)
 	r.ContinuesFrom = r.JobHandoffBranch
@@ -663,6 +689,10 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 			return Record{}, err
 		}
 		set("usage", string(raw))
+		cost, estimated := s.runCost(ctx, current.Agent, current.Model, *change.Usage)
+		set("cost_usd", cost)
+		set("cost_estimated", estimated)
+		set("cost_settled", true)
 	}
 	now := s.stamp()
 	switch {
@@ -712,10 +742,14 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	}
 	// The runner clamps its role fields; the hub clamps again.
 	result.ClampRoleFields()
+	verdict := CleanVerdict(result.Verdict)
+	if current, err := s.Get(ctx, id); err == nil {
+		verdict = s.reconcileVerdict(ctx, current, verdict)
+	}
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
-		FailureKind: failureKind, Verdict: CleanVerdict(result.Verdict),
+		FailureKind: failureKind, Verdict: verdict,
 		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
 		Verify: result.Verify, Checks: result.Checks,
 	})
@@ -724,6 +758,7 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	}
 	if err == nil {
 		r.GuardAck = result.GuardAck
+		s.synthesizeVerdict(ctx, r)
 	}
 	return r, err
 }
@@ -746,6 +781,7 @@ func cleanEvent(e runnerwire.RunEvent) runnerwire.RunEvent {
 // that matters.
 func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerwire.RunEvent) (int, error) {
 	added := 0
+	table := s.priceTable(ctx)
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		added = 0
 		var last sql.NullInt64
@@ -786,7 +822,13 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE runs SET usage = ? WHERE id = ?`, string(raw), runID)
+		var agent, model string
+		if err := tx.QueryRowContext(ctx, `SELECT agent, model FROM runs WHERE id = ?`, runID).Scan(&agent, &model); err != nil {
+			return err
+		}
+		cost, estimated := runCostAt(table, agent, model, *usage)
+		_, err = tx.ExecContext(ctx, `UPDATE runs SET usage = ?, cost_usd = ?, cost_estimated = ?, cost_settled = true WHERE id = ?`,
+			string(raw), cost, estimated, runID)
 		return err
 	})
 	return added, err

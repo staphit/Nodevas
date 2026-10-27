@@ -42,6 +42,8 @@ var Toolsets = []string{ToolsetFull, ToolsetRun}
 //     tool result points at check_inbox when mail is waiting.
 //   - send_message: runs working on one project tell each other what they
 //     changed or ask each other, which the station shows.
+//   - submit_verdict: review and QA runs record their structured verdict;
+//     the hub takes it only from a reviewer's or QA's run.
 var RunTools = []string{
 	"claim_task",
 	"get_node",
@@ -53,6 +55,7 @@ var RunTools = []string{
 	"ask_user",
 	"check_inbox",
 	"send_message",
+	"submit_verdict",
 }
 
 // ValidToolset reports whether name is a --toolset value; empty is full.

@@ -252,7 +252,9 @@ func (o *Orchestrator) qaPhase(ctx context.Context, w *work) {
 		return
 	}
 	wf := w.rec.Workflow.Normalized()
+	round := w.rec.QARound + 1
 	if qaPassed(r) {
+		o.recordQARound(ctx, w.rec.ID, round, r.ID, QAOutcomePass, 0, "QA verified the goal")
 		if wf.Stages.GoalReview {
 			w.rec.Reason = "QA verified the goal; waiting for a person to review it"
 			o.setPhase(w, runnerwire.GoalPhaseHuman)
@@ -265,6 +267,7 @@ func (o *Orchestrator) qaPhase(ctx context.Context, w *work) {
 	w.dirty = true
 	if w.rec.QARound >= wf.MaxQARounds {
 		w.rec.Reason = fmt.Sprintf("QA still failing after %d round(s); a person decides", w.rec.QARound)
+		o.recordQARound(ctx, w.rec.ID, round, r.ID, QAOutcomeFail, 0, w.rec.Reason)
 		o.setPhase(w, runnerwire.GoalPhaseHuman)
 		return
 	}
@@ -277,10 +280,12 @@ func (o *Orchestrator) qaPhase(ctx context.Context, w *work) {
 	}, maxFixTasksPerRound)
 	if adopted == 0 {
 		w.rec.Reason = fmt.Sprintf("QA failed in round %d and created no fix tasks; a person decides", w.rec.QARound)
+		o.recordQARound(ctx, w.rec.ID, round, r.ID, QAOutcomeNone, 0, w.rec.Reason)
 		o.setPhase(w, runnerwire.GoalPhaseHuman)
 		return
 	}
 	w.rec.Reason = fmt.Sprintf("QA round %d failed: %d fix task(s) added", w.rec.QARound, adopted)
+	o.recordQARound(ctx, w.rec.ID, round, r.ID, QAOutcomeFail, adopted, w.rec.Reason)
 	o.setPhase(w, runnerwire.GoalPhaseTasks)
 }
 
@@ -318,7 +323,10 @@ func (o *Orchestrator) goalRunner(ctx context.Context, w *work, role, content st
 	}
 	var chain []runnerwire.AgentModel
 	if rules, err := o.opts.Runs.Routing(ctx, rec.CreatedBy); err == nil {
-		if s := runs.Suggest(rules, runs.RouteNode{Project: rec.Project, Role: role}); s.RuleID != "" {
+		s := runs.Suggest(rules, runs.RouteNode{Project: rec.Project, Role: role})
+		s = routeWith(ctx, o.opts.Route, RouteRequest{OwnerID: rec.CreatedBy, Project: rec.Project,
+			NodeID: rec.GoalNodeID, Role: role, Manual: s})
+		if s.RuleID != "" {
 			chain = append(chain, s.Target)
 		}
 	}

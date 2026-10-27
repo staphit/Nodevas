@@ -1,8 +1,11 @@
 package agents
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +29,12 @@ const maxUsageBody = 32 << 10
 // hears the project key a report was recorded under, for realtime.
 func (a *API) UseUsage(store *usage.Store, notify func(projectKey string)) {
 	a.usage, a.usageNotify = store, notify
+}
+
+// UseRunUsage records an interactive run's usage from its agent session's
+// reports (runs.Store.SetUsageFromSession).
+func (a *API) UseRunUsage(record func(ctx context.Context, runID string, models []usage.ModelUsage) error) {
+	a.runUsage = record
 }
 
 func (a *API) postSessionUsage(c *gin.Context) {
@@ -77,6 +86,7 @@ func (a *API) postSessionUsage(c *gin.Context) {
 	err := a.usage.RecordSession(c.Request.Context(), usage.SessionReport{
 		Project: name, SessionID: session.ID, SessionName: session.Name,
 		ActorID: session.ActorID, ActorName: session.ActorName, Agent: agent, Models: body.Models,
+		RunID: session.RunID,
 	})
 	if errors.Is(err, usage.ErrInvalid) {
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
@@ -86,6 +96,19 @@ func (a *API) postSessionUsage(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
+	// An interactive run's session: its tokens are the run's.
+	if session.RunID != "" && a.runUsage != nil {
+		if models, err := a.usage.SessionModels(c.Request.Context(), name, session.ID); err == nil {
+			if err := a.runUsage(c.Request.Context(), session.RunID, models); err != nil {
+				slog.Warn("agents: run usage from its session", slog.String("run", session.RunID), slog.Any("error", err))
+			}
+		}
+	}
+	var total int64
+	for _, m := range body.Models {
+		total += m.InputTokens + m.OutputTokens + m.CacheReadTokens + m.CacheWriteTokens
+	}
+	a.hub.LogAction(projectKey, session.ID, session.RunID, agents.ActionUsage, "", strconv.FormatInt(total, 10))
 	if a.usageNotify != nil {
 		a.usageNotify(projectKey)
 	}

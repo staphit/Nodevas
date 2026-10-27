@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"nodevas/internal/analytics"
-	"nodevas/internal/auth"
 	"nodevas/internal/db"
 	"nodevas/internal/runnerwire"
 )
@@ -115,8 +114,10 @@ func TestApplySuggestion(t *testing.T) {
 		return response.Code, response.Body.String()
 	}
 	// An agent never applies.
-	if code, body := apply(&f.bea, pick.Key, pick.Change, map[string]string{auth.AgentRoleHeaderName: "worker"}); code != http.StatusForbidden || !strings.Contains(body, "PERMISSION_DENIED") {
-		t.Fatalf("agent apply = %d %s", code, body)
+	raw, _ := json.Marshal(map[string]any{"key": pick.Key, "change": pick.Change})
+	if response := f.doAsAgent(t, &f.bea, http.MethodPost, "/api/analytics/suggestions/apply", string(raw)); response.Code != http.StatusForbidden ||
+		!strings.Contains(response.Body.String(), "PERMISSION_DENIED") {
+		t.Fatalf("agent apply = %d %s", response.Code, response.Body)
 	}
 	// A change that is not the suggestion's is stale.
 	stale := *pick.Change

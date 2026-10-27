@@ -67,6 +67,11 @@ var accountLevelPaths = []string{
 	"/api/usage/prices",
 	"/api/notify/",
 	"/api/audit",
+	// Agent analytics across projects: the actor's own runs.
+	"/api/analytics/scorecards",
+	"/api/analytics/tiers",
+	"/api/analytics/overview",
+	"/api/analytics/retention",
 }
 
 // readOnlyPosts are POST routes that change nothing: a viewer may use them.

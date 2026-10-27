@@ -89,6 +89,16 @@ var Tables = []string{
 	"account_recovery_codes",
 	"copilot_followups",
 	"run_role_settings",
+	// 0028_agent_analytics: newer than any SQLite file, so never present in
+	// one; listed so an import still finds the target empty.
+	"copilot_usage",
+	"agent_session_actions",
+	"run_evidence",
+	"autopilot_qa_rounds",
+	"run_verdicts",
+	"analytics_settings",
+	"route_picks",
+	"analytics_dismissed",
 }
 
 // Result is what MaybeImport or Import did.

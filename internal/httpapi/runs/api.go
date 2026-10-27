@@ -43,7 +43,17 @@ type API struct {
 	// steppedUpAt reports the dispatcher's live step-up (W6); nil on a server
 	// without accounts, where the dispatcher vouches for everyone anyway.
 	steppedUpAt func(*http.Request) (time.Time, bool)
+	// autoRoute is agent analytics' auto routing (UseAutoRoute); nil keeps
+	// the rules' pick.
+	autoRoute AutoRoute
 }
+
+// AutoRoute decides the dispatch dialog's route: manual is what the
+// caller's rules picked; with auto routing on and no rule, its own pick.
+type AutoRoute func(r *http.Request, ownerID, project, nodeID, role string, manual runnerwire.RouteSuggestion) runnerwire.RouteSuggestion
+
+// UseAutoRoute sends GET /api/runs/route through auto routing.
+func (a *API) UseAutoRoute(fn AutoRoute) { a.autoRoute = fn }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
@@ -77,6 +87,9 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/route", a.route)
 	api.GET("/runs/pipelines/:id", a.pipeline)
 	api.POST("/runs/pipelines/:id/review", a.review)
+	api.GET("/runs/:id/verdicts", a.verdicts)
+	// A review or QA run's structured verdict, through its runner's proxy.
+	api.POST("/verdicts", a.submitVerdict)
 }
 
 func notFound(c *gin.Context, what string) {

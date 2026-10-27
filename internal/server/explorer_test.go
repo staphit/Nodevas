@@ -11,9 +11,28 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
+
+// doAsAgent sends a person's session request as an in-process agent acting
+// for them: a signed-in session ignores X-Nodevas-Agent-Role (it is honored
+// only on loopback), so the agent is marked the way the in-process copilot
+// marks its own requests.
+func (s *runnerTestServer) doAsAgent(t *testing.T, b *browser, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	withCookies(request, b.cookies)
+	request.Header.Set(auth.CSRFHeaderName, b.csrf)
+	request = request.WithContext(auth.WithInProcessAgent(request.Context(), identity.AgentWorker))
+	response := httptest.NewRecorder()
+	s.handler.ServeHTTP(response, request)
+	return response
+}
 
 func browseHello() runnerwire.Envelope {
 	env := runsHello(1)
@@ -55,7 +74,7 @@ func TestExplorerRepoRoutes(t *testing.T) {
 	}
 
 	// An agent never browses.
-	response = f.do(t, &f.bea, http.MethodGet, tree, "", map[string]string{auth.AgentRoleHeaderName: "worker"})
+	response = f.doAsAgent(t, &f.bea, http.MethodGet, tree, "")
 	if response.Code != http.StatusForbidden || errorCode(t, response) != "PERMISSION_DENIED" {
 		t.Fatalf("agent browsing: %d %s", response.Code, response.Body)
 	}
@@ -141,7 +160,7 @@ func TestExplorerWorkspace(t *testing.T) {
 	if code := f.do(t, &f.bea, http.MethodGet, "/api/explorer/workspace/git/commit?sha=HEAD", "", nil).Code; code != http.StatusBadRequest {
 		t.Fatalf("commit sha HEAD = %d", code)
 	}
-	if code := f.do(t, &f.bea, http.MethodGet, "/api/explorer/workspace/files", "", map[string]string{auth.AgentRoleHeaderName: "worker"}).Code; code != http.StatusForbidden {
+	if code := f.doAsAgent(t, &f.bea, http.MethodGet, "/api/explorer/workspace/files", "").Code; code != http.StatusForbidden {
 		t.Fatalf("agent reading workspace files = %d", code)
 	}
 }

@@ -236,6 +236,13 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if body.Override != "" && !wf.Staged() {
 		return Record{}, refuse(StartInvalid, "override: this node's workflow has no stages to override")
 	}
+	// A staged project's Executor work runs headless (tests first, verify,
+	// review); working it interactively needs a person's override reason.
+	if wf.Staged() && body.Override == "" && body.Kind == runnerwire.JobImplement &&
+		body.Mode == runnerwire.ModeInteractive && (role == nil || role.Slot() == engine.RoleExecutor) {
+		return Record{}, &StartError{Code: StartPrecondition, Reason: CodeStagedNeedsHeadless,
+			Msg: "this project's stages run headless; give an override reason to work interactively"}
+	}
 	story := wf != nil && wf.Judge == engine.JudgeChecklist && storyType(node.Type)
 	staged := wf.Staged() && body.Override == "" && body.Kind == runnerwire.JobImplement &&
 		body.Mode == runnerwire.ModeHeadless && (role == nil || role.Slot() == engine.RoleExecutor)
@@ -308,12 +315,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 			return Record{}, &StartError{Code: StartBudget, Msg: RoleBudgetMessage(first.role, status), Budget: status}
 		}
 	}
-	// The criteria an Executor works against do not change under it.
-	if req.LockAcceptance != nil && body.Override == "" && body.Kind == runnerwire.JobImplement && (staged || worker) {
-		if err := req.LockAcceptance(); err != nil {
-			return Record{}, fmt.Errorf("lock the acceptance criteria: %w", err)
-		}
-	}
+	lockCriteria := req.LockAcceptance != nil && body.Override == "" && body.Kind == runnerwire.JobImplement && (staged || worker)
 
 	pipelineID := ""
 	var config *StagedConfig
@@ -353,7 +355,11 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		jobRoles.VerifySpec = &runnerwire.VerifySpec{Phase: runnerwire.VerifyGoal}
 	}
 	review := strings.TrimSpace(body.Revision)
-	record, err := d.store.Create(ctx, New{
+	createRun := d.createRun
+	if createRun == nil {
+		createRun = d.store.Create
+	}
+	record, err := createRun(ctx, New{
 		Project: req.Project, NodeID: body.NodeID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
 		Agent: first.am.Agent, Model: first.am.Model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
@@ -362,12 +368,27 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
 		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
 		Role: first.role, Override: body.Override, JobRoles: jobRoles,
+		NodeType: node.Type, AcceptanceCount: len(acceptance),
 	})
 	if err != nil {
 		if pipelineID != "" {
 			_, _ = d.store.EndPipeline(ctx, pipelineID, runnerwire.PipelineFailed, err.Error())
 		}
 		return Record{}, err
+	}
+	// The criteria an Executor works against do not change under it. They
+	// are locked only once the run exists; a failed lock cancels it.
+	if lockCriteria {
+		if err := req.LockAcceptance(); err != nil {
+			_, _ = d.store.Transition(ctx, record.ID, runnerwire.RunCancelled, Change{Error: "criteria lock failed: " + err.Error()})
+			if pipelineID != "" {
+				_, _ = d.store.EndPipeline(ctx, pipelineID, runnerwire.PipelineFailed, "criteria lock failed")
+			}
+			return Record{}, fmt.Errorf("lock the acceptance criteria: %w", err)
+		}
+	}
+	if body.RoutePick != "" {
+		d.store.LinkRoutePick(ctx, body.RoutePick, req.ActorID, body.NodeID, record.ID)
 	}
 	if body.Override != "" {
 		if err := d.store.NoteFirst(ctx, record.ID, "stage override by "+name+": "+body.Override); err != nil {
@@ -382,6 +403,10 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 // CodeAcceptanceRequired is StartError.Reason when the node needs acceptance
 // criteria first (shared with the web client and store.CodeAcceptanceRequired).
 const CodeAcceptanceRequired = "ACCEPTANCE_REQUIRED"
+
+// CodeStagedNeedsHeadless is StartError.Reason when a staged node's Executor
+// work is asked for interactively without an override reason.
+const CodeStagedNeedsHeadless = "STAGED_NEEDS_HEADLESS"
 
 // storyType reports whether a node type is a story's (its body is the work).
 func storyType(nodeType string) bool { return nodeType == "scene" || nodeType == "event" }

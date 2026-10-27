@@ -57,6 +57,12 @@ type Server struct {
 	usage *usage.Store
 	// llm relays copilot model calls to runners; nil until UseRunnersDB.
 	llm *runners.LLMRelay
+	// repo relays read-only repo browsing to runners (the Explorer); nil
+	// until UseRunnersDB.
+	repo *runners.RepoRelay
+	// analyticsDB is the workspace database agent analytics reads (pure
+	// SQL, never a model); nil until UseRunnersDB.
+	analyticsDB *db.DB
 	// links holds device link codes and runnerAccess the Access service
 	// token they carry (runner_links.go); nil until UseRunnersDB.
 	links        *runners.Links
@@ -325,6 +331,14 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	}()
 	go s.runs.RunRetries(retries, runs.RetryInterval)
 	s.llm = runners.NewLLMRelay(s.runners)
+	s.repo = runners.NewRepoRelay(s.runners)
+	s.analyticsDB = database
+	if s.agents != nil {
+		// External sessions' action log is analytics history, kept even
+		// where the agent network itself runs in memory.
+		s.agents.SetActionLog(database)
+	}
+	s.startAnalytics(database)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
 	// the same relay.

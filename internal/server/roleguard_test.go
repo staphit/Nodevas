@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -92,7 +93,7 @@ func TestAcceptanceEndpointAllowedThroughProxy(t *testing.T) {
 func (f *runsFixture) roleRun(t *testing.T, role string) runs.Record {
 	t.Helper()
 	rec, err := f.server.runs.Store().Create(context.Background(), runs.New{
-		Project: ".", NodeID: runsTestNode, NodeTitle: "Fix the login bug",
+		Project: f.projectName(), NodeID: runsTestNode, NodeTitle: "Fix the login bug",
 		RunnerID: f.runner.Runner.ID, RunnerName: "bea-pc", OwnerID: f.runner.Runner.OwnerID,
 		Agent: "claude", Model: "default", RepoID: "repo-1", RepoName: "visual-editor",
 		JobPrompt: "# Fix", CreatedBy: f.runner.Runner.OwnerID, CreatedByName: "bea", Role: role,
@@ -101,6 +102,13 @@ func (f *runsFixture) roleRun(t *testing.T, role string) runs.Record {
 		t.Fatal(err)
 	}
 	return rec
+}
+
+// projectName is the fixture project's name as runs record it (the
+// active project, below the workspace), so the role guard finds the run's
+// project: a run of a project that does not resolve is refused.
+func (f *runsFixture) projectName() string {
+	return runsapi.ProjectName(f.server.pm, f.server.pm.Store())
 }
 
 func (f *runsFixture) proxied(t *testing.T, runID, method, path, body string, extra map[string]string) (int, string) {

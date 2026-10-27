@@ -132,8 +132,15 @@ func TestRouteExploration(t *testing.T) {
 	f.history("opencode", "big", 3, 0.10)
 	agents := append(append([]runnerwire.Agent{}, claudeCodex...), agentWith("opencode", "big"), agentWith("gemini", "gemini-2.5-pro"))
 
-	f.autoRouting(true, 100)
-	got := route(t, f, routeIn("executor", desk(true, agents...)))
+	// Exploration is at most 50% (analytics_settings' CHECK); node n7's
+	// executor bucket is 7, so a 50% share explores it.
+	f.autoRouting(true, MaxExplorationPct)
+	explore := routeIn("executor", desk(true, agents...))
+	explore.NodeID = "n7"
+	if ExploreBucket("p", "n7", "executor") >= MaxExplorationPct {
+		t.Fatalf("bucket of n7 = %d, want under %d", ExploreBucket("p", "n7", "executor"), MaxExplorationPct)
+	}
+	got := route(t, f, explore)
 	if got.Target != (runnerwire.AgentModel{Agent: "gemini", Model: "gemini-2.5-pro"}) {
 		t.Fatalf("exploring picked %+v, want the probation combo with fewest samples (gemini, 0)", got.Target)
 	}
@@ -147,7 +154,7 @@ func TestRouteExploration(t *testing.T) {
 	}
 
 	// A role that needs senior never explores.
-	f.autoRouting(true, 100)
+	f.autoRouting(true, MaxExplorationPct)
 	if got := route(t, f, routeIn("reviewer", desk(true, agents...))); got.RuleID != "" {
 		t.Fatalf("a senior-required role explored: %+v", got)
 	}

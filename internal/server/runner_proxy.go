@@ -69,6 +69,9 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/agents/sessions/*/changes"},
 	// `nodevas hook` reporting an external session's token usage.
 	{http.MethodPost, "/api/agents/sessions/*/usage"},
+	// submit_verdict: a review or QA run's structured verdict; the hub takes
+	// the role from the run's record.
+	{http.MethodPost, "/api/verdicts"},
 	// Deliberately absent: holding a session's inbound mail and approving or
 	// rejecting held messages are a person's decisions about agents.
 }

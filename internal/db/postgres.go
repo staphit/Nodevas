@@ -846,6 +846,133 @@ CREATE TABLE legacy_imports (
 );
 `,
 	},
+	{
+		name: "0028_agent_analytics",
+		stmt: `
+ALTER TABLE runs ADD COLUMN cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN cost_estimated   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN cost_settled     BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN node_type        TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN acceptance_count INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX runs_project_role_created ON runs (project, role, created_at);
+CREATE INDEX runs_retry_of ON runs (retry_of) WHERE retry_of <> '';
+CREATE INDEX runs_finished ON runs (finished_at) WHERE finished_at <> '';
+
+ALTER TABLE agent_session_usage ADD COLUMN run_id TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE copilot_usage (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id TEXT COLLATE "C" NOT NULL,
+    account_id      TEXT COLLATE "C" NOT NULL,
+    project         TEXT COLLATE "C" NOT NULL,
+    provider        TEXT NOT NULL DEFAULT '',
+    model           TEXT NOT NULL DEFAULT '',
+    input_tokens    BIGINT NOT NULL DEFAULT 0,
+    output_tokens   BIGINT NOT NULL DEFAULT 0,
+    created_at      TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX copilot_usage_project ON copilot_usage (project, created_at);
+
+CREATE TABLE agent_session_actions (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project    TEXT COLLATE "C" NOT NULL,
+    session_id TEXT COLLATE "C" NOT NULL,
+    run_id     TEXT COLLATE "C" NOT NULL DEFAULT '',
+    at         TEXT COLLATE "C" NOT NULL,
+    action     TEXT NOT NULL CHECK (action IN ('joined','left','doing','message','ask','changes','usage')),
+    node_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX agent_session_actions_session ON agent_session_actions (project, session_id, at);
+CREATE INDEX agent_session_actions_at ON agent_session_actions (at);
+
+CREATE TABLE run_evidence (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id      TEXT COLLATE "C" NOT NULL,
+    pipeline_id TEXT COLLATE "C" NOT NULL DEFAULT '',
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    kind        TEXT NOT NULL,
+    outcome     TEXT NOT NULL DEFAULT 'info' CHECK (outcome IN ('pass','fail','skip','info')),
+    summary     TEXT NOT NULL DEFAULT '',
+    at          TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_evidence_run ON run_evidence (run_id);
+CREATE INDEX run_evidence_pipeline ON run_evidence (pipeline_id, at);
+CREATE INDEX run_evidence_node ON run_evidence (project, node_id, at);
+
+CREATE TABLE autopilot_qa_rounds (
+    autopilot_id TEXT COLLATE "C" NOT NULL,
+    round        INTEGER NOT NULL,
+    run_id       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    outcome      TEXT NOT NULL CHECK (outcome IN ('pass','fail','none')),
+    fix_tasks    INTEGER NOT NULL DEFAULT 0,
+    reason       TEXT NOT NULL DEFAULT '',
+    created_at   TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (autopilot_id, round)
+);
+
+CREATE TABLE run_verdicts (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id         TEXT COLLATE "C" NOT NULL UNIQUE REFERENCES runs(id),
+    project        TEXT COLLATE "C" NOT NULL,
+    node_id        TEXT COLLATE "C" NOT NULL,
+    pipeline_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    role           TEXT COLLATE "C" NOT NULL CHECK (role IN ('reviewer','qa')),
+    round          INTEGER NOT NULL DEFAULT 1,
+    subject_run_id TEXT COLLATE "C" NOT NULL DEFAULT '',
+    agent          TEXT NOT NULL DEFAULT '',
+    model          TEXT NOT NULL DEFAULT '',
+    outcome        TEXT NOT NULL CHECK (outcome IN ('pass','fail')),
+    severity       TEXT NOT NULL CHECK (severity IN ('none','low','medium','high','critical')),
+    reasons        TEXT NOT NULL DEFAULT '[]',
+    note           TEXT NOT NULL DEFAULT '',
+    source         TEXT NOT NULL DEFAULT 'mcp' CHECK (source IN ('mcp','finish')),
+    created_at     TEXT COLLATE "C" NOT NULL,
+    updated_at     TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_verdicts_node ON run_verdicts (project, node_id, created_at);
+CREATE INDEX run_verdicts_pipeline ON run_verdicts (pipeline_id, round);
+
+CREATE TABLE analytics_settings (
+    owner_id        TEXT COLLATE "C" NOT NULL,
+    project         TEXT COLLATE "C" NOT NULL DEFAULT '',
+    auto_routing    BOOLEAN NOT NULL DEFAULT false,
+    exploration_pct INTEGER NOT NULL DEFAULT 10 CHECK (exploration_pct BETWEEN 0 AND 50),
+    required_tiers  TEXT NOT NULL DEFAULT '{}',
+    updated_at      TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, project)
+);
+
+CREATE TABLE route_picks (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    owner_id      TEXT COLLATE "C" NOT NULL,
+    project       TEXT COLLATE "C" NOT NULL,
+    node_id       TEXT COLLATE "C" NOT NULL,
+    role          TEXT COLLATE "C" NOT NULL DEFAULT '',
+    source        TEXT NOT NULL CHECK (source IN ('manual','auto','none')),
+    rule_id       TEXT NOT NULL DEFAULT '',
+    runner_id     TEXT COLLATE "C" NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    tier          TEXT NOT NULL DEFAULT '',
+    required_tier TEXT NOT NULL DEFAULT '',
+    explore       BOOLEAN NOT NULL DEFAULT false,
+    reason        TEXT NOT NULL,
+    run_id        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at    TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX route_picks_project ON route_picks (project, created_at);
+CREATE INDEX route_picks_at ON route_picks (created_at);
+
+CREATE TABLE analytics_dismissed (
+    owner_id     TEXT COLLATE "C" NOT NULL,
+    key          TEXT COLLATE "C" NOT NULL,
+    dismissed_at TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, key)
+);
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

@@ -246,6 +246,10 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 			h.emit(project, "agent-notify", msg.ID)
 		}
 	}
+	if in.SenderSession != "" && !in.IsHuman {
+		h.LogAction(project, in.SenderSession, h.sessionRunID(project, in.SenderSession), ActionMessage,
+			strings.TrimSpace(in.NodeID), to)
+	}
 	return SendResult{
 		ThreadID:   threadID,
 		Deliveries: deliveries,

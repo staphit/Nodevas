@@ -16,11 +16,34 @@ var AgentDefaultModel = map[string]string{
 	"antigravity": "gemini-2.5-pro",
 }
 
+func estimatePrice(model string, in, out, read, write float64) Price {
+	p := price(model, in, out, read, write)
+	p.Source = SourceEstimate
+	return p
+}
+
 // RunCost is what a run's usage cost: the CLI's own figure when it reported
-// one, else an estimate from its tokens at the first priced model of
-// u.Model, dispatchedModel and the agent's default. priced is false when
-// none of those has a price.
+// one, else its tokens at the first priced model of u.Model,
+// dispatchedModel and the agent's default. estimated marks a cost priced at
+// an estimate price or for a CLI that reports none (Codex, Gemini,
+// Antigravity). priced is false when none of those models has a price.
 func RunCost(t Table, agent, dispatchedModel string, u runnerwire.Usage) (cost float64, estimated, priced bool) {
-	// TODO(green): implement.
+	if u.CostUSD > 0 {
+		return u.CostUSD, false, true
+	}
+	tokens := Tokens{Input: int64(u.InputTokens), Output: int64(u.OutputTokens),
+		CacheRead: int64(u.CacheReadTokens), CacheWrite: int64(u.CacheWriteTokens)}
+	for _, model := range []string{u.Model, dispatchedModel, AgentDefaultModel[agent]} {
+		if model == "" || normalizeModel(model) == "default" {
+			continue
+		}
+		if p, ok := t.Lookup(model); ok {
+			// An estimate: Nodevas's own price, or a CLI that never says
+			// what it cost. A first-party list price for an agent that
+			// does report is not.
+			_, silent := AgentDefaultModel[agent]
+			return p.Cost(tokens), silent || p.Source == SourceEstimate, true
+		}
+	}
 	return 0, false, false
 }

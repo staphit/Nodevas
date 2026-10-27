@@ -20,7 +20,7 @@ func (f *runsFixture) runningRoleRun(t *testing.T, kind, role, pipelineID string
 	ctx := context.Background()
 	st := f.server.runs.Store()
 	rec, err := st.Create(ctx, runs.New{
-		Project: ".", NodeID: runsTestNode, NodeTitle: "Fix the login bug",
+		Project: f.projectName(), NodeID: runsTestNode, NodeTitle: "Fix the login bug",
 		RunnerID: f.runner.Runner.ID, RunnerName: "bea-pc", OwnerID: f.runner.Runner.OwnerID,
 		Agent: "codex", Model: "gpt-5.5", RepoID: "repo-1", RepoName: "visual-editor",
 		JobPrompt: "# Fix", CreatedBy: f.runner.Runner.OwnerID, CreatedByName: "bea",
@@ -43,7 +43,7 @@ func (f *runsFixture) reviewPipeline(t *testing.T) runs.PipelineRecord {
 	t.Helper()
 	am := runnerwire.AgentModel{Agent: "codex", Model: "gpt-5.5"}
 	p, err := f.server.runs.Store().CreatePipeline(context.Background(), runs.NewPipeline{
-		OwnerID: f.runner.Runner.OwnerID, CreatedBy: f.runner.Runner.OwnerID, Project: ".", NodeID: runsTestNode,
+		OwnerID: f.runner.Runner.OwnerID, CreatedBy: f.runner.Runner.OwnerID, Project: f.projectName(), NodeID: runsTestNode,
 		Pipeline: runnerwire.Pipeline{Implement: am, Review: am, MaxRounds: 2},
 	})
 	if err != nil {

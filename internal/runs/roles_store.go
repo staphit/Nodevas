@@ -7,8 +7,7 @@ package runs
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"math"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -181,30 +180,15 @@ func (s *Store) RoleBudgetStatus(ctx context.Context, ownerID, role string) (run
 	now := s.clock().UTC()
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT usage FROM runs WHERE owner_id = ? AND role = ? AND created_at >= ? AND created_at < ? AND kind <> ?`,
+		`SELECT usage, cost_usd, cost_settled FROM runs WHERE owner_id = ? AND role = ? AND created_at >= ? AND created_at < ? AND kind <> ?`,
 		ownerID, role, formatStamp(day), formatStamp(day.AddDate(0, 0, 1)), runnerwire.JobVerify)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		if err := addBudgetRow(rows, &out); err != nil {
 			return out, err
-		}
-		out.Used.Runs++
-		if raw == "" {
-			continue
-		}
-		var usage runnerwire.Usage
-		if json.Unmarshal([]byte(raw), &usage) != nil {
-			continue
-		}
-		if usage.CostUSD > 0 && !math.IsInf(usage.CostUSD, 0) {
-			out.Used.CostUSD += usage.CostUSD
-		}
-		if tokens := usage.InputTokens + usage.OutputTokens; tokens > 0 {
-			out.Used.Tokens += tokens
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -230,10 +214,22 @@ func (d *Dispatcher) SetEvidence(fn func(project, nodeID, runID, kind, outcome, 
 	d.evidence = fn
 }
 
-func (d *Dispatcher) recordEvidence(r Record, kind, summary string) {
-	// TODO(green): store a run_evidence row with its outcome and name the
-	// run in the journal note.
-	if d.evidence != nil {
-		d.evidence(r.Project, r.NodeID, r.ID, kind, "", summary)
+// recordEvidence stores a run_evidence row for r and notes it on the node's
+// journal, naming the run.
+func (d *Dispatcher) recordEvidence(r Record, kind, outcome, summary string) {
+	if d.store != nil {
+		if err := d.store.AddEvidence(context.Background(), r, kind, outcome, summary); err != nil {
+			slog.Warn("runs: store evidence", slog.String("run", r.ID), slog.Any("error", err))
+		}
 	}
+	if d.evidence != nil {
+		d.evidence(r.Project, r.NodeID, r.ID, kind, outcome, summary+" (run "+shortRunID(r.ID)+")")
+	}
+}
+
+func shortRunID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }

@@ -49,6 +49,8 @@ type API struct {
 	runs *runs.Dispatcher
 	// llm relays copilot model calls (WithLLM); nil drops their answers.
 	llm *runners.LLMRelay
+	// repo carries read-only repo browsing answers (WithRepo).
+	repo *runners.RepoRelay
 	// link enables device links (WithLinks; link.go); nil serves none.
 	link *LinkOptions
 }
@@ -62,6 +64,13 @@ func New(reg *runners.Registry, dispatcher *runs.Dispatcher) *API {
 // through relay. It returns a for chaining.
 func (a *API) WithLLM(relay *runners.LLMRelay) *API {
 	a.llm = relay
+	return a
+}
+
+// WithRepo relays read-only repo browsing answers (runnerwire/repobrowse.go)
+// through relay. It returns a for chaining.
+func (a *API) WithRepo(relay *runners.RepoRelay) *API {
+	a.repo = relay
 	return a
 }
 
@@ -280,6 +289,11 @@ func (a *API) connect(c *gin.Context) {
 			// more (cancelled, timed out) is dropped, never fatal.
 			if a.llm != nil {
 				_ = a.llm.Deliver(runner.ID, env)
+			}
+		case runnerwire.TypeRepoDone:
+			// A repo browse answer; one nobody waits for is dropped.
+			if a.repo != nil {
+				_ = a.repo.Deliver(runner.ID, env)
 			}
 		case runnerwire.TypeTermOut:
 			if a.runs == nil {

@@ -4,6 +4,7 @@
 package agents
 
 import (
+	"context"
 	"errors"
 	"mime"
 	"net/http"
@@ -38,6 +39,9 @@ type API struct {
 	// usage records session token usage; nil leaves the route answering 503.
 	usage       *usage.Store
 	usageNotify func(projectKey string)
+	// runUsage records an interactive run's usage from its session's
+	// report (UseRunUsage); nil records none.
+	runUsage func(ctx context.Context, runID string, models []usage.ModelUsage) error
 	// isRun reports whether a request comes from a run through its runner's
 	// proxy (UseRunCheck); nil means none does.
 	isRun func(*http.Request) bool

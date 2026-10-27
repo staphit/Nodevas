@@ -103,9 +103,39 @@ type Query struct {
 // item is one usage figure: a run, or one model of a session.
 type item struct {
 	source, id, agent, model, day string
+	role, node                    string
 	tokens                        Tokens
 	reported                      float64
+	// settled marks a run whose cost is already worked out: cost, an
+	// estimate when estimated, and no cost at all when neither is set.
+	settled   bool
+	cost      float64
+	estimated bool
 }
+
+// RoleOf is a run's role for reports: its recorded role, or for a legacy
+// run (role "") the role its kind stands for.
+func RoleOf(role, kind string) string {
+	if role != "" {
+		return role
+	}
+	switch kind {
+	case "", "implement", "revise":
+		return "executor"
+	case "review":
+		return "reviewer"
+	case "plan":
+		return "planner"
+	case "test":
+		return "tester"
+	case "judge":
+		return "qa"
+	}
+	return kind
+}
+
+// MaxNodesListed caps Report.ByNode.
+const MaxNodesListed = 50
 
 // Report sums usage over q's window: runs by the day they were created,
 // sessions by the day each model's totals were last reported. A session's
@@ -132,7 +162,7 @@ func (s *Store) Report(ctx context.Context, q Query) (Report, error) {
 	entries := map[string]*SessionEntry{}
 	var order []string
 
-	runItems, runEntries, err := s.runUsage(ctx, q, sinceStamp)
+	runItems, runEntries, err := s.runUsage(ctx, q, sinceStamp, table)
 	if err != nil {
 		return out, err
 	}
@@ -151,6 +181,11 @@ func (s *Store) Report(ctx context.Context, q Query) (Report, error) {
 		entries[key] = sessionEntries[key]
 		order = append(order, key)
 	}
+	copilotItems, err := s.copilotUsage(ctx, q, sinceStamp)
+	if err != nil {
+		return out, err
+	}
+	items = append(items, copilotItems...)
 
 	agg := newAggregate(table)
 	byDay := map[string]*bucketAcc{}
@@ -161,6 +196,10 @@ func (s *Store) Report(ctx context.Context, q Query) (Report, error) {
 		agg.add(&agg.totals, it)
 		agg.add(agg.bucket(agg.byAgent, it.agent), it)
 		agg.add(agg.bucket(agg.byModel, it.agent+"\x00"+it.model), it)
+		agg.add(agg.bucket(agg.byRole, it.role), it)
+		if it.source == SourceRun && it.node != "" {
+			agg.add(agg.bucket(agg.byNode, it.node), it)
+		}
 		if day, ok := byDay[it.day]; ok {
 			agg.add(day, it)
 		}
@@ -179,6 +218,11 @@ func (s *Store) Report(ctx context.Context, q Query) (Report, error) {
 		agent, model, _ := strings.Cut(key, "\x00")
 		return KeyBucket{Key: model, Agent: agent}
 	})
+	out.ByRole = sortedBuckets(agg.byRole, func(key string) KeyBucket { return KeyBucket{Key: key} })
+	out.ByNode = sortedBuckets(agg.byNode, func(key string) KeyBucket { return KeyBucket{Key: key} })
+	if len(out.ByNode) > MaxNodesListed {
+		out.ByNode = out.ByNode[:MaxNodesListed]
+	}
 	out.ByDay = make([]KeyBucket, 0, len(byDay))
 	for d := since; !d.After(today); d = d.AddDate(0, 0, 1) {
 		key := d.Format("2006-01-02")
@@ -210,9 +254,10 @@ func (s *Store) Report(ctx context.Context, q Query) (Report, error) {
 }
 
 // runUsage reads the window's runs that reported usage.
-func (s *Store) runUsage(ctx context.Context, q Query, since string) ([]item, []*SessionEntry, error) {
+func (s *Store) runUsage(ctx context.Context, q Query, since string, table Table) ([]item, []*SessionEntry, error) {
 	query := `
-SELECT id, node_id, node_title, agent, model, usage, created_by_name, created_at, started_at, finished_at
+SELECT id, node_id, node_title, agent, model, usage, created_by_name, created_at, started_at, finished_at,
+       role, kind, cost_usd, cost_estimated, cost_settled
   FROM runs WHERE project = ? AND created_at >= ? AND usage != ''`
 	args := []any{q.Project, since}
 	if q.Viewer != "" {
@@ -227,8 +272,11 @@ SELECT id, node_id, node_title, agent, model, usage, created_by_name, created_at
 	var items []item
 	var entries []*SessionEntry
 	for rows.Next() {
-		var id, nodeID, title, agent, model, raw, by, created, started, finished string
-		if err := rows.Scan(&id, &nodeID, &title, &agent, &model, &raw, &by, &created, &started, &finished); err != nil {
+		var id, nodeID, title, agent, model, raw, by, created, started, finished, role, kind string
+		var cost float64
+		var estimated, settled bool
+		if err := rows.Scan(&id, &nodeID, &title, &agent, &model, &raw, &by, &created, &started, &finished,
+			&role, &kind, &cost, &estimated, &settled); err != nil {
 			return nil, nil, err
 		}
 		var u runnerwire.Usage
@@ -249,8 +297,15 @@ SELECT id, node_id, node_title, agent, model, usage, created_by_name, created_at
 		tokens := Tokens{Input: max(u.InputTokens, 0), Output: max(u.OutputTokens, 0),
 			CacheRead: max(u.CacheReadTokens, 0), CacheWrite: max(u.CacheWriteTokens, 0)}
 		agent = strings.ToLower(agent)
+		if !settled {
+			cost, estimated, _ = RunCost(table, agent, model, u)
+		}
+		if math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 {
+			cost = 0
+		}
 		items = append(items, item{source: SourceRun, id: id, agent: agent, model: resolved,
-			day: dayOf(created), tokens: tokens, reported: reported})
+			day: dayOf(created), tokens: tokens, reported: reported, role: RoleOf(role, kind), node: nodeID,
+			settled: true, cost: cost, estimated: estimated})
 		last := created
 		for _, t := range []string{started, finished} {
 			if t > last {
@@ -273,7 +328,7 @@ func (s *Store) sessionUsage(ctx context.Context, q Query, since string) ([]item
 	rows, err := s.db.QueryContext(ctx, `
 SELECT session_id, model, actor_name, session_name, agent, input_tokens, output_tokens,
        cache_read_tokens, cache_write_tokens, reported_cost_usd, first_at, updated_at
-  FROM agent_session_usage WHERE project = ? AND updated_at >= ?
+  FROM agent_session_usage WHERE project = ? AND updated_at >= ? AND run_id = ''
  ORDER BY session_id, model`, q.Project, since)
 	if err != nil {
 		return nil, nil, nil, err
@@ -292,7 +347,7 @@ SELECT session_id, model, actor_name, session_name, agent, input_tokens, output_
 			return nil, nil, nil, err
 		}
 		items = append(items, item{source: SourceSession, id: id, agent: agent, model: model,
-			day: dayOf(updated), tokens: t, reported: reported})
+			day: dayOf(updated), tokens: t, reported: reported, role: SourceSession})
 		key := SourceSession + "\x00" + id
 		e := entries[key]
 		if e == nil {
@@ -362,11 +417,14 @@ type aggregate struct {
 	totals  bucketAcc
 	byAgent map[string]*bucketAcc
 	byModel map[string]*bucketAcc
+	byRole  map[string]*bucketAcc
+	byNode  map[string]*bucketAcc
 }
 
 func newAggregate(table Table) *aggregate {
 	return &aggregate{table: table, prices: map[string]*Price{},
-		byAgent: map[string]*bucketAcc{}, byModel: map[string]*bucketAcc{}}
+		byAgent: map[string]*bucketAcc{}, byModel: map[string]*bucketAcc{},
+		byRole: map[string]*bucketAcc{}, byNode: map[string]*bucketAcc{}}
 }
 
 func (g *aggregate) bucket(m map[string]*bucketAcc, key string) *bucketAcc {
@@ -399,6 +457,15 @@ func (g *aggregate) add(acc *bucketAcc, it item) {
 	b.CacheWriteTokens += it.tokens.CacheWrite
 	b.TotalTokens += it.tokens.Total()
 	switch p := g.price(it.model); {
+	case it.settled && it.cost > 0 && it.reported > 0 && !it.estimated:
+		b.ReportedCostUSD += it.cost
+	case it.settled && it.cost > 0:
+		// Priced from its tokens: what the report calls an estimate.
+		b.EstimatedCostUSD += it.cost
+	case it.settled:
+		if it.reported <= 0 {
+			b.UnpricedTokens += it.tokens.Total()
+		}
 	case it.reported > 0:
 		b.ReportedCostUSD += it.reported
 	case p != nil:
@@ -463,3 +530,36 @@ func shortID(id string) string {
 
 // round keeps costs to a millionth of a dollar, so sums print cleanly.
 func round(v float64) float64 { return math.Round(v*1e6) / 1e6 }
+
+// copilotUsage reads the window's copilot turns: the project's, or with a
+// viewer, that person's.
+func (s *Store) copilotUsage(ctx context.Context, q Query, since string) ([]item, error) {
+	query := `
+SELECT conversation_id, model, input_tokens, output_tokens, created_at
+  FROM copilot_usage WHERE project = ? AND created_at >= ?`
+	args := []any{q.Project, since}
+	if q.Viewer != "" {
+		query += ` AND account_id = ?`
+		args = append(args, q.Viewer)
+	}
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []item
+	for rows.Next() {
+		var conversation, model, created string
+		var t Tokens
+		if err := rows.Scan(&conversation, &model, &t.Input, &t.Output, &created); err != nil {
+			return nil, err
+		}
+		model = normalizeModel(model)
+		if model == "" {
+			model = UnknownModel
+		}
+		items = append(items, item{source: SourceCopilot, id: conversation, agent: SourceCopilot, model: model,
+			day: dayOf(created), tokens: t, role: SourceCopilot})
+	}
+	return items, rows.Err()
+}

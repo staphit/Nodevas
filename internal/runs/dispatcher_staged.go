@@ -333,11 +333,11 @@ func (d *Dispatcher) verifyEnded(ctx context.Context, p PipelineRecord, r Record
 		kind = runnerwire.PhaseVerifyGreen
 	}
 	if res.NoCommand {
-		d.recordEvidence(r, kind, "no test command on the runner")
+		d.recordEvidence(r, kind, EvidenceSkip, "no test command on the runner")
 		d.stagedHuman(ctx, p, r, "the runner has no test command for this repository; configure a test command (nodevas runner repo set <repo> --test-command \"...\") and continue")
 		return
 	}
-	d.recordEvidence(r, kind, fmt.Sprintf("exit %d in %.1fs at %s", res.ExitCode, float64(res.DurationMs)/1000, shortHead(head)))
+	d.recordEvidence(r, kind, passFail(res.Passed), fmt.Sprintf("exit %d in %.1fs at %s", res.ExitCode, float64(res.DurationMs)/1000, shortHead(head)))
 	output := tail(res.Output, maxReviewOutput)
 	switch phase {
 	case runnerwire.VerifyRed:
@@ -468,7 +468,7 @@ func (d *Dispatcher) guardStep(ctx context.Context, p PipelineRecord, r Record, 
 		}
 		summary = strings.Join(parts, "; ")
 	}
-	d.recordEvidence(r, runnerwire.PhaseGuard, summary)
+	d.recordEvidence(r, runnerwire.PhaseGuard, passFail(!report.Violation()), summary)
 	wf := workflowOf(p)
 	if report.Violation() && !report.Approved && !wf.Stages.Reviewer {
 		if !d.saveStaged(ctx, &p, runnerwire.PhaseGuard) {
@@ -517,7 +517,7 @@ func (d *Dispatcher) ciReported(ctx context.Context, r Record) {
 
 // ciDecided applies CI's result on the green head.
 func (d *Dispatcher) ciDecided(ctx context.Context, p PipelineRecord, r Record, notified bool) {
-	d.recordEvidence(r, runnerwire.PhaseCI, r.CIStatus+" at "+shortHead(r.PRHeadSHA))
+	d.recordEvidence(r, runnerwire.PhaseCI, ciOutcome(r.CIStatus), r.CIStatus+" at "+shortHead(r.PRHeadSHA))
 	if r.CIStatus == runnerwire.CIFailure {
 		p.Tries.CI++
 		if p.Tries.CI >= workflowOf(p).MaxGreenTries {
@@ -546,7 +546,7 @@ func (d *Dispatcher) afterCI(ctx context.Context, p PipelineRecord, r Record, li
 	}
 	risky := p.Guard != nil && (p.Guard.Violation())
 	if wf.ReviewerSkipBelowLines > 0 && lines < wf.ReviewerSkipBelowLines && !risky {
-		d.recordEvidence(r, runnerwire.PhaseReview, fmt.Sprintf("skipped: %d changed lines, under %d", lines, wf.ReviewerSkipBelowLines))
+		d.recordEvidence(r, runnerwire.PhaseReview, EvidenceSkip, fmt.Sprintf("skipped: %d changed lines, under %d", lines, wf.ReviewerSkipBelowLines))
 		d.stagedApprove(ctx, p, r, fmt.Sprintf("verified red then green; review skipped (%d lines)", lines), notified)
 		return
 	}
@@ -634,7 +634,7 @@ func (d *Dispatcher) stagedReviewEnded(ctx context.Context, p PipelineRecord, r 
 		if r.GuardAck {
 			p.Guard.Approved = true
 			p.Guard.ApprovedBy = label(runnerwire.AgentModel{Agent: r.Agent, Model: r.Model})
-			d.recordEvidence(r, runnerwire.PhaseGuard, "protected changes approved by "+p.Guard.ApprovedBy)
+			d.recordEvidence(r, runnerwire.PhaseGuard, EvidencePass, "protected changes approved by "+p.Guard.ApprovedBy)
 			if !d.saveStaged(ctx, &p, p.Phase) {
 				return
 			}
@@ -687,7 +687,7 @@ func (d *Dispatcher) stagedReviewEnded(ctx context.Context, p PipelineRecord, r 
 	}
 	tally := fmt.Sprintf("%d of %d approved, %d needed", approvals, reviewers, needed)
 	if approvals >= needed {
-		d.recordEvidence(r, runnerwire.PhaseReview, "approved by "+strings.Join(approvers, ", "))
+		d.recordEvidence(r, runnerwire.PhaseReview, EvidencePass, "approved by "+strings.Join(approvers, ", "))
 		d.stagedApprove(ctx, p, r, "verified red then green; approved by "+strings.Join(approvers, ", ")+" ("+tally+")", notified)
 		return
 	}
@@ -728,14 +728,14 @@ func (d *Dispatcher) judgeEnded(ctx context.Context, p PipelineRecord, r Record,
 	}
 	pass := r.Verdict == runnerwire.VerdictPass && len(failing) == 0
 	if pass {
-		d.recordEvidence(r, runnerwire.PhaseJudge, fmt.Sprintf("all %d criteria pass", len(r.Checks)))
+		d.recordEvidence(r, runnerwire.PhaseJudge, EvidencePass, fmt.Sprintf("all %d criteria pass", len(r.Checks)))
 		d.stagedApprove(ctx, p, r, "checklist judged: every criterion passes", notified)
 		return
 	}
 	if len(failing) == 0 {
 		failing = append(failing, "the judge gave no passing verdict")
 	}
-	d.recordEvidence(r, runnerwire.PhaseJudge, "failing: "+strings.Join(failing, "; "))
+	d.recordEvidence(r, runnerwire.PhaseJudge, EvidenceFail, "failing: "+strings.Join(failing, "; "))
 	p.Tries.Green++
 	if p.Tries.Green >= workflowOf(p).MaxGreenTries {
 		d.endPipeline(ctx, p, r, runnerwire.PipelineChangesLeft,

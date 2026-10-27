@@ -222,6 +222,7 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	registerWriteTools(server, client)
 	registerAuthoringTools(server, client)
 	registerNetworkTools(server, client)
+	registerVerdictTools(server, client)
 	registerResources(server, client)
 	registerPrompt(server, client)
 	server.AddReceivingMiddleware(compactToolList)

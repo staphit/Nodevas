@@ -217,6 +217,8 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 	// Copilot model calls on this connection (llm.go); stopped with it.
 	llm := c.newLLMSession(ctx, ownerID)
 	defer llm.stop()
+	// Repo browsing answers (repobrowse.go) go out on this connection.
+	repoOut := make(chan runnerwire.Envelope, 8)
 	ping := time.NewTicker(c.pingInterval())
 	defer ping.Stop()
 	redetect := time.NewTicker(c.redetectInterval())
@@ -266,8 +268,23 @@ func (c *Client) session(ctx context.Context) (welcomed bool, err error) {
 				llm.cancel(msg.LLMID)
 			case runnerwire.TypeDecideRequest:
 				llm.decide(msg.Decide)
+			case runnerwire.TypeRepoRequest:
+				if msg.Repo != nil {
+					req := *msg.Repo
+					go func() {
+						done := BrowseRepo(ctx, c.Config, ownerID, req)
+						select {
+						case repoOut <- runnerwire.Envelope{Type: runnerwire.TypeRepoDone, RepoDone: &done}:
+						case <-ctx.Done():
+						}
+					}()
+				}
 			}
 		case env := <-llm.out:
+			if err := c.write(ctx, conn, env); err != nil {
+				return true, err
+			}
+		case env := <-repoOut:
 			if err := c.write(ctx, conn, env); err != nil {
 				return true, err
 			}

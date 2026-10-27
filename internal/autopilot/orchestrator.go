@@ -78,6 +78,29 @@ type Options struct {
 	// Tick is how often every live autopilot is looked at regardless of
 	// updates; zero means DefaultTick.
 	Tick time.Duration
+	// Route, when set, is agent analytics' auto routing
+	// (analytics.Route): given what the owner's rules picked, it returns
+	// that, or with auto routing on and no rule, its own pick. Nil keeps the
+	// rules' pick.
+	Route RouteFunc
+}
+
+// RouteRequest is one routing decision the orchestrator asks for.
+type RouteRequest struct {
+	OwnerID, Project, NodeID, Role string
+	// Manual is what the owner's routing rules picked (RuleID "" none).
+	Manual runnerwire.RouteSuggestion
+}
+
+// RouteFunc decides a routing request; see Options.Route.
+type RouteFunc func(ctx context.Context, in RouteRequest) runnerwire.RouteSuggestion
+
+// routeWith is manual, or opts.Route's decision when it is set.
+func routeWith(ctx context.Context, route RouteFunc, in RouteRequest) runnerwire.RouteSuggestion {
+	if route == nil {
+		return in.Manual
+	}
+	return route(ctx, in)
 }
 
 // ChangedEvent is the realtime event an autopilot change sends to its
@@ -146,6 +169,7 @@ func New(opts Options) *Orchestrator {
 	o := &Orchestrator{opts: opts, kicks: make(chan string, 256), index: map[string]string{}}
 	o.rules = rulesAdvisor{
 		routing: opts.Runs.Routing,
+		route:   opts.Route,
 		kind: func(project, nodeID string) (string, []string) {
 			g, _, err := opts.Board.Graph(project)
 			if err != nil || g == nil {
@@ -1609,7 +1633,12 @@ func (o *Orchestrator) stagedPipeline(ctx context.Context, w *work, p *runnerwir
 			return runnerwire.AgentModel{}, false
 		}
 		s := runs.Suggest(rules, runs.RouteNode{Project: w.rec.Project, Role: role})
-		return s.Target, s.RuleID != "" && s.Match == runnerwire.RouteRole
+		if s.RuleID == "" {
+			s = routeWith(ctx, o.opts.Route, RouteRequest{OwnerID: w.rec.CreatedBy, Project: w.rec.Project,
+				NodeID: w.rec.GoalNodeID, Role: role, Manual: s})
+			return s.Target, s.RuleID != "" && s.Match == runnerwire.RouteAuto
+		}
+		return s.Target, s.Match == runnerwire.RouteRole
 	}
 	if out.Tester.Agent == "" {
 		out.Tester = head
