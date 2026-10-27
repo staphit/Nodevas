@@ -211,10 +211,16 @@ func runnerStopContext() (context.Context, context.CancelFunc) {
 }
 
 // stopWhenParentChanges calls stop once getppid stops answering what it did at
-// the start: the parent exited and the process was handed to another. It
-// returns at once; the polling ends with ctx.
+// the start: the parent exited and the process was handed to another. A parent
+// of 1 at the start means serve was already gone (the runner was reparented
+// to init before it looked), so that stops at once. It returns at once; the
+// polling ends with ctx.
 func stopWhenParentChanges(ctx context.Context, stop context.CancelFunc, getppid func() int, every time.Duration) {
 	parent := getppid()
+	if parent == 1 {
+		stop()
+		return
+	}
 	go func() {
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()

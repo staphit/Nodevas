@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createPreloadFailureTracker,
   parseLastReload,
   PRELOAD_RELOAD_COOLDOWN_MS,
   PRELOAD_RETRY_WINDOW_MS,
@@ -56,16 +57,33 @@ describe("shouldReloadForPreloadError", () => {
   });
 
   it("does not reload when two different chunks fail once each", () => {
-    const failures = new Map<string, number>();
-    const decide = (message: string, at: number) => {
-      const chunk = preloadChunkKey(new TypeError(message));
-      const previous = failures.get(chunk);
-      failures.set(chunk, at);
-      return shouldReloadForPreloadError(previous, at, null);
-    };
+    const previousFailure = createPreloadFailureTracker();
+    const decide = (message: string, at: number) =>
+      shouldReloadForPreloadError(previousFailure(new TypeError(message), at), at, null);
     expect(decide("Failed to fetch dynamically imported module: http://h/assets/A-1.js", now)).toBe(false);
     expect(decide("Failed to fetch dynamically imported module: http://h/assets/B-2.js", now + 500)).toBe(false);
     expect(decide("Failed to fetch dynamically imported module: http://h/assets/A-1.js", now + 1_000)).toBe(true);
+  });
+});
+
+describe("createPreloadFailureTracker", () => {
+  const now = 1_700_000_000_000;
+
+  it("treats a module failing after its stylesheet as the retry failing", () => {
+    // Vite fails a chunk with CSS on the stylesheet first; the retry skips
+    // that stylesheet and fails on the module, a different URL.
+    const previousFailure = createPreloadFailureTracker();
+    const css = new Error("Unable to preload CSS for http://h/assets/terminal-1.css");
+    const js = new TypeError("Failed to fetch dynamically imported module: http://h/assets/RunTerminal-2.js");
+    expect(shouldReloadForPreloadError(previousFailure(css, now), now, null)).toBe(false);
+    expect(shouldReloadForPreloadError(previousFailure(js, now + 1_200), now + 1_200, null)).toBe(true);
+  });
+
+  it("keeps a chunk's own earlier failure when it is the later one", () => {
+    const previousFailure = createPreloadFailureTracker();
+    const js = new TypeError("Failed to fetch dynamically imported module: http://h/assets/A-1.js");
+    previousFailure(js, now);
+    expect(previousFailure(js, now + 900)).toBe(now);
   });
 });
 

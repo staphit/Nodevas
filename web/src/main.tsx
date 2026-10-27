@@ -2,7 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
-import { parseLastReload, preloadChunkKey, shouldReloadForPreloadError } from "./preloadReload";
+import { createPreloadFailureTracker, parseLastReload, shouldReloadForPreloadError } from "./preloadReload";
 import { resetPreferences, VIEW_SELECTION_PREFERENCES } from "./preferences";
 import "./app.css";
 
@@ -15,13 +15,11 @@ import "./app.css";
 // the new build too reaches the error boundary instead of reloading forever
 // (shouldReloadForPreloadError).
 const PRELOAD_RELOAD_KEY = "nodevas-preload-reload";
-const chunkFailures = new Map<string, number>();
+const previousPreloadFailure = createPreloadFailureTracker();
 
 window.addEventListener("vite:preloadError", (event) => {
   const now = Date.now();
-  const chunk = preloadChunkKey((event as Event & { payload?: unknown }).payload);
-  const previousFailureAt = chunkFailures.get(chunk);
-  chunkFailures.set(chunk, now);
+  const previousFailureAt = previousPreloadFailure((event as Event & { payload?: unknown }).payload, now);
   try {
     const lastReloadAt = parseLastReload(sessionStorage.getItem(PRELOAD_RELOAD_KEY));
     if (!shouldReloadForPreloadError(previousFailureAt, now, lastReloadAt)) return;

@@ -164,3 +164,14 @@ func TestStopWhenParentChanges(t *testing.T) {
 		t.Fatal("did not stop when the parent changed")
 	}
 }
+
+func TestStopWhenParentIsAlreadyInit(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	stopWhenParentChanges(ctx, stop, func() int { return 1 }, time.Hour)
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("serve was already gone (parent 1) but the runner kept going")
+	}
+}

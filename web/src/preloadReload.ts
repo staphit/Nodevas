@@ -21,6 +21,28 @@ export function preloadChunkKey(payload: unknown): string {
 }
 
 /**
+ * Remembers failures per chunk and answers when the chunk behind a new
+ * vite:preloadError last failed. A chunk with a stylesheet fails first on the
+ * CSS ("Unable to preload CSS for <css url>"); its retry skips the CSS it has
+ * already seen and fails on the module itself (a different URL). So a CSS
+ * failure counts as the previous failure of whichever chunk fails next.
+ */
+export function createPreloadFailureTracker() {
+  const failures = new Map<string, number>();
+  let lastCssFailureAt: number | undefined;
+  return (payload: unknown, now: number): number | undefined => {
+    const chunk = preloadChunkKey(payload);
+    const message = payload instanceof Error ? payload.message : String(payload ?? "");
+    const own = failures.get(chunk);
+    const previous =
+      own === undefined ? lastCssFailureAt : lastCssFailureAt === undefined ? own : Math.max(own, lastCssFailureAt);
+    failures.set(chunk, now);
+    if (message.startsWith("Unable to preload CSS")) lastCssFailureAt = now;
+    return previous;
+  };
+}
+
+/**
  * Whether a vite:preloadError should reload the page.
  *
  * A chunk that will not load usually means the server was updated after this
