@@ -17,9 +17,8 @@ export interface ExplorerState {
   close: () => void;
 }
 
-export const useExplorer = create<ExplorerState>(() => ({
+export const useExplorer = create<ExplorerState>((set) => ({
   view: null,
-  // TODO(green): implement.
-  open: () => {},
-  close: () => {},
+  open: (view) => set({ view }),
+  close: () => set({ view: null }),
 }));

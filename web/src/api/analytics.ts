@@ -1,4 +1,6 @@
+import { AuthError, RequestError, req, send } from "./http";
 import type { AgentModel } from "./runs";
+import { ApiShapeError } from "./verify";
 
 /**
  * Agent analytics (internal/analytics): insights, scorecards, tiers and
@@ -197,32 +199,120 @@ export const RETENTION_MIN_DAYS = 30;
 export const RETENTION_MAX_DAYS = 3650;
 export const EXPLORATION_MAX_PCT = 50;
 
+function shape(endpoint: string, field: string, expected: string, value: unknown): never {
+  const actual = value === null ? "null" : value === undefined ? "缺少" : Array.isArray(value) ? "array" : typeof value;
+  throw new ApiShapeError(endpoint, field, expected, actual);
+}
+
+function obj(endpoint: string, value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) shape(endpoint, field, "object", value);
+  return value as Record<string, unknown>;
+}
+
+function num(endpoint: string, value: unknown, field: string): number {
+  if (typeof value !== "number" || Number.isNaN(value)) shape(endpoint, field, "number", value);
+  return value as number;
+}
+
+/** Go marshals a nil slice as null: that is an empty list. */
+function list(endpoint: string, value: unknown, field: string): unknown[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) shape(endpoint, field, "array", value);
+  return value as unknown[];
+}
+
 /** Checks an insights response. */
-export function verifyInsights(_raw: unknown, _endpoint: string): Insights {
-  // TODO(green): implement.
-  throw new Error("verifyInsights: not implemented");
+export function verifyInsights(raw: unknown, endpoint: string): Insights {
+  const body = obj(endpoint, raw, "insights");
+  num(endpoint, body.days, "days");
+  const totals = obj(endpoint, body.totals, "totals");
+  num(endpoint, totals.costUsd, "totals.costUsd");
+  num(endpoint, totals.delivered, "totals.delivered");
+  const waste = obj(endpoint, body.waste, "waste");
+  for (const field of ["costUsd", "failedCostUsd", "retriedCostUsd", "abandonedCostUsd"]) {
+    num(endpoint, waste[field], `waste.${field}`);
+  }
+  const hotspots = list(endpoint, waste.hotspots, "waste.hotspots");
+  const buckets = (field: string) => list(endpoint, body[field], field) as CostBucket[];
+  return {
+    ...(body as unknown as Insights),
+    byRole: buckets("byRole"),
+    byAgent: buckets("byAgent"),
+    byModel: buckets("byModel"),
+    byNodeType: buckets("byNodeType"),
+    waste: { ...(waste as unknown as Waste), hotspots: hotspots as WasteHotspot[] },
+    suggestions: list(endpoint, body.suggestions, "suggestions") as Suggestion[],
+  };
 }
 
 /** Checks a scorecards response. */
-export function verifyScorecards(_raw: unknown, _endpoint: string): Scorecards {
-  // TODO(green): implement.
-  throw new Error("verifyScorecards: not implemented");
+export function verifyScorecards(raw: unknown, endpoint: string): Scorecards {
+  const body = obj(endpoint, raw, "scorecards");
+  num(endpoint, body.days, "days");
+  const rows = list(endpoint, body.rows, "rows");
+  rows.forEach((row, i) => obj(endpoint, row, `rows[${i}]`));
+  return { ...(body as unknown as Scorecards), rows: rows as ScorecardRow[] };
 }
 
-function notImplemented(): Promise<never> {
-  return Promise.reject(new Error("analytics API: not implemented"));
+/** "?days=30&project=p": the project parameter only when one is named. */
+function query(params: Record<string, string | number | undefined>): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") continue;
+    parts.push(`${key}=${encodeURIComponent(String(value))}`);
+  }
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+const json = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
+
+async function applySuggestion(key: string, change: SuggestionChange, project?: string): Promise<void> {
+  const url = `/api/analytics/suggestions/apply${query({ project })}`;
+  const res = await send(url, json({ key, change }));
+  if (res.ok) return;
+  const body = (await res.json().catch(() => ({}))) as { error?: unknown; code?: unknown; suggestion?: unknown };
+  if (res.status === 409 && body.code === "STALE_SUGGESTION") {
+    const fresh = body.suggestion;
+    throw new StaleSuggestionError(fresh && typeof fresh === "object" ? (fresh as Suggestion) : null);
+  }
+  const message = typeof body.error === "string" && body.error ? body.error : `${res.status}`;
+  if (res.status === 403) throw new AuthError(403, message);
+  throw new RequestError(res.status, message, typeof body.code === "string" ? body.code : "");
 }
 
 export const analyticsApi = {
-  insights: (_days: number, _project?: string): Promise<Insights> => notImplemented(),
-  overview: (_days: number): Promise<Overview> => notImplemented(),
-  scorecards: (_days: number, _track: Track, _owner?: string): Promise<Scorecards> => notImplemented(),
-  tiers: (): Promise<TiersResponse> => notImplemented(),
-  settings: (_project?: string): Promise<AnalyticsSettings> => notImplemented(),
-  putSettings: (_settings: AnalyticsSettings, _project?: string): Promise<AnalyticsSettings> => notImplemented(),
-  routePicks: (_limit: number, _project?: string): Promise<RoutePick[]> => notImplemented(),
-  applySuggestion: (_key: string, _change: SuggestionChange, _project?: string): Promise<void> => notImplemented(),
-  dismissSuggestion: (_key: string, _project?: string): Promise<void> => notImplemented(),
-  retention: (): Promise<number> => notImplemented(),
-  putRetention: (_days: number): Promise<number> => notImplemented(),
+  insights: (days: number, project?: string): Promise<Insights> =>
+    req(`/api/analytics/insights${query({ days, project })}`, undefined, verifyInsights),
+  overview: (days: number): Promise<Overview> =>
+    req<Overview>(`/api/analytics/overview${query({ days })}`).then((o) => ({ byProject: o?.byProject ?? [] })),
+  scorecards: (days: number, track: Track, owner?: string): Promise<Scorecards> =>
+    req(`/api/analytics/scorecards${query({ days, track, owner })}`, undefined, verifyScorecards),
+  tiers: (): Promise<TiersResponse> =>
+    req<TiersResponse>("/api/analytics/tiers").then((t) => ({ ...t, required: t.required ?? {}, rows: t.rows ?? [] })),
+  settings: (project?: string): Promise<AnalyticsSettings> =>
+    req<AnalyticsSettings>(`/api/analytics/settings${query({ project })}`).then((s) => ({
+      ...s,
+      requiredTiers: s.requiredTiers ?? {},
+    })),
+  putSettings: (settings: AnalyticsSettings, project?: string): Promise<AnalyticsSettings> =>
+    req<AnalyticsSettings>(`/api/analytics/settings${query({ project })}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        autoRouting: settings.autoRouting,
+        explorationPct: settings.explorationPct,
+        requiredTiers: settings.requiredTiers,
+      }),
+    }),
+  routePicks: (limit: number, project?: string): Promise<RoutePick[]> =>
+    req<{ picks: RoutePick[] | null }>(`/api/analytics/route-picks${query({ limit, project })}`).then(
+      (r) => r?.picks ?? [],
+    ),
+  applySuggestion,
+  dismissSuggestion: (key: string, project?: string): Promise<void> =>
+    req<void>(`/api/analytics/suggestions/dismiss${query({ project })}`, json({ key })).then(() => undefined),
+  retention: (): Promise<number> => req<{ days: number }>("/api/analytics/retention").then((r) => r.days),
+  putRetention: (days: number): Promise<number> =>
+    req<{ days: number }>("/api/analytics/retention", { method: "PUT", body: JSON.stringify({ days }) }).then(
+      (r) => r?.days ?? days,
+    ),
 };

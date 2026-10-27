@@ -1,3 +1,5 @@
+import { send } from "./http";
+
 /**
  * The Explorer's data (internal/httpapi/explorer): the workspace's own files
  * and history, read-only browsing of the repos registered on the viewer's own
@@ -173,26 +175,70 @@ export class ExplorerError extends Error {
 }
 
 /** The URL of one repo route: runner and repo ids path-escaped. */
-export function repoUrl(_runnerId: string, _repoId: string, _rest: string): string {
-  // TODO(green): implement.
-  return "";
+export function repoUrl(runnerId: string, repoId: string, rest: string): string {
+  return `/api/explorer/repos/${encodeURIComponent(runnerId)}/${encodeURIComponent(repoId)}/${rest}`;
 }
 
-function notImplemented(): Promise<never> {
-  return Promise.reject(new Error("explorer API: not implemented"));
+const CODES: readonly ExplorerErrorCode[] = [
+  "RUNNER_OFFLINE",
+  "REPO_BROWSE_OFF",
+  "HIDDEN_FILE",
+  "BAD_PATH",
+  "NOT_FOUND",
+  "TIMEOUT",
+];
+
+/** GET url; a refusal becomes an ExplorerError carrying the server's code. */
+async function get<T>(url: string): Promise<T> {
+  const res = await send(url);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
+    const raw = typeof body.code === "string" ? body.code : "";
+    const code = (CODES as readonly string[]).includes(raw) ? (raw as ExplorerErrorCode) : "";
+    const message = typeof body.error === "string" && body.error ? body.error : `${res.status}`;
+    throw new ExplorerError(res.status, code, message);
+  }
+  return (await res.json()) as T;
 }
+
+const q = (value: string) => encodeURIComponent(value);
+const arr = <T>(value: T[] | null | undefined): T[] => value ?? [];
 
 export const explorerApi = {
-  workspaceFiles: (): Promise<WorkspaceListing> => notImplemented(),
-  workspaceFile: (_path: string): Promise<WorkspaceFile> => notImplemented(),
-  workspaceGit: (): Promise<WorkspaceGit> => notImplemented(),
-  workspaceCommit: (_sha: string): Promise<CommitPatch> => notImplemented(),
-  repos: (): Promise<RepoSummary[]> => notImplemented(),
-  repoTree: (_runnerId: string, _repoId: string, _path: string): Promise<RepoListing> => notImplemented(),
-  repoFile: (_runnerId: string, _repoId: string, _path: string): Promise<RepoFile> => notImplemented(),
-  repoStatus: (_runnerId: string, _repoId: string): Promise<RepoGitStatus> => notImplemented(),
-  repoLog: (_runnerId: string, _repoId: string, _limit?: number): Promise<CommitInfo[]> => notImplemented(),
-  repoDiff: (_runnerId: string, _repoId: string, _ref: string): Promise<RepoDiff> => notImplemented(),
-  agents: (): Promise<AgentsResponse> => notImplemented(),
-  sessionActions: (_sessionId: string, _limit?: number): Promise<SessionAction[]> => notImplemented(),
+  workspaceFiles: (): Promise<WorkspaceListing> =>
+    get<WorkspaceListing>("/api/explorer/workspace/files").then((r) => ({ ...r, entries: arr(r.entries) })),
+  workspaceFile: (path: string): Promise<WorkspaceFile> =>
+    get<WorkspaceFile>(`/api/explorer/workspace/file?path=${q(path)}`),
+  workspaceGit: (): Promise<WorkspaceGit> =>
+    get<WorkspaceGit>("/api/explorer/workspace/git").then((r) => ({
+      ...r,
+      pending: arr(r.pending),
+      commits: arr(r.commits),
+    })),
+  workspaceCommit: (sha: string): Promise<CommitPatch> =>
+    get<CommitPatch>(`/api/explorer/workspace/git/commit?sha=${q(sha)}`),
+  repos: (): Promise<RepoSummary[]> =>
+    get<{ repos: RepoSummary[] | null }>("/api/explorer/repos").then((r) => arr(r.repos)),
+  repoTree: (runnerId: string, repoId: string, path: string): Promise<RepoListing> =>
+    get<RepoListing>(repoUrl(runnerId, repoId, `tree?path=${q(path)}`)).then((r) => ({ ...r, entries: arr(r.entries) })),
+  repoFile: (runnerId: string, repoId: string, path: string): Promise<RepoFile> =>
+    get<RepoFile>(repoUrl(runnerId, repoId, `file?path=${q(path)}`)),
+  repoStatus: (runnerId: string, repoId: string): Promise<RepoGitStatus> =>
+    get<RepoGitStatus>(repoUrl(runnerId, repoId, "git/status")).then((r) => ({ ...r, entries: arr(r.entries) })),
+  repoLog: (runnerId: string, repoId: string, limit = 30): Promise<CommitInfo[]> =>
+    get<{ commits: CommitInfo[] | null }>(repoUrl(runnerId, repoId, `git/log?limit=${limit}`)).then((r) =>
+      arr(r.commits),
+    ),
+  repoDiff: (runnerId: string, repoId: string, ref: string): Promise<RepoDiff> =>
+    get<RepoDiff>(repoUrl(runnerId, repoId, `git/diff?ref=${q(ref)}`)),
+  agents: (): Promise<AgentsResponse> =>
+    get<AgentsResponse>("/api/explorer/agents").then((r) => ({
+      live: arr(r.live),
+      external: arr(r.external),
+      recent: arr(r.recent),
+    })),
+  sessionActions: (sessionId: string, limit = 200): Promise<SessionAction[]> =>
+    get<{ actions: SessionAction[] | null }>(`/api/explorer/sessions/${q(sessionId)}/actions?limit=${limit}`).then((r) =>
+      arr(r.actions),
+    ),
 };

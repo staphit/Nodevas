@@ -88,22 +88,31 @@ export function poseLabel(t: Translate, pose: Actor["pose"]): string {
   return t(`game.pose.${pose}`);
 }
 
+const BUILTIN_ROLES: ReadonlySet<string> = new Set(["planner", "qa", "tester", "executor", "reviewer", "researcher"]);
+
+/** "Acts as Tester.": the role a run acts in; a session has none. */
+function roleSentence(t: Translate, role: string): string {
+  return t("game.label.role", { role: BUILTIN_ROLES.has(role) ? t(`roles.name.${role}`) : role });
+}
+
 /** One sentence for a character: who, where, doing what, on which node. */
 export function actorLabel(t: Translate, actor: Actor, room: string): string {
+  const who = agentWho(actor.agent, actor.model);
   const parts = [
     actor.nodeTitle
       ? t("game.actor.label", {
-          who: agentWho(actor.agent, actor.model),
+          who,
           room,
           pose: poseLabel(t, actor.pose),
           node: actor.nodeTitle,
         })
       : t("game.actor.labelNoNode", {
-          who: agentWho(actor.agent, actor.model),
+          who,
           room,
           pose: poseLabel(t, actor.pose),
         }),
   ];
+  if (actor.role) parts.push(roleSentence(t, actor.role));
   if (actor.ask) parts.push(t("game.actor.asks", { question: excerpt(actor.ask.question, 80) }));
   if (actor.heldMail.length) parts.push(t("game.actor.held", { count: actor.heldMail.length }));
   if (actor.bubble) parts.push(t("game.actor.says", { text: excerpt(actor.bubble.body, 80) }));

@@ -20,6 +20,8 @@ import { RolesSettings } from "../roles/RolesSettings";
 import { workflowSummary } from "../roles/stageLabels";
 import { WorkflowStagesSettings } from "../roles/WorkflowStagesSettings";
 import { useApp, usePreference } from "../store";
+import AnalyticsSettings from "../analytics/AnalyticsSettings";
+import { useAnalytics } from "../analytics/analyticsStore";
 import { UsageModal } from "../usage/UsageModal";
 import { formatTokens, formatUSD } from "../usage/usageFormat";
 import { useUsage } from "../usage/usageStore";
@@ -83,6 +85,7 @@ function Advanced({
   const usage = useUsage((s) => s.report);
   const project = useApp((s) => s.activeProject);
   const workflow = useApp((s) => s.graph?.workflow ?? null);
+  const suggestions = useAnalytics((s) => s.insights?.suggestions.length ?? null);
 
   // The values are fetched when they are shown, as the parts themselves do.
   useEffect(() => {
@@ -91,7 +94,7 @@ function Advanced({
     void useRouting.getState().load();
   }, [open]);
 
-  const items = 5 + (project ? 1 : 0) + (admin ? 1 : 0);
+  const items = 6 + (project ? 1 : 0) + (admin ? 1 : 0);
   return (
     <section className="settings-page-pane settings-card settings-advanced" aria-label={t("settingsPage.advanced")}>
       <button
@@ -165,6 +168,25 @@ function Advanced({
             onToggle={() => toggleRow("usage")}
           >
             <UsageModal onClose={leave} />
+          </SettingsDisclosure>
+          <SettingsDisclosure
+            label={t("settingsPage.part.analytics")}
+            value={
+              suggestions === null
+                ? ""
+                : suggestions === 0
+                  ? t("analytics.valueNone")
+                  : t("analytics.value", { count: suggestions })
+            }
+            open={row === "analytics"}
+            onToggle={() => toggleRow("analytics")}
+          >
+            <AnalyticsSettings
+              isAdmin={Boolean(!teamServer || viewer?.role === "admin")}
+              onOpenSettings={(target) => {
+                if (target === "stages" && project) toggleRow("stages");
+              }}
+            />
           </SettingsDisclosure>
           {admin && (
             <SettingsDisclosure

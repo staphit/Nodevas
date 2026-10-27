@@ -90,6 +90,8 @@ export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
     a.actor.bubble?.id === b.actor.bubble?.id &&
     a.actor.energy?.used === b.actor.energy?.used &&
     a.actor.energy?.cap === b.actor.energy?.cap &&
+    a.actor.role === b.actor.role &&
+    a.actor.testState === b.actor.testState &&
     sameTargets(a.actor.actions, b.actor.actions) &&
     a.row === b.row &&
     a.titleOf === b.titleOf
@@ -98,6 +100,13 @@ export function sameDesk(a: AgentDeskProps, b: AgentDeskProps): boolean {
 
 export function sameTargets(a: ClickTarget[], b: ClickTarget[]): boolean {
   return a.length === b.length && a.every((target, i) => JSON.stringify(target) === JSON.stringify(b[i]));
+}
+
+const BADGED_ROLES: ReadonlySet<string> = new Set(["planner", "qa", "tester", "executor", "reviewer", "researcher"]);
+
+/** A role's badge: a built-in's own, "custom" for any other. */
+export function roleBadgeKey(role: string): string {
+  return BADGED_ROLES.has(role) ? role : "custom";
 }
 
 /** Targets a run's own menu does not already cover: a question it asked, a
@@ -182,6 +191,18 @@ export const AgentDesk = memo(function AgentDesk({
             // The loop's length, for the frames' steps() animation.
             style={loop ? ({ ["--px-loop" as string]: `${loop}ms` } as CSSProperties) : undefined}
           />
+          {actor.role && (
+            <span className={`px-badge is-role role--${roleBadgeKey(actor.role)}`} aria-hidden="true">
+              {t(`warroom.roleBadge.${roleBadgeKey(actor.role)}`)}
+            </span>
+          )}
+          {actor.testState && (
+            <span
+              className={`px-badge is-test is-${actor.testState}`}
+              role="img"
+              aria-label={t(`warroom.test.${actor.testState}`)}
+            />
+          )}
           {actor.heldMail.length > 1 && (
             <span className="px-badge is-mail" aria-hidden="true">
               {actor.heldMail.length}

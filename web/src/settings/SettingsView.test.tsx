@@ -228,7 +228,8 @@ describe("Settings", () => {
       .getAllByRole("button", { expanded: false })
       .concat(row)
       .map((button) => button.querySelector("span")?.textContent ?? "");
-    expect(labels).toContain("Usage");
+    // The Usage row's own label is "Usage details".
+    expect(labels).toContain("Usage details");
     expect(labels).toContain("Agent performance");
 
     const search = within(nav()).getByRole("searchbox", { name: "Search settings" });

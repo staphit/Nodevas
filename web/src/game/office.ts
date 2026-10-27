@@ -12,6 +12,7 @@ import type { WaitingItem } from "../station/waiting";
 import { areaOf } from "./areas";
 import { joinSessions } from "./joins";
 import { resolveOfficeStyle } from "./officeStyle";
+import { roleOfRun, testStateOf } from "./testState";
 import { finishedRunStaysInRoom, runPose, sessionPose } from "./pose";
 import { bubbleVisible, sessionOnline } from "./presence";
 import type { Actor, ClickTarget, Energy, Meeting, MeetingItem, ProjectOffice, SwappedFrom } from "./world";
@@ -282,9 +283,17 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
   const cap = inputs.budget?.budget.dailyTokens;
   const capOf = (used: number): Energy => (cap && cap > 0 ? { used, cap } : { used });
   const runners = new Map(inputs.runners.map((runner) => [runner.id, runner]));
+  const byPipeline = new Map<string, Run[]>();
+  for (const run of runs) {
+    if (!run.pipelineId) continue;
+    const list = byPipeline.get(run.pipelineId);
+    if (list) list.push(run);
+    else byPipeline.set(run.pipelineId, [run]);
+  }
 
   const actors: Actor[] = [];
   for (const run of seated) {
+    const role = roleOfRun(run);
     const runner = runners.get(run.runnerId);
     // A runner the caller cannot list (an administrator looking at someone
     // else's): its state is unknown, so it never reads offline.
@@ -323,6 +332,8 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
       swappedFrom: swappedFrom(run, byId),
       energy: run.usage ? capOf(totalTokens(run)) : undefined,
       pipelineId: run.pipelineId || undefined,
+      role,
+      testState: run.pipelineId ? testStateOf(role, byPipeline.get(run.pipelineId) ?? []) : undefined,
       target,
       actions,
     });

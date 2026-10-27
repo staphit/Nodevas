@@ -163,7 +163,7 @@ export interface Workflow {
   judge?: "" | "checklist";
 }
 
-export type Capability = "read" | "claim" | "status" | "body" | "create" | "link" | "meta" | "acceptance" | "message";
+export type Capability = "read" | "claim" | "status" | "body" | "create" | "link" | "meta" | "acceptance" | "message" | "verdict";
 
 /** A project's stored (sparse) agent role: a custom role, or a built-in's tool/type override. */
 export interface AgentRoleDef {

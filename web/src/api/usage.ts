@@ -159,9 +159,8 @@ export function normalizeUsage(raw: unknown): UsageReport {
       firstAt: str(s.firstAt),
       lastAt: str(s.lastAt),
     })),
-    // TODO(green): read byRole and byNode.
-    byRole: [],
-    byNode: [],
+    byRole: list(r.byRole, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
+    byNode: list(r.byNode, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
   };
 }
 

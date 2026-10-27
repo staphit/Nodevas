@@ -23,6 +23,7 @@ export const CAPABILITIES: readonly Capability[] = Object.freeze([
   "meta",
   "acceptance",
   "message",
+  "verdict",
 ] satisfies Capability[]);
 
 /** Tool → the capabilities it needs. */
@@ -49,6 +50,7 @@ export const TOOL_CAPABILITIES: Readonly<Record<string, readonly Capability[]>> 
   send_message: ["message"],
   list_team: ["message"],
   save_attachment: ["message"],
+  submit_verdict: ["verdict"],
 } satisfies Record<string, Capability[]>);
 
 /** The tools a role can be given, in catalog order. */
@@ -82,6 +84,7 @@ export const TOOL_TOKEN_COST: Readonly<Record<string, number>> = Object.freeze({
   send_message: 400,
   list_team: 100,
   save_attachment: 300,
+  submit_verdict: 300,
 });
 
 /** "~0.5k tok" */
@@ -120,7 +123,7 @@ export const BUILTIN_AGENT_ROLES: readonly AgentRole[] = Object.freeze([
     "qa",
     "QA",
     "orchestrator",
-    ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message"],
+    ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message", "submit_verdict"],
     ["task", "scene", "event"],
     ["goal"],
   ),
@@ -133,7 +136,7 @@ export const BUILTIN_AGENT_ROLES: readonly AgentRole[] = Object.freeze([
     ["task", "scene", "event"],
     [],
   ),
-  builtin("reviewer", "Reviewer", "worker", ["get_node", "check_inbox", "send_message"], [], []),
+  builtin("reviewer", "Reviewer", "worker", ["get_node", "check_inbox", "send_message", "submit_verdict"], [], []),
   builtin(
     "researcher",
     "Researcher",

@@ -38,6 +38,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   { label: "stages.title", page: "agents", row: "stages", needs: ["workstation"] },
   { label: "runners.autoAccept", page: "agents", row: "autoAccept", needs: ["workstation"] },
   { label: "settingsPage.usageDetails", page: "agents", row: "usage", needs: ["workstation"] },
+  { label: "settingsPage.part.analytics", page: "agents", row: "analytics", needs: ["workstation"] },
   { label: "runners.link.accessTitle", page: "agents", row: "accessToken", needs: ["workstation", "admin"] },
   { label: "settings.workflow", page: "project", row: "statuses" },
   { label: "settings.nodeTypes", page: "project", row: "nodeTypes" },

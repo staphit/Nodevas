@@ -852,6 +852,56 @@
   left: 0;
   bottom: calc(4 * var(--px));
 }
+/* The run's role, top right of its desk: a short pixel-font tag. */
+.px-badge.is-role {
+  right: 0;
+  top: calc(2 * var(--px));
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 11px;
+  letter-spacing: 0.02em;
+}
+.px-badge.is-role.role--planner {
+  background: #e3d4f7;
+  color: #3d2766;
+}
+.px-badge.is-role.role--qa {
+  background: #f7e0c4;
+  color: #5c3410;
+}
+.px-badge.is-role.role--tester {
+  background: #d9ecf7;
+  color: #12405c;
+}
+.px-badge.is-role.role--executor {
+  background: #dff3e4;
+  color: #1d4d2b;
+}
+.px-badge.is-role.role--reviewer {
+  background: #f7f0c4;
+  color: #4d4310;
+}
+.px-badge.is-role.role--researcher {
+  background: #f2d9e6;
+  color: #5c1d3c;
+}
+/* The pipeline's latest test run: a red or green lamp beside the role. */
+.px-badge.is-test {
+  right: calc(1 * var(--px));
+  top: calc(6 * var(--px));
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-width: 2px;
+  border-radius: 0;
+}
+.px-badge.is-test.is-red {
+  background: #e5534b;
+}
+.px-badge.is-test.is-green {
+  background: #3fb950;
+}
+
 /* What the agent just said, for a few seconds. */
 .px-say {
   position: absolute;

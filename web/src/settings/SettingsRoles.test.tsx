@@ -61,12 +61,12 @@ describe("Settings › Agents › Roles and Workflow stages", () => {
     expect(SETTINGS_PLACES[stages]).toEqual({ page: "agents", row: "stages" });
   });
 
-  it("counts six items under Advanced", async () => {
+  it("counts seven items under Advanced", async () => {
     act(() => openSettings("workstation"));
     render(<SettingsView />);
     expect(within(nav()).getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
     const advanced = screen.getByRole("region", { name: "Advanced" });
-    expect(within(advanced).getByRole("button", { name: /^Advanced/ })).toHaveTextContent("6 items");
+    expect(within(advanced).getByRole("button", { name: /^Advanced/ })).toHaveTextContent("7 items");
   });
 
   it("opens the Roles row", async () => {

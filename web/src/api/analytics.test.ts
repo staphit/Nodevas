@@ -58,7 +58,8 @@ describe("analytics API", () => {
     const fetch = mockFetch(INSIGHTS);
     await analyticsApi.insights(30);
     await analyticsApi.insights(7, "game one");
-    fetch.mockResolvedValue(new Response(JSON.stringify(SCORECARDS)));
+    // A fresh Response per call: a body can be read once.
+    fetch.mockImplementation(async () => new Response(JSON.stringify(SCORECARDS)));
     await analyticsApi.scorecards(30, "code");
     await analyticsApi.scorecards(30, "all", "u-cal");
     expect(urls(fetch)).toEqual([

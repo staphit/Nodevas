@@ -6,6 +6,7 @@ import {
   MAX_RUN_PROMPT_CHARS,
   MAX_PIPELINE_ROUNDS,
   RequestError,
+  ROUTE_AUTO,
   type Actor,
   type AgentModel,
   type RouteSuggestion,
@@ -273,9 +274,22 @@ export function DispatchDialog({
     suggestion?.value ??
     routingRules?.find((rule) => rule.id === suggestion?.ruleId)?.value ??
     "";
+  // An auto-routing pick (analytics): no rule of the viewer's chose it.
+  const autoPick = suggestion?.match === ROUTE_AUTO;
   const ruleNote = suggestion
-    ? t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
+    ? autoPick
+      ? t("runs.route.auto")
+      : t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
     : "";
+  // The pick is linked to the run only when the run follows it.
+  const routePick =
+    autoPick &&
+    suggestion?.ruleId.startsWith(`${ROUTE_AUTO}:`) &&
+    agent?.kind === suggestion.target.agent &&
+    model === (suggestion.target.model ?? "") &&
+    (!suggestion.runnerId || runner?.id === suggestion.runnerId)
+      ? suggestion.ruleId.slice(ROUTE_AUTO.length + 1)
+      : "";
   const wanted = suggestion ? (suggestion.pipeline?.implement ?? suggestion.target) : undefined;
   const ruleMisses: string[] = [];
   if (suggestion && runner) {
@@ -332,6 +346,7 @@ export function DispatchDialog({
             : {}),
         ...(overrideOn ? { override: overrideValue } : {}),
         ...(mode === "interactive" ? { mode } : {}),
+        ...(routePick ? { routePick } : {}),
       });
       onCreated(run);
     } catch (caught) {

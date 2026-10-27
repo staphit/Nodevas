@@ -17,6 +17,7 @@ export type SettingsSection =
   | "workstation"
   | "runners"
   | "usage"
+  | "analytics"
   | "budget"
   | "routing"
   | "roles"
@@ -43,6 +44,7 @@ export type SettingsRow =
   | "stages"
   | "autoAccept"
   | "usage"
+  | "analytics"
   | "accessToken"
   | "statuses"
   | "nodeTypes"
@@ -60,6 +62,7 @@ export const ADVANCED_ROWS: readonly SettingsRow[] = [
   "stages",
   "autoAccept",
   "usage",
+  "analytics",
   "accessToken",
 ];
 
@@ -82,6 +85,7 @@ export const SETTINGS_PLACES: Record<SettingsSection, SettingsPlace> = {
   // Agents › Advanced until that section is free to change.
   stages: { page: "agents", row: "stages" },
   usage: { page: "agents", row: "usage" },
+  analytics: { page: "agents", row: "analytics" },
   project: { page: "project" },
   backup: { page: "project", row: "backup" },
   account: { page: "account" },
