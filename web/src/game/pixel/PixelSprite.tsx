@@ -1,6 +1,6 @@
 // Paints placed sprites into one SVG at whole art pixels: crispEdges, every
 // rectangle on the pixel grid, the CSS size an integer multiple of the art
-// (pixel.css: --px). Colours are tokens, so nothing here depends on the
+// (warroom/warroom.css: --px). Colours are tokens, so nothing here depends on the
 // theme. Frames of an animation are groups the stylesheet takes turns
 // showing (steps(), no script); a still picture shows frame 0.
 

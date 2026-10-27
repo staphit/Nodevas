@@ -7,7 +7,7 @@ import { useApp } from "../../store";
 import { GameActionsProvider } from "../GameActions";
 import { buildOffice, type OfficeInputs } from "../office";
 import { ago, makeAsk, makeMessage, makeRun, makeRunner, makeSession, NOW } from "../testFixtures";
-import WarRoomStage from "./WarRoom";
+import WarRoomStage, { artPixel } from "./WarRoom";
 
 const titles = new Map([
   ["login", "Login form"],
@@ -185,5 +185,19 @@ describe("the pixel war room", () => {
     mount(office({ runners: [runner("rn1", "mac-mini", 1)] }));
     expect(screen.queryByRole("region", { name: "Room mac-mini" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("The war room shows your agent workstation");
+  });
+});
+
+describe("artPixel", () => {
+  it("is a whole number of device pixels, near three CSS pixels", () => {
+    for (const ratio of [1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+      const devicePixels = artPixel(ratio) * ratio;
+      expect(Math.abs(devicePixels - Math.round(devicePixels))).toBeLessThan(1e-9);
+      expect(Math.abs(artPixel(ratio) - 3)).toBeLessThanOrEqual(0.5);
+    }
+    expect(artPixel(1)).toBe(3);
+    expect(artPixel(2)).toBe(3);
+    expect(artPixel(1.5)).toBeCloseTo(10 / 3);
+    expect(artPixel(0)).toBe(3);
   });
 });

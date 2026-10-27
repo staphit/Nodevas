@@ -1,6 +1,7 @@
 /* The pixel war room. Loaded with its chunk only (Station imports the room
- * lazily). One art pixel is --px CSS pixels, a whole number, so every sprite
- * is drawn on the pixel grid and nothing is scaled by a fraction. Colours are
+ * lazily). One art pixel is --px CSS pixels: 3 here, and a whole number of
+ * device pixels as WarRoom.tsx sets it (artPixel), so every sprite is drawn
+ * on the device's pixel grid and nothing is scaled by a fraction. Colours are
  * the --px-* tokens (pixel/palette.ts), redefined for [data-theme="dark"].
  * Every animated state has a still picture that says the same (frame 0),
  * and reduced motion, a background tab and a room with its lights off stop

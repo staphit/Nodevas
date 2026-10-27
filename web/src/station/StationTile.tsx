@@ -26,6 +26,7 @@ export function StationTile({
   badge,
   action,
   onOpen,
+  className,
   children,
 }: {
   /** The dot's status class: a run's status, "running", "paused", "off". */
@@ -41,14 +42,16 @@ export function StationTile({
   action?: ReactNode;
   /** The title opens this, when the tile has no menu to say it. */
   onOpen?: () => void;
-  /** Anything else, under the meta line (a progress bar, an error). */
+  /** Extra classes on the tile. */
+  className?: string;
+  /** Anything else, under the meta line (a progress bar, an error, buttons). */
   children?: ReactNode;
 }) {
   const graph = useApp((s) => s.graph);
   const kind = nodeId ? graph?.nodes?.find((node) => node.id === nodeId)?.kind : undefined;
   const type = nodeId ? nodeTypeById(graph, kind) : null;
   return (
-    <li className={`station-tile dot-${dot}`}>
+    <li className={`station-tile dot-${dot}${className ? ` ${className}` : ""}`}>
       <div className="col-card-head">
         <span className={`station-dot ${dot === "off" ? "is-off" : `status-${dot}`}`} aria-hidden="true" />
         {onOpen ? (

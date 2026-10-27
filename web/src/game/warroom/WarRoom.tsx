@@ -10,7 +10,7 @@
 // over a few frames, off under reduced motion and in a background tab. A
 // heartbeat only redraws a desk whose agent changed (PixelDesk is memoised).
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import "./warroom.css";
 
@@ -34,6 +34,38 @@ export interface WarRoomProps {
   rowOf: (runId: string) => ControlRow | undefined;
 }
 
+/** Art pixels per CSS pixel aimed for; the real size rounds to whole device
+ * pixels. */
+const ART_PIXEL = 3;
+
+/** One art pixel in CSS pixels: the nearest whole number of device pixels
+ * to ART_PIXEL CSS pixels, so at a ratio of 1.25 or 1.5 (or a browser zoom)
+ * every art pixel is the same width instead of alternating 4 and 5. */
+export function artPixel(ratio: number): number {
+  const dpr = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  return Math.max(1, Math.round(ART_PIXEL * dpr)) / dpr;
+}
+
+/** artPixel for this screen, followed across a zoom or a move to another
+ * monitor. */
+function useArtPixel(): number {
+  const ratio = () => (typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
+  const [px, setPx] = useState(() => artPixel(ratio()));
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    let list: MediaQueryList | null = null;
+    const watch = () => {
+      list?.removeEventListener?.("change", watch);
+      setPx(artPixel(ratio()));
+      list = window.matchMedia(`(resolution: ${ratio()}dppx)`);
+      list.addEventListener?.("change", watch);
+    };
+    watch();
+    return () => list?.removeEventListener?.("change", watch);
+  }, []);
+  return px;
+}
+
 /** The room as Station shows it: still under reduced motion, paused in a
  * background tab, and a way back when the workstation is hidden. */
 export default function WarRoomStage(props: WarRoomProps) {
@@ -41,8 +73,14 @@ export default function WarRoomStage(props: WarRoomProps) {
   const hidden = usePageHidden();
   const workstation = useWorkstationVisible();
   const announcement = useOfficeAnnouncements(props.office, workstation);
+  const px = useArtPixel();
   return (
-    <div className="px-office" data-motion={reduced ? "reduced" : "full"} data-paused={hidden ? "true" : undefined}>
+    <div
+      className="px-office"
+      data-motion={reduced ? "reduced" : "full"}
+      data-paused={hidden ? "true" : undefined}
+      style={{ ["--px" as string]: `${px}px` } as CSSProperties}
+    >
       {workstation ? (
         <>
           <WarRoom {...props} />

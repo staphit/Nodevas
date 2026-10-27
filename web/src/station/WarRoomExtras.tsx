@@ -8,12 +8,13 @@ import { useMemo, useState } from "react";
 import type { AutopilotView } from "../api";
 import { AutopilotStatusChip } from "../autopilot/AutopilotPanel";
 import { analyzeGraph } from "../analysis";
+import { useViewer } from "../components/SignIn";
 import { IconMore } from "../icons";
 import { useI18n } from "../i18n";
 import { RunStatusBadge } from "../runs/NodeRuns";
 import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
-import type { ControlRow } from "./control";
+import { canSteer, type ControlRow } from "./control";
 import { waitingOnPrerequisites } from "./prerequisites";
 import { AutopilotMenu, openNode, RunMenu, runMeta, useAutopilotError } from "./runMenuItems";
 import { StationTile, StationTiles } from "./StationTile";
@@ -70,15 +71,20 @@ function CancelErrors({ live }: { live: ControlRow[] }) {
 function AutopilotTile({ view, title }: { view: AutopilotView; title: string }) {
   const { t } = useI18n();
   const error = useAutopilotError(view);
+  const viewer = useViewer();
   const { success, total } = view.run.counts;
   const progress = t("station.goals.progress", { done: success, total });
+  // Someone else's autopilot has no pause or cancel here: say whose it is.
+  const meta = canSteer(viewer, view.run.createdBy)
+    ? progress
+    : `${progress} · ${t("station.control.startedBy", { name: view.run.createdByName || view.run.createdBy })}`;
   const label = t("station.progress.actions", { name: title });
   return (
     <StationTile
       dot={view.run.status === "paused" ? "paused" : "running"}
       title={title}
       nodeId={view.run.goalNodeId}
-      meta={progress}
+      meta={meta}
       badge={<AutopilotStatusChip status={view.run.status} />}
       action={
         <AutopilotMenu

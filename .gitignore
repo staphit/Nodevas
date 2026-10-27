@@ -40,9 +40,8 @@ cover.out
 # Local exports
 *.veproj
 
-# Local workspaces (except the shipped example view packs)
+# Local workspaces
 /examples/*
-!/examples/view-packs/
 /demo/日程/
 
 # Per-project recovery state

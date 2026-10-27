@@ -378,38 +378,28 @@
 }
 
 /* Waiting on you */
-.station-waiting-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* A waiting tile says what it waits for in up to three lines (a question
+   is worth reading before answering it), its buttons at the bottom. */
+.station-waiting-item .station-tile-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.station-waiting-item {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--text);
+.station-waiting-item .col-card-head {
+  align-items: flex-start;
 }
-.station-waiting-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  line-height: 1.4;
-}
-.station-waiting-sub {
-  font-size: 12px;
-  color: var(--text-2);
+.station-waiting-item .col-card-head .station-dot {
+  margin-top: 4px;
 }
 .station-waiting-actions {
   display: flex;
-  flex: 0 0 auto;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
 }
 /* Something waits: the card says so before its rows are read. */
 .station-waiting.is-attention {
@@ -505,7 +495,8 @@
 }
 .station-tile.dot-queued,
 .station-tile.dot-offered,
-.station-tile.dot-paused {
+.station-tile.dot-paused,
+.station-tile.dot-waiting {
   border-top-color: var(--st-ready-fg);
 }
 .station-tile.dot-failed {
@@ -568,7 +559,8 @@
 }
 .station-dot.status-queued,
 .station-dot.status-offered,
-.station-dot.status-paused {
+.station-dot.status-paused,
+.station-dot.status-waiting {
   background: var(--st-ready-fg);
 }
 .station-dot.status-failed {
@@ -821,19 +813,13 @@
     overflow: visible;
   }
 }
-/* Phone: tighter, and a waiting row's buttons go under its text. */
+/* Phone: tighter. */
 @media (max-width: 760px) {
   .station {
     padding: 8px;
   }
   .station-lane {
     grid-template-columns: 72px minmax(0, 1fr);
-  }
-  .station-waiting-item {
-    flex-wrap: wrap;
-  }
-  .station-waiting-actions {
-    justify-content: flex-start;
   }
 }
 /* The top bar is full at these widths: the switch keeps its icons (and the

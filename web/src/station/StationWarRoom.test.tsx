@@ -17,6 +17,13 @@ import { StationControlReport, StationPauseButton } from "./StationControl";
 import { useStation } from "./stationStore";
 import { StationWarRoom } from "./StationWarRoom";
 
+// Who is signed in: nobody (a server without accounts) unless a test says.
+let viewer: { id: string; name: string; role: string } | null = null;
+vi.mock("../components/SignIn", async (original) => ({
+  ...(await original<typeof import("../components/SignIn")>()),
+  useViewer: () => viewer,
+}));
+
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
     id: "run1",
@@ -125,6 +132,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  viewer = null;
 });
 
 /** Station's war room section over the stores, as StationView mounts it
@@ -228,6 +236,19 @@ describe("StationWarRoom", () => {
     expect(useStation.getState().goal).toBe("goal");
     fireEvent.click(within(menuOf(actions)).getByRole("menuitem", { name: "Pause autopilot" }));
     await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "pause"));
+  });
+
+  it("says whose someone else's autopilot is, and offers no steering", async () => {
+    viewer = { id: "u2", name: "bob", role: "member" };
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
+    mount();
+
+    const tiles = await screen.findByRole("list", { name: "Autopilots" });
+    const [pilot] = within(tiles).getAllByRole("listitem");
+    expect(within(pilot).getByText("1 of 4 tasks done · Started by alice")).toBeInTheDocument();
+    const menu = menuOf(within(pilot).getByRole("button", { name: "Actions for Ship login" }));
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Open goal “Ship login”"]);
   });
 
   it("asks the Runs tab's question before cancelling a run", async () => {
