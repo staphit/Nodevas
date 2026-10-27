@@ -59,45 +59,18 @@ type UserRecord struct {
 // from the CLI, from another process, or from an operator typing into DB
 // Browser — revokes the sessions it authorised at once rather than at the next
 // restart. The file store bought that with a digest check on every
-// authentication; a query against a local SQLite page cache is cheaper than
-// that was, so the guarantee is kept by simply not remembering anything.
+// authentication; an indexed query is cheaper than that was, so the guarantee
+// is kept by simply not remembering anything.
 type UserStore struct {
 	database *db.DB
-	// owned records that this store opened the database and may close it. A
-	// handle passed in by a caller belongs to that caller.
-	owned bool
 	// keyPath is the machine key that seals authenticator secrets at rest; ""
 	// means secrets.MachineKeyPath. See UseSecretKey and totp_store.go.
 	keyPath string
 }
 
-// NewUserStore opens the workspace database and prepares the accounts table.
-//
-// NewUserStoreDB is preferred wherever the caller already has a handle: SQLite
-// admits one writer, and a second *db.DB is a second connection pool queueing
-// against the first for it instead of behind it in Go.
-func NewUserStore(workspace string) (*UserStore, error) {
-	database, err := db.Open(workspace)
-	if err != nil {
-		return nil, fmt.Errorf("open account database: %w", err)
-	}
-	store := NewUserStoreDB(database)
-	store.owned = true
-	if err := store.EnsureAdmin(); err != nil {
-		database.Close()
-		return nil, err
-	}
-	return store, nil
-}
-
-// Close releases the database if this store opened it. A store built with
-// NewUserStoreDB does not close the caller's handle out from under it.
-func (u *UserStore) Close() error {
-	if !u.ready() || !u.owned {
-		return nil
-	}
-	return u.database.Close()
-}
+// Close is a no-op kept for callers that deferred it: the store never owns
+// its handle, the caller that opened the database closes it.
+func (u *UserStore) Close() error { return nil }
 
 // NewUserStoreDB wraps an already-open database. The caller keeps ownership of
 // the handle and should call EnsureAdmin once at startup.
@@ -190,8 +163,8 @@ func (u *UserStore) accounts(ctx context.Context, where accountFilter, limit int
 		return nil, nil
 	}
 	if limit <= 0 {
-		// SQLite reads a negative LIMIT as no limit at all, which is the exact
-		// opposite of what anyone passing one would mean. Fail closed: a caller
+		// A negative LIMIT is an error on PostgreSQL and was "no limit at all"
+		// on SQLite; neither is what anyone passing one would mean. Fail closed: a caller
 		// that asked for no rows gets none rather than the whole table.
 		return nil, nil
 	}
@@ -485,15 +458,9 @@ func (u *UserStore) SetPassword(ctx context.Context, name, password string) erro
 }
 
 // isEmailConflict reports whether a write was refused by the unique index on
-// the sign-in address. SQLite names the column for a column index, partial or
-// not; the index name is matched as well so the check does not hang on which
-// of the two a driver version chooses to print. PostgreSQL always names the
-// index.
+// the sign-in address.
 func isEmailConflict(err error) bool {
-	if db.IsUniqueViolation(err, "accounts_email_nocase") {
-		return true
-	}
-	return db.IsUniqueViolation(err, "") && strings.Contains(err.Error(), "accounts.email")
+	return db.IsUniqueViolation(err, "accounts_email_nocase")
 }
 
 // errNoAccount says the name matched no row. Callers word it for their own

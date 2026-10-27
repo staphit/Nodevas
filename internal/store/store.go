@@ -202,7 +202,7 @@ func (s *Store) markSelfWrite(path string) {
 // ---------- atomic write + local history ----------
 
 // WriteAtomic writes via temp file + rename so a crash can never leave a
-// half-written file (the VS Code / SQLite pattern).
+// half-written file (the VS Code pattern).
 func (s *Store) WriteAtomic(path string, data []byte) error {
 	return writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite)
 }

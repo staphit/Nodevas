@@ -1,8 +1,9 @@
 // Cross-project search: the workspace-facing API, and the direct scan kept as
 // the last-resort fallback.
 //
-// The matching itself lives in internal/searchindex, which holds a durable
-// inverted index per project. This file is the adapter: it turns a
+// The matching itself lives in internal/searchindex, which keeps a durable
+// index per project in the workspace database. This file is the adapter: it
+// turns a
 // ProjectInfo into a root path, turns index matches back into SearchResult,
 // and forwards watcher events so a change updates one node's postings instead
 // of throwing the project's index away.
@@ -11,6 +12,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,12 +155,12 @@ func readSearchTextDirect(root, path string) string {
 	return string(data)
 }
 
-// UseDatabase points the search index at the workspace database, so the index
-// survives a restart instead of being rebuilt by the first search after one.
+// UseDatabase points the search index at the workspace database, where it
+// lives and survives a restart.
 //
-// Call it before the first search. Without it the manager keeps its own
-// private in-memory index, which is correct but forgets everything on exit —
-// that is the fallback for an embedder that has no database.
+// Call it before the first search. Without it there is no index: every search
+// falls back to the direct scan, which is correct but reads every file and
+// ranks nothing — the path for an embedder that has no database.
 func (pm *ProjectManager) UseDatabase(database *db.DB) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -182,7 +184,10 @@ func (pm *ProjectManager) PruneSearchIndex(ctx context.Context) error {
 			roots = append(roots, project.Path)
 		}
 	}
-	return pm.getSearchIndex().indexes().Prune(ctx, roots)
+	if err := pm.getSearchIndex().indexes().Prune(ctx, roots); err != nil && !errors.Is(err, searchindex.ErrNoIndex) {
+		return err
+	}
+	return nil
 }
 
 func (pm *ProjectManager) getSearchIndex() *searchIndex {

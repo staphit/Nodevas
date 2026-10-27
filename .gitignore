@@ -29,6 +29,7 @@ cover.out
 /desktop/dist/
 /desktop/build/
 /desktop/resources/bin/
+/desktop/resources/pg/
 
 # iOS build outputs. The Xcode project is generated from ios/project.yml by
 # XcodeGen, so it does not belong in review.

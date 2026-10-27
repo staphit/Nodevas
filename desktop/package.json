@@ -9,7 +9,7 @@
   "signedUpdates": false,
   "scripts": {
     "check": "node --check main.cjs",
-    "test": "node --test scripts/",
+    "test": "node --test \"scripts/*.test.mjs\"",
     "pack:mac": "node scripts/pack.mjs --mac --universal",
     "pack:win": "node scripts/pack.mjs --win"
   },
@@ -50,6 +50,10 @@
           "nodevas",
           "nodevas.exe"
         ]
+      },
+      {
+        "from": "resources/pg",
+        "to": "pg"
       }
     ],
     "directories": {
@@ -73,7 +77,8 @@
         }
       ],
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "x64ArchFiles": "Contents/Resources/{bin,pg}/**"
     },
     "win": {
       "artifactName": "Nodevas-testflight-v1.0-Windows-${arch}.${ext}",

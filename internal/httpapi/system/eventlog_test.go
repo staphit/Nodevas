@@ -13,9 +13,9 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
 	"nodevas/internal/logging/logtest"
+	"nodevas/internal/testpg"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,10 +24,7 @@ import (
 // the attempt named, and why it was refused in the log's finer words, which
 // for a server fault is error rather than a refused credential.
 func TestARefusedSignInLineNamesTheAccountAndTheFinerReason(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	trail := audit.New(database)
 	api := &API{audit: trail}
@@ -87,10 +84,7 @@ func TestARefusedSignInLineNamesTheAccountAndTheFinerReason(t *testing.T) {
 // is a warning: the server did nothing wrong. What goes back is only that the
 // request ended, never the text of whatever read it interrupted.
 func TestACancelledSignInLineSaysErrorInTheSharedWords(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	trail := audit.New(database)
 	api := &API{audit: trail}
@@ -120,10 +114,7 @@ func TestACancelledSignInLineSaysErrorInTheSharedWords(t *testing.T) {
 // names the database, its user and its address, would reach whoever typed an
 // address at the door.
 func TestADriverDeadlineWhileTheClientWaitsIsTheServersFault(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	trail := audit.New(database)
 	api := &API{audit: trail}
@@ -195,10 +186,7 @@ func (m *countingMailer) count() int {
 // the sign-in's 500 — and nothing of the failure's text. Readable again, an
 // address nobody registered is the warning, 202 and 401 it always was.
 func TestAFailedAccountLookupIsLoggedAsTheServersFault(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	users := auth.NewUserStoreDB(database)
@@ -279,15 +267,7 @@ func TestAFailedAccountLookupIsLoggedAsTheServersFault(t *testing.T) {
 // both, as for everything but a throttle. For both requests the cause reaches
 // the operator, on a line of its own, and never the client.
 func TestAnUnreadableAccountSignsInLikeAnUnknownAddress(t *testing.T) {
-	postgres := dbtest.UsePostgres(t)
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if postgres && database.Backend() != db.Postgres {
-		t.Fatalf("%s is set but the database fell back to %s", dbtest.Env, database.Backend())
-	}
+	database := testpg.New(t)
 	ctx := context.Background()
 	users := auth.NewUserStoreDB(database)
 	for _, person := range []struct{ name, email string }{{"ann", "ann@example.test"}, {"bea", "bea@example.test"}} {
@@ -297,10 +277,7 @@ func TestAnUnreadableAccountSignsInLikeAnUnknownAddress(t *testing.T) {
 	}
 	// Constraints are checked on write, so a hand edit is the only way such a
 	// row comes to be.
-	loosen := `PRAGMA ignore_check_constraints = ON`
-	if database.Backend() == db.Postgres {
-		loosen = `ALTER TABLE accounts DROP CONSTRAINT accounts_role_check`
-	}
+	loosen := `ALTER TABLE accounts DROP CONSTRAINT accounts_role_check`
 	if _, err := database.ExecContext(ctx, loosen); err != nil {
 		t.Fatalf("loosen the role check: %v", err)
 	}
@@ -363,18 +340,16 @@ func TestAnUnreadableAccountSignsInLikeAnUnknownAddress(t *testing.T) {
 // driver's text, which names the database, its user and its address, reaches
 // the client.
 func TestAStalledDatabaseAnswersEveryAddressAlike(t *testing.T) {
-	stall := dbtest.UseStalledPostgres(t)
+	stall := testpg.UseStalledPostgres(t)
 	if stall == nil {
-		t.Skipf("set %s to run against PostgreSQL", dbtest.Env)
+		t.Skipf("set %s to run against PostgreSQL", testpg.Env)
 	}
-	database, err := db.Open(t.TempDir())
+	// Through the stalling proxy UseStalledPostgres put in the environment.
+	database, err := db.OpenRoot(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	if database.Backend() != db.Postgres {
-		t.Fatalf("backend = %s, want postgres", database.Backend())
-	}
 	ctx := context.Background()
 	users := auth.NewUserStoreDB(database)
 	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "ann@example.test"); err != nil {

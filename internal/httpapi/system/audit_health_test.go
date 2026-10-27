@@ -9,14 +9,11 @@ import (
 	"testing"
 
 	"nodevas/internal/audit"
-	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 )
 
 func TestAuditHealthEndpointReportsDatabaseFallback(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	trail := audit.New(database)
 	api := &API{audit: trail}
@@ -36,7 +33,7 @@ func TestAuditHealthEndpointReportsDatabaseFallback(t *testing.T) {
 		t.Fatalf("healthy response = %+v", health)
 	}
 
-	if _, err := database.Writer().Exec("PRAGMA query_only = ON"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = on"); err != nil {
 		t.Fatal(err)
 	}
 	trail.RecordOrLog(context.Background(), audit.Event{Action: "POST nodes"})
@@ -67,7 +64,7 @@ func TestAuditHealthEndpointReportsDatabaseFallback(t *testing.T) {
 		t.Fatalf("acknowledge while writes degraded status = %d, body = %s", response.Code, response.Body)
 	}
 
-	if _, err := database.Writer().Exec("PRAGMA query_only = OFF"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = off"); err != nil {
 		t.Fatal(err)
 	}
 	trail.RecordOrLog(context.Background(), audit.Event{Action: "audit recovery probe"})

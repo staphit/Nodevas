@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 )
 
 // 0025_agent_roles: the run's role and evidence, the staged pipeline's
 // phase, the autopilot's goal phase and QA rounds, and per-owner role
-// settings, on both backends.
+// settings.
 var agentRoleColumns = map[string][]string{
 	"runs":           {"role", "verify", "checks", "override"},
 	"run_pipelines":  {"stages", "phase", "test_files", "guard", "tries"},
@@ -30,7 +31,7 @@ func checkAgentRoleSchema(t *testing.T, database *db.DB) {
 	}
 	for table, columns := range agentRoleColumns {
 		for _, column := range columns {
-			// Selecting the column fails if it is missing, on either backend.
+			// Selecting the column fails if it is missing.
 			rows, err := database.QueryContext(ctx, `SELECT `+column+` FROM `+table+` WHERE 1 = 0`)
 			if err != nil {
 				t.Errorf("%s.%s: %v", table, column, err)
@@ -48,26 +49,6 @@ func checkAgentRoleSchema(t *testing.T, database *db.DB) {
 	}
 }
 
-func TestMigration0025BothBackends(t *testing.T) {
-	t.Run("sqlite", func(t *testing.T) {
-		t.Setenv(db.URLEnv, "")
-		database, err := db.Open(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer database.Close()
-		if database.Backend() != db.SQLite {
-			t.Fatalf("backend = %s", database.Backend())
-		}
-		checkAgentRoleSchema(t, database)
-	})
-	t.Run("postgres", func(t *testing.T) {
-		requirePostgres(t)
-		database, err := db.Open(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer database.Close()
-		checkAgentRoleSchema(t, database)
-	})
+func TestMigration0025(t *testing.T) {
+	checkAgentRoleSchema(t, testpg.New(t))
 }

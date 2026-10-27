@@ -9,18 +9,18 @@
 // in owner-only files; its postmaster is started before the hub and stopped
 // with it, and a crashed predecessor's postmaster.pid is recovered.
 //
-// RED PHASE: every exported function is a compile-only stub returning
-// ErrNotImplemented; the tests in this package describe the behaviour.
+// The library github.com/fergusstrange/embedded-postgres was evaluated and not
+// used: v1 checks archives against a .sha256 fetched from the same server
+// (nothing pinned), shares serve's process group (a Ctrl+C reaches the
+// server mid-shutdown) and has no stale-pid recovery; v2 was weeks old with
+// no importers and downloads a further supervisor executable at first start.
+// This package is the small part of either that Nodevas needs, around
+// binaries it pins itself.
 package embeddedpg
 
 import "errors"
 
-// PinnedVersion is the PostgreSQL release every target is pinned to.
-const PinnedVersion = "17.11.1"
-
 var (
-	// ErrNotImplemented is what every stub returns until the package exists.
-	ErrNotImplemented = errors.New("embeddedpg: not implemented")
 	// ErrChecksumMismatch is a downloaded or supplied archive whose SHA-256
 	// differs from the manifest.
 	ErrChecksumMismatch = errors.New("embeddedpg: archive checksum does not match the pinned SHA-256")

@@ -12,7 +12,6 @@ import (
 	"github.com/coder/websocket"
 
 	"nodevas/internal/auth"
-	"nodevas/internal/db"
 	"nodevas/internal/runnerwire"
 )
 
@@ -288,14 +287,4 @@ func TestLoopbackRunnerSocketStillNeedsAToken(t *testing.T) {
 	if created.Runner.OwnerID != "local" {
 		t.Fatalf("owner = %q, want local", created.Runner.OwnerID)
 	}
-}
-
-func dbtestOpenForServer(t *testing.T, workspace string) *db.DB {
-	t.Helper()
-	database, err := db.Open(workspace)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	return database
 }

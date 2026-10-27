@@ -158,7 +158,7 @@ mkdir -p ~/nodevas-workspace
 nodevas serve --project ~/nodevas-workspace     # then open http://127.0.0.1:5666
 ```
 
-It fetches GitHub's latest build for this OS and checks it the same way. Run it again to upgrade. `--commit <sha>`, `--prefix` and `--dry-run` apply; the hub, login, agent and service options do not.
+It fetches GitHub's latest build for this OS and checks it the same way. Run it again to upgrade. The first `serve` also downloads the pinned PostgreSQL it keeps its data in (checked against a SHA-256 compiled into the binary); offline, `nodevas db install-postgres --archive <file>` installs a copy fetched elsewhere ([Operations: Database](./operations.md#database)). `--commit <sha>`, `--prefix` and `--dry-run` apply; the hub, login, agent and service options do not.
 
 ## Check and remove
 

@@ -1,6 +1,6 @@
 # Operations
 
-Running a Nodevas server: configuration, letting other machines connect, and reading its logs. To install Nodevas, see [Getting started](./getting-started.md).
+Running a Nodevas server: configuration, letting other machines connect, the database, and reading its logs. To install Nodevas, see [Getting started](./getting-started.md).
 
 ## Configuration
 
@@ -66,6 +66,35 @@ Then start the server, for example behind a reverse proxy on the same host that 
 Configure `trusted_proxy` to match the proxy addresses that are allowed to forward client information.
 
 For the container image, see [Getting started: Run the hub with Docker](./getting-started.md#run-the-hub-with-docker).
+
+## Database
+
+Accounts, sessions, the audit trail, settings, runs, the copilot's conversations and the search index live in PostgreSQL. Node bodies and the graph stay Markdown and YAML in the workspace.
+
+| Setting | Meaning |
+|---|---|
+| `NODEVAS_DATABASE_URL` / `NODEVAS_DATABASE_URL_FILE` | An existing server (`postgres://user:password@host:5432/db`). Environment only, never `nodevas.yaml`: it carries a password. |
+| `NODEVAS_DATABASE_WAIT` | How long an unreachable server is retried at start (default `30s`). Past it, `serve` exits 1; there is no fallback database. |
+| `NODEVAS_REQUIRE_DATABASE_URL=1` | Refuse to start without a URL (set in the container image). |
+| `NODEVAS_PG_HOME` | Where the embedded server keeps its binaries and data: `%LOCALAPPDATA%\nodevas\pg` on Windows, `~/Library/Application Support/nodevas/pg` on macOS, `$XDG_CONFIG_HOME/nodevas/pg` elsewhere. |
+| `NODEVAS_PG_BINARIES` | Preinstalled binaries (the desktop app's bundle). Refused unless their stamp names the pinned version and archive hash. |
+| `NODEVAS_PG_OFFLINE=1`, `NODEVAS_PG_MIRROR` | Never download; or download from another base URL (the hash is still enforced). |
+
+**Embedded server (no URL).** `serve` starts the workspace's own PostgreSQL 17.11.1 before the hub and stops it on exit, Ctrl+C, a closed console or, with `--stop-on-stdin-close`, end of stdin (how the desktop app and `nodevas-dev` stop it on Windows). It listens on `127.0.0.1` only, on a free port, with a random password kept in owner-only files; the app connects as a role that is not a superuser. The binaries are a pinned [theseus-rs/postgresql-binaries](https://github.com/theseus-rs/postgresql-binaries) build whose SHA-256 per platform is compiled into Nodevas; a first CLI start downloads and verifies them once (Linux about 40 MB, Windows 48 MB, macOS 90 MB; about 65–110 MB unpacked after unused parts are dropped). Each workspace has its own data directory, named by `<workspace>/.vised/database-id`, so moving the folder keeps its database. A first start takes a few seconds (initdb; longer on Windows while Defender scans the new files), later starts under a second; `db.embedded_ready` in the log has the measured `initdb_ms`, `start_ms` and `data_bytes`. If the server dies it is restarted on the same port (three times a minute at most, then `serve` exits). A crash leaves a stale `postmaster.pid`, which the next start recovers. A command such as `nodevas user add` run beside a running `serve` connects to its server. A copied workspace carries the original's id: run `nodevas db detach --project <copy>` to give it its own database. Linux builds need glibc 2.36 or newer; on older systems use `NODEVAS_DATABASE_URL`.
+
+**Backups.** The database is no longer a file in the workspace, so copying the workspace folder does not back it up. Use `nodevas db dump --out nodevas.dump` (the bundled `pg_dump`, custom format) and `nodevas db restore --in nodevas.dump`; both work against the embedded or an external server. `nodevas db status` shows which one a workspace uses.
+
+**Upgrading from a SQLite release.** Earlier releases kept this data in `<workspace>/.vised/nodevas.db`. On the first start of this release, a workspace whose new database is empty imports that file in one transaction and renames it `nodevas.db.imported` (with its `-wal` and `-shm` files); it is never deleted. If the import fails, `serve` stops without changing anything: `nodevas db import-sqlite --report` compares the file with the database, and `NODEVAS_SKIP_SQLITE_IMPORT=1` starts without it (`nodevas db import-sqlite` imports it later). The importer is removed in the next release.
+
+**Upgrading a server on PostgreSQL (the NAS).**
+
+1. Back up first: `pg_dump -Fc nodevas > nodevas-before-upgrade.dump`.
+2. Check what it has: `SELECT name FROM schema_migrations ORDER BY name` ends at `0024_run_handoff` (or `0025_agent_roles`). Steps are matched by name and never renumbered.
+3. Start the new image. `0025_agent_roles`, `0026_search_index` and `0027_legacy_imports` apply in place, under an advisory lock, without touching existing rows.
+4. The search index now lives in the same database (`search_documents`). It starts empty and is rebuilt from the Markdown as projects are opened.
+5. `/data/.vised/nodevas.db` is no longer read, and is not imported because the server already holds data (the log says `db.legacy_sqlite_present`). It may hold rows written while an earlier release fell back to SQLite; run `nodevas db import-sqlite --report --project /data` and keep the file until the report shows nothing missing.
+6. There is no SQLite fallback any more: a database that is down makes `serve` exit, and the container's restart policy starts it again once the database is back.
+7. Database backups that dump every table can skip `search_documents` (rebuilt from the Markdown) and `legacy_imports`.
 
 ## Version history and backup
 

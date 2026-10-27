@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/testpg"
 )
 
 // ---- fakes ----
@@ -353,10 +352,7 @@ type harness struct {
 
 func newHarness(t *testing.T, board *fakeBoard) *harness {
 	t.Helper()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	h := &harness{t: t, runs: newFakeRuns(), board: board, store: NewStore(database), ctx: context.Background(),
 		bea: identity.Actor{ID: "bea", Name: "Bea"}}

@@ -17,7 +17,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -33,10 +32,6 @@ import (
 
 // Env names the server the tests use instead of an embedded one.
 const Env = "NODEVAS_TEST_DATABASE_URL"
-
-// ErrEmbeddedNotImplemented is what a test gets without Env until the embedded
-// server exists.
-var ErrEmbeddedNotImplemented = errors.New("testpg: embedded PostgreSQL is not implemented yet; set " + Env)
 
 var (
 	serverOnce sync.Once

@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
 	"nodevas/internal/server"
+	"nodevas/internal/testpg"
 )
 
 // liveServer starts a real Nodevas server over loopback and returns its URL.
@@ -30,6 +31,9 @@ func liveServer(t *testing.T) (string, *project.ProjectManager) {
 		t.Fatalf("workspace: %v", err)
 	}
 	t.Cleanup(pm.StopWatcher)
+	// The search index lives in the workspace database, as serve wires it;
+	// without one search_nodes only has the direct scan.
+	pm.UseDatabase(testpg.New(t))
 
 	graph := &engine.Graph{
 		Version: 1,

@@ -8,7 +8,16 @@ import (
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/searchindex"
+	"nodevas/internal/testpg"
 )
+
+// newTestSearchIndex is the project's index over a fresh database, as serve
+// wires it with UseDatabase.
+func newTestSearchIndex(t testing.TB) *searchIndex {
+	t.Helper()
+	return &searchIndex{manager: searchindex.NewManagerWithDB(testpg.New(t))}
+}
 
 func writeSearchProject(t testing.TB, nodes ...*engine.Node) string {
 	t.Helper()
@@ -38,7 +47,7 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 	writeNodeBody(t, root, "alpha", "before body")
 
 	project := ProjectInfo{Name: "main", Path: root}
-	index := newSearchIndex()
+	index := newTestSearchIndex(t)
 	results, err := index.search(project, "before")
 	if err != nil {
 		t.Fatalf("initial search: %v", err)
@@ -80,7 +89,7 @@ func TestSearchIndexFindsTextDeepInALongNode(t *testing.T) {
 	writeNodeBody(t, root, "alpha", body)
 
 	project := ProjectInfo{Name: "main", Path: root}
-	results, err := newSearchIndex().search(project, "buried needle")
+	results, err := newTestSearchIndex(t).search(project, "buried needle")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -105,7 +114,7 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 	writeNodeBody(t, root, "beta", "unrelated body")
 
 	project := ProjectInfo{Name: "main", Path: root}
-	index := newSearchIndex()
+	index := newTestSearchIndex(t)
 	for _, query := range []string{"设计", "接口设计", "english prose", "alpha", "high"} {
 		indexed, err := index.search(project, query)
 		if err != nil {
@@ -120,7 +129,7 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 
 func BenchmarkSearchWarmIndex(b *testing.B) {
 	root, project := benchmarkProject(b)
-	index := newSearchIndex()
+	index := newTestSearchIndex(b)
 	if _, err := index.search(project, "needle"); err != nil {
 		b.Fatal(err)
 	}

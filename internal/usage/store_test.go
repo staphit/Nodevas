@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 )
 
 // testNow is the clock every store test runs at.
@@ -16,7 +16,7 @@ var testNow = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 
 func newTestStore(t *testing.T) (*Store, *db.DB) {
 	t.Helper()
-	database := dbtest.Open(t)
+	database := testpg.New(t)
 	s := NewStore(database)
 	s.SetClock(func() time.Time { return testNow })
 	return s, database

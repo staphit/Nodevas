@@ -10,15 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 )
 
 // newStore opens a throwaway workspace database. Every test gets its own file
 // so nothing here depends on the order the tests run in.
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	return New(dbtest.Open(t))
+	return New(testpg.New(t))
 }
 
 func TestRecordAndQueryReturnTheNewestEventFirst(t *testing.T) {
@@ -64,10 +63,7 @@ func TestRecordRejectsAnEventWithoutAnAction(t *testing.T) {
 func TestRecordReturnsAnErrorWhenTheDatabaseIsClosed(t *testing.T) {
 	// The contract the request path depends on: a failed write is reported,
 	// never swallowed, so RecordOrLog can put the event somewhere else.
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	s := New(database)
 	database.Close()
 	if err := s.Record(context.Background(), Event{Action: "node.update"}); err == nil {
@@ -76,10 +72,7 @@ func TestRecordReturnsAnErrorWhenTheDatabaseIsClosed(t *testing.T) {
 }
 
 func TestRecordOrLogSignalsDeterministicDatabaseFallbackAndRecovery(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	s := New(database)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
@@ -119,10 +112,7 @@ func TestRecordOrLogSignalsDeterministicDatabaseFallbackAndRecovery(t *testing.T
 		}
 	}
 
-	recoveredDB, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	recoveredDB := testpg.New(t)
 	t.Cleanup(func() { recoveredDB.Close() })
 	s.db = recoveredDB
 	s.RecordOrLog(context.Background(), Event{At: event.At.Add(time.Minute), Action: "POST graph"})
@@ -137,7 +127,7 @@ func TestRecordOrLogSignalsDeterministicDatabaseFallbackAndRecovery(t *testing.T
 	if _, err := s.AcknowledgeFallbacks(0); !errors.Is(err, ErrFallbackEventsChanged) {
 		t.Fatalf("stale acknowledgement error = %v, want ErrFallbackEventsChanged", err)
 	}
-	health, err = s.AcknowledgeFallbacks(1)
+	health, err := s.AcknowledgeFallbacks(1)
 	if err != nil {
 		t.Fatal(err)
 	}

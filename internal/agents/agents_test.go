@@ -3,20 +3,16 @@ package agents
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 )
 
 func openTestHub(t *testing.T) *Hub {
 	t.Helper()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatalf("OpenAt: %v", err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	return NewHub(database, nil)
 }

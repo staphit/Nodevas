@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
 	"nodevas/internal/logging"
 	"nodevas/internal/logging/logtest"
+	"nodevas/internal/testpg"
 )
 
 func TestEveryStoredActionReadsAsTheSharedVocabulary(t *testing.T) {
@@ -309,10 +309,7 @@ func TestARefusalNamesItsSubjectInTheLineAndNotInTheRow(t *testing.T) {
 }
 
 func TestAFailedWriteKeepsTheLineAndAddsTheFallback(t *testing.T) {
-	database, err := db.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	s := New(database)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)

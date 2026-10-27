@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,57 +14,39 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
+
+	"nodevas/internal/dbconn"
 )
 
-// URLEnv names the variable that moves the workspace's operational data from
-// the SQLite file to a PostgreSQL server. It is an environment variable and
-// not a nodevas.yaml key for the same reason the SMTP password is: the URL
-// carries a password, and nodevas.yaml sits in the workspace beside the notes.
-const URLEnv = "NODEVAS_DATABASE_URL"
+// URLEnv names an external PostgreSQL server (a NAS, a hosted deployment).
+// Unset, the workspace runs its own embedded server. It is an environment
+// variable and not a nodevas.yaml key for the same reason the SMTP password
+// is: the URL carries a password, and nodevas.yaml sits in the workspace
+// beside the notes.
+const URLEnv = dbconn.URLEnv
 
 // URLFileEnv names a file holding the URL instead, for a container that gets
 // its secrets as mounted files, as NODEVAS_SMTP_PASSWORD_FILE does.
-const URLFileEnv = URLEnv + "_FILE"
+const URLFileEnv = dbconn.URLFileEnv
 
 // URLFromEnv returns the configured PostgreSQL URL, or "" for none. URLEnv
 // wins over URLFileEnv when both are set.
 func URLFromEnv(lookup func(string) (string, bool)) (string, error) {
-	if raw, _ := lookup(URLEnv); strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw), nil
-	}
-	path, _ := lookup(URLFileEnv)
-	if strings.TrimSpace(path) == "" {
-		return "", nil
-	}
-	data, err := os.ReadFile(strings.TrimSpace(path))
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", URLFileEnv, err)
-	}
-	return strings.TrimSpace(string(data)), nil
+	return dbconn.URLFromEnv(lookup)
 }
 
-// WaitEnv bounds how long Open keeps retrying an unreachable server before it
-// falls back to the SQLite file, as a Go duration ("30s", "2m"). On a NAS that
-// has just booted the database container usually comes up after this one, and
-// giving up at the first refused connection would leave the server on the
-// fallback until somebody restarts it.
+// WaitEnv bounds how long OpenRoot keeps retrying an unreachable external
+// server before it gives up, as a Go duration ("30s", "2m"). On a NAS that has
+// just booted the database container usually comes up after this one. Past
+// it, serve exits and the container's restart policy tries again: there is no
+// fallback database.
 const WaitEnv = "NODEVAS_DATABASE_WAIT"
 
 // defaultWait is WaitEnv's value when it is unset.
 const defaultWait = 30 * time.Second
 
-// Backend names the engine a DB talks to.
-type Backend string
-
-const (
-	SQLite   Backend = "sqlite"
-	Postgres Backend = "postgres"
-)
-
 // ErrUnreachable wraps a failure to reach the PostgreSQL server at all, as
-// opposed to reaching it and being refused something. Only this kind falls
-// back to SQLite: a server that answers and rejects the schema is a problem to
-// surface, not one to route around.
+// opposed to reaching it and being refused something.
 var ErrUnreachable = errors.New("postgres unreachable")
 
 // waitFromEnv reads WaitEnv.
@@ -82,14 +63,7 @@ func waitFromEnv(lookup func(string) (string, bool)) (time.Duration, error) {
 }
 
 // OpenPostgres connects to a PostgreSQL server and brings its schema up to
-// date, retrying an unreachable server for up to wait.
-//
-// The handles mirror the SQLite ones on purpose. The write pool is one
-// connection, so the transactions that count and then insert ("the first
-// account is an administrator", "the last administrator cannot be removed")
-// stay serialised exactly as SQLite's single writer serialised them, rather
-// than depending on an isolation level. The read pool is opened with
-// default_transaction_read_only, the server-side counterpart of query_only.
+// date, retrying an unreachable server for up to wait. See DB for the pools.
 func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	writeConfig, err := pgx.ParseConfig(rawURL)
 	if err != nil {
@@ -117,7 +91,12 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	reader.SetMaxIdleConns(maxReaders)
 	reader.SetConnMaxLifetime(0)
 
-	database := &DB{write: writer, read: reader, path: describeURL(writeConfig), backend: Postgres}
+	search := sql.OpenDB(rebindConnector{stdlib.GetConnector(*writeConfig.Copy())})
+	search.SetMaxOpenConns(searchConns)
+	search.SetMaxIdleConns(searchConns)
+	search.SetConnMaxLifetime(0)
+
+	database := &DB{write: writer, read: reader, search: search, path: describeURL(writeConfig)}
 	if err := database.migrate(context.Background()); err != nil {
 		database.Close()
 		return nil, err
@@ -147,6 +126,17 @@ func pingUntil(handle *sql.DB, wait time.Duration) error {
 	}
 }
 
+// DescribeURL is a connection string's server and database without the
+// credentials, for logs and for an operator being told where the data lives.
+// A URL that does not parse is described as such, never echoed.
+func DescribeURL(rawURL string) string {
+	config, err := pgx.ParseConfig(rawURL)
+	if err != nil {
+		return "(an unparseable PostgreSQL URL)"
+	}
+	return describeURL(config)
+}
+
 // describeURL is the server's address without its credentials, for logs and
 // for an operator being told where the data went.
 func describeURL(config *pgx.ConnConfig) string {
@@ -159,10 +149,8 @@ func describeURL(config *pgx.ConnConfig) string {
 }
 
 // IsUniqueViolation reports whether err is a write refused by a unique
-// constraint or index, on either engine. A non-empty name narrows it to that
-// constraint: PostgreSQL reports the index name, SQLite prints the indexed
-// columns or the index name depending on the index, so callers that care pass
-// the index name and match the column form themselves.
+// constraint or index. A non-empty name narrows it to that constraint (the
+// index name PostgreSQL reports).
 func IsUniqueViolation(err error, name string) bool {
 	if err == nil {
 		return false
@@ -170,13 +158,12 @@ func IsUniqueViolation(err error, name string) bool {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return pgErr.Code == "23505" && (name == "" || pgErr.ConstraintName == name)
 	}
-	message := err.Error()
-	return strings.Contains(message, "UNIQUE constraint failed") &&
-		(name == "" || strings.Contains(message, name))
+	return false
 }
 
-// rebindConnector lets the SQL in this program keep SQLite's ? placeholders on
-// PostgreSQL, which wants $1, $2, …, by rewriting each statement on its way to
+// rebindConnector lets the SQL in this program keep the ? placeholders it was
+// written with (when it also ran on SQLite) on PostgreSQL, which wants $1, $2,
+// …, by rewriting each statement on its way to
 // the driver. Doing it under database/sql instead of at every call site keeps
 // *sql.DB and *sql.Tx the types the rest of the program already passes around.
 type rebindConnector struct{ inner driver.Connector }
@@ -265,30 +252,28 @@ func rebind(query string) string {
 	return out.String()
 }
 
-// pgSchemaMigrations is the bookkeeping table, as schema_migrations is on
-// SQLite.
+// pgSchemaMigrations is the bookkeeping table: one row per applied step,
+// matched by name.
 const pgSchemaMigrations = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
 )`
 
-// pgMigrations is the PostgreSQL schema. It follows the SQLite one table for
-// table, so the queries in the rest of the program run unchanged on either:
+// pgMigrations is the schema. It was written to mirror the SQLite schema this
+// program used to keep beside it, which is why some of it reads the way it
+// does:
 //
 //   - nocase is an ICU collation that ignores case, so the queries' own
 //     "COLLATE NOCASE" (folded to nocase by the parser) finds it by name.
-//   - accounts keeps a rowid column, which is what "ORDER BY rowid" means on
-//     SQLite: the order the rows were created in.
+//   - accounts keeps a rowid column: the order the rows were created in.
 //   - Timestamp and hash columns use the C collation, so they compare and sort
-//     byte by byte as they do on SQLite, whatever locale the server runs in.
-//   - The search index has no counterpart here. It is derived from the
-//     Markdown, built on SQLite's FTS5, and stays in the workspace's SQLite
-//     file; see DB.Local.
+//     byte by byte whatever locale the server runs in.
 //
-// The names line up with the SQLite steps they mirror. A server starts from
-// the current SQLite shape, so 0006's data repair has nothing to repair and
-// only its index is created, in 0001.
+// Steps are matched by name in schema_migrations, and databases in the field
+// (the NAS) have these names recorded, so none is ever renamed or
+// renumbered. The gaps (0004, 0006) are SQLite-only steps that never had a
+// PostgreSQL counterpart: 0004 was the FTS5 index, 0006 a SQLite data repair.
 var pgMigrations = []migration{
 	{
 		name: "0001_accounts",
@@ -837,9 +822,55 @@ CREATE TABLE run_role_settings (
 );
 `,
 	},
+	{
+		// The search index, which lived in a SQLite FTS5 table until the
+		// database became PostgreSQL only. It is derived from the Markdown and
+		// rebuilt lazily, so an upgraded server starts with it empty. The text
+		// must stay the same objects as searchindex.Schema, which recreates a
+		// dropped table (search_schema_test.go compares them).
+		name: "0026_search_index",
+		stmt: SearchIndexSchema,
+	},
+	{
+		// One row per legacy SQLite file internal/legacysqlite imported (or was
+		// told to skip), so the import happens once and a rename it could not
+		// finish is retried.
+		name: "0027_legacy_imports",
+		stmt: `
+CREATE TABLE legacy_imports (
+    source        TEXT COLLATE "C" PRIMARY KEY,
+    source_sha256 TEXT COLLATE "C" NOT NULL DEFAULT '',
+    status        TEXT COLLATE "C" NOT NULL DEFAULT 'imported' CHECK (status IN ('imported', 'skipped')),
+    imported_at   TEXT COLLATE "C" NOT NULL,
+    counts        JSONB NOT NULL DEFAULT '{}'
+);
+`,
+	},
 }
 
-// pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
-// CLI command and a server starting at the same moment do not both apply a
-// step. SQLite gets the same exclusion from its single writer.
+// SearchIndexSchema is migration 0026: the search index's table, as
+// internal/searchindex defines it (searchindex.Schema).
+const SearchIndexSchema = `
+CREATE TABLE IF NOT EXISTS search_documents (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    path        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    modified_at TEXT COLLATE "C" NOT NULL DEFAULT '',
+    meta        TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL DEFAULT '',
+    meta_tokens TSVECTOR NOT NULL,
+    body_tokens TSVECTOR NOT NULL,
+    token_count INTEGER NOT NULL,
+    oversize    BOOLEAN NOT NULL DEFAULT false,
+    UNIQUE (project, node_id, path)
+);
+CREATE INDEX IF NOT EXISTS search_documents_meta_tokens ON search_documents USING gin (meta_tokens);
+CREATE INDEX IF NOT EXISTS search_documents_body_tokens ON search_documents USING gin (body_tokens);
+CREATE INDEX IF NOT EXISTS search_documents_oversize ON search_documents (project) WHERE oversize;
+`
+
+// pgMigrationLock is the advisory lock key migrations hold, so a CLI command
+// and a server starting at the same moment do not both apply a step.
 const pgMigrationLock = 0x6e6f6465 // "node"

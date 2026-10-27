@@ -83,7 +83,7 @@ func accountTOTPReset(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	database, err := db.Open(root)
+	database, err := db.OpenRoot(root)
 	if err != nil {
 		return fmt.Errorf("open account database: %w", err)
 	}
