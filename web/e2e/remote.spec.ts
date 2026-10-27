@@ -142,7 +142,10 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await freshProject(page, ["設計稿"]);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
 
-    const modal = page.getByRole("region", { name: "Runner" });
+    // Read-only, under Settings › Agents › Advanced.
+    await page.getByRole("button", { name: /^進階/ }).click();
+    await page.getByRole("button", { name: /^自動接受/ }).click();
+    const modal = page.getByRole("region", { name: "自動接受", exact: true });
     const policy = modal.getByTestId("runner-policy-r1");
     await expect(policy).toBeVisible();
     await expect(policy.getByText("nodevas", { exact: true })).toBeVisible();

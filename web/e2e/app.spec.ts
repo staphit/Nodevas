@@ -114,14 +114,15 @@ test.describe("main flows", () => {
 
     // The sidebar legend explains, it does not edit.
     await page.getByText("狀態圖例").click();
-    await expect(page.getByText("自訂實際狀態在「設定 → 狀態、里程碑與人員」")).toBeVisible();
+    await expect(page.getByText("自訂實際狀態在「設定 → 這個專案」")).toBeVisible();
 
     // The legend also offers a way in, so match the toolbar button exactly.
     await page.getByRole("button", { name: "設定", exact: true }).click();
-    const dialog = page.getByRole("region", { name: "專案設定" });
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^這個專案/ }).click();
+    await page.getByRole("button", { name: /^里程碑類型/ }).click();
+    const dialog = page.getByRole("region", { name: "里程碑類型", exact: true });
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole("tab", { name: "里程碑類型" }).click();
     await dialog.getByLabel("新里程碑名稱").fill("內審");
     await dialog.getByRole("button", { name: "新增類型" }).click();
     await expect(dialog.getByText("已新增「內審」")).toBeVisible();

@@ -37,6 +37,7 @@
 @import "./styles/24-start-screen.css"; /* start screen for a brand-new workspace: blank project or an example */
 @import "./styles/25-station.css"; /* Info | Station switch and the Station view */
 @import "./styles/26-audit.css"; /* Settings → Audit log: audit health, trail, rate limiter */
+@import "./styles/27-settings.css"; /* Settings sections: search, rows opened in place, Advanced, runner lines */
 
 /* Sign-in screen (networked servers only; a loopback server never shows it) */
 .signin {

@@ -458,8 +458,9 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["設計稿"]);
 
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
-    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: "路由規則" }).click();
-    const dialog = page.getByRole("region", { name: "路由規則" });
+    await page.getByRole("button", { name: /^進階/ }).click();
+    await page.getByRole("button", { name: /^路由規則/ }).click();
+    const dialog = page.getByRole("region", { name: "路由規則", exact: true });
     await expect(dialog).toBeVisible();
 
     const first = dialog.getByRole("listitem", { name: "規則 1" });
