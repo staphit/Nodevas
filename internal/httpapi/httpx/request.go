@@ -29,6 +29,8 @@ var projectScopedPathExempt = []string{
 	// Runners belong to their owner, not to a project.
 	"/api/runners",
 	"/api/runner/",
+	// Station's building reads every project the viewer may, checking each.
+	"/api/station/",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

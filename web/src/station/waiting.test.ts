@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentAsk, AgentMessage, Run } from "../api";
+import type { AgentAsk, AgentMessage, BuildingRun, Run } from "../api";
 import { waitingKey, waitingOnYou, waitingRuns } from "./waiting";
 
 const NOW = Date.parse("2026-10-26T14:00:00Z");
@@ -105,5 +105,33 @@ describe("waitingOnYou", () => {
     expect(
       waitingOnYou({ runs: [], active: [], asks: [], held: [], reviews: [], canAnswer: () => true, now: NOW }),
     ).toEqual([]);
+  });
+});
+
+describe("waiting on you, for another project's run summaries", () => {
+  const summary = (over: Partial<BuildingRun>): BuildingRun => ({
+    id: "r1", nodeId: "n1", title: "Login", agent: "claude", model: "opus", kind: "", status: "succeeded",
+    runnerId: "x", runnerName: "mac", createdAt: min(30), finishedAt: min(20), ...over,
+  });
+
+  it("counts a building run the way it counts a full run", () => {
+    const ready = summary({ id: "pr", prUrl: "https://x/pull/2", prNumber: 2, prState: "open", ciStatus: "success" });
+    const merging = summary({
+      id: "m", nodeId: "n2", prUrl: "https://x/pull/3", prState: "open", ciStatus: "success", merge: { status: "pending" },
+    });
+    const offered = summary({ id: "o", nodeId: "n3", status: "offered", finishedAt: undefined });
+    const limited = summary({ id: "l", nodeId: "n4", status: "failed", failureKind: "quota" });
+    const runs = [ready, merging, offered, limited];
+    const items = waitingOnYou<BuildingRun>({
+      runs,
+      active: runs.filter((r) => r.status === "offered"),
+      asks: [],
+      held: [],
+      reviews: [],
+      canAnswer: () => true,
+      now: NOW,
+    });
+    expect(items.map((item) => waitingKey(item))).toEqual(["merge:pr", "offer:o", "limit:l"]);
+    expect(waitingRuns(runs, NOW).map((item) => item.kind)).toEqual(["merge", "limit"]);
   });
 });

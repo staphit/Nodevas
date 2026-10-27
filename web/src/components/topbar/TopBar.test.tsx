@@ -7,6 +7,7 @@ import { readPreferences } from "../../preferences";
 import { useRunners } from "../../runners/runnerStore";
 import { useBudget } from "../../runs/budgetStore";
 import { useApp } from "../../store";
+import { replayTour } from "./actions";
 import { AccountMenu } from "./AccountMenu";
 import { ProjectMenu } from "./ProjectMenu";
 import { RunnerPill } from "./RunnerPill";
@@ -97,54 +98,44 @@ describe("ProjectMenu", () => {
 });
 
 describe("AccountMenu", () => {
-  it("enters Settings, flips the theme and replays the tour", async () => {
-    const user = userEvent.setup();
-    const tour = vi.fn();
-    window.addEventListener("nodevas-tour-start", tour);
-    render(<AccountMenu />);
-    const trigger = screen.getByRole("button", { name: "Account and settings" });
-
-    await user.click(trigger);
-    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
-    expect(useApp.getState().preferences.projectMode).toBe("settings");
-
-    await user.click(trigger);
-    await user.click(screen.getByRole("menuitem", { name: "Switch to light mode" }));
-    expect(toggleTheme).toHaveBeenCalledTimes(1);
-
-    await user.click(trigger);
-    await user.click(screen.getByRole("menuitem", { name: "Replay tour" }));
-    expect(tour).toHaveBeenCalledTimes(1);
-    window.removeEventListener("nodevas-tour-start", tour);
+  // A loopback server has no session, so no account to show.
+  it("is not drawn without an account", () => {
+    const { container } = render(<AccountMenu />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("opens the palette on its help view", async () => {
+  it("holds only account things: your account and sign-out", async () => {
     const user = userEvent.setup();
-    const opened = vi.fn();
-    const listener = (event: Event) => opened((event as CustomEvent).detail);
-    window.addEventListener("nodevas-command-palette", listener);
-    render(<AccountMenu />);
-    await user.click(screen.getByRole("button", { name: "Account and settings" }));
-    await user.click(screen.getByRole("menuitem", { name: "Help and shortcuts" }));
-    expect(opened).toHaveBeenCalledWith({ view: "help" });
-    window.removeEventListener("nodevas-command-palette", listener);
-  });
-
-  // A loopback server has no session to end.
-  it("offers sign-out only with an account", async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<AccountMenu />);
-    await user.click(screen.getByRole("button", { name: "Account and settings" }));
-    expect(screen.queryByRole("menuitem", { name: /Sign out/ })).toBeNull();
-    unmount();
-
     auth.viewer = { id: "ann", name: "Ann", role: "member" } as Actor;
     render(<AccountMenu />);
-    const trigger = screen.getByRole("button", { name: "Account and settings" });
+    const trigger = screen.getByRole("button", { name: "Account" });
     expect(trigger.textContent).toBe("A");
+    expect(trigger).toHaveAttribute("title", "Ann: account");
+
+    await user.click(trigger);
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Your account", "Sign out (Ann)"]);
+
+    await user.click(screen.getByRole("menuitem", { name: "Your account" }));
+    const prefs = useApp.getState().preferences;
+    expect(prefs.projectMode).toBe("settings");
+    expect(prefs.settingsSection).toBe("account");
+
     await user.click(trigger);
     await user.click(screen.getByRole("menuitem", { name: "Sign out (Ann)" }));
     expect(auth.signOut).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("actions", () => {
+  it("replays the tour on the board, wherever it was asked from", () => {
+    const tour = vi.fn();
+    window.addEventListener("nodevas-tour-start", tour);
+    useApp.setState({ preferences: { ...useApp.getState().preferences, projectMode: "settings" } });
+    replayTour();
+    expect(useApp.getState().preferences.projectMode).toBe("info");
+    expect(tour).toHaveBeenCalledTimes(1);
+    window.removeEventListener("nodevas-tour-start", tour);
   });
 });
 
@@ -178,17 +169,29 @@ describe("RunnerPill", () => {
 });
 
 describe("TopBar", () => {
-  it("holds the project menu, Board | Station, search and the account menu, and nothing else it used to", () => {
+  it("holds the project menu, Board | Station | Settings and search, and nothing else it used to", () => {
     render(<TopBar />);
     expect(screen.getByRole("heading", { name: "Nodevas" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Project: Beta" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Board" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Station" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Search or command/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Account and settings" })).toBeTruthy();
-    // Relocated: the explorer toggle, the project <select>, the theme and help icons.
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-pressed", "false");
+    // The theme is in Settings › General, not on the bar.
+    expect(screen.queryByRole("button", { name: /light mode|dark mode/ })).toBeNull();
+    // Standalone: no account, so no avatar.
+    expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
+    // Relocated: the explorer toggle, the project <select>, the help and tour icons.
     expect(screen.queryByRole("button", { name: /project explorer/ })).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.queryByRole("button", { name: /light mode|Replay tour/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Replay tour|Help/ })).toBeNull();
+  });
+
+  it("draws the account avatar after Settings on a server with a session", () => {
+    auth.viewer = { id: "ann", name: "Ann", role: "member" } as Actor;
+    render(<TopBar />);
+    const settings = screen.getByRole("button", { name: "Settings" });
+    const account = screen.getByRole("button", { name: "Account" });
+    expect(settings.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

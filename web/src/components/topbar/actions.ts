@@ -1,6 +1,7 @@
 // What the top bar's menus and the command palette both do. Plain functions,
 // so either can call them without the other mounted.
 
+import { setProjectMode } from "../../station/projectMode";
 import { useApp } from "../../store";
 
 /** The event the command palette opens on; `detail.view` picks its view. */
@@ -17,7 +18,10 @@ export function openShortcutsHelp(): void {
   openCommandPalette("help");
 }
 
+/** Starts the tour over. It points at the board, so it plays there: from
+ * Settings or Station it goes back to the board first. */
 export function replayTour(): void {
+  if (useApp.getState().preferences.projectMode !== "info") setProjectMode("info");
   window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
 }
 

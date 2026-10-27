@@ -1,13 +1,15 @@
 /**
  * The top bar, left to right: the brand; the project menu; Board | Station;
  * then, pushed right, what is happening (the last operation, who else is
- * here), search, the runners pill and the account menu.
+ * here), search, the runners pill, Settings (a labelled button: one click
+ * in, pressed while open), the theme toggle and, on a server with a session,
+ * the account avatar.
  *
- * Everything the bar used to carry besides is a menu entry or a palette
- * command now: the explorer toggle (the board's explorer, the palette), the
- * workspace and the layout chip (project menu), Settings, help, the tour, the
- * theme and sign-out (account menu), Runners and Usage (the pill, Settings,
- * the palette).
+ * Everything the bar used to carry besides is a menu entry, a Settings row or
+ * a palette command now: the explorer toggle (the board's explorer, the
+ * palette), the workspace and the layout chip (project menu), help and the
+ * tour (Settings › General, the palette), sign-out (account menu), Runners
+ * and Usage (the pill, Settings, the palette).
  */
 
 import { useLastOperation } from "../../store";

@@ -1,15 +1,22 @@
-// The game views' world: what the war room and the boss map draw, in terms
-// of no particular skin. Everything here is plain data built by pure
-// functions (buildWorld.ts) from store snapshots, so a skin only decides how
-// an entity looks, never what it means, and the whole model is testable
-// without React. Labels are not here either: skins put them through t().
+// The war room's world: what it draws, in terms of no particular drawing.
+// The workspace is a building: an office per project (the current one in
+// full, the others as a glance through the door), a lounge everyone shares
+// and a server room with a rack per runner. Everything here is plain data built by pure functions (buildWorld.ts) from
+// store snapshots, so the drawing only decides how an entity looks, never
+// what it means, and the whole model is testable without React. Labels are
+// not here either: the drawing puts them through t().
 
 import type { AgentAsk, AgentMessage } from "../api/agents";
-import type { AgentMode, LogicGateOperator, NodeKind } from "../types";
+import type { OfficeStyle } from "../types";
 
-/** What clicking an entity opens. A skin maps each kind to an existing UI
- * action (open the node, open the run in the drawer, show a diff, open the
- * autopilot panel); the model only says which. */
+export type { OfficeStyle };
+
+/** The parts of a project's office (the lounge is shared by the building). */
+export type Area = "work" | "meeting" | "entrance" | "lounge";
+
+/** What clicking an entity opens. The drawing maps each kind to an existing
+ * UI action (open the node, open the run in the drawer, show a diff); the
+ * model only says which. */
 export type ClickTarget =
   | { kind: "node"; nodeId: string }
   | { kind: "run"; runId: string; nodeId: string }
@@ -21,13 +28,18 @@ export type ClickTarget =
   | { kind: "session"; sessionId: string }
   | { kind: "ask"; askId: string; sessionId: string }
   | { kind: "held-message"; messageId: string }
-  | { kind: "autopilot"; autopilotId: string; goalNodeId: string }
-  | { kind: "pr"; runId: string; url: string };
-
-// ---- War room -------------------------------------------------------------
+  | { kind: "pr"; runId: string; url: string }
+  /** Another project's office: switch to it. */
+  | { kind: "project"; project: string }
+  /** Something in another project: switch to it, then do `then` there. */
+  | { kind: "in-project"; project: string; then: ClickTarget }
+  /** An autopilot's goal, in Station. */
+  | { kind: "autopilot"; goalNodeId: string }
+  /** The server room: Settings › Agents, the runners. */
+  | { kind: "runners" };
 
 /** What an agent character is doing, most urgent first (see pose.ts for the
- * precedence). Every pose needs a non-colour cue in the skin. */
+ * precedence). Every pose needs a non-colour cue in the drawing. */
 export type Pose =
   /** Its session timed out, or the runner it sits at is offline. */
   | "offline"
@@ -35,54 +47,38 @@ export type Pose =
   | "asking-user"
   /** The run failed, or its PR's CI went red. */
   | "failed"
+  /** Queued again after its agent hit a usage limit: asleep until the
+   * limit resets (Run.retryAt). */
+  | "limit"
   /** Waiting for someone at the runner to accept the offer (queued or
    * offered), or for an approved merge to land. */
   | "awaiting-accept"
   /** Its PR is open and CI is running. */
   | "waiting-ci"
-  /** A review run at work: a seat at the meeting table. */
+  /** A review run at work. */
   | "reviewing"
   | "working"
+  /** The run succeeded a moment ago (office.FINISHED_SHOW_MS). */
+  | "finished"
   | "idle";
 
 export const POSES: readonly Pose[] = [
   "offline",
   "asking-user",
   "failed",
+  "limit",
   "awaiting-accept",
   "waiting-ci",
   "reviewing",
   "working",
+  "finished",
   "idle",
 ];
-
-export type RoomKind = "runner" | "terminal";
-
-/** The id of the room for agents with no runner: sessions people run in
- * their own terminals, and run sessions whose run is not in view. */
-export const TERMINAL_ROOM_ID = "terminal";
-
-export interface Room {
-  id: string;
-  kind: RoomKind;
-  /** The runner's name; "" for the terminal room (the skin names it). */
-  name: string;
-  runnerId?: string;
-  ownerName?: string;
-  hostname?: string;
-  /** null when the runner is not one the caller can list (an
-   * administrator's view of someone else's runner): nothing is known. */
-  online: boolean | null;
-  /** Agent kinds installed on the runner, for the desks it has. */
-  agentKinds: string[];
-  /** Actor ids in this room, in display order. */
-  actorIds: string[];
-}
 
 export interface Energy {
   /** Input + output tokens. */
   used: number;
-  /** The daily token budget, when one is set; the skin draws a bar only
+  /** The daily token budget, when one is set; the drawing shows a bar only
    * then, a counter otherwise. */
   cap?: number;
 }
@@ -101,7 +97,15 @@ export interface Actor {
   /** claude / codex / gemini / opencode / antigravity / … */
   agent: string;
   model: string;
-  roomId: string;
+  /** The project whose office it is in. */
+  project: string;
+  /** Where in the office it is (game/areas.ts). */
+  area: Area;
+  runnerId?: string;
+  /** The runner it works at; absent for a session (a terminal of its own). */
+  runnerName?: string;
+  /** null when the runner is not one the caller can list, or there is none. */
+  runnerOnline: boolean | null;
   pose: Pose;
   nodeId?: string;
   /** The node's title from the graph; "" when the node is not in it. */
@@ -142,7 +146,8 @@ export interface Meeting {
   pipelineId: string;
   nodeId: string;
   nodeTitle: string;
-  roomId: string;
+  /** The project whose meeting room it is in. */
+  project: string;
   round: number;
   /** The pipeline's status when it is loaded, "" otherwise. */
   status: string;
@@ -153,100 +158,120 @@ export interface Meeting {
   target: ClickTarget;
 }
 
-export interface Office {
-  rooms: Room[];
-  actors: Actor[];
+/** Something on the meeting-room table that waits on the viewer and has no
+ * agent at it: a PR ready to merge, an autopilot review waiting for a
+ * person, a held message to an agent not in the room. */
+export interface MeetingItem {
+  /** "merge:<runId>" | "review:<autopilotId>:<nodeId>" | "held:<msgId>". */
+  id: string;
+  kind: "merge" | "review" | "held";
+  nodeId?: string;
+  title: string;
+  target: ClickTarget;
+  actions: ClickTarget[];
+}
+
+/** The current project's office, in full. */
+export interface ProjectOffice {
+  project: string;
+  label: string;
+  layout: string;
+  style: OfficeStyle;
+  /** The project chose its style (otherwise it is the layout's default). */
+  styleSet: boolean;
+  /** Actor ids at desks, in seating order. */
+  work: string[];
+  /** Free desks shown next to them: min(3, online runners' free slots). */
+  freeDesks: number;
+  /** Actor ids in the meeting room. */
+  meeting: string[];
+  items: MeetingItem[];
+  /** Actor ids waiting at the door to be let in. */
+  entrance: string[];
+  /** Review pipelines. */
   meetings: Meeting[];
+}
+
+/** A desk in another project's office, drawn small. */
+export interface MiniDesk {
+  agent: string;
+  pose: Pose;
+  title: string;
+}
+
+/** Another project's office: its door sign and a glance inside. */
+export interface CompactOffice {
+  project: string;
+  label: string;
+  style: OfficeStyle;
+  /** At most three: running, then planning, then offered. */
+  desks: MiniDesk[];
+  /** Seated beyond the three drawn. */
+  more: number;
+  counts: { running: number; waiting: number; offered: number; sleeping: number; othersActive: number };
+  busy: boolean;
+  /** {kind: "project"}. */
+  target: ClickTarget;
+  /** Go there first, then its runs and what waits on the viewer there. */
+  actions: ClickTarget[];
+}
+
+/** A seat in the shared lounge. */
+export interface LoungeSpot {
+  id: string;
+  /** The current project's actor (its full menu). */
+  actorId?: string;
+  /** Another project's agent. */
+  visitor?: {
+    project: string;
+    label: string;
+    agent: string;
+    model: string;
+    pose: "idle" | "limit" | "offline";
+    title: string;
+    target: ClickTarget;
+    actions: ClickTarget[];
+  };
+}
+
+/** A runner, as a rack in the server room. */
+export interface Rack {
+  runnerId: string;
+  name: string;
+  ownerName?: string;
+  hostname?: string;
+  /** null when the caller cannot list the runner. */
+  online: boolean | null;
+  slots?: number;
+  /** Runs offered to or running on it, in every project in view. */
+  busy: number;
+  agentKinds: string[];
+  target: { kind: "runners" };
+}
+
+/** The workspace as a building: an office per project. */
+export interface Building {
+  current: ProjectOffice | null;
+  /** Other busy projects, busiest first, at most MAX_COMPACT. */
+  others: CompactOffice[];
+  /** Idle projects, and busy ones past MAX_COMPACT: door signs only. */
+  doorSigns: CompactOffice[];
+  /** The current project's actors first, then visitors; at most 10. */
+  lounge: LoungeSpot[];
+  loungeMore: number;
+  racks: Rack[];
+  /** The current project's actors. */
+  actors: Actor[];
   /** The caller's tokens today against their daily budget, when known. */
   energy?: Energy;
-}
-
-// ---- Boss map ---------------------------------------------------------------
-
-/** attackable: open to work (not settled, nothing blocks it; the server's
- * "ready" alone does not mean that). locked: something blocks it.
- * defeated: settled (done, skipped, deprecated or a settled custom state). */
-export type MonsterState = "attackable" | "locked" | "defeated";
-
-export interface Monster {
-  nodeId: string;
-  title: string;
-  kind: NodeKind | string;
-  /** Whether an agent may be sent at it; absent reads as "dispatch". */
-  agentMode?: AgentMode;
-  /** The node's priority, as difficulty. */
-  priority: string;
-  status: string;
-  state: MonsterState;
-  /** What blocks it, by node id, while locked. */
-  blockers: string[];
-  /** An entrance: nothing points at it. */
-  entry: boolean;
-  /** On the critical path: the corridor to the boss. */
-  critical: boolean;
-  /** Only reachable through deprecated wires: drawn faded. */
-  faded: boolean;
-  /** A run or an autopilot task is at work on it. */
-  engaged: boolean;
-  /** A run's PR on it was merged. */
-  merged: boolean;
-  target: ClickTarget;
-}
-
-/** A boolean logic gate in front of its output node. */
-export interface Door {
-  gateId: string;
-  operator: LogicGateOperator;
-  inputs: string[];
-  output: string;
-  open: boolean;
-  /** Why it is shut, by node id. */
-  blockers: string[];
-  /** The first blocker while shut, the output once open. */
-  target: ClickTarget;
-}
-
-export interface Boss {
-  /** The project's name, as the caller knows it. */
-  name: string;
-  /** Unsettled nodes, start/end/event excluded. */
-  hp: number;
-  maxHp: number;
-  /** hp / maxHp, 0 for an empty project. */
-  ratio: number;
-  defeated: boolean;
-}
-
-/** A live autopilot, moving through its goal's tasks. */
-export interface Party {
-  autopilotId: string;
-  goalNodeId: string;
-  status: string;
-  /** Tasks it is on now (running or waiting on a review or a person), in
-   * the autopilot's topological order. */
-  positions: string[];
-  /** Tasks waiting for a person. */
-  waitingHuman: string[];
+  /** The hub left projects out. */
+  truncated: boolean;
+  /** Projects in the workspace the viewer may read. */
   total: number;
-  done: number;
-  failed: number;
-  target: ClickTarget;
-}
-
-export interface Dungeon {
-  boss: Boss;
-  monsters: Monster[];
-  doors: Door[];
-  parties: Party[];
-  /** Completions: lifecycle history events that reached done. */
-  xp: number;
-  /** Nodes with a merged run PR, in graph order. */
-  mergedNodeIds: string[];
 }
 
 export interface World {
   /** The clock the world was built for. */
   now: number;
-  office: Office;
-  dungeon: Dungeon;
+  building: Building;
 }

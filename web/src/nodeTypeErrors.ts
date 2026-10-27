@@ -2,7 +2,9 @@
  * The hub's node-type refusals, in words. The hub answers a dispatch, an
  * Autopilot start or a status write that the node's type does not allow with
  * one of these codes (internal/store/permission.go); the dialogs that send
- * those requests read them here so the reason names the type.
+ * those requests read them here so the reason names the type. A graph save
+ * that changes the project's office style as an agent is refused the same
+ * way (OFFICE_STYLE_AGENT_DENIED).
  */
 
 import { nodeTypeById } from "./domain/graph/nodeTypes";
@@ -14,6 +16,7 @@ export const NODE_TYPE_ERROR_CODES = [
   "NODE_TYPE_PEOPLE_ONLY",
   "NODE_TYPE_NO_STATUS",
   "UNKNOWN_NODE_TYPE",
+  "OFFICE_STYLE_AGENT_DENIED",
 ] as const;
 
 function errorCode(error: unknown): string {
@@ -45,7 +48,15 @@ export function nodeTypeErrorMessage(error: unknown, nodeId?: string): string | 
       return translate("nodeType.error.noStatus", undefined, { type });
     case "UNKNOWN_NODE_TYPE":
       return translate("nodeType.error.unknown", undefined, { type });
+    case "OFFICE_STYLE_AGENT_DENIED":
+      return translate("office.style.agentDenied");
     default:
       return null;
   }
+}
+
+/** A graph save refused because an agent changed the office style, in
+ * words; null for anything else (the save's own message applies). */
+export function officeStyleErrorMessage(error: unknown): string | null {
+  return errorCode(error) === "OFFICE_STYLE_AGENT_DENIED" ? translate("office.style.agentDenied") : null;
 }

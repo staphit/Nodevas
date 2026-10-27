@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Run } from "../api/runs";
+import type { WaitingItem } from "../station/waiting";
 import {
-  buildOffice,
+  buildCurrentOffice,
   dedupeRuns,
   FINISHED_RUN_SEAT_MS,
+  FINISHED_SHOW_MS,
   runActorId,
-  runnerRoomId,
   seatedRuns,
   sessionActorId,
-  type OfficeInputs,
+  type CurrentOfficeInputs,
 } from "./office";
 import {
   ago,
@@ -19,12 +20,13 @@ import {
   makeRun,
   makeRunner,
   makeSession,
+  makeTask,
   NOW,
 } from "./testFixtures";
-import { TERMINAL_ROOM_ID, type Actor } from "./world";
+import type { Actor } from "./world";
 
-function office(overrides: Partial<OfficeInputs> = {}) {
-  return buildOffice({
+function office(overrides: Partial<CurrentOfficeInputs> = {}) {
+  const built = buildCurrentOffice({
     runs: [],
     runners: [makeRunner()],
     sessions: [],
@@ -36,8 +38,19 @@ function office(overrides: Partial<OfficeInputs> = {}) {
       ["schema", "DB schema"],
     ]),
     now: NOW,
+    project: "main",
+    label: "Main",
+    layout: "workflow",
+    waitingItems: [],
     ...overrides,
   });
+  return { ...built, meetings: built.office.meetings };
+}
+
+/** A runner taking `slots` runs at once. */
+function runner(id: string, slots: number, online = true) {
+  const base = makeRunner({ id, name: id, online });
+  return { ...base, info: { ...base.info!, maxConcurrent: slots } };
 }
 
 function actor(actors: Actor[], id: string): Actor {
@@ -46,36 +59,109 @@ function actor(actors: Actor[], id: string): Actor {
   return found;
 }
 
-describe("rooms", () => {
-  it("has a room per runner and the terminal room last", () => {
-    const world = office({
-      runners: [makeRunner(), makeRunner({ id: "rn2", name: "linux-box", online: false, info: undefined })],
+describe("the office", () => {
+  it("names the project and its style, the layout's default until one is chosen", () => {
+    expect(office().office).toMatchObject({ project: "main", label: "Main", style: "engineering", styleSet: false });
+    expect(office({ layout: "story" }).office.style).toBe("study");
+    expect(office({ officeStyle: "cafe" }).office).toMatchObject({ style: "cafe", styleSet: true });
+    expect(office({ label: "" }).office.label).toBe("main");
+  });
+
+  it("puts each character where its state says: desk, meeting, door or lounge", () => {
+    const working = makeRun({ createdAt: ago(50_000) });
+    const offered = makeRun({ status: "offered", nodeId: "schema", createdAt: ago(40_000) });
+    const plan = makeRun({ kind: "plan", nodeId: "plan", createdAt: ago(30_000) });
+    const limit = makeRun({ status: "queued", retryAt: ago(-60_000), nodeId: "x", createdAt: ago(20_000) });
+    const merging = makeRun({
+      status: "succeeded",
+      nodeId: "m",
+      merge: { id: "mg", runId: "", headSha: "", status: "pending", requestedBy: "u", createdAt: ago(1_000) },
+      createdAt: ago(10_000),
+      finishedAt: ago(5_000),
     });
-    expect(world.rooms.map((room) => room.id)).toEqual([
-      runnerRoomId("rn1"),
-      runnerRoomId("rn2"),
-      TERMINAL_ROOM_ID,
-    ]);
-    const [mini, box, terminal] = world.rooms;
-    expect(mini).toMatchObject({ kind: "runner", name: "mac-mini", online: true, hostname: "bea-mini", ownerName: "bea" });
-    expect(mini.agentKinds).toEqual(["claude"]);
-    expect(box).toMatchObject({ online: false, agentKinds: [] });
-    expect(terminal).toMatchObject({ kind: "terminal", online: null, actorIds: [] });
+    const built = office({
+      runners: [runner("rn1", 8)],
+      runs: [working, offered, plan, limit, merging],
+      sessions: [makeSession({ id: "idle", name: "idle-one" }), makeSession({ id: "ask", name: "asker", nodeId: "login" })],
+      asks: [makeAsk({ sessionId: "ask" })],
+    });
+    expect(built.office.work).toEqual([runActorId(working.id), runActorId(merging.id)]);
+    expect(built.office.meeting).toEqual([runActorId(plan.id), sessionActorId("ask")]);
+    expect(built.office.entrance).toEqual([runActorId(offered.id)]);
+    expect(built.loungeIds).toEqual([runActorId(limit.id), sessionActorId("idle")]);
+    expect(actor(built.actors, runActorId(merging.id)).pose).toBe("awaiting-accept");
   });
 
-  it("opens a room of unknown state for a run on a runner the caller cannot list", () => {
+  it("shows the free desks the online runners have room for, three at most", () => {
+    const one = makeRun();
+    expect(office({ runners: [runner("rn1", 2)], runs: [one] }).office.freeDesks).toBe(1);
+    expect(office({ runners: [runner("rn1", 8)] }).office.freeDesks).toBe(3);
+    expect(office({ runners: [runner("rn1", 4, false)] }).office.freeDesks).toBe(0);
+    // A runner that does not say takes one run at once.
+    expect(office({ runners: [makeRunner()], runs: [one] }).office.freeDesks).toBe(0);
+    // Busy counts every project's runs when the building says so.
+    expect(office({ runners: [runner("rn1", 3)], runnerBusy: new Map([["rn1", 3]]) }).office.freeDesks).toBe(0);
+  });
+
+  it("knows the runner a character works at, and an unknown runner is never offline", () => {
     const run = makeRun({ runnerId: "rn-other", runnerName: "cal-pc" });
-    const world = office({ runs: [run] });
-    const room = world.rooms.find((r) => r.id === runnerRoomId("rn-other"));
-    expect(room).toMatchObject({ name: "cal-pc", online: null });
-    expect(room?.actorIds).toEqual([runActorId(run.id)]);
-    // Unknown is not offline.
-    expect(world.actors[0].pose).toBe("working");
+    const a = office({ runs: [run] }).actors[0];
+    expect(a).toMatchObject({ runnerId: "rn-other", runnerName: "cal-pc", runnerOnline: null, pose: "working" });
+    const offline = office({ runners: [makeRunner({ online: false })], runs: [makeRun()] }).actors[0];
+    expect(offline).toMatchObject({ runnerOnline: false, pose: "offline", area: "work" });
   });
 
-  it("seats a run on an offline runner as offline", () => {
-    const world = office({ runners: [makeRunner({ online: false })], runs: [makeRun()] });
-    expect(world.actors[0].pose).toBe("offline");
+  it("lays what waits on the viewer on the meeting table", () => {
+    const pr = makeRun({ status: "succeeded", nodeId: "login", prUrl: "https://x/pull/4", prNumber: 4 });
+    const task = makeTask({ nodeId: "schema", title: "" });
+    const items: WaitingItem[] = [
+      { kind: "merge", run: pr },
+      { kind: "review", task: { autopilotId: "ap1", goalNodeId: "goal", task } },
+      { kind: "held", message: makeMessage({ id: "loose", to: "nobody-here", body: "please rebase", status: "held" }) },
+      { kind: "ask", ask: makeAsk() },
+      { kind: "offer", run: makeRun({ status: "offered" }) },
+    ];
+    const built = office({ waitingItems: items });
+    expect(built.office.items).toEqual([
+      {
+        id: `merge:${pr.id}`,
+        kind: "merge",
+        nodeId: "login",
+        title: "Login form",
+        target: { kind: "run", runId: pr.id, nodeId: "login" },
+        actions: [
+          { kind: "run", runId: pr.id, nodeId: "login" },
+          { kind: "node", nodeId: "login" },
+          { kind: "pr", runId: pr.id, url: "https://x/pull/4" },
+        ],
+      },
+      {
+        id: "review:ap1:schema",
+        kind: "review",
+        nodeId: "schema",
+        title: "DB schema",
+        target: { kind: "autopilot", goalNodeId: "goal" },
+        actions: [
+          { kind: "autopilot", goalNodeId: "goal" },
+          { kind: "node", nodeId: "schema" },
+        ],
+      },
+      {
+        id: "held:loose",
+        kind: "held",
+        title: "please rebase",
+        target: { kind: "held-message", messageId: "loose" },
+        actions: [{ kind: "held-message", messageId: "loose" }],
+      },
+    ]);
+  });
+
+  it("leaves a held message off the table when its agent holds it already", () => {
+    const session = makeSession({ id: "s", name: "laptop" });
+    const message = makeMessage({ id: "env", to: "laptop", status: "held" });
+    const built = office({ sessions: [session], held: [message], waitingItems: [{ kind: "held", message }] });
+    expect(built.actors[0].heldMail.map((m) => m.id)).toEqual(["env"]);
+    expect(built.office.items).toEqual([]);
   });
 });
 
@@ -95,7 +181,10 @@ describe("run characters", () => {
       kind: "run",
       agent: "claude",
       model: "opus",
-      roomId: runnerRoomId("rn1"),
+      project: "main",
+      area: "work",
+      runnerName: "mac-mini",
+      runnerOnline: true,
       nodeId: "login",
       nodeTitle: "Login form",
       runId: run.id,
@@ -147,7 +236,7 @@ describe("run characters", () => {
       pipelineId: "p1",
       nodeId: "login",
       nodeTitle: "Login form",
-      roomId: runnerRoomId("rn1"),
+      project: "main",
       round: 2,
       status: "running",
       waitingHuman: false,
@@ -193,10 +282,7 @@ describe("run characters", () => {
     expect(office({ runs: [run] }).actors[0].energy).toEqual({ used: 1_250 });
     const capped = office({ runs: [run], budget: makeBudget(40_000, 100_000) });
     expect(capped.actors[0].energy).toEqual({ used: 1_250, cap: 100_000 });
-    expect(capped.energy).toEqual({ used: 40_000, cap: 100_000 });
     expect(office({ runs: [makeRun()] }).actors[0].energy).toBeUndefined();
-    expect(office({ budget: makeBudget(5, 0) }).energy).toEqual({ used: 5 });
-    expect(office().energy).toBeUndefined();
   });
 });
 
@@ -244,16 +330,20 @@ describe("the run's agent session", () => {
   });
 });
 
-describe("terminal room", () => {
-  it("seats sessions with no run in view, by name, and points them at their node", () => {
+describe("sessions with no run in view", () => {
+  it("seats them by name, works at their node, and lounges with none", () => {
     const world = office({
       sessions: [
         makeSession({ id: "b", name: "zeta-codex", agent: "codex", nodeId: "schema", state: "busy", model: "o3" }),
         makeSession({ id: "a", name: "alpha-claude" }),
       ],
     });
-    const terminal = world.rooms.find((r) => r.id === TERMINAL_ROOM_ID)!;
-    expect(terminal.actorIds).toEqual([sessionActorId("a"), sessionActorId("b")]);
+    expect(world.actors.map((a) => [a.id, a.area])).toEqual([
+      [sessionActorId("a"), "lounge"],
+      [sessionActorId("b"), "work"],
+    ]);
+    expect(world.loungeIds).toEqual([sessionActorId("a")]);
+    expect(world.office.work).toEqual([sessionActorId("b")]);
     const zeta = actor(world.actors, sessionActorId("b"));
     expect(zeta).toMatchObject({
       kind: "session",
@@ -262,8 +352,10 @@ describe("terminal room", () => {
       pose: "working",
       nodeTitle: "DB schema",
       ownerName: "bea",
+      runnerOnline: null,
       target: { kind: "node", nodeId: "schema" },
     });
+    expect(zeta.runnerName).toBeUndefined();
     expect(zeta.actions).toContainEqual({ kind: "session-diff", sessionId: "b", nodeId: "schema" });
     const alpha = actor(world.actors, sessionActorId("a"));
     expect(alpha.target).toEqual({ kind: "session", sessionId: "a" });
@@ -306,6 +398,15 @@ describe("which runs get a seat", () => {
     // Work on another node does not.
     const elsewhere = makeRun({ nodeId: "schema", createdAt: ago(10_000) });
     expect(seatedRuns([failed, elsewhere], NOW)).toEqual([failed, elsewhere]);
+  });
+
+  it("keeps a run that just succeeded for a moment, cheering", () => {
+    const done = makeRun({ status: "succeeded", finishedAt: ago(FINISHED_SHOW_MS - 1) });
+    expect(seatedRuns([done], NOW)).toEqual([done]);
+    expect(office({ runs: [done] }).actors[0].pose).toBe("finished");
+    expect(seatedRuns([{ ...done, finishedAt: ago(FINISHED_SHOW_MS + 1) }], NOW)).toEqual([]);
+    // Cancelled or declined runs leave at once.
+    expect(seatedRuns([{ ...done, status: "cancelled" }], NOW)).toEqual([]);
   });
 
   it("lets a finished run go after a day", () => {

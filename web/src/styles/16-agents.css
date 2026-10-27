@@ -43,9 +43,91 @@
   font-size: 11px;
   line-height: 18px;
 }
+.agent-fab-label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.agent-fab-badge.is-unread {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.agent-fab-badge.is-waiting,
 .agent-fab.has-pending-ask .agent-fab-badge {
   background: var(--st-failed-fg);
   color: #fff;
+}
+/* A phone keeps the round button; the name stays its accessible label. */
+@media (max-width: 480px) {
+  .agent-fab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Agent chat with nobody in it: what it is, and how to connect an agent. */
+.agent-chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.agent-chat-empty p {
+  margin: 0;
+}
+.agent-chat-empty p:first-child {
+  color: var(--text);
+}
+.agent-chat-snippet {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-chat-snippet pre {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2, var(--hover));
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  /* The whole command in view, broken anywhere: it is copied, not read
+     from the wrap. */
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.agent-chat-copy {
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-chat-copy:hover {
+  background: var(--hover);
+}
+.agent-chat-manual summary {
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.agent-chat-docs {
+  align-self: flex-start;
+  color: var(--accent);
 }
 
 .agent-panel {

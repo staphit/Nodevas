@@ -10,7 +10,7 @@
 
 import { useEffect } from "react";
 
-import { setProjectMode } from "../../game/stageSkin";
+import { setProjectMode } from "../../station/projectMode";
 import { useI18n } from "../../i18n";
 import { useWorkstationVisible } from "../../runners/workstation";
 import { useRunners } from "../../runners/runnerStore";

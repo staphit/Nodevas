@@ -152,16 +152,14 @@ export function writePreference<K extends PreferenceKey>(
 }
 
 /**
- * The preferences that pick which view opens: Info, Station or Settings, the
- * Settings section, and the Station view. A view that crashes as it renders
+ * The preferences that pick which view opens: Board, Station or Settings, and
+ * the Settings section. A view that crashes as it renders
  * opens again on every reload while these point at it; the root error
  * boundary's "Reset view" drops them so the app starts on the board.
  */
 export const VIEW_SELECTION_PREFERENCES: readonly PreferenceKey[] = [
   "projectMode",
   "settingsSection",
-  "stationPack",
-  "stageSkin",
 ];
 
 /** Drops stored values so the defaults apply again. */

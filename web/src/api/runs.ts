@@ -24,6 +24,11 @@ export function runFinal(status: string): boolean {
   );
 }
 
+/** Whether a run waits, queued, for its agent's usage limit to reset. */
+export function runWaitsForLimit(run: Pick<Run, "status" | "retryAt">): boolean {
+  return run.status === "queued" && Boolean(run.retryAt);
+}
+
 /** Statuses the cancel route accepts. */
 export function runCancellable(status: string): boolean {
   return status === "queued" || status === "offered" || status === "running";

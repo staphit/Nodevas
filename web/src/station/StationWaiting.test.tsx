@@ -118,7 +118,7 @@ describe("StationWaiting", () => {
 
     expect(container.querySelector(".station-waiting")).toHaveClass("is-attention");
     const items = within(screen.getByRole("list")).getAllByRole("listitem");
-    expect(items.map((item) => item.firstChild?.firstChild?.textContent)).toEqual([
+    expect(items.map((item) => item.querySelector(".station-tile-title")?.textContent)).toEqual([
       "Today's budget is used up (Estimated cost): new runs are refused until 00:00 UTC.",
       "laptop-claude asks: May I drop the table?",
       "Held message: a/codex → b/claude",

@@ -12,14 +12,13 @@ import (
 	"nodevas/internal/httpapi/graph"
 	membersapi "nodevas/internal/httpapi/members"
 	"nodevas/internal/httpapi/node"
-	packsapi "nodevas/internal/httpapi/packs"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
 	runnersapi "nodevas/internal/httpapi/runners"
 	runsapi "nodevas/internal/httpapi/runs"
+	stationapi "nodevas/internal/httpapi/station"
 	"nodevas/internal/httpapi/system"
 	usageapi "nodevas/internal/httpapi/usage"
-	"nodevas/internal/packs"
 	"nodevas/internal/usage"
 )
 
@@ -109,6 +108,12 @@ func (s *Server) Handler() http.Handler {
 	} else {
 		s.configureStepUp(nil)
 	}
+	if s.pm != nil {
+		// Station's building: every readable project at once. It checks each
+		// project itself, so it is exempt from the per-request project gate,
+		// and it is not on the runner proxy's allowlist.
+		stationapi.New(s.pm, stationapi.NewSources(s.pm, s.runs, s.autopilot, s.agents), s.projectReadable).Register(api)
+	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {
 		sys.UseMailer(s.mailer)
@@ -125,14 +130,6 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	sys.Register(api)
-	packsAPI := packsapi.New(packs.New(func() string { return packs.Dir(s.pm.Workspace()) }))
-	if s.audit != nil {
-		packsAPI.UseAudit(s.audit)
-	}
-	// A pack is the workspace's, so every client hears of it, whatever
-	// project it watches.
-	packsAPI.UseChanged(func(id string) { s.hub.Broadcast(packsapi.ChangedEvent, id) })
-	packsAPI.Register(api)
 	if s.copilot != nil {
 		s.copilot.Register(api)
 	}

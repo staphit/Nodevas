@@ -445,9 +445,7 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 		path == "/api/auth/status" {
 		return ClassPublicAuth, 1.0
 	}
-	// Installing a view pack decodes up to 28 MB of base64 and unpacks the
-	// zip in memory, so few may run at once. Listing packs is an ordinary read.
-	if isHeavyPath(path) || (method == http.MethodPost && path == "/api/packs") {
+	if isHeavyPath(path) {
 		return ClassHeavy, 2.0
 	}
 	if isExpensivePath(path) {

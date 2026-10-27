@@ -1,7 +1,9 @@
-// What a click in a game view does. Every ClickTarget the world model hands
+// What a click in the war room does. Every ClickTarget the world model hands
 // out maps to a real action of the app: open the node, open the run in the
-// drawer, show a diff, answer an ask, decide a held message, open the
-// autopilot, follow a PR link. The views never invent behaviour of their own.
+// drawer, show a diff, answer an ask, decide a held message, follow a PR
+// link, go to another project's office (and do something there once it has
+// loaded), open an autopilot or the runners. The views never invent
+// behaviour of their own.
 
 import {
   createContext,
@@ -25,6 +27,8 @@ import { SessionDiffDialog } from "../runs/NodeSessions";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
 import { useSessions } from "../runs/sessionStore";
+import { openSettings } from "../settings/openSettings";
+import { useStation } from "../station/stationStore";
 import { reportError, useApp } from "../store";
 import { mergeRuns } from "./useWorld";
 import type { ClickTarget } from "./world";
@@ -83,6 +87,8 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
     if (back?.isConnected) setTimeout(() => back.focus(), 0);
   }, []);
 
+  // An in-project target already in its project dispatches what it wraps.
+  const dispatchRef = useRef<(target: ClickTarget) => void>(() => undefined);
   const dispatch = useCallback(
     (target: ClickTarget) => {
       switch (target.kind) {
@@ -119,17 +125,41 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
         case "held-message":
           open({ kind: "held", messageId: target.messageId });
           return;
+        case "pr":
+          openExternal(target.url);
+          return;
+        case "project":
+          void useApp.getState().switchProject(target.project).catch(reportError);
+          return;
+        case "in-project": {
+          // Done by StationView once the project's own stores are loaded.
+          if (useApp.getState().activeProject === target.project) {
+            dispatchRef.current(target.then);
+            return;
+          }
+          useStation.getState().deferTarget(target.project, target.then);
+          void useApp
+            .getState()
+            .switchProject(target.project)
+            .then(() => useStation.getState().deferredReady(target.project))
+            .catch((error) => {
+              useStation.getState().clearDeferred();
+              reportError(error);
+            });
+          return;
+        }
         case "autopilot":
           openAutopilot(target.goalNodeId);
           return;
-        case "pr":
-          openExternal(target.url);
+        case "runners":
+          openSettings("runners");
           return;
       }
     },
     [open, t],
   );
 
+  dispatchRef.current = dispatch;
   const value = useMemo(() => ({ dispatch }), [dispatch]);
 
   return (

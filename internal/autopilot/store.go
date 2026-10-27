@@ -225,6 +225,47 @@ func (s *Store) InProject(ctx context.Context, project string, statuses ...strin
 	return out, rows.Err()
 }
 
+// WaitingHumanRow is one task of a live autopilot whose review waits for a
+// person: what Station's building counts and links to.
+type WaitingHumanRow struct {
+	Project     string
+	AutopilotID string
+	GoalNodeID  string
+	NodeID      string
+	PipelineID  string
+}
+
+// WaitingHuman returns, in one query, the tasks of the given projects' live
+// autopilots (running or paused) that wait for a person's review.
+func (s *Store) WaitingHuman(ctx context.Context, projects []string) ([]WaitingHumanRow, error) {
+	out := []WaitingHumanRow{}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+1)
+	for _, project := range projects {
+		args = append(args, project)
+	}
+	args = append(args, runnerwire.TaskWaitingHuman)
+	rows, err := s.db.QueryContext(ctx, `SELECT r.project, r.id, r.goal_node_id, t.node_id, t.pipeline_id
+		FROM autopilot_tasks t JOIN autopilot_runs r ON r.id = t.autopilot_id
+		WHERE r.project IN (?`+strings.Repeat(", ?", len(projects)-1)+`) AND r.status IN ('running', 'paused')
+		AND t.state = ? AND t.pipeline_id <> ''
+		ORDER BY r.project, r.created_at, t.node_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row WaitingHumanRow
+		if err := rows.Scan(&row.Project, &row.AutopilotID, &row.GoalNodeID, &row.NodeID, &row.PipelineID); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // Tasks returns an autopilot's task instances, unordered.
 func (s *Store) Tasks(ctx context.Context, autopilotID string) ([]runnerwire.TaskInstance, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT data FROM autopilot_tasks WHERE autopilot_id = ?`, autopilotID)

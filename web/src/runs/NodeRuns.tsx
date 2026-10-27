@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { runCancellable, runFinal, type PipelineState, type Run, type RunEvent } from "../api";
+import { runCancellable, runFinal, runWaitsForLimit, type PipelineState, type Run, type RunEvent } from "../api";
 import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
@@ -67,11 +67,6 @@ export interface RetryInfo {
   failureKind?: string;
   /** The retry continues the earlier run's partial work (a handoff). */
   continues?: boolean;
-}
-
-/** Whether a run waits, queued, for its agent's usage limit to reset. */
-export function runWaitsForLimit(run: Run): boolean {
-  return run.status === "queued" && Boolean(run.retryAt);
 }
 
 /** "agent/model", or the agent alone. */

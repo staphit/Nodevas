@@ -8,7 +8,7 @@ A runner is the machine your coding agents run on. The hub (`nodevas serve`) sho
 2. Logs the runner in to the hub: with a one-time device link (`--link`, the easy way on a new PC; see below), or with a runner token. Either comes from a hidden prompt (or, for an unattended install, `NODEVAS_RUNNER_LINK` / `NODEVAS_RUNNER_TOKEN`), never from a flag.
 3. Adds the Cloudflare Access service token when the hub sits behind Access (`--access-client-id`; its secret from a hidden prompt, or `NODEVAS_ACCESS_CLIENT_SECRET`). Once logged in, the script unsets both variables, so the runner it starts (and the agents that runner spawns) never inherit them.
 4. Allows runs in each `--repo`.
-5. Wires the agents installed here into the agent network (`nodevas setup-agent`). It shows the changes first and asks, unless you pass `--yes`.
+5. Wires the agents installed here into Agent chat (`nodevas setup-agent`). It shows the changes first and asks, unless you pass `--yes`.
 6. Starts the runner at login:
    - Windows: a script in your Startup folder. It needs no administrator rights, runs without a window, and logs to `%LOCALAPPDATA%\nodevas\runner.log`.
    - Linux: a systemd user unit.

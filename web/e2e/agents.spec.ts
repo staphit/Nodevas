@@ -105,11 +105,13 @@ for (const [name, viewport] of Object.entries({
     await declineTour(page);
     await page.goto("/");
 
-    // The FAB shows the held count, so it reads as waiting before it opens.
-    const fab = page.getByRole("button", { name: "開啟 Agent 協作面板" });
-    await expect(fab).toContainText("!1");
+    // The FAB says what it is and shows the held count, so it reads as
+    // waiting before it opens.
+    const fab = page.getByRole("button", { name: /^開啟 Agent 對話 · 1 件等你處理/ });
+    await expect(fab).toContainText("Agent 對話");
+    await expect(fab.locator(".agent-fab-badge.is-waiting")).toHaveText("1");
     await fab.click();
-    const panel = page.getByRole("dialog", { name: "Agent 協作網路" });
+    const panel = page.getByRole("dialog", { name: "Agent 對話" });
     await expect(panel).toBeVisible();
 
     const heldSection = panel.getByRole("region", { name: "待審訊息（1）" });

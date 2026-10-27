@@ -21,10 +21,11 @@ import (
 
 var ProjectNamePattern = regexp.MustCompile(`^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$`)
 
-// graphNodeCount answers "how many nodes does this graph.yaml hold" without
-// re-parsing the YAML every time. List() runs on every search query and every
-// project listing, and a full ParseGraph of a large graph purely to read
-// len(g.Nodes) dominated that cost.
+// graphHeader answers "how many nodes does this graph.yaml hold, and what
+// layout and office style does it name" without re-parsing the YAML every
+// time. List() runs on every search query, every project listing and every
+// Station building refresh, and a full ParseGraph of a large graph purely to
+// read len(g.Nodes) dominated that cost.
 //
 // The cache is keyed by size+modtime, so an edit through any path — the API,
 // an external editor, a restored backup — invalidates it. A stat is all a warm
@@ -36,40 +37,48 @@ var graphCountCache sync.Map // absolute graph.yaml path -> graphCountEntry
 type graphCountEntry struct {
 	size    int64
 	modTime time.Time
-	nodes   int
+	header  graphHeaderInfo
 }
 
-// graphNodeCount reports the node count of the graph.yaml at path. ok is false
-// when the file does not exist or cannot be parsed, which callers read as
-// "this directory is a grouping folder, not a project".
-func graphNodeCount(root, path string) (nodes int, ok bool) {
+// graphHeaderInfo is what the catalog reads from a graph.yaml: its node
+// count, its layout (graph type) and its stored office style ("" unset).
+type graphHeaderInfo struct {
+	nodes       int
+	layout      string
+	officeStyle string
+}
+
+// graphHeader reports the header of the graph.yaml at path. ok is false when
+// the file does not exist or cannot be read, which callers read as "this
+// directory is a grouping folder, not a project".
+func graphHeader(root, path string) (header graphHeaderInfo, ok bool) {
 	info, err := store.StatProjectPath(root, path)
 	if err != nil || info.IsDir() {
-		return 0, false
+		return graphHeaderInfo{}, false
 	}
 	if cached, hit := graphCountCache.Load(path); hit {
 		entry := cached.(graphCountEntry)
 		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
-			return entry.nodes, true
+			return entry.header, true
 		}
 	}
 	data, err := store.ReadProjectFile(root, path)
 	if err != nil {
-		return 0, false
+		return graphHeaderInfo{}, false
 	}
 	graph, err := engine.ParseGraph(data)
 	if err != nil {
 		// Unparseable graph.yaml still marks a project, just an unreadable one.
 		// Do not cache: the next call should retry once the file is repaired.
-		return 0, true
+		return graphHeaderInfo{}, true
 	}
-	nodes = len(graph.Nodes)
+	header = graphHeaderInfo{nodes: len(graph.Nodes), layout: graph.Type, officeStyle: graph.OfficeStyle}
 	graphCountCache.Store(path, graphCountEntry{
 		size:    info.Size(),
 		modTime: info.ModTime(),
-		nodes:   nodes,
+		header:  header,
 	})
-	return nodes, true
+	return header, true
 }
 
 var ignoredProjectDirectories = map[string]bool{
@@ -252,6 +261,12 @@ type ProjectInfo struct {
 	// IsFolder marks a plain workspace directory (no graph.yaml): it groups
 	// projects in the tree but cannot be opened itself.
 	IsFolder bool `json:"isFolder,omitempty"`
+	// Layout is the graph's type (workflow or story). OfficeStyle is the
+	// style Station draws its office in, resolved (the layout's default when
+	// unset); OfficeStyleSet says whether the project chose one.
+	Layout         string `json:"layout,omitempty"`
+	OfficeStyle    string `json:"officeStyle,omitempty"`
+	OfficeStyleSet bool   `json:"officeStyleSet,omitempty"`
 }
 
 func (pm *ProjectManager) detachedProjectsFile() string {
@@ -331,8 +346,12 @@ func (pm *ProjectManager) List() ([]ProjectInfo, error) {
 			Depth:  depth,
 			Path:   dir,
 		}
-		if nodes, isProject := graphNodeCount(pm.workspace, filepath.Join(dir, "graph.yaml")); isProject {
-			info.Nodes = nodes
+		if header, isProject := graphHeader(pm.workspace, filepath.Join(dir, "graph.yaml")); isProject {
+			info.Nodes = header.nodes
+			info.Layout = header.layout
+			resolved := &engine.Graph{Type: header.layout, OfficeStyle: header.officeStyle}
+			info.OfficeStyle = resolved.ResolvedOfficeStyle()
+			info.OfficeStyleSet = header.officeStyle != "" && engine.ValidOfficeStyle(header.officeStyle)
 		} else {
 			info.IsFolder = true
 		}

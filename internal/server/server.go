@@ -94,6 +94,10 @@ type Server struct {
 	// router is the last router Handler built, read by the copilot's tool
 	// bridge from request goroutines while startup may still be writing it.
 	router atomic.Pointer[builtRouter]
+	// buildingPings throttles building-changed per project (building.go);
+	// made on first use unless a test set it first.
+	buildingPings *buildingPings
+	buildingOnce  sync.Once
 }
 
 // builtRouter boxes the router for the atomic pointer.
@@ -155,6 +159,16 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 			return
 		}
 		projectRoot = agentsRoom(projectRoot)
+		// Asks, mail and presence changes are news for Station's building in
+		// every project that may read this one. A presence change is only
+		// that: the agents-changed every heartbeat sends covers the panel.
+		switch eventType {
+		case agents.AskEvent, "agent-message", agents.PresenceEvent:
+			s.pingBuilding(projectRoot)
+		}
+		if eventType == agents.PresenceEvent {
+			return
+		}
 		// A notify message pops up on its recipient's screen, so it travels
 		// as its own event naming the message; everything else is one
 		// "reload the agent panel" signal.
@@ -402,6 +416,11 @@ func (s *Server) broadcastProject(name, evType, id string) {
 		return
 	}
 	s.hub.BroadcastRoom(st.Root(), evType, id)
+	// What runs and autopilots are doing is what the building shows; their
+	// event streams and notifications are not.
+	if evType == runnerwire.RunsChangedEvent || evType == autopilot.ChangedEvent {
+		s.pingBuilding(st.Root())
+	}
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.

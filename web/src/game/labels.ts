@@ -1,10 +1,10 @@
-// Words for the world model's entities, shared by the scenes and the list
-// view so a sprite's accessible name and its list sentence always agree.
+// Words for the world model's entities, shared by the war room's drawing and
+// its text list so a sprite's accessible name and its sentence always agree.
 // Everything goes through t(); product names (Claude, Codex…) are not
 // translated.
 
 import { excerpt } from "../agents/agentStore";
-import type { Actor, ClickTarget, Door, Monster, Party, Room } from "./world";
+import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -36,9 +36,52 @@ export function agentColorKey(agent: string): string {
   return AGENT_COLORS.includes(kind) ? kind : "other";
 }
 
-export function roomName(t: Translate, room: Pick<Room, "kind" | "name">): string {
-  if (room.kind === "terminal") return t("game.room.terminal");
-  return room.name || t("game.room.unnamed");
+/** Where a character works, for its sentence: its runner, or "Terminals"
+ * for an agent someone runs in their own terminal. */
+export function placeOf(t: Translate, actor: Pick<Actor, "runnerName">): string {
+  return actor.runnerName || t("game.room.terminal");
+}
+
+export function areaName(t: Translate, area: Area): string {
+  return t(`game.area.${area}`);
+}
+
+export function styleName(t: Translate, style: OfficeStyle): string {
+  return t(`office.style.${style}`);
+}
+
+/** The office's name with its style: "Office app (Engineering)". */
+export function officeLabel(t: Translate, office: Pick<ProjectOffice, "label" | "style">): string {
+  return `${t("game.office.label", { name: office.label })} (${styleName(t, office.style)})`;
+}
+
+/** What a glance through another office's door shows, in words. */
+export function compactSummary(t: Translate, c: Pick<CompactOffice, "counts">): string {
+  const parts: string[] = [];
+  if (c.counts.running) parts.push(t("game.compact.working", { count: c.counts.running }));
+  if (c.counts.waiting) parts.push(t("game.compact.waiting", { count: c.counts.waiting }));
+  if (c.counts.offered) parts.push(t("game.compact.offered", { count: c.counts.offered }));
+  if (c.counts.sleeping) parts.push(t("game.compact.sleeping", { count: c.counts.sleeping }));
+  if (c.counts.othersActive) parts.push(t("game.compact.others", { count: c.counts.othersActive }));
+  return parts.length ? parts.join(", ") : t("game.compact.idle");
+}
+
+/** "app: 2 working, 1 waiting on you, Engineering. Go to app". */
+export function compactLabel(t: Translate, c: Pick<CompactOffice, "counts" | "label" | "style">): string {
+  return t("game.compact.label", { name: c.label, summary: compactSummary(t, c), style: styleName(t, c.style) });
+}
+
+export function rackLabel(t: Translate, rack: Rack): string {
+  const state =
+    rack.online === null ? t("game.rack.unknown") : rack.online ? t("game.room.online") : t("game.room.offline");
+  const name = rack.name || t("game.room.unnamed");
+  return rack.slots
+    ? t("game.rack.label", { name, state, busy: rack.busy, slots: rack.slots })
+    : t("game.rack.labelNoSlots", { name, state, busy: rack.busy });
+}
+
+export function itemLabel(t: Translate, item: Pick<MeetingItem, "kind" | "title">): string {
+  return t(`game.item.${item.kind}`, { title: item.title });
 }
 
 export function poseLabel(t: Translate, pose: Actor["pose"]): string {
@@ -91,7 +134,10 @@ export function energyLabel(t: Translate, used: number, cap?: number): string {
 /** Node id → title, "" when unknown. */
 export type TitleOf = (nodeId: string) => string;
 
-export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf): string {
+/** Project name → its label, for "Go to …". */
+export type LabelOf = (project: string) => string;
+
+export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf, labelOf: LabelOf = (p) => p): string {
   switch (target.kind) {
     case "node":
       return t("game.action.node", { title: titleOf(target.nodeId) || target.nodeId });
@@ -107,61 +153,18 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf)
       return t("game.action.ask");
     case "held-message":
       return t("game.action.held");
-    case "autopilot":
-      return t("game.action.autopilot");
     case "pr":
       return t("game.action.pr");
-  }
-}
-
-export function monsterStateLabel(t: Translate, monster: Pick<Monster, "state">): string {
-  return t(`game.monster.${monster.state}`);
-}
-
-export function monsterLabel(t: Translate, monster: Monster, titleOf: TitleOf): string {
-  const parts = [
-    t("game.monster.label", {
-      title: monster.title || monster.nodeId,
-      state: monsterStateLabel(t, monster),
-    }),
-  ];
-  if (monster.state === "locked" && monster.blockers.length) {
-    parts.push(
-      t("game.monster.lockedBy", {
-        names: monster.blockers.map((id) => titleOf(id) || id).join(", "),
-      }),
-    );
-  }
-  if (monster.engaged) parts.push(t("game.monster.engaged"));
-  if (monster.merged) parts.push(t("game.monster.merged"));
-  if (monster.critical) parts.push(t("game.monster.critical"));
-  if (monster.entry) parts.push(t("game.monster.entry"));
-  return parts.join(" ");
-}
-
-export function doorLabel(t: Translate, door: Door, titleOf: TitleOf): string {
-  const output = titleOf(door.output) || door.output;
-  return door.open
-    ? t("game.door.open", { operator: door.operator.toUpperCase(), output })
-    : t("game.door.shut", {
-        operator: door.operator.toUpperCase(),
-        output,
-        names: door.blockers.map((id) => titleOf(id) || id).join(", "),
+    case "project":
+      return t("game.action.project", { name: labelOf(target.project) });
+    case "in-project":
+      return t("game.action.inProject", {
+        action: actionLabel(t, target.then, () => "", labelOf),
+        name: labelOf(target.project),
       });
-}
-
-export function partyLabel(t: Translate, party: Party, titleOf: TitleOf): string {
-  const at = party.positions.map((id) => titleOf(id) || id).join(", ");
-  const parts = [
-    t("game.party.label", {
-      goal: titleOf(party.goalNodeId) || party.goalNodeId,
-      done: party.done,
-      total: party.total,
-    }),
-  ];
-  parts.push(t(`game.party.status.${party.status}`));
-  if (at) parts.push(t("game.party.at", { names: at }));
-  if (party.waitingHuman.length) parts.push(t("game.party.waiting", { count: party.waitingHuman.length }));
-  if (party.failed) parts.push(t("game.party.failed", { count: party.failed }));
-  return parts.join(" ");
+    case "autopilot":
+      return t("game.action.autopilot");
+    case "runners":
+      return t("game.action.runners");
+  }
 }

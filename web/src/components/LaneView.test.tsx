@@ -175,7 +175,7 @@ describe("LaneView", () => {
           within(menu).getByRole("menuitemcheckbox", { name }),
       ).toBeInTheDocument();
     }
-    // The game views are Station's, opened from its own switch.
+    // The war room is Station's; the graph menu does not open it.
     expect(within(menu).queryByRole("menuitem", { name: /工作站/ })).not.toBeInTheDocument();
     // Nothing selected, so there is nothing to fit to.
     expect(within(menu).getByRole("menuitem", { name: "選取置中" })).toBeDisabled();

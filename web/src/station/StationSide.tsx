@@ -1,13 +1,13 @@
 // Station's side column: today's spend and who is working, the runners, and
-// the agent network's messages folded into one card. Each keeps its full
+// Agent chat folded into one card. Each keeps its full
 // view one step away (Settings → Usage, Settings → Runners, the docked agent
 // panel) instead of spreading it open.
 
 import { useCallback, useEffect, useState } from "react";
 
 import { AgentPanel } from "../agents/AgentPanel";
-import { useAgents } from "../agents/agentStore";
-import { agentColorKey, agentWho, poseLabel } from "../game/labels";
+import { unseenCount, useAgents } from "../agents/agentStore";
+import { agentColorKey, agentWho, areaName, poseLabel } from "../game/labels";
 import type { Actor, World } from "../game/world";
 import { useI18n } from "../i18n";
 import { useRunners } from "../runners/runnerStore";
@@ -21,10 +21,12 @@ const POSE_TONE: Record<Actor["pose"], string> = {
   offline: "muted",
   "asking-user": "ask",
   failed: "bad",
+  limit: "wait",
   "awaiting-accept": "wait",
   "waiting-ci": "wait",
   reviewing: "review",
   working: "work",
+  finished: "done",
   idle: "muted",
 };
 
@@ -102,9 +104,10 @@ function StationToday({ world }: { world: World }) {
   const usageError = useUsage((s) => s.error);
   const budget = useBudget((s) => s.status);
   const [rosterOpen, setRosterOpen] = useState(false);
-  const { actors, rooms } = world.office;
+  const { actors } = world.building;
   const working = actors.filter((actor) => actor.pose === "working" || actor.pose === "reviewing").length;
-  const roomName = (id: string) => rooms.find((room) => room.id === id)?.name || t("station.roster.terminal");
+  const placeName = (actor: Actor) =>
+    `${areaName(t, actor.area)} · ${actor.runnerName || t("station.roster.terminal")}`;
 
   useEffect(() => {
     if (!useUsage.getState().loaded) void useUsage.getState().refresh();
@@ -173,7 +176,7 @@ function StationToday({ world }: { world: World }) {
                       {actor.nodeTitle ? ` · ${actor.nodeTitle}` : ""}
                       {actor.energy ? ` · ${t("station.roster.tokens", { tokens: compact(actor.energy.used) })}` : ""}
                     </span>
-                    <span className="station-actor-room">{roomName(actor.roomId)}</span>
+                    <span className="station-actor-room">{placeName(actor)}</span>
                   </span>
                 </button>
               </li>
@@ -222,12 +225,13 @@ function StationRunners() {
   );
 }
 
-/** The agent network, folded to its message count until opened; open, it
- * is the docked agent panel with every control it has. */
+/** Agent chat, folded to what is unread until opened; open, it is the
+ * docked agent panel with every control it has. On the board, this card is
+ * its way in whenever the floating button has nothing to show. */
 function StationNetwork() {
   const { t } = useI18n();
   const [open, setOpen] = useRememberedOpen("nodevas-station-network-open");
-  const count = useAgents((s) => s.messages.length);
+  const count = useAgents((s) => unseenCount(s.messages, s.seenAt, s.viewer));
   const online = useAgents((s) => s.sessions.filter((session) => session.online).length);
   // What opens the floating panel on the board (Ctrl+Shift+A, a toast, a
   // loose session in the war room) unfolds this card in Station. The request

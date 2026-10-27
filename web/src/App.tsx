@@ -22,7 +22,7 @@ import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
 import { followupArrived as copilotFollowupArrived, runnersChanged as copilotRunnersChanged } from "./copilot/session";
-import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
+import { AgentChatRoot } from "./agents/AgentChatRoot";
 import { useAgents } from "./agents/agentStore";
 import { useUsage } from "./usage/usageStore";
 import { useAutopilot } from "./autopilot/autopilotStore";
@@ -30,7 +30,7 @@ import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
 import { openSettings } from "./settings/openSettings";
-import { usePacks } from "./game/packStore";
+import { useBuilding } from "./station/buildingStore";
 import { useStation } from "./station/stationStore";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
@@ -292,16 +292,17 @@ function MainApp() {
           // system notification when this browser allows one.
           void useAgents.getState().handleAsk(ev.id ?? "");
           break;
-        case "packs-changed":
-          // A view pack was installed or removed: a loaded list refetches.
-          usePacks.getState().onPacksChanged();
-          break;
         case "runners-changed":
           // Only refetched once the Runners dialog has loaded them; a board
           // that never opened it has nothing to keep current.
           void useRunners.getState().refreshIfLoaded();
           // The copilot's model calls may run on this person's runner.
           copilotRunnersChanged();
+          break;
+        case "building-changed":
+          // Something changed in a project this viewer may read (any of
+          // them): an open Station's building refetches, coalesced.
+          useBuilding.getState().onChanged();
           break;
         case "usage-changed":
           // A session reported its tokens: an open Usage dialog refetches.
@@ -505,7 +506,7 @@ function MainApp() {
         <CopilotRoot />
       </ViewErrorBoundary>
       <ViewErrorBoundary compact resetKey={activeProject}>
-        <AgentNetworkRoot />
+        <AgentChatRoot />
       </ViewErrorBoundary>
       <ViewErrorBoundary compact resetKey={activeProject}>
         <RunsRoot />

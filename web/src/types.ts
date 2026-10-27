@@ -255,6 +255,9 @@ export interface SavedView {
   sort?: "manual" | "title" | "priority" | "status" | "assignee";
 }
 
+/** Station's office looks (game/officeStyle.ts), in display order. */
+export type OfficeStyle = "default" | "engineering" | "study" | "studio" | "cafe";
+
 export interface Graph {
   version: number;
   type?: string;
@@ -264,6 +267,9 @@ export interface Graph {
   flags?: Record<string, unknown>;
   /** Project node types: custom ones plus built-in shape/colour overrides. */
   nodeTypes?: NodeTypeDef[];
+  /** How the project's office looks in Station (graph.yaml office_style);
+   * absent: the layout's default (game/officeStyle.ts). */
+  officeStyle?: OfficeStyle;
   ui?: {
     positions?: Record<string, { x: number; y: number }>;
     /** Timeline-only node order. Graph positions never affect this sequence. */

@@ -1,30 +1,32 @@
 // Station: the project as its agents see it. What waits on you comes first;
-// then what is under way (a list, or the live war room or boss map), with
-// one emergency stop in the header. The side column says what today cost,
+// then the war room, where what is under way sits at its desks, with one
+// emergency stop in the header. The side column says what today cost,
 // which runners there are and what the agents say to each other, each folded
 // to a line until asked. Info (the board) is the other face of the same
 // project; the top bar switches between them.
 //
 // Loaded on demand (App's React.lazy), so a browser that stays in Info never
-// downloads it, and the game views below it load lazily again.
+// downloads it, and the war room's drawing below it loads lazily again.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useAgents } from "../agents/agentStore";
 import { AutopilotPanel } from "../autopilot/AutopilotPanel";
-import { GameActionsProvider } from "../game/GameActions";
-import { usePacks } from "../game/packStore";
-import { setProjectMode } from "../game/stageSkin";
+import { GameActionsProvider, useGameActions } from "../game/GameActions";
+import { setProjectMode } from "./projectMode";
 import { useWorld } from "../game/useWorld";
 import { useI18n } from "../i18n";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
+import { useRuns } from "../runs/runStore";
 import { reportError, useApp } from "../store";
 import { buildActivity, type ActivityLane } from "./activity";
-import { StationControl, StationControlReport, StationPauseButton } from "./StationControl";
+import { useBuilding } from "./buildingStore";
+import { StationControlReport, StationPauseButton } from "./StationControl";
 import { StationSide } from "./StationSide";
 import { useStation } from "./stationStore";
 import { StationWaiting } from "./StationWaiting";
+import { StationWarRoom } from "./StationWarRoom";
 
 export default function StationView({ drawer }: { drawer: ReactNode }) {
   const { t } = useI18n();
@@ -34,16 +36,25 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
 
   useEffect(() => {
     setWatching(true);
-    return () => setWatching(false);
+    useBuilding.getState().setWatching(true);
+    return () => {
+      setWatching(false);
+      useBuilding.getState().setWatching(false);
+    };
   }, [setWatching]);
+  const firstProject = useRef(true);
   useEffect(() => {
     useStation.getState().openProject(activeProject);
     void useBudget.getState().load();
-    void usePacks.getState().load();
+    // The mount's load is setWatching's; a switch reloads (the current
+    // office leaves the building summary, the old one joins it).
+    if (firstProject.current) firstProject.current = false;
+    else void useBuilding.getState().load();
   }, [activeProject]);
 
   return (
     <GameActionsProvider>
+      <DeferredTarget />
       <div className="station" aria-label={t("mode.station")} role="main">
         <header className="station-head">
           <h2>{t("mode.station")}</h2>
@@ -57,7 +68,7 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
           {/* A goal opened from a node's panel (or a review waiting on you)
               is why Station opened: right under what waits on you. */}
           <StationGoal />
-          <StationControl world={world} />
+          <StationWarRoom world={world} />
           <StationActivity />
         </div>
         <StationSide world={world} />
@@ -67,9 +78,31 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
   );
 }
 
+/** Something clicked in another project's office: once Station has
+ * switched there and what it needs has loaded, it is done (and forgotten). */
+function DeferredTarget() {
+  const { dispatch } = useGameActions();
+  const deferred = useStation((s) => s.deferred);
+  const activeProject = useApp((s) => s.activeProject);
+  const graph = useApp((s) => s.graph);
+  const runsLoaded = useRuns((s) => s.activeRunsLoaded);
+  const asks = useAgents((s) => s.asks);
+  const held = useAgents((s) => s.held);
+  useEffect(() => {
+    if (!deferred?.ready || deferred.project !== activeProject || !graph) return;
+    const target = deferred.target;
+    if (target.kind === "run" && !runsLoaded) return;
+    if (target.kind === "ask" && !asks.some((ask) => ask.id === target.askId)) return;
+    if (target.kind === "held-message" && !held.some((message) => message.id === target.messageId)) return;
+    useStation.getState().clearDeferred();
+    dispatch(target);
+  }, [deferred, activeProject, graph, runsLoaded, asks, held, dispatch]);
+  return null;
+}
+
 /**
- * Autopilot in Station: the goal a node's banner (or its menu, a party on the
- * boss map, a task waiting for you, a row of "In progress") opened, in full.
+ * Autopilot in Station: the goal a node's banner (or its menu, a task waiting
+ * for you, a war-room character or tile) opened, in full.
  * The goal and its tasks stay nodes of the board: "Show on board" goes
  * back to it.
  */

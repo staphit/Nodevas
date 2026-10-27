@@ -11,6 +11,7 @@ import { formatLocalizedDateTime, useI18n } from "../i18n";
 import { IconBell, IconClose, IconComputer, IconPaperclip, IconUsage } from "../icons";
 import { WaitingForYouButton } from "../autopilot/HumanReview";
 import { useApp } from "../store";
+import { AgentChatEmpty } from "./AgentChatEmpty";
 import { AskCard } from "./AskCard";
 import { canManageSession, useAgents } from "./agentStore";
 import {
@@ -127,6 +128,11 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
   useEffect(() => {
     if (!docked) inputRef.current?.focus();
   }, [docked]);
+
+  // Open, the panel is being read: what is in it is no longer unread.
+  useEffect(() => {
+    useAgents.getState().markSeen();
+  }, [messages]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented && onClose) {
@@ -338,7 +344,7 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
 
       <section className="agent-roster-section" aria-label={t("agents.roster")}>
         {sessions.length === 0 ? (
-          <div className="agent-roster-empty">{t("agents.emptyRoster")}</div>
+          <AgentChatEmpty />
         ) : (
           <div className="agent-roster-list">
             {sessions.map((s) => {

@@ -65,8 +65,6 @@ export type WSEvent = {
     | "agent-notify"
     // A new question from an agent; the id is the ask's.
     | "agent-ask"
-    // A view pack was installed or removed (docs/view-packs.md).
-    | "packs-changed"
     | "runners-changed"
     | "runs-changed"
     | "run-events"
@@ -77,7 +75,10 @@ export type WSEvent = {
     | "autopilot-changed"
     // The copilot followed up in one of this account's conversations (a plan
     // run it started ended); the id is the conversation's.
-    | "copilot-followup";
+    | "copilot-followup"
+    // Something changed in a project this viewer may read, any of them:
+    // Station's building refetches. No id.
+    | "building-changed";
   id?: string;
   project?: string;
   /** autopilot-changed: the goal node the autopilot run belongs to. */

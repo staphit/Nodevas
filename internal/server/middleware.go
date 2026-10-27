@@ -301,10 +301,7 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	r := c.Request
 	if !strings.HasPrefix(r.URL.Path, "/api/") ||
 		!isUnsafeMethod(r.Method) ||
-		strings.HasPrefix(r.URL.Path, "/api/auth/") ||
-		// A pack belongs to no project; its handlers write their own
-		// server-wide pack.install and pack.remove rows.
-		r.URL.Path == "/api/packs" || strings.HasPrefix(r.URL.Path, "/api/packs/") {
+		strings.HasPrefix(r.URL.Path, "/api/auth/") {
 		c.Next()
 		return
 	}

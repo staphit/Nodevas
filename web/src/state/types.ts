@@ -100,6 +100,12 @@ export interface ProjectEntry {
   path: string;
   nodes: number;
   isFolder?: boolean;
+  /** graph.yaml's type: "workflow", "story" or absent. */
+  layout?: string;
+  /** Resolved office style (the project's choice or its layout's default). */
+  officeStyle?: string;
+  /** Whether the project chose its office style. */
+  officeStyleSet?: boolean;
 }
 
 export interface OperationsSlice {

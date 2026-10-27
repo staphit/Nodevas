@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { setProjectMode } from "../game/stageSkin";
+import { setProjectMode } from "../station/projectMode";
 import { useApp } from "../store";
 
 /**
@@ -42,6 +42,7 @@ export type SettingsRow =
   | "accessToken"
   | "statuses"
   | "nodeTypes"
+  | "officeStyle"
   | "milestones"
   | "people"
   | "backup"
