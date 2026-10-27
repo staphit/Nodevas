@@ -17,10 +17,25 @@ async function ranked(
 ): Promise<Ranked[]> {
   const params = new URLSearchParams({ q: query, mode: "ranked" });
   if (project) params.set("project", project);
-  const res = await request.get(`/api/search?${params}`);
+  const res = await searchPaced(request, params);
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = (await res.json()) as { results: Ranked[] };
   return body.results;
+}
+
+/**
+ * GET /api/search, waiting out the expensive-route limiter (cost 2 against an
+ * actor burst of 16) when a loop of queries spends it: a 429 is the limiter
+ * doing its job, not the answer under test, so it is retried after
+ * Retry-After. Any other status is returned as it came.
+ */
+async function searchPaced(request: APIRequestContext, params: URLSearchParams) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await request.get(`/api/search?${params}`);
+    if (res.status() !== 429 || attempt >= 5) return res;
+    const wait = Number(res.headers()["retry-after"] ?? "1");
+    await new Promise((r) => setTimeout(r, Math.min(Math.max(wait, 1), 5) * 1000));
+  }
 }
 
 async function addNode(request: APIRequestContext, title: string, body: string) {
@@ -62,7 +77,7 @@ test.describe("ranked search on PostgreSQL", () => {
       for (const mode of ["", "ranked"]) {
         const params = new URLSearchParams({ q: query });
         if (mode) params.set("mode", mode);
-        const res = await page.request.get(`/api/search?${params}`);
+        const res = await searchPaced(page.request, params);
         expect(res.status(), `${mode || "plain"} ${query}`).toBe(200);
       }
     }
