@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	pathpkg "path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,8 +25,14 @@ func (s *Server) notFound(c *gin.Context) {
 	s.serveStatic(c)
 }
 
-// serveStatic serves the embedded frontend build; unknown paths fall back to
-// index.html (SPA routing).
+// serveStatic serves the embedded frontend build; unknown extension-less paths
+// fall back to index.html (SPA routing).
+//
+// A missing file is a 404, never the app shell. A tab opened before an upgrade
+// asks for the old build's hashed chunks; answered with index.html, the
+// browser gets HTML where it expected JavaScript, and the cached 200 can stick
+// for a year under the immutable header. A plain uncached 404 lets the page
+// notice the chunk is gone and reload.
 func (s *Server) serveStatic(c *gin.Context) {
 	if s.webFS == nil {
 		http.Error(c.Writer, "frontend not built; run `npm run build` in web/ or use the Vite dev server", 404)
@@ -36,6 +43,11 @@ func (s *Server) serveStatic(c *gin.Context) {
 		path = "index.html"
 	}
 	if _, err := fs.Stat(s.webFS, path); err != nil {
+		if strings.HasPrefix(path, "assets/") || pathpkg.Ext(path) != "" {
+			c.Header("Cache-Control", "no-store")
+			http.Error(c.Writer, "not found", http.StatusNotFound)
+			return
+		}
 		path = "index.html"
 	}
 	if path == "index.html" {

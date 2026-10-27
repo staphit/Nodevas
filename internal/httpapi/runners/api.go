@@ -21,6 +21,7 @@ import (
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 const maxCreateBody = 4 << 10
@@ -166,6 +167,7 @@ func (s *session) Send(env runnerwire.Envelope) error {
 func (s *session) Bye(reason string) {
 	s.byeOnce.Do(func() {
 		go func() {
+			defer safego.Recover("runner bye")
 			_ = s.send(context.Background(), runnerwire.Envelope{Type: runnerwire.TypeBye, Reason: reason})
 			_ = s.conn.Close(websocket.StatusNormalClosure, reason)
 		}()

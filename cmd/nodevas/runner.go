@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"nodevas/internal/agenthook"
@@ -217,7 +215,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if cfg.Hub == "" || cfg.Token == "" {
 		return fmt.Errorf("not logged in (%s): run nodevas runner login --hub <url> first", path)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := runnerStopContext()
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 var (
@@ -241,7 +242,7 @@ func (t *Terminal) setStatus(status string) {
 		v.push(frame)
 	}
 	if runnerwire.RunFinal(status) && t.expiry == nil {
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 
@@ -365,7 +366,7 @@ func (t *Terminal) setFinal(status string) {
 	defer t.mu.Unlock()
 	if t.expiry == nil && !t.gone {
 		t.status = status
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 

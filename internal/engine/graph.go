@@ -302,7 +302,22 @@ func ParseGraph(data []byte) (*Graph, error) {
 		}
 		return nil, fmt.Errorf("graph.yaml: %w", err)
 	}
+	NormalizeLogicGates(&g)
 	return &g, nil
+}
+
+// NormalizeLogicGates gives every logic gate a non-nil Inputs. A gate written
+// as "inputs:" with nothing after it, or sent without the field, decodes to
+// nil, which reaches the browser as JSON null where it iterates an array.
+func NormalizeLogicGates(g *Graph) {
+	if g == nil || g.UI == nil {
+		return
+	}
+	for i := range g.UI.LogicGates {
+		if g.UI.LogicGates[i].Inputs == nil {
+			g.UI.LogicGates[i].Inputs = []string{}
+		}
+	}
 }
 
 // MarshalGraph encodes a graph back to YAML.

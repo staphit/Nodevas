@@ -20,6 +20,7 @@ import (
 	"nodevas/internal/identity"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 // Device links (runnerwire/link.go):
@@ -231,7 +232,8 @@ func (a *API) redeemLink(c *gin.Context) {
 		"name": runner.Name, "device": device, "os": deviceOS,
 	})
 	if a.link.Mail != nil && email != "" {
-		go a.mailRedeem(email, runner, device, deviceOS, source, time.Now())
+		at := time.Now()
+		safego.Go("device link mail", func() { a.mailRedeem(email, runner, device, deviceOS, source, at) })
 	}
 	c.JSON(http.StatusCreated, runnerwire.RedeemLinkResponse{RunnerID: runner.ID, Name: runner.Name, Token: token})
 }

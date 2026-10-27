@@ -311,7 +311,9 @@ func (pm *ProjectManager) List() ([]ProjectInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []ProjectInfo
+	// Never nil: an empty workspace is an empty list, not JSON null, which a
+	// client iterating "projects" would trip on.
+	out := []ProjectInfo{}
 	add := func(name, dir string) {
 		label := filepath.Base(dir)
 		depth := strings.Count(filepath.ToSlash(name), "/")

@@ -16,6 +16,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 )
 
@@ -719,6 +720,15 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	ip := auth.ClientIP(c.Request)
 	now := time.Now()
 
+	// The person at the keyboard of a standalone hub is every tab, the copilot
+	// and the local runner at once, all as one actor: a busy board opened in a
+	// few tabs reads past the per-actor limit on its own. Reads straight from
+	// this machine skip that one bucket; the global and per-IP buckets, and
+	// every write limit, still apply. A hub with accounts is unchanged.
+	if class == ClassRead && s.directLocalActor(c.Request, actor) {
+		actorID = ""
+	}
+
 	if ok, retrySec := s.abuse.AllowRoute(class, cost, actorID, ip, now); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
@@ -754,6 +764,15 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
 		c.Abort()
 	}
+}
+
+// directLocalActor reports a request from the local user of a standalone
+// (loopback, no accounts) hub that reached it directly, not through a proxy.
+func (s *Server) directLocalActor(r *http.Request, actor identity.Actor) bool {
+	if _, local := s.auth.(auth.LocalOnly); !local {
+		return false
+	}
+	return actor.ID == identity.Local.ID && auth.DirectLoopback(r)
 }
 
 // AbuseStats reports limiter health and metrics for administrators.

@@ -89,6 +89,7 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 			return nil, "", err
 		}
 	}
+	engine.NormalizeLogicGates(graph)
 	if err := ValidateGraphForStorage(graph); err != nil {
 		return nil, "", err
 	}

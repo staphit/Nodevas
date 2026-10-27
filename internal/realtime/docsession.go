@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"nodevas/internal/safego"
 )
 
 const (
@@ -1150,16 +1152,21 @@ func (h *Hub) docSnapshotStart(client *wsClient, key string, message clientMessa
 	// A quiet client must not reserve memory indefinitely. The timer only
 	// clears the matching token, so a later compaction for this key is safe.
 	timer := time.AfterFunc(remaining, func() {
-		unlock := h.lockDocPersistence(room, key)
-		h.mu.Lock()
-		var slow bool
-		if current := h.docs[room][key]; current != nil && current.compaction != nil && current.compaction.token == message.Token && !current.compaction.until.After(time.Now()) {
-			h.clearCompactionLocked(current)
-			slow = !queueEvent(client, Event{Type: "doc-snapshot-rejected", ID: key, Token: message.Token})
-			slow = !queueEvent(client, Event{Type: "doc-persistence-error", ID: key}) || slow
-		}
-		h.mu.Unlock()
-		unlock()
+		// A timer callback is a bare goroutine: a panic would end the server.
+		// The locks are deferred so a recovered panic does not leave them held.
+		defer safego.Recover("doc compaction timeout")
+		slow := func() (slow bool) {
+			unlock := h.lockDocPersistence(room, key)
+			defer unlock()
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if current := h.docs[room][key]; current != nil && current.compaction != nil && current.compaction.token == message.Token && !current.compaction.until.After(time.Now()) {
+				h.clearCompactionLocked(current)
+				slow = !queueEvent(client, Event{Type: "doc-snapshot-rejected", ID: key, Token: message.Token})
+				slow = !queueEvent(client, Event{Type: "doc-persistence-error", ID: key}) || slow
+			}
+			return slow
+		}()
 		if slow {
 			h.remove(client)
 		}

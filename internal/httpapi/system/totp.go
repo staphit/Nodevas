@@ -15,6 +15,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/safego"
 )
 
 // Two-factor authentication (an authenticator app, TOTP). See
@@ -310,6 +311,7 @@ func (a *API) noticeTOTPChange(c *gin.Context, accounts *auth.SessionAuth, what 
 		"\n\nIf this was not you, sign in, check Settings > Account, and ask an administrator to reset " +
 		"two-factor authentication (nodevas account totp-reset) if you are locked out.\n"
 	go func() {
+		defer safego.Recover("two-factor notice mail")
 		ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 		defer cancel()
 		if err := a.mailer.Send(ctx, to, "Nodevas: two-factor authentication changed", body); err != nil {

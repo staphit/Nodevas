@@ -13,6 +13,7 @@ import (
 
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 // Follow-up: the copilot coming back to a conversation by itself.
@@ -248,6 +249,7 @@ func (s *Service) RunChanged(run RunInfo) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot follow-up for run " + run.ID)
 		s.settleRun(context.Background(), run)
 	}()
 }
@@ -295,6 +297,7 @@ func (s *Service) StartFollowups(ctx context.Context) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot pending follow-ups")
 		waiting, err := s.store.followups(ctx, `status = ?`, followupPending)
 		if err != nil {
 			slog.Warn("copilot: pending follow-ups", slog.Any("error", err))
@@ -348,6 +351,7 @@ func (s *Service) releaseLocked(conversationID, holder string) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer safego.Recover("copilot follow-ups for a conversation")
 		s.settleConversation(context.Background(), conversationID)
 	}()
 }

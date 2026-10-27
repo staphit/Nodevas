@@ -13,11 +13,9 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"nodevas/internal/audit"
@@ -418,14 +416,21 @@ func serve(args []string) {
 
 	// Logging is set up before anything else can fail, so a startup error is
 	// itself a structured record rather than the one line that escapes the
-	// pipeline.
-	logger, err := logging.Setup(os.Stderr, logging.Config{
+	// pipeline. It also goes to a file under the catalog root, with the
+	// runtime's crash output (serve_console.go).
+	standalone := !isRemoteDeployment(*listen, *behindProxy)
+	logs := openServeLogs(os.Stderr)
+	defer logs.close()
+	logger, err := logging.Setup(logs.writer, logging.Config{
 		Level:   *logLevel,
 		Format:  *logFormat,
 		Service: "nodevas",
 	})
 	if err != nil {
 		log.Fatalf("logging: %v", err)
+	}
+	if logs.path != "" {
+		log.Printf("serve log: %s", logs.path)
 	}
 
 	root, err := filepath.Abs(*projectFlag)
@@ -670,8 +675,15 @@ func serve(args []string) {
 		log.Print("WARNING: serving over plain HTTP; passwords and session cookies are visible on the network")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// A standalone hub on a terminal asks for a second Ctrl+C: that terminal
+	// is also where its runner's runs are accepted.
+	confirmStop := standalone && isTerminal(os.Stdin)
+	ctx, stop := serveContext(confirmStop, os.Stderr)
 	defer stop()
+	if standalone && localRunnerConfig != "" {
+		// A click in the console must not pause the runner's prompt.
+		defer disableQuickEdit()()
+	}
 	// Bound before serving, so a local runner started next finds the hub
 	// already listening.
 	listener, err := net.Listen("tcp", addr)
@@ -694,12 +706,15 @@ func serve(args []string) {
 			stopRunner = stop
 		}
 	}
+	if standalone {
+		logs.consoleNonBlocking()
+	}
 
 	select {
 	case err := <-errCh:
 		stopRunner()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve: %v", err)
+			logs.fatal("serve: %v", err)
 		}
 	case <-ctx.Done():
 		log.Print("shutting down")

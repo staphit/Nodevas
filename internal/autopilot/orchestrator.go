@@ -21,6 +21,7 @@ import (
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 // Runs is what the orchestrator needs of the run dispatcher.
@@ -207,9 +208,11 @@ func (o *Orchestrator) lock(id string) func() {
 	return mu.Unlock
 }
 
-// Start resumes every live autopilot and runs the loop until ctx ends.
+// Start resumes every live autopilot and runs the loop until ctx ends. A
+// panic in the loop is logged and the loop starts again (safego), so one
+// autopilot's bad state cannot stop every other one, or the hub.
 func (o *Orchestrator) Start(ctx context.Context) {
-	go o.loop(ctx)
+	safego.Loop(ctx, "autopilot orchestrator", o.loop)
 	o.kickLive(ctx)
 }
 
@@ -232,9 +235,11 @@ func (o *Orchestrator) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id := <-o.kicks:
-			o.Reconcile(ctx, id)
+			// One autopilot's pass panicking is logged and the loop goes on
+			// to the next kick; the periodic pass retries it.
+			safego.Call("autopilot reconcile "+id, func() { o.Reconcile(ctx, id) })
 		case <-ticker.C:
-			o.kickLive(ctx)
+			safego.Call("autopilot live pass", func() { o.kickLive(ctx) })
 		}
 	}
 }

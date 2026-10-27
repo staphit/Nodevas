@@ -23,6 +23,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/gitrepo"
 	"nodevas/internal/identity"
+	"nodevas/internal/safego"
 )
 
 // historyImportMarker says the .vised/history copies are in the repository.
@@ -98,6 +99,7 @@ func newGitHistory(s *Store, window time.Duration) *gitHistory {
 	g.inflight.Add(1)
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history open")
 		if _, err := g.ready(context.Background()); err != nil && !errors.Is(err, errProjectGone) {
 			log.Printf("history for %s: %v", s.root, err)
 		}
@@ -221,9 +223,16 @@ func (g *gitHistory) pendingLocked() *gitPending {
 		g.pending = &gitPending{kinds: map[string]string{}}
 	}
 	if g.timer == nil && !g.closed {
-		g.timer = time.AfterFunc(g.window, g.commitSoon)
+		g.timer = time.AfterFunc(g.window, g.commitSoonSafely)
 	}
 	return g.pending
+}
+
+// commitSoonSafely is commitSoon as the window's timer calls it: a timer
+// callback is a bare goroutine, and a panic there would end the server.
+func (g *gitHistory) commitSoonSafely() {
+	defer safego.Recover("history commit window")
+	g.commitSoon()
 }
 
 func (g *gitHistory) commitSoon() {
@@ -242,6 +251,7 @@ func (g *gitHistory) commitSoon() {
 	g.mu.Unlock()
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history commit")
 		if err := g.commit(context.Background(), false); err != nil {
 			log.Printf("history for %s: %v", g.s.root, err)
 		}
@@ -261,6 +271,7 @@ func (g *gitHistory) commitStartsSoon() {
 	g.mu.Unlock()
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history commit segments")
 		if err := g.commitSegments(context.Background()); err != nil {
 			log.Printf("history for %s: %v", g.s.root, err)
 		}
@@ -416,7 +427,7 @@ func (g *gitHistory) requeue(batch *gitPending) {
 	}
 	g.pending = batch
 	if g.timer == nil && !g.closed {
-		g.timer = time.AfterFunc(g.window, g.commitSoon)
+		g.timer = time.AfterFunc(g.window, g.commitSoonSafely)
 	}
 }
 
