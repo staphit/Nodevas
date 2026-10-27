@@ -24,21 +24,19 @@ import {
 } from "../store";
 import { OperationStatus, ResizeHandle } from "./InteractionPrimitives";
 import { DocumentOutline } from "./inspector/DocumentOutline";
-import { NodeAppearance } from "./inspector/NodeAppearance";
 import { NodeLinkPicker } from "./NodeLinkPicker";
-import { useNarrowViewport } from "./TopbarOverflow";
 import { LifecyclePanel } from "./inspector/LifecyclePanel";
-import { NodeHistory } from "./inspector/NodeHistory";
-import { NodeMetaForm } from "./inspector/NodeMetaForm";
-import { NodeRelations } from "./inspector/NodeRelations";
-import { NodeTimeline } from "./inspector/NodeTimeline";
-import { NodeRuns } from "../runs/NodeRuns";
+import { NodeActivity } from "./inspector/NodeActivity";
+import { NodeDependencies } from "./inspector/NodeDependencies";
+import { AssigneeField, NodeMetaForm } from "./inspector/NodeMetaForm";
 import { useRuns } from "../runs/runStore";
 import { useWorkstationVisible } from "../runners/workstation";
+import { DispatchControl } from "./drawer/DispatchControl";
 import { DocumentPreview } from "./drawer/DocumentPreview";
 import { DrawerTabs } from "./drawer/DrawerTabs";
 import { EditorToolbar } from "./drawer/EditorToolbar";
-import { SubpageControls } from "./drawer/SubpageControls";
+import { useNodeDetailView, type NodeDetailView } from "./drawer/openNodeDetail";
+import { SubpageControls, SubpageMenu } from "./drawer/SubpageControls";
 import { TableToolbar } from "./drawer/TableToolbar";
 import { useEditorExtensions, type EditorMode } from "./drawer/editorExtensions";
 import { setRemoteCarets } from "../editor/remoteCarets";
@@ -221,7 +219,9 @@ export function Drawer() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (tabMenuOpen.current) return;
+        // Something inside the panel — a menu, a dialog, the editor — has
+        // already answered this Escape.
+        if (tabMenuOpen.current || e.defaultPrevented) return;
         closeDrawer();
       }
     };
@@ -372,29 +372,31 @@ export function TabBody({
   }, [id, requestLock, releaseLock]);
 
   const workstation = useWorkstationVisible();
-  const [drawerView, setDrawerView] = useState<
-    "content" | "relations" | "timeline" | "appearance" | "runs"
-  >("content");
+  const [drawerView, setDrawerView] = useState<NodeDetailView>("content");
   // "Runs" in a node menu, or a dispatch that just went out, asks for this
-  // node's runs; the body showing that node consumes the request.
+  // node's runs, which live on the Activity tab; the body showing that node
+  // consumes the request.
   const showRunsRequest = useRuns((s) => s.showRunsRequest);
   useEffect(() => {
     if (showRunsRequest?.nodeId !== id) return;
-    setDrawerView("runs");
+    setDrawerView("activity");
     useRuns.getState().clearShowRunsRequest();
   }, [showRunsRequest, id]);
-  // The panel is one column of panes with the document last, which a desktop
-  // drawer has the height to show all at once and a phone sheet does not: on a
-  // 390px screen 基本資料 and 實際狀態 together are taller than half the sheet,
-  // and the document ends up below the fold of something that does not scroll.
-  // So on a phone the metadata opens closed. It is the same reasoning as the
-  // sheet itself — what you came for is the document; the metadata is what you
-  // check afterwards, and one tap away is close enough for that. Kept in state
-  // rather than left to the `open` attribute so a window resized across the
-  // breakpoint mid-session lands on the right default for its new width.
-  const narrow = useNarrowViewport();
-  const [metaOpen, setMetaOpen] = useState(!narrow);
-  useEffect(() => setMetaOpen(!narrow), [narrow]);
+  // openNodeDetail(): another part of the app asking for one view of this node,
+  // such as the board's "Add dependency…".
+  const viewRequest = useNodeDetailView((s) => s.request);
+  useEffect(() => {
+    if (viewRequest?.nodeId !== id) return;
+    setDrawerView(viewRequest.view);
+    useNodeDetailView.getState().clearRequest();
+  }, [viewRequest, id]);
+  // Type, priority, tags and the rest are looked at now and then, not every
+  // time a node is opened, so they wait behind one line under the tabs. Closed
+  // by default at every width: what a node is opened for is its document.
+  const [morePropsOpen, setMorePropsOpen] = useState(false);
+  const dependencyCount = useApp(
+    (s) => (s.graph?.edges ?? []).filter((edge) => edge.to === id).length,
+  );
   const editorMode = usePreference("editorMode");
   const setEditorMode = (mode: EditorMode) =>
     useApp.getState().updateUIPreference("editorMode", mode);
@@ -806,99 +808,71 @@ export function TabBody({
         </div>
       )}
 
-      <details
-        className="drawer-meta-band"
-        open={metaOpen}
-        onToggle={(event) => setMetaOpen(event.currentTarget.open)}
-      >
-        {/* The summary is drawn only at phone width (05-drawer.css); on a
-          * desktop drawer this band is always open and the two panels look
-          * exactly as they did before it existed. */}
-        <summary>{t("drawer.metaSummary")}</summary>
-        <NodeMetaForm id={id} />
+      {/* The row a node is worked from: where it stands, whose it is, and
+          handing it to an agent. */}
+      <div className="drawer-action-row">
         <LifecyclePanel id={id} />
-      </details>
-
-      <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "content"}
-          className={drawerView === "content" ? "active" : ""}
-          onClick={() => setDrawerView("content")}
-        >
-          {t("drawer.content")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "relations"}
-          className={drawerView === "relations" ? "active" : ""}
-          onClick={() => setDrawerView("relations")}
-        >
-          {t("drawer.relations")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "timeline"}
-          className={drawerView === "timeline" ? "active" : ""}
-          onClick={() => setDrawerView("timeline")}
-        >
-          {t("drawer.timeline")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "appearance"}
-          className={drawerView === "appearance" ? "active" : ""}
-          onClick={() => setDrawerView("appearance")}
-        >
-          {t("drawer.appearance")}
-        </button>
-        {/* Agent workstation tabs: only once the workstation is on. */}
+        <AssigneeField id={id} />
+        {/* Agents exist only once the workstation is on. */}
         {workstation && (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "runs"}
-          className={drawerView === "runs" ? "active" : ""}
-          onClick={() => setDrawerView("runs")}
-        >
-          {t("drawer.runs")}
-        </button>
+          <DispatchControl id={id} onShowRuns={() => setDrawerView("activity")} />
         )}
       </div>
 
-      {drawerView === "relations" && <NodeRelations id={id} />}
-      {drawerView === "timeline" && <NodeTimeline id={id} />}
-      {drawerView === "appearance" && <NodeAppearance id={id} />}
-      {drawerView === "runs" && <NodeRuns id={id} />}
+      <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
+        {(
+          [
+            ["content", t("drawer.content")],
+            ["dependencies", t("drawer.dependencies")],
+            ["activity", t("drawer.activity")],
+          ] as const
+        ).map(([view, label]) => (
+          <button
+            key={view}
+            type="button"
+            role="tab"
+            aria-selected={drawerView === view}
+            className={drawerView === view ? "active" : ""}
+            onClick={() => setDrawerView(view)}
+          >
+            {label}
+            {view === "dependencies" && dependencyCount > 0 && (
+              <span className="node-view-tab-count">{dependencyCount}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
-      <div className="node-content-view" hidden={drawerView !== "content"}>
-        <NodeHistory
+      {drawerView === "dependencies" && <NodeDependencies id={id} />}
+      {drawerView === "activity" && (
+        <NodeActivity
           id={id}
-          path={documentPath}
+          documentPath={documentPath}
           format={activeFormat}
           onRestored={reloadDocument}
         />
+      )}
 
-        <SubpageControls pages={subpages} onPopout={popoutPage} />
+      <div className="node-content-view" hidden={drawerView !== "content"}>
+        <div className="editor-file-row">
+          <SubpageMenu pages={subpages} onPopout={popoutPage} />
+          <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
+            {activeProject && (
+              <>
+                <span className="editor-path-project">{activeProject}</span>
+                <span className="editor-path-sep" aria-hidden>
+                  /
+                </span>
+              </>
+            )}
+            <span className="editor-path-file mono" title={documentPath}>
+              {documentPath}
+            </span>
+            {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
+          </nav>
+        </div>
 
-        <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
-          {activeProject && (
-            <>
-              <span className="editor-path-project">{activeProject}</span>
-              <span className="editor-path-sep" aria-hidden>
-                /
-              </span>
-            </>
-          )}
-          <span className="editor-path-file mono" title={documentPath}>
-            {documentPath}
-          </span>
-          {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
-        </nav>
+        <SubpageControls pages={subpages} />
 
         <EditorToolbar
           markdownTools={markdownTools}
@@ -1028,6 +1002,18 @@ export function TabBody({
           </span>
         </div>
       </div>
+
+      <details
+        className="drawer-more-props"
+        open={morePropsOpen}
+        onToggle={(event) => setMorePropsOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <span>{t("drawer.moreProperties")}</span>
+          <span className="drawer-more-props-hint">{t("drawer.morePropertiesHint")}</span>
+        </summary>
+        {morePropsOpen && <NodeMetaForm id={id} />}
+      </details>
     </div>
   );
 }

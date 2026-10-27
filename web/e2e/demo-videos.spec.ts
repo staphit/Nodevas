@@ -618,8 +618,8 @@ test("agent-run", async ({ page }) => {
   await pause(page, 1300);
   await focus(page, page.getByText("Add rate limiting middleware").first(), { pad: 140, minW: 760, hold: 700 });
   const drawer = await openNode(page, "Add rate limiting middleware");
-  const runsTab = drawer.getByRole("tab", { name: "Runs" });
-  await focus(page, [runsTab, drawer.getByRole("heading").first()], { pad: 40, minW: 760, hold: 300 });
+  const runsTab = drawer.getByRole("tab", { name: "Activity", exact: true });
+  await focus(page, [runsTab, drawer.getByLabel("Title", { exact: true })], { pad: 40, minW: 760, hold: 300 });
   await glide(page, runsTab);
   await pause(page, 400);
   const dispatch = drawer.getByRole("button", { name: "Dispatch to agent…" });
@@ -824,9 +824,13 @@ test("autopilot", async ({ page }) => {
   await pause(page, 2600);
   await focus(page, page.getByText("Ship the rate-limited public API").first(), { pad: 140, minW: 760, hold: 500 });
   const drawer = await openNode(page, "Ship the rate-limited public API");
-  const pill = drawer.getByRole("button", { name: /^Autopilot/ });
-  say("Open its autopilot", "The goal's Autopilot pill opens it in Station.");
-  await focus(page, pill, { pad: 120, minW: 720, hold: 1400 });
+  // Autopilot sits beside Dispatch, in the menu under its caret.
+  const caret = drawer.getByRole("button", { name: "More agent actions" });
+  say("Open its autopilot", "Next to Dispatch: Autopilot opens it in Station.");
+  await focus(page, caret, { pad: 120, minW: 720, hold: 900 });
+  await glide(page, caret);
+  const pill = drawer.getByRole("menuitem", { name: "Autopilot…" });
+  await focus(page, pill, { pad: 120, minW: 720, hold: 600 });
   const table = page.locator(".station-goal").getByRole("table");
   await cut(page, async () => {
     await glide(page, pill);

@@ -2,7 +2,7 @@
  * one contiguous slice of the original — moving rules between files can
  * change which one wins.
  *
- * drawer, banners, metadata form
+ * drawer, banners, action row, dependencies, activity, metadata form
  */
 /* ---------- drawer ---------- */
 .drawer {
@@ -95,30 +95,68 @@
     opacity: 1;
   }
 }
+/* Header: the node's title, edited in place, then the panel's own buttons. */
 .drawer-head {
   display: flex;
   align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 8px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   flex-shrink: 0;
 }
+.drawer-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+.drawer-title-input:hover,
+.drawer-title-input:focus {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.drawer-head .operation-status {
+  flex: 0 0 auto;
+}
+.drawer-head .drawer-menu {
+  flex: 0 0 auto;
+}
+.drawer-head-button,
 .drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
   border: none;
+  border-radius: 6px;
   background: none;
   color: var(--text-2);
   cursor: pointer;
-  padding: 6px 12px;
-  display: inline-flex;
-  align-items: center;
 }
+.drawer-head-button:hover,
+.drawer-head-button[aria-expanded="true"],
 .drawer-close:hover {
+  background: var(--surface-2);
   color: var(--text);
 }
 
+/* The strip of open nodes: only drawn once there is more than one. */
 .tab-bar {
   display: flex;
+  flex-shrink: 0;
   overflow-x: auto;
-  flex: 1;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
 }
 .tab {
   display: flex;
@@ -287,6 +325,332 @@
   left: 9px;
   height: 2px;
   background: var(--st-progress-fg);
+}
+.node-view-tab-count {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* ---------- the row a node is worked from ---------- */
+.drawer-action-row {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+.drawer-action-row select,
+.drawer-action-row .assignee-input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.drawer-action-row .assignee-input {
+  flex: 1 1 120px;
+  min-width: 100px;
+  max-width: 220px;
+}
+.status-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.status-control-shape {
+  display: inline-flex;
+}
+.status-control.staged .status-control-select {
+  border-color: var(--accent);
+}
+/* The document saves itself; a status does not, because a journal entry
+   cannot be taken back. So a change shows how to apply it and that it has not
+   been applied yet — see LifecyclePanel.tsx. */
+.status-control .lifecycle-apply {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.status-control .lifecycle-staged {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-note-toggle {
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.status-note-toggle:hover {
+  color: var(--text);
+}
+.status-control .status-note-input {
+  flex: 1 0 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+.dispatch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.dispatch-split {
+  display: inline-flex;
+}
+.dispatch-main,
+.dispatch-caret {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dispatch-main {
+  padding: 0 12px;
+  border-radius: 6px 0 0 6px;
+}
+.dispatch-caret {
+  padding: 0 7px;
+  border-left-color: color-mix(in srgb, var(--accent-text) 35%, var(--accent));
+  border-radius: 0 6px 6px 0;
+}
+.dispatch-main:hover,
+.dispatch-caret:hover,
+.dispatch-caret[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 86%, var(--text));
+}
+
+/* ---------- dependencies tab ---------- */
+.node-dependencies {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
+  background: var(--surface);
+}
+.node-dependencies-hint {
+  margin: -2px 0 8px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.node-dependency-list {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.node-dependency-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.node-dependency-open {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.node-dependency-open:hover {
+  color: var(--accent);
+}
+.node-dependency-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.node-dependency-remove:hover {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.node-dependency-add {
+  display: flex;
+  gap: 6px;
+}
+.node-dependency-add select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.node-dependency-add button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.node-dependency-add button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.node-dependencies .dependency-advanced {
+  margin: 0 0 14px;
+}
+.node-dependencies .dependency-advanced-body {
+  display: grid;
+  gap: 10px;
+  padding: 4px 10px 10px;
+}
+.node-dependencies-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+  font-size: 11.5px;
+}
+.node-dependencies-notice.error {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.node-dependencies-notice span {
+  flex: 1;
+}
+.node-dependencies-notice button {
+  display: inline-flex;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ---------- activity tab: the timeline, runs and versions, stacked ---------- */
+.node-activity {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+}
+.node-activity > .node-timeline,
+.node-activity > .node-runs {
+  flex: none;
+  overflow: visible;
+}
+.node-activity > .node-runs {
+  border-top: 1px solid var(--border);
+}
+.node-activity-history .node-history {
+  max-height: none;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- more properties ---------- */
+.drawer-more-props {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.drawer-more-props > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.drawer-more-props > summary::-webkit-details-marker {
+  display: none;
+}
+.drawer-more-props-hint {
+  margin-left: auto;
+  color: var(--text-2);
+  font-weight: 400;
+}
+.drawer-more-props[open] .drawer-more-props-hint {
+  visibility: hidden;
+}
+/* Opened, it scrolls inside a share of the panel rather than pushing the
+   document out of it. */
+.drawer-more-props[open] {
+  flex: 0 1 auto;
+  max-height: 55%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.drawer-more-props[open] > summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
 }
 .node-content-view {
   display: flex;
@@ -688,24 +1052,58 @@
 }
 
 /* ---------- meta form ---------- */
-/* The band the two metadata panels sit in. A <details> so that a phone can
- * fold it away (see the sheet rules at the end of this file); here it is only
- * a wrapper that must not change how the panels lay out, so it never gives
- * ground — the two forms used to be flex items of .tab-body with the same
- * flex-shrink:0, and the document below is still the pane that stretches. */
-.drawer-meta-band {
-  flex: 0 0 auto;
-}
-.drawer-meta-band > summary {
-  display: none;
-}
-.meta-form,
-.lifecycle-form {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+.meta-form {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
   font-size: 13px;
-  flex-shrink: 0;
+}
+/* Label beside its control, one property per line. */
+.meta-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+}
+.meta-grid > label,
+.meta-grid-label {
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.meta-grid-label {
+  align-self: start;
+  padding-top: 5px;
+}
+.meta-grid > input,
+.meta-grid > select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.meta-appearance {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.meta-appearance > summary {
+  padding: 7px 10px;
+  color: var(--text-2);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.meta-appearance[open] > summary {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.meta-actions {
+  display: flex;
 }
 /* Named sections: the user must be able to tell plan from record [B-04]. */
 .section-head {
@@ -726,85 +1124,6 @@
 }
 .section-head .operation-status {
   margin-left: auto;
-}
-/* The document saves itself; this does not, because a journal entry cannot be
-   taken back. The pair is therefore the way to apply it and a reminder that it
-   has not been applied — see LifecyclePanel.tsx. */
-.lifecycle-form .lifecycle-apply {
-  flex: 0 0 auto;
-  font-size: 11px;
-  padding: 4px 10px;
-  white-space: nowrap;
-}
-.lifecycle-form .lifecycle-staged {
-  flex: 0 0 auto;
-  padding: 4px 9px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.meta-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 7px;
-  flex-wrap: wrap;
-}
-.meta-row:last-child {
-  margin-bottom: 0;
-}
-.meta-row label {
-  color: var(--text-2);
-  font-size: 11px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.meta-row input {
-  flex: 1;
-  min-width: 120px;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
-  background: var(--surface);
-  color: var(--text);
-}
-.meta-row input.mono {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-.meta-row select {
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
-}
-.meta-row .input-error {
-  border-color: var(--st-failed-fg);
-  background: var(--st-failed-bg);
-}
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-weight: 600;
-  font-size: 12px;
-}
-.meta-row .status-note-input {
-  min-width: 160px;
-}
-.meta-row .assignee-input {
-  min-width: 240px;
-}
-.status-inline-error {
-  margin: -2px 0 7px 52px;
-  color: var(--st-failed-fg);
-  font-size: 11.5px;
 }
 button.danger {
   display: inline-flex;
@@ -895,43 +1214,26 @@ button.danger:hover {
      one thing that could not be reached. Fixing it is a matter of bounding
      what sits above it rather than of picking a height for it. */
 
-  /* Folded away by default (Drawer.tsx decides the default; this only draws
-     the control). Opened, it becomes its own scroller instead of growing:
-     a band that pushes the document out again is no better than the column
-     that did. */
-  .drawer-meta-band > summary {
-    display: block;
-    padding: 11px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text-2);
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .drawer-meta-band[open] {
-    flex: 0 1 auto;
-    /* Never more than a share of the sheet, and — because a scroll container
-       has no automatic minimum size — free to be squeezed below it when the
-       document needs the room. */
+  /* "More properties" is folded away by default at every width. Opened on a
+     phone it takes a smaller share of the sheet than on a desktop panel, and
+     — because a scroll container has no automatic minimum size — can be
+     squeezed below it when the document needs the room. */
+  .drawer-more-props[open] {
     max-height: 46%;
-    overflow-y: auto;
-    /* A swipe that runs past the end of the band must stop there rather than
-       carry on into the board behind the sheet. */
-    overscroll-behavior: contain;
   }
-  .drawer-meta-band[open] > summary {
-    position: sticky;
-    top: 0;
-    z-index: 1;
+  .drawer-action-row {
+    padding: 8px 10px;
+  }
+  .drawer-action-row .assignee-input {
+    max-width: none;
   }
 
-  /* The rows between the tab strip and the document — 歷程, the subpage bar,
-     the path, the toolbar wrapping to four lines on a 390px screen — are all
-     fixed-height, and together they can still swallow the pane below them. So
-     the content view scrolls, and the document keeps a floor stated as a share
-     of it: an opened 歷程 now scrolls the toolbar off the top instead of
-     closing the editor. Specificity is what makes these win rather than order
-     — 08 and 09 import after this file — hence the .drawer prefix. */
+  /* The rows between the tab strip and the document — the page switcher, the
+     path, the toolbar, an open subpage's controls — are all fixed-height, and
+     together they can still swallow the pane below them. So the content view
+     scrolls, and the document keeps a floor stated as a share of it.
+     Specificity is what makes these win rather than order — 08 and 09 import
+     after this file — hence the .drawer prefix. */
   .drawer .node-content-view {
     overflow-y: auto;
     overscroll-behavior: contain;

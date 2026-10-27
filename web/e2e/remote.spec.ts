@@ -97,7 +97,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
     await drawer.getByRole("button", { name: "派給 agent…" }).click();
 
     const dispatch = page.getByRole("dialog", { name: "派給 agent" });
@@ -211,7 +211,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     const section = drawer.getByRole("region", { name: /終端機 session/ });
     await expect(section).toBeVisible();

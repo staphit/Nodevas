@@ -2,75 +2,152 @@
  * one contiguous slice of the original — moving rules between files can
  * change which one wins.
  *
- * content pages, editor toolbar
+ * node panel menus, content pages, editor toolbar
  */
-/* ---------- document pages ---------- */
-.content-page-bar {
-  display: flex;
-  flex-shrink: 0;
-  min-width: 0;
-  height: 38px;
-  border-bottom: 1px solid var(--border);
+/* ---------- node panel menus (DrawerMenu) ---------- */
+.drawer-menu {
+  position: relative;
+  display: inline-flex;
+}
+.drawer-menu-panel {
+  z-index: calc(var(--z-drawer) + 20);
+  display: grid;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px var(--shadow);
+}
+.drawer-menu-panel [role="menu"] {
+  display: grid;
+  gap: 1px;
+}
+.drawer-menu-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.drawer-menu-item:hover,
+.drawer-menu-item:focus-visible {
+  outline: none;
   background: var(--surface-2);
 }
-.content-page-tabs {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
-  padding: 4px 5px 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+.drawer-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
-.content-page-tabs button {
+.drawer-menu-item.checked {
+  font-weight: 600;
+}
+.drawer-menu-item.danger {
+  color: var(--st-failed-fg);
+}
+.drawer-menu-icon {
   display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  max-width: 180px;
-  padding: 0 11px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+  justify-content: center;
   color: var(--text-2);
-  background: transparent;
-  cursor: pointer;
-  font-size: 11.5px;
+  font-size: 11px;
+}
+.drawer-menu-item.checked .drawer-menu-icon {
+  color: var(--accent);
+}
+.drawer-menu-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.content-page-tabs button:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-.content-page-tabs button.active {
-  border-color: var(--border);
-  color: var(--text);
-  background: var(--surface);
-  font-weight: 600;
-}
-.content-page-action {
-  display: inline-flex;
-  flex: 0 0 36px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-left: 1px solid var(--border);
-  color: var(--text-2);
-  background: transparent;
-  cursor: pointer;
-}
-.content-page-action:hover {
-  color: var(--text);
-  background: var(--hover);
-}
-.content-page-loading {
-  align-self: center;
-  padding: 0 8px;
+.drawer-menu-hint {
   color: var(--text-2);
   font-size: 10.5px;
+}
+.drawer-menu-group {
+  padding: 6px 8px 2px;
+  color: var(--text-2);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.drawer-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.drawer-menu-extra {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+.drawer-menu-extra .editor-tool-more-row {
+  margin-bottom: 0;
+}
+.editor-markdown-help > summary {
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.editor-markdown-help .markdown-help-grid {
+  margin-top: 6px;
+}
+
+/* ---------- document pages ---------- */
+/* The page switcher and the file path share one row above the toolbar. */
+.editor-file-row {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px 10px 0;
+}
+.editor-file-row .editor-path {
+  flex: 1;
+  padding: 0;
+}
+.content-page-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.content-page-trigger:hover,
+.content-page-trigger[aria-expanded="true"] {
+  border-color: var(--border-strong);
+}
+.content-page-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.content-page-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 10px;
 }
 .content-page-create {
   display: flex;
@@ -112,21 +189,6 @@
 }
 .content-page-create {
   flex-wrap: wrap;
-}
-/* Tab badge: the extension, only when it is not the Markdown default. */
-.content-page-format {
-  margin-left: 5px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.04em;
-}
-.content-page-tabs button.active .content-page-format {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: inherit;
 }
 .content-page-format-select {
   height: 24px;
@@ -218,6 +280,27 @@
 }
 .tool-flex {
   flex: 1;
+}
+.tool-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.tool-btn:disabled:hover {
+  background: none;
+  color: var(--text-2);
+}
+/* "More formatting": a word, not another icon, so the rest is findable. */
+.editor-more-trigger {
+  gap: 4px;
+  padding: 0 8px;
+}
+.editor-more-trigger[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.editor-back-to-edit {
+  gap: 5px;
+  border-color: var(--border);
 }
 /* Card resize handles: visible only on the selected card, 12px targets. */
 .col-card-handle {

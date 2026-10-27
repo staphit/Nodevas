@@ -399,7 +399,7 @@ test("war room: opened in Station from the graph menu, a character opens its nod
 
   await claude.click();
   await page.getByRole("menuitem", { name: "Open “Auth API”" }).click();
-  await expect(page.locator(".drawer").getByText("Auth API").first()).toBeVisible();
+  await expect(page.locator(".drawer").getByLabel("Title", { exact: true })).toHaveValue("Auth API");
 
   // The same world as a list.
   await stage.getByRole("button", { name: "List view" }).click();
@@ -427,7 +427,7 @@ test("boss map: opened in Station from the command palette, a locked monster ope
 
   await login.click();
   await page.getByRole("menuitem", { name: "Open blocker “Auth API”" }).click();
-  await expect(page.locator(".drawer").getByText("Auth API").first()).toBeVisible();
+  await expect(page.locator(".drawer").getByLabel("Title", { exact: true })).toHaveValue("Auth API");
 });
 
 test("station: the roster, what waits on you and who worked on what", async ({ page }) => {

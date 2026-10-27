@@ -43,7 +43,10 @@ test.describe("main flows", () => {
     const staged = drawer.getByText("尚未套用");
     await expect(staged).toBeHidden();
 
-    await drawer.getByLabel("改為").selectOption("in_progress");
+    // One status picker in the panel's top row; the note is behind its toggle.
+    const status = drawer.getByLabel("狀態", { exact: true });
+    await status.selectOption("in_progress");
+    await drawer.getByRole("button", { name: "加註解" }).click();
     await drawer.getByLabel("實際狀態註解").fill("開工");
     await expect(staged).toBeVisible();
 
@@ -57,7 +60,7 @@ test.describe("main flows", () => {
     await drawer.getByRole("button", { name: "套用狀態" }).click();
 
     await expect(staged).toBeHidden();
-    await expect(drawer.getByText("進行中").first()).toBeVisible();
+    await expect(status).toHaveValue("in_progress");
   });
 
   // Ctrl+S is still "save now", and still the way to apply a staged status
@@ -72,16 +75,18 @@ test.describe("main flows", () => {
 
     // A state the node is not already in — these tests share one project, and
     // choosing the current state is not a change worth staging.
-    await drawer.getByLabel("改為").selectOption("done");
+    const status = drawer.getByLabel("狀態", { exact: true });
+    await status.selectOption("done");
     // Filling the note also puts focus inside the panel, which is where the
     // drawer listens for the keystroke.
+    await drawer.getByRole("button", { name: "加註解" }).click();
     await drawer.getByLabel("實際狀態註解").fill("收工");
     await expect(staged).toBeVisible();
 
     await page.keyboard.press("Control+s");
 
     await expect(staged).toBeHidden();
-    await expect(drawer.getByText("完成").first()).toBeVisible();
+    await expect(status).toHaveValue("done");
   });
 
   // A promise that work is saved is worth nothing if nobody can see that it
@@ -205,8 +210,9 @@ test.describe("keyboard and persistence", () => {
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByLabel("標題").fill("設計稿 v2");
-    await drawer.getByLabel("標題").blur();
+    // The title is edited in the panel's header.
+    await drawer.getByLabel("標題", { exact: true }).fill("設計稿 v2");
+    await drawer.getByLabel("標題", { exact: true }).blur();
     await expect(page.getByText("已儲存").first()).toBeVisible();
 
     await page.keyboard.press("Control+z");

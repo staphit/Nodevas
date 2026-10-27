@@ -1,8 +1,10 @@
 /**
- * Node metadata form [B-04/B-06].
+ * Node metadata [B-04/B-06].
  *
  * Writes `graph.yaml` through the typed node commands. Every field commits on
- * blur/change, and the section badge reports whether that write landed.
+ * blur/change, and the panel reports whether that write landed. The title and
+ * the assignee are read every time a node is opened, so they live in the
+ * panel's header; the rest sits behind "More properties".
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -10,18 +12,113 @@ import type { NodeMetadataPatch } from "../../domain/graph/node";
 import { IconTrash } from "../../icons";
 import {
   nodeById,
-  operationScope,
   reportError,
   useApp,
-  useOperation,
   type CommandResult,
 } from "../../store";
 import type { NodeLinkRef } from "../../types";
 import { NodeLinkPicker } from "../NodeLinkPicker";
 import { confirmAction } from "../ConfirmDialog";
-import { OperationStatus } from "../InteractionPrimitives";
+import { NodeAppearance } from "./NodeAppearance";
 import { useI18n } from "../../i18n";
 
+/** Reports a command that failed; a success needs no word of its own. */
+function reportCommand(run: Promise<CommandResult>) {
+  void run.then((result) => {
+    if (!result.ok) reportError(new Error(result.message));
+  });
+}
+
+/**
+ * The node's title, edited where it is read: the panel's heading. Commits on
+ * blur like every other field; Enter commits, Escape puts it back.
+ */
+export function NodeTitleField({
+  id,
+  className = "drawer-title-input",
+}: {
+  id: string;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const title = useApp((state) => nodeById(state.graph, id)?.title ?? "");
+  const updateNodeMetadata = useApp((state) => state.updateNodeMetadata);
+  return (
+    <input
+      key={`${id}:${title}`}
+      id={`title-${id}`}
+      className={className}
+      defaultValue={title}
+      placeholder={id}
+      aria-label={t("node.meta.title")}
+      onBlur={(event) => {
+        if (event.target.value === title) return;
+        reportCommand(updateNodeMetadata(id, { title: event.target.value }));
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          // The panel closes on Escape; inside the field it only means
+          // "never mind".
+          event.nativeEvent.stopImmediatePropagation();
+          event.currentTarget.value = title;
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+/** Who the node is assigned to: a known user, or a new name typed in. */
+export function AssigneeField({ id }: { id: string }) {
+  const { t } = useI18n();
+  const users = useApp((state) => state.graph?.users);
+  const assigneeId = useApp((state) => nodeById(state.graph, id)?.assignee);
+  const updateNode = useApp((state) => state.updateNode);
+  const assignedUserName = (users ?? []).find((user) => user.id === assigneeId)?.name ?? "";
+  const [assignee, setAssignee] = useState(assignedUserName);
+  useEffect(() => setAssignee(assignedUserName), [assignedUserName]);
+
+  const commitAssignee = () => {
+    const name = assignee.trim();
+    if (name === assignedUserName) return;
+    reportCommand(updateNode({ type: "node.assignByName", nodeId: id, name }));
+  };
+
+  return (
+    <>
+      <input
+        id={`assignee-${id}`}
+        className="assignee-input"
+        list={`assignee-options-${id}`}
+        value={assignee}
+        aria-label={t("node.meta.assignee")}
+        placeholder={t("drawer.assigneePlaceholder")}
+        title={t("node.meta.assigneePlaceholder")}
+        onChange={(event) => setAssignee(event.target.value)}
+        onBlur={commitAssignee}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            event.nativeEvent.stopImmediatePropagation();
+            setAssignee(assignedUserName);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <datalist id={`assignee-options-${id}`}>
+        {(users ?? []).map((user) => (
+          <option key={user.id} value={user.name} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+/**
+ * Everything about a node that is not read every time it is opened: type,
+ * entry, priority, tags, links, card appearance, write access and deletion.
+ */
 export function NodeMetaForm({ id }: { id: string }) {
   const { t } = useI18n();
   const graph = useApp((state) => state.graph);
@@ -30,13 +127,8 @@ export function NodeMetaForm({ id }: { id: string }) {
   const deleteNode = useApp((state) => state.deleteNode);
   const openNodeLink = useApp((state) => state.openNodeLink);
   const activeProject = useApp((state) => state.activeProject);
-  const metadataOperation = useOperation(operationScope.node(id));
 
   const node = nodeById(graph, id);
-  const users = graph?.users ?? [];
-  const assignedUserName = users.find((user) => user.id === node?.assignee)?.name ?? "";
-  const [assignee, setAssignee] = useState(assignedUserName);
-  useEffect(() => setAssignee(assignedUserName), [assignedUserName]);
 
   // The list is edited locally so a label can be typed without a write per
   // keystroke; every structural change commits immediately.
@@ -52,17 +144,11 @@ export function NodeMetaForm({ id }: { id: string }) {
     .join("|");
   useEffect(() => setDraftLinks(null), [id, linksSignature]);
 
-  const reportCommand = useCallback((run: Promise<CommandResult>) => {
-    void run.then((result) => {
-      if (!result.ok) reportError(new Error(result.message));
-    });
-  }, []);
-
   const commitMeta = useCallback(
-    (field: "title" | "kind" | "priority" | "writeAccess", value: string) => {
+    (field: "kind" | "priority" | "writeAccess", value: string) => {
       reportCommand(updateNodeMetadata(id, { [field]: value } as NodeMetadataPatch));
     },
-    [id, reportCommand, updateNodeMetadata],
+    [id, updateNodeMetadata],
   );
 
   const setDraftLabel = (index: number, label: string) => {
@@ -76,7 +162,7 @@ export function NodeMetaForm({ id }: { id: string }) {
       setDraftLinks(next);
       reportCommand(updateNode({ type: "node.setLinks", nodeId: id, links: next }));
     },
-    [id, reportCommand, updateNode],
+    [id, updateNode],
   );
 
   const commitTags = useCallback(
@@ -88,7 +174,7 @@ export function NodeMetaForm({ id }: { id: string }) {
         .slice(0, 64);
       reportCommand(updateNodeMetadata(id, { tags }));
     },
-    [id, reportCommand, updateNodeMetadata],
+    [id, updateNodeMetadata],
   );
 
 
@@ -109,38 +195,12 @@ export function NodeMetaForm({ id }: { id: string }) {
         }),
       );
     },
-    [id, reportCommand, updateNode],
+    [id, updateNode],
   );
 
-  const commitAssignee = useCallback(() => {
-    const name = assignee.trim();
-    if (name === assignedUserName) return;
-    reportCommand(updateNode({ type: "node.assignByName", nodeId: id, name }));
-  }, [assignee, assignedUserName, id, reportCommand, updateNode]);
-
   return (
-      <section className="meta-form" aria-labelledby={`meta-heading-${id}`}>
-        <div className="section-head">
-          <h3 id={`meta-heading-${id}`}>{t("node.meta.section")}</h3>
-          <span className="section-hint">{t("node.meta.sectionHint")}</span>
-          <OperationStatus
-            status={metadataOperation.status}
-            message={
-              metadataOperation.status === "error" ||
-              metadataOperation.status === "conflict"
-                ? metadataOperation.message
-                : undefined
-            }
-          />
-        </div>
-        <div className="meta-row">
-          <label htmlFor={`title-${id}`}>{t("node.meta.title")}</label>
-          <input
-            id={`title-${id}`}
-            key={`${id}:${node?.title ?? ""}`}
-            defaultValue={node?.title ?? ""}
-            onBlur={(e) => commitMeta("title", e.target.value)}
-          />
+      <section className="meta-form" aria-label={t("drawer.moreProperties")}>
+        <div className="meta-grid">
           <label htmlFor={`kind-${id}`}>{t("node.meta.kind")}</label>
           <select
             id={`kind-${id}`}
@@ -188,43 +248,6 @@ export function NodeMetaForm({ id }: { id: string }) {
             <option value="medium">{t("node.priority.medium")}</option>
             <option value="low">{t("node.priority.low")}</option>
           </select>
-          <label htmlFor={`write-access-${id}`}>{t("node.meta.writeAccess")}</label>
-          <select
-            id={`write-access-${id}`}
-            value={node?.writeAccess ?? ""}
-            onChange={(event) => commitMeta("writeAccess", event.target.value)}
-          >
-            <option value="">{t("node.writeAccess.everyone")}</option>
-            <option value="worker">{t("node.writeAccess.worker")}</option>
-            <option value="orchestrator">{t("node.writeAccess.orchestrator")}</option>
-            <option value="human-only">{t("node.writeAccess.humanOnly")}</option>
-          </select>
-        </div>
-        <div className="meta-row">
-          <label htmlFor={`assignee-${id}`}>{t("node.meta.assignee")}</label>
-          <input
-            id={`assignee-${id}`}
-            className="assignee-input"
-            list={`assignee-options-${id}`}
-            value={assignee}
-            placeholder={t("node.meta.assigneePlaceholder")}
-            onChange={(event) => setAssignee(event.target.value)}
-            onBlur={commitAssignee}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                setAssignee(assignedUserName);
-                event.currentTarget.blur();
-              }
-            }}
-          />
-          <datalist id={`assignee-options-${id}`}>
-            {users.map((user) => (
-              <option key={user.id} value={user.name} />
-            ))}
-          </datalist>
-        </div>
-        <div className="meta-row">
           <label htmlFor={`tags-${id}`}>{t("node.meta.tags")}</label>
           <input
             id={`tags-${id}`}
@@ -233,9 +256,7 @@ export function NodeMetaForm({ id }: { id: string }) {
             placeholder={t("node.meta.tagsPlaceholder")}
             onBlur={(event) => commitTags(event.target.value)}
           />
-        </div>
-        <div className="meta-row meta-row-links">
-          <label>{t("node.meta.links")}</label>
+          <span className="meta-grid-label">{t("node.meta.links")}</span>
           <div className="node-links-editor">
             {links.length === 0 && (
               <p className="settings-hint">
@@ -312,8 +333,27 @@ export function NodeMetaForm({ id }: { id: string }) {
             }}
           />
         )}
-        <div className="meta-row">
+        {/* The card's look on the board: formerly a tab of its own. */}
+        <details className="meta-appearance">
+          <summary>{t("drawer.appearance")}</summary>
+          <NodeAppearance id={id} />
+        </details>
+        <div className="meta-grid">
+          <label htmlFor={`write-access-${id}`}>{t("node.meta.writeAccess")}</label>
+          <select
+            id={`write-access-${id}`}
+            value={node?.writeAccess ?? ""}
+            onChange={(event) => commitMeta("writeAccess", event.target.value)}
+          >
+            <option value="">{t("node.writeAccess.everyone")}</option>
+            <option value="worker">{t("node.writeAccess.worker")}</option>
+            <option value="orchestrator">{t("node.writeAccess.orchestrator")}</option>
+            <option value="human-only">{t("node.writeAccess.humanOnly")}</option>
+          </select>
+        </div>
+        <div className="meta-actions">
           <button
+            type="button"
             className="danger"
             onClick={async () => {
               const confirmed = await confirmAction({
