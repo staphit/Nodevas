@@ -5,7 +5,9 @@ This document describes how Nodevas release artifacts are built and signed.
 ## What gets signed
 
 - **Windows**: the NSIS installer (`Nodevas-*-Windows-x64.exe`) and the
-  portable ZIP produced by `electron-builder` from `desktop/`.
+  portable ZIP produced by `electron-builder` from `desktop/`. These are
+  currently published **unsigned**, so SmartScreen may warn; verify them with
+  the checksums below.
 - **macOS**: the universal DMG and ZIP produced by `electron-builder`
   (signed and notarized with Apple credentials when configured).
 
@@ -39,14 +41,15 @@ can never impersonate a release.
 
 ## Key storage
 
-Windows signing is performed via [SignPath](https://signpath.io) under the
-SignPath Foundation open-source program. The certificate's private key is
-stored on SignPath's HSM and never leaves it. macOS signing credentials are
+Windows signing, once enabled, goes through [SignPath](https://signpath.io)
+under the SignPath Foundation open-source program, so the certificate's
+private key stays on SignPath's HSM. macOS signing credentials are
 stored as GitHub Actions secrets and used only inside the release workflow.
 
 ## Verifying a release
 
-Each release includes `SHA256SUMS-windows.txt` / `SHA256SUMS-macos.txt`.
+Each Windows release includes `SHA256SUMS-windows.txt`, and each macOS release
+`SHA256SUMS.txt`.
 Verify a download with:
 
 ```bash

@@ -57,6 +57,7 @@ var errAccountUsage = errors.New("usage")
 func accountUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: nodevas account totp-reset [--project <dir>] <email-or-id-or-name>")
 	fmt.Fprintln(w, "       (turns two-factor authentication off for one account; run it on the server host)")
+	fmt.Fprintln(w, "       (an ID that starts with \"-\" goes after --: totp-reset --project <dir> -- <id>)")
 }
 
 func accountTOTPReset(args []string, stdout, stderr io.Writer) error {

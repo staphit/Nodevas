@@ -129,6 +129,7 @@ export function LaneContextMenuLayer({
         />
       ) : contextMenu.kind === "edge" ? (
         <EdgeMenu
+          key={contextMenu.edges.map((edge) => `${edge.from}->${edge.to}`).join(",")}
           contextMenu={contextMenu}
           graph={graph}
           nodeTitle={nodeTitle}
@@ -149,6 +150,9 @@ export function LaneContextMenuLayer({
         />
       ) : contextMenu.kind === "node" ? (
         <NodeMenu
+          // A fresh menu per node, so "Advanced conditions" opens or closes
+          // for what this node holds, not for the node edited before it.
+          key={contextMenu.nodeId}
           {...conditions}
           contextMenu={contextMenu}
           nodeTitle={nodeTitle}

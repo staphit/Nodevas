@@ -14,6 +14,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 )
 
@@ -142,7 +143,7 @@ func TestRunnerProxyRefusesEverythingElse(t *testing.T) {
 
 func TestRunnerProxy(t *testing.T) {
 	s := newRunnerTestServer(t)
-	if _, err := s.server.pm.Store().CreateNode(&engine.Node{
+	if _, err := s.server.pm.Store().CreateNode(identity.Local, &engine.Node{
 		ID: "guarded", Title: "Guarded", WriteAccess: engine.WriteAccessOrchestrator,
 	}, ""); err != nil {
 		t.Fatal(err)

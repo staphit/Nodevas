@@ -1,9 +1,9 @@
-// Package autopilot is W7's orchestrator: it works a goal node's tasks as a
+// Package autopilot is the Autopilot orchestrator: it works a goal node's tasks as a
 // DAG, dispatching each ready task through the run dispatcher (implement →
 // review → revise → merge) and recording every task instance's state and
 // stages the way an Airflow DAG run does. The hub still executes nothing:
 // every run is an ordinary run its runner has to accept. See
-// docs/nodevas-workstation-plan.md, W7.
+// docs/workstation.md, "Autopilot".
 package autopilot
 
 import (
@@ -1102,6 +1102,28 @@ func (o *Orchestrator) Latest(ctx context.Context, project, goal string) (runner
 		return runnerwire.AutopilotView{}, err
 	}
 	return o.View(ctx, rec.ID)
+}
+
+// List is a project's autopilots in the given statuses, oldest first, each as
+// View shows it. One that ends between the listing and its view is still
+// listed, as it now stands.
+func (o *Orchestrator) List(ctx context.Context, project string, statuses ...string) ([]runnerwire.AutopilotView, error) {
+	ids, err := o.opts.Store.InProject(ctx, project, statuses...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runnerwire.AutopilotView, 0, len(ids))
+	for _, id := range ids {
+		view, err := o.View(ctx, id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, view)
+	}
+	return out, nil
 }
 
 // Get is one autopilot record, for access checks.

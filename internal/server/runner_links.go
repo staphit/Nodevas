@@ -69,8 +69,16 @@ func (s *Server) auditRunnerLink(r *http.Request, action string, actor identity.
 	if s.audit == nil {
 		return
 	}
+	// A device link signs a machine in as its owner, so its log line names
+	// the owner's address like any other sign-in; links are rare, and so is
+	// the one read.
+	email := ""
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok && actor.ID != "" {
+		email = accounts.AccountEmail(r.Context(), actor.ID)
+	}
 	s.audit.RecordOrLog(r.Context(), audit.Event{
 		At: time.Now(), ActorID: actor.ID, ActorName: actor.Name,
 		Action: action, Target: target, ClientIP: auth.ClientIP(r), Detail: detail,
+		ActorEmail: email,
 	})
 }

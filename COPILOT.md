@@ -11,10 +11,84 @@ of what the person said and what the AI answered and did.
 | --- | --- |
 | Speech to text | Browser Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`). Chrome and Edge; elsewhere the panel falls back to typing. |
 | Text to speech | `speechSynthesis`, off by default, toggle in the panel. |
-| Model | Pluggable provider: `anthropic` (official Go SDK) or `openai` (any OpenAI-compatible Chat Completions endpoint: OpenAI, Ollama, LM Studio, vLLM, OpenRouter). |
+| Model | Pluggable provider: `anthropic` (official Go SDK), `openai` (any OpenAI-compatible Chat Completions endpoint: OpenAI, Ollama, LM Studio, vLLM, OpenRouter), or `auto`, the default: a free model with no key (the browser's built-in model, or a local Ollama / LM Studio), see "Which model answers". |
 | Tools | The existing MCP tools, run in-process (see Tool bridge) plus browser-side UI tools. No tool is implemented twice. |
 | Permissions | Four modes modelled on Claude Code: `plan`, `default`, `acceptEdits`, `bypassPermissions`. |
 | Transcript | Persisted per account and project in the workspace database; shown as a chat log in the panel. |
+
+## Which model answers
+
+Explicit configuration always wins. With none of it, the copilot works out of
+the box with a free model and no key.
+
+| Source | Provider | Where the model runs | Key |
+| --- | --- | --- | --- |
+| Administrator chose `anthropic` / `openai` (settings, `nodevas.yaml`, `NODEVAS_COPILOT_PROVIDER`) | that one | server, or the runner with `keySource: runner` | server or runner key |
+| A key is configured (stored, `NODEVAS_COPILOT_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) with `provider: auto` | the key's vendor (Anthropic for a key that does not say) | server | that key |
+| `copilotProvider` set on the person's runner | the runner's | runner | the runner's |
+| Automatic, 1: the browser's built-in model (Chrome's Prompt API, Gemini Nano), when the speaker's browser reports it `available` | `browser` / `gemini-nano` | the speaker's browser | none |
+| Automatic, 2: Ollama (`127.0.0.1:11434`) or LM Studio (`127.0.0.1:1234`) found on the speaker's runner, else on the server | `openai` at the loopback URL | runner, else server | none |
+| Automatic, 3: the browser's model reports `downloadable` / `downloading` | `browser` | the browser, after the person clicks "Download the on-device model" | none |
+| Nothing | — | — | the panel says what to do: Chrome 148+ on a desktop, or install Ollama and `ollama pull qwen3:8b`, or set a key |
+
+`provider: auto` is the default (`internal/copilot/choose.go`). `keySource:
+runner` limits the automatic choice to a runner (its configured provider or
+the local model it found); `keySource: server` never asks a runner. The order
+puts a ready local model before a browser model that still has to download.
+
+### Local model servers (`internal/copilot/localllm`)
+
+- Probes only the fixed loopback candidates (`127.0.0.1:11434`,
+  `127.0.0.1:1234`); a candidate whose host is not loopback is skipped, and a
+  found base URL that is not loopback is ignored. No proxy, no redirects,
+  700 ms per probe, all candidates at once.
+- Lists models with Ollama's `/api/tags`, else `/v1/models`. Picks a model
+  known to call tools (qwen3, qwen2.5, llama3.1+, mistral-nemo, gpt-oss, …),
+  else the first that is not an embedding model.
+- Caches the answer: a found server for 30 s (a newly pulled model shows up),
+  "nothing" for 10 s (starting Ollama is noticed without a restart).
+- Runs where the model call runs. On a runner, with no `copilotProvider`, the
+  runner offers what it finds in its hello (`LLMInfo.auto`, `local`), keyless:
+  a copilot key on that PC is never sent to it. `nodevas runner set
+  copilotProvider off` turns this off. The server probes its own loopback,
+  which on a NAS is the NAS: the panel says which machine the model is on
+  ("on this PC", "on the server", "on <runner>").
+
+### The browser's built-in model
+
+The turn loop, the tools and the permission gate stay on the server; only the
+model call runs in the browser of the person who started the turn
+(`internal/copilot/browser.go`, `web/src/copilot/browserModel.ts`).
+
+- **Relay.** The server emits `model_request` on that turn's own NDJSON
+  stream (`requestId`, `modelRequest: {system, messages[], schema, attempt}`);
+  the browser runs it and posts `POST …/turns/:turn/model-results`
+  `{requestId, output}` or `{requestId, error}`. An answer is accepted only
+  for a request still waiting, on a turn of the same account and
+  conversation, from the same sign-in session (a hash of its session cookie),
+  with the random request id that only that stream carried; everything else
+  is 404. No answer within 120 s ends the turn with an error; a stopped turn
+  aborts the browser's call.
+- **Tool calls.** The Prompt API has none. The browser prompts with
+  `responseConstraint` set to the server's JSON Schema, so the model answers
+  one object: `{"type":"text","text":…}` or `{"type":"tool_call","name":…,
+  "input":{…}}` with `name` limited to the offered tools. The server parses it
+  like any provider's output: an unknown tool, a non-object input or broken
+  JSON is asked for once more (the browser also retries once locally), plain
+  prose is taken as the reply, a second failure ends the turn. A valid call
+  then goes through the permission gate like any other.
+- **Small context.** A short system prompt and one line per tool; the newest
+  16 messages, each cut to 2 KB, tool results to 1.5 KB. The browser drops the
+  oldest further until the input fits its measured quota.
+- **Download.** Creating a session may download the model; the Prompt API
+  allows that only from a user gesture, so the panel shows a "Download the
+  on-device model" button with progress (`downloadprogress`).
+- **No bypass.** Node content can carry prompt injection and a small model is
+  the easiest to mislead, so `bypassPermissions` is not offered with the
+  browser's model and a turn that asks for it is refused (400) with the reason.
+  Default still asks before every write.
+- Chrome 148+ on desktop only; Edge, Firefox, Safari and mobile browsers
+  report no model and fall through to the next choice.
 
 ## Architecture
 
@@ -115,7 +189,7 @@ model through confirm → `start_breakdown` → summarize the tasks → ask →
   `deny` (optional message to the model).
 - `bypassPermissions` is available only when the server config allows it
   (`copilot.allow_bypass`, default true on a loopback-only server, false with
-  accounts).
+  accounts), and never with the browser's built-in model.
 - The mode is per conversation, chosen in the panel (Shift+Tab cycles, as in
   Claude Code), and sent with each turn.
 - Voice can answer a permission request: "確認 / 允許 / 好 / yes / allow" and
@@ -127,7 +201,7 @@ All under `/api`, authenticated like every other route, JSON in.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/copilot/status` | `{enabled, provider, model, modes[], allowBypass, reason?}` |
+| `GET` | `/copilot/status?browserModel=` | `{enabled, provider, model, modes[], allowBypass, reason?, keySource, modelHost, automatic?, localServer?, serverIsLocal?, runner?, needsRunner?, needsDownload?, needsSetup?, reasonCode?}`; `browserModel` is the browser's Prompt API availability |
 | `GET` | `/copilot/conversations?project=` | the caller's conversations, newest first |
 | `POST` | `/copilot/conversations` | `{project, mode}` → conversation |
 | `GET` | `/copilot/conversations/:id` | conversation + transcript entries |
@@ -136,8 +210,9 @@ All under `/api`, authenticated like every other route, JSON in.
 | `POST` | `/copilot/conversations/:id/turns` | start a turn, streamed response (below) |
 | `POST` | `/copilot/conversations/:id/turns/:turn/decisions` | `{requestId, decision, message?}` |
 | `POST` | `/copilot/conversations/:id/turns/:turn/client-results` | `{callId, output, isError}` |
+| `POST` | `/copilot/conversations/:id/turns/:turn/model-results` | `{requestId, output}` or `{requestId, error}`: the browser model's answer (same session only) |
 | `POST` | `/copilot/conversations/:id/turns/:turn/cancel` | stop the turn |
-| `GET`/`PUT` | `/copilot/settings` | admin: provider kind, model, base URL, effort, API key (write-only), allowBypass, keySource (`runner` \| `server` \| `auto`) |
+| `GET`/`PUT` | `/copilot/settings` | admin: provider (`auto` \| `anthropic` \| `openai`), model, base URL, effort, API key (write-only), allowBypass, keySource (`runner` \| `server` \| `auto`); the view adds `automatic` |
 
 A conversation, transcript entry and turn belong to the account that created
 them; every other account gets 404.
@@ -154,7 +229,8 @@ them; every other account gets 404.
     "view": "graph",
     "language": "zh-TW"
   },
-  "clientTools": ["ui_open_node", "ui_focus_nodes", "ui_set_view", "ui_set_filter"]
+  "clientTools": ["ui_open_node", "ui_focus_nodes", "ui_set_view", "ui_set_filter"],
+  "browserModel": "available"
 }
 ```
 
@@ -176,6 +252,7 @@ send the CSRF header).
 | `entry` | `entry` | a transcript entry was stored (user, assistant, tool) |
 | `error` | `message`, `code` | the turn failed |
 | `turn_finished` | `stop`, `usage` | done |
+| `model_request` | `requestId`, `modelRequest` | the browser's built-in model must answer (see above) |
 
 ## Storage
 
@@ -222,7 +299,8 @@ never in the database or `nodevas.yaml`. Environment overrides:
 ## Key on the runner (`keySource`)
 
 The server need not hold a model key at all. With `keySource: runner` (and with
-`auto`, the default, whenever the server has no key), the turn loop, the
+`auto`, the default, whenever the server has no key and the runner has a
+provider set or a local model), the turn loop, the
 permission gate and the tools stay on the server, but each **model call** goes
 to the speaker's own runner over its existing socket
 (`internal/runnerwire/llm.go`): `llm_request` carries the history and tool
@@ -357,7 +435,7 @@ taken as it is.
 ```yaml
 copilot:
   enabled: true
-  provider: anthropic        # anthropic | openai
+  provider: auto             # auto (free: browser or local model, or the key's vendor) | anthropic | openai
   model: claude-opus-5-5
   base_url: ""               # required for openai-compatible servers other than OpenAI
   effort: low                # voice favours latency
@@ -374,6 +452,11 @@ copilot:
   assistant markdown, collapsible tool cards with input/output and status),
   live interim transcript while listening, text input fallback, mode selector,
   speak-replies toggle, stop button.
+- The header names the model in use: "Browser (Gemini Nano)", "Ollama ·
+  qwen3:8b on this PC", or the configured provider and model. When the browser
+  model has to be downloaded, or nothing free is available, the microphone
+  button opens a help panel instead (download button with progress, or what
+  to install or set).
 - Permission card inline in the transcript: Allow / Allow for this conversation
   / Deny, keyboard `1`/`2`/`3`, or voice.
 - Strings in `web/src/i18n.ts` (`copilot.*`, en and zh-TW).

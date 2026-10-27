@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 54 60" width="54" height="60">
+<!-- Candy dungeon: a candy chest, closed -->
+<ellipse cx="27" cy="55" rx="22" ry="3.5" fill="#7a3b5c" fill-opacity=".2"/>
+<rect x="8" y="30" width="38" height="24" rx="3" fill="#ff9cc2" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="15" y="31" width="6" height="22" fill="#7fdcc4"/><rect x="33" y="31" width="6" height="22" fill="#7fdcc4"/>
+<rect x="8" y="30" width="38" height="24" rx="3" fill="none" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M8 32 V25 Q8 15 27 15 Q46 15 46 25 V32 Z" fill="#ff7aa8" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M10 31 H44" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+<path d="M27 42 L21 36 Q19 31 24 31 Q26 31 27 33 Q28 31 30 31 Q35 31 33 36 Z" fill="#ffe17a" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

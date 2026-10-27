@@ -102,7 +102,7 @@ func TestTurnOnTheRunner(t *testing.T) {
 	if _, err := h.service.UpdateSettings(ctx, SettingsUpdate{KeySource: &runnerSource}); err != nil {
 		t.Fatal(err)
 	}
-	status, err := h.service.Status(ctx, alice)
+	status, err := h.service.Status(ctx, alice, "")
 	if err != nil || !status.Enabled || status.Runner != "desk" || status.Model != "claude-runner" {
 		t.Fatalf("status = %+v, %v", status, err)
 	}

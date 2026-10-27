@@ -23,8 +23,11 @@ function errorText(error: unknown): string {
  * Who may reach this project. Open (no members) means every signed-in
  * account; adding the first member restricts it to the list, with whoever
  * did so as its first owner.
+ *
+ * `onInvite`, given to a server administrator, opens the server's own
+ * account list, where someone without an account can be invited.
  */
-export function MembersEditor({ notify }: { notify: SettingsNotify }) {
+export function MembersEditor({ notify, onInvite }: { notify: SettingsNotify; onInvite?: () => void }) {
   const { t } = useI18n();
   const project = useApp((s) => s.activeProject) ?? "";
   const [access, setAccess] = useState<ProjectAccess | null>(null);
@@ -177,6 +180,15 @@ export function MembersEditor({ notify }: { notify: SettingsNotify }) {
             {t("members.add")}
           </button>
         </form>
+      )}
+
+      {canManage && onInvite && (
+        <p className="settings-hint members-invite-hint">
+          {t("serverMembers.notFound")}{" "}
+          <button type="button" className="link-button" onClick={onInvite}>
+            {t("serverMembers.inviteLink")}
+          </button>
+        </p>
       )}
 
       {canManage && list?.restricted && (

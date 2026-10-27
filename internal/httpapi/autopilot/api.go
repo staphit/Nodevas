@@ -6,6 +6,7 @@ package autopilot
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -125,6 +126,10 @@ func (a *API) latest(c *gin.Context) {
 		return
 	}
 	goal := strings.TrimSpace(c.Query("goal"))
+	if _, named := c.GetQuery("goal"); !named {
+		a.list(c, name)
+		return
+	}
 	if !engine.ValidNodeID(goal) {
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("goal is not a valid node id"), nil)
 		return
@@ -136,6 +141,42 @@ func (a *API) latest(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, view)
+}
+
+// listable is what GET /api/autopilot?status= may ask for: the live
+// statuses, of which a goal has at most one autopilot at a time, so the list
+// stays as short as the goals being worked. Ended ones are read by goal.
+var listable = map[string]bool{
+	runnerwire.AutopilotRunning: true, runnerwire.AutopilotPaused: true,
+}
+
+// list answers GET /api/autopilot without ?goal=: the project's autopilots
+// in the statuses asked for. Anyone who may read the project sees them, as
+// they may see any one of them (visible).
+func (a *API) list(c *gin.Context, project string) {
+	statuses := []string{runnerwire.AutopilotRunning, runnerwire.AutopilotPaused}
+	if raw := strings.TrimSpace(c.Query("status")); raw != "" {
+		statuses = statuses[:0]
+		seen := map[string]bool{}
+		for _, part := range strings.Split(raw, ",") {
+			status := strings.TrimSpace(part)
+			if !listable[status] {
+				httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("unknown autopilot status "+strconv.Quote(status)), nil)
+				return
+			}
+			if !seen[status] {
+				seen[status] = true
+				statuses = append(statuses, status)
+			}
+		}
+	}
+	views, err := a.o.List(c.Request.Context(), project, statuses...)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.AutopilotListResponse{Autopilots: views})
 }
 
 // visible loads the autopilot in the path, in the request's project.

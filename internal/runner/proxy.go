@@ -113,7 +113,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, rest, _ := strings.Cut(after, "/")
 	p.mu.Lock()
-	_, live := p.secrets[secret]
+	runID, live := p.secrets[secret]
 	p.mu.Unlock()
 	if !live || len(secret) != 32 {
 		proxyError(w, http.StatusNotFound, "not found")
@@ -152,6 +152,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out.Header.Set("Authorization", "Bearer "+p.token)
+	// Which run this is comes from the secret, not from the agent: the
+	// header is not in forwardedRequestHeaders, so whatever the agent put
+	// there is dropped and this is the only value the hub sees.
+	if runID != "" {
+		out.Header.Set(runnerwire.RunIDHeader, runID)
+	}
 	if p.accessID != "" {
 		out.Header.Set(runnerwire.AccessClientIDHeader, p.accessID)
 		out.Header.Set(runnerwire.AccessClientSecretHeader, p.accessSecret)

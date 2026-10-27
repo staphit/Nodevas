@@ -142,7 +142,7 @@ for (const [name, viewport] of Object.entries(viewports)) {
     await freshProject(page, ["設計稿"]);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
 
-    const modal = page.getByRole("dialog", { name: "Runner" });
+    const modal = page.getByRole("region", { name: "Runner" });
     const policy = modal.getByTestId("runner-policy-r1");
     await expect(policy).toBeVisible();
     await expect(policy.getByText("nodevas", { exact: true })).toBeVisible();

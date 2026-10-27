@@ -95,7 +95,7 @@ func registerReadTools(server *mcp.Server, client *Client) {
 		}
 		out := listProjectsOutput{Projects: projects, Scope: client.Project()}
 		if client.Project() == "" {
-			out.Scope = "(the server's active project)"
+			out.Scope = "(your current project: the one you have open; the server's active project on loopback)"
 		}
 		out.Note = "Tools cannot be pointed at another project. Restart `nodevas mcp` with --project to change it."
 		return nil, out, nil

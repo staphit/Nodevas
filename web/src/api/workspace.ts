@@ -123,6 +123,13 @@ export const workspaceApi = {
       method: "POST",
       body: JSON.stringify({ path, name }),
     }),
+  /** Copies a bundled example project into the workspace and opens it; the
+   * answer names the copy ("novel-writing", or "novel-writing-2" when taken). */
+  openExample: (example: string) =>
+    req<{ ok: boolean; name: string; active: string }>("/api/projects/example", {
+      method: "POST",
+      body: JSON.stringify({ example }),
+    }),
   openProject: (name: string, create = false, template = "") =>
     req<{ root: string; active: string }>("/api/projects/open", {
       method: "POST",

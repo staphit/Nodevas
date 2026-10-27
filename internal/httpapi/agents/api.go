@@ -41,11 +41,24 @@ type API struct {
 	// isRun reports whether a request comes from a run through its runner's
 	// proxy (UseRunCheck); nil means none does.
 	isRun func(*http.Request) bool
+	// runOf names the run a request comes from (UseRunOf); nil means none.
+	runOf func(*http.Request) string
 }
 
 // UseRunCheck tells the API how to recognise a run's request (the server's
 // runner proxy marks them).
 func (a *API) UseRunCheck(isRun func(*http.Request) bool) { a.isRun = isRun }
+
+// UseRunOf tells the API how to read which run a request comes from: the
+// server's runner proxy vouches for it, so it is never taken from the body.
+func (a *API) UseRunOf(runOf func(*http.Request) string) { a.runOf = runOf }
+
+func (a *API) runIDOf(r *http.Request) string {
+	if a.runOf == nil {
+		return ""
+	}
+	return a.runOf(r)
+}
 
 // fromRun reports whether a request acting as actorID is a run's: proxied by
 // a runner, or a local "run:" actor (`nodevas mcp --actor run:<agent>`).
@@ -230,6 +243,7 @@ func (a *API) postHeartbeat(c *gin.Context) {
 		NodeID:    body.NodeID,
 		Model:     body.Model,
 		Run:       a.fromRun(c.Request, actorID),
+		RunID:     a.runIDOf(c.Request),
 	})
 	if err != nil {
 		fail(c, err)

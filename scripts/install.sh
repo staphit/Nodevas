@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Nodevas client installer: one command that sets up this machine as a
-# runner for a Nodevas hub. It builds (or takes) the nodevas binary, installs
-# it, logs the runner in, allows repositories, wires the coding agents found
-# here into the agent network, and starts the runner at login.
+# runner for a Nodevas hub. It fetches the nodevas binary GitHub built (or
+# builds it, or takes one), installs it, logs the runner in, allows
+# repositories, wires the coding agents found here into the agent network,
+# and starts the runner at login. --standalone installs the binary alone, for
+# a single machine with no hub.
+#
+# A fetched binary is checked against GitHub, never against the hub: the hub
+# only says which commit it runs, and that picks one of the builds GitHub
+# Actions published (see fetch_verified).
 #
 # Works in Git Bash / MSYS on Windows, on Linux and on macOS (bash 3.2 and
 # up). Re-running it is safe: every step checks what is already there.
@@ -13,26 +19,33 @@
 #   scripts/install.sh --hub https://nodevas.example.com --link --repo ~/code/app
 #   scripts/install.sh --hub https://nodevas.example.com --repo ~/code/app
 #   scripts/install.sh --dry-run --hub https://nodevas.example.com
+#   scripts/install.sh --standalone
 #   scripts/install.sh status
 #   scripts/install.sh uninstall
 #
 # See docs/install.md.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 usage() {
 	cat <<'EOF'
 usage: install.sh [install] [options]     set this machine up as a runner (default)
        install.sh status [--config <file>] show the runner's settings and agents
        install.sh uninstall [options]     remove the login service, agent wiring and binary
+       install.sh --standalone [options]  install the binary only, for one machine with no hub
        install.sh server                  how to deploy the hub itself (prints the steps)
 
-binary:
+binary (default: build from the checkout this script is in when Go 1.26+ is
+here, else fetch the build GitHub made of the commit the hub runs):
+  --download               fetch the GitHub build even where Go could build one
+  --commit <sha>           fetch the GitHub build of this commit (40 hex characters)
+                           instead of the hub's
   --binary <path>          use this nodevas binary instead of building one
-  --from-source <dir>      build from this checkout (default: the checkout this
-                           script is in, when it is one); needs Go 1.26+
+  --from-source <dir>      build from this checkout; needs Go 1.26+
   --prefix <dir>           where to install it (default: ~/.local/bin)
+  --standalone             install the latest GitHub build and stop: no hub, no
+                           login, no service (then: nodevas serve)
 
 hub and login:
   --hub <url>              the hub, e.g. https://nodevas.example.com
@@ -78,6 +91,9 @@ EOF
 COMMAND=install
 BINARY=""
 SOURCE=""
+DOWNLOAD=0
+COMMIT=""
+STANDALONE=0
 PREFIX="${HOME}/.local/bin"
 HUB=""
 NAME=""
@@ -130,6 +146,9 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--binary) need_value "$@"; BINARY="$2"; shift 2 ;;
 	--from-source) need_value "$@"; SOURCE="$2"; shift 2 ;;
+	--download) DOWNLOAD=1; shift ;;
+	--commit) need_value "$@"; COMMIT="$2"; shift 2 ;;
+	--standalone) STANDALONE=1; shift ;;
 	--prefix) need_value "$@"; PREFIX="$2"; shift 2 ;;
 	--hub) need_value "$@"; HUB="${2%/}"; shift 2 ;;
 	--name) need_value "$@"; NAME="$2"; shift 2 ;;
@@ -264,6 +283,225 @@ status_field() {
 	printf '%s\n' "$STATUS" | sed -n "s/^$1: *//p" | head -n 1
 }
 
+# --- the GitHub build -------------------------------------------------------
+#
+# GitHub Actions (.github/workflows/container.yml, job "cli") builds nodevas
+# for every commit on master, with the same flags as the hub's container
+# image, attests each binary's build provenance, and publishes it to GitHub's
+# container registry, one single-file OCI artifact per platform:
+#
+#   ghcr.io/staphit/nodevas-cli:<40-char commit>-<os>-<arch>
+#   ghcr.io/staphit/nodevas-cli:latest-<os>-<arch>
+#
+# GitHub is the trust root, not the hub. The hub says only which commit it
+# runs (`nodevas runner hub-version`, behind the runner token); that commit
+# picks one of the builds above, and the binary is checked against what
+# ghcr.io lists for it over TLS (its SHA-256 is the layer's digest) and, when
+# gh is logged in here, against its GitHub build attestation. A hub that lies
+# can pick another genuine GitHub build, never a binary of its own.
+
+GITHUB_REPO="staphit/Nodevas"
+SIGNER_WORKFLOW="$GITHUB_REPO/.github/workflows/container.yml"
+REGISTRY="https://ghcr.io"
+CLI_REPOSITORY="staphit/nodevas-cli"
+
+# BUILT is the binary step_binary installs. DOWNLOADED is 1 once it came from
+# GitHub; FETCHED_COMMIT is the commit the last fetch_verified got.
+BUILT=""
+DOWNLOADED=0
+FETCHED_COMMIT=""
+
+# is_commit: a full commit, 40 lowercase hex characters. Anything that came
+# from the hub or the registry passes it before it goes into a URL.
+is_commit() {
+	case "$1" in
+	*[!0-9a-f]*) return 1 ;;
+	esac
+	[ "${#1}" -eq 40 ]
+}
+
+# platform prints the GitHub build's name for this machine: darwin-arm64,
+# darwin-amd64, linux-amd64, linux-arm64 or windows-amd64.
+platform() {
+	local os arch machine
+	machine="$(uname -m)"
+	case "$OS" in
+	windows) os=windows ;;
+	macos) os=darwin ;;
+	linux) os=linux ;;
+	esac
+	case "$machine" in
+	x86_64 | amd64) arch=amd64 ;;
+	arm64 | aarch64) arch=arm64 ;;
+	*) die "GitHub builds nodevas for amd64 and arm64, not $machine; build it here instead (--from-source, Go 1.26+)" ;;
+	esac
+	# A shell under Rosetta reports x86_64 on an Apple silicon Mac.
+	if [ "$os" = darwin ] && [ "$arch" = amd64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+		arch=arm64
+	fi
+	# Windows on Arm runs the amd64 build.
+	if [ "$os" = windows ]; then
+		arch=amd64
+	fi
+	printf '%s-%s\n' "$os" "$arch"
+}
+
+# sha256_of prints a file's SHA-256 in lowercase hex, with whichever tool
+# this system has.
+sha256_of() {
+	local file="$1" out=""
+	if command -v sha256sum >/dev/null 2>&1; then
+		out="$(sha256sum "$file")"
+	elif command -v shasum >/dev/null 2>&1; then
+		out="$(shasum -a 256 "$file")"
+	elif command -v openssl >/dev/null 2>&1; then
+		out="$(openssl dgst -sha256 -r "$file")"
+	elif command -v certutil >/dev/null 2>&1; then
+		out="$(certutil -hashfile "$(native "$file")" SHA256 | sed -n 2p | tr -d ' \r')"
+	else
+		die "no sha256sum, shasum, openssl or certutil here to check the download with"
+	fi
+	# sha256sum marks a file name it had to escape with a leading backslash.
+	out="${out#\\}"
+	out="${out%%[ *]*}"
+	printf '%s\n' "$out" | tr 'A-F' 'a-f'
+}
+
+# The manifest helpers read the OCI manifest the workflow pushed (oras, one
+# layer). They only pick values out; each is checked again before use (a
+# digest the download must hash to, a commit is_commit accepts).
+
+# manifest_layers prints the manifest's "layers" array, whitespace removed.
+manifest_layers() {
+	tr -d ' \t\r\n' <"$1" | sed -n 's/.*"layers":\[\([^]]*\)\].*/\1/p'
+}
+
+# exactly_one prints its input when it is one non-empty line, else fails.
+exactly_one() {
+	local lines
+	lines="$(cat)"
+	[ -n "$lines" ] && [ "$(printf '%s\n' "$lines" | wc -l | tr -d ' ')" = 1 ] || return 1
+	printf '%s\n' "$lines"
+}
+
+# manifest_layer_digest prints the one layer's digest, or fails when there
+# is not exactly one.
+manifest_layer_digest() {
+	manifest_layers "$1" | grep -o '"digest":"sha256:[0-9a-f]\{64\}"' |
+		sed 's/^"digest":"//; s/"$//' | exactly_one
+}
+
+# manifest_layer_title prints the layer's file name.
+manifest_layer_title() {
+	manifest_layers "$1" | grep -o '"org.opencontainers.image.title":"[^"]*"' |
+		sed 's/^"org.opencontainers.image.title":"//; s/"$//' | exactly_one
+}
+
+# manifest_revision prints the commit the artifact was built from.
+manifest_revision() {
+	tr -d ' \t\r\n' <"$1" | grep -o '"org.opencontainers.image.revision":"[0-9a-f]\{40\}"' |
+		sed 's/^"org.opencontainers.image.revision":"//; s/"$//' | exactly_one
+}
+
+# verify_attestation checks a fetched binary's GitHub build attestation with
+# gh: built by this repository's container.yml on a GitHub-hosted runner, from
+# commit. gh needs a login for it; without one the digest check stands alone.
+verify_attestation() {
+	local file="$1" commit="$2" err
+	if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+		warn "build provenance not checked: gh is not installed here, or not logged in (gh auth login)."
+		note "The binary matches the SHA-256 that GitHub's registry (ghcr.io) lists for commit"
+		note "$commit, fetched over TLS; the hub had no say in it. To check its provenance too:"
+		note "  gh attestation verify $(native "$INSTALLED") --repo $GITHUB_REPO --signer-workflow $SIGNER_WORKFLOW"
+		return 0
+	fi
+	local help
+	local -a args=(attestation verify "$(native "$file")" --repo "$GITHUB_REPO"
+		--signer-workflow "$SIGNER_WORKFLOW")
+	# Older gh releases lack some flags; an unknown flag would fail a good
+	# binary, so each is added only where gh has it.
+	help="$(gh attestation verify --help 2>&1 || true)"
+	case "$help" in
+	*--deny-self-hosted-runners*) args+=(--deny-self-hosted-runners) ;;
+	esac
+	case "$help" in
+	*--source-digest*) args+=(--source-digest "$commit") ;;
+	esac
+	show gh "${args[@]}"
+	err="$TMP_DIR/gh-attestation.err"
+	if ! gh "${args[@]}" >/dev/null 2>"$err"; then
+		sed 's/^/    /' "$err" >&2
+		die "the binary's GitHub build attestation does not verify; not installing it"
+	fi
+	note "build provenance verified: $SIGNER_WORKFLOW built it from $commit"
+}
+
+# fetch_verified fetches the GitHub build for this machine of want (a full
+# commit, or latest) into out, and checks it. It returns 1 when GitHub has no
+# such build, and stops the script when one does not check out.
+fetch_verified() {
+	local want="$1" out="$2" plat name tag dir token code digest title revision got
+	plat="$(platform)" || exit 1
+	name="nodevas-$plat"
+	if [ "${plat%%-*}" = windows ]; then
+		name="$name.exe"
+	fi
+	case "$want" in
+	latest) tag="latest-$plat" ;;
+	*)
+		is_commit "$want" || die "not a full commit (40 lowercase hex characters): $want"
+		tag="$want-$plat"
+		;;
+	esac
+	command -v curl >/dev/null 2>&1 || die "fetching nodevas needs curl"
+	dir="$(dirname "$out")"
+	mkdir -p "$dir"
+	rm -f "$out"
+	local -a get=(curl --silent --show-error --proto "=https" --tlsv1.2 --retry 2 --connect-timeout 20)
+
+	say "fetching $name ($want) from ghcr.io/$CLI_REPOSITORY"
+	# A public package still wants a pull token; an anonymous one will do. It
+	# opens nothing but public pulls, so it may show on the command line.
+	token="$("${get[@]}" --fail --max-filesize 65536 \
+		"$REGISTRY/token?scope=repository:$CLI_REPOSITORY:pull&service=ghcr.io" |
+		sed -n 's/.*"token":"\([A-Za-z0-9._~+\/=-]*\)".*/\1/p')" || token=""
+	[ -n "$token" ] || die "ghcr.io gave no pull token for $CLI_REPOSITORY: it does not exist yet, or is not public"
+
+	code="$("${get[@]}" --max-filesize 1048576 -o "$dir/manifest.json" -w '%{http_code}' \
+		-H "Authorization: Bearer $token" \
+		-H "Accept: application/vnd.oci.image.manifest.v1+json" \
+		"$REGISTRY/v2/$CLI_REPOSITORY/manifests/$tag")" || die "could not reach ghcr.io"
+	case "$code" in
+	200) ;;
+	404) return 1 ;;
+	*) die "ghcr.io answered $code for $CLI_REPOSITORY:$tag" ;;
+	esac
+	digest="$(manifest_layer_digest "$dir/manifest.json")" || die "$CLI_REPOSITORY:$tag is not a single-file nodevas build"
+	title="$(manifest_layer_title "$dir/manifest.json")" || title=""
+	[ "$title" = "$name" ] || die "$CLI_REPOSITORY:$tag holds \"$title\", not $name"
+	revision="$(manifest_revision "$dir/manifest.json")" || die "$CLI_REPOSITORY:$tag does not say which commit it was built from"
+	if [ "$want" != latest ] && [ "$revision" != "$want" ]; then
+		die "$CLI_REPOSITORY:$tag was built from $revision, not $want"
+	fi
+
+	# The blob is served from a signed URL on another GitHub host; curl does
+	# not pass the token on to it.
+	"${get[@]}" --fail --location --max-filesize 268435456 -o "$out" \
+		-H "Authorization: Bearer $token" \
+		"$REGISTRY/v2/$CLI_REPOSITORY/blobs/$digest" || die "could not download $name"
+	got="$(sha256_of "$out")" || exit 1
+	got="sha256:$got"
+	if [ "$got" != "$digest" ]; then
+		rm -f "$out"
+		die "$name does not match its digest (got $got, GitHub lists $digest); not installing it"
+	fi
+	note "SHA-256 matches what GitHub's registry lists: ${digest#sha256:}"
+	verify_attestation "$out" "$revision"
+	chmod +x "$out"
+	FETCHED_COMMIT="$revision"
+	note "commit $revision"
+}
+
 # --- steps ------------------------------------------------------------------
 
 go_is_new_enough() {
@@ -277,38 +515,76 @@ go_is_new_enough() {
 	[ "${major:-0}" -gt 1 ] || { [ "${major:-0}" -eq 1 ] && [ "${minor:-0}" -ge 26 ]; }
 }
 
+ensure_tmp() {
+	if [ -z "$TMP_DIR" ]; then
+		TMP_DIR="$(mktemp -d)"
+	fi
+}
+
+# build_binary builds nodevas from the checkout src into the temp dir (BUILT).
+build_binary() {
+	local src
+	src="$(cd "$1" && pwd)"
+	[ -d "$src/cmd/nodevas" ] || die "$src is not a nodevas checkout (no cmd/nodevas)"
+	command -v go >/dev/null 2>&1 || die "building needs Go 1.26 or newer (https://go.dev/dl/); without --from-source the script fetches GitHub's build instead"
+	go_is_new_enough || die "building needs Go 1.26 or newer; this is $(go env GOVERSION)"
+	ensure_tmp
+	BUILT="$TMP_DIR/nodevas${EXE}"
+	say "building nodevas from $src"
+	show go build -tags nomsgpack -trimpath -o "$BUILT" ./cmd/nodevas
+	# Even a dry run builds, into a temp dir: the later steps preview
+	# themselves with it. Nothing outside the temp dir changes.
+	(cd "$src" && CGO_ENABLED=0 go build -tags nomsgpack -trimpath -o "$(native "$BUILT")" ./cmd/nodevas)
+}
+
+# download_binary fetches GitHub's build into the temp dir (BUILT): of
+# --commit; else, on a re-run whose installed runner is logged in, of the
+# commit the hub runs; else of the latest commit, which step_match_hub swaps
+# for the hub's own once this runner is logged in. A dry run fetches too, into
+# the temp dir, as it would build.
+download_binary() {
+	local want="$COMMIT" hub_commit
+	if [ -z "$want" ] && [ "$STANDALONE" = 0 ] && [ -f "$INSTALLED" ]; then
+		if hub_commit="$("$INSTALLED" runner hub-version ${CFG[@]+"${CFG[@]}"} 2>/dev/null)" && is_commit "$hub_commit"; then
+			note "the hub runs $hub_commit"
+			want="$hub_commit"
+		fi
+	fi
+	ensure_tmp
+	BUILT="$TMP_DIR/fetched/nodevas${EXE}"
+	fetch_verified "${want:-latest}" "$BUILT" ||
+		die "GitHub has no build of ${want:-latest} for $(platform); pass --binary, or --from-source with Go 1.26+"
+	DOWNLOADED=1
+}
+
 step_binary() {
-	local built
 	if [ -n "$BINARY" ]; then
 		[ -f "$BINARY" ] || die "--binary $BINARY: no such file"
-		built="$BINARY"
+		BUILT="$BINARY"
 		say "using the binary $BINARY"
+	elif [ -n "$SOURCE" ]; then
+		build_binary "$SOURCE"
+	elif [ "$DOWNLOAD" = 0 ] && [ -z "$COMMIT" ] && [ "$STANDALONE" = 0 ] &&
+		[ -f "$SCRIPT_DIR/../go.mod" ] && [ -d "$SCRIPT_DIR/../cmd/nodevas" ] &&
+		command -v go >/dev/null 2>&1 && go_is_new_enough; then
+		# A checkout with Go: build what is checked out, as before.
+		build_binary "$SCRIPT_DIR/.."
 	else
-		local src="$SOURCE"
-		if [ -z "$src" ] && [ -f "$SCRIPT_DIR/../go.mod" ] && [ -d "$SCRIPT_DIR/../cmd/nodevas" ]; then
-			src="$SCRIPT_DIR/.."
-		fi
-		if [ -z "$src" ]; then
-			die "no binary: pass --binary <path>, or run this script from a nodevas checkout (or --from-source <dir>)"
-		fi
-		src="$(cd "$src" && pwd)"
-		[ -d "$src/cmd/nodevas" ] || die "$src is not a nodevas checkout (no cmd/nodevas)"
-		command -v go >/dev/null 2>&1 || die "building needs Go 1.26 or newer (https://go.dev/dl/), or pass --binary"
-		go_is_new_enough || die "building needs Go 1.26 or newer; this is $(go env GOVERSION)"
-		TMP_DIR="$(mktemp -d)"
-		built="$TMP_DIR/nodevas${EXE}"
-		say "building nodevas from $src"
-		show go build -tags nomsgpack -trimpath -o "$built" ./cmd/nodevas
-		# Even a dry run builds, into a temp dir: the later steps preview
-		# themselves with it. Nothing outside the temp dir changes.
-		(cd "$src" && CGO_ENABLED=0 go build -tags nomsgpack -trimpath -o "$(native "$built")" ./cmd/nodevas)
+		download_binary
 	fi
+	install_binary "$BUILT"
+}
 
+# install_binary copies a binary to INSTALLED (a dry run only shows it, and
+# runs the later steps with the new binary when nothing is installed yet or
+# it came from GitHub).
+install_binary() {
+	local built="$1"
 	say "installing to $INSTALLED"
 	if [ "$DRY" = 1 ]; then
 		show mkdir -p "$PREFIX"
 		show cp "$built" "$INSTALLED"
-		if [ ! -f "$INSTALLED" ]; then
+		if [ ! -f "$INSTALLED" ] || [ "$DOWNLOADED" = 1 ]; then
 			NV="$built"
 		fi
 	elif [ -f "$INSTALLED" ] && cmp -s "$built" "$INSTALLED"; then
@@ -336,6 +612,47 @@ step_binary() {
 		fi
 		;;
 	esac
+}
+
+# step_match_hub runs once the runner is logged in, after GitHub's build of
+# the latest commit was installed: it asks the hub which commit it runs and,
+# when that is another one, installs GitHub's build of it instead. The hub's
+# answer only picks the build; fetch_verified checks it against GitHub. A hub
+# that cannot say (older than the version endpoint, a local build), or whose
+# commit GitHub never built, keeps the latest build, with a warning. Nothing
+# here updates a runner later: the binary changes only when this script runs.
+step_match_hub() {
+	if [ "$DOWNLOADED" = 0 ] || [ -n "$COMMIT" ]; then
+		return 0
+	fi
+	local hub_commit err="$TMP_DIR/hub-version.err"
+	say "asking the hub which commit it runs"
+	show "$NV" runner hub-version ${CFG[@]+"${CFG[@]}"}
+	if ! hub_commit="$("$NV" runner hub-version ${CFG[@]+"${CFG[@]}"} 2>"$err")"; then
+		if [ "$DRY" = 1 ]; then
+			note "(dry run: not logged in yet) a real run asks once logged in, and fetches GitHub's build"
+			note "of the hub's commit when it is not $FETCHED_COMMIT"
+			return 0
+		fi
+		warn "the hub did not say: $(sed 's/^nodevas runner hub-version: //' "$err" | head -n 1)"
+		note "kept GitHub's build of $FETCHED_COMMIT; if the hub runs another commit, run again with --commit <sha>"
+		return 0
+	fi
+	if ! is_commit "$hub_commit"; then
+		warn "the hub's answer is not a commit; kept GitHub's build of $FETCHED_COMMIT"
+		return 0
+	fi
+	if [ "$hub_commit" = "$FETCHED_COMMIT" ]; then
+		note "the hub runs $hub_commit too"
+		return 0
+	fi
+	note "the hub runs $hub_commit"
+	if ! fetch_verified "$hub_commit" "$TMP_DIR/hub/nodevas${EXE}"; then
+		warn "GitHub has no build of $hub_commit (a hub built before runner builds were published,"
+		warn "or not from $GITHUB_REPO); kept GitHub's build of $FETCHED_COMMIT"
+		return 0
+	fi
+	install_binary "$TMP_DIR/hub/nodevas${EXE}"
 }
 
 # step_login_link logs in with a device link: one string that carries the
@@ -769,15 +1086,55 @@ check_inputs() {
 	"" | http://* | https://*) ;;
 	*) die "--agents-server $AGENTS_SERVER: give the full URL" ;;
 	esac
+	if [ -n "$COMMIT" ]; then
+		is_commit "$COMMIT" || die "--commit $COMMIT: give the full commit, 40 lowercase hex characters"
+	fi
+	if [ -n "$BINARY" ] && [ -n "$SOURCE" ]; then
+		die "--binary and --from-source cannot be combined"
+	fi
+	if [ -n "$BINARY$SOURCE" ] && { [ -n "$COMMIT" ] || [ "$DOWNLOAD" = 1 ]; }; then
+		die "--binary or --from-source cannot be combined with --download or --commit"
+	fi
+	if [ "$STANDALONE" = 1 ]; then
+		if [ -n "$HUB$NAME$ACCESS_ID$CONFIG$DATA_DIR$AUTO_ACCEPT$AGENTS$AGENTS_SERVER" ] ||
+			[ "$LINK$RELOGIN$NO_AGENTS$NO_SERVICE$RESTART" != 00000 ] || [ ${#REPOS[@]} -gt 0 ]; then
+			die "--standalone installs the binary only: drop the hub, login, repository, agent and service options"
+		fi
+	fi
+}
+
+# cmd_standalone installs nodevas for a single machine with no hub: GitHub's
+# latest build (or --commit's, --binary, --from-source), and nothing else.
+cmd_standalone() {
+	if [ "$DRY" = 1 ]; then
+		say "dry run: nothing outside a temp dir changes"
+	fi
+	step_binary
+	say "done"
+	cat <<'EOF'
+
+start it on this machine (it listens on 127.0.0.1 only; no accounts needed):
+  mkdir -p ~/nodevas-workspace
+  nodevas serve --project ~/nodevas-workspace
+then open http://127.0.0.1:5666
+
+To run coding agents from the board on this machine too, make it a runner of
+that hub as well: see docs/install.md.
+EOF
 }
 
 cmd_install() {
 	check_inputs
+	if [ "$STANDALONE" = 1 ]; then
+		cmd_standalone
+		return
+	fi
 	if [ "$DRY" = 1 ]; then
 		say "dry run: nothing outside a temp dir changes"
 	fi
 	step_binary
 	step_login
+	step_match_hub
 	# The secrets are in runner.json now. Nothing started from here on (the
 	# runner service, the agent CLIs it spawns) inherits them from this shell.
 	unset NODEVAS_RUNNER_TOKEN NODEVAS_ACCESS_CLIENT_SECRET NODEVAS_RUNNER_LINK
@@ -859,9 +1216,8 @@ cmd_server() {
 	cat <<'EOF'
 The hub (nodevas serve) runs on the server; a runner never serves. To deploy it:
 
-  - TrueNAS / Docker Compose: deploy/truenas/README.md (compose.yaml, compose.postgres.yaml,
-    the existing-tunnel variant, and the network fix script it describes)
-  - Oracle Cloud:             deploy/oci/
+  - Docker or a plain binary: docs/getting-started.md ("Team server") and
+    docs/operations.md ("Allow network access")
   - behind Cloudflare Access: create a service token for runners and store it on the hub
     (Runners -> Runner access token, as an administrator); then install each runner with
     --link (Runners -> Link a new device), or with --access-client-id <id> (secret in
@@ -870,6 +1226,11 @@ The hub (nodevas serve) runs on the server; a runner never serves. To deploy it:
 This script does not change servers.
 EOF
 }
+
+# Sourced (scripts/install_test.sh does): define everything, run nothing.
+if [ "${BASH_SOURCE[0]:-$0}" != "$0" ]; then
+	return 0
+fi
 
 case "$COMMAND" in
 install) cmd_install ;;

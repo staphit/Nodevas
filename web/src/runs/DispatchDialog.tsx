@@ -365,8 +365,8 @@ export function DispatchDialog({
                 type="button"
                 className="run-inline-link"
                 onClick={() => {
-                  useBudget.getState().requestShow(true);
-                  openRunners();
+                  onClose();
+                  window.dispatchEvent(new CustomEvent("nodevas-open-budget"));
                 }}
               >
                 {t("budget.adjust")}

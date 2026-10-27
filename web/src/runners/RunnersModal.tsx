@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { DialogFrame, useInlineDialog } from "../components/DialogFrame";
 import type { Runner } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
 import { IconClose, IconComputer, IconShield, IconTrash } from "../icons";
@@ -6,11 +7,9 @@ import { MODE_INTERACTIVE } from "../runs/autoAccept";
 import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
 import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
 import { languageLocale, useI18n } from "../i18n";
-import { BudgetSettings } from "../runs/BudgetSettings";
-import { useBudget } from "../runs/budgetStore";
-import { RoutingSettings } from "../runs/RoutingSettings";
 import { RunNotifySettings } from "../runs/RunToasts";
 import { CopyButton, LinkDeviceDialog, RunnerAccessTokenSettings } from "./LinkDevice";
+import { useTeamServer } from "../components/SignIn";
 import { useRunners } from "./runnerStore";
 
 /** "3 minutes ago" in the reader's language, or "" for an unparseable time. */
@@ -178,10 +177,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
   return (
     <li className="runner-card" data-testid={`runner-${runner.id}`}>
       <div className="runner-card-head">
-        <span
-          className={`runner-dot${runner.online ? " online" : ""}`}
-          aria-hidden="true"
-        />
+        <span className={`runner-dot${runner.online ? " online" : ""}`} aria-hidden="true" />
         <div className="runner-card-title">
           <strong>{runner.name}</strong>
           <span>
@@ -217,9 +213,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
               <li key={agent.kind} className={agent.installed ? "" : "missing"}>
                 <span className="runner-agent-kind">{agent.kind}</span>
                 <span className="runner-agent-version">
-                  {agent.installed
-                    ? agent.version || t("runners.installed")
-                    : agent.error || t("runners.notInstalled")}
+                  {agent.installed ? agent.version || t("runners.installed") : agent.error || t("runners.notInstalled")}
                 </span>
                 {agent.installed && agent.models.length > 0 && (
                   <span className="runner-models">
@@ -270,6 +264,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
  */
 export function RunnersModal({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
+  const inline = useInlineDialog();
   const runners = useRunners((s) => s.runners);
   const loading = useRunners((s) => s.loading);
   const loaded = useRunners((s) => s.loaded);
@@ -278,12 +273,6 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   const refresh = useRunners((s) => s.refresh);
   const create = useRunners((s) => s.create);
   const [adding, setAdding] = useState(false);
-  // Opened on the Budget section when an "adjust budget" link sent us here.
-  const [budgetOpen, setBudgetOpen] = useState(() => useBudget.getState().showRequested);
-  useEffect(() => {
-    useBudget.getState().requestShow(false);
-  }, []);
-  const [routingOpen, setRoutingOpen] = useState(false);
   const [name, setName] = useState("");
   // The token lives only in this dialog's state: closing it is the last time
   // anyone sees it, which is the point.
@@ -296,6 +285,7 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   // W6: whether this browser is stepped up, asked afresh on every open.
   const [stepUpOpen, setStepUpOpen] = useState(false);
   const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+  const teamServer = useTeamServer();
   const [linkOpen, setLinkOpen] = useState(false);
   const closeLink = useCallback(() => setLinkOpen(false), []);
   useEffect(() => {
@@ -304,11 +294,11 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !inline) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, inline]);
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -324,158 +314,137 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   const loginCommand = `nodevas runner login --hub ${hub}`;
 
   return (
-    <div className="confirm-backdrop" onClick={onClose}>
-      <div
-        className="confirm-dialog runners-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("runners.title")}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <span className="confirm-dialog-icon">
-            <IconComputer size={17} />
-          </span>
-          <div>
-            <h2>{t("runners.title")}</h2>
-            <p>{t("runners.description")}</p>
-          </div>
-          <button
-            type="button"
-            className="confirm-dialog-close"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <IconClose size={14} />
-          </button>
-        </header>
+    <DialogFrame className="runners-dialog" label={t("runners.title")} onDismiss={onClose}>
+      <header>
+        <span className="confirm-dialog-icon">
+          <IconComputer size={17} />
+        </span>
+        <div>
+          <h2>{t("runners.title")}</h2>
+          <p>{t("runners.description")}</p>
+        </div>
+        <button
+          type="button"
+          className="confirm-dialog-close"
+          data-dialog-close
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
+          <IconClose size={14} />
+        </button>
+      </header>
 
-        <div className="runners-body">
-          {created && (
-            <section className="runner-token" aria-label={t("runners.token")}>
-              <strong>{t("runners.tokenTitle", { name: created.name })}</strong>
-              <p className="runner-token-warning" role="alert">
-                {t("runners.tokenWarning")}
-              </p>
-              <div className="runner-token-row">
-                <input
-                  readOnly
-                  value={created.token}
-                  aria-label={t("runners.token")}
-                  onFocus={(event) => event.currentTarget.select()}
-                />
-                <CopyButton value={created.token} label={t("runners.copyToken")} />
-              </div>
-              <ol className="runner-steps">
-                <li>
-                  {t("runners.stepLogin")}
-                  <div className="runner-token-row">
-                    <code>{loginCommand}</code>
-                    <CopyButton value={loginCommand} label={t("runners.copyCommand")} />
-                  </div>
-                  <span className="runner-hint">{t("runners.stepAccess")}</span>
-                </li>
-                <li>
-                  {t("runners.stepStart")}
-                  <div className="runner-token-row">
-                    <code>nodevas runner</code>
-                  </div>
-                </li>
-              </ol>
-              <button type="button" className="runner-done" onClick={() => setCreated(null)}>
-                {t("runners.tokenSaved")}
-              </button>
-            </section>
-          )}
-
-          {error && (
-            <div className="notify-message error" role="status">
-              {error}
+      <div className="runners-body">
+        {created && (
+          <section className="runner-token" aria-label={t("runners.token")}>
+            <strong>{t("runners.tokenTitle", { name: created.name })}</strong>
+            <p className="runner-token-warning" role="alert">
+              {t("runners.tokenWarning")}
+            </p>
+            <div className="runner-token-row">
+              <input
+                readOnly
+                value={created.token}
+                aria-label={t("runners.token")}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <CopyButton value={created.token} label={t("runners.copyToken")} />
             </div>
-          )}
+            <ol className="runner-steps">
+              <li>
+                {t("runners.stepLogin")}
+                <div className="runner-token-row">
+                  <code>{loginCommand}</code>
+                  <CopyButton value={loginCommand} label={t("runners.copyCommand")} />
+                </div>
+                <span className="runner-hint">{t("runners.stepAccess")}</span>
+              </li>
+              <li>
+                {t("runners.stepStart")}
+                <div className="runner-token-row">
+                  <code>nodevas runner</code>
+                </div>
+              </li>
+            </ol>
+            <button type="button" className="runner-done" onClick={() => setCreated(null)}>
+              {t("runners.tokenSaved")}
+            </button>
+          </section>
+        )}
 
-          <StepUpRow onVerify={() => setStepUpOpen(true)} />
+        {error && (
+          <div className="notify-message error" role="status">
+            {error}
+          </div>
+        )}
 
-          {!loaded || (loading && runners.length === 0) ? (
-            <p className="runner-empty">{t("common.loading")}</p>
-          ) : runners.length === 0 ? (
-            <p className="runner-empty">{t("runners.empty")}</p>
-          ) : (
-            <ul className="runner-list">
-              {runners.map((runner) => (
-                <RunnerCard key={runner.id} runner={runner} />
-              ))}
-            </ul>
-          )}
+        <StepUpRow onVerify={() => setStepUpOpen(true)} />
 
-          {adding && (
-            <form
-              className="runner-add"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submit();
-              }}
-            >
-              <label htmlFor="runner-name">{t("runners.name")}</label>
-              <div className="runner-token-row">
-                <input
-                  id="runner-name"
-                  value={name}
-                  maxLength={64}
-                  autoFocus
-                  placeholder={t("runners.namePlaceholder")}
-                  onChange={(event) => setName(event.target.value)}
-                />
-                <button type="submit" className="primary" disabled={creating || !name.trim()}>
-                  {t("runners.create")}
-                </button>
-              </div>
-            </form>
-          )}
+        {!loaded || (loading && runners.length === 0) ? (
+          <p className="runner-empty">{t("common.loading")}</p>
+        ) : runners.length === 0 ? (
+          <p className="runner-empty">{t("runners.empty")}</p>
+        ) : (
+          <ul className="runner-list">
+            {runners.map((runner) => (
+              <RunnerCard key={runner.id} runner={runner} />
+            ))}
+          </ul>
+        )}
 
-          {/* Fetched only when opened: most visits here are about runners. */}
-          <details
-            className="runner-settings"
-            open={budgetOpen || undefined}
-            onToggle={(event) => setBudgetOpen(event.currentTarget.open)}
-          >
-            <summary>{t("budget.title")}</summary>
-            {budgetOpen && <BudgetSettings />}
-          </details>
-          <details
-            className="runner-settings"
-            // Mounted from the first open on, so closing it keeps a draft.
-            onToggle={(event) => {
-              if (event.currentTarget.open) setRoutingOpen(true);
+        {adding && (
+          <form
+            className="runner-add"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
             }}
           >
-            <summary>{t("routing.title")}</summary>
-            {routingOpen && <RoutingSettings />}
-          </details>
-          <RunNotifySettings />
-          <RunnerAccessTokenSettings />
-        </div>
+            <label htmlFor="runner-name">{t("runners.name")}</label>
+            <div className="runner-token-row">
+              <input
+                id="runner-name"
+                value={name}
+                maxLength={64}
+                autoFocus
+                placeholder={t("runners.namePlaceholder")}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <button type="submit" className="primary" disabled={creating || !name.trim()}>
+                {t("runners.create")}
+              </button>
+            </div>
+          </form>
+        )}
 
-        <footer>
-          {!adding && (
-            <button type="button" onClick={() => setLinkOpen(true)}>
-              {t("runners.link.open")}
-            </button>
-          )}
-          {!adding && (
-            <button type="button" className="primary" onClick={() => setAdding(true)}>
-              {t("runners.add")}
-            </button>
-          )}
-          {adding && (
-            <button type="button" onClick={() => setAdding(false)}>
-              {t("common.cancel")}
-            </button>
-          )}
-        </footer>
-        {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
-        {linkOpen && <LinkDeviceDialog onClose={closeLink} />}
+        {/* The daily budget and routing rules are Settings parts of their
+            own, beside this one. */}
+        <RunNotifySettings />
+        {/* Device links and the edge's Access token are for runners on
+              other machines reaching a team server; a standalone hub is only
+              reachable from this one, where "Add runner" is the way in. */}
+        {teamServer && <RunnerAccessTokenSettings />}
       </div>
-    </div>
+
+      <footer>
+        {!adding && teamServer && (
+          <button type="button" onClick={() => setLinkOpen(true)}>
+            {t("runners.link.open")}
+          </button>
+        )}
+        {!adding && (
+          <button type="button" className="primary" onClick={() => setAdding(true)}>
+            {t("runners.add")}
+          </button>
+        )}
+        {adding && (
+          <button type="button" onClick={() => setAdding(false)}>
+            {t("common.cancel")}
+          </button>
+        )}
+      </footer>
+      {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
+      {linkOpen && <LinkDeviceDialog onClose={closeLink} />}
+    </DialogFrame>
   );
 }

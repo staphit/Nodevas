@@ -10,6 +10,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/logging"
 	"strings"
 	"time"
 
@@ -58,14 +59,20 @@ func (a *API) postLogin(c *gin.Context) {
 		a.answerPendingSignIn(c, result)
 		return
 	}
-	a.finishSignIn(c, result.Actor, result.Token, result.CSRF, err, nil)
+	if err != nil && result.Refusal.Account.ID == "" {
+		// No account was read, so there is no registered address to name.
+		result.Refusal.Email = auth.TypedAddress(body.Email)
+	}
+	a.finishSignIn(c, audit.MethodOTP, result, err, nil)
 }
 
 // finishSignIn turns the outcome of a sign-in into the response, the audit
-// line and the cookie pair.
-func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf string, err error, detail map[string]any) {
+// line and the cookie pair. method is what the step asked for, in the log's
+// words (audit.MethodOTP, ...).
+func (a *API) finishSignIn(c *gin.Context, method string, result auth.SignInResult, err error, detail map[string]any) {
 	if err != nil {
-		status := http.StatusUnauthorized
+		ctx := c.Request.Context()
+		status, refusal, answer := http.StatusUnauthorized, result.Refusal, err
 		switch {
 		case errors.Is(err, auth.ErrTooManyLogins):
 			status = http.StatusTooManyRequests
@@ -79,28 +86,42 @@ func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf str
 			// Nothing the person can type fixes it; the message says who can.
 			status = http.StatusConflict
 		case errors.Is(err, auth.ErrBadCredentials), errors.Is(err, auth.ErrTOTPCode),
-			errors.Is(err, auth.ErrSignInExpired),
-			errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			errors.Is(err, auth.ErrSignInExpired):
+		case stoppedWaiting(ctx, err):
+			// Nobody is left to read the answer, and the error may be a
+			// driver's, so what goes back is only that the request ended.
+			answer = ctx.Err()
 		default:
 			// A database read that failed mid sign-in, say: the server's
-			// fault, and its text is not the client's business.
+			// fault, and its text is not the client's business. Its row has
+			// always filed it under bad-credentials; its log line says error,
+			// so an alert on refused credentials does not fire for an outage.
 			status = http.StatusInternalServerError
+			refusal.Reason = "error"
 		}
 		// A failed sign-in is the event an operator most wants after the fact,
 		// and the one with no actor to attribute it to, so the address it came
-		// from is all there is to record. The reason is a category, never the
-		// credential that was offered.
-		a.recordAuthEvent(c, "auth.signin.failed", identity.Actor{}, map[string]any{
-			"reason": authFailureReason(err),
-		})
-		httpx.Err(c, status, err)
+		// from is all its row records; its log line also says whose account
+		// the attempt named (refusedSignIn). The reason is a category, never
+		// the credential that was offered.
+		a.recordAuth(c, refusedSignIn(authFailureReason(ctx, err), method, refusal))
+		httpx.Err(c, status, answer)
 		return
 	}
-	a.recordAuthEvent(c, "auth.signin", actor, detail)
+	actor := result.Actor
+	signedIn := a.authEvent(c, audit.Event{
+		ActorID: actor.ID, ActorName: actor.Name, Action: audit.ActionSignIn, Detail: detail, AuthMethod: method,
+	})
+	if a.audit != nil {
+		a.audit.RecordOrLog(c.Request.Context(), signedIn)
+	}
+	// The request log line for this request names who it signed in.
+	logging.SetUser(c.Request.Context(), actor.ID, actor.Name)
+	logging.SetUserEmail(c.Request.Context(), signedIn.ActorEmail)
 	secure := auth.RequestIsSecure(c.Request)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     auth.SessionCookieName,
-		Value:    token,
+		Value:    result.Token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
@@ -112,7 +133,7 @@ func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf str
 	// set.
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     auth.CSRFCookieName,
-		Value:    csrf,
+		Value:    result.CSRF,
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   secure,
@@ -120,6 +141,23 @@ func (a *API) finishSignIn(c *gin.Context, actor identity.Actor, token, csrf str
 		MaxAge:   int(auth.SessionTTL.Seconds()),
 	})
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "actor": actor})
+}
+
+// refusedSignIn is the event for a refused sign-in step. Its row is what such
+// rows have always been: no actor, and the stored reason. Its line also names
+// the account the attempt was for, when there was one, or else the address
+// typed, and the refusal's finer reason: an unknown address, a passcode that
+// had run out, the guess that used one up.
+func refusedSignIn(reason, method string, refusal auth.SignInRefusal) audit.Event {
+	return audit.Event{
+		Action:      audit.ActionSignInFailed,
+		Detail:      map[string]any{"reason": reason},
+		AuthMethod:  method,
+		Reason:      refusal.Reason,
+		SubjectID:   refusal.Account.ID,
+		SubjectName: refusal.Account.Name,
+		ActorEmail:  refusal.Email,
+	}
 }
 
 // postRequestOTP emails a one-time passcode to the account registered with an
@@ -156,10 +194,30 @@ func (a *API) postRequestOTP(c *gin.Context) {
 	// not registered is what somebody probing for accounts looks like, and it
 	// is invisible to the client by design — the trail is the only place it
 	// shows up. "delivered" has always meant a passcode was minted and handed
-	// to delivery — the key is kept so older rows read the same — and whether
-	// the relay then accepted it is the delivery log line's business.
-	a.recordAuthEvent(c, "auth.passcode.request", identity.Actor{Name: challenge.Actor},
-		map[string]any{"delivered": err == nil})
+	// to delivery — the key is kept so older rows read the same. The log line
+	// says whether one went out, and if none did, why; it names the account's
+	// own address, or with no account found, the one typed, once it parsed as
+	// an address.
+	requested := audit.Event{
+		ActorName:  challenge.Actor,
+		ActorEmail: challenge.Email,
+		Action:     audit.ActionPasscodeRequest,
+		Detail:     map[string]any{"delivered": err == nil},
+		Reason:     deliveryFailureReason(c.Request.Context(), err),
+	}
+	if requested.ActorEmail == "" {
+		requested.ActorEmail = auth.TypedAddress(body.Email)
+	}
+	if err != nil {
+		a.recordAuth(c, requested)
+	}
+	if requested.Reason == "error" {
+		// The line says only that the server failed; the cause is for the
+		// operator, as a failed sign-in's is, and never for the client, which
+		// gets the same 202 below. No passcode is in it: what failed is the
+		// account read or the generator, before any passcode existed.
+		log.Printf("passcode request failed: %v", err)
+	}
 	if errors.Is(err, auth.ErrTooManyOTPRequests) {
 		// The one failure worth telling the client about: the budgets are
 		// charged identically for registered and unregistered addresses, so it
@@ -172,7 +230,9 @@ func (a *API) postRequestOTP(c *gin.Context) {
 		// challenge.Email is the address stored on the account, never the
 		// string in the request body: mail goes where the administrator
 		// registered it, however the person at the door chose to type it.
-		go a.deliverPasscode(challenge)
+		// The row is written now; the line once the relay has answered.
+		sent := a.recordAuthLater(c, requested)
+		go a.deliverPasscode(challenge, sent)
 	}
 	// Unknown address, malformed address, or a passcode that could not be
 	// generated: none of these are the client's business, and a delivered one
@@ -180,45 +240,103 @@ func (a *API) postRequestOTP(c *gin.Context) {
 	c.JSON(http.StatusAccepted, map[string]any{"ok": true})
 }
 
-// deliverPasscode sends one passcode. It owns its deadline rather than
-// borrowing the request's: the request is answered, and its context is
-// cancelled, before the relay has even been dialled. A failure reaches the
-// operator through the log; it never reaches the client, because "the mail
-// bounced" would confirm the address.
-func (a *API) deliverPasscode(challenge auth.Challenge) {
+// deliverPasscode sends one passcode and hands sent the relay's answer, which
+// writes the request's log line. It owns its deadline rather than borrowing
+// the request's: the request is answered, and its context is cancelled,
+// before the relay has even been dialled. A failure reaches the operator
+// through that line; it never reaches the client, because "the mail bounced"
+// would confirm the address. The error says what the relay answered; the
+// message itself, passcode and all, is not in it.
+func (a *API) deliverPasscode(challenge auth.Challenge, sent func(error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 	defer cancel()
-	if err := a.mailer.Send(ctx, challenge.Email, otpSubject, otpBody(challenge)); err != nil {
-		log.Printf("passcode delivery to %s failed: %v", challenge.Actor, err)
-	}
+	sent(a.mailer.Send(ctx, challenge.Email, otpSubject, otpBody(challenge)))
 }
 
 // recordAuthEvent writes a sign-in-related event to the trail. These belong to
 // no project, which is why they live in the database trail and had nowhere to
 // go in the per-project files.
 //
-// The passcode never appears here, and neither does the address typed at the
-// door. The audit package drops credential-shaped keys as a backstop, but a
-// caller that relies on that has already written the credential into a
+// The passcode never appears here, and the row never holds the address typed
+// at the door. The audit package drops credential-shaped keys as a backstop,
+// but a caller that relies on that has already written the credential into a
 // structure it did not have to.
 func (a *API) recordAuthEvent(c *gin.Context, action string, actor identity.Actor, detail map[string]any) {
+	a.recordAuth(c, audit.Event{ActorID: actor.ID, ActorName: actor.Name, Action: action, Detail: detail})
+}
+
+// recordAuth fills in what every sign-in-related event carries (authEvent)
+// and writes it.
+func (a *API) recordAuth(c *gin.Context, event audit.Event) {
 	if a.audit == nil {
 		return
 	}
-	a.audit.RecordOrLog(c.Request.Context(), audit.Event{
-		At:        time.Now(),
-		ActorID:   actor.ID,
-		ActorName: actor.Name,
-		Action:    action,
-		ClientIP:  auth.ClientIP(c.Request),
-		Detail:    detail,
-	})
+	a.audit.RecordOrLog(c.Request.Context(), a.authEvent(c, event))
+}
+
+// recordAuthLater is recordAuth for a passcode handed to delivery: the row is
+// written now, and the line by the returned function, once the relay has
+// answered (audit.Store.RecordOrLogLater).
+func (a *API) recordAuthLater(c *gin.Context, event audit.Event) func(error) {
+	if a.audit == nil {
+		return func(error) {}
+	}
+	return a.audit.RecordOrLogLater(c.Request.Context(), a.authEvent(c, event))
+}
+
+// authEvent fills in what every sign-in-related event carries, when and from
+// where. For the log line it also looks up the account's address: these
+// events are rare, so the one read is cheap, and "who signed in" is answered
+// by an address far sooner than by an account ID.
+func (a *API) authEvent(c *gin.Context, event audit.Event) audit.Event {
+	event.At = time.Now()
+	event.ClientIP = auth.ClientIP(c.Request)
+	account := event.ActorID
+	if account == "" {
+		account = event.SubjectID
+	}
+	if accounts, ok := a.auth.(*auth.SessionAuth); ok && event.ActorEmail == "" && account != "" {
+		event.ActorEmail = accounts.AccountEmail(c.Request.Context(), account)
+	}
+	return event
+}
+
+// stoppedWaiting reports a failure that is the client hanging up: err is a
+// context error and the request's own context is done. A context error alone
+// is not enough. A driver puts deadlines of its own under a read, the
+// connect timeout for one, and a server that hangs fails through them while
+// the client is still waiting: that is the server's fault, and must neither
+// read as a client that went away nor be answered like one.
+func stoppedWaiting(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
+}
+
+// deliveryFailureReason is why no passcode went out, in the log's words. It
+// reaches only the log line: the client is told nothing either way, and the
+// row keeps the delivered flag it always had. ctx is the request's.
+func deliveryFailureReason(ctx context.Context, err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, auth.ErrTooManyOTPRequests):
+		return "throttled"
+	case errors.Is(err, auth.ErrNoSuchAccount):
+		return "unknown-account"
+	case errors.Is(err, auth.ErrStepUpNoEmail):
+		return "no-email"
+	case errors.Is(err, auth.ErrUnauthenticated):
+		return "no-session"
+	case stoppedWaiting(ctx, err):
+		return "cancelled"
+	default:
+		return "error"
+	}
 }
 
 // authFailureReason turns a sign-in error into a category safe to store. The
 // error itself is written for the person at the keyboard and must not become a
-// permanent record of what was tried.
-func authFailureReason(err error) string {
+// permanent record of what was tried. ctx is the request's.
+func authFailureReason(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, auth.ErrTooManyLogins):
 		return "throttled"
@@ -232,7 +350,7 @@ func authFailureReason(err error) string {
 		return "signin-expired"
 	case errors.Is(err, auth.ErrTOTPUnreadable):
 		return "totp-unreadable"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case stoppedWaiting(ctx, err):
 		// The client stopped waiting before the account lookup finished. No
 		// credential was rejected, and filing it as one would leave the trail
 		// showing sign-in attempts that were never judged.
@@ -275,6 +393,9 @@ func (a *API) postLogout(c *gin.Context) {
 					fmt.Errorf("sign out could not be persisted: %w", err))
 				return
 			}
+			// The session is gone, but who it belonged to is still on the
+			// request: the auth middleware put it there to let this one in.
+			a.recordAuthEvent(c, audit.ActionSignOut, auth.ActorFrom(c.Request), nil)
 		}
 	}
 	for _, name := range []string{auth.SessionCookieName, auth.CSRFCookieName} {

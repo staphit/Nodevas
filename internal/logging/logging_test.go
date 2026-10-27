@@ -61,6 +61,47 @@ func TestRecordsAreJSONWithElasticCommonSchemaFieldNames(t *testing.T) {
 	if _, err := time.Parse(ecsTimeFormat, stamp); err != nil {
 		t.Fatalf("@timestamp %q is not RFC3339 with milliseconds: %v", stamp, err)
 	}
+	// UTC whatever the host's zone, so several services' lines sort as text.
+	if !strings.HasSuffix(stamp, "Z") {
+		t.Fatalf("@timestamp %q is not UTC", stamp)
+	}
+}
+
+func TestEventFieldsAreFlatAndEmptyOnesAreLeftOut(t *testing.T) {
+	var buf bytes.Buffer
+	logger, err := Setup(&buf, Config{Service: "nodevas"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("auth.signin failure",
+		Event(CategoryAuthentication, "auth.signin", OutcomeFailure),
+		EventReason("bad-credentials"),
+		UserEmail("ann@example.test"),
+		// Nothing to say: no field at all, rather than an empty one.
+		EventReason(""), UserEmail(""), ClientIP(""), User("", ""),
+	)
+
+	record := decodeOne(t, &buf)
+	want := map[string]any{
+		"event.category": "authentication",
+		"event.action":   "auth.signin",
+		"event.outcome":  "failure",
+		"event.reason":   "bad-credentials",
+		"user.email":     "ann@example.test",
+	}
+	for key, value := range want {
+		if record[key] != value {
+			t.Fatalf("%s = %v, want %v", key, record[key], value)
+		}
+	}
+	for _, key := range []string{"client.ip", "user.id", "user.name", ""} {
+		if _, present := record[key]; present {
+			t.Fatalf("%q = %v, want it left out", key, record[key])
+		}
+	}
+	if len(record) != len(want)+4 { // @timestamp, log.level, message, service.name
+		t.Fatalf("record has %d fields, want %d: %v", len(record), len(want)+4, record)
+	}
 }
 
 func TestSourceLocationUsesTheECSOriginFields(t *testing.T) {

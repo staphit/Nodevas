@@ -555,7 +555,7 @@ func TestRunSucceeds(t *testing.T) {
 	}
 	server := mcp.MCPServers["nodevas"]
 	exe, _ := os.Executable()
-	if server.Command != exe || len(server.Args) != 11 || server.Args[0] != "mcp" || server.Args[1] != "--server" {
+	if server.Command != exe || len(server.Args) != 13 || server.Args[0] != "mcp" || server.Args[1] != "--server" {
 		t.Fatalf("mcp server = %+v", server)
 	}
 	proxyURL := server.Args[2]
@@ -563,7 +563,7 @@ func TestRunSucceeds(t *testing.T) {
 		t.Errorf("proxy url %q", proxyURL)
 	}
 	if want := []string{"--project", "demo", "--agent-role", "worker", "--actor", "run:claude",
-		"--session-name", "demo-claude-sonnet-run-ok"}; !slices.Equal(server.Args[3:11], want[:8]) {
+		"--session-name", "demo-claude-sonnet-run-ok", "--toolset", "run"}; !slices.Equal(server.Args[3:], want) {
 		t.Errorf("mcp args = %q", server.Args)
 	}
 	// The run's MCP config and its door through the proxy are gone.
@@ -744,6 +744,21 @@ func TestRunOpenCodeACP(t *testing.T) {
 		`acp: read the readme`, `"optionId":"reject"`} {
 		if !strings.Contains(stdin, want) {
 			t.Errorf("stdin lacks %s:\n%s", want, stdin)
+		}
+	}
+}
+
+// OpenCode 2 never runs over ACP; 1.x and other agents keep their adapter.
+func TestOpenCode2SkipsACP(t *testing.T) {
+	if ad, note := withoutOpenCode2ACP(adapter.OpenCodeACP{}, "opencode v2.1.4"); ad != (adapter.OpenCode{}) || note == "" {
+		t.Errorf("2.x over ACP = %T, %q", ad, note)
+	}
+	for _, c := range []struct {
+		ad      adapter.Adapter
+		version string
+	}{{adapter.OpenCodeACP{}, "1.18.23"}, {adapter.OpenCodeACP{}, ""}, {adapter.OpenCode{}, "2.1.4"}, {adapter.For("claude"), "2.1.4"}} {
+		if ad, note := withoutOpenCode2ACP(c.ad, c.version); ad != c.ad || note != "" {
+			t.Errorf("%T %q = %T, %q", c.ad, c.version, ad, note)
 		}
 	}
 }
@@ -1054,5 +1069,17 @@ func TestLineWriter(t *testing.T) {
 	_, _ = tail.Write([]byte("ab "))
 	if got := tail.String(); got != "56789ab" {
 		t.Fatalf("tail = %q", got)
+	}
+}
+
+// A run's MCP sidecar serves the run toolset, as a worker: tool choice and
+// write permission are separate flags.
+func TestMCPArgsServeTheRunToolset(t *testing.T) {
+	job := runnerwire.Job{RunID: "run-abcdef12", Agent: "claude", Model: "sonnet", Project: "demo"}
+	got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"})
+	want := []string{"mcp", "--server", "http://127.0.0.1:5/r/s", "--project", "demo", "--agent-role", "worker",
+		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab", "--toolset", "run"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("mcpArgs = %q, want %q", got, want)
 	}
 }

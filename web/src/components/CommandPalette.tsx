@@ -20,6 +20,18 @@ import {
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
+import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
+import { packName, usePacks } from "../game/packStore";
+import {
+  setProjectMode,
+  setStageSkin,
+  setStationPack,
+  STAGE_SKIN_LABEL,
+  useStageSkinChoices,
+  useStationView,
+} from "../game/stageSkin";
+import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
+import { useViewer } from "./SignIn";
 
 type SearchResult = Awaited<ReturnType<typeof api.search>>["results"][number];
 
@@ -91,7 +103,7 @@ const USAGE_STEPS = [
 ];
 
 export function CommandPalette() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
   const openTab = useApp((state) => state.openTab);
   const createNode = useApp((state) => state.createNode);
@@ -110,6 +122,18 @@ export function CommandPalette() {
   const theme = useApp((state) => state.theme);
   const paneOpen = useApp((state) => state.paneOpen);
   const explorerCollapsed = usePreference("explorerCollapsed");
+  const snapToGrid = usePreference("graphSnapToGrid");
+  const snapGuides = usePreference("graphSnapGuides");
+  const minimap = usePreference("graphMinimap");
+  const viewer = useViewer();
+  const canCreateProjects = !viewer || viewer.role === "admin";
+  const workstation = useWorkstationVisible();
+  const workstationInUse = useWorkstationInUse();
+  const stationView = useStationView();
+  const projectMode = usePreference("projectMode");
+  const skinChoices = useStageSkinChoices();
+  const packs = usePacks((s) => s.packs);
+  const stationPack = usePreference("stationPack");
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "help">("list");
   const [query, setQuery] = useState("");
@@ -249,7 +273,108 @@ export function CommandPalette() {
         icon: <IconBell size={15} />,
         run: () => window.dispatchEvent(new Event("nodevas-notify-settings")),
       },
+      // The graph header keeps these behind its ⋯ menu; they are settings,
+      // so they can be flipped from here without finding the board first.
+      {
+        key: "toggle-snap-grid",
+        title: t("board.snapGrid"),
+        detail: t("board.snapGridTitle"),
+        keywords: "snap grid 格線 吸附",
+        hint: snapToGrid ? "✓" : undefined,
+        run: () => updateUIPreference("graphSnapToGrid", !snapToGrid),
+      },
+      {
+        key: "toggle-snap-guides",
+        title: t("board.alignGuides"),
+        detail: t("board.alignGuidesTitle"),
+        keywords: "align guides snap 對齊 輔助線",
+        hint: snapGuides ? "✓" : undefined,
+        run: () => updateUIPreference("graphSnapGuides", !snapGuides),
+      },
+      {
+        key: "toggle-minimap",
+        title: t("board.minimap"),
+        detail: t("board.minimapTitle"),
+        keywords: "minimap overview 縮圖 小地圖",
+        hint: minimap ? "✓" : undefined,
+        run: () => updateUIPreference("graphMinimap", !minimap),
+      },
+      ...(canCreateProjects
+        ? [
+      {
+        key: "open-example",
+        title: t("palette.openExample"),
+        detail: t("palette.openExampleDetail"),
+        keywords: "example demo sample template 範例 示範 開始",
+        icon: <IconCompass size={15} />,
+        run: () => void window.dispatchEvent(new Event(OPEN_START_SCREEN_EVENT)),
+      },
+          ]
+        : []),
     ];
+    // Info and Station, and Station's views; what is showing is not offered
+    // again.
+    if (projectMode === "station") {
+      list.push({
+        key: "project-mode-info",
+        title: t("mode.toInfo"),
+        detail: t("mode.info.detail"),
+        keywords: "info board graph timeline cards 資訊 看板 圖 時間軸 卡片",
+        icon: <IconTree size={15} />,
+        run: () => setProjectMode("info"),
+      });
+    }
+    for (const skin of skinChoices) {
+      if (projectMode === "station" && !stationPack && skin === stationView) continue;
+      list.push({
+        key: `stage-skin-${skin}`,
+        title: t("game.menu.openInStation", { name: t(STAGE_SKIN_LABEL[skin]) }),
+        detail: t(`game.palette.${skin}`),
+        keywords: "station agents view skin game war room boss dungeon 工作站 檢視 遊戲 戰情室 地城 頭目",
+        icon: <IconTree size={15} />,
+        run: () => setStageSkin(skin),
+      });
+    }
+    for (const pack of packs) {
+      if (projectMode === "station" && stationPack === pack.id) continue;
+      list.push({
+        key: `view-pack-${pack.id}`,
+        title: t("game.menu.openInStation", { name: packName(pack, language) }),
+        detail: t("packs.paletteDetail"),
+        keywords: `station pack view skin ${pack.id} 工作站 主題包`,
+        icon: <IconTree size={15} />,
+        run: () => setStationPack(pack),
+      });
+    }
+    if (workstation) {
+      list.push(
+        {
+          key: "runners",
+          title: t("topbar.runners"),
+          detail: t("palette.runnersDetail"),
+          keywords: "runner agent machine 執行器 agent",
+          run: () => void window.dispatchEvent(new Event("nodevas-open-runners")),
+        },
+        {
+          key: "usage",
+          title: t("topbar.usage"),
+          detail: t("palette.usageDetail"),
+          keywords: "usage tokens cost 用量 費用",
+          run: () => void window.dispatchEvent(new Event("nodevas-open-usage")),
+        },
+      );
+    }
+    // Off until asked for or in use; once in use it cannot be hidden, since
+    // seeing a runner or a run turns it straight back on.
+    if (!workstation || !workstationInUse) {
+      list.push({
+        key: "toggle-workstation",
+        title: workstation ? t("workstation.disable") : t("workstation.enable"),
+        detail: t("workstation.hint"),
+        keywords: "agent workstation runner runs autopilot 工作站 執行器 自動駕駛",
+        run: () => updateUIPreference("agentWorkstation", !workstation),
+      });
+    }
     if (activeTab) {
       list.push(
         {
@@ -332,9 +457,11 @@ export function CommandPalette() {
   }, [
     activeProject,
     activeTab,
+    canCreateProjects,
     createNode,
     explorerCollapsed,
     loadAll,
+    minimap,
     paneOpen.graph,
     paneOpen.timeline,
     refreshProjects,
@@ -342,11 +469,21 @@ export function CommandPalette() {
     refreshTrash,
     saveAllTabs,
     saveTab,
+    snapGuides,
+    snapToGrid,
+    skinChoices,
+    stationView,
+    projectMode,
+    packs,
+    stationPack,
+    language,
     theme,
     toggleTheme,
     togglePane,
     undoLast,
     updateUIPreference,
+    workstation,
+    workstationInUse,
     t,
   ]);
 

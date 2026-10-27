@@ -230,6 +230,19 @@ func TestDetectOpenCodeAndAntigravity(t *testing.T) {
 		slices.Contains(cmds.calls, "/bin/opencode models") {
 		t.Errorf("config list: %+v, calls %v", oc.Models, cmds.calls)
 	}
+
+	// OpenCode 2 takes runs; a later major version is found but takes none
+	// until checked, and the reason is named.
+	cmds.outputs["/bin/opencode --version"] = "opencode v2.1.4\n"
+	if oc := find(Detect(context.Background(), cmds, nil), "opencode"); !oc.Installed || oc.Error != "" {
+		t.Errorf("opencode 2 = %+v", oc)
+	}
+	cmds.outputs["/bin/opencode --version"] = "opencode v3.0.0\n"
+	cmds.calls = nil
+	if oc := find(Detect(context.Background(), cmds, nil), "opencode"); oc.Installed || oc.Version != "opencode v3.0.0" ||
+		!strings.Contains(oc.Error, "not supported yet") || slices.Contains(cmds.calls, "/bin/opencode models") {
+		t.Errorf("opencode 3 = %+v, calls %v", oc, cmds.calls)
+	}
 }
 
 // An installed Codex is asked for its bundled catalog; only the models its

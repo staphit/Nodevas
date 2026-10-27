@@ -14,6 +14,8 @@
 | `graphSlice` | `graph.yaml` 全部寫入；`saveGraph` 與 typed command | `node-metadata`、`plan-milestone`、`workflow`、`project-layout` |
 | `remoteSlice` | 備份設定、備份清單、同步狀態、截止提醒設定 | — |
 | `undoSlice` | 還原與重做；`canUndo`、`undoLabel`、`canRedo`、`redoLabel` | — |
+| `collabSlice` | 即時協作：在線的人、誰開著哪份文件（伺服器推送，僅供顯示） | — |
+| `folderSlice` | 節點資料夾（只影響 explorer，不碰 `graph.yaml`） | — |
 
 `internals.ts` 放共用管線：graph 寫入佇列（同一 `baseRev` 不併發）、每份文件的存檔佇列、
 以及 load／state generation（切專案後丟棄舊回應）。

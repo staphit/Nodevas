@@ -191,7 +191,7 @@ func TestSaveGraphGatesOnlyTheNodesTheSaveChanges(t *testing.T) {
 func TestCreateNodeNormalizesAllToUnrestricted(t *testing.T) {
 	root := t.TempDir()
 	st := NewStore(root)
-	id, err := st.CreateNode(&engine.Node{ID: "fresh", Title: "Fresh", WriteAccess: "all"}, "")
+	id, err := st.CreateNode(identity.Local, &engine.Node{ID: "fresh", Title: "Fresh", WriteAccess: "all"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestCreateNodeNormalizesAllToUnrestricted(t *testing.T) {
 	if _, exists := nf.Meta["write_access"]; exists {
 		t.Fatalf("frontmatter carries write_access for an unrestricted node: %v", nf.Meta)
 	}
-	if _, err := st.CreateNode(&engine.Node{ID: "junk", WriteAccess: "robots"}, ""); err == nil {
+	if _, err := st.CreateNode(identity.Local, &engine.Node{ID: "junk", WriteAccess: "robots"}, ""); err == nil {
 		t.Fatal("creating a node with an unknown write_access succeeded")
 	}
 }

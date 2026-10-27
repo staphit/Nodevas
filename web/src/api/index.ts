@@ -3,7 +3,9 @@
  * recomposed here: every caller imports `api` from `"../api"` and neither knows
  * nor cares which file an endpoint now lives in.
  */
+import { accountsApi } from "./accounts";
 import { agentsApi } from "./agents";
+import { auditApi } from "./audit";
 import { autopilotApi, planApi } from "./autopilot";
 import { authApi } from "./auth";
 import { copilotApi } from "./copilot";
@@ -14,6 +16,7 @@ import { lifecycleApi } from "./lifecycle";
 import { membersApi } from "./members";
 import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
+import { packsApi } from "./packs";
 import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
@@ -30,6 +33,7 @@ export {
   UnauthorizedError,
 } from "./http";
 export { ApiShapeError } from "./verify";
+export type { ViewPack, ViewPackLayout } from "./packs";
 export type { GraphOp, GraphOpsResponse, GraphResponse } from "./graph";
 export type {
   NodePageInfo,
@@ -62,6 +66,7 @@ export {
   streamTurn,
 } from "./copilot";
 export type {
+  CopilotBrowserModel,
   CopilotClientTool,
   CopilotConversation,
   CopilotConversationDetail,
@@ -69,6 +74,8 @@ export type {
   CopilotEntry,
   CopilotEntryKind,
   CopilotMode,
+  CopilotModelHost,
+  CopilotModelRequest,
   CopilotSettings,
   CopilotSettingsInput,
   CopilotSource,
@@ -80,12 +87,29 @@ export type {
   CopilotTurnRequest,
   CopilotView,
 } from "./copilot";
-export type { AuditEntry } from "./history";
+export type {
+  AuditEntry,
+  AuditHealth,
+  AuditHealthStatus,
+  AuditLimiterStats,
+  AuditQuery,
+  AuditScope,
+} from "./audit";
 export type { MemberRole, ProjectAccess, ProjectMember, ProjectMembers } from "./members";
+export type {
+  InviteEmailStatus,
+  InviteResult,
+  ServerAccount,
+  ServerAccounts,
+  ServerRole,
+  ServerSeats,
+} from "./accounts";
 export type { NotifySettings } from "./notify";
 export type {
   RemoteBundle,
   RemoteConfig,
+  RemoteGitProject,
+  RemoteGitPush,
   RemoteKind,
   RemoteSyncState,
   RemoteSyncStatus,
@@ -188,6 +212,7 @@ export {
 export type {
   AutopilotAction,
   AutopilotAdvisor,
+  AutopilotListResponse,
   AutopilotPolicy,
   AutopilotRun,
   AutopilotStatus,
@@ -195,6 +220,7 @@ export type {
   AutopilotView,
   CreateAutopilotRequest,
   HumanReviewRequest,
+  LiveAutopilotStatus,
   PlanRunRequest,
   ReviewMode,
   ReviewPolicy,
@@ -229,6 +255,7 @@ export const api = {
   ...notifyApi,
   ...authApi,
   ...historyApi,
+  ...auditApi,
   ...remoteApi,
   ...copilotApi,
   ...agentsApi,
@@ -236,6 +263,8 @@ export const api = {
   ...runsApi,
   ...usageApi,
   ...membersApi,
+  ...accountsApi,
+  ...packsApi,
   ...autopilotApi,
   ...planApi,
 };

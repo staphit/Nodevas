@@ -48,7 +48,7 @@ func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
 	return "", errors.New("automatic node id space exhausted")
 }
 
-func (s *Store) CreateNode(n *engine.Node, body string) (string, error) {
+func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (string, error) {
 	if n == nil {
 		return "", errors.New("node is required")
 	}
@@ -100,7 +100,7 @@ func (s *Store) CreateNode(n *engine.Node, body string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{
 		{
 			path:          s.NodePath(n.ID),
 			data:          out,
@@ -122,7 +122,7 @@ func (s *Store) CreateNode(n *engine.Node, body string) (string, error) {
 // DuplicateNode creates an independent copy of a node, its document, subpages,
 // attachments, expected plans, and visual style. Outgoing dependencies are
 // intentionally not copied.
-func (s *Store) DuplicateNode(sourceID string) (string, error) {
+func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, error) {
 	if !engine.ValidNodeID(sourceID) {
 		return "", fmt.Errorf("invalid node id")
 	}
@@ -308,7 +308,7 @@ func (s *Store) DuplicateNode(sourceID string) (string, error) {
 		checkRevision: true,
 		expectedRev:   graphRev,
 	})
-	if err := s.applyUpdatesLocked(updates); err != nil {
+	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return "", err
 	}
 	return duplicate.ID, nil
@@ -595,7 +595,7 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		return zero, deleteCleanupUnavailable(err)
 	}
 
-	if err := s.applyUpdatesLocked([]fileUpdate{{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
 		path:          s.GraphPath(),
 		data:          data,
 		checkRevision: true,
@@ -628,5 +628,8 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		outcome.CleanupPending = true
 		log.Printf("node delete committed; cleanup queued for retry: %v", err)
 	}
+	// Recorded at once, after the node's files are gone, so the commit is the
+	// delete itself rather than half of it.
+	s.history().commitSoon()
 	return outcome, nil
 }

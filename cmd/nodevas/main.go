@@ -3,6 +3,7 @@
 //	nodevas serve --project <dir> [--port 5666] [--listen 127.0.0.1]
 //	              [--hostname name[,name...]] [--behind-proxy]
 //	              [--trusted-proxy ip-or-cidr[,ip-or-cidr...]]
+//	              [--repo <git dir>]... [--no-runner | --with-runner]
 //	nodevas user  add|passwd|email|remove|role|list --project <dir> [--user <name>]
 //	              [--email addr | --clear] [--password-stdin]
 //	nodevas account totp-reset [--project <dir>] <email-or-id-or-name>
@@ -75,6 +76,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    [--max-active-users N]")
 	fmt.Fprintln(os.Stderr,
+		"                    [--repo <git dir>]... [--no-runner | --with-runner]  (loopback: a runner here starts by default)")
+	fmt.Fprintln(os.Stderr,
 		"                    [--smtp-host h --smtp-port 587 --smtp-from addr --smtp-user u]  (password: NODEVAS_SMTP_PASSWORD or NODEVAS_SMTP_PASSWORD_FILE)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas user add|passwd|email|remove|role|list --project <dir> [--user <name>] [--role admin|member]")
@@ -87,7 +90,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"       nodevas account totp-reset [--project <dir>] <email-or-id-or-name>  (turns two-factor sign-in off for a locked-out account)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--model m] [--server http://127.0.0.1:5666]")
+		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--toolset full|run] [--model m] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
 	fmt.Fprintln(os.Stderr,

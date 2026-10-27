@@ -298,6 +298,10 @@ func scratchIndex(ctx context.Context, root string) ([]string, func()) {
 	if err != nil {
 		return nil, nothing
 	}
+	info, err := os.Stat(index)
+	if err != nil {
+		return nil, nothing
+	}
 	tmp, err := os.CreateTemp("", "nodevas-hook-index-*")
 	if err != nil {
 		return nil, nothing
@@ -306,6 +310,13 @@ func scratchIndex(ctx context.Context, root string) ([]string, func()) {
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
 	if werr != nil || cerr != nil {
+		cleanup()
+		return nil, nothing
+	}
+	// git trusts a cached stat only for files older than the index file, so
+	// the copy keeps the index's time: a fresh one would hide a same-size edit
+	// made in the second the index was last written.
+	if err := os.Chtimes(tmp.Name(), info.ModTime(), info.ModTime()); err != nil {
 		cleanup()
 		return nil, nothing
 	}

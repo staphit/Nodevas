@@ -9,6 +9,7 @@ import {
   type AgentSession,
 } from "../api";
 import type { GraphUser } from "../types";
+import { translate } from "../i18n";
 import { showSystemNotification } from "./systemNotify";
 
 /** A notify=true message, shown briefly over the board. */
@@ -100,12 +101,20 @@ export interface AgentStoreState {
   setInbound: (sessionId: string, inbound: AgentInbound) => Promise<void>;
   /** Handles an "agent-notify" event: id is the message to announce. */
   handleNotify: (messageId: string) => Promise<void>;
+  /** Handles an "agent-ask" event: id is a new question to announce to the
+   * viewer when they may answer it. */
+  handleAsk: (askId: string) => Promise<void>;
   pushToast: (toast: Omit<AgentToast, "id">) => void;
   dismissToast: (id: string) => void;
 }
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** asks with one put in, replacing the same id. */
+function mergeAsk(asks: AgentAsk[], ask: AgentAsk): AgentAsk[] {
+  return [...asks.filter((a) => a.id !== ask.id), ask];
 }
 
 function replaceMessage(list: AgentMessage[], next: AgentMessage): AgentMessage[] {
@@ -316,6 +325,25 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     showSystemNotification(message.from, body, `agent-msg-${messageId}`, () =>
       get().setOpen(true),
     );
+  },
+
+  handleAsk: async (askId) => {
+    if (!askId || announced.has(`ask:${askId}`)) return;
+    announced.add(`ask:${askId}`);
+    let ask: AgentAsk | undefined;
+    try {
+      const res = await api.getAgentAsks("pending");
+      ask = res.asks.find((a) => a.id === askId);
+      if (ask) set({ asks: mergeAsk(get().asks, ask) });
+    } catch {
+      /* fall through: nothing to show */
+    }
+    if (!ask || ask.status !== "pending" || !canManageSession(ask, get().viewer)) return;
+    const from = ask.sessionName || ask.agent || ask.sessionId;
+    const body = excerpt(ask.question);
+    get().pushToast({ messageId: `ask:${askId}`, from, body });
+    showSystemNotification(translate("agents.ask.notifyTitle", undefined, { session: from }), body,
+      `agent-ask-${askId}`, () => get().setOpen(true));
   },
 
   pushToast: (toast) => {

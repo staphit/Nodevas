@@ -166,7 +166,8 @@ func (a *API) PostWorkspaceRemove(c *gin.Context) {
 	})
 }
 
-// GetProjects lists sub-projects plus the active one.
+// GetProjects lists sub-projects plus the active one: the server's on
+// loopback, the caller's own current project with per-account projects.
 func (a *API) GetProjects(c *gin.Context) {
 	projects, err := a.pm.List()
 	if err != nil {
@@ -175,6 +176,10 @@ func (a *API) GetProjects(c *gin.Context) {
 	}
 	active := ""
 	root := a.pm.Store().Root()
+	current, perAccount := "", a.current != nil
+	if perAccount {
+		current = a.currentName(c.Request)
+	}
 	visible := projects[:0]
 	for _, p := range projects {
 		// A project the caller may not read is not listed at all; its
@@ -182,7 +187,7 @@ func (a *API) GetProjects(c *gin.Context) {
 		if !p.IsFolder && !a.readable(c.Request, p.Path) {
 			continue
 		}
-		if p.Path == root {
+		if (!perAccount && p.Path == root) || (perAccount && !p.IsFolder && p.Name == current) {
 			active = p.Name
 		}
 		visible = append(visible, p)

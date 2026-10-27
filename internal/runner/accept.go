@@ -25,7 +25,7 @@ type Offer struct {
 
 // Accepter decides whether this machine takes a job. It is the point of the
 // whole design that a person at the runner says yes, not the hub; see
-// docs/nodevas-workstation-plan.md, "安全".
+// docs/workstation.md, "Safe defaults".
 type Accepter interface {
 	// Accept blocks until someone decides or ctx ends. reason explains a no and
 	// is shown on the run.

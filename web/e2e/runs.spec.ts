@@ -386,7 +386,7 @@ for (const [name, viewport] of Object.entries({
   });
 }
 
-// W5: routing rules in the Runners dialog, and a dispatch pre-filled by them.
+// W5: routing rules in their Settings part, and a dispatch pre-filled by them.
 const savedRule = {
   id: "rule-review",
   project: "",
@@ -458,9 +458,9 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["設計稿"]);
 
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
-    const dialog = page.getByRole("dialog", { name: "Runner" });
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: "路由規則" }).click();
+    const dialog = page.getByRole("region", { name: "路由規則" });
     await expect(dialog).toBeVisible();
-    await dialog.getByText("路由規則", { exact: true }).click();
 
     const first = dialog.getByRole("listitem", { name: "規則 1" });
     await expect(first).toBeVisible();

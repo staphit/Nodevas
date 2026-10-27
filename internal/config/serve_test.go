@@ -210,7 +210,7 @@ copilot:
 
 func TestCopilotConfigDefaultsAndValidation(t *testing.T) {
 	defaults := DefaultServeConfig().Copilot
-	if !defaults.Enabled || defaults.Provider != "anthropic" || defaults.Effort != "low" ||
+	if !defaults.Enabled || defaults.Provider != "auto" || defaults.Effort != "low" ||
 		defaults.MaxToolCallsPerTurn != 25 || defaults.AgentRole != "orchestrator" ||
 		defaults.AllowBypass != nil {
 		t.Fatalf("copilot defaults = %+v", defaults)

@@ -82,7 +82,7 @@ func (a *API) postNode(c *gin.Context) {
 	if !httpx.DecodeJSON(c, &body) {
 		return
 	}
-	id, err := httpx.StoreFor(c.Request, a.pm).CreateNode(&body.Node, body.Body)
+	id, err := httpx.StoreFor(c.Request, a.pm).CreateNode(auth.ActorFrom(c.Request), &body.Node, body.Body)
 	if err != nil {
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
@@ -97,7 +97,7 @@ func (a *API) postNode(c *gin.Context) {
 }
 
 func (a *API) postNodeDuplicate(c *gin.Context) {
-	id, err := httpx.StoreFor(c.Request, a.pm).DuplicateNode(c.Param("id"))
+	id, err := httpx.StoreFor(c.Request, a.pm).DuplicateNode(auth.ActorFrom(c.Request), c.Param("id"))
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
@@ -328,10 +328,12 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 	// store to infer it from directory paths.
 	if name := strings.TrimSpace(body.Source); name != "" {
 		payload.SetSourceProject(name)
-	} else if active, activeErr := a.pm.ActiveProject(); activeErr == nil {
-		payload.SetSourceProject(active.Name)
+	} else if sourceName, ok := a.pm.NameFor(source.Root()); ok {
+		// The request's own project: the one ?project= named, the caller's
+		// current one, or the active one.
+		payload.SetSourceProject(sourceName)
 	}
-	result, err := target.ImportNodes(payload)
+	result, err := target.ImportNodes(auth.ActorFrom(c.Request), payload)
 	if err != nil {
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
@@ -341,7 +343,8 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
 	}
-	a.hub.Broadcast("graph-changed", "")
+	// Only the two projects changed; windows on any other keep their graph.
+	a.hub.BroadcastRoom(target.Root(), "graph-changed", "")
 
 	var trashFiles []string
 	cleanupPending := false
@@ -364,7 +367,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		}
 		trashFiles = deleteOutcome.TrashFiles
 		cleanupPending = deleteOutcome.CleanupPending
-		a.hub.Broadcast("graph-changed", "")
+		a.hub.BroadcastRoom(source.Root(), "graph-changed", "")
 	}
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":             true,

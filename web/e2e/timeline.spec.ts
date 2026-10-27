@@ -162,7 +162,9 @@ test.describe("timeline", () => {
     await openApp(page);
 
     const rowsBefore = await timeline(page).locator(".board-row").count();
-    await timeline(page).getByLabel(/收合.*空白|空白/).first().check();
+    // A layout setting, so it lives in the timeline header's ⋯ menu.
+    await timeline(page).getByRole("button", { name: "更多時間軸工具" }).click();
+    await timeline(page).getByRole("menuitemcheckbox", { name: /空白/ }).click();
 
     await expect
       .poll(async () => timeline(page).locator(".board-row").count())

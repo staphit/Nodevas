@@ -1,6 +1,7 @@
 package remoteapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,6 +41,11 @@ func (a *API) getRemoteConfig(c *gin.Context) {
 		// that silently switches pruning on again.
 		"retainBundles": effectiveRetain(cfg),
 		"lastBackupAt":  a.remotes.LastBackupAt(),
+		"gitUrl":        cfg.GitURL,
+		"gitUser":       cfg.GitUser,
+		// Whether a token is stored, never the token: as with the SMTP
+		// password, the form only needs to say "saved".
+		"hasGitToken": a.remotes.HasGitToken(cfg),
 	})
 }
 
@@ -62,6 +68,12 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 		AutoBackup    bool   `json:"autoBackup"`
 		IntervalHours int    `json:"intervalHours"`
 		RetainBundles int    `json:"retainBundles"`
+		GitURL        string `json:"gitUrl"`
+		GitUser       string `json:"gitUser"`
+		// GitToken is write-only: empty keeps the stored token (when the URL
+		// and user are unchanged), ClearGitToken forgets it.
+		GitToken      string `json:"gitToken"`
+		ClearGitToken bool   `json:"clearGitToken"`
 	}
 	if !httpx.DecodeJSON(c, &body) {
 		return
@@ -73,6 +85,7 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 		IntervalHours: body.IntervalHours,
 		RetainBundles: body.RetainBundles,
 	}
+	token := remote.TokenChange{}
 	switch cfg.Kind {
 	case "":
 		cfg = remote.Config{}
@@ -82,6 +95,18 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 			return
 		}
 		if httpx.RefuseHostPath(c, a.pm) {
+			return
+		}
+	case "git":
+		// A URL and a token are not a host path, so a networked server may
+		// use this backend; the address check is what keeps it from
+		// reaching inside the network.
+		cfg.Folder = ""
+		cfg.GitURL = strings.TrimSpace(body.GitURL)
+		cfg.GitUser = strings.TrimSpace(body.GitUser)
+		token = remote.TokenChange{Set: strings.TrimSpace(body.GitToken), Clear: body.ClearGitToken}
+		if err := a.remotes.CheckGitDestination(c.Request.Context(), cfg); err != nil {
+			httpx.Err(c, http.StatusBadRequest, err)
 			return
 		}
 	default:
@@ -94,7 +119,11 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := a.remotes.Save(cfg); err != nil {
+	if err := a.remotes.SaveWithToken(cfg, token); err != nil {
+		if errors.Is(err, remote.ErrGitTokenRequired) {
+			httpx.Err(c, http.StatusBadRequest, err)
+			return
+		}
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -103,6 +132,11 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 
 // getRemoteList returns the bundles the configured remote holds.
 func (a *API) getRemoteList(c *gin.Context) {
+	if a.remotes.Load().Kind == "git" {
+		// Branches, not bundles: the per-project view is in the sync status.
+		c.JSON(http.StatusOK, map[string]any{"backend": "git", "bundles": []remote.RemoteRef{}})
+		return
+	}
 	backend, err := a.remotes.Store()
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
@@ -126,6 +160,10 @@ func (a *API) getRemoteList(c *gin.Context) {
 // postRemotePush builds the export bundle for ?project= (the active project, a
 // sub-project, or a whole folder subtree) and uploads it to the remote.
 func (a *API) postRemotePush(c *gin.Context) {
+	if a.remotes.Load().Kind == "git" {
+		a.postGitPush(c)
+		return
+	}
 	backend, err := a.remotes.Store()
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
@@ -135,7 +173,11 @@ func (a *API) postRemotePush(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("no remote is configured"))
 		return
 	}
-	scope, err := a.pm.ExportScope(strings.TrimSpace(c.Request.URL.Query().Get("project")))
+	name := strings.TrimSpace(c.Request.URL.Query().Get("project"))
+	if name == "" && a.current != nil {
+		name = a.current(c.Request)
+	}
+	scope, err := a.pm.ExportScope(name)
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
@@ -156,6 +198,10 @@ func (a *API) postRemoteImport(c *gin.Context) {
 		Name string `json:"name"`
 	}
 	if !httpx.DecodeJSON(c, &body) {
+		return
+	}
+	if a.remotes.Load().Kind == "git" {
+		httpx.Err(c, http.StatusBadRequest, remote.ErrGitNoBundles)
 		return
 	}
 	id := strings.TrimSpace(body.ID)

@@ -11,6 +11,7 @@ import { IconClose, IconPlus, IconTrash } from "../icons";
 import { Composer } from "./Composer";
 import { useCopilot } from "./copilotStore";
 import { IconSpeaker, IconSpeakerOff } from "./icons";
+import { modelLabel } from "./modelLabel";
 import {
   availableModes,
   changeMode,
@@ -90,6 +91,7 @@ export const CopilotPanel = forwardRef<
   };
 
   const speechError = speech.errorKey ? t(speech.errorKey) : null;
+  const label = modelLabel(status, t);
 
   return (
     <aside
@@ -106,7 +108,11 @@ export const CopilotPanel = forwardRef<
           <h2 id={headingId} className="copilot-heading">
             {t("copilot.title")}
           </h2>
-          {status?.model && <span className="copilot-model">{status.model}</span>}
+          {label && (
+            <span className="copilot-model" title={label}>
+              {label}
+            </span>
+          )}
           <button
             type="button"
             className="copilot-icon-btn"

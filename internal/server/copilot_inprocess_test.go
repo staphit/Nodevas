@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/project"
 )
 
@@ -117,7 +118,7 @@ func TestCopilotBridgeRunsMCPToolsInProcess(t *testing.T) {
 // it needs no CSRF token.
 func TestCopilotBridgeActsAsThePersonAndAsAnAgent(t *testing.T) {
 	srv, pm, inbox := accountServerForTest(t)
-	if _, err := pm.Store().CreateNode(&engine.Node{
+	if _, err := pm.Store().CreateNode(identity.Local, &engine.Node{
 		ID: "sealed", Title: "Sealed", WriteAccess: engine.WriteAccessHumanOnly,
 	}, ""); err != nil {
 		t.Fatalf("create human-only node: %v", err)

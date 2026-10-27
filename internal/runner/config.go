@@ -87,7 +87,10 @@ type Config struct {
 	legacyAutoAccept bool
 	// Interactive takes interactive runs (W2.5): the agent's TUI in a terminal
 	// here that the dispatcher watches (and types into, when allowed). nil
-	// means the default, off: every interactive offer is declined.
+	// means the default, on; false declines every interactive offer. Either
+	// way an offer is accepted at the terminal or by the auto-accept policy,
+	// whose modes are headless only unless the owner adds interactive, and
+	// typing from the hub stays off unless the owner allows it.
 	Interactive *bool `json:"interactive,omitempty"`
 
 	// Pull requests, from W3 on.
@@ -171,8 +174,8 @@ func (c *Config) MergeMethodOrDefault() string {
 	return MergeMethods[0]
 }
 
-// InteractiveOn is Interactive with its default (off) applied.
-func (c *Config) InteractiveOn() bool { return c.Interactive != nil && *c.Interactive }
+// InteractiveOn is Interactive with its default (on) applied.
+func (c *Config) InteractiveOn() bool { return c.Interactive == nil || *c.Interactive }
 
 // AutoPROn is AutoPR with its default (on) applied.
 func (c *Config) AutoPROn() bool { return c.AutoPR == nil || *c.AutoPR }

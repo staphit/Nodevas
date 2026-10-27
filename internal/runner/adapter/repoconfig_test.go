@@ -153,10 +153,7 @@ func TestClaudeInteractiveReadOnly(t *testing.T) {
 // Against the real CLI, when it is installed: listing a read-only run's MCP
 // servers neither loads a project plugin nor lists the project's servers.
 func TestOpenCodeMCPServersReadOnlyReal(t *testing.T) {
-	bin, err := exec.LookPath("opencode")
-	if err != nil {
-		t.Skip("opencode not installed")
-	}
+	bin := realOpenCode(t)
 	dir, markers := t.TempDir(), t.TempDir()
 	marker := filepath.ToSlash(filepath.Join(markers, "plugin-ran"))
 	plugin := "import fs from \"fs\";\nfs.writeFileSync(" + strconvQuote(marker) + ", \"x\");\n" +

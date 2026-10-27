@@ -30,11 +30,25 @@ The server watches project files and notifies connected browsers over WebSocket.
 
 For team workflows, deploy one shared Nodevas server so collaborators see the same workspace, task state, live document updates, and audit history. Git remains useful for versioning and reviewing the underlying project files.
 
-The default local server listens on loopback. For a shared deployment, follow the [getting started](./getting-started.md) network guidance or the [OCI deployment guide](../deploy/oci/README.md).
+The default local server listens on loopback. For a shared deployment, follow [Getting started: Team server](./getting-started.md#team-server) and [Allow network access](./operations.md#allow-network-access).
+
+## Invite people
+
+On a server with accounts, an administrator adds people from the browser: *Settings → Server accounts*. The part is shown only to server administrators, and only on a networked server; a loopback server has no accounts. The project *Members* tab links to it ("Person not found? Invite them to this server").
+
+1. Type the person's email address, optionally an account name (it defaults to the part before the `@`), and choose **Member** or **Administrator**.
+2. Click **Invite**. The first change in a while asks you to verify it's you (a step-up: a fresh passcode mailed to you, or your authenticator code).
+3. Nodevas creates the account and mails the person the server's address with how to sign in: open the address, enter that email, type the one-time passcode mailed to them. There is no password and no sign-in link; the mailbox is the credential, as for every account.
+
+If the invitation cannot be mailed, because the relay refused it or the server has no `smtp` configured, the account is still created and the panel shows the message to pass on yourself. Without outgoing mail nobody can be sent a passcode, so the person can sign in only once mail is configured.
+
+The same panel lists every account with its email, role and whether two-factor authentication is on, changes an account between member and administrator, and removes accounts. Each change asks for a fresh step-up. You cannot remove or demote your own account (ask another administrator), and the last administrator can never be removed or demoted. A role change or removal ends that account's sessions on their next request. `--max-active-users` limits how many people are signed in at once, not how many accounts exist: an invitation past the limit succeeds, and the person is turned away at sign-in while the server is full.
+
+The panel uses the same account rules as `nodevas user add|role|remove` on the server host (unique names and addresses, the same name format), and every change is written to the audit trail as `account.invite`, `account.role` or `account.remove`.
 
 ## Project members
 
-On a server with accounts, every project starts **open**: everyone who can sign in can see and change it, as before. To limit a project to a team, open *Project settings → Members* and add people by account name or sign-in email. The first member added restricts the project, and whoever added them becomes its first **owner**.
+On a server with accounts, every project starts **open**: everyone who can sign in can see and change it, as before. To limit a project to a team, open *Settings → Statuses, milestones and people → Members* and add people by account name or sign-in email. The first member added restricts the project, and whoever added them becomes its first **owner**.
 
 | Role | Can |
 | --- | --- |
@@ -52,6 +66,7 @@ Membership is stored in the `project_members` table and keyed by the project's d
 
 Membership only applies to servers with accounts. On a loopback server, the local user owns everything.
 
+Each account has its own current project, saved across restarts and never one it can't open: switching moves only that account's tabs, MCP sessions and runner calls, and `?project=` still names a project explicitly.
+
 What membership does not cover yet:
 - Hiding a restricted project hides only that project. Projects nested inside it are restricted separately, and a hidden project's folder name can still appear as the parent of a nested project in the tree.
-- The active project is server-wide. A non-member therefore sees the "not a member" banner until they pick a project they can open.

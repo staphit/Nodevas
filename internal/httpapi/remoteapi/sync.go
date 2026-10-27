@@ -28,7 +28,7 @@ func (a *API) postRemoteSyncFlush(c *gin.Context) {
 		status := http.StatusBadGateway
 		if errors.Is(err, remote.ErrSyncConflict) {
 			status = http.StatusConflict
-		} else if errors.Is(err, remote.ErrNoRemote) {
+		} else if errors.Is(err, remote.ErrNoRemote) || errors.Is(err, remote.ErrNoGitHistory) {
 			status = http.StatusBadRequest
 		}
 		httpx.Err(c, status, err)

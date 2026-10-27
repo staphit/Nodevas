@@ -1,13 +1,19 @@
-/** Node relations panel [B-06]: incoming and outgoing dependencies. */
+/**
+ * Node relations panel [B-06]: what this node depends on and what it blocks.
+ *
+ * The default condition — wait for every dependency — is stated in plain
+ * words. A non-default one (OR/XOR/NAND/NOR, flags, groups) is named with its
+ * operator, and an edge only shows its relation or line when it differs from
+ * the default, so the uncommon cases stand out instead of every row repeating
+ * "Solid / Required".
+ */
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
-import { topLevelOp, useApp } from "../../store";
-import {
-  edgeLine,
-  edgeRelation,
-} from "../../domain/graph/edgeStyle";
+import { useApp } from "../../store";
+import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { localizedLineLabel, localizedRelationLabel, useI18n } from "../../i18n";
+import { advancedConditionKind } from "../canvas/simpleDependency";
 
 export function NodeRelations({ id }: { id: string }) {
   const { t, language } = useI18n();
@@ -24,7 +30,8 @@ export function NodeRelations({ id }: { id: string }) {
   );
   const incoming = edges.filter((edge) => edge.to === id);
   const outgoing = edges.filter((edge) => edge.from === id);
-  const operator = topLevelOp(node?.requires);
+  const conditionKind = advancedConditionKind(node?.requires);
+  const requiredIncoming = incoming.filter((edge) => edgeRelation(edge) === "");
 
   const relationList = (
     title: string,
@@ -56,13 +63,22 @@ export function NodeRelations({ id }: { id: string }) {
                 <span className="node-relation-copy">
                   <b>{related?.title || relatedId}</b>
                 </span>
-                <span
-                  className={`node-relation-style${
-                    edgeRelation(edge) ? ` relation-${edgeRelation(edge)}` : ""
-                  }`}
-                >
-                  {`${localizedLineLabel(edgeLine(edge), language)} / ${localizedRelationLabel(edgeRelation(edge), language)}`}
-                </span>
+                {(edgeRelation(edge) !== "" || edge.line) && (
+                  <span
+                    className={`node-relation-style${
+                      edgeRelation(edge) ? ` relation-${edgeRelation(edge)}` : ""
+                    }`}
+                  >
+                    {[
+                      edgeRelation(edge) !== ""
+                        ? localizedRelationLabel(edgeRelation(edge), language)
+                        : "",
+                      edge.line ? localizedLineLabel(edge.line, language) : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -77,11 +93,15 @@ export function NodeRelations({ id }: { id: string }) {
         <div>
           <span>{t("relations.logic")}</span>
           <b>
-            {operator
-              ? t(`relations.operator.${operator}`)
-              : incoming.length > 1
-                ? t("relations.operator.and")
-                : t("relations.singleCondition")}
+            {conditionKind === "custom"
+              ? t("dependency.customCondition")
+              : conditionKind
+                ? t(`gate.label.${conditionKind}`)
+                : requiredIncoming.length === 0
+                  ? t("relations.noDependencies")
+                  : requiredIncoming.length === 1
+                    ? t("relations.waitsForOne")
+                    : t("relations.waitsForAll")}
           </b>
         </div>
         <div>

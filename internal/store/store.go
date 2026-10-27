@@ -77,6 +77,12 @@ type Store struct {
 	// see snapshotHistory. Guarded by mu, like every other write path here.
 	historyMarks map[string]historyMark
 
+	// historyImpl is where version history goes, chosen on first use; see
+	// history_backend.go. historyMode is a choice made before that.
+	historyMu   sync.Mutex
+	historyImpl historyBackend
+	historyMode HistoryMode
+
 	// deleteCleanupFault is a deterministic test seam for a failure after an
 	// authoritative delete commit. Production leaves it nil. Guarded by mu.
 	deleteCleanupFault func(deleteCleanupRecord) error
@@ -207,12 +213,14 @@ type fileUpdate struct {
 	expectedRev   string
 }
 
-// applyUpdatesLocked writes a small group of files with rollback. Callers order the
+// applyUpdatesLocked writes a small group of files with rollback for actor, who
+// becomes the author of the version history records. Callers order the
 // graph last, so readers never observe a graph that references unwritten node
 // content.
 //
 // The caller must hold s.mu — the compiler cannot check that, hence the name.
-func (s *Store) applyUpdatesLocked(updates []fileUpdate) error {
+func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) error {
+	history := s.history()
 	for i := range updates {
 		before, err := s.ReadFile(updates[i].path)
 		switch {
@@ -235,7 +243,7 @@ func (s *Store) applyUpdatesLocked(updates []fileUpdate) error {
 		if updates[i].existed && bytes.Equal(updates[i].before, updates[i].data) {
 			continue
 		}
-		if err := s.snapshotHistory(updates[i].path); err != nil {
+		if err := history.beforeOverwrite(updates[i].path, false); err != nil {
 			return err
 		}
 	}
@@ -269,6 +277,13 @@ func (s *Store) applyUpdatesLocked(updates []fileUpdate) error {
 		}
 		s.noteHistoryWrite(update.path, Rev(update.data))
 		applied = append(applied, update)
+	}
+	if len(applied) > 0 {
+		paths := make([]string, len(applied))
+		for i, update := range applied {
+			paths[i] = update.path
+		}
+		history.wrote(actor, "", paths)
 	}
 	return nil
 }

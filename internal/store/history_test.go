@@ -104,7 +104,7 @@ func TestStoreSubpageHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("snapshot content = %q, want the version before the burst", string(data))
 	}
 
-	if err := store.RestoreHistory(rel, versions[0].Name); err != nil {
+	if err := store.RestoreHistory(identity.Local, rel, versions[0].Name); err != nil {
 		t.Fatalf("restore subpage: %v", err)
 	}
 	_, content, _, err := store.LoadNodePage("alpha", page.ID)

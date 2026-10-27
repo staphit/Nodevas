@@ -32,7 +32,7 @@ const runsTestNode = "fix-login"
 func newRunsFixture(t *testing.T) *runsFixture {
 	t.Helper()
 	s := newRunnerTestServer(t)
-	if _, err := s.server.pm.Store().CreateNode(&engine.Node{
+	if _, err := s.server.pm.Store().CreateNode(identity.Local, &engine.Node{
 		ID: runsTestNode, Title: "Fix the login bug",
 	}, "The login button does nothing on Safari."); err != nil {
 		t.Fatalf("create node: %v", err)

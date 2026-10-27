@@ -23,7 +23,7 @@ func TestAutopilotThroughTheDispatcher(t *testing.T) {
 		{ID: "task-a", Title: "Fix the button", Kind: "task"},
 		{ID: "task-b", Title: "Add a regression test", Kind: "task"},
 	} {
-		if _, err := st.CreateNode(n, "Do "+n.Title+"."); err != nil {
+		if _, err := st.CreateNode(identity.Local, n, "Do "+n.Title+"."); err != nil {
 			t.Fatal(err)
 		}
 	}

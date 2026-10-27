@@ -31,6 +31,21 @@ export function useViewer(): Actor | null {
 }
 
 /**
+ * Whether this is a team server (accounts) or a standalone one (loopback, no
+ * accounts). A standalone install is a first-class mode, not a reduced one, and
+ * shows nothing that only means something with accounts: no sign-out, account
+ * security, project members, or device links for other machines.
+ *
+ * Outside AuthGate — component tests — it reads as a team server, so nothing
+ * an existing test looks for is hidden.
+ */
+const ServerModeContext = createContext<"local" | "accounts">("accounts");
+
+export function useTeamServer(): boolean {
+  return useContext(ServerModeContext) === "accounts";
+}
+
+/**
  * AuthGate decides whether the app or a sign-in form is shown.
  *
  * A loopback server has no accounts, so the gate resolves to "local" and gets
@@ -52,8 +67,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       .getAuthStatus()
       .then((status) => {
         if (cancelled) return;
-        setMode(status.mode === "accounts" ? "accounts" : "local");
-        setActor(status.authenticated ? status.actor : null);
+        const accounts = status.mode === "accounts";
+        setMode(accounts ? "accounts" : "local");
+        // A loopback server answers with its built-in "local" actor, and
+        // authenticated: true. That is not a person signed in: the rest of
+        // the app reads a null viewer as "no accounts here", so it gets one.
+        setActor(accounts && status.authenticated ? status.actor : null);
       })
       .catch(() => {
         // A failure here says nothing about who is signed in, so it must not be
@@ -110,11 +129,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return <SignIn onSignedIn={setActor} />;
   }
   return (
-    <ViewerContext.Provider value={actor}>
-      <SignOutContext.Provider value={signOut}>
-        {children}
-      </SignOutContext.Provider>
-    </ViewerContext.Provider>
+    <ServerModeContext.Provider value={mode}>
+      <ViewerContext.Provider value={actor}>
+        <SignOutContext.Provider value={signOut}>
+          {children}
+        </SignOutContext.Provider>
+      </ViewerContext.Provider>
+    </ServerModeContext.Provider>
   );
 }
 

@@ -52,6 +52,8 @@ test.describe("explorer", () => {
 test("exports the whole project as one document from the sidebar", async ({ page }) => {
   await freshProject(page, ["第一節", "第二節"]);
 
+  // The project-file row is one of the explorer's folded tools.
+  await page.getByRole("button", { name: "更多專案操作" }).click();
   await page.getByRole("button", { name: "匯出目標" }).click();
   await page.getByRole("menuitem", { name: /Markdown/ }).click();
   // Explorer exports say what is about to leave and wait for a yes.
@@ -73,6 +75,7 @@ test("exports the whole project as one document from the sidebar", async ({ page
 test("offers every import source from one menu", async ({ page }) => {
   await freshProject(page);
 
+  await page.getByRole("button", { name: "更多專案操作" }).click();
   await page.getByRole("button", { name: "匯入來源" }).click();
   const menu = page.getByRole("menu").filter({ hasText: "專案封裝" });
   await expect(menu.getByRole("menuitem", { name: /Markdown/ })).toBeVisible();

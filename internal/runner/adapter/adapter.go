@@ -3,11 +3,10 @@
 // the runner around it (worktree, acceptance, process tree, streaming to the
 // hub) is the same for all of them.
 //
-// See docs/nodevas-workstation-plan.md, "Agent adapter". The Claude and Codex
-// flags were checked against the CLIs' own --help, because these CLIs change
-// quickly; the OpenCode (1.18.23) and Antigravity CLI (agy 1.4.6) adapters
-// against real runs, whose output is in testdata; the Gemini adapter follows
-// the CLI's docs only (see gemini.go).
+// The Claude and Codex flags were checked against the CLIs' own --help,
+// because these CLIs change quickly; the OpenCode (1.18.23) and Antigravity
+// CLI (agy 1.4.6) adapters against real runs, whose output is in testdata;
+// the Gemini adapter follows the CLI's docs only (see gemini.go).
 package adapter
 
 import (
@@ -58,6 +57,9 @@ type RunEnv struct {
 	// DisableMCP names MCP servers to switch off for the run (OpenCode: the
 	// owner's and the worktree's own; see OpenCodeMCPServers).
 	DisableMCP []string
+	// Version is the CLI's `--version` line as the runner detected it; ""
+	// when unknown. OpenCode reads it (1.x and 2.x take different commands).
+	Version string
 }
 
 // MCPServer is a stdio MCP server: a command and its arguments.

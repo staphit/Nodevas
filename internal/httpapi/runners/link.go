@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
@@ -171,7 +172,7 @@ func (a *API) createLink(c *gin.Context) {
 		return
 	}
 	at := expires.UTC().Format(time.RFC3339)
-	a.audit(c.Request, "runner.link.create", actor, name, map[string]any{
+	a.audit(c.Request, audit.ActionRunnerLinkCreate, actor, name, map[string]any{
 		"expiresAt": at, "access": clientID != "",
 	})
 	c.Header("Cache-Control", "no-store")
@@ -189,7 +190,7 @@ func (a *API) redeemLink(c *gin.Context) {
 	source := auth.ClientIP(c.Request)
 	device, deviceOS := label(body.Name), label(body.OS)
 	refuse := func(reason string, actor identity.Actor, err error) {
-		a.audit(c.Request, "runner.link.failed", actor, "", map[string]any{
+		a.audit(c.Request, audit.ActionRunnerLinkFailed, actor, "", map[string]any{
 			"reason": reason, "device": device, "os": deviceOS,
 		})
 		if errors.Is(err, runners.ErrLinkThrottled) {
@@ -226,7 +227,7 @@ func (a *API) redeemLink(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	a.audit(c.Request, "runner.link.redeem", owner, runner.ID, map[string]any{
+	a.audit(c.Request, audit.ActionRunnerLinkRedeem, owner, runner.ID, map[string]any{
 		"name": runner.Name, "device": device, "os": deviceOS,
 	})
 	if a.link.Mail != nil && email != "" {
@@ -291,7 +292,7 @@ func (a *API) putAccessToken(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.audit(c.Request, "runner.access-token.set", actor, status.ClientID, nil)
+	a.audit(c.Request, audit.ActionRunnerAccessTokenSet, actor, status.ClientID, nil)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, status)
 }
@@ -305,7 +306,7 @@ func (a *API) deleteAccessToken(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
-	a.audit(c.Request, "runner.access-token.clear", actor, "", nil)
+	a.audit(c.Request, audit.ActionRunnerAccessTokenClear, actor, "", nil)
 	c.Status(http.StatusNoContent)
 }
 

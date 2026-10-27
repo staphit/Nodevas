@@ -170,8 +170,10 @@ func DefaultServeConfig() ServeConfig {
 			Format: "json",
 		},
 		Copilot: CopilotConfig{
-			Enabled:  true,
-			Provider: "anthropic",
+			Enabled: true,
+			// Nobody chose: a free model (the browser's own, or Ollama or LM
+			// Studio on the machine) unless a key is configured.
+			Provider: "auto",
 			// Voice favours latency over depth.
 			Effort:              "low",
 			MaxToolCallsPerTurn: 25,
@@ -486,9 +488,9 @@ func (c ServeConfig) Validate() error {
 // a YAML file would otherwise first show itself.
 func (c CopilotConfig) Validate() error {
 	switch c.Provider {
-	case "anthropic", "openai":
+	case "auto", "anthropic", "openai":
 	default:
-		return fmt.Errorf("copilot provider must be anthropic or openai, got %q", c.Provider)
+		return fmt.Errorf("copilot provider must be auto, anthropic or openai, got %q", c.Provider)
 	}
 	switch c.Effort {
 	case "", "low", "medium", "high":

@@ -73,6 +73,12 @@ type LLMInfo struct {
 	BaseURL string `json:"baseUrl,omitempty"`
 	// Purpose is LLMPurposeCopilot or LLMPurposeAdvisor.
 	Purpose string `json:"purpose,omitempty"`
+	// Auto: nobody set copilotProvider on the runner; it found a local
+	// OpenAI-compatible server on its own loopback (Local names which:
+	// "ollama", "lmstudio") and offers that, keyless. The hub ranks an
+	// automatic model below the browser's own and below anything configured.
+	Auto  bool   `json:"auto,omitempty"`
+	Local string `json:"local,omitempty"`
 }
 
 // LLMRequest is one model call. Messages and Tools are the copilot's

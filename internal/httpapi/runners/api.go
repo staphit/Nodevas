@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/auth"
+	"nodevas/internal/buildinfo"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -64,7 +65,7 @@ func (a *API) WithLLM(relay *runners.LLMRelay) *API {
 	return a
 }
 
-// Register wires /api/runners and /api/runner/connect. The server's auth
+// Register wires /api/runners, /api/runner/connect and /api/runner/version. The server's auth
 // middleware decides who reaches which: a session for /api/runners, a runner
 // token for /api/runner/*, never the other way round.
 func (a *API) Register(api *gin.RouterGroup) {
@@ -72,7 +73,15 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/runners", a.create)
 	api.DELETE("/runners/:id", a.revoke)
 	api.GET("/runner/connect", a.connect)
+	api.GET("/runner/version", a.version)
 	a.registerLinks(api)
+}
+
+// version is GET runnerwire.VersionPath: the commit this hub was built from,
+// for a runner token only (the middleware sees to that).
+func (a *API) version(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, runnerwire.VersionResponse{Commit: buildinfo.Commit()})
 }
 
 func fail(c *gin.Context, err error) {

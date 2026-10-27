@@ -158,6 +158,9 @@ export interface WorkspaceSlice {
     path: string,
   ) => Promise<{ name: string; workspace: string }>;
   switchProject: (name: string, create?: boolean, template?: string) => Promise<void>;
+  /** Copies a bundled example into the workspace, switches to the copy and
+   * returns its project name. */
+  openExample: (example: string) => Promise<string>;
 }
 
 /**
@@ -440,6 +443,11 @@ export interface RemoteConfigInput {
   intervalHours?: number;
   /** -1 keeps every bundle forever; otherwise the number kept. */
   retainBundles?: number;
+  gitUrl?: string;
+  gitUser?: string;
+  /** Write-only: empty keeps the stored token, if it still fits the URL and user. */
+  gitToken?: string;
+  clearGitToken?: boolean;
 }
 
 /**
@@ -471,6 +479,13 @@ export interface RemoteSlice {
   flushRemoteSync: () => Promise<CommandResult>;
   /** Installs a bundle as a new project and switches to it; resolves with its name. */
   importRemoteBundle: (bundleId: string) => Promise<CommandResult<string>>;
+  /**
+   * Saves, then asks the git remote for its branches with the saved token;
+   * resolves with how many are Nodevas's.
+   */
+  testRemoteGit: (config: RemoteConfigInput) => Promise<CommandResult<number>>;
+  /** Pushes a diverged project to a side branch; resolves with its name. */
+  keepLocalRemoteGit: (project: string) => Promise<CommandResult<string>>;
   saveNotifySettings: (settings: NotifySettings) => Promise<CommandResult>;
   /** Saves, then asks the server to send one mail to the default recipient. */
   sendNotifyTest: (settings: NotifySettings) => Promise<CommandResult>;

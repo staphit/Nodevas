@@ -25,6 +25,9 @@ type API struct {
 	mailer   PasscodeMailer
 	audit    *audit.Store
 	limiter  func() any
+	// users is the account store behind /api/auth/accounts (accounts.go);
+	// nil on a server without accounts.
+	users *auth.UserStore
 }
 
 // New builds the handler set.

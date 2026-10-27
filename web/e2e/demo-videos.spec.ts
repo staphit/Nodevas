@@ -1,87 +1,304 @@
 /**
  * Not a test: the README's feature videos.
  *
- * Each test drives the real app through one feature while Playwright records
- * the page (see playwright.demo.config.ts). The hub routes a runner would feed
- * — runners, runs, autopilot, usage, agents, the second factor — are answered
- * here, and pushes are injected into the app's real WebSocket, so a run can be
+ * Each test drives the real app through one feature and records the page at
+ * twice its pixels (see playwright.demo.config.ts). The hub routes a runner
+ * would feed — runners, runs, autopilot, usage, agents, the second factor —
+ * are answered here, and pushes are injected into the app's real WebSocket, so a run can be
  * seen starting, streaming and finishing without a runner or an agent.
  *
- * Playwright's recording has no mouse pointer, so a drawn pointer follows the
- * mouse, and a caption names each step. Run it with:
+ * The page is only the footage. Alongside the frames the test writes a
+ * film.json: a title card, where the camera looks (keyframes in viewport
+ * pixels), the captions, and the cuts to cross-fade over. e2e/demo-encode.mjs
+ * turns footage and film into the finished video: the app as a window on a
+ * dark backdrop, the camera pushing in on what each step is about, and the
+ * captions set below the window at output resolution. Real clicks stay real:
+ * nothing on the page is transformed.
+ *
+ * Screenshots have no mouse pointer, so a drawn pointer follows the mouse,
+ * ripples on a click and fades out when it is idle. Run it with:
  *
  *   npm run demo:videos
  */
 
 import { test, expect, type Locator, type Page, type WebSocketRoute } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const QR = readFileSync(join(import.meta.dirname, "demo-assets", "totp-qr.txt"), "utf8").trim();
 
 // ---------------------------------------------------------------------------
-// Staging: the pointer, captions, pacing.
+// The film: camera, captions and cuts, timed against the recording.
+
+/** The viewport (playwright.demo.config.ts), in CSS pixels: 16:9, like the
+ * camera. It is drawn at a device scale of 2, and recorded at that. */
+const VW = 1440;
+const VH = 810;
+const ASPECT = VW / VH;
+
+type Rect = { x: number; y: number; w: number; h: number };
+type Film = {
+  t0: number;
+  viewport: { w: number; h: number };
+  frames: string;
+  title: { title: string; sub: string } | null;
+  begin: number | null;
+  end: number | null;
+  camera: Array<Rect & { t: number; d: number }>;
+  captions: Array<{ t: number; title: string; sub: string }>;
+  cuts: Array<{ from: number; to: number }>;
+  clicks: Array<{ t: number; x: number; y: number }>;
+};
+
+const FULL: Rect = { x: 0, y: 0, w: VW, h: VH };
+let film: Film;
+let cam: Rect = FULL;
+let mouse = { x: VW / 2, y: VH / 2 };
+
+/** Seconds since the recording started (the page was created just before). */
+const clock = () => (Date.now() - film.t0) / 1000;
+const pause = (page: Page, ms: number) => page.waitForTimeout(ms);
+const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+const ease = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+
+/** Where the finished video starts: the board is up, the title card is over it. */
+async function begin(page: Page, title: string, sub: string) {
+  await hidePointer(page);
+  await pause(page, 300);
+  film.title = { title, sub };
+  film.begin = clock();
+  cam = FULL;
+  film.camera.push({ t: film.begin, d: 0, ...FULL });
+}
+
+/** A caption: a short headline and an optional line under it. "" clears. */
+function say(title: string, sub = "") {
+  film.captions.push({ t: clock(), title, sub });
+}
+
+async function boxesOf(target: Locator | Locator[] | Rect): Promise<Rect[]> {
+  if (!Array.isArray(target) && "w" in target) return [target];
+  const boxes: Rect[] = [];
+  for (const locator of Array.isArray(target) ? target : [target]) {
+    const box = await locator.boundingBox().catch(() => null);
+    if (box) boxes.push({ x: box.x, y: box.y, w: box.width, h: box.height });
+  }
+  return boxes;
+}
+
+/** The camera rectangle that shows `area` with `pad` around it: 16:9, inside
+ * the viewport, never tighter than `minW` pixels wide. */
+function frameOf(area: Rect, pad: number, minW: number): Rect {
+  let x = area.x - pad;
+  let y = area.y - pad;
+  let w = area.w + 2 * pad;
+  let h = area.h + 2 * pad;
+  if (w / h < ASPECT) {
+    x -= (h * ASPECT - w) / 2;
+    w = h * ASPECT;
+  } else {
+    y -= (w / ASPECT - h) / 2;
+    h = w / ASPECT;
+  }
+  if (w < minW) {
+    x -= (minW - w) / 2;
+    y -= (minW / ASPECT - h) / 2;
+    w = minW;
+    h = minW / ASPECT;
+  }
+  if (w >= VW) return FULL;
+  return { x: clamp(x, 0, VW - w), y: clamp(y, 0, VH - h), w, h };
+}
+
+/** pad and minW in CSS pixels; `within` clips the targets to a container
+ * (content that overflows a scrolling panel is not on screen). */
+type FocusOptions = { pad?: number; d?: number; hold?: number; minW?: number; within?: Locator };
+
+/** Moves the camera onto the targets (their union), easing over `d` seconds,
+ * and waits for it to arrive. */
+async function focus(page: Page, target: Locator | Locator[] | Rect, options: FocusOptions = {}) {
+  const { pad = 28, d = 0.8, hold = 0, minW = 560, within } = options;
+  const outer = within ? (await boxesOf(within))[0] : FULL;
+  const boxes = (await boxesOf(target))
+    .map((b) => {
+      const x = clamp(b.x, outer.x, outer.x + outer.w);
+      const y = clamp(b.y, outer.y, outer.y + outer.h);
+      return { x, y, w: clamp(b.x + b.w, outer.x, outer.x + outer.w) - x, h: clamp(b.y + b.h, outer.y, outer.y + outer.h) - y };
+    })
+    .filter((b) => b.w > 0 && b.h > 0);
+  if (boxes.length === 0) throw new Error("demo: nothing to focus on");
+  const left = Math.min(...boxes.map((b) => b.x));
+  const top = Math.min(...boxes.map((b) => b.y));
+  const right = Math.max(...boxes.map((b) => b.x + b.w));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.h));
+  await setCamera(page, frameOf({ x: left, y: top, w: right - left, h: bottom - top }, pad, minW), d, hold);
+}
+
+async function wide(page: Page, d = 0.9, hold = 0) {
+  await setCamera(page, FULL, d, hold);
+}
+
+async function setCamera(page: Page, rect: Rect, d: number, hold: number) {
+  const round = (r: Rect) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) });
+  cam = round(rect);
+  film.camera.push({ t: clock(), d, ...cam });
+  await pause(page, d * 1000 + hold);
+}
+
+/** A jump in the UI (a mode switch, a page change): the encoder leaves out
+ * what `step` does after the click and cross-fades across it. */
+async function cut(page: Page, step: () => Promise<void>) {
+  await pause(page, 350);
+  const from = clock();
+  await step();
+  await pause(page, 250);
+  film.cuts.push({ from, to: clock() });
+}
+
+// ---------------------------------------------------------------------------
+// The footage. Playwright's own video is in CSS pixels, too coarse to push in
+// on, so the test records the page itself: screenshots at the device scale
+// (2x), as fast as the browser hands them over, each stamped with the film's
+// clock. The encoder plays them back at those times.
+
+type Recorder = { stop: () => Promise<void> };
+
+async function record(page: Page, dir: string): Promise<Recorder> {
+  mkdirSync(dir, { recursive: true });
+  const cdp = await page.context().newCDPSession(page);
+  const frames: Array<{ file: string; t: number }> = [];
+  let running = true;
+  const loop = (async () => {
+    while (running) {
+      const before = clock();
+      const shot = await cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 92 }).catch(() => null);
+      if (!shot) {
+        await page.waitForTimeout(20).catch(() => {});
+        continue;
+      }
+      const file = `${String(frames.length).padStart(5, "0")}.jpg`;
+      frames.push({ file, t: (before + clock()) / 2 });
+      await writeFile(join(dir, file), Buffer.from(shot.data, "base64"));
+    }
+  })();
+  return {
+    stop: async () => {
+      running = false;
+      await loop;
+      await cdp.detach().catch(() => {});
+      // ffconcat: each frame shows until the next; the first from zero.
+      const lines = ["ffconcat version 1.0"];
+      frames.forEach((frame, index) => {
+        const next = frames[index + 1]?.t ?? frame.t + 0.04;
+        const from = index === 0 ? 0 : frame.t;
+        lines.push(`file ${frame.file}`, `duration ${(next - from).toFixed(4)}`);
+      });
+      if (frames.length > 0) lines.push(`file ${frames[frames.length - 1].file}`);
+      writeFileSync(join(dir, "frames.ffconcat"), `${lines.join("\n")}\n`);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The pointer.
 
 async function stage(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("vised-tour-prompt", "declined");
     localStorage.setItem("vised-language", "en");
+    localStorage.setItem("vised-theme", "dark");
+    // Runners, runs, autopilot and usage are what these show.
+    localStorage.setItem("vised-agent-workstation", "1");
     const install = () => {
       if (document.getElementById("demo-pointer")) return;
       const style = document.createElement("style");
       style.textContent = `
-        #demo-pointer { position: fixed; left: 0; top: 0; width: 22px; height: 22px; z-index: 2147483647;
-          pointer-events: none; transform: translate(-100px, -100px); transition: transform 40ms linear; }
-        #demo-pointer svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
-        #demo-pointer.down::after { content: ""; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px;
-          border-radius: 50%; background: rgba(20, 184, 166, .45); }
-        #demo-caption { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 2147483646;
-          pointer-events: none; max-width: 80%; padding: 10px 18px; border-radius: 10px; opacity: 0;
-          background: rgba(15, 23, 42, .88); color: #f8fafc; font: 600 17px/1.35 system-ui, sans-serif;
-          box-shadow: 0 6px 24px rgba(0,0,0,.25); transition: opacity 200ms ease; text-align: center; }
-        #demo-caption.on { opacity: 1; }`;
+        #demo-pointer { position: fixed; left: 0; top: 0; width: 20px; height: 20px; z-index: 2147483647;
+          pointer-events: none; opacity: 0; transform: translate(-100px, -100px); transition: opacity 280ms ease; }
+        #demo-pointer.on { opacity: 1; }
+        #demo-pointer svg { filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+        .demo-ripple { position: fixed; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%;
+          z-index: 2147483646; pointer-events: none; border: 2px solid rgba(255,255,255,.9);
+          background: rgba(255,255,255,.14); animation: demo-ripple 560ms cubic-bezier(.2,.7,.3,1) forwards; }
+        @keyframes demo-ripple { from { transform: scale(.25); opacity: .95; } to { transform: scale(1.35); opacity: 0; } }`;
       document.head.appendChild(style);
       const pointer = document.createElement("div");
       pointer.id = "demo-pointer";
       pointer.innerHTML =
-        '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 2l14 8.5-6.2 1.3 3.6 6.9-2.6 1.4-3.6-6.9L3 17z" fill="#fff" stroke="#0f172a" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+        '<svg width="20" height="20" viewBox="0 0 22 22"><path d="M3 2l14 8.5-6.2 1.3 3.6 6.9-2.6 1.4-3.6-6.9L3 17z" fill="#fff" stroke="#111" stroke-width="1.3" stroke-linejoin="round"/></svg>';
       document.body.appendChild(pointer);
-      const caption = document.createElement("div");
-      caption.id = "demo-caption";
-      document.body.appendChild(caption);
+      let idle = 0;
+      const wake = () => {
+        pointer.classList.add("on");
+        window.clearTimeout(idle);
+        idle = window.setTimeout(() => pointer.classList.remove("on"), 1600);
+      };
       window.addEventListener("mousemove", (event) => {
         pointer.style.transform = `translate(${event.clientX - 3}px, ${event.clientY - 2}px)`;
+        wake();
       }, true);
-      window.addEventListener("mousedown", () => pointer.classList.add("down"), true);
-      window.addEventListener("mouseup", () => setTimeout(() => pointer.classList.remove("down"), 120), true);
+      window.addEventListener("mousedown", (event) => {
+        wake();
+        const ripple = document.createElement("div");
+        ripple.className = "demo-ripple";
+        ripple.style.left = `${event.clientX}px`;
+        ripple.style.top = `${event.clientY}px`;
+        document.body.appendChild(ripple);
+        window.setTimeout(() => ripple.remove(), 700);
+      }, true);
+      (window as unknown as { demoHidePointer: () => void }).demoHidePointer = () => {
+        window.clearTimeout(idle);
+        pointer.classList.remove("on");
+      };
     };
     if (document.body) install();
     else document.addEventListener("DOMContentLoaded", install);
   });
 }
 
-async function caption(page: Page, text: string) {
-  await page.evaluate((value) => {
-    const element = document.getElementById("demo-caption");
-    if (!element) return;
-    element.textContent = value;
-    element.classList.toggle("on", value !== "");
-  }, text);
+async function hidePointer(page: Page) {
+  await page.evaluate(() => (window as unknown as { demoHidePointer?: () => void }).demoHidePointer?.());
 }
 
-const pause = (page: Page, ms: number) => page.waitForTimeout(ms);
+/** Moves the mouse the way a hand would: eased, never linear. */
+async function moveTo(page: Page, x: number, y: number) {
+  const from = { ...mouse };
+  const distance = Math.hypot(x - from.x, y - from.y);
+  const ms = clamp(320 + distance * 0.55, 420, 900);
+  const start = Date.now();
+  for (;;) {
+    const k = Math.min(1, (Date.now() - start) / ms);
+    const e = ease(k);
+    await page.mouse.move(from.x + (x - from.x) * e, from.y + (y - from.y) * e);
+    if (k >= 1) break;
+    await page.waitForTimeout(14);
+  }
+  mouse = { x, y };
+}
 
-/** Moves the drawn pointer to the element the way a hand would, then clicks. */
+/** Frames the element if the camera is not already on it, then moves the
+ * pointer to it (never both at once) and clicks. */
 async function glide(page: Page, target: Locator, options: { click?: boolean } = {}) {
   await target.scrollIntoViewIfNeeded();
   const box = await target.boundingBox();
   if (!box) throw new Error("demo: target has no box");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 18 });
-  await pause(page, 180);
-  if (options.click !== false) {
-    await page.mouse.down();
-    await page.mouse.up();
-  }
+  const inset = 2;
+  const inFrame =
+    box.x >= cam.x + inset &&
+    box.y >= cam.y + inset &&
+    box.x + box.width <= cam.x + cam.w - inset &&
+    box.y + box.height <= cam.y + cam.h - inset;
+  if (!inFrame) await focus(page, target, { pad: 160, minW: 720 });
+  await moveTo(page, box.x + box.width / 2, box.y + box.height / 2);
+  await pause(page, 220);
+  if (options.click !== false) await click(page);
+}
+
+async function click(page: Page) {
+  film.clicks.push({ t: clock(), x: Math.round(mouse.x), y: Math.round(mouse.y) });
+  await page.mouse.down();
+  await page.mouse.up();
 }
 
 /** Scrolls the element into view the way a person would, smoothly. */
@@ -94,7 +311,7 @@ async function reveal(target: Locator, block: ScrollLogicalPosition = "start") {
 
 async function typeSlowly(page: Page, target: Locator, text: string) {
   await glide(page, target);
-  await target.pressSequentially(text, { delay: 55 });
+  await target.pressSequentially(text, { delay: 75 });
 }
 
 /** Forwards the app's live socket to the real server and hands back a way to
@@ -110,6 +327,14 @@ async function liveSocket(page: Page) {
   };
 }
 
+async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await page.mouse.up();
+  mouse = to;
+}
+
 async function openBoard(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible({ timeout: 20_000 });
@@ -118,15 +343,14 @@ async function openBoard(page: Page) {
   const split = page.getByRole("separator", { name: "Resize graph and timeline height" });
   const box = await split.boundingBox().catch(() => null);
   if (box) {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2, 700, { steps: 4 });
-    await page.mouse.up();
+    const x = box.x + box.width / 2;
+    await drag(page, { x, y: box.y + box.height / 2 }, { x, y: VH - 110 });
   }
   const fit = page.getByRole("button", { name: "Fit all" }).first();
   if (await fit.isVisible().catch(() => false)) await fit.click();
-  await page.mouse.move(640, 420);
-  await pause(page, 600);
+  await page.mouse.move(VW / 2, VH / 2);
+  mouse = { x: VW / 2, y: VH / 2 };
+  await pause(page, 900);
 }
 
 async function nodeIds(page: Page): Promise<Record<string, string>> {
@@ -136,18 +360,23 @@ async function nodeIds(page: Page): Promise<Record<string, string>> {
   return ids;
 }
 
+/** Opens the node's panel and widens it, out of shot. */
 async function openNode(page: Page, title: string) {
-  await glide(page, page.getByText(title).first());
+  const node = page.getByText(title).first();
+  await glide(page, node);
   const drawer = page.getByRole("dialog", { name: "Node editor" });
   await expect(drawer).toBeVisible();
+  await pause(page, 400);
   // Widen the drawer so run activity and the autopilot grid have room.
   const handle = page.getByRole("separator", { name: "Resize information panel" });
   const box = await handle.boundingBox().catch(() => null);
-  if (box && box.x > 640) {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
-    await page.mouse.down();
-    await page.mouse.move(640, box.y + box.height / 2, { steps: 12 });
-    await page.mouse.up();
+  if (box && box.x > 620) {
+    await cut(page, async () => {
+      const y = box.y + box.height / 2;
+      await drag(page, { x: box.x + box.width / 2, y }, { x: 620, y });
+      await hidePointer(page);
+      await pause(page, 300);
+    });
   }
   return drawer;
 }
@@ -284,8 +513,16 @@ const changes = {
 
 // ---------------------------------------------------------------------------
 
-test.beforeEach(async ({ page }) => {
+let recorder: Recorder | null = null;
+
+test.beforeEach(async ({ page }, testInfo) => {
+  film = { t0: Date.now(), viewport: { w: VW, h: VH }, frames: "frames/frames.ffconcat", title: null, begin: null, end: null, camera: [], captions: [], cuts: [], clicks: [] };
+  cam = FULL;
+  mouse = { x: VW / 2, y: VH / 2 };
   await stage(page);
+  const frames = testInfo.outputPath("frames");
+  rmSync(frames, { recursive: true, force: true });
+  recorder = await record(page, frames);
   // demo-serve.mjs seeds one project; make sure it is the one on screen.
   const projects = await (await page.request.get("/api/projects")).json();
   if (projects.active !== "public-api") {
@@ -293,6 +530,22 @@ test.beforeEach(async ({ page }) => {
     expect(open.ok()).toBeTruthy();
   }
 });
+
+test.afterEach(async ({}, testInfo) => {
+  film.end = clock();
+  await recorder?.stop();
+  recorder = null;
+  writeFileSync(testInfo.outputPath("film.json"), JSON.stringify(film, null, 1));
+});
+
+/** A band of an element's box, top to bottom as fractions of its height. */
+async function band(target: Locator, top: number, bottom: number): Promise<Rect> {
+  const box = await target.boundingBox();
+  if (!box) throw new Error("demo: target has no box");
+  const y0 = Math.max(0, box.y);
+  const y1 = Math.min(VH, box.y + box.height);
+  return { x: box.x, y: y0 + (y1 - y0) * top, w: box.width, h: (y1 - y0) * (bottom - top) };
+}
 
 test("agent-run", async ({ page }) => {
   const push = await liveSocket(page);
@@ -360,28 +613,37 @@ test("agent-run", async ({ page }) => {
   const changed = () => push({ type: "runs-changed", id: nodeId });
 
   await openBoard(page);
-  await caption(page, "Each node is a task you can hand to an agent on your own PC");
+  await begin(page, "Agent runs", "Hand a task to a coding agent on your own PC.");
+  say("Every node is a task", "Open one to hand it to an agent.");
+  await pause(page, 1300);
+  await focus(page, page.getByText("Add rate limiting middleware").first(), { pad: 140, minW: 760, hold: 700 });
   const drawer = await openNode(page, "Add rate limiting middleware");
-  await pause(page, 900);
-  await glide(page, drawer.getByRole("tab", { name: "Runs" }));
-  await pause(page, 300);
-  await reveal(drawer.getByRole("button", { name: "Dispatch to agent…" }), "center");
-  await pause(page, 600);
+  const runsTab = drawer.getByRole("tab", { name: "Runs" });
+  await focus(page, [runsTab, drawer.getByRole("heading").first()], { pad: 40, minW: 760, hold: 300 });
+  await glide(page, runsTab);
+  await pause(page, 400);
+  const dispatch = drawer.getByRole("button", { name: "Dispatch to agent…" });
+  await reveal(dispatch, "center");
+  await pause(page, 500);
 
-  await caption(page, "Pick a runner, an agent and a model");
-  await glide(page, drawer.getByRole("button", { name: "Dispatch to agent…" }));
+  say("Pick who does the work", "A runner on your PC, an agent and a model.");
+  await focus(page, dispatch, { pad: 160, minW: 720, hold: 400 });
+  await glide(page, dispatch);
   const dialog = page.getByRole("dialog", { name: "Dispatch to agent" });
   await expect(dialog).toBeVisible();
-  await pause(page, 700);
+  await pause(page, 300);
+  await hidePointer(page);
+  await focus(page, await band(dialog, 0, 0.42), { pad: 12, hold: 900 });
   const agent = dialog.getByRole("combobox", { name: "Agent", exact: true });
   await glide(page, agent, { click: false });
   await agent.selectOption("opencode");
-  await pause(page, 500);
+  await pause(page, 600);
   const model = dialog.getByRole("combobox", { name: "Model", exact: true });
   await glide(page, model, { click: false });
   await model.selectOption("opencode/qwen3-coder");
-  await pause(page, 500);
+  await pause(page, 600);
   const extra = dialog.getByRole("textbox", { name: /Extra instructions/ });
+  await focus(page, await band(dialog, 0.55, 1), { pad: 12, hold: 300 });
   if (await extra.isVisible().catch(() => false)) {
     await typeSlowly(page, extra, "Return 429 with Retry-After.");
   }
@@ -390,51 +652,86 @@ test("agent-run", async ({ page }) => {
   await expect(dialog).toBeHidden();
   changed();
 
-  await caption(page, "Nothing starts until you accept it at the runner");
-  await pause(page, 2200);
+  say("Nothing starts without you", "The run waits until you accept it at the runner.");
+  await pause(page, 500);
+  await hidePointer(page);
+  const details = drawer.getByRole("region", { name: "Run details" });
+  await reveal(details, "center");
+  await pause(page, 600);
+  await focus(page, details, { pad: 12, within: drawer, hold: 2600 });
   phase = "running";
   changed();
-  await caption(page, "OpenCode over ACP: every step streams to the node");
   const activity = drawer.getByRole("list", { name: "Run activity" });
   await expect(activity).toBeVisible();
   await reveal(drawer.getByRole("region", { name: "Run details" }));
+  await pause(page, 500);
+  say("Watch it work", "OpenCode's reads, edits and thoughts stream in live.");
+  await focus(page, await band(drawer, 0.42, 1), { pad: 0, hold: 200 });
   for (let i = 1; i <= runEvents.length; i++) {
     shown = i;
     push({ type: "run-events", id: "run1" });
     await pause(page, 150);
-    await reveal(activity.locator(":scope > *").last(), "end");
-    await pause(page, i === 11 ? 1800 : 750);
-    if (i === 11) await caption(page, "Shell commands are refused: nobody is there to approve them");
+    const latest = activity.locator(":scope > *").last();
+    if (i === 11) {
+      // The refused command: centre it and look closer.
+      await reveal(latest, "center");
+      await pause(page, 500);
+      say("Risky commands are refused", "Nobody is at a headless run to approve them.");
+      await focus(page, latest, { pad: 60, minW: 720, within: drawer, hold: 2600 });
+      await focus(page, await band(drawer, 0.42, 1), { pad: 0, d: 0.7 });
+      continue;
+    }
+    await reveal(latest, "end");
+    await pause(page, 750);
   }
   await pause(page, 1200);
 
   phase = "done";
   changed();
-  await caption(page, "The runner commits, pushes and opens a pull request");
+  say("A pull request, ready to review", "The runner commits, pushes and opens it.");
+  const viewChanges = drawer.getByRole("button", { name: "View changes" });
   await pause(page, 300);
-  await reveal(drawer.getByRole("region", { name: "Run details" }));
-  await pause(page, 2400);
+  await reveal(viewChanges, "center");
+  await pause(page, 700);
+  await focus(page, [drawer.getByText("The agent finished."), viewChanges, drawer.getByRole("button", { name: "Merge PR #42" })], {
+    pad: 24,
+    within: drawer,
+    hold: 2600,
+  });
 
-  await caption(page, "Read the diff before you merge");
-  await glide(page, drawer.getByRole("button", { name: "View changes" }));
+  say("Read the diff, then merge", "Without leaving the board.");
   const diff = page.getByRole("dialog", { name: "Changes" });
-  await expect(diff).toBeVisible();
+  await glide(page, viewChanges);
+  await cut(page, async () => {
+    await expect(diff.getByRole("navigation")).toBeVisible();
+    const unified = diff.getByRole("button", { name: "Unified" });
+    if (await unified.isVisible().catch(() => false)) await unified.click();
+    await pause(page, 500);
+    await hidePointer(page);
+    const top = await band(diff, 0, 0.42);
+    await focus(page, { ...top, w: top.w * 0.62 }, { pad: 8, d: 0 });
+  });
   await pause(page, 2000);
   await glide(page, diff.getByRole("navigation").getByRole("button").nth(1));
-  await pause(page, 1600);
+  await pause(page, 2000);
 
   const merge = diff.getByRole("button", { name: "Merge PR #42" });
+  await focus(page, diff, { pad: 8, hold: 500 });
   await glide(page, merge);
   const confirm = page.getByRole("alertdialog", { name: "Merge PR #42?" });
   await expect(confirm).toBeVisible();
-  await pause(page, 1600);
+  await pause(page, 300);
+  await focus(page, confirm, { pad: 60, minW: 720, hold: 1400 });
   await glide(page, confirm.getByRole("button", { name: "Merge PR #42" }));
   changed();
-  await pause(page, 1500);
+  await pause(page, 300);
+  await hidePointer(page);
+  const header = await band(diff, 0, 0.16);
+  await focus(page, { ...header, w: header.w * 0.45 }, { pad: 8, minW: 640, hold: 700 });
   phase = "merged";
   changed();
-  await caption(page, "");
-  await pause(page, 1500);
+  say("Merged", "Your runner merges it, with its own GitHub login.");
+  await pause(page, 3200);
 });
 
 test("autopilot", async ({ page }) => {
@@ -522,28 +819,40 @@ test("autopilot", async ({ page }) => {
   const advance = () => push({ type: "autopilot-changed", id: "ap1", goalNodeId: goal });
 
   await openBoard(page);
-  await caption(page, "Autopilot: a goal, broken into a graph of tasks");
-  await pause(page, 1600);
+  await begin(page, "Autopilot", "A goal becomes a graph of tasks that run themselves.");
+  say("Start from a goal", "Its tasks, and their order, come from the graph.");
+  await pause(page, 2600);
+  await focus(page, page.getByText("Ship the rate-limited public API").first(), { pad: 140, minW: 760, hold: 500 });
   const drawer = await openNode(page, "Ship the rate-limited public API");
-  await pause(page, 600);
-  await glide(page, drawer.getByRole("tab", { name: "Autopilot" }));
-  await expect(drawer.getByRole("table")).toBeVisible();
-  await reveal(drawer.getByRole("table"), "end");
-  await caption(page, "Each task runs once its dependencies are done");
+  const pill = drawer.getByRole("button", { name: /^Autopilot/ });
+  say("Open its autopilot", "The goal's Autopilot pill opens it in Station.");
+  await focus(page, pill, { pad: 120, minW: 720, hold: 1400 });
+  const table = page.locator(".station-goal").getByRole("table");
+  await cut(page, async () => {
+    await glide(page, pill);
+    await expect(table).toBeVisible();
+    await reveal(table, "end");
+    await pause(page, 900);
+    await hidePointer(page);
+    await focus(page, table, { pad: 24, d: 0 });
+  });
+  say("Tasks run in order", "Each starts once the tasks it needs are done.");
   await pause(page, 3000);
   step = 1;
   advance();
-  await caption(page, "Implement → CI → review by other models");
+  say("Other models review the work", "Implement, CI, then a review by two other agents.");
   await pause(page, 3200);
   step = 2;
   advance();
-  await caption(page, "Requested changes get a revise run, then it waits for you");
-  await pause(page, 2500);
-  const table = drawer.getByRole("table");
-  await glide(page, table.getByRole("row").nth(2), { click: false });
-  await pause(page, 2600);
-  await caption(page, "");
+  say("You have the last word", "After a revise round, the task waits for you.");
   await pause(page, 800);
+  const goalPanel = page.locator(".station-goal");
+  const approveButton = goalPanel.getByRole("button", { name: "Approve" });
+  await expect(approveButton).toBeVisible();
+  await focus(page, [goalPanel.getByText("Waiting for your review"), approveButton], { pad: 20, hold: 400 });
+  await glide(page, approveButton, { click: false });
+  await pause(page, 2800);
+  await wide(page, 1.0, 1400);
 });
 
 test("usage", async ({ page }) => {
@@ -630,29 +939,52 @@ test("usage", async ({ page }) => {
   );
 
   await openBoard(page);
-  await caption(page, "Token usage across runs and agent sessions");
-  await glide(page, page.getByRole("button", { name: "Open Agent Network" }));
-  const panel = page.getByRole("dialog", { name: "Agent Network" });
-  await expect(panel).toBeVisible();
-  await pause(page, 500);
-  await glide(page, panel.getByRole("button", { name: "Usage" }));
-  const dialog = page.getByRole("dialog", { name: "Usage" });
-  await expect(dialog).toBeVisible();
-  await pause(page, 1800);
-  await caption(page, "By day, agent and model, as API-equivalent estimates");
-  const bars = dialog.locator(".usage-chart-plot .usage-hit");
+  await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
+  const modes = page.getByRole("navigation", { name: "Project view" });
+  const settings = modes.getByRole("button", { name: "Settings" });
+  say("Usage lives in Settings", "Next to runners, routing and the daily budget.");
+  await pause(page, 1200);
+  await focus(page, modes, { pad: 80, minW: 640, hold: 600 });
+  const parts = page.getByRole("navigation", { name: "Settings" });
+  const region = page.getByRole("region", { name: "Usage" });
+  await cut(page, async () => {
+    await glide(page, settings);
+    await expect(parts).toBeVisible();
+    await pause(page, 300);
+    await focus(page, parts, { pad: 40, minW: 720, d: 0 });
+  });
+  await glide(page, parts.getByRole("button", { name: "Usage", exact: true }));
+  await expect(region).toBeVisible();
+  await pause(page, 600);
+  say("By day, agent and model", "Tokens and API-equivalent cost for the last 30 days.");
+  await focus(page, region, { pad: 16, hold: 1600 });
+  const bars = region.locator(".usage-chart-plot .usage-hit");
+  await focus(page, region.locator(".usage-chart-plot"), { pad: 60, minW: 760, hold: 300 });
   for (const index of [8, 14, 21, 27]) {
     await glide(page, bars.nth(index), { click: false });
-    await pause(page, 650);
+    await pause(page, 750);
   }
   await pause(page, 600);
-  await glide(page, dialog.getByRole("tab", { name: "Sessions" }));
-  await pause(page, 2000);
-  await caption(page, "Prices are editable when a model is missing");
-  await glide(page, dialog.getByRole("tab", { name: "Prices" }));
-  await pause(page, 2200);
-  await caption(page, "");
-  await pause(page, 600);
+  say("Every session and run", "See which piece of work spent the tokens.");
+  const sessionsTab = region.getByRole("tab", { name: "Sessions" });
+  await glide(page, sessionsTab);
+  await pause(page, 500);
+  await focus(page, [sessionsTab, region.getByRole("table")], { pad: 24, within: region, hold: 2400 });
+  say("Prices you can edit", "Add the price of a model the table is missing.");
+  await glide(page, region.getByRole("tab", { name: "Prices" }));
+  await pause(page, 500);
+  await focus(page, region, { pad: 16, hold: 2400 });
+  say("A daily budget", "Past the limit, the hub refuses new runs.");
+  const budget = parts.getByRole("button", { name: "Daily budget" });
+  await glide(page, budget);
+  const budgetRegion = page.getByRole("region", { name: "Daily budget" });
+  await expect(budgetRegion).toBeVisible();
+  await pause(page, 400);
+  await focus(page, [budgetRegion.getByText(/^Limits on your runs/), budgetRegion.getByRole("button", { name: "Save budget" })], {
+    pad: 40,
+    hold: 2800,
+  });
+  await wide(page, 1.0, 1200);
 });
 
 test("agent-network", async ({ page }) => {
@@ -726,22 +1058,28 @@ test("agent-network", async ({ page }) => {
   });
 
   await openBoard(page);
-  await caption(page, "Agent network: see who else is working");
+  await begin(page, "Agent network", "See the other agents at work, and what they tell each other.");
   const fab = page.getByRole("button", { name: "Open Agent Network" });
+  say("Every agent session, in one place", "Claude Code, Codex and OpenCode on the same project.");
+  await pause(page, 1400);
+  await focus(page, fab, { pad: 160, minW: 720, hold: 400 });
   await glide(page, fab);
   const panel = page.getByRole("dialog", { name: "Agent Network" });
   await expect(panel).toBeVisible();
-  await pause(page, 2400);
-  await caption(page, "Agents message each other; you can hold a session's inbox");
+  await pause(page, 400);
+  await hidePointer(page);
+  await focus(page, await band(panel, 0, 0.55), { pad: 8, hold: 2600 });
   const heldSection = panel.getByRole("region", { name: /Held messages/ });
   if (await heldSection.isVisible().catch(() => false)) {
-    await glide(page, heldSection, { click: false });
-    await pause(page, 1800);
+    say("Hold a session's inbox", "Read what other agents send it before it gets there.");
+    await focus(page, heldSection, { pad: 40, minW: 640, hold: 2800 });
+    say("Approve to deliver", "The message goes through to the agent.");
     await glide(page, heldSection.getByRole("button", { name: "Approve" }));
+    await pause(page, 700);
+    await hidePointer(page);
+    await focus(page, await band(panel, 0.15, 0.85), { pad: 8, hold: 2800 });
   }
-  await pause(page, 2000);
-  await caption(page, "");
-  await pause(page, 800);
+  await wide(page, 1.0, 1200);
 });
 
 test("two-factor-and-device-link", async ({ page }) => {
@@ -808,50 +1146,72 @@ test("two-factor-and-device-link", async ({ page }) => {
   });
 
   await openBoard(page);
-  await caption(page, "Two-factor authentication with an authenticator app");
-  await glide(page, page.getByRole("button", { name: "Project settings" }).first());
-  await pause(page, 600);
-  await glide(page, page.getByRole("tab", { name: /Account security/ }).or(page.getByRole("button", { name: /Account security/ })).first());
+  await begin(page, "Two-factor and device links", "Lock your account down, then link a new runner.");
+  const modes = page.getByRole("navigation", { name: "Project view" });
+  const parts = page.getByRole("navigation", { name: "Settings" });
+  say("Your account, in Settings", "Turn on an authenticator app as a second factor.");
   await pause(page, 1200);
+  await focus(page, modes, { pad: 80, minW: 640, hold: 400 });
+  await cut(page, async () => {
+    await glide(page, modes.getByRole("button", { name: "Settings" }));
+    await expect(parts).toBeVisible();
+    await glide(page, parts.getByRole("button", { name: "Your account" }));
+    await pause(page, 600);
+    await hidePointer(page);
+    await focus(page, page.getByRole("button", { name: "Set up" }), { pad: 200, minW: 760, d: 0 });
+  });
+  await pause(page, 800);
   await glide(page, page.getByRole("button", { name: "Set up" }));
-  await expect(page.getByRole("img", { name: "QR code for your authenticator app" })).toBeVisible();
-  await caption(page, "Scan the QR code, then type the 6-digit code");
-  await pause(page, 1800);
-  await typeSlowly(page, page.getByLabel("6-digit code from the app"), "482913");
+  const qr = page.getByRole("img", { name: "QR code for your authenticator app" });
+  await expect(qr).toBeVisible();
+  await pause(page, 300);
+  say("Scan, then type the code", "Any authenticator app works.");
+  const code = page.getByLabel("6-digit code from the app");
+  await focus(page, [qr, code], { pad: 32, hold: 1800 });
+  await typeSlowly(page, code, "482913");
   await pause(page, 400);
   await glide(page, page.getByRole("button", { name: "Turn on" }));
-  await caption(page, "Recovery codes are shown once");
-  await pause(page, 2600);
-  await glide(page, page.getByRole("button", { name: "I've saved them" }));
-  await pause(page, 1200);
-  await page.keyboard.press("Escape");
-  await pause(page, 600);
+  say("Recovery codes, shown once", "Keep them somewhere safe.");
+  const saved = page.getByRole("button", { name: "I've saved them" });
+  await expect(saved).toBeVisible();
+  await pause(page, 300);
+  await focus(page, [saved, page.getByText("K7QM-4XTR-9PWD-2HNA")], { pad: 40, hold: 2600 });
+  await glide(page, saved);
+  await pause(page, 900);
 
-  await caption(page, "Link a new runner with a one-time device link");
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
-  const runners = page.getByRole("dialog", { name: "Runners" });
-  await expect(runners).toBeVisible();
+  say("Link a new runner", "A one-time device link from Settings, Runners.");
+  const runners = page.getByRole("region", { name: "Runners" });
+  await cut(page, async () => {
+    await glide(page, parts.getByRole("button", { name: "Runners" }));
+    await expect(runners).toBeVisible();
+    await pause(page, 500);
+    await hidePointer(page);
+    await focus(page, runners, { pad: 16, d: 0 });
+  });
   await pause(page, 1200);
   await glide(page, runners.getByRole("button", { name: "Link a new device" }));
   const link = page.getByRole("dialog", { name: "Link a new device" });
   await expect(link).toBeVisible();
+  await pause(page, 300);
+  await focus(page, link, { pad: 24, hold: 500 });
   await typeSlowly(page, link.getByLabel("Runner name"), "laptop");
   await pause(page, 400);
   await glide(page, link.getByRole("button", { name: "Create link" }));
-  await caption(page, "Step-up now asks the authenticator, not email");
   const verify = page.getByRole("dialog", { name: "Verify it's you" });
   await expect(verify).toBeVisible();
-  await pause(page, 1200);
+  say("Verify it's you", "Sensitive steps now ask the authenticator, not email.");
+  await pause(page, 300);
+  await focus(page, verify, { pad: 32, hold: 1400 });
   await typeSlowly(page, verify.getByLabel("Authenticator code"), "730164");
   await pause(page, 300);
   await glide(page, verify.getByRole("button", { name: "Verify" }));
-  const done = verify.getByRole("button", { name: "Done" });
-  await expect(done).toBeVisible();
+  const doneButton = verify.getByRole("button", { name: "Done" });
+  await expect(doneButton).toBeVisible();
   await pause(page, 900);
-  await glide(page, done);
+  await glide(page, doneButton);
   await expect(link.getByText("Link for laptop")).toBeVisible();
-  await caption(page, "Paste it into the new machine's nodevas: it works once");
-  await pause(page, 3200);
-  await caption(page, "");
-  await pause(page, 800);
+  say("One link, used once", "Paste it into nodevas on the new machine.");
+  await pause(page, 300);
+  await focus(page, link, { pad: 24, hold: 3400 });
+  await wide(page, 1.0, 1000);
 });

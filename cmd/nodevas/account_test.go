@@ -67,7 +67,13 @@ func TestAccountTOTPResetTurnsTheFactorOffAndAudits(t *testing.T) {
 	stdout.Reset()
 	if code := accountCmd([]string{"totp-reset", "--project", root, id}, &stdout, &stderr); code != 0 ||
 		!strings.Contains(stdout.String(), "was not on") {
-		t.Fatalf("second reset: exit %d, %q", code, stdout.String())
+		t.Fatalf("second reset: exit %d, %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	// An ID that reads like a flag (accounts made before IDs stopped
+	// beginning with "-") still goes through after --.
+	if code := accountCmd([]string{"totp-reset", "--project", root, "--", "-not-an-account"}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), `no account matches "-not-an-account"`) {
+		t.Fatalf("after --: exit %d, %q", code, stderr.String())
 	}
 	if code := accountCmd([]string{"totp-reset", "--project", root, "nobody@example.test"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("unknown account exit = %d", code)

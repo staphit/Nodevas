@@ -1,0 +1,227 @@
+/* Settings → Audit log: audit health, the recent trail, the rate limiter. */
+.audit-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.audit-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.audit-pane-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.audit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.audit-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.audit-btn.primary {
+  align-self: flex-start;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.audit-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.audit-empty {
+  margin: 0;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-2);
+  text-align: center;
+  font-size: 12px;
+}
+
+/* Health */
+.audit-health-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.audit-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--st-done-bg);
+  color: var(--st-done-fg);
+}
+.audit-status[data-status="degraded"] {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.audit-status[data-status="unconfigured"] {
+  background: var(--st-locked-bg);
+  color: var(--st-locked-fg);
+}
+.audit-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.audit-facts > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.audit-facts .audit-facts-wide {
+  grid-column: 1 / -1;
+}
+.audit-facts dt {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.audit-facts dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.audit-facts code {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: pre-wrap;
+}
+.audit-ack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Trail */
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.audit-filters select,
+.audit-filters input {
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.audit-filters select {
+  max-width: 100%;
+}
+.audit-filters input {
+  flex: 1;
+  min-width: 160px;
+}
+.audit-count {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.audit-table-wrap {
+  min-width: 0;
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.audit-table th,
+.audit-table td {
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.audit-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.audit-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.audit-table tr[data-failed] {
+  background: color-mix(in srgb, var(--st-failed-fg) 6%, transparent);
+}
+.audit-table td small {
+  display: block;
+  color: var(--text-2);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.audit-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.audit-op {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.audit-kind {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.audit-failed {
+  margin-left: 6px;
+  color: var(--st-failed-fg);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.audit-actor {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.audit-target {
+  max-width: 180px;
+  overflow-wrap: anywhere;
+}
+.audit-detail {
+  min-width: 160px;
+  max-width: 320px;
+}
+.audit-detail-pair {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.audit-detail-pair b {
+  color: var(--text-2);
+  font-weight: 600;
+}

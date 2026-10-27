@@ -1,19 +1,10 @@
 import { req } from "./http";
 
-/** One recorded write, returned by the database-backed audit API. */
-export interface AuditEntry {
-  at: string;
-  actor: string;
-  name?: string;
-  op: string;
-  target?: string;
-}
-
 export const historyApi = {
-  getAudit: () => req<{ entries: AuditEntry[] }>("/api/audit"),
-
   getHistory: (path: string) =>
-    req<{ path: string; versions: { name: string; at: string; size: number }[] }>(
+    // name is opaque: a snapshot file name or a commit ID, depending on the
+    // server's history backend. author is only known with git.
+    req<{ path: string; versions: { name: string; at: string; size: number; author?: string }[] }>(
       `/api/history?path=${encodeURIComponent(path)}`,
     ),
   getHistoryVersion: (path: string, version: string) =>

@@ -168,7 +168,7 @@ func (a *API) patchNodePage(c *gin.Context) {
 	// A format change rewrites the file; the title and order only touch the
 	// manifest, so both can arrive in one request.
 	if strings.TrimSpace(body.Format) != "" {
-		pages, content, rev, err := httpx.StoreFor(c.Request, a.pm).ConvertNodePage(nodeID, pageID, body.Format)
+		pages, content, rev, err := httpx.StoreFor(c.Request, a.pm).ConvertNodePage(auth.ActorFrom(c.Request), nodeID, pageID, body.Format)
 		if err != nil {
 			httpx.Err(c, http.StatusBadRequest, err)
 			return

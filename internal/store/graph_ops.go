@@ -113,7 +113,7 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 		}
 	}
 	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data})
-	if err := s.applyUpdatesLocked(updates); err != nil {
+	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return nil, "", err
 	}
 	return graph, Rev(data), nil

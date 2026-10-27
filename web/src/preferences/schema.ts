@@ -101,6 +101,17 @@ function numberPref(
   };
 }
 
+/** A string that must match pattern; "" (the fallback) is always valid. */
+function stringPref(key: string, scope: PreferenceScope, pattern: RegExp): PreferenceSpec<string> {
+  return {
+    key,
+    scope,
+    fallback: () => "",
+    decode: (raw) => (raw === "" || pattern.test(raw) ? raw : undefined),
+    encode: (value) => value,
+  };
+}
+
 function stringListPref(
   key: string,
   scope: PreferenceScope,
@@ -122,28 +133,26 @@ function stringListPref(
   };
 }
 
-function systemTheme(): "light" | "dark" {
-  return typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
+/** The editor's modes and text sizes; the drawer's toolbar and the Settings
+ * view's editor defaults both edit these preferences. */
+export const EDITOR_MODES = ["live", "source", "preview"] as const;
+export const EDITOR_FONT_SIZE = { min: 11, max: 22, fallback: 14 } as const;
 
 export const PREFERENCE_SCHEMA = {
   // appearance
-  theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, systemTheme),
+  // Dark until the viewer picks light, whatever the OS prefers.
+  theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, () => "dark" as const),
   language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, () => "en" as const),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),
-  // Both panes at once is a desktop luxury: split across a phone they get
-  // about 200px each and neither is usable. The graph opens, the timeline
-  // starts folded to its header, one tap from being opened.
-  paneTimeline: boolPref(
-    "vised-pane-timeline",
-    "layout",
-    () => typeof window === "undefined" || window.innerWidth > 720,
-  ),
+  // A first visit opens on the graph alone: two boards at once is a lot to
+  // take in before anything is on either, and on a phone split panes get about
+  // 200px each and neither is usable. The timeline stays folded to its header,
+  // one tap from being opened. A browser that already used the app before this
+  // default changed keeps the timeline it had — see `initialPaneOpen`, which
+  // stores that answer once so this fallback never takes it away.
+  paneTimeline: boolPref("vised-pane-timeline", "layout", false),
   paneSplit: numberPref("vised-pane-split", "layout", {
     min: 15,
     max: 85,
@@ -184,6 +193,58 @@ export const PREFERENCE_SCHEMA = {
   graphMinimap: boolPref("vised-graph-minimap", "layout", () =>
     typeof window === "undefined" || window.innerWidth > 720,
   ),
+  /**
+   * How the upper pane draws the board: the dependency cards (the default,
+   * and what every existing browser keeps), or one of the two game views —
+   * the war room (an isometric office of runners and their agents) or the
+   * boss map (the project as a dungeon). Display only; the board is the same.
+   */
+  stageSkin: enumPref(
+    "vised-stage-skin",
+    "layout",
+    ["cards", "warroom", "dungeon"] as const,
+    () => "cards" as const,
+  ),
+  /**
+   * Which face of the project is shown: Info, the board as it always was
+   * (graph, board, timeline, pages), or Station, where the project's agents
+   * work together — the live war room or boss map, who is doing what, what
+   * waits on you, and what the agents say to each other. In Station, the
+   * view is stageSkin's game view; "cards" there means the war room.
+   */
+  /**
+   * The view pack Station draws with (docs/view-packs.md), by id; "" is the
+   * built-in war room or boss map. A pack that is gone falls back to the
+   * built-in view of its layout.
+   */
+  stationPack: stringPref("vised-station-pack", "layout", /^[a-z0-9-]{1,40}$/),
+  projectMode: enumPref(
+    "vised-project-mode",
+    "layout",
+    ["info", "station", "settings"] as const,
+    () => "info" as const,
+  ),
+  /** The part of the Settings view last open. */
+  settingsSection: enumPref(
+    "vised-settings-section",
+    "layout",
+    [
+      "project",
+      "appearance",
+      "notifications",
+      "backup",
+      "workstation",
+      "runners",
+      "usage",
+      "budget",
+      "routing",
+      "copilot",
+      "server",
+      "account",
+      "audit",
+    ] as const,
+    () => "project" as const,
+  ),
 
   // explorer (sidebar)
   explorerWidth: numberPref("vised-explorer-width", "explorer", {
@@ -212,6 +273,17 @@ export const PREFERENCE_SCHEMA = {
     "vised-explorer-workspace-expanded",
     "explorer",
     true,
+  ),
+  /**
+   * Whether the explorer's less common actions — new subproject, Markdown
+   * import, connecting a workspace, sorting and the project-file row — are
+   * unfolded. Folded by default: a first project needs one button, and the
+   * rest are one press away and remembered once opened.
+   */
+  explorerToolsExpanded: boolPref(
+    "vised-explorer-tools-expanded",
+    "explorer",
+    false,
   ),
 
   // timeline
@@ -261,19 +333,10 @@ export const PREFERENCE_SCHEMA = {
 
   // editor
   /** How markdown is shown while editing: rendered live, raw, or read-only. */
-  editorMode: enumPref(
-    "vised-editor-mode",
-    "editor",
-    ["live", "source", "preview"] as const,
-    () => "live" as const,
-  ),
+  editorMode: enumPref("vised-editor-mode", "editor", EDITOR_MODES, () => "live" as const),
   /** Whether the document outline panel is open. */
   editorOutline: boolPref("vised-editor-outline", "editor", false),
-  editorFontSize: numberPref("vised-editor-fs", "editor", {
-    min: 11,
-    max: 22,
-    fallback: 14,
-  }),
+  editorFontSize: numberPref("vised-editor-fs", "editor", EDITOR_FONT_SIZE),
 
   // onboarding
   /** Whether the user has answered the first-run tour invitation yet. */
@@ -285,6 +348,20 @@ export const PREFERENCE_SCHEMA = {
   ),
   /** Ids of tour chapters the user has already finished. */
   tourChaptersDone: stringListPref("vised-tour-chapters", "onboarding"),
+  /**
+   * Whether the agent workstation — runners, runs, autopilot, the agent
+   * network and usage — is shown. Off by default so a board used as a local
+   * planner is not full of controls for machines it has none of; it turns
+   * itself on (and stays on) the first time this browser sees a runner, a run
+   * or a connected agent, so nobody who already uses it ever loses it.
+   */
+  agentWorkstation: boolPref("vised-agent-workstation", "onboarding", false),
+  /**
+   * Whether the start screen offered to a brand-new workspace (one project,
+   * no nodes) was answered. Once is enough: it can be reopened from the
+   * command palette or the explorer's menu.
+   */
+  startScreenDismissed: boolPref("vised-start-screen-dismissed", "onboarding", false),
 };
 
 export type PreferenceKey = keyof typeof PREFERENCE_SCHEMA;

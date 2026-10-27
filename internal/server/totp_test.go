@@ -18,6 +18,7 @@ import (
 
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
+	"nodevas/internal/logging/logtest"
 )
 
 // totpAt is an authenticator app: RFC 6238 over a base32 secret, written
@@ -62,7 +63,9 @@ func TestTwoFactorOverHTTP(t *testing.T) {
 	// directory's machine key.
 	t.Setenv("NODEVAS_SECRET_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	server, _, inbox, database, _ := accountServerPartsForTest(t)
+	logs := logtest.Capture(t)
 	cookies, csrf := signIn(t, server, inbox, testEmail)
+	firstSession := cookies
 
 	// Enrollment needs a step-up.
 	if response := authed(server, cookies, csrf, http.MethodPost, "/api/auth/totp/begin", `{}`); response.Code != http.StatusForbidden ||
@@ -215,6 +218,9 @@ func TestTwoFactorOverHTTP(t *testing.T) {
 	seen := map[string]int{}
 	for _, event := range events {
 		seen[event.Action]++
+		if event.Action == audit.ActionSignInFailed && (event.ActorID != "" || event.ActorName != "") {
+			t.Errorf("a refused sign-in's row names %s / %s", event.ActorID, event.ActorName)
+		}
 		for key, value := range event.Detail {
 			if text, ok := value.(string); ok && (strings.Contains(text, enrollment.Secret) || strings.Contains(text, recovery.RecoveryCodes[0])) {
 				t.Fatalf("audit %s.%s holds a credential", event.Action, key)
@@ -232,4 +238,56 @@ func TestTwoFactorOverHTTP(t *testing.T) {
 	if seen[audit.ActionTOTPRecoveryUsed] != 2 {
 		t.Errorf("%d recovery-used events, want 2 (step-up, disable)", seen[audit.ActionTOTPRecoveryUsed])
 	}
+
+	// The same story in the process log, one line per row.
+	for action, count := range seen {
+		if got := len(logs.Find(t, map[string]any{"nodevas.audit.action": action})); got != count {
+			t.Errorf("%d log lines for %s, want %d", got, action, count)
+		}
+	}
+	ann := map[string]any{"user.name": "ann", "user.email": testEmail}
+	stepUps := logs.Find(t, map[string]any{"event.action": "auth.stepup", "nodevas.auth.purpose": "step-up"})
+	if len(stepUps) != 2 {
+		t.Fatalf("%d step-up lines, want 2:\n%s", len(stepUps), logs.Text())
+	}
+	logtest.Want(t, stepUps[0], map[string]any{"event.outcome": "success", "nodevas.auth.method": "otp"})
+	logtest.Want(t, stepUps[1], map[string]any{"event.outcome": "success", "nodevas.auth.method": "recovery-code"})
+	logtest.Want(t, stepUps[1], ann)
+	pendingLine := logs.One(t, map[string]any{"nodevas.audit.action": audit.ActionSignInPending})
+	logtest.Want(t, pendingLine, map[string]any{
+		"event.category": "audit", "event.action": audit.ActionSignInPending, "event.outcome": "success",
+		"nodevas.auth.method": "otp",
+	})
+	logtest.Want(t, pendingLine, ann)
+	// Without the ticket the pending sign-in is unknown; with it, the spent
+	// confirming code is a wrong one. Both were authenticator codes.
+	refused := logs.Find(t, map[string]any{"event.action": "auth.signin", "event.outcome": "failure"})
+	if len(refused) != 2 {
+		t.Fatalf("%d refused sign-in lines, want 2:\n%s", len(refused), logs.Text())
+	}
+	logtest.Want(t, refused[0], map[string]any{"event.reason": "expired-code", "nodevas.auth.method": "totp"})
+	logtest.Absent(t, refused[0], "user.id", "user.name", "user.email")
+	logtest.Want(t, refused[1], map[string]any{"event.reason": "bad-credentials", "nodevas.auth.method": "totp"})
+	// The ticket said whose sign-in it was; the row still names nobody.
+	logtest.Want(t, refused[1], ann)
+	twoFactor := logs.Find(t, map[string]any{"event.action": "auth.signin", "event.outcome": "success",
+		"nodevas.auth.purpose": "sign-in"})
+	if len(twoFactor) != 2 {
+		t.Fatalf("%d sign-in lines, want 2 (the passcode one, then the two-factor one)", len(twoFactor))
+	}
+	logtest.Want(t, twoFactor[0], map[string]any{"nodevas.auth.method": "otp"})
+	logtest.Want(t, twoFactor[1], map[string]any{"nodevas.auth.method": "totp"})
+	logtest.Want(t, twoFactor[1], ann)
+	// Turning the factor on and off changes the account; the refused code on
+	// the way to turning it off is a refused change.
+	if changed := logs.Find(t, map[string]any{"event.action": "iam.account.update", "event.outcome": "success"}); len(changed) != 2 {
+		t.Errorf("%d account updates, want 2 (enable, disable)", len(changed))
+	}
+	logtest.Want(t, logs.One(t, map[string]any{"event.action": "iam.account.update", "event.outcome": "failure"}),
+		map[string]any{"event.category": "iam", "event.reason": "bad-credentials", "nodevas.audit.action": audit.ActionTOTPFailed})
+	var sessions []string
+	for _, cookie := range append(firstSession, cookies...) {
+		sessions = append(sessions, cookie.Value)
+	}
+	logs.Never(t, append(append([]string{enrollment.Secret, ticket.Value}, recovery.RecoveryCodes...), sessions...)...)
 }

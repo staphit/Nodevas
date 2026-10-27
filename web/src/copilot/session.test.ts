@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
+import { resetBrowserModelCache } from "./browserModel";
 import { useCopilot } from "./copilotStore";
 import { sendTurn } from "./session";
 
@@ -32,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetBrowserModelCache();
 });
 
 describe("sendTurn", () => {
@@ -97,5 +99,77 @@ describe("sendTurn", () => {
     const state = useCopilot.getState();
     expect(state.running).toBe(false);
     expect(state.items.at(-1)).toMatchObject({ kind: "notice", tone: "error" });
+  });
+
+  it("runs a model request on the browser's model and posts the raw answer", async () => {
+    const prompts: { input: string; options: unknown }[] = [];
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create: vi.fn(async () => ({
+        prompt: vi.fn(async (input: string, options: unknown) => {
+          prompts.push({ input, options });
+          return '{"type":"text","text":"你好"}';
+        }),
+        destroy: vi.fn(),
+      })),
+    });
+    // The bypass mode the person left on does not apply to the browser's model.
+    useCopilot.setState({
+      activeId: "c1",
+      mode: "bypassPermissions",
+      status: {
+        enabled: true,
+        provider: "browser",
+        model: "gemini-nano",
+        modes: ["plan", "default", "acceptEdits"],
+        allowBypass: false,
+      },
+    });
+    const encoder = new TextEncoder();
+    let release: () => void = () => undefined;
+    const calls: { url: string; body: unknown }[] = [];
+    const schema = { type: "object", properties: { name: { enum: ["get_node"] } } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+        if (url.endsWith("/turns")) {
+          // The server keeps the stream open until the browser answers.
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const line = (event: unknown) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+              line({ type: "turn_started", turnId: "t1", entryId: "e1" });
+              line({
+                type: "model_request",
+                requestId: "m1",
+                modelRequest: { system: "sys", messages: [{ role: "user", content: "hi" }], schema, attempt: 1 },
+              });
+              release = () => {
+                line({ type: "text_delta", text: "你好" });
+                line({ type: "turn_finished", stop: "end_turn" });
+                controller.close();
+              };
+            },
+          });
+          return new Response(body, { status: 200 });
+        }
+        if (url.endsWith("/model-results")) {
+          release();
+          return new Response(JSON.stringify({ ok: true }));
+        }
+        return new Response(JSON.stringify({ conversations: [] }));
+      }),
+    );
+
+    await sendTurn("hi", "text");
+
+    const turn = calls.find((call) => call.url.endsWith("/turns"));
+    expect(turn?.body).toMatchObject({ mode: "default", browserModel: "available" });
+    expect(prompts).toEqual([{ input: "hi", options: expect.objectContaining({ responseConstraint: schema }) }]);
+    expect(calls.find((call) => call.url.endsWith("/model-results"))).toEqual({
+      url: "/api/copilot/conversations/c1/turns/t1/model-results",
+      body: { requestId: "m1", output: '{"type":"text","text":"你好"}' },
+    });
+    expect(useCopilot.getState().lastReply).toEqual({ turnId: "t1", text: "你好" });
   });
 });

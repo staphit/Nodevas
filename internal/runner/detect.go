@@ -11,11 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
 
+	"nodevas/internal/buildinfo"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -293,6 +293,13 @@ func Detect(ctx context.Context, cmds CommandRunner, cfg *Config) []runnerwire.A
 			continue
 		}
 		agent.Version = truncate(firstLine(out), 200)
+		if kind == "opencode" {
+			if reason := adapter.OpenCodeUnsupported(agent.Version); reason != "" {
+				agent.Error = truncate(reason, 300)
+				agents = append(agents, agent)
+				continue
+			}
+		}
 		if kind == "antigravity" {
 			if reason := antigravityRunsBlocked(); reason != "" {
 				// Every nodevas tool call would be denied: not usable for runs.
@@ -337,6 +344,11 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		}
 		maxConcurrent = cfg.MaxConcurrentRuns()
 	}
+	llm := copilotInfo(ctx, cfg)
+	caps := capabilities(cfg)
+	if llm != nil && llm.Auto {
+		caps = append(caps, runnerwire.CapLLM)
+	}
 	return runnerwire.Info{
 		Version:       Version(),
 		Hostname:      host,
@@ -344,10 +356,10 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		Arch:          runtime.GOARCH,
 		Agents:        Detect(ctx, cmds, cfg),
 		Repos:         repos,
-		Capabilities:  capabilities(cfg),
+		Capabilities:  caps,
 		MaxConcurrent: maxConcurrent,
 		AutoAccept:    autoAccept,
-		LLM:           copilotInfo(cfg),
+		LLM:           llm,
 		Advisor:       advisorInfo(cfg),
 	}
 }
@@ -363,46 +375,22 @@ func advisorInfo(cfg *Config) *runnerwire.LLMInfo {
 }
 
 // copilotInfo is what the hello says about the copilot's model calls (never
-// the key), or nil when this runner does not make them.
-func copilotInfo(cfg *Config) *runnerwire.LLMInfo {
+// the key), or nil when this runner does not make them: the owner's
+// settings, else a local model found on this machine (llm_auto.go).
+func copilotInfo(ctx context.Context, cfg *Config) *runnerwire.LLMInfo {
 	info, _, reason := cfg.CopilotLLM()
-	if reason != "" {
-		return nil
+	if reason == "" {
+		return &info
 	}
-	return &info
+	if auto, ok := autoCopilotLLM(ctx, cfg); ok {
+		return &auto
+	}
+	return nil
 }
 
 // Version identifies this build: the module version when it has one, else the
-// VCS revision Go stamped into the binary, else "dev".
-func Version() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "dev"
-	}
-	if v := info.Main.Version; v != "" && v != "(devel)" {
-		return v
-	}
-	var revision string
-	var dirty bool
-	for _, setting := range info.Settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = setting.Value
-		case "vcs.modified":
-			dirty = setting.Value == "true"
-		}
-	}
-	if revision == "" {
-		return "dev"
-	}
-	if len(revision) > 7 {
-		revision = revision[:7]
-	}
-	if dirty {
-		revision += "-dirty"
-	}
-	return revision
-}
+// commit it was built from, else "dev" (internal/buildinfo).
+func Version() string { return buildinfo.Version() }
 
 // InspectRepo checks that path is inside a git work tree and describes it.
 // The stored path is the work tree's top level, so adding a subdirectory adds

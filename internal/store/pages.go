@@ -179,7 +179,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 	if err != nil {
 		return zero, "", "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{
 		{path: s.NodePagesManifestPath(nodeID), data: manifestData},
 		{path: s.NodePagePath(nodeID, pageID, format), data: contentData},
 	}); err != nil {
@@ -212,7 +212,7 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 	// whatever the user handed over, byte for byte.
 	path := s.NodePagePath(nodeID, page.ID, format)
 	s.mu.Lock()
-	err = s.applyUpdatesLocked([]fileUpdate{{path: path, data: data}})
+	err = s.applyUpdatesLocked(actor, []fileUpdate{{path: path, data: data}})
 	s.mu.Unlock()
 	if err != nil {
 		return zero, "", "", err
@@ -227,7 +227,7 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 
 // ConvertNodePage rewrites a page in another format: the new file replaces
 // the old one, which is kept as a history snapshot.
-func (s *Store) ConvertNodePage(nodeID, pageID, target string) ([]NodePageInfo, string, string, error) {
+func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target string) ([]NodePageInfo, string, string, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
 		return nil, "", "", fmt.Errorf("invalid node or page id")
 	}
@@ -275,10 +275,11 @@ func (s *Store) ConvertNodePage(nodeID, pageID, target string) ([]NodePageInfo, 
 	}
 	// The old file leaves a snapshot behind: a conversion is lossy, and the
 	// previous version has to stay recoverable.
-	if err := s.snapshotHistoryAlways(oldPath); err != nil {
+	history := s.history()
+	if err := history.beforeOverwrite(oldPath, true); err != nil {
 		return nil, "", "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{
 		{path: s.NodePagesManifestPath(nodeID), data: manifestData},
 		{path: s.NodePagePath(nodeID, pageID, target), data: converted},
 	}); err != nil {
@@ -288,6 +289,8 @@ func (s *Store) ConvertNodePage(nodeID, pageID, target string) ([]NodePageInfo, 
 	if err := s.removePath(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, "", "", fmt.Errorf("page converted but the old file remains: %w", err)
 	}
+	history.wrote(actor, "convert page", []string{oldPath})
+	history.commitSoon()
 	content, err := s.decodePageContent(nodeID, target, converted)
 	if err != nil {
 		return nil, "", "", err
@@ -372,7 +375,7 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if err != nil {
 		return "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
 		path:          s.NodePagePath(nodeID, pageID, page.Format),
 		data:          data,
 		checkRevision: true,
@@ -439,7 +442,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
 		path: s.NodePagesManifestPath(nodeID),
 		data: data,
 	}}); err != nil {
@@ -523,7 +526,7 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 		_ = s.removePath(trashPath)
 		return zero, deleteCleanupUnavailable(err)
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
 		path: s.NodePagesManifestPath(nodeID),
 		data: manifestData,
 	}}); err != nil {
@@ -540,6 +543,9 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 		outcome.CleanupPending = true
 		log.Printf("page delete committed; cleanup queued for retry: %v", err)
 	}
+	// A delete is recorded at once: it is the change someone is most likely
+	// to want undone, and it should not wait out the save window.
+	s.history().commitSoon()
 	return outcome, nil
 }
 

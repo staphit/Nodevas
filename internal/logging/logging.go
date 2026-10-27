@@ -21,6 +21,7 @@ import (
 	"log"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // Redacted is the placeholder substituted for any credential-shaped value. It
@@ -30,7 +31,9 @@ const Redacted = "[redacted]"
 
 // ecsTimeFormat is RFC3339 with milliseconds, the resolution ECS uses for
 // "@timestamp". Second resolution is too coarse to order the records of a
-// single request; nanoseconds are noise in Kibana.
+// single request; nanoseconds are noise in Kibana. Records are stamped in
+// UTC, whatever zone the host or container runs in, so lines from several
+// services sort and compare as text.
 const ecsTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 // Config selects the shape of the log stream. The zero value is valid and
@@ -113,7 +116,7 @@ func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 		switch a.Key {
 		case slog.TimeKey:
 			if a.Value.Kind() == slog.KindTime {
-				return slog.String("@timestamp", a.Value.Time().Format(ecsTimeFormat))
+				return slog.String("@timestamp", a.Value.Time().UTC().Format(ecsTimeFormat))
 			}
 		case slog.LevelKey:
 			return slog.String("log.level", strings.ToLower(a.Value.String()))
@@ -165,6 +168,53 @@ func inline(attrs ...slog.Attr) slog.Attr {
 	return slog.Attr{Value: slog.GroupValue(attrs...)}
 }
 
+// The event vocabulary every service on the host shares, so that one dashboard
+// and one alert rule read all of their logs: event.category says what kind of
+// thing happened, event.action which thing, and event.outcome how it ended.
+const (
+	CategoryAuthentication = "authentication" // sign-in, sign-out, sessions, Access checks
+	CategoryIAM            = "iam"            // changes to accounts and to who may reach what
+	CategoryConfiguration  = "configuration"  // changes to the server's settings
+	CategoryAudit          = "audit"          // any other row of the audit trail
+	CategoryWeb            = "web"            // the request log
+
+	OutcomeSuccess = "success"
+	OutcomeFailure = "failure"
+)
+
+// Event classifies a record: its category, its action and, when it has one,
+// its outcome. A record that is not an event (a startup line, a warning about
+// a file) carries none of these.
+func Event(category, action, outcome string) slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("event.category", category),
+		EventAction(action),
+	}
+	if outcome != "" {
+		attrs = append(attrs, slog.String("event.outcome", outcome))
+	}
+	return inline(attrs...)
+}
+
+// EventReason says why an event failed, as a short kebab-case category such as
+// "bad-credentials" or "throttled". It is never the credential that was
+// offered, and never text the client wrote.
+func EventReason(reason string) slog.Attr {
+	if reason == "" {
+		return slog.Attr{}
+	}
+	return slog.String("event.reason", reason)
+}
+
+// UserEmail reports the acting account's sign-in address. Addresses are logged
+// on purpose: "who signed in" is the question this log exists to answer.
+func UserEmail(email string) slog.Attr {
+	if email == "" {
+		return slog.Attr{}
+	}
+	return slog.String("user.email", email)
+}
+
 // Err renders an error as ECS "error.message" and "error.type". The type comes
 // from %T so that a sentinel and a wrapped I/O failure can be told apart in a
 // dashboard without matching on message text, which changes far more often.
@@ -191,8 +241,12 @@ func HTTPRequest(method, path string, statusCode int) slog.Attr {
 	return inline(attrs...)
 }
 
-// ClientIP reports the caller's address as ECS "client.ip".
+// ClientIP reports the caller's address as ECS "client.ip". An event with no
+// caller, one a runner's socket delivered, say, carries none.
 func ClientIP(ip string) slog.Attr {
+	if ip == "" {
+		return slog.Attr{}
+	}
 	return slog.String("client.ip", ip)
 }
 
@@ -208,19 +262,41 @@ func User(id, name string) slog.Attr {
 	return inline(attrs...)
 }
 
-// EventAction names what happened, e.g. "sign-in" or "passcode-request". It is
-// the field an operator filters on to answer "who tried to sign in".
+// EventAction names what happened, e.g. "auth.signin" or "auth.code.request".
+// It is the field an operator filters on to answer "who tried to sign in".
 func EventAction(action string) slog.Attr {
 	return slog.String("event.action", action)
 }
 
-// UserAgent reports the raw User-Agent header as ECS "user_agent.original".
+// maxUserAgent bounds "user_agent.original". The header is whatever the client
+// sent, up to the server's header limit, and nothing past the first few
+// hundred characters tells one browser from another.
+const maxUserAgent = 256
+
+// UserAgent reports the User-Agent header as ECS "user_agent.original", cut to
+// maxUserAgent characters.
 func UserAgent(value string) slog.Attr {
-	return slog.String("user_agent.original", value)
+	return slog.String("user_agent.original", truncate(value, maxUserAgent))
 }
 
-// EventDuration reports how long something took. ECS stores durations in
-// nanoseconds.
-func EventDuration(nanoseconds int64) slog.Attr {
-	return slog.Int64("event.duration", nanoseconds)
+// truncate cuts s to at most limit characters, never inside one.
+func truncate(s string, limit int) string {
+	count := 0
+	for index := range s {
+		if count == limit {
+			return s[:index]
+		}
+		count++
+	}
+	return s
+}
+
+// EventDuration reports how long something took, in two units: ECS
+// "event.duration" in nanoseconds, which Kibana and other ECS log tools read,
+// and "event.duration_ms", which the shared log dashboards read.
+func EventDuration(elapsed time.Duration) slog.Attr {
+	return inline(
+		slog.Int64("event.duration", elapsed.Nanoseconds()),
+		slog.Float64("event.duration_ms", float64(elapsed.Microseconds())/1000),
+	)
 }

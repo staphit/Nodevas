@@ -66,6 +66,10 @@ type Settings struct {
 	// KeySourceRunner or KeySourceAuto (remote.go). With the runner, the
 	// provider and model are the runner's, not these.
 	KeySource string `json:"keySource"`
+	// Automatic: nobody chose a provider (ProviderAuto). Provider is then
+	// "auto" while no key is configured, or the vendor the configured key
+	// belongs to.
+	Automatic bool `json:"automatic"`
 }
 
 // overrides is what an administrator saved. An empty string means "not
@@ -137,7 +141,7 @@ func (s *settingsStore) loadOverrides(ctx context.Context) (overrides, error) {
 // endpoint would only fail.
 func (s *settingsStore) effective(saved overrides) Settings {
 	settings := Settings{
-		Provider:    firstNonEmpty(saved.Provider, s.defaults.Provider, "anthropic"),
+		Provider:    firstNonEmpty(saved.Provider, s.defaults.Provider, ProviderAuto),
 		Effort:      firstNonEmpty(saved.Effort, s.defaults.Effort, "low"),
 		AllowBypass: s.defaults.AllowBypass,
 		KeySource:   firstNonEmpty(saved.KeySource, KeySourceAuto),
@@ -157,6 +161,12 @@ func (s *settingsStore) effective(saved overrides) Settings {
 	if saved.AllowBypass != nil {
 		settings.AllowBypass = *saved.AllowBypass
 	}
+	if settings.Provider == ProviderAuto {
+		settings.Automatic = true
+		// A model or base URL is a vendor's; without one there is nothing
+		// to apply them to yet.
+		settings.Model, settings.BaseURL = saved.Model, saved.BaseURL
+	}
 	return settings
 }
 
@@ -173,16 +183,38 @@ func (s *settingsStore) resolve(ctx context.Context) (Settings, string, string, 
 			return settings, "", "", fmt.Errorf("copilot API key: %w", err)
 		}
 		if key := strings.TrimSpace(string(stored)); key != "" {
-			return settings, key, "stored", nil
+			return s.keyed(settings, ""), key, "stored", nil
 		}
 	}
 	if key := strings.TrimSpace(s.defaults.APIKey); key != "" {
-		return settings, key, "environment", nil
+		return s.keyed(settings, ""), key, "environment", nil
 	}
-	if key := strings.TrimSpace(s.defaults.VendorKeys[settings.Provider]); key != "" {
-		return settings, key, "environment", nil
+	vendors := []string{settings.Provider}
+	if settings.Provider == ProviderAuto {
+		// No provider chosen: a vendor's own key variable names the vendor.
+		vendors = []string{"anthropic", "openai"}
+	}
+	for _, vendor := range vendors {
+		if key := strings.TrimSpace(s.defaults.VendorKeys[vendor]); key != "" {
+			return s.keyed(settings, vendor), key, "environment", nil
+		}
 	}
 	return settings, "", "", nil
+}
+
+// keyed resolves the automatic provider once a key is configured: the key
+// decides, as it did before automatic existed (its vendor, or Anthropic for
+// a key that does not say whose it is). Free models are only for a copilot
+// with no key at all.
+func (s *settingsStore) keyed(settings Settings, vendor string) Settings {
+	if settings.Provider != ProviderAuto {
+		return settings
+	}
+	settings.Provider = firstNonEmpty(vendor, "anthropic")
+	if settings.Model == "" && s.defaultModel != nil {
+		settings.Model = s.defaultModel(settings.Provider)
+	}
+	return settings
 }
 
 func (s *settingsStore) view(ctx context.Context) (SettingsView, error) {
@@ -207,8 +239,8 @@ func (s *settingsStore) update(ctx context.Context, update SettingsUpdate) error
 	}
 	if update.Provider != nil {
 		value := strings.TrimSpace(*update.Provider)
-		if value != "" && value != "anthropic" && value != "openai" {
-			return fmt.Errorf("%w: provider must be anthropic or openai", ErrInvalidSettings)
+		if value != "" && value != "anthropic" && value != "openai" && value != ProviderAuto {
+			return fmt.Errorf("%w: provider must be auto, anthropic or openai", ErrInvalidSettings)
 		}
 		saved.Provider = value
 	}

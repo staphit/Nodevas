@@ -21,6 +21,12 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/auth/totp/confirm", a.postTOTPConfirm)
 	api.POST("/auth/totp/disable", a.postTOTPDisable)
 	api.POST("/auth/totp/recovery-codes", a.postTOTPRecoveryCodes)
+	// Account management checks for an administrator itself, so that a
+	// server without accounts can say so instead of "administrator required".
+	api.GET("/auth/accounts", a.getAccounts)
+	api.POST("/auth/accounts", a.postAccount)
+	api.PUT("/auth/accounts/role", a.putAccountRole)
+	api.DELETE("/auth/accounts", a.deleteAccount)
 	api.POST("/export", a.postExport)
 
 	admin := api.Group("")

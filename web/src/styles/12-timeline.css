@@ -1424,3 +1424,115 @@ body.pane-resizing * {
 .board-cell.node-selected .plan-card {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-progress-fg) 70%, transparent);
 }
+/* Dependencies: the plain "depends on" list, and the "Advanced conditions"
+   disclosure that holds gate operators, relations and standalone gates. */
+.dependency-list > ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dependency-list > ul > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+}
+.dependency-list > ul > li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dependency-badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dependency-advanced {
+  margin: 2px 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.dependency-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.dependency-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.dependency-advanced > summary::before {
+  content: "▸";
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+.dependency-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+.dependency-advanced > summary > small {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dependency-advanced > summary > small.dependency-badge {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+}
+.dependency-advanced > summary:hover,
+.dependency-advanced > summary:focus-visible {
+  color: var(--text);
+}
+.dependency-advanced-body {
+  display: grid;
+  gap: 4px;
+  padding: 0 0 6px;
+}
+/* The edge menu's relation choices read like the menu items beside them. */
+.dependency-advanced-body > button {
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.dependency-advanced-body > button:hover {
+  background: var(--surface-2);
+}
+.dependency-advanced-body > .lane-context-field-help {
+  margin: 0;
+  padding: 0 8px;
+}
+.dependency-expression {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dependency-advanced > summary::before {
+    transition: none;
+  }
+}

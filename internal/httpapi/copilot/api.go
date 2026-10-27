@@ -8,6 +8,8 @@
 package copilot
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -30,7 +32,10 @@ const (
 	maxSmallBody        = 8 << 10
 	maxTurnBody         = 64 << 10
 	maxClientResultBody = 256 << 10
-	maxSettingsBody     = 16 << 10
+	// A browser model answer is at most copilot.MaxBrowserOutputBytes of
+	// text, JSON-escaped, plus an id.
+	maxModelResultBody = 2*copilot.MaxBrowserOutputBytes + 8<<10
+	maxSettingsBody    = 16 << 10
 )
 
 // writeGrace is how far each event pushes the response's write deadline. The
@@ -67,6 +72,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	group.POST("/conversations/:id/turns", a.postTurn)
 	group.POST("/conversations/:id/turns/:turn/decisions", a.postDecision)
 	group.POST("/conversations/:id/turns/:turn/client-results", a.postClientResult)
+	group.POST("/conversations/:id/turns/:turn/model-results", a.postModelResult)
 	group.POST("/conversations/:id/turns/:turn/cancel", a.postCancel)
 
 	admin := group.Group("")
@@ -98,7 +104,8 @@ func fail(c *gin.Context, err error) {
 
 func (a *API) getStatus(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	status, err := a.service.Status(c.Request.Context(), auth.ActorFrom(c.Request))
+	status, err := a.service.Status(c.Request.Context(), auth.ActorFrom(c.Request),
+		browserModel(c.Query("browserModel")))
 	if err != nil {
 		fail(c, err)
 		return
@@ -186,6 +193,8 @@ func (a *API) postTurn(c *gin.Context) {
 		Mode        copilot.Mode        `json:"mode"`
 		Context     copilot.TurnContext `json:"context"`
 		ClientTools []string            `json:"clientTools"`
+		// BrowserModel is the browser's Prompt API availability.
+		BrowserModel string `json:"browserModel"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxTurnBody) {
 		return
@@ -203,6 +212,8 @@ func (a *API) postTurn(c *gin.Context) {
 		Host:           c.Request.Host,
 		Cookie:         c.Request.Header.Get("Cookie"),
 		RemoteAddr:     auth.ClientIP(c.Request),
+		Session:        sessionFingerprint(c.Request),
+		BrowserModel:   browserModel(body.BrowserModel),
 	}, stream.send)
 	stopHeartbeat()
 	if err != nil && !stream.started {
@@ -319,6 +330,46 @@ func (a *API) postClientResult(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// postModelResult takes the browser's answer to a model_request. The
+// service accepts it only from the session that started the turn.
+func (a *API) postModelResult(c *gin.Context) {
+	var body struct {
+		RequestID string `json:"requestId"`
+		Output    string `json:"output"`
+		Error     string `json:"error"`
+	}
+	if !httpx.DecodeJSONLimit(c, &body, maxModelResultBody) {
+		return
+	}
+	if err := a.service.ModelResult(auth.ActorFrom(c.Request), sessionFingerprint(c.Request),
+		c.Param("id"), c.Param("turn"), body.RequestID, body.Output, body.Error); err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// browserModel keeps only the availabilities the Prompt API reports.
+func browserModel(value string) string {
+	switch value {
+	case copilot.BrowserAvailable, copilot.BrowserDownloadable, copilot.BrowserDownloading:
+		return value
+	}
+	return ""
+}
+
+// sessionFingerprint names the sign-in session a request belongs to without
+// carrying the session secret around: a hash of its cookie. Empty on a
+// loopback-only server, which has no sessions.
+func sessionFingerprint(r *http.Request) string {
+	cookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(cookie.Value))
+	return hex.EncodeToString(sum[:16])
 }
 
 func (a *API) postCancel(c *gin.Context) {

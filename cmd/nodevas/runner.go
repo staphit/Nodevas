@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"nodevas/internal/agenthook"
+	"nodevas/internal/buildinfo"
 	"nodevas/internal/runner"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
@@ -42,6 +43,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerLogout(args, stdout, stderr)
 	case "status":
 		err = runnerStatus(args, stdout, stderr)
+	case "hub-version":
+		err = runnerHubVersion(args, stdout, stderr)
 	case "repo":
 		err = runnerRepo(args, in, stdout, stderr)
 	case "set":
@@ -89,6 +92,8 @@ func runnerUsage(w io.Writer) {
                                              argument. It brings the hub and its Access service token
        nodevas runner logout                 forget the token and the Access secret
        nodevas runner status                 settings (secrets masked) and the agents found here
+       nodevas runner hub-version            the commit the hub was built from (the installer uses it
+                                             to fetch the matching runner binary from GitHub)
        nodevas runner repo add <path> [--name <n>] [--yes]
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
@@ -113,8 +118,9 @@ func runnerUsage(w io.Writer) {
                                              (default 20), planTimeoutMinutes (default 30), dataDir, autoAccept
                                              (true = autoaccept on with the defaults: step-up required,
                                              every repo here, installed agents, headless; false = off),
-                                             interactive (true|false, default false: take runs whose
-                                             agent TUI the dispatcher watches, typing only if allowed);
+                                             interactive (true|false, default true: take runs whose
+                                             agent TUI the dispatcher watches, typing only if allowed;
+                                             each still accepted here or by autoaccept);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
@@ -131,8 +137,10 @@ func runnerUsage(w io.Writer) {
                                              prPollSeconds (30 or more);
                                              remote merge: remoteMerge (true|false, default false), mergeMethod
                                              (squash|merge|rebase), deleteBranchOnMerge (true|false);
-                                             copilot: copilotProvider (anthropic|openai|none: this runner
-                                             makes your voice copilot's model calls with a key kept here),
+                                             copilot: copilotProvider (anthropic|openai|none|off: this runner
+                                             makes your voice copilot's model calls with a key kept here;
+                                             with none, a local Ollama or LM Studio is used when found;
+                                             off turns that off too),
                                              copilotModel, copilotBaseURL (https, or http to this machine
                                              or the local network);
                                              autopilot advisor: advisorProvider (anthropic|openai|systemone|
@@ -311,6 +319,9 @@ func runnerStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "access:  client id %s, secret %s\n", cfg.AccessClientID, masked(cfg.AccessClientSecret))
 	}
 	fmt.Fprintf(stdout, "version: %s\n", runner.Version())
+	if commit := buildinfo.Commit(); commit != "" {
+		fmt.Fprintf(stdout, "commit:  %s\n", commit)
+	}
 	fmt.Fprintln(stdout, "agents:")
 	for _, agent := range runner.Detect(context.Background(), runnerCommands, cfg) {
 		state := "not found"
@@ -354,7 +365,9 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	interactive := "interactive runs: the agent's TUI in a terminal here; the dispatcher watches, " +
 		"and types only where you allowed it"
 	if !cfg.InteractiveOn() {
-		interactive = "interactive runs are declined; headless only (the default)"
+		interactive = "interactive runs are declined; headless only"
+	} else if cfg.Interactive == nil {
+		interactive += " (the default)"
 	}
 	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
 	fmt.Fprintln(w, "claude runs:")
@@ -489,7 +502,11 @@ func printCopilot(w io.Writer, cfg *runner.Config) {
 	setting := func(key string, value any) { fmt.Fprintf(w, "  %-22s %v\n", key, value) }
 	fmt.Fprintln(w, "copilot:")
 	if cfg.CopilotProvider == "" {
-		setting("copilotProvider", "none (the voice copilot's model calls are not made here)")
+		setting("copilotProvider", "none (a local Ollama or LM Studio answers the copilot when one runs here)")
+		return
+	}
+	if cfg.CopilotProvider == runner.CopilotProviderOff {
+		setting("copilotProvider", "off (the voice copilot's model calls are not made here)")
 		return
 	}
 	info, _, reason := cfg.CopilotLLM()

@@ -1,151 +1,71 @@
 # Nodevas
 
-Traditional Chinese documentation: [README.zh-TW.md](./README.zh-TW.md)
+[繁體中文](./README.zh-TW.md)
 
-> A visual workspace for connecting documents, dependencies, workflows, schedules, and AI agents.
+> A visual workspace for your notes, tasks, and AI agents.
 
-Nodevas turns scattered notes and tasks into a workspace you can see, edit, and move forward. Each node keeps its Markdown content and working context—metadata, assignees, priorities, tags, links, status, and history—in one place. Relationships are visible on the canvas, and progress can be planned and reviewed on a timeline.
+Put your work on a canvas as nodes, connect them, and see what is ready to start. When a task is ready, hand it to a coding agent on your own machine and get a pull request back.
 
-It is also a personal agent workstation: the board is the control room, and each node is a task you can hand to a coding agent on one of your own machines. You watch the run live, and the change comes back as a pull request on the node.
+![Nodevas feature tour](./docs/screenshots/nodevas-feature-tour.gif)
 
-[Quick start](./docs/getting-started.md) · [Concepts](./docs/concepts.md) · [MCP guide](./docs/mcp.md) · [Install a runner](./docs/install.md) · [Demo videos](#demo-videos)
+## What you can do
 
-## Features
+- **Plan visually.** Each node is a Markdown page with status, assignee, priority, and tags. View them as a graph, board, or timeline.
+- **Model dependencies.** Link nodes with conditions like `AND` or `OR`; Nodevas shows which work is ready.
+- **Hand work to agents.** Send a node to Claude Code, Codex, Gemini CLI, OpenCode, or Antigravity CLI. Watch it run live, review the diff, merge the PR.
+- **Connect any MCP client.** Agents can find ready tasks, claim them, and report back.
 
-| Feature | What it gives you |
+## Info, Station and Settings
+
+Every project has three faces, switched in the top bar:
+
+- **Info** is the board: graph, timeline, pages and dependencies, where you plan.
+- **Station** is where your agents work together. You see who is working on what, the live war room or boss map, a timeline of who did what in the last hour, what waits on you (questions, merges, usage limits, the daily budget), and what the agents say to each other. Autopilot drives a goal's tasks from here.
+- **Settings** is one page for the rest: the project's statuses, milestones and people, notifications, backup and history, your appearance and language, the voice copilot, the agent workstation (runners, usage, daily budget, routing rules), and on a team server your account and two-factor sign-in, plus server accounts and the audit log for administrators.
+
+![Station: the agents, the war room, who worked on what, and what waits on you](./docs/screenshots/station-warroom.png)
+
+| War room: each runner is an office, each agent at a desk | Boss map: the project is a boss; finishing nodes takes its HP down |
 | --- | --- |
-| [Graph workspace](./docs/concepts.md#nodes-and-relationships) | See documents, tasks, and relationships as a graph, board, or timeline. |
-| [Dependency gates](./docs/concepts.md#dependency-gates) | Model `MUST`, `AND`, `OR`, `XOR`, `NAND`, and `NOR` conditions and find work that is ready to start. |
-| [Planning and progress](./docs/timeline.md) | Compare planned milestones with actual status transitions without mixing plan and history. |
-| [MCP integration](./docs/mcp.md) | Let AI agents discover ready tasks, claim work, update nodes, manage dependencies, and report status. |
-| [Agent runs](./docs/install.md) | Dispatch a node to Claude Code, Codex, Gemini CLI, OpenCode, or Antigravity CLI on your own machine. Each run gets its own git worktree and branch, and ends in a pull request. |
-| [Autopilot](./docs/nodevas-workstation-plan.md) | Break a goal into a task graph, then implement, review, revise, and merge each task as its dependencies finish. |
-| [Voice copilot](./COPILOT.md) | Read and edit the graph by voice or text, with Claude Code–style permission modes. |
-| [Token usage](./docs/usage.md) | See what runs and agent sessions spent, by model, as API-equivalent estimates. |
-| [Local or shared workspace](./docs/collaboration.md) | Run privately on a local machine or deploy one shared server for team collaboration. |
+| ![War room view](./docs/screenshots/game-warroom.png) | ![Boss map view](./docs/screenshots/game-boss-map.png) |
 
-## Agent workstation
+Every character and monster opens the real node, run, diff, or PR. When an agent asks you something, hits its usage limit, or the budget runs out, the browser tells you.
 
-The server (the **hub**) shows the board, the runs, and their changes, but never starts a program. A **runner** (`nodevas runner`) on your own PC connects out to the hub, takes the runs you accept, and runs the agent CLIs with your own logins. Your code, your agent logins, and your `gh` login stay on the runner.
+**Make it yours.** A [view pack](./docs/view-packs.md) restyles the war room or the boss map with your own pictures. It is a zip of `pack.json` and images, with no code; an admin installs it for everyone. Two examples are in [`examples/view-packs`](./examples/view-packs):
 
-- **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
-- **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental), where each tool call streams as it happens and any permission it asks for is refused, since nobody is at a headless run to grant it.
-- **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run.
-- **Agent network.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
-- **Safe defaults.**
-  - Runs need your acceptance at the runner's terminal. Remote dispatch needs a step-up passcode and an auto-accept allowlist you set on the runner.
-  - Remote merge is off until you turn it on.
-  - Reviews and plans run read only, without the repository's own agent config.
-  - Put the hub behind Cloudflare Access; the runner connects with a service token.
-  - Turn on two-factor authentication with an authenticator app (**Project settings → Account security**). Sign-in then needs the app's code too, and step-up asks the app instead of sending email.
-
-Set it up in two steps:
-
-1. Deploy the hub, for example [on TrueNAS behind Cloudflare Tunnel](./deploy/truenas/README.md).
-2. On the hub, open **Runners → Link a new device** and copy the one-time link. On your PC, run [`scripts/install.sh --hub <url> --link`](./docs/install.md#set-up-a-new-pc-with-a-device-link) with the repositories that runs may use, and paste the link when asked. The link works once, for ten minutes, and carries the hub's Access service token if an administrator stored one, so nothing is copied from Cloudflare by hand.
-
-## Beta
-
-The following capabilities are available today but still in beta, and may change between releases:
-
-- [Agent workstation](./docs/install.md): runners, agent runs, review pipelines, and autopilot.
-- [MCP integration](./docs/mcp.md): AI agent tools, resources, and prompts.
-- [Real-time co-editing](./docs/collaboration.md): shared servers, WebSocket presence, and CRDT document sessions.
-- Backup: scheduled snapshots to a local folder, and restore.
-- Version history: document drafts, past revisions, and restore.
-
-## Use cases
-
-- [AI harness engineering](./demo/ai-harness-engineering): dependency-aware queues that agents can safely work through with MCP.
-- [Daily work schedule](./demo/daily-work-schedule): priorities, ownership, planned milestones, and timeline assessment.
-- [Novel writing](./demo/novel-writing): scenes, choices, characters, gates, and revision history as one story graph.
-
-## See it in action
-
-The feature tour keeps the browser viewport at its normal scale and enlarges only the relevant local UI area in a cyan focus window.
-
-![Nodevas feature tour with local focus windows](./docs/screenshots/nodevas-feature-tour.gif)
-
-Readable focused captures and the full screenshot index are available in [`docs/screenshots/`](./docs/screenshots/README.md).
-
-The interface defaults to English and can switch to Traditional Chinese (`zh-TW`). The language and dark-mode capture is available at [nodevas-language-zh-tw.png](./docs/screenshots/nodevas-language-zh-tw.png).
-
-## Demo videos
-
-Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent and hub data in them are staged. Click a clip for the full-size MP4.
-
-### Dispatch a node to an agent
-
-Pick a runner, agent and model; accept it at the runner; watch OpenCode work over ACP; read the diff; merge the PR.
-
-[![Dispatch a node to OpenCode, watch the run, read the diff and merge](./docs/videos/agent-run.gif)](./docs/videos/agent-run.mp4)
-
-### Autopilot
-
-A goal broken into tasks. Each one is implemented, checked by CI, reviewed by other models and revised, then waits for you.
-
-[![Autopilot moving tasks through implement, review and human review](./docs/videos/autopilot.gif)](./docs/videos/autopilot.mp4)
-
-### Two-factor authentication and device links
-
-Turn on an authenticator app, save the recovery codes, then link a new PC: step-up asks the app, and the hub hands back a one-time link.
-
-[![Setting up two-factor authentication, then creating a device link](./docs/videos/two-factor-and-device-link.gif)](./docs/videos/two-factor-and-device-link.mp4)
-
-### Token usage
-
-Tokens and API-equivalent cost by day, agent, model and session.
-
-[![The usage dialog: daily chart, sessions and prices](./docs/videos/usage.gif)](./docs/videos/usage.mp4)
-
-### Agent network
-
-Who is working on what, messages between agents, and a held message waiting for your approval.
-
-[![The agent network panel approving a held message](./docs/videos/agent-network.gif)](./docs/videos/agent-network.mp4)
-
-## Also included
-
-- Multiple projects and subprojects in one workspace tree.
-- Markdown, plain text, HTML, and Word document pages.
-- Imports from Markdown, JSON Canvas, and `.veproj`; exports to Word, plain text, HTML, Markdown, and PDF.
-- Filters and saved views for status, assignee, label, priority, and project.
-- Drafts, history, trash, conflict detection, and filesystem change notifications.
-- Inspectable project files that remain useful with Git and ordinary text tools.
+| Neon station (war room) | Candy dungeon (boss map) |
+| --- | --- |
+| ![Neon station view pack](./docs/screenshots/pack-neon-station.png) | ![Candy dungeon view pack](./docs/screenshots/pack-candy-dungeon.png) |
 
 ## Quick start
 
-Requirements: Go 1.26.10, Node.js 22 with npm, and Git.
+**Standalone, on one machine.** No account, mail, or two-factor sign-in. Needs Go 1.26.10, Node.js 22, and Git:
 
 ```bash
-git clone https://github.com/staphit/Nodevas.git
-cd Nodevas
-npm ci --prefix web
-npm run build --prefix web
-go run ./cmd/nodevas serve -project ./workspace -port 5666
+git clone https://github.com/staphit/Nodevas.git && cd Nodevas
+npm ci --prefix web && npm run build --prefix web && go build -o nodevas ./cmd/nodevas
+./nodevas serve --project ./workspace
 ```
 
-Open <http://127.0.0.1:5666>. For production builds, development mode, configuration, and network access, see [Getting started](./docs/getting-started.md).
+Open <http://127.0.0.1:5666>. The same command starts a runner for coding agents; add `--repo ~/code/my-app` to let runs work in a repository, or `--no-runner` to leave it out. More, including Docker on Linux: [Standalone](./docs/getting-started.md#standalone).
 
-## Documentation
+**Team server.** Run the hub with Docker (`ghcr.io/staphit/nodevas`) on a server or NAS behind HTTPS, with an admin account (`nodevas user add`) and an SMTP relay for sign-in passcodes; people open it in a browser. Each person can add a runner on their PC with `scripts/install.sh --hub <url> --link`, which downloads a GitHub-verified build, or builds from a checkout with Go 1.26 or newer ([details](./docs/install.md)). Steps: [Team server](./docs/getting-started.md#team-server).
 
-- [Getting started](./docs/getting-started.md): build, run, configure, and expose a server safely.
-- [Install a runner](./docs/install.md): `scripts/install.sh` sets up the machine your agents run on in one command.
-- [Concepts](./docs/concepts.md): nodes, edges, dependency gates, readiness, and node metadata.
-- [Timeline](./docs/timeline.md): planned milestones, actual events, and date assessment.
-- [MCP integration](./docs/mcp.md): connect Claude Code, Codex, or another MCP client.
-- [Token usage](./docs/usage.md): what runs and agent sessions spent, and how costs are estimated.
-- [Voice copilot](./COPILOT.md): the in-app AI copilot, its tools, and its permission modes.
-- [Workstation plan](./docs/nodevas-workstation-plan.md) (Traditional Chinese): hub and runner design, agent adapters, security, and autopilot.
-- [Storage and collaboration](./docs/collaboration.md): project files, shared servers, WebSocket, and CRDT behavior.
-- [OCI deployment](./deploy/oci/README.md): provision and operate a shared cloud deployment.
-- [TrueNAS deployment](./deploy/truenas/README.md): run Nodevas behind Cloudflare Tunnel without publishing an origin port.
-- [Contributing](./docs/contributing.md): development checks and repository locations.
+## Run agents on your machine
 
-## Code signing
+[![Dispatch a node to an agent, watch the run, and merge the PR](./docs/videos/agent-run.gif)](./docs/videos/agent-run.mp4)
 
-Windows releases are planned to be signed with free code signing provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org). See the [code signing policy](./docs/code-signing-policy.md).
+The server shows the board; a small **runner** on your PC runs the agents with your own logins, so your code never leaves your machine. Setup, security, autopilot, and more demos: [Agent workstation](./docs/workstation.md).
+
+## Learn more
+
+- [Concepts](./docs/concepts.md) · [Timeline](./docs/timeline.md) · [MCP](./docs/mcp.md) · [Voice copilot](./COPILOT.md) · [Token usage](./docs/usage.md)
+- [Install a runner](./docs/install.md) · [Operations](./docs/operations.md) · [History and backup](./docs/history-and-backup.md) · [Team server and co-editing](./docs/collaboration.md)
+- Examples: [AI harness](./demo/ai-harness-engineering) · [Daily schedule](./demo/daily-work-schedule) · [Novel writing](./demo/novel-writing)
+- [Contributing](./docs/contributing.md) · [Code signing policy](./docs/code-signing-policy.md)
+
+The agent workstation, MCP, co-editing, backup, and version history are in beta and may change.
 
 ## License
 
-Nodevas is licensed under the [GNU General Public License v3.0](./LICENSE).
+[GPL-3.0](./LICENSE)

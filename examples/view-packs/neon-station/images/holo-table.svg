@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 112" width="192" height="112">
+<!-- Neon station: a round holo-table -->
+<ellipse cx="96" cy="96" rx="78" ry="14" fill="#000" fill-opacity=".35"/>
+<path d="M80 62 L84 96 H108 L112 62 Z" fill="#1a2940"/>
+<ellipse cx="96" cy="64" rx="80" ry="28" fill="#1a2940"/>
+<ellipse cx="96" cy="58" rx="80" ry="28" fill="#2e4670"/>
+<ellipse cx="96" cy="58" rx="80" ry="28" fill="none" stroke="#5cc8ff" stroke-width="2.5"/>
+<ellipse cx="96" cy="58" rx="46" ry="15" fill="#5cc8ff" fill-opacity=".18" stroke="#5cc8ff" stroke-opacity=".5" stroke-width="1.5"/>
+<path d="M78 58 L86 26 H106 L114 58 Z" fill="#5cc8ff" fill-opacity=".14"/>
+<circle cx="96" cy="22" r="14" fill="#0b2f45" fill-opacity=".6" stroke="#5cc8ff" stroke-width="2"/>
+<ellipse cx="96" cy="22" rx="14" ry="5" fill="none" stroke="#5cc8ff" stroke-width="1.5"/>
+<ellipse cx="96" cy="22" rx="5" ry="14" fill="none" stroke="#5cc8ff" stroke-width="1.5"/>
+</svg>

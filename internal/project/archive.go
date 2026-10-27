@@ -882,7 +882,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 	if activateRel != "." && activateRel != "" {
 		activateName = name + "/" + activateRel
 	}
-	if err := pm.Activate(activateName, false, ""); err != nil {
+	if err := pm.OpenForCaller(activateName); err != nil {
 		_ = store.RemoveAllProjectPath(pm.workspace, destination)
 		return "", "", &InstallError{
 			http.StatusInternalServerError, fmt.Errorf("activate imported project: %w", err),
@@ -958,7 +958,7 @@ func (pm *ProjectManager) installBundleAtRoot(
 	if err != nil {
 		return abandon(http.StatusBadRequest, err)
 	}
-	if err := pm.Activate(activateName, false, ""); err != nil {
+	if err := pm.OpenForCaller(activateName); err != nil {
 		return abandon(
 			http.StatusInternalServerError,
 			fmt.Errorf("activate imported project: %w", err),

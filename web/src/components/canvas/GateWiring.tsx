@@ -27,6 +27,7 @@ import {
 import type { EdgeLine, EdgeRelation } from "../../types";
 import { DependencyLine } from "./DependencyLine";
 import { useI18n } from "../../i18n";
+import { isPlainAllOfRequirement } from "./simpleDependency";
 
 
 
@@ -49,6 +50,37 @@ export const GATE_H = 24;
 export const DEFAULT_GATE_RATIO = 0.72;
 
 export const BINARY_GATE_OPS = new Set(["and", "or", "xor", "nand", "nor"]);
+
+/**
+ * The operator the gate box would show. A lone non-required parent has no
+ * boolean operator, so the box states the relation instead.
+ */
+export function effectiveGateOp(gate: Gate): string | null {
+  return (
+    gate.op ??
+    (gate.parents.length === 1 && gate.parents[0].relation !== ""
+      ? gate.parents[0].relation
+      : null)
+  );
+}
+
+/**
+ * Whether the fan-in is drawn through a labelled gate box. The default
+ * "depends on all of these" fan-in — required wires joined by a plain `and` —
+ * is drawn as ordinary wires, so the common case carries no badge. Every other
+ * condition keeps its box, and so does an AND left with too few inputs, which
+ * needs the box to flag and delete it.
+ */
+export function showsGateBadge(gate: Gate): boolean {
+  const op = effectiveGateOp(gate);
+  if (!op || gate.parents.length === 0) return false;
+  const defaultAllOf =
+    op === "and" &&
+    gate.parents.length >= 2 &&
+    gate.parents.every((parent) => parent.relation === "") &&
+    isPlainAllOfRequirement(gate.to.node.requires);
+  return !defaultAllOf;
+}
 
 export function GateWiring({
   gate,
@@ -217,15 +249,9 @@ export function GateWiring({
     onPositionChange(gate.to.node.id, fallbackCenter);
   };
 
-  // A lone non-required parent has no boolean operator to show, so the gate
-  // box states the relation instead.
-  const effectiveOp =
-    gate.op ??
-    (gate.parents.length === 1 && gate.parents[0].relation !== ""
-      ? gate.parents[0].relation
-      : null);
+  const effectiveOp = effectiveGateOp(gate);
 
-  if (!effectiveOp || gate.parents.length === 0) {
+  if (!effectiveOp || !showsGateBadge(gate)) {
     return (
       <>
         {gate.parents.map((parent, index) => {

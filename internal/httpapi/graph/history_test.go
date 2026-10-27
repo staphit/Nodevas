@@ -1,16 +1,135 @@
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/gitrepo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
 	"nodevas/internal/store"
 )
+
+// The history API works the same over both backends: list, read and restore
+// round-trip, and a restore can itself be undone.
+func TestHistoryAPIOnBothBackends(t *testing.T) {
+	for _, mode := range []store.HistoryMode{store.HistoryFiles, store.HistoryGit} {
+		t.Run(string(mode), func(t *testing.T) {
+			if mode == store.HistoryGit {
+				if _, err := exec.LookPath("git"); err != nil {
+					t.Skip("git is not installed")
+				}
+			}
+			// The manager creates the default project before a test could pick
+			// its store's backend, so the default is what decides.
+			store.SetDefaultHistoryMode(mode)
+			t.Cleanup(func() { store.SetDefaultHistoryMode(store.HistoryFiles) })
+			api, st := graphTestAPI(t)
+			if got := st.HistoryBackend(); got != mode {
+				t.Fatalf("backend = %q, want %q", got, mode)
+			}
+			ctx := context.Background()
+			seedGraph(t, st, &engine.Node{ID: "alpha", Title: "Alpha"})
+			if err := st.FlushHistory(ctx); err != nil {
+				t.Fatal(err)
+			}
+			_, rev, err := st.LoadGraph()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.SaveGraph(identity.Local, &engine.Graph{Version: 1, Nodes: []*engine.Node{
+				{ID: "alpha", Title: "Alpha"}, {ID: "beta", Title: "Beta"},
+			}}, rev); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.FlushHistory(ctx); err != nil {
+				t.Fatal(err)
+			}
+
+			current, err := os.ReadFile(st.GraphPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			versions := listHistory(t, api, "graph.yaml")
+			version, content := "", ""
+			for _, candidate := range versions {
+				if mode == store.HistoryGit && !gitrepo.ValidSHA(candidate.Name) {
+					t.Fatalf("version name %q is not a commit ID", candidate.Name)
+				}
+				if candidate.At == "" || candidate.Size <= 0 {
+					t.Fatalf("version %+v has no time or size", candidate)
+				}
+				if data := readVersion(t, api, "graph.yaml", candidate.Name); data != string(current) {
+					version, content = candidate.Name, data
+					break
+				}
+			}
+			if version == "" {
+				t.Fatalf("no version differs from the live graph: %+v", versions)
+			}
+
+			restoreRequest := httptest.NewRequest(http.MethodPost, "/api/history/restore",
+				strings.NewReader(`{"path":"graph.yaml","version":"`+version+`"}`))
+			restoreRequest.Header.Set("Content-Type", "application/json")
+			restoreResponse := httptest.NewRecorder()
+			api.postHistoryRestore(ginContext(restoreResponse, restoreRequest))
+			if restoreResponse.Code != http.StatusOK {
+				t.Fatalf("restore status = %d, body = %s", restoreResponse.Code, restoreResponse.Body)
+			}
+			if restored, err := os.ReadFile(st.GraphPath()); err != nil || string(restored) != content {
+				t.Fatalf("restored graph %q, %v; want %q", restored, err, content)
+			}
+			if err := st.FlushHistory(ctx); err != nil {
+				t.Fatal(err)
+			}
+			after := listHistory(t, api, "graph.yaml")
+			if len(after) <= len(versions) {
+				t.Fatalf("history did not grow across a restore: %d then %d", len(versions), len(after))
+			}
+			if mode == store.HistoryGit && after[0].Author != identity.Local.Name {
+				t.Fatalf("restore recorded as %q, want the request's actor", after[0].Author)
+			}
+
+			// Each backend refuses the other's version names.
+			other := "20200101-000000.000000000.yaml"
+			if mode == store.HistoryFiles {
+				other = strings.Repeat("a", 40)
+			}
+			request := httptest.NewRequest(http.MethodGet,
+				"/api/history/version?path=graph.yaml&version="+other, nil)
+			response := httptest.NewRecorder()
+			api.getHistoryVersion(ginContext(response, request))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("foreign version name: status = %d, body = %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
+func readVersion(t *testing.T, api *API, path, version string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/history/version?path="+path+"&version="+version, nil)
+	response := httptest.NewRecorder()
+	api.getHistoryVersion(ginContext(response, request))
+	if response.Code != http.StatusOK {
+		t.Fatalf("version status = %d, body = %s", response.Code, response.Body)
+	}
+	var snapshot struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot.Content
+}
 
 func listHistory(t *testing.T, api *API, path string) []store.HistoryVersion {
 	t.Helper()

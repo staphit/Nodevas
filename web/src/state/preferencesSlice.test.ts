@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configurePreferenceStorage, readPreferences } from "../preferences";
 import { useApp } from "../store";
+import { initialPaneOpen } from "./preferencesSlice";
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
@@ -104,5 +105,54 @@ describe("resetUIPreferences", () => {
 
     expect(useApp.getState().preferences.explorerWidth).toBe(304);
     expect(useApp.getState().preferences.editorFontSize).toBe(14);
+  });
+});
+
+// The timeline's default changed from "open on any wide window" to "folded".
+// Nobody who had it open may lose it — including someone who never stored a
+// choice because the old default was the one they wanted.
+describe("settleTimelineDefault", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("folds the timeline for a browser that has never stored anything", () => {
+    const storage = fakeStorage();
+    configurePreferenceStorage(storage);
+
+    expect(initialPaneOpen()).toEqual({ graph: true, timeline: false });
+    // Written down, so the first preference this visitor stores does not make
+    // them look like a returning one and pop the timeline open later.
+    expect(storage.map.get("vised-pane-timeline")).toBe("0");
+  });
+
+  it("keeps the old default for a returning browser that never chose", () => {
+    const storage = fakeStorage({ "vised-explorer-width": "320" });
+    configurePreferenceStorage(storage);
+
+    expect(initialPaneOpen()).toEqual({ graph: true, timeline: true });
+    expect(storage.map.get("vised-pane-timeline")).toBe("1");
+  });
+
+  it("keeps a returning phone on the graph alone, as it always was", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-explorer-width": "320" }));
+    vi.stubGlobal("innerWidth", 390);
+
+    expect(initialPaneOpen().timeline).toBe(false);
+  });
+
+  it("never overrides a stored choice", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-pane-timeline": "1" }));
+    expect(initialPaneOpen().timeline).toBe(true);
+
+    configurePreferenceStorage(
+      fakeStorage({ "vised-pane-timeline": "0", "vised-explorer-width": "320" }),
+    );
+    expect(initialPaneOpen().timeline).toBe(false);
+  });
+
+  it("falls back to the new default after a reset", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-pane-timeline": "1" }));
+    useApp.getState().resetUIPreferences("layout");
+
+    expect(readPreferences().paneTimeline).toBe(false);
   });
 });

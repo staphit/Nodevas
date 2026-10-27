@@ -19,12 +19,19 @@ import (
 // app config directory, not the workspace: the workspace is the thing users
 // hand to a colleague or sync to a cloud drive, and a backup target — especially
 // a host Path — is machine-local configuration, not project content. It
-// carries nothing sensitive so the API can return it as-is.
+// carries nothing sensitive so the API can return it as-is: the git token is
+// kept apart, encrypted (see gitTokenStore).
 type Config struct {
-	// Kind selects the backend: "" (none) or "folder".
+	// Kind selects the backend: "" (none), "folder" or "git".
 	Kind string `json:"kind"`
 	// Folder is the directory the folder backend writes to.
 	Folder string `json:"folder,omitempty"`
+	// GitURL is the HTTPS repository the git backend pushes each project's
+	// branch to.
+	GitURL string `json:"gitUrl,omitempty"`
+	// GitUser is the user name sent with the token; empty means
+	// defaultGitUser.
+	GitUser string `json:"gitUser,omitempty"`
 	// AutoBackup turns on the scheduled push loop.
 	AutoBackup bool `json:"autoBackup,omitempty"`
 	// IntervalHours is how often the scheduler pushes; <1 falls back to the
@@ -91,7 +98,7 @@ func (m *RemoteManager) loadLocked() Config {
 
 // knownKind reports whether kind names a backend BuildRemote can construct.
 func knownKind(kind string) bool {
-	return kind == "" || kind == "folder"
+	return kind == "" || kind == "folder" || kind == "git"
 }
 
 func (m *RemoteManager) Load() Config {
@@ -115,12 +122,50 @@ func (m *RemoteManager) saveLocked(cfg Config) error {
 	return os.Chmod(Path, 0o600)
 }
 
+// Save stores cfg and keeps a stored git token only when it still belongs to
+// cfg's repository and user.
 func (m *RemoteManager) Save(cfg Config) error {
+	return m.SaveWithToken(cfg, TokenChange{})
+}
+
+// TokenChange is what a config save says about the git token, which is never
+// part of Config: a new one, a request to forget it, or neither (keep it).
+type TokenChange struct {
+	Set   string
+	Clear bool
+}
+
+// SaveWithToken stores cfg and applies the token change. Like the SMTP
+// password, a token never follows an edit of the URL or the user silently:
+// sending one repository's token to another host is how it leaks.
+func (m *RemoteManager) SaveWithToken(cfg Config, token TokenChange) error {
 	if err := m.ValidateConfig(cfg); err != nil {
 		return err
 	}
+	if token.Set != "" {
+		if err := validateGitToken(token.Set); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.pm != nil {
+		switch {
+		case cfg.Kind != "git" || token.Clear:
+			if err := m.gitTokenStore().Clear(); err != nil {
+				return err
+			}
+		case token.Set != "":
+			if err := m.saveGitToken(cfg, token.Set); err != nil {
+				return err
+			}
+		default:
+			current := m.loadLocked()
+			if m.loadGitToken(current) != "" && gitCredentialIdentity(current) != gitCredentialIdentity(cfg) {
+				return ErrGitTokenRequired
+			}
+		}
+	}
 	return m.saveLocked(cfg)
 }
 
@@ -131,6 +176,14 @@ func (m *RemoteManager) Save(cfg Config) error {
 func (m *RemoteManager) ValidateConfig(cfg Config) error {
 	if cfg.Kind == "folder" && m.pm != nil && m.pm.IsRemote() {
 		return ErrFolderRemote
+	}
+	if cfg.Kind == "git" {
+		if _, err := parseGitURL(cfg.GitURL); err != nil {
+			return err
+		}
+		if err := validateGitUser(cfg.GitUser); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -148,7 +201,9 @@ func (m *RemoteManager) BuildRemote(cfg Config) (RemoteStore, error) {
 		return nil, err
 	}
 	switch cfg.Kind {
-	case "":
+	case "", "git":
+		// The git backend holds branches, not bundles: it has no RemoteStore,
+		// and its push and sync go through git.go instead.
 		return nil, nil
 	case "folder":
 		Remote, err := NewFolderRemote(cfg.Folder)

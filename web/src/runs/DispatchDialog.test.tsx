@@ -326,7 +326,7 @@ describe("DispatchDialog", () => {
     });
     const onClose = vi.fn();
     const opened = vi.fn();
-    window.addEventListener("nodevas-open-runners", opened);
+    window.addEventListener("nodevas-open-budget", opened);
 
     render(<DispatchDialog nodeId="alpha" onClose={onClose} onCreated={vi.fn()} />);
     expect(
@@ -337,8 +337,7 @@ describe("DispatchDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adjust budget" }));
     expect(onClose).toHaveBeenCalled();
     expect(opened).toHaveBeenCalled();
-    expect(useBudget.getState().showRequested).toBe(true);
-    window.removeEventListener("nodevas-open-runners", opened);
+    window.removeEventListener("nodevas-open-budget", opened);
   });
 
   it("says nothing about the budget while within it", async () => {

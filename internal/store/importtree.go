@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // ImportDocument is one source file on its way to becoming a node.
@@ -80,7 +81,7 @@ func (s *Store) ImportDocuments(g *engine.Graph, docs []ImportDocument) (int, er
 		data:          data,
 		checkRevision: true,
 	})
-	if err := s.applyUpdatesLocked(updates); err != nil {
+	if err := s.applyUpdatesLocked(identity.Actor{}, updates); err != nil {
 		return 0, err
 	}
 	return len(docs), nil

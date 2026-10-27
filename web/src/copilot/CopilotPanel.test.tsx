@@ -129,4 +129,46 @@ describe("CopilotPanel", () => {
     renderPanel({ errorKey: "copilot.speech.notAllowed" });
     expect(screen.getByText(/Microphone access is blocked/).closest("[role=status]")).not.toBeNull();
   });
+
+  it("names the browser's model in the header", () => {
+    useCopilot.setState({
+      status: { enabled: true, provider: "browser", model: "gemini-nano", modes: ["default"], allowBypass: false },
+    });
+    renderPanel();
+    expect(screen.getByText("Browser (Gemini Nano)")).toBeInTheDocument();
+  });
+
+  it("names a local model and where it runs", () => {
+    useCopilot.setState({
+      status: {
+        enabled: true,
+        provider: "openai",
+        model: "qwen3:8b",
+        modes: ["default"],
+        allowBypass: false,
+        localServer: "ollama",
+        modelHost: "server",
+        serverIsLocal: true,
+      },
+    });
+    renderPanel();
+    expect(screen.getByText("Ollama · qwen3:8b on this PC")).toBeInTheDocument();
+  });
+
+  it("never offers bypass with the browser's model", () => {
+    useCopilot.setState({
+      status: {
+        enabled: true,
+        provider: "browser",
+        model: "gemini-nano",
+        modes: ["plan", "default", "acceptEdits", "bypassPermissions"],
+        allowBypass: true,
+      },
+    });
+    renderPanel();
+    const options = within(screen.getByRole("combobox", { name: "Mode" }))
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("value"));
+    expect(options).not.toContain("bypassPermissions");
+  });
 });

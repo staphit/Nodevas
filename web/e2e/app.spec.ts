@@ -114,11 +114,11 @@ test.describe("main flows", () => {
 
     // The sidebar legend explains, it does not edit.
     await page.getByText("狀態圖例").click();
-    await expect(page.getByText("自訂實際狀態在「專案設定")).toBeVisible();
+    await expect(page.getByText("自訂實際狀態在「設定 → 狀態、里程碑與人員」")).toBeVisible();
 
     // The legend also offers a way in, so match the toolbar button exactly.
-    await page.getByRole("button", { name: "專案設定", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "專案設定" });
+    await page.getByRole("button", { name: "設定", exact: true }).click();
+    const dialog = page.getByRole("region", { name: "專案設定" });
     await expect(dialog).toBeVisible();
 
     await dialog.getByRole("tab", { name: "里程碑類型" }).click();
@@ -156,11 +156,14 @@ test.describe("context menus", () => {
 
     const menu = page.locator(".lane-context-menu");
     await expect(menu).toBeVisible();
-    await expect(menu.getByText(/關係線/)).toBeVisible();
+    // The title reads as a plain dependency: "B 相依於 A".
+    await expect(menu.getByText(/相依於/)).toBeVisible();
     // Meaning and looks are two separate groups in this menu.
     await expect(menu.getByText("關係語意")).toBeVisible();
-    await expect(menu.getByText("棄用")).toBeVisible();
     await expect(menu.getByText("線條外觀")).toBeVisible();
+    // Optional and deprecated live behind the advanced disclosure.
+    await menu.getByText("進階條件").click();
+    await expect(menu.getByText("棄用")).toBeVisible();
   });
 
   test("right click on a timeline cell schedules an expected milestone", async ({

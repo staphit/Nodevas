@@ -1,7 +1,6 @@
 import {
   lazy,
   Suspense,
-  useCallback,
   useEffect,
   useReducer,
   useRef,
@@ -18,22 +17,24 @@ import { ConfirmDialogHost } from "./components/ConfirmDialog";
 import { ProjectPickerHost } from "./components/ProjectPickerDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { OnboardingTour } from "./components/tour/OnboardingTour";
+import { StartScreen } from "./components/StartScreen";
+import { useWorkstationAutoEnable } from "./runners/workstation";
 import { CopilotRoot } from "./copilot/CopilotRoot";
 import { notifyAccessChanged, ProjectAccessBanner } from "./members/ProjectAccessBanner";
 import { runnersChanged as copilotRunnersChanged } from "./copilot/session";
 import { AgentNetworkRoot } from "./agents/AgentNetworkRoot";
 import { useAgents } from "./agents/agentStore";
-import { RunnersModal } from "./runners/RunnersModal";
-import { UsageModal } from "./usage/UsageModal";
 import { useUsage } from "./usage/usageStore";
 import { useAutopilot } from "./autopilot/autopilotStore";
 import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
+import { ModeSwitch } from "./station/ModeSwitch";
+import { openSettings } from "./settings/openSettings";
+import { usePacks } from "./game/packStore";
+import { useStation } from "./station/stationStore";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
-import { NotifySettingsModal } from "./components/NotifySettingsModal";
-import { BackupModal } from "./components/BackupModal";
 import { RemoteSyncBanner } from "./components/backup/RemoteSyncBanner";
 import {
   degradedDocumentsReducer,
@@ -41,28 +42,24 @@ import {
   documentPersistenceAction,
 } from "./components/DocumentPersistenceBanner";
 import { AuthGate, SignOutButton, useSignOut, useViewer } from "./components/SignIn";
-import { ProjectSettings } from "./components/ProjectSettings";
 import { OperationStatus, ResizeHandle } from "./components/InteractionPrimitives";
 import { useTouchContextMenu } from "./components/touch";
 import { PresenceAvatars } from "./components/PresenceAvatars";
 import { TopbarOverflow, useNarrowViewport } from "./components/TopbarOverflow";
-import { LANGUAGE_OPTIONS, useI18n } from "./i18n";
+import { useI18n } from "./i18n";
 import {
-  IconBell,
-  IconCloud,
-  IconComputer,
-  IconGear,
   IconHelp,
   IconMoon,
   IconSignOut,
   IconSun,
   IconTree,
-  IconUsage,
 } from "./icons";
 
 const Drawer = lazy(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
 );
+const StationView = lazy(() => import("./station/StationView"));
+const SettingsView = lazy(() => import("./settings/SettingsView"));
 const PopoutEditor = lazy(() =>
   import("./components/PopoutEditor").then((module) => ({
     default: module.PopoutEditor,
@@ -74,7 +71,7 @@ const EXPLORER_MAX_W = 520;
 const EXPLORER_DEFAULT_W = 304;
 
 function MainApp() {
-  const { language, setLanguage, t } = useI18n();
+  const { language, t } = useI18n();
   const loadAll = useApp((s) => s.loadAll);
   const refreshState = useApp((s) => s.refreshState);
   const refreshTrash = useApp((s) => s.refreshTrash);
@@ -98,25 +95,18 @@ function MainApp() {
   const clearError = useApp((s) => s.clearError);
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const explorerCollapsed = usePreference("explorerCollapsed");
+  const projectMode = usePreference("projectMode");
   const workspace = useApp((s) => s.workspace);
   const workspaceLabel = useApp(
     (s) => s.workspaces.find((entry) => entry.active)?.label ?? "",
   );
   const lastOperation = useLastOperation();
+  // Agents seen in this workspace turn the workstation on.
+  useWorkstationAutoEnable();
   const [degradedDocuments, dispatchDocumentPersistence] = useReducer(
     degradedDocumentsReducer,
     new Set<string>(),
   );
-  // One state for all three, rather than a boolean each.
-  //
-  // Booleans let two of these be true at once, and the one that shows is
-  // whichever React renders last — so opening one dialog while another was
-  // still up did open it, underneath, and read as a button that did nothing. Making them one value makes that unrepresentable instead
-  // of relying on every opener remembering to close its neighbours.
-  const [modal, setModal] = useState<
-    "" | "notify" | "backup" | "settings" | "runners" | "usage"
-  >("");
-  const closeModal = useCallback(() => setModal(""), []);
   // Live width while dragging; the preference is written on commit so a drag
   // does not hammer localStorage. Adopting the preference again keeps a reset
   // (or another window's change) visible without a reload.
@@ -160,22 +150,25 @@ function MainApp() {
     return () => window.removeEventListener("keydown", onUndo);
   }, [redoLast, undoLast]);
 
-  // Anything that mentions Project Settings can open it, instead of telling
-  // the reader to hunt for the gear in the top bar.
+  // Anything that mentions a setting can open it, instead of telling the
+  // reader to hunt for it: each event opens its part of the Settings view.
   useEffect(() => {
-    const onOpenSettings = () => setModal("settings");
-    const onOpenNotify = () => setModal("notify");
-    const onOpenRunners = () => setModal("runners");
-    const onOpenUsage = () => setModal("usage");
+    const onOpenSettings = () => openSettings("project");
+    const onOpenNotify = () => openSettings("notifications");
+    const onOpenRunners = () => openSettings("runners");
+    const onOpenUsage = () => openSettings("usage");
+    const onOpenBudget = () => openSettings("budget");
     window.addEventListener("nodevas-project-settings", onOpenSettings);
     window.addEventListener("nodevas-notify-settings", onOpenNotify);
     window.addEventListener("nodevas-open-runners", onOpenRunners);
     window.addEventListener("nodevas-open-usage", onOpenUsage);
+    window.addEventListener("nodevas-open-budget", onOpenBudget);
     return () => {
       window.removeEventListener("nodevas-project-settings", onOpenSettings);
       window.removeEventListener("nodevas-notify-settings", onOpenNotify);
       window.removeEventListener("nodevas-open-runners", onOpenRunners);
       window.removeEventListener("nodevas-open-usage", onOpenUsage);
+      window.removeEventListener("nodevas-open-budget", onOpenBudget);
     };
   }, []);
 
@@ -312,6 +305,15 @@ function MainApp() {
           // and raise a system notification when this browser allows one.
           void useAgents.getState().handleNotify(ev.id ?? "");
           break;
+        case "agent-ask":
+          // The id is a new question: toast it to whoever may answer, with a
+          // system notification when this browser allows one.
+          void useAgents.getState().handleAsk(ev.id ?? "");
+          break;
+        case "packs-changed":
+          // A view pack was installed or removed: a loaded list refetches.
+          usePacks.getState().onPacksChanged();
+          break;
         case "runners-changed":
           // Only refetched once the Runners dialog has loaded them; a board
           // that never opened it has nothing to keep current.
@@ -328,6 +330,8 @@ function MainApp() {
           useRuns.getState().onRunsChanged(ev.id);
           // A finished run's usage arrives only as runs-changed.
           useUsage.getState().onUsageEvent();
+          // An open Station refetches the project's runs, coalesced.
+          useStation.getState().onRunsChanged();
           // A task's run moved: active autopilot runs held refetch.
           useAutopilot.getState().onRunsChanged();
           break;
@@ -420,11 +424,12 @@ function MainApp() {
   }, [live, activeTab, editingTab?.dirty]);
 
   return (
-    <div className="app">
+    <div className={`app mode-${projectMode}`}>
       <header className="topbar">
         <button
           type="button"
           className="icon-btn explorer-toggle"
+          hidden={projectMode !== "info"}
           onClick={toggleExplorer}
           title={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
           aria-label={explorerCollapsed ? t("topbar.explorer.expand") : t("topbar.explorer.collapse")}
@@ -470,6 +475,7 @@ function MainApp() {
           </select>
         </nav>
 
+        <ModeSwitch />
         {graph?.type && <span className="project-type">{graph.type}</span>}
         {lastOperation && (
           <OperationStatus
@@ -491,21 +497,6 @@ function MainApp() {
           >
             {t("topbar.searchOrCommand")} <kbd>Ctrl/⌘ K</kbd>
           </button>
-          <label className="language-control">
-            <span className="sr-only">{t("language.label")}</span>
-            <select
-              className="language-select"
-              value={language}
-              aria-label={t("language.label")}
-              onChange={(event) => setLanguage(event.target.value as typeof language)}
-            >
-              {LANGUAGE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {t(`language.option.${option}`)}
-                </option>
-              ))}
-            </select>
-          </label>
           <button
             className="icon-btn"
             data-tour="tour-replay"
@@ -514,33 +505,6 @@ function MainApp() {
             aria-label={t("topbar.replayTour")}
           >
             <IconHelp size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="settings"
-            onClick={() => setModal("settings")}
-            title={t("topbar.projectSettingsTitle")}
-            aria-label={t("topbar.projectSettings")}
-          >
-            <IconGear size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="notify"
-            onClick={() => setModal("notify")}
-            title={t("topbar.deadlineSettings")}
-            aria-label={t("topbar.deadlineSettings")}
-          >
-            <IconBell size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            data-tour="backup"
-            onClick={() => setModal("backup")}
-            title={t("topbar.cloudBackupTitle")}
-            aria-label={t("topbar.cloudBackup")}
-          >
-            <IconCloud size={16} />
           </button>
           <button
             className="icon-btn"
@@ -564,36 +528,6 @@ function MainApp() {
                 onSelect: () => window.dispatchEvent(new CustomEvent("nodevas-tour-start")),
               },
               {
-                id: "settings",
-                label: t("topbar.projectSettings"),
-                icon: <IconGear size={16} />,
-                onSelect: () => setModal("settings"),
-              },
-              {
-                id: "notify",
-                label: t("topbar.deadlineSettings"),
-                icon: <IconBell size={16} />,
-                onSelect: () => setModal("notify"),
-              },
-              {
-                id: "backup",
-                label: t("topbar.cloudBackup"),
-                icon: <IconCloud size={16} />,
-                onSelect: () => setModal("backup"),
-              },
-              {
-                id: "runners",
-                label: t("topbar.runners"),
-                icon: <IconComputer size={16} />,
-                onSelect: () => setModal("runners"),
-              },
-              {
-                id: "usage",
-                label: t("topbar.usage"),
-                icon: <IconUsage size={16} />,
-                onSelect: () => setModal("usage"),
-              },
-              {
                 id: "theme",
                 label: theme === "dark" ? t("topbar.lightMode") : t("topbar.darkMode"),
                 icon: theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />,
@@ -615,12 +549,7 @@ function MainApp() {
       </header>
       <DocumentPersistenceBanner documents={degradedDocuments} />
       <ProjectAccessBanner />
-      <RemoteSyncBanner onOpenBackup={() => setModal("backup")} />
-      {modal === "notify" && <NotifySettingsModal onClose={closeModal} />}
-      {modal === "backup" && <BackupModal onClose={closeModal} />}
-      {modal === "settings" && <ProjectSettings onClose={closeModal} />}
-      {modal === "runners" && <RunnersModal onClose={closeModal} />}
-      {modal === "usage" && <UsageModal onClose={closeModal} />}
+      <RemoteSyncBanner onOpenBackup={() => openSettings("backup")} />
       {error && (
         <div className="global-error" role="alert">
           <span>{error}</span>
@@ -630,6 +559,24 @@ function MainApp() {
         </div>
       )}
       <div className="main">
+        {projectMode === "settings" ? (
+          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+            <SettingsView />
+          </Suspense>
+        ) : projectMode === "station" ? (
+          <Suspense fallback={<div className="station-loading">{t("station.loading")}</div>}>
+            <StationView
+              drawer={
+                activeTab !== null && (
+                  <Suspense fallback={<div className="drawer drawer-loading">{t("stage.loadingEditor")}</div>}>
+                    <Drawer />
+                  </Suspense>
+                )
+              }
+            />
+          </Suspense>
+        ) : (
+          <>
         {/* Phone-width only (the component renders nothing when wide): dims
             the board the explorer overlay covers and gives a tap anywhere
             outside the panel the obvious meaning — close it. */}
@@ -670,10 +617,13 @@ function MainApp() {
           />
         )}
         <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
+          </>
+        )}
       </div>
       <ConfirmDialogHost />
       <ProjectPickerHost />
       <CommandPalette />
+      <StartScreen />
       <OnboardingTour />
       <CopilotRoot />
       <AgentNetworkRoot />

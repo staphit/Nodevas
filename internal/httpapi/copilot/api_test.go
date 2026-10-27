@@ -121,6 +121,7 @@ func TestAnotherAccountGets404Everywhere(t *testing.T) {
 		{http.MethodPost, base + "/turns", `{"text":"hi"}`},
 		{http.MethodPost, base + "/turns/t1/decisions", `{"requestId":"r","decision":"allow"}`},
 		{http.MethodPost, base + "/turns/t1/client-results", `{"callId":"c","output":"x"}`},
+		{http.MethodPost, base + "/turns/t1/model-results", `{"requestId":"r","output":"{}"}`},
 		{http.MethodPost, base + "/turns/t1/cancel", `{}`},
 	} {
 		response := call(t, router, "bob", request.method, request.target, request.body)
@@ -212,5 +213,33 @@ func TestSettingsAreAdminOnlyAndTheKeyIsWriteOnly(t *testing.T) {
 	status := call(t, router, "alice", http.MethodGet, "/api/copilot/status", "")
 	if !strings.Contains(status.Body.String(), `"enabled":true`) || !strings.Contains(status.Body.String(), `"allowBypass":true`) {
 		t.Fatalf("status after settings = %s", status.Body)
+	}
+}
+
+func TestBrowserModelAvailabilityIsFiltered(t *testing.T) {
+	for value, want := range map[string]string{
+		"available": "available", "downloadable": "downloadable", "downloading": "downloading",
+		"unavailable": "", "": "", "available x": "", "yes": "",
+	} {
+		if got := browserModel(value); got != want {
+			t.Errorf("browserModel(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+func TestSessionFingerprint(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	if got := sessionFingerprint(request); got != "" {
+		t.Fatalf("no cookie = %q", got)
+	}
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "secret-session"})
+	first := sessionFingerprint(request)
+	if first == "" || strings.Contains(first, "secret") {
+		t.Fatalf("fingerprint = %q", first)
+	}
+	other := httptest.NewRequest(http.MethodGet, "/", nil)
+	other.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "another-session"})
+	if sessionFingerprint(other) == first {
+		t.Fatal("two sessions share a fingerprint")
 	}
 }

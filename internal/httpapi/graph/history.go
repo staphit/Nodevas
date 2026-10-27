@@ -4,6 +4,7 @@ package graph
 
 import (
 	"errors"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/store"
 	"strings"
@@ -45,12 +46,14 @@ func (a *API) getHistoryVersion(c *gin.Context) {
 		httpx.Err(c, 400, errors.New("此格式的版本無法預覽，請直接還原"))
 		return
 	}
-	// A snapshot is finished the moment it is written and is never rewritten:
-	// snapshotHistory names each one after the nanosecond it was taken and only
-	// ever creates new files, RestoreHistory copies a snapshot forward into the
-	// live file rather than editing the snapshot, and pruneHistory only deletes
-	// the oldest names. Because the names are monotonic timestamps, a pruned
-	// name is never handed out again, so this URL cannot come to mean different
+	// A version is finished the moment it is written and is never rewritten.
+	// With the git backend the version is a commit ID, and a commit's content
+	// is its ID. With the file backend, snapshotHistory names each copy after
+	// the nanosecond it was taken and only ever creates new files,
+	// RestoreHistory copies a snapshot forward into the live file rather than
+	// editing the snapshot, and pruneHistory only deletes the oldest names.
+	// Because the names are monotonic timestamps, a pruned name is never
+	// handed out again. Either way this URL cannot come to mean different
 	// bytes later — it can only stop existing. Nothing else here changes: path
 	// and version are echoed straight back from the query.
 	httpx.Immutable(c)
@@ -70,7 +73,7 @@ func (a *API) postHistoryRestore(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	if err := st.RestoreHistory(body.Path, body.Version); err != nil {
+	if err := st.RestoreHistory(auth.ActorFrom(c.Request), body.Path, body.Version); err != nil {
 		httpx.Err(c, 400, err)
 		return
 	}
@@ -120,7 +123,7 @@ func (a *API) postTrashRestore(c *gin.Context) {
 		httpx.Err(c, 400, errors.New("trash filename is too long"))
 		return
 	}
-	id, err := httpx.StoreFor(c.Request, a.pm).RestoreTrash(body.File)
+	id, err := httpx.StoreFor(c.Request, a.pm).RestoreTrash(auth.ActorFrom(c.Request), body.File)
 	if err != nil {
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {

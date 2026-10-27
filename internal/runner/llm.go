@@ -76,6 +76,9 @@ func (c *Config) CopilotLLM() (info runnerwire.LLMInfo, key string, reason strin
 	if c == nil || c.CopilotProvider == "" {
 		return runnerwire.LLMInfo{}, "", "copilotProvider is not set"
 	}
+	if c.CopilotProvider == CopilotProviderOff {
+		return runnerwire.LLMInfo{}, "", "copilotProvider is off"
+	}
 	info = runnerwire.LLMInfo{
 		Provider: c.CopilotProvider,
 		Model:    c.CopilotModel,
@@ -170,6 +173,11 @@ func purposeLabel(purpose string) string {
 
 // setCopilot handles the copilot settings of `nodevas runner set`.
 func (c *Config) setCopilot(key, value string, reset bool) error {
+	if key == "copilotProvider" && strings.EqualFold(value, CopilotProviderOff) {
+		// Not even the automatic local model (llm_auto.go).
+		c.CopilotProvider = CopilotProviderOff
+		return nil
+	}
 	return setModelSetting(key, value, reset, CopilotProviders, &c.CopilotProvider, &c.CopilotModel, &c.CopilotBaseURL)
 }
 
@@ -335,7 +343,7 @@ func (s *llmSession) request(req *runnerwire.LLMRequest) {
 		return
 	}
 	what := purposeLabel(req.Purpose)
-	info, key, reason := s.c.Config.modelCallSettings(req.Purpose)
+	info, key, reason := s.c.modelCallSettings(s.ctx, req.Purpose)
 	switch {
 	case reason != "":
 		s.refuse(req.ID, "this runner does not answer "+what+" model calls: "+reason)

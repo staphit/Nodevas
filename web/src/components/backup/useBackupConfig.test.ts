@@ -8,6 +8,7 @@ import {
   DEFAULT_RETAIN,
   draftFromConfig,
   draftIsDirty,
+  inputOf,
   retentionOf,
   useBackupConfig,
   type BackupDraft,
@@ -91,6 +92,25 @@ describe("draft arithmetic", () => {
 
   it("counts an untouched draft as clean", () => {
     expect(draftIsDirty(draftFromConfig(CONFIG), CONFIG)).toBe(false);
+  });
+
+  it("sends the git fields only with the git backend, and a token only when typed", () => {
+    const git = { ...CONFIG, kind: "git" as const, folder: "", gitUrl: "https://h/r.git", hasGitToken: true };
+    const draft = draftFromConfig(git);
+    expect(draftIsDirty(draft, git)).toBe(false);
+    expect(inputOf(draft)).toEqual(
+      expect.objectContaining({ kind: "git", gitUrl: "https://h/r.git", gitUser: "" }),
+    );
+    expect(inputOf(draft)).not.toHaveProperty("gitToken");
+
+    // A typed token, or asking to forget the saved one, is an unsaved change.
+    expect(draftIsDirty({ ...draft, gitToken: "t" }, git)).toBe(true);
+    expect(inputOf({ ...draft, gitToken: " t " }).gitToken).toBe("t");
+    expect(draftIsDirty({ ...draft, clearGitToken: true }, git)).toBe(true);
+    expect(inputOf({ ...draft, clearGitToken: true }).clearGitToken).toBe(true);
+
+    // A folder backend never carries git settings along.
+    expect(inputOf({ ...draft, kind: "folder", gitToken: "t" })).not.toHaveProperty("gitUrl");
   });
 });
 

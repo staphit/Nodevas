@@ -58,7 +58,7 @@ const configDir = join(scratch, "config");
 mkdirSync(configDir, { recursive: true });
 
 console.log(`[demo] workspace ${workspace}`);
-const server = spawn(binary, ["serve", "--project", workspace, "--port", port], {
+const server = spawn(binary, ["serve", "--project", workspace, "--port", port, "--no-runner"], {
   stdio: "inherit",
   env: {
     ...process.env,

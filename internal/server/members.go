@@ -35,6 +35,13 @@ func (s *Server) UseMembersDB(database *db.DB) {
 		store = members.Unavailable()
 	}
 	s.members = store
+	// Each account's current project lives in the same database.
+	s.current = newCurrentProjects(database)
+	if err := s.current.load(context.Background()); err != nil {
+		// Only the remembered choices are lost: everyone starts on a
+		// default they may open, and choosing again saves again.
+		log.Printf("current projects: %v; accounts start on their default project", err)
+	}
 	if s.hub != nil {
 		s.hub.SetAccess(func(actor identity.Actor, room string) bool {
 			return s.members.Access(actor, project.Key(room)).CanRead()
@@ -60,6 +67,8 @@ var accountLevelPaths = []string{
 	"/api/usage/prices",
 	"/api/notify/",
 	"/api/audit",
+	// View packs are the workspace's; admins install them for everyone.
+	"/api/packs/",
 }
 
 // readOnlyPosts are POST routes that change nothing: a viewer may use them.

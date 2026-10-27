@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp, usePreference } from "../../store";
 import { TOUR_CHAPTERS, type TourChapter, type TourStep } from "./chapters";
+import { useStartScreenVisible } from "../StartScreen";
 
 const HIGHLIGHT_PAD = 8;
 const POPOVER_GAP = 12;
@@ -71,6 +72,9 @@ export function OnboardingTour() {
   const chaptersDoneRaw = usePreference("tourChaptersDone");
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const activeTab = useApp((s) => s.activeTab);
+  // A new workspace opens on the start screen; the invitation waits for it,
+  // so a first launch shows one dialog at a time.
+  const startScreenVisible = useStartScreenVisible();
 
   // Before the schema entry lands (or on a fresh profile) the store may hand
   // back undefined; treat that as "nothing done yet".
@@ -150,11 +154,17 @@ export function OnboardingTour() {
   // ---------------------------------------------------------------------
   useEffect(() => {
     if (promptedRef.current) return;
-    promptedRef.current = true;
-    if (tourPrompt !== "pending") return;
-    const timer = window.setTimeout(() => setWelcomeOpen(true), WELCOME_DELAY);
+    if (tourPrompt !== "pending") {
+      promptedRef.current = true;
+      return;
+    }
+    if (startScreenVisible) return;
+    const timer = window.setTimeout(() => {
+      promptedRef.current = true;
+      setWelcomeOpen(true);
+    }, WELCOME_DELAY);
     return () => window.clearTimeout(timer);
-  }, [tourPrompt]);
+  }, [tourPrompt, startScreenVisible]);
 
   const acceptTour = useCallback(() => {
     updateUIPreference("tourPrompt", "accepted");

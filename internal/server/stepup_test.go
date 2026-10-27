@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"nodevas/internal/agents"
+	"nodevas/internal/logging/logtest"
 	"nodevas/internal/realtime"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -45,6 +46,7 @@ func stepUp(t *testing.T, s *runnerTestServer, b browser) runnerwire.StepUpStatu
 
 func TestStepUpOverHTTP(t *testing.T) {
 	s := newRunnerTestServer(t)
+	logs := logtest.Capture(t)
 	bea := s.signIn(t, "bea@example.test")
 
 	if status := stepUpStatusOf(t, s, &bea); !status.Required || status.Active || status.Until != "" {
@@ -94,6 +96,31 @@ func TestStepUpOverHTTP(t *testing.T) {
 	if strings.Contains(trail, code) {
 		t.Fatal("the passcode reached the audit trail")
 	}
+
+	// In the process log a step-up is not a sign-in, nor its passcode one
+	// mailed for a sign-in: the session already had one. It is this server's
+	// own audit event, named like those two.
+	stepUp := map[string]any{"event.category": "audit", "nodevas.auth.purpose": "step-up", "nodevas.auth.method": "otp",
+		"user.name": "bea", "user.email": "bea@example.test"}
+	asked := logs.Await(t, map[string]any{"nodevas.audit.action": "auth.stepup.request"})
+	logtest.Want(t, asked, map[string]any{"log.level": "info", "event.action": "auth.stepup.code.request", "event.outcome": "success"})
+	logtest.Want(t, asked, stepUp)
+	wrong := logs.One(t, map[string]any{"nodevas.audit.action": "auth.stepup.failed"})
+	logtest.Want(t, wrong, map[string]any{"log.level": "warn", "event.action": "auth.stepup", "event.outcome": "failure",
+		"event.reason": "bad-credentials"})
+	logtest.Want(t, wrong, stepUp)
+	right := logs.One(t, map[string]any{"nodevas.audit.action": "auth.stepup"})
+	logtest.Want(t, right, map[string]any{"log.level": "info", "event.action": "auth.stepup", "event.outcome": "success"})
+	logtest.Want(t, right, stepUp)
+	// What counts sign-ins and the passcodes mailed for them sees three
+	// sign-ins (bea, cal, ann), and no step-up.
+	if signIns := logs.Find(t, map[string]any{"event.action": "auth.signin"}); len(signIns) != 3 {
+		t.Errorf("%d auth.signin lines, want 3:\n%s", len(signIns), logs.Text())
+	}
+	if codes := logs.Find(t, map[string]any{"event.action": "auth.code.request", "nodevas.auth.purpose": "step-up"}); len(codes) != 0 {
+		t.Errorf("a step-up passcode reads as a sign-in code: %v", codes)
+	}
+	logs.Never(t, code, "WRONGCOD")
 }
 
 func TestStepUpOnLoopbackIsNotRequired(t *testing.T) {

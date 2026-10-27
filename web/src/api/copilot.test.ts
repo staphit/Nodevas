@@ -148,4 +148,34 @@ describe("copilotApi", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([conversation]))));
     await expect(copilotApi.listCopilotConversations("p")).resolves.toEqual([conversation]);
   });
+
+  it("tells the status which built-in model this browser has", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ enabled: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    await copilotApi.getCopilotStatus("downloadable");
+    await copilotApi.getCopilotStatus();
+    const urls = fetchMock.mock.calls.map((call) => (call as unknown as [string])[0]);
+    expect(urls).toEqual(["/api/copilot/status?browserModel=downloadable", "/api/copilot/status"]);
+  });
+
+  it("posts the browser model's answer to the turn", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    await copilotApi.sendCopilotModelResult("c", "t", { requestId: "m1", output: '{"type":"text","text":"hi"}' });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/copilot/conversations/c/turns/t/model-results");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ requestId: "m1", output: '{"type":"text","text":"hi"}' });
+  });
+});
+
+describe("model_request events", () => {
+  it("parses the browser model call", () => {
+    const line = JSON.stringify({
+      type: "model_request",
+      requestId: "m1",
+      modelRequest: { system: "s", messages: [{ role: "user", content: "hi" }], schema: { type: "object" }, attempt: 1 },
+    });
+    expect(parseTurnEventLine(line)).toMatchObject({ type: "model_request", requestId: "m1" });
+  });
 });

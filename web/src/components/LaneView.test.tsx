@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -69,13 +69,19 @@ describe("LaneView", () => {
     const user = userEvent.setup();
     render(<LaneView variant="graph" {...paneProps} />);
 
-    const toggle = screen.getByRole("button", { name: /對齊輔助/ });
+    // A setting, not a first-day control: it lives in the header's ⋯ menu.
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
+    const toggle = screen.getByRole("menuitemcheckbox", { name: /對齊輔助/ });
     // On by default: lining a board up by hand is the tedious part.
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
 
     await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(useApp.getState().preferences.graphSnapGuides).toBe(false);
+    // The preference outlives this test file; put it back.
+    act(() => {
+      useApp.getState().updateUIPreference("graphSnapGuides", true);
+    });
   });
 
   // The node scale rides the board's CSS zoom, and the text divides it back
@@ -85,7 +91,7 @@ describe("LaneView", () => {
     const { container } = render(<LaneView variant="graph" {...paneProps} />);
     const inner = container.querySelector<HTMLElement>(".board-inner")!;
 
-    await user.click(screen.getByText(/節點 100% · 文字 100%/));
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
     const [node, font] = screen.getAllByRole("slider");
 
     fireEvent.change(node, { target: { value: "1.5" } });
@@ -113,7 +119,7 @@ describe("LaneView", () => {
 
     expect(inner).not.toHaveAttribute("data-lod");
 
-    await user.click(screen.getByText(/節點 100% · 文字 100%/));
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
     const [node] = screen.getAllByRole("slider");
 
     fireEvent.change(node, { target: { value: "0.7" } });
@@ -133,7 +139,8 @@ describe("LaneView", () => {
     // Wide windows start with it: jsdom's 1024px counts as wide.
     expect(container.querySelector(".graph-minimap")).not.toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "縮圖" }));
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "縮圖" }));
     expect(container.querySelector(".graph-minimap")).toBeNull();
     expect(useApp.getState().preferences.graphMinimap).toBe(false);
 
@@ -141,6 +148,36 @@ describe("LaneView", () => {
     act(() => {
       useApp.getState().updateUIPreference("graphMinimap", true);
     });
+  });
+
+  // The header keeps what a first board needs; the rest is one press away
+  // and still all there.
+  it("keeps the graph header short and the rest in its ⋯ menu", async () => {
+    const user = userEvent.setup();
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    for (const name of [/新增節點/, "全部置中", "篩選與檢視"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    for (const name of ["選取置中", "貼齊格線", "全部對齊", "縮圖"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    // The gesture sentence waits behind its ? button.
+    const hintToggle = screen.getByRole("button", { name: "操作提示" });
+    expect(hintToggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(hintToggle);
+    expect(hintToggle).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
+    const menu = screen.getByRole("menu", { name: "更多關係圖工具" });
+    for (const name of [/分析/, "選取置中", /對齊輔助/, "貼齊格線", "全部對齊", "縮圖"]) {
+      expect(
+        within(menu).queryByRole("menuitem", { name }) ??
+          within(menu).getByRole("menuitemcheckbox", { name }),
+      ).toBeInTheDocument();
+    }
+    // Nothing selected, so there is nothing to fit to.
+    expect(within(menu).getByRole("menuitem", { name: "選取置中" })).toBeDisabled();
   });
 
   it("keeps the display scale off the timeline, which sizes its own cells", () => {

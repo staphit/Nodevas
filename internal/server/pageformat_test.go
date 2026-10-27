@@ -250,7 +250,7 @@ func TestDeletedDocxPageRestoresIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.store(nil).RestoreTrash(deleteOutcome.TrashFile); err != nil {
+	if _, err := server.store(nil).RestoreTrash(identity.Local, deleteOutcome.TrashFile); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	after, err := os.ReadFile(pageFilePath(t, root, "alpha", page.ID, ".docx"))

@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/members"
@@ -34,12 +35,21 @@ type API struct {
 	pm    *project.ProjectManager
 	store *members.Store
 	find  FindAccount
+	// current names the caller's own current project when the request names
+	// none, on a server where each account has one; nil means the active one.
+	current func(*http.Request) string
 }
 
 // New builds the handler set. find may be nil on a server without accounts,
 // where membership has nobody to name.
 func New(pm *project.ProjectManager, store *members.Store, find FindAccount) *API {
 	return &API{pm: pm, store: store, find: find}
+}
+
+// UseCurrent resolves an unnamed project to the caller's current one.
+func (a *API) UseCurrent(current func(*http.Request) string) *API {
+	a.current = current
+	return a
 }
 
 // Register wires the routes.
@@ -55,6 +65,13 @@ func (a *API) Register(api *gin.RouterGroup) {
 // so probing names teaches nothing) a project the caller may not read.
 func (a *API) target(c *gin.Context, name string) (string, string, members.Access, bool) {
 	name = strings.Trim(strings.TrimSpace(name), "/")
+	if name == "" && a.current != nil {
+		name = a.current(c.Request)
+		if name == "" {
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+			return "", "", members.Access{}, false
+		}
+	}
 	var dir string
 	if name == "" {
 		active, err := a.pm.ActiveProject()
@@ -77,6 +94,10 @@ func (a *API) target(c *gin.Context, name string) (string, string, members.Acces
 		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such project"), nil)
 		return "", "", members.Access{}, false
 	}
+	// These routes name their project themselves, so the audit row of a
+	// change would file it under the active project; this names the project
+	// it was made to.
+	audit.Annotate(c.Request.Context(), audit.Annotation{Project: dir})
 	return name, key, access, true
 }
 
@@ -170,6 +191,9 @@ func (a *API) put(c *gin.Context) {
 		a.fail(c, err)
 		return
 	}
+	// A membership change changes what an account may reach, so its audit
+	// row names the account, and the role it was given.
+	audit.Annotate(c.Request.Context(), audit.Annotation{Target: userID, Detail: map[string]any{"role": string(role)}})
 	a.respond(c, name, key)
 }
 
@@ -178,10 +202,12 @@ func (a *API) remove(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := a.store.Remove(c.Request.Context(), auth.ActorFrom(c.Request), key, strings.TrimSpace(c.Query("userId"))); err != nil {
+	userID := strings.TrimSpace(c.Query("userId"))
+	if err := a.store.Remove(c.Request.Context(), auth.ActorFrom(c.Request), key, userID); err != nil {
 		a.fail(c, err)
 		return
 	}
+	audit.Annotate(c.Request.Context(), audit.Annotation{Target: userID})
 	a.respond(c, name, key)
 }
 

@@ -133,7 +133,7 @@ func TestRunRoutingRulesAndSuggestion(t *testing.T) {
 		{ID: "ui-gate", Title: "UI gate", Kind: "gate", Tags: []string{"frontend", "UI"}},
 		{ID: "plain-gate", Title: "Plain gate", Kind: "gate"},
 	} {
-		if _, err := st.CreateNode(node, ""); err != nil {
+		if _, err := st.CreateNode(identity.Local, node, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

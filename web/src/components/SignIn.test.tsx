@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthGate, SignIn, SignOutButton } from "./SignIn";
+import { AuthGate, SignIn, SignOutButton, useTeamServer, useViewer } from "./SignIn";
 import { AuthError, api } from "../api";
 import { useApp } from "../store";
 
@@ -288,6 +288,50 @@ describe("AuthGate", () => {
 
     expect(await screen.findByText("app")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  /** What a loopback server really answers: its built-in local actor, marked
+   * authenticated. That is not a person signed in, and nothing that only
+   * means something with accounts may show for it. */
+  it("treats the loopback server's local actor as nobody signed in", async () => {
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "local",
+      authenticated: true,
+      actor: { id: "local", name: "local", role: "admin" },
+    });
+    function Probe() {
+      const viewer = useViewer();
+      return <p>{`viewer:${viewer?.id ?? "none"} team:${useTeamServer()}`}</p>;
+    }
+
+    render(
+      <AuthGate>
+        <SignOutButton />
+        <Probe />
+      </AuthGate>,
+    );
+
+    expect(await screen.findByText("viewer:none team:false")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("reports a team server to what it wraps", async () => {
+    mocked.getAuthStatus.mockResolvedValue({
+      mode: "accounts",
+      authenticated: true,
+      actor: { id: "u1", name: "阿明", role: "member" },
+    });
+    function Probe() {
+      return <p>{`viewer:${useViewer()?.id ?? "none"} team:${useTeamServer()}`}</p>;
+    }
+
+    render(
+      <AuthGate>
+        <Probe />
+      </AuthGate>,
+    );
+
+    expect(await screen.findByText("viewer:u1 team:true")).toBeInTheDocument();
   });
 
   it("signs the session out and puts the form back", async () => {

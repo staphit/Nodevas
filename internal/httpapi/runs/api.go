@@ -224,6 +224,15 @@ func (a *API) list(c *gin.Context) {
 	}
 	actor := auth.ActorFrom(c.Request)
 	filter := runs.Filter{Project: projectName, NodeID: strings.TrimSpace(c.Query("nodeId")), Limit: listLimit}
+	// ?active=1: every run that has not ended, uncapped (Filter.Active).
+	switch strings.TrimSpace(c.Query("active")) {
+	case "", "0", "false":
+	case "1", "true":
+		filter.Active = true
+	default:
+		invalid(c, "active must be 1 or 0")
+		return
+	}
 	if !actor.IsAdmin() {
 		filter.Viewer = actor.ID
 	}

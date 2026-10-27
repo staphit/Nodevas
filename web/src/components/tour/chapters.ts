@@ -93,7 +93,9 @@ export const TOUR_CHAPTERS: TourChapter[] = [
   },
   {
     id: "timeline",
-    trigger: { kind: "pointerdown", selector: ".lane-wrap.timeline" },
+    // Not while folded: a click on the header there is opening it, and the
+    // steps point at a board that is not drawn yet.
+    trigger: { kind: "pointerdown", selector: ".lane-wrap.timeline:not(.pane-collapsed)" },
     steps: [
       {
         id: "timeline-cells",

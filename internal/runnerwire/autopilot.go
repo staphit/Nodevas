@@ -1,11 +1,11 @@
 package runnerwire
 
-// Autopilot (W7): a goal node's tasks dispatched as a DAG. The board already
+// Autopilot: a goal node's tasks dispatched as a DAG. The board already
 // is the graph (a task's requires edges decide when it is ready); an autopilot
 // run walks it, dispatching every ready task through a pipeline (implement →
 // review → revise → merge) and recording each task's stages the way an
 // Airflow DAG run records its task instances. See
-// docs/nodevas-workstation-plan.md, W7.
+// docs/workstation.md, "Autopilot".
 
 // Review modes for ReviewPolicy.Mode.
 const (
@@ -210,6 +210,13 @@ const MaxAutopilotTasks = 25
 type AutopilotView struct {
 	Run   AutopilotRun   `json:"run"`
 	Tasks []TaskInstance `json:"tasks"`
+}
+
+// AutopilotListResponse is GET /api/autopilot without ?goal=: the project's
+// autopilots in the statuses asked for (running and paused by default),
+// oldest first.
+type AutopilotListResponse struct {
+	Autopilots []AutopilotView `json:"autopilots"`
 }
 
 // CreateAutopilotRequest is POST /api/autopilot (project from ?project=).

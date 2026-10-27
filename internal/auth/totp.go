@@ -122,6 +122,17 @@ func normalizeTOTP(code string) string {
 	return b.String()
 }
 
+// SecondFactorKind says which kind of second-factor code a string is shaped
+// like, by the same rule proveSecondFactor uses: SecondFactorTOTP for an
+// authenticator code, SecondFactorRecovery for anything else. It judges the
+// shape only, so a refused code can be described without being repeated.
+func SecondFactorKind(code string) string {
+	if normalizeTOTP(code) != "" {
+		return SecondFactorTOTP
+	}
+	return SecondFactorRecovery
+}
+
 // matchTOTP reports the time step a code belongs to, if it is the code for a
 // step within totpSkew of now. Every candidate step is computed and compared
 // in constant time, whichever one matches, so how long the answer takes does

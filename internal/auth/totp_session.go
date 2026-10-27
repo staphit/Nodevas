@@ -98,7 +98,33 @@ type SignInResult struct {
 	Pending *PendingSignIn
 	// Proof is what finished a two-factor sign-in; zero for one factor.
 	Proof SecondFactorProof
+	// Refusal is set beside the error of a refused step, for the server's log.
+	Refusal SignInRefusal
 }
+
+// SignInRefusal is the server log's account of a refused sign-in step. The
+// client never sees it: most refusals give one error on purpose, so a caller
+// cannot tell an unknown address from a wrong passcode, but the operator
+// reading the log should be able to, and should see whose account it was.
+type SignInRefusal struct {
+	// Reason is one of the Refused names below, or "" when the error already
+	// says it all (a throttle, a full server, a failed database).
+	Reason string
+	// Account is the account the attempt named, and Email its registered
+	// address when the step read it. Both are zero when it named none, and
+	// the handler then names what was typed, through TypedAddress.
+	Account identity.Actor
+	Email   string
+}
+
+// Why a sign-in step was refused, in the server log's words.
+const (
+	RefusedBadCredentials  = "bad-credentials"   // a wrong passcode or code
+	RefusedUnknownAccount  = "unknown-account"   // the address names no account
+	RefusedExpiredCode     = "expired-code"      // no live passcode or pending sign-in to check it against
+	RefusedTooManyAttempts = "too-many-attempts" // a wrong guess that used up the passcode or the pending sign-in
+	RefusedServerFault     = "error"             // refused as the others are, though what failed was the server
+)
 
 type pendingSignIn struct {
 	actor    identity.Actor
@@ -144,8 +170,9 @@ func (a *SessionAuth) CompleteSignIn(r *http.Request, ticket, code string) (Sign
 	if !a.chargeLogin("", source) {
 		return SignInResult{}, ErrTooManyLogins
 	}
+	expired := SignInResult{Refusal: SignInRefusal{Reason: RefusedExpiredCode}}
 	if ticket == "" || len(ticket) > 128 {
-		return SignInResult{}, ErrSignInExpired
+		return expired, ErrSignInExpired
 	}
 	key := sessionKey(ticket)
 	now := time.Now()
@@ -154,27 +181,34 @@ func (a *SessionAuth) CompleteSignIn(r *http.Request, ticket, code string) (Sign
 	if pending == nil || now.After(pending.expires) {
 		delete(a.pendingSignIns, key)
 		a.mu.Unlock()
-		return SignInResult{}, ErrSignInExpired
+		return expired, ErrSignInExpired
 	}
 	actor := pending.actor
 	a.mu.Unlock()
+	// From here a refusal is a refusal for this account.
+	refused := func(reason string) SignInResult {
+		return SignInResult{Refusal: SignInRefusal{Reason: reason, Account: actor}}
+	}
 
 	proof, err := a.proveSecondFactor(ctx, actor.ID, code)
 	if err != nil {
+		reason := ""
 		if errors.Is(err, ErrTOTPCode) {
+			reason = RefusedBadCredentials
 			a.mu.Lock()
 			pending.attempts++
 			if pending.attempts >= maxSecondFactorAttempts {
 				delete(a.pendingSignIns, key)
+				reason = RefusedTooManyAttempts
 			}
 			a.mu.Unlock()
 		}
-		return SignInResult{}, err
+		return refused(reason), err
 	}
 	revision, exists := a.users.Revision(ctx, actor.ID)
 	token, csrf, err := newSessionTokens()
 	if err != nil {
-		return SignInResult{}, err
+		return refused(""), err
 	}
 
 	a.mu.Lock()
@@ -183,10 +217,10 @@ func (a *SessionAuth) CompleteSignIn(r *http.Request, ticket, code string) (Sign
 	// have changed — address, role, removal — since the passcode was right.
 	if a.pendingSignIns[key] != pending || !exists || revision != pending.revision {
 		delete(a.pendingSignIns, key)
-		return SignInResult{}, ErrSignInExpired
+		return refused(RefusedExpiredCode), ErrSignInExpired
 	}
 	if err := a.finishSignInLocked(actor, revision, token, time.Now()); err != nil {
-		return SignInResult{}, err
+		return refused(""), err
 	}
 	delete(a.pendingSignIns, key)
 	return SignInResult{Actor: actor, Token: token, CSRF: csrf, Proof: proof}, nil

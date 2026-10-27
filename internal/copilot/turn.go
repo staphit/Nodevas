@@ -25,6 +25,9 @@ const (
 	EventEntry              = "entry"
 	EventError              = "error"
 	EventTurnFinished       = "turn_finished"
+	// EventModelRequest asks the browser's built-in model for one answer
+	// (browser.go); the browser posts it to model-results.
+	EventModelRequest = "model_request"
 )
 
 // Stop reasons the loop adds to the provider's own.
@@ -69,6 +72,8 @@ type Event struct {
 	Code      string   `json:"code,omitempty"`
 	Stop      string   `json:"stop,omitempty"`
 	Usage     *Usage   `json:"usage,omitempty"`
+	// ModelRequest is set on EventModelRequest.
+	ModelRequest *BrowserModelRequest `json:"modelRequest,omitempty"`
 }
 
 // Usage is the token count of a whole turn, summed over its model calls.
@@ -95,6 +100,12 @@ type TurnRequest struct {
 	// RemoteAddr is the person's client address, so the abuse limits and the
 	// audit trail see the bridge's calls as coming from them.
 	RemoteAddr string
+	// Session fingerprints the sign-in session that started the turn; only
+	// that session may answer the turn's browser model calls.
+	Session string
+	// BrowserModel is the browser's own Prompt API availability
+	// ("available", "downloadable", …; "" when it has none).
+	BrowserModel string
 }
 
 // Turn runs one turn: it stores what the person said, lets the model answer
@@ -127,30 +138,34 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	if err != nil {
 		return err
 	}
-	settings, key, _, err := s.settings.resolve(ctx)
+	plan, err := s.plan(ctx, req.Actor, req.BrowserModel)
 	if err != nil {
 		return err
 	}
+	if plan.reason != "" {
+		return fmt.Errorf("%w: %s", ErrUnavailable, plan.reason)
+	}
+	settings := plan.settings
+	requested := req.Mode
+	if requested == "" {
+		requested = conversation.Mode
+	}
+	if requested == ModeBypass && plan.host == ModelHostBrowser {
+		return fmt.Errorf("%w: %v", ErrInvalid, errBypassBrowser)
+	}
 	var model provider.Provider
-	if effectiveKeySource(settings, key) == KeySourceRunner {
-		// The key is on the person's own runner, which makes the call; the
-		// server never sees it (remote.go).
-		if reason := s.baseUnavailableReason(); reason != "" {
-			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
-		}
-		runner, info, err := s.runnerTarget(ctx, req.Actor.ID)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrUnavailable, err)
-		}
-		model = &runnerProvider{remote: s.opts.Remote, runnerID: runner.ID, info: info,
+	switch plan.host {
+	case ModelHostRunner:
+		// The key (or the local model) is on the person's own runner, which
+		// makes the call; the server never sees a key (remote.go).
+		model = &runnerProvider{remote: s.opts.Remote, runnerID: plan.runner.ID, info: plan.runnerInfo,
 			accountID: req.Actor.ID, effort: settings.Effort}
-	} else {
-		if reason := s.unavailableReason(settings, key); reason != "" {
-			return fmt.Errorf("%w: %s", ErrUnavailable, reason)
-		}
+	case ModelHostBrowser:
+		// Built below: it answers through the registered turn.
+	default:
 		model, err = s.opts.NewProvider(provider.Config{
-			Kind: settings.Provider, Model: settings.Model, BaseURL: settings.BaseURL,
-			APIKey: key, Effort: settings.Effort,
+			Kind: plan.provider, Model: plan.model, BaseURL: plan.baseURL,
+			APIKey: plan.key, Effort: settings.Effort,
 		})
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrUnavailable, err)
@@ -160,9 +175,11 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	turn := &activeTurn{
-		id: newID(), conversationID: conversation.ID, accountID: req.Actor.ID, cancel: cancel,
+		id: newID(), conversationID: conversation.ID, accountID: req.Actor.ID, session: req.Session,
+		cancel:      cancel,
 		permissions: map[string]chan permissionAnswer{},
 		clientCalls: map[string]chan toolbridge.Result{},
+		modelCalls:  map[string]chan browserAnswer{},
 	}
 	if err := s.register(turn); err != nil {
 		return err
@@ -187,10 +204,6 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	// a cancelled turn should still leave a transcript that says what it did.
 	storeCtx := context.WithoutCancel(ctx)
 
-	requested := req.Mode
-	if requested == "" {
-		requested = conversation.Mode
-	}
 	if requested != conversation.Mode {
 		// The mode is per conversation; the panel sends it with each turn so
 		// the choice sticks when the conversation is reopened.
@@ -199,7 +212,7 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 			return err
 		}
 	}
-	mode := effectiveMode(requested, settings.AllowBypass)
+	mode := effectiveMode(requested, plan.allowBypass())
 
 	stored, err := s.store.Entries(storeCtx, conversation.ID)
 	if err != nil {
@@ -235,6 +248,12 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		}
 	}
 	tools, info := collectTools(bridge.Tools(), req.ClientTools, server != nil)
+	if plan.host == ModelHostBrowser {
+		model = &browserProvider{
+			service: s, turn: turn, emit: emit, timeout: s.opts.BrowserModelTimeout,
+			system: browserSystemPrompt(req.Actor.Name, conversation.Project, mode, req.Context),
+		}
+	}
 	run := &turnRun{
 		service: s, turn: turn, ctx: turnCtx, storeCtx: storeCtx, emit: emit,
 		conversation: conversation, mode: mode, model: model, bridge: bridge, server: server,

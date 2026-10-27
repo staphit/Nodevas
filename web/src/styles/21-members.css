@@ -52,3 +52,52 @@
   background: var(--danger-bg, #4a1f1f);
   color: var(--danger-text, #f3c3c3);
 }
+/* Members of this server (Project settings → Members of this server). */
+.members-invite-hint .link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, var(--text));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.server-members-list li {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.server-members-email,
+.server-members-seats,
+.server-members-2fa {
+  font-size: 12px;
+  color: var(--text-muted, var(--text));
+}
+.server-members-email {
+  flex: 1;
+  min-width: 140px;
+  overflow-wrap: anywhere;
+}
+.server-members-2fa[data-on="true"] {
+  color: var(--text);
+}
+.server-members-seats {
+  margin: 0 0 8px;
+}
+.server-members-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.server-members-message {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  user-select: text;
+}
+.server-members-fallback-actions {
+  display: flex;
+  gap: 6px;
+}

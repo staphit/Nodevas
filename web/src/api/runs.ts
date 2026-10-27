@@ -386,6 +386,11 @@ export const runsApi = {
     req<RunListResponse>(`/api/runs?nodeId=${encodeURIComponent(nodeId)}`),
   /** The project's most recent runs (the hub caps the list at 50). */
   listProjectRuns: () => req<RunListResponse>("/api/runs"),
+  /** Every run of the project that has not ended (queued, offered,
+   * running), uncapped, several on one node included. Same visibility as
+   * the other lists: the caller's own runs and runs on their runners, or
+   * everyone's for an administrator. */
+  listActiveRuns: () => req<RunListResponse>("/api/runs?active=1"),
   getRun: (id: string) => req<Run>(runPath(id)),
   getRunEvents: (id: string, after = 0, limit = RUN_EVENTS_PAGE) =>
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),

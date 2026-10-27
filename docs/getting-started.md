@@ -1,62 +1,52 @@
 # Getting started
 
-This guide covers building Nodevas from source, running it locally, and configuring a server.
+Nodevas runs in one of two ways:
 
-## Requirements
+- [**Standalone**](#standalone): one machine, nothing to set up. The server listens on loopback only, so there are no accounts, no mail, and no two-factor sign-in; you own every project. Start here to try it.
+- [**Team server**](#team-server): a hub on a server or NAS that people open in a browser, with accounts, emailed sign-in passcodes, and runners on their own PCs.
 
-- Go 1.26.10
-- Node.js 22 and npm
-- Git
+## Standalone
 
-## Build from source
+### Build and run
+
+Requirements: Go 1.26.10, Node.js 22 with npm, and Git.
 
 ```bash
 git clone https://github.com/staphit/Nodevas.git
 cd Nodevas
-
 npm ci --prefix web
 npm run build --prefix web
-```
-
-The frontend is built into `web/dist` and embedded into the Go binary.
-
-Windows:
-
-```powershell
-go build -o nodevas.exe ./cmd/nodevas
-```
-
-macOS or Linux:
-
-```bash
 go build -o nodevas ./cmd/nodevas
+./nodevas serve --project ./workspace
 ```
 
-## Start a local server
+On Windows, build `nodevas.exe` and run `.\nodevas.exe serve --project .\workspace`.
 
-`-project` points to a workspace, not a single project. Every directory below that workspace containing `graph.yaml` appears as a project. Nodevas creates the required workspace data when the path does not exist.
+Open <http://127.0.0.1:5666>. There is no sign-in page: on a loopback server the local user owns everything.
+
+`--project` points to a workspace, not a single project. Every directory below that workspace containing `graph.yaml` appears as a project. Nodevas creates the required workspace data when the path does not exist. The frontend is built into `web/dist` and embedded into the binary.
+
+### Run coding agents too
+
+The same command starts a runner for this server on this machine. Name the repositories agents may work in:
 
 ```bash
-go run ./cmd/nodevas serve -project ./workspace -port 5666
+./nodevas serve --project ./workspace --repo ~/code/my-app
 ```
 
-Open <http://127.0.0.1:5666>.
+`--repo` is needed once: the runner remembers it. You still accept each run in the terminal running `serve`. `--no-runner` starts the server alone. See [Hub and runner on one machine](./install.md#hub-and-runner-on-one-machine).
 
-With a built executable:
+### With Docker on Linux
 
 ```bash
-./nodevas serve -project ./workspace -port 5666
+docker run -d --name nodevas --network host \
+  -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
+  ghcr.io/staphit/nodevas:latest
 ```
 
-On Windows:
+Open <http://127.0.0.1:5666>. `--network host` keeps the server's default loopback listener on the host itself, so it stays standalone. Host networking needs Linux. `XDG_CONFIG_HOME` is required because the container user has no home directory. A plain `-p 5666:5666` does not work: a port mapping reaches the container from outside its loopback, which makes it a [team server](#team-server). The image starts without a runner (`--no-runner`): it has no coding agents. Use the binary to run them.
 
-```powershell
-.\nodevas.exe serve -project .\workspace -port 5666
-```
-
-The default listener is loopback-only. For collaboration, use a shared deployment or place Nodevas behind a correctly configured HTTPS reverse proxy.
-
-## Development mode
+### Development mode
 
 Run the backend and frontend separately:
 
@@ -70,64 +60,145 @@ npm run dev --prefix web
 
 Open <http://127.0.0.1:5173>. Vite proxies `/api` and `/ws` to port `5666`.
 
-## Configuration
+## Team server
 
-Configuration precedence is:
+The hub runs on a server or NAS and the browser is the client. Coding agents run on each person's PC through a [runner](#add-a-runner).
 
-```text
-built-in defaults < YAML < environment variables < command-line flags
-```
+### Run the hub with Docker
 
-By default, Nodevas reads `nodevas.yaml` from the workspace root. Use `-config` or `NODEVAS_CONFIG` to select another file. See [nodevas.yaml.example](../nodevas.yaml.example).
+The image is `ghcr.io/staphit/nodevas`. A hub other machines can reach needs:
+
+- **A public host name and HTTPS.** Put it behind Cloudflare Tunnel or a reverse proxy, or give the container a certificate.
+- **An admin account with a sign-in email**, created with `nodevas user add` before the first start.
+- **An SMTP relay.** Web sign-in is the account's email address plus a one-time passcode sent to it, so without mail nobody can sign in.
+
+The server refuses to start on the network without a host name, TLS (or a proxy), and an account. [Operations: Allow network access](./operations.md#allow-network-access) explains each check.
+
+The image's default command serves `/data` on loopback only, which a port mapping cannot reach, so a hub sets its own `serve` flags or the matching `NODEVAS_SERVE_*` variables. Every container that uses the data volume needs `XDG_CONFIG_HOME=/data/.config`, because the container user (uid `568`) has no home directory.
+
+#### Behind a reverse proxy, with Docker Compose
+
+The hub serves plain HTTP on a private Compose network, and your HTTPS reverse proxy (Caddy, nginx, Traefik, `cloudflared`, ...) on the same network forwards to it. Save this as `compose.yaml`:
 
 ```yaml
-listen: 127.0.0.1
-port: 5666
-hostname: ""
-behind_proxy: false
-trusted_proxy: 127.0.0.1/32,::1/128
-tls_cert: ""
-tls_key: ""
-allow_plaintext: false
-max_active_users: 0
+services:
+  nodevas:
+    image: ghcr.io/staphit/nodevas:latest
+    restart: unless-stopped
+    environment:
+      XDG_CONFIG_HOME: /data/.config
+      NODEVAS_SERVE_LISTEN: 0.0.0.0
+      NODEVAS_SERVE_HOSTNAME: nodevas.example.com
+      NODEVAS_SERVE_BEHIND_PROXY: "true"
+      NODEVAS_SERVE_TRUSTED_PROXY: 172.31.250.0/24
+      # Plain HTTP only on the private hop from the proxy.
+      NODEVAS_SERVE_ALLOW_PLAINTEXT: "true"
+      NODEVAS_SERVE_SMTP_HOST: smtp.example.com
+      NODEVAS_SERVE_SMTP_USER: nodevas@example.com
+      NODEVAS_SERVE_SMTP_FROM: Nodevas <nodevas@example.com>
+      NODEVAS_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+    volumes:
+      - nodevas-data:/data
+    secrets:
+      - smtp_password
+    networks:
+      - nodevas
+    # No "ports:": only the proxy reaches the hub, at http://nodevas:5666.
 
-smtp:
-  host: ""
-  port: 587
-  user: ""
-  from: ""
-  security: starttls
+  # Add your HTTPS reverse proxy here, on the nodevas network.
 
-logging:
-  level: info
-  format: json
+networks:
+  nodevas:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+volumes:
+  nodevas-data:
+
+secrets:
+  smtp_password:
+    file: ./smtp-password
 ```
 
-Keep the SMTP password out of YAML. Set `NODEVAS_SMTP_PASSWORD` through a secret store or the process environment. Containers can instead set `NODEVAS_SMTP_PASSWORD_FILE` to a mounted secret file. Do not set both variables. Deployment environments can use `NODEVAS_SERVE_*` variables to override YAML values.
+1. Put the SMTP password in `smtp-password`, readable by uid `568`.
+2. Create the admin account (the password is read from stdin):
 
-## Allow network access
+   ```bash
+   printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T nodevas \
+     user add --project /data --user admin --role admin \
+     --email you@example.com --password-stdin
+   ```
 
-Create an account before allowing another machine to connect:
+3. Add your proxy, pointing `https://nodevas.example.com` at `http://nodevas:5666`, and run `docker compose up -d`.
 
-```bash
-printf '%s' 'PASSWORD' | ./nodevas user add \
-  --project ./workspace --user USER_NAME --role admin --password-stdin
-```
+`NODEVAS_SERVE_TRUSTED_PROXY` trusts forwarding headers from the whole Compose network, so put only the hub and the proxy on it. Each `NODEVAS_SERVE_*` variable matches a `serve` flag and a `nodevas.yaml` key; see [Operations: Configuration](./operations.md#configuration).
 
-Use a secure stdin mechanism and do not put a real password in shell history. For production, use HTTPS directly or put Nodevas behind a reverse proxy that terminates TLS:
+#### With your own certificate
 
-```bash
-./nodevas serve -project ./workspace -port 5666 \
-  -listen 127.0.0.1 -hostname nodevas.example.com -behind-proxy
-```
+1. Create the account (`-i` passes the password on stdin):
 
-`-allow-plaintext` is for controlled testing only. Configure `trusted_proxy` to match the proxy addresses that are allowed to forward client information.
+   ```bash
+   printf '%s' "$ADMIN_PASSWORD" | docker run --rm -i \
+     -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
+     ghcr.io/staphit/nodevas:latest \
+     user add --project /data --user admin --role admin \
+     --email you@example.com --password-stdin
+   ```
+
+2. Start the hub with the certificate, host name, and mail settings. The certificate, key, and password files must be readable by uid `568`:
+
+   ```bash
+   docker run -d --name nodevas --restart unless-stopped -p 443:5666 --no-healthcheck \
+     -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
+     -v /etc/nodevas/tls:/tls:ro \
+     -v /etc/nodevas/smtp-password:/run/secrets/smtp-password:ro \
+     -e NODEVAS_SERVE_SMTP_HOST=smtp.example.com \
+     -e NODEVAS_SERVE_SMTP_USER=nodevas@example.com \
+     -e 'NODEVAS_SERVE_SMTP_FROM=Nodevas <nodevas@example.com>' \
+     -e NODEVAS_SMTP_PASSWORD_FILE=/run/secrets/smtp-password \
+     ghcr.io/staphit/nodevas:latest \
+     serve --project /data --listen 0.0.0.0 --hostname nodevas.example.com \
+     --tls-cert /tls/cert.pem --tls-key /tls/key.pem
+   ```
+
+   The image's health check probes plain HTTP, so it is turned off here; with TLS it would always report unhealthy.
+
+Without Docker, run the binary as a service and follow [Operations: Allow network access](./operations.md#allow-network-access).
+
+### Open the hub
+
+Open `https://nodevas.example.com` in a browser, enter the account's email address, and type the passcode it receives. There is nothing else to install to use the board. Turn on an authenticator app under **Settings → Your account** for a second factor.
+
+### Add a runner
+
+A runner runs coding agents on your PC with your own logins and connects out to the hub. You need it only for agent runs.
+
+`scripts/install.sh` downloads the `nodevas` build that matches your hub and checks it against GitHub, or builds it from a checkout with Go 1.26 or newer (see [Install a runner](./install.md)). This PC also needs Git, the agent CLIs you want to use, and `gh` for pull requests. On Windows, run it in Git Bash.
+
+1. On the hub, open **Settings → Runners → Link a new device** and copy the one-time link. It works once, for ten minutes.
+2. On your PC:
+
+   ```bash
+   git clone https://github.com/staphit/Nodevas.git
+   cd Nodevas
+   scripts/install.sh --hub https://nodevas.example.com --link --repo ~/code/my-app
+   ```
+
+3. Paste the link when asked. The script logs the runner in, allows runs in each `--repo`, and starts the runner at login.
+
+Options, runner tokens, and Cloudflare Access: [Install a runner](./install.md).
+
+## Configuration
+
+Settings come from built-in defaults, then `nodevas.yaml` in the workspace root, then environment variables (`NODEVAS_SERVE_*`), then command-line flags. See [nodevas.yaml.example](../nodevas.yaml.example) and [Operations: Configuration](./operations.md#configuration).
+
+Log format and audit events: [Operations: Logs and audit events](./operations.md#logs-and-audit-events).
 
 ## Next steps
 
 - [Concepts](./concepts.md) — understand nodes, dependencies, and readiness.
 - [MCP integration](./mcp.md) — connect an AI agent.
-- [Install a runner](./install.md) — one script that sets up the machine your agents run on.
+- [Install a runner](./install.md) — every option of the runner install script.
+- [Operations](./operations.md) — configuration, network access, and logs.
 - [Storage and collaboration](./collaboration.md) — share a workspace safely.
-- [OCI deployment](../deploy/oci/README.md) — run a shared cloud server.
-- [TrueNAS and Cloudflare Tunnel deployment](../deploy/truenas/README.md) — run containers without opening an inbound port.

@@ -40,8 +40,9 @@ cover.out
 # Local exports
 *.veproj
 
-# Local workspaces
-/examples/
+# Local workspaces (except the shipped example view packs)
+/examples/*
+!/examples/view-packs/
 /demo/日程/
 
 # Per-project recovery state
@@ -90,9 +91,9 @@ web/demo-videos/
 # Security case workspace (scope, evidence): never part of a commit.
 /work/
 
-# Local deployment configurations and security guides.
-/deploy/caddy/
-/deploy/nginx/
+# Local deployment configurations and security guides: a deployment's
+# compose files, scripts and secrets stay on the machine that runs it.
+/deploy/
 /docs/security-deployment.md
 
 # Local iOS deployment project; keep it on the developer machine only.

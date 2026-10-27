@@ -30,7 +30,7 @@ test.describe("responsive", () => {
       await openApp(page);
 
       await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "專案設定" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "設定", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: /新增節點/ }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
@@ -81,9 +81,9 @@ test.describe("theme", () => {
     await page.keyboard.press("Shift+ArrowRight");
     await expect(handle).not.toHaveAttribute("aria-valuenow", "304");
 
-    await page.getByRole("button", { name: "專案設定" }).click();
-    const dialog = page.getByRole("dialog", { name: "專案設定" });
-    await dialog.getByRole("tab", { name: "外觀與版面" }).click();
+    await page.getByRole("button", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "外觀與語言" }).click();
+    const dialog = page.getByRole("region", { name: "專案設定" });
     await dialog.getByRole("button", { name: "重設全部本機偏好" }).click();
     await page.getByRole("button", { name: "重設", exact: true }).click();
 
@@ -91,9 +91,10 @@ test.describe("theme", () => {
     // language — so the dialog has to be found again under its English name.
     // The notice itself was translated at click time, before the language
     // flipped, so it still reads in Chinese inside the English dialog.
-    const resetDialog = page.getByRole("dialog", { name: "Project settings" });
+    const resetDialog = page.getByRole("region", { name: "Project settings" });
     await expect(resetDialog.getByText("已重設全部本機偏好")).toBeVisible();
-    await resetDialog.getByRole("button", { name: "Close" }).click();
+    // Still in Settings: the reset does not throw you out of it.
+    await page.getByRole("button", { name: "Info", exact: true }).click();
     await expect(page.getByRole("separator", { name: "Resize project explorer" })).toHaveAttribute(
       "aria-valuenow",
       "304",

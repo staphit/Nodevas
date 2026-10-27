@@ -10,6 +10,7 @@ import { IconDoc, IconPages, IconPencil, IconSend, IconTerminal, IconTrash } fro
 import { openNodeRuns } from "../../runs/RunsRoot";
 import { openAutopilot } from "../../autopilot/openAutopilot";
 import { useRuns } from "../../runs/runStore";
+import { useWorkstationVisible } from "../../runners/workstation";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
@@ -37,6 +38,7 @@ export function NodeContextMenu({
   const duplicateNode = useApp((state) => state.duplicateNode);
   const deleteNodes = useApp((state) => state.deleteNodes);
   const { t } = useI18n();
+  const workstation = useWorkstationVisible();
   const [nodeMenuBusy, setNodeMenuBusy] = useState(false);
 
   useEffect(() => {
@@ -154,6 +156,8 @@ export function NodeContextMenu({
               <small>{t("explorer.duplicateHint")}</small>
             </span>
           </button>
+          {workstation && (
+          <>
           <div className="project-context-separator" />
           <button
             type="button"
@@ -206,6 +210,8 @@ export function NodeContextMenu({
               <small>{t("explorer.autopilotHint")}</small>
             </span>
           </button>
+          </>
+          )}
           <div className="project-context-separator" />
         </>
       )}

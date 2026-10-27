@@ -2,11 +2,15 @@ package logging
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // newTestMiddleware wires the middleware to a buffer and a fixed client IP so
@@ -67,6 +71,8 @@ func TestMiddlewareLogsTheRequestWithECSFields(t *testing.T) {
 
 	record := decodeOne(t, &buf)
 	want := map[string]any{
+		"event.category":            "web",
+		"event.action":              "http.request",
 		"http.request.method":       "POST",
 		"url.path":                  "/api/projects",
 		"http.response.status_code": float64(http.StatusCreated),
@@ -86,6 +92,152 @@ func TestMiddlewareLogsTheRequestWithECSFields(t *testing.T) {
 	// ECS durations are nanoseconds: a millisecond of sleep must not read as 1.
 	if duration < float64(time.Millisecond) {
 		t.Fatalf("event.duration = %v ns, too small to be nanoseconds", duration)
+	}
+	// The same duration in milliseconds, for the dashboards that read that.
+	millis, ok := record["event.duration_ms"].(float64)
+	if !ok || millis < 1 || millis > duration/float64(time.Millisecond)+0.001 {
+		t.Fatalf("event.duration_ms = %v, want %v ns in milliseconds", record["event.duration_ms"], duration)
+	}
+	// Nobody signed this request in, so it names nobody.
+	for _, key := range []string{"user.id", "user.name", "user.email", "event.outcome"} {
+		if _, present := record[key]; present {
+			t.Fatalf("%s = %v on an anonymous request", key, record[key])
+		}
+	}
+}
+
+func TestMiddlewareNamesTheUserAnInnerLayerSignedIn(t *testing.T) {
+	var buf bytes.Buffer
+	handler := newTestMiddleware(t, &buf)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Authentication runs deep inside the chain, on a context of its own.
+		inner := r.WithContext(context.WithValue(r.Context(), struct{ name string }{"inner"}, true))
+		SetUser(inner.Context(), "u-1", "ann")
+	}))
+	serve(handler, httptest.NewRequest(http.MethodGet, "/api/graph", nil))
+
+	record := decodeOne(t, &buf)
+	if record["user.id"] != "u-1" || record["user.name"] != "ann" {
+		t.Fatalf("user = %v / %v, want u-1 / ann", record["user.id"], record["user.name"])
+	}
+	if _, present := record["user.email"]; present {
+		t.Fatalf("user.email = %v, but nobody said it", record["user.email"])
+	}
+	// Outside the middleware there is no line to name anybody on.
+	SetUser(context.Background(), "u-2", "bea")
+	SetUserEmail(context.Background(), "bea@example.test")
+	if email := UserEmailFrom(context.Background()); email != "" {
+		t.Fatalf("UserEmailFrom outside a request = %q", email)
+	}
+}
+
+func TestMiddlewareNamesTheAddressOfTheUserSignedIn(t *testing.T) {
+	var buf bytes.Buffer
+	var seen string
+	handler := newTestMiddleware(t, &buf)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An address said for somebody else is forgotten with them.
+		SetUser(r.Context(), "u-2", "bea")
+		SetUserEmail(r.Context(), "bea@example.test")
+		SetUser(r.Context(), "u-1", "ann")
+		if email := UserEmailFrom(r.Context()); email != "" {
+			t.Errorf("ann's address = %q before anybody said it", email)
+		}
+		SetUserEmail(r.Context(), "ann@example.test")
+		seen = UserEmailFrom(r.Context())
+	}))
+	serve(handler, httptest.NewRequest(http.MethodPost, "/api/nodes", nil))
+
+	record := decodeOne(t, &buf)
+	if record["user.id"] != "u-1" || record["user.name"] != "ann" || record["user.email"] != "ann@example.test" {
+		t.Fatalf("user = %v / %v / %v, want u-1 / ann / ann@example.test", record["user.id"], record["user.name"], record["user.email"])
+	}
+	if seen != "ann@example.test" {
+		t.Fatalf("UserEmailFrom = %q, want ann's address", seen)
+	}
+}
+
+func TestMiddlewareLeavesOutOnlyQuietSuccesses(t *testing.T) {
+	var buf bytes.Buffer
+	logger, err := Setup(&buf, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusOK
+	handler := MiddlewareWithOptions(Options{
+		Logger: logger,
+		Quiet:  func(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/assets/") },
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		serve(handler, httptest.NewRequest(method, "/assets/index-abc.js", nil))
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("a successful quiet request was logged: %q", buf.String())
+	}
+	// A write and a failure are recorded whatever Quiet says.
+	serve(handler, httptest.NewRequest(http.MethodPost, "/assets/index-abc.js", nil))
+	if record := decodeOne(t, &buf); record["http.request.method"] != "POST" {
+		t.Fatalf("record = %v, want the POST", record)
+	}
+	buf.Reset()
+	status = http.StatusNotFound
+	serve(handler, httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil))
+	if record := decodeOne(t, &buf); record["http.response.status_code"] != float64(http.StatusNotFound) {
+		t.Fatalf("record = %v, want the 404", record)
+	}
+	buf.Reset()
+	status = http.StatusOK
+	serve(handler, httptest.NewRequest(http.MethodGet, "/api/graph", nil))
+	if record := decodeOne(t, &buf); record["url.path"] != "/api/graph" {
+		t.Fatalf("record = %v, want the API read", record)
+	}
+}
+
+func TestRecordsWrittenDuringARequestCanNameIt(t *testing.T) {
+	var buf bytes.Buffer
+	handler := newTestMiddleware(t, &buf)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slog.Default().LogAttrs(r.Context(), slog.LevelInfo, "inside", Request(r.Context()))
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 test")
+	rec := serve(handler, req)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d lines, want the handler's and the request's: %q", len(lines), buf.String())
+	}
+	var inside map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &inside); err != nil {
+		t.Fatal(err)
+	}
+	if inside["http.request.id"] != rec.Header().Get("X-Request-Id") || inside["user_agent.original"] != "Mozilla/5.0 test" {
+		t.Fatalf("record = %v, want the request's id and user agent", inside)
+	}
+	if attr := Request(context.Background()); !attr.Equal(slog.Attr{}) {
+		t.Fatalf("Request outside a request = %v, want nothing", attr)
+	}
+}
+
+func TestTheUserAgentIsCutAndCannotForgeALine(t *testing.T) {
+	var buf bytes.Buffer
+	handler := newTestMiddleware(t, &buf)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	req := httptest.NewRequest(http.MethodGet, "/api/graph", nil)
+	forged := "evil\n{\"event.action\":\"auth.signin\",\"user.email\":\"x@example.test\"}\"" + strings.Repeat("é", 300)
+	req.Header.Set("User-Agent", forged)
+	serve(handler, req)
+
+	// One line, still: the encoder escapes what the client wrote.
+	record := decodeOne(t, &buf)
+	if record["event.action"] != "http.request" {
+		t.Fatalf("event.action = %v, the user agent forged a field", record["event.action"])
+	}
+	if _, present := record["user.email"]; present {
+		t.Fatal("the user agent forged user.email")
+	}
+	agent, _ := record["user_agent.original"].(string)
+	if utf8.RuneCountInString(agent) != 256 || !strings.HasPrefix(forged, agent) {
+		t.Fatalf("user_agent.original has %d characters, want the first 256 of the header", utf8.RuneCountInString(agent))
 	}
 }
 

@@ -37,6 +37,5 @@ npm run e2e --prefix web
 - `internal/realtime/`: WebSocket presence and CRDT document sessions.
 - `internal/server/`: HTTP API, WebSocket routing, and file management.
 - `web/src/`: React and TypeScript interface.
-- `deploy/oci/`: OCI Terraform, bootstrap, deployment, backup, and restore scripts.
 
 When changing the plan/timeline UI, preserve the distinction between planned milestones in `graph.yaml` and actual lifecycle events in `run/journal.jsonl`.

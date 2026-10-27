@@ -42,6 +42,12 @@ export interface AutopilotStoreState {
   showRequest: { nodeId: string; nonce: number } | null;
 
   loadForGoal: (goalNodeId: string) => Promise<void>;
+  /** Holds every live (running or paused) autopilot of the project, so a
+   * view can show the ones started before the page loaded. Later
+   * autopilot-changed pushes keep them current. */
+  loadActive: () => Promise<void>;
+  /** Whether loadActive was asked for since the last reset. */
+  activeLoaded: boolean;
   refresh: (id: string) => Promise<void>;
   start: (goalNodeId: string, policy: AutopilotPolicy) => Promise<boolean>;
   act: (id: string, action: AutopilotAction) => Promise<boolean>;
@@ -134,6 +140,7 @@ export const useAutopilot = create<AutopilotStoreState>((set, get) => {
     marks: {},
     waiting: [],
     showRequest: null,
+    activeLoaded: false,
 
     loadForGoal: async (goalNodeId) => {
       const mine = generation;
@@ -161,6 +168,19 @@ export const useAutopilot = create<AutopilotStoreState>((set, get) => {
         if (mine === generation) {
           set((s) => ({ loading: { ...s.loading, [goalNodeId]: false } }));
         }
+      }
+    },
+
+    loadActive: async () => {
+      const mine = generation;
+      set({ activeLoaded: true });
+      try {
+        const views = await api.listActiveAutopilots();
+        if (mine !== generation) return;
+        for (const view of views) if (view?.run?.id) hold(view);
+      } catch {
+        // An older hub without the list: the views fall back to what the
+        // board loaded goal by goal.
       }
     },
 
@@ -294,6 +314,7 @@ export const useAutopilot = create<AutopilotStoreState>((set, get) => {
         marks: {},
         waiting: [],
         showRequest: null,
+        activeLoaded: false,
       });
     },
   };

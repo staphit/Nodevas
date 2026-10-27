@@ -88,6 +88,9 @@ type remoteState struct {
 	// refuse: pressing "back up now" once silently stopped every scheduled
 	// backup after it.
 	KnownBundleIDs []string `json:"knownBundleIds,omitempty"`
+	// GitPushes is the git backend's last push result per project, which the
+	// backup dialog lists.
+	GitPushes map[string]GitPushResult `json:"gitPushes,omitempty"`
 }
 
 // maxKnownBundles bounds the remembered-upload list. It only has to outlive
@@ -143,6 +146,9 @@ type SyncStatus struct {
 	RemoteLatest       *RemoteRef `json:"remoteLatest,omitempty"`
 	RemoteHash         string     `json:"remoteHash,omitempty"`
 	LastBackupAt       time.Time  `json:"lastBackupAt"`
+	// Projects is the git backend's per-project view; State folds it into
+	// one answer for the banner.
+	Projects []GitProjectStatus `json:"projects,omitempty"`
 }
 
 func (m *RemoteManager) StatePath() string {
@@ -447,6 +453,10 @@ func (m *RemoteManager) maybeBackup(parent context.Context) {
 	if !DueForBackup(cfg, m.LastBackupAt(), time.Now()) {
 		return
 	}
+	if cfg.Kind == "git" {
+		m.maybeGitBackup(ctx, cfg)
+		return
+	}
 	prepared, err := m.prepareSync(ctx)
 	if err != nil {
 		log.Printf("scheduled backup: sync check: %v", err)
@@ -622,7 +632,9 @@ func (m *RemoteManager) prepareSync(ctx context.Context) (*preparedSync, error) 
 			LastBackupAt:       state.LastBackupAt,
 		},
 	}
-	if cfg.Kind == "" || m.pm == nil {
+	// The git backend has no bundle to prepare; its callers go to
+	// runGitBackup before reaching here.
+	if cfg.Kind == "" || cfg.Kind == "git" || m.pm == nil {
 		return prepared, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -737,6 +749,10 @@ func (m *RemoteManager) SyncStatus(ctx context.Context) (SyncStatus, error) {
 		return SyncStatus{}, err
 	}
 	defer m.releaseBackup()
+	if cfg := m.Load(); cfg.Kind == "git" {
+		run, err := m.runGitBackup(ctx, cfg, false, "")
+		return run.status, err
+	}
 	return m.syncStatus(ctx)
 }
 
@@ -748,6 +764,9 @@ func (m *RemoteManager) FlushBackup(ctx context.Context) (RemoteRef, error) {
 		return RemoteRef{}, err
 	}
 	defer m.releaseBackup()
+	if cfg := m.Load(); cfg.Kind == "git" {
+		return m.gitFlush(ctx, cfg)
+	}
 	prepared, err := m.prepareSync(ctx)
 	if err != nil {
 		return RemoteRef{}, err
@@ -779,6 +798,10 @@ func (m *RemoteManager) FinalBackup(ctx context.Context) error {
 		return nil
 	}
 	_, err := m.FlushBackup(ctx)
+	if errors.Is(err, ErrNoGitHistory) {
+		// Nothing to push is not a failed shutdown.
+		return nil
+	}
 	return err
 }
 

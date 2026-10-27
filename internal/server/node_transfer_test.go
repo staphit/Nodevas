@@ -354,7 +354,7 @@ func TestTransferCarriesLifecycleHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.CreateNode(&engine.Node{ID: "node-0001", Title: "Existing"}, ""); err != nil {
+	if _, err := other.CreateNode(identity.Local, &engine.Node{ID: "node-0001", Title: "Existing"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -386,7 +386,7 @@ func TestTransferRenamesOnIDCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.CreateNode(&engine.Node{ID: "node-0001", Title: "Existing"}, ""); err != nil {
+	if _, err := other.CreateNode(identity.Local, &engine.Node{ID: "node-0001", Title: "Existing"}, ""); err != nil {
 		t.Fatal(err)
 	}
 

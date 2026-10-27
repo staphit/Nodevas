@@ -34,7 +34,12 @@ const DOCUMENT_EXPORTS: readonly (readonly [
  * opened near the bottom or the right of the window still fits. Follows scroll
  * because the summary moves with the explorer's own scrolling.
  */
-function useTransferMenuPlacement(menuRef: RefObject<HTMLDetailsElement | null>) {
+function useTransferMenuPlacement(
+  menuRef: RefObject<HTMLDetailsElement | null>,
+  // The menus mount and unmount with the explorer's tools; listeners are
+  // bound to whichever element is there now.
+  mounted: boolean,
+) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<PanelPoint | undefined>(undefined);
 
@@ -67,18 +72,25 @@ function useTransferMenuPlacement(menuRef: RefObject<HTMLDetailsElement | null>)
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [menuRef]);
+  }, [menuRef, mounted]);
 
   return { panelRef, style };
 }
 
 export function ProjectTransferBar({
+  showActions = true,
   transfer,
   activeProject,
   setProjectTransferNotice,
   openSaveAs,
   saveAsBusy,
 }: {
+  /**
+   * Whether the row of buttons is drawn. The file inputs and the import
+   * dialog are mounted either way: the workspace context menu drives them
+   * too, and it must work while the explorer's tools are folded away.
+   */
+  showActions?: boolean;
   transfer: ProjectTransfer;
   activeProject: string;
   setProjectTransferNotice: (notice: string | null) => void;
@@ -107,8 +119,8 @@ export function ProjectTransferBar({
     exportJSONCanvas,
     importJSONCanvas,
   } = transfer;
-  const importPlacement = useTransferMenuPlacement(importMenuRef);
-  const exportPlacement = useTransferMenuPlacement(exportMenuRef);
+  const importPlacement = useTransferMenuPlacement(importMenuRef, showActions);
+  const exportPlacement = useTransferMenuPlacement(exportMenuRef, showActions);
   const { t } = useI18n();
   const saveAllTabs = useApp((state) => state.saveAllTabs);
   const dirtyDocumentCount = useApp(
@@ -155,6 +167,7 @@ export function ProjectTransferBar({
       />
       {/* Two menus instead of a row of look-alike buttons: everything
           that comes in on one side, everything that goes out on the other. */}
+      {showActions && (
       <div className="explorer-transfer-actions">
         <span>{t("explorer.projectFiles")}</span>
         <div>
@@ -293,6 +306,7 @@ export function ProjectTransferBar({
           </details>
         </div>
       </div>
+      )}
       <input
         ref={importInputRef}
         className="visually-hidden"

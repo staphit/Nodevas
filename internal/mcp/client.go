@@ -287,8 +287,9 @@ func (c *Client) UnreadCount() int {
 	return c.unreadCount
 }
 
-// Project is the workspace this client is pinned to; empty means the server's
-// active project.
+// Project is the workspace this client is pinned to; empty means whichever
+// project its account has open, resolved per request (the server's active
+// project on loopback).
 func (c *Client) Project() string { return c.project }
 
 // Actor is the name written into the `by` field of everything this client

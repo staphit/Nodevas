@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"nodevas/internal/logging/logtest"
 	"nodevas/internal/runnerwire"
 )
 
@@ -44,6 +45,7 @@ func (s *runnerTestServer) redeem(t *testing.T, code string) (int, runnerwire.Re
 
 func TestDeviceLinkRedeemsOnceForItsCreator(t *testing.T) {
 	s := newRunnerTestServer(t)
+	logs := logtest.Capture(t)
 	bea := s.signIn(t, "bea@example.test")
 
 	// No link without a fresh step-up.
@@ -112,6 +114,26 @@ func TestDeviceLinkRedeemsOnceForItsCreator(t *testing.T) {
 	if strings.Contains(trail, payload.Code) || strings.Contains(trail, redeemed.Token) {
 		t.Fatal("a credential reached the audit trail")
 	}
+
+	// In the process log minting a link is the trail's own event: it is a
+	// one-time code, but handed back rather than mailed, so not a sign-in
+	// code the shared action counts. Redeeming it signs that machine in as
+	// bea.
+	bea2 := map[string]any{"user.name": "bea", "user.email": "bea@example.test", "nodevas.auth.method": "device-link"}
+	minted := logs.One(t, map[string]any{"nodevas.audit.action": "runner.link.create"})
+	logtest.Want(t, minted, map[string]any{"event.category": "audit", "event.action": "runner.link.create",
+		"event.outcome": "success", "nodevas.audit.target": "laptop"})
+	logtest.Want(t, minted, bea2)
+	logtest.Absent(t, minted, "nodevas.auth.purpose")
+	linked := logs.One(t, map[string]any{"nodevas.audit.action": "runner.link.redeem"})
+	logtest.Want(t, linked, map[string]any{"event.action": "auth.signin", "event.outcome": "success",
+		"nodevas.audit.target": redeemed.RunnerID})
+	logtest.Want(t, linked, bea2)
+	replayed := logs.One(t, map[string]any{"nodevas.audit.action": "runner.link.failed"})
+	logtest.Want(t, replayed, map[string]any{"event.action": "auth.signin", "event.outcome": "failure",
+		"event.reason": "bad-credentials", "nodevas.auth.method": "device-link"})
+	logtest.Absent(t, replayed, "user.id", "user.email")
+	logs.Never(t, payload.Code, redeemed.Token, created.Link)
 }
 
 func TestDeviceLinkExpires(t *testing.T) {

@@ -48,16 +48,35 @@ export interface CopilotStatus {
   modes: CopilotMode[];
   allowBypass: boolean;
   reason?: string;
-  /** Where this person's model calls run: on the server, or on their own runner. */
-  keySource?: CopilotKeySource;
+  /** Where this person's model calls run: on the server, their own runner, or this browser. */
+  keySource?: CopilotModelHost;
   /** The runner that makes them, when keySource is "runner". */
   runner?: string;
   /** All set but this person's runner: offline, or no copilot key on it. */
   needsRunner?: boolean;
+  /** Chosen automatically: a free model (the browser's own, or a local server). */
+  automatic?: boolean;
+  /** Where the model runs. */
+  modelHost?: CopilotModelHost;
+  /** An OpenAI-compatible server found on the machine the model call runs on. */
+  localServer?: "ollama" | "lmstudio";
+  /** The server is loopback-only: it is this PC. */
+  serverIsLocal?: boolean;
+  /** The browser's built-in model is the choice, but must be downloaded first. */
+  needsDownload?: boolean;
+  /** Automatic mode, and nothing free is available here. */
+  needsSetup?: boolean;
+  reasonCode?: "no_model" | string;
 }
+
+/** The browser's Prompt API availability, as the server is told it. */
+export type CopilotBrowserModel = "available" | "downloadable" | "downloading" | "unavailable";
 
 /** Where the copilot's API key lives; "auto" is the server's when it has one. */
 export type CopilotKeySource = "server" | "runner";
+
+/** Where this person's model calls run (status.keySource): the browser needs no key at all. */
+export type CopilotModelHost = CopilotKeySource | "browser";
 
 export interface CopilotConversation {
   id: string;
@@ -102,10 +121,15 @@ export interface CopilotTurnRequest {
   mode: CopilotMode;
   context: CopilotTurnContext;
   clientTools: CopilotClientTool[];
+  /** This browser's built-in model; the server uses it only when "available". */
+  browserModel?: CopilotBrowserModel;
 }
 
 export interface CopilotSettings {
-  provider: "anthropic" | "openai" | string;
+  /** "auto" picks a free model (the browser's, or a local server) when no key is set. */
+  provider: "auto" | "anthropic" | "openai" | string;
+  /** The administrator left the provider automatic (a key may still have resolved it). */
+  automatic?: boolean;
   model: string;
   baseUrl: string;
   effort: string;
@@ -155,12 +179,23 @@ export type CopilotTurnEvent =
     }
   | { type: "permission_resolved"; requestId: string; decision: CopilotDecision | string }
   | { type: "client_tool_call"; callId: string; name: string; input: unknown }
+  /** The browser must run this model call on its built-in model. */
+  | { type: "model_request"; requestId: string; modelRequest: CopilotModelRequest }
   | { type: "tool_result"; callId: string; output: string; isError: boolean }
   | { type: "entry"; entry: CopilotEntry }
   | { type: "error"; message: string; code?: string }
   | { type: "turn_finished"; stop: string; usage?: Record<string, number> }
   /** Keeps a quiet stream (a turn parked on a permission card) alive through proxies. */
   | { type: "ping" };
+
+/** One model call for the browser's built-in model (COPILOT.md, "Browser model"). */
+export interface CopilotModelRequest {
+  system: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+  /** JSON Schema for the Prompt API's responseConstraint. */
+  schema: Record<string, unknown>;
+  attempt?: number;
+}
 
 export type CopilotTurnEventType = CopilotTurnEvent["type"];
 
@@ -171,6 +206,7 @@ const EVENT_TYPES = new Set<string>([
   "permission_request",
   "permission_resolved",
   "client_tool_call",
+  "model_request",
   "tool_result",
   "entry",
   "error",
@@ -330,7 +366,10 @@ async function reqAction(url: string, init: RequestInit): Promise<void> {
 }
 
 export const copilotApi = {
-  getCopilotStatus: () => req<CopilotStatus>(`${base}/status`),
+  getCopilotStatus: (browserModel?: CopilotBrowserModel) =>
+    req<CopilotStatus>(
+      browserModel ? `${base}/status?browserModel=${encodeURIComponent(browserModel)}` : `${base}/status`,
+    ),
 
   listCopilotConversations: (project: string) =>
     req<unknown>(`${base}/conversations?project=${encodeURIComponent(project)}`).then(
@@ -371,6 +410,16 @@ export const copilotApi = {
     result: { callId: string; output: string; isError: boolean },
   ) =>
     reqAction(`${turnPath(id, turnId)}/client-results`, {
+      method: "POST",
+      body: JSON.stringify(result),
+    }),
+
+  sendCopilotModelResult: (
+    id: string,
+    turnId: string,
+    result: { requestId: string; output?: string; error?: string },
+  ) =>
+    reqAction(`${turnPath(id, turnId)}/model-results`, {
       method: "POST",
       body: JSON.stringify(result),
     }),

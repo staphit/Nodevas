@@ -197,7 +197,7 @@ func TestStatusAllowsAKeylessLocalOpenAIServer(t *testing.T) {
 			return nil, errors.New("not called")
 		},
 	})
-	status, err := service.Status(context.Background(), alice)
+	status, err := service.Status(context.Background(), alice, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestStatusAllowsAKeylessLocalOpenAIServer(t *testing.T) {
 	}
 
 	service.opts.Defaults.Enabled = false
-	if status, _ = service.Status(context.Background(), alice); status.Enabled || !strings.Contains(status.Reason, "copilot.enabled") {
+	if status, _ = service.Status(context.Background(), alice, ""); status.Enabled || !strings.Contains(status.Reason, "copilot.enabled") {
 		t.Fatalf("disabled status = %+v", status)
 	}
 }

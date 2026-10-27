@@ -3,13 +3,28 @@
 //
 // It holds types only, so the hub can import it without importing anything
 // that starts processes. Starting processes is the runner's job alone; see
-// docs/nodevas-workstation-plan.md, "Hub 永遠不執行程式".
+// docs/workstation.md.
 package runnerwire
 
 // ConnectPath is the runner's WebSocket endpoint on the hub. The runner
 // authenticates with "Authorization: Bearer <runner token>"; behind
 // Cloudflare Access it also sends the service token headers below.
 const ConnectPath = "/api/runner/connect"
+
+// VersionPath is GET VersionResponse: the commit the hub was built from. It
+// takes a runner token like ConnectPath, so only a runner the hub already
+// trusts learns which build it is talking to. scripts/install.sh asks for it
+// (through `nodevas runner hub-version`) to pick the matching GitHub-built
+// runner binary; the commit only selects one, the installer verifies it
+// against GitHub, never against the hub.
+const VersionPath = "/api/runner/version"
+
+// VersionResponse is the body of GET VersionPath. Commit is 40 lowercase hex
+// characters, or "" when the hub does not know its own (a local build
+// without VCS information).
+type VersionResponse struct {
+	Commit string `json:"commit"`
+}
 
 // ProxyPathPrefix is where a runner's loopback MCP proxy forwards an agent's
 // board calls: /api/runner/proxy/<path> on the hub serves /api/<path> as the
@@ -26,6 +41,13 @@ const (
 	AccessClientIDHeader     = "CF-Access-Client-Id"
 	AccessClientSecretHeader = "CF-Access-Client-Secret"
 )
+
+// RunIDHeader names the run a proxied request comes from. The runner's proxy
+// sets it from the per-run secret the request arrived under, never from what
+// the agent sent, and the hub believes it only for a run of the runner whose
+// token carried the request. It is how a run's agent session is tied to its
+// run (agents.Session.RunID).
+const RunIDHeader = "X-Nodevas-Run-Id"
 
 // Message types on the connect socket.
 const (

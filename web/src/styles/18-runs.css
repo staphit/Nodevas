@@ -1552,6 +1552,10 @@
 .run-toast.is-merge-failed .run-toast-dot {
   background: var(--st-failed-fg);
 }
+.run-toast.is-limit .run-toast-dot,
+.run-toast.is-budget .run-toast-dot {
+  background: var(--st-ready-fg);
+}
 .run-toast.is-merged .run-toast-dot {
   background: var(--pr-merged-fg);
 }

@@ -678,6 +678,29 @@
   color: var(--text-2);
   font-size: 12px;
 }
+.copilot-free-options {
+  list-style: disc;
+}
+.copilot-download {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.copilot-download-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.copilot-download-progress progress {
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  accent-color: var(--accent);
+}
 .copilot-key-warning {
   padding: 8px 10px;
   border: 1px solid var(--st-failed-fg);

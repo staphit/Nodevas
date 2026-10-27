@@ -7,7 +7,7 @@
  * what operator is editable — and the edits that follow from picking one.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n";
 import { topLevelOp } from "../../store";
 import {
@@ -54,7 +54,7 @@ export function useNodeConditions({
   const [conditionOperator, setConditionOperator] = useState("and");
   const [conditionRelation, setConditionRelation] = useState<EdgeRelation>("");
 
-  const openConditionMenu = (nodeId: string, x: number, y: number) => {
+  const resetConditionDraft = (nodeId: string) => {
     const incoming = new Set(
       (graph?.edges ?? []).filter((edge) => edge.to === nodeId).map((edge) => edge.from),
     );
@@ -65,8 +65,24 @@ export function useNodeConditions({
     setConditionSource(firstSource?.id ?? "");
     setConditionOperator(editableGateOperator(topLevelOp(target?.requires)));
     setConditionRelation("");
+  };
+
+  const openConditionMenu = (nodeId: string, x: number, y: number) => {
+    resetConditionDraft(nodeId);
     setContextMenu({ kind: "node", nodeId, x, y });
   };
+
+  // The node menu is also opened straight from a card's context menu, without
+  // going through openConditionMenu. Reset the draft whenever the menu lands on
+  // a node, so a new prerequisite never inherits the operator or relation
+  // picked for another node — the default "depends on" must stay the default.
+  const menuNodeId = contextMenu?.kind === "node" ? contextMenu.nodeId : null;
+  useEffect(() => {
+    if (menuNodeId) resetConditionDraft(menuNodeId);
+    // Only a change of node resets the draft; graph edits while the menu is
+    // open must not discard what the user picked.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuNodeId]);
 
   /**
    * Replaces the inline badge on a set of relation edges with the gate

@@ -79,9 +79,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function notify(run: Run) {
+function budgetStatus(exceeded = "") {
+  return {
+    budget: { maxRuns: 5, maxCostUsd: 0, maxTokens: 0 },
+    used: { runs: exceeded ? 5 : 1, costUsd: 0, tokens: 0 },
+    exceeded,
+  } as never;
+}
+
+async function notify(run: Run, exceeded = "") {
   vi.spyOn(api, "getRun").mockResolvedValue(run);
+  vi.spyOn(api, "getRunBudget").mockResolvedValue(budgetStatus(exceeded));
   await useRunToasts.getState().handleRunNotify(run.id);
+  // The budget is checked alongside; let it land.
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("runNotifyKind", () => {
@@ -199,5 +211,44 @@ describe("run-notify toasts", () => {
       "nodevas-run-run2:merge:m1",
       expect.any(Function),
     );
+  });
+});
+
+describe("usage limits and the daily budget", () => {
+  it("says a run failed on its agent's usage limit rather than plain failed", async () => {
+    const limited = makeRun({ status: "failed", prUrl: undefined, failureKind: "quota", error: "usage limit reached" });
+    expect(runNotifyKind(limited, NOW)).toEqual({ kind: "limit", key: "run2:limit" });
+    expect(runNotifyKind({ ...limited, failureKind: "rate_limit" }, NOW)?.kind).toBe("limit");
+    expect(runNotifyKind({ ...limited, failureKind: "task" }, NOW)?.kind).toBe("failed");
+
+    render(<RunToasts />);
+    await notify(limited);
+    const toast = await screen.findByText("claude reached its usage limit: Design doc");
+    expect(toast.closest(".run-toast")?.className).toContain("is-limit");
+    expect(screen.getByText("usage limit reached")).toBeTruthy();
+  });
+
+  it("tells once per UTC day that the budget is used up, and opens it", async () => {
+    render(<RunToasts />);
+    const opened = vi.fn();
+    window.addEventListener("nodevas-open-budget", opened);
+    await notify(makeRun(), "runs");
+    await notify(makeRun({ id: "run3" }), "runs");
+    expect(await screen.findAllByText("Daily budget used up")).toHaveLength(1);
+
+    fireEvent.click(screen.getByText("Daily budget used up"));
+    expect(opened).toHaveBeenCalledTimes(1);
+    window.removeEventListener("nodevas-open-budget", opened);
+
+    // A new UTC day is news again.
+    vi.setSystemTime(NOW + 24 * 60 * 60 * 1000);
+    await notify(makeRun({ id: "run4", finishedAt: new Date(NOW + 24 * 60 * 60 * 1000 - 60_000).toISOString() }), "runs");
+    expect(await screen.findAllByText("Daily budget used up")).toHaveLength(1);
+  });
+
+  it("says nothing about a budget that is not used up", async () => {
+    render(<RunToasts />);
+    await notify(makeRun());
+    expect(screen.queryByText("Daily budget used up")).toBeNull();
   });
 });

@@ -156,7 +156,7 @@ func hookServer(t *testing.T) (*httptest.Server, *agents.Hub, *project.ProjectMa
 		t.Fatal(err)
 	}
 	t.Cleanup(pm.StopWatcher)
-	if _, err := pm.Store().CreateNode(&engine.Node{ID: "n1", Title: "Fix it"}, ""); err != nil {
+	if _, err := pm.Store().CreateNode(identity.Local, &engine.Node{ID: "n1", Title: "Fix it"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	gin.SetMode(gin.TestMode)

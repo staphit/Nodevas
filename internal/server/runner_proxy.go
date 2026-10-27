@@ -111,6 +111,10 @@ type runnerProxyKey struct{}
 
 type runnerProxied struct {
 	actor identity.Actor
+	// runID is the run a heartbeat comes from, when the runner named one
+	// (runnerwire.RunIDHeader) and it is a run of that runner; "" otherwise,
+	// and for every other route.
+	runID string
 	// still reports whether the runner's token is still good, for long-polls
 	// that outlive a revoke.
 	still func() bool
@@ -180,6 +184,11 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 		_, err := s.runners.Authenticate(context.Background(), token)
 		return err == nil
 	}}
+	// Only a heartbeat records the run (agents.Session.RunID); every other
+	// proxied call is spared the lookup.
+	if target == "/api/agents/heartbeat" {
+		proxied.runID = s.proxiedRunID(r, runner)
+	}
 	inner := r.Clone(context.WithValue(r.Context(), runnerProxyKey{}, proxied))
 	inner.URL.Path = target
 	inner.URL.RawPath = ""
@@ -189,6 +198,32 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	inner.Header.Del("Authorization")
 	inner.Header.Del("Cookie")
 	inner.Header.Del(auth.AgentRoleHeaderName)
+	inner.Header.Del(runnerwire.RunIDHeader)
 	handler.ServeHTTP(c.Writer, inner)
 	c.Abort()
+}
+
+// proxiedRunID is the run a proxied request says it comes from, if that run
+// is the runner's own: a runner can only speak for its own runs, whatever ID
+// it sends. "" when it names none, or one it may not.
+func (s *Server) proxiedRunID(r *http.Request, runner runnerwire.Runner) string {
+	runID := strings.TrimSpace(r.Header.Get(runnerwire.RunIDHeader))
+	if runID == "" || s.runs == nil {
+		return ""
+	}
+	rec, err := s.runs.Store().Get(r.Context(), runID)
+	if err != nil || rec.RunnerID != runner.ID {
+		return ""
+	}
+	return rec.ID
+}
+
+// proxiedRunIDFrom is the run a request came from through a runner's proxy,
+// or "" for any other request.
+func proxiedRunIDFrom(ctx context.Context) string {
+	proxied, ok := runnerProxiedFrom(ctx)
+	if !ok {
+		return ""
+	}
+	return proxied.runID
 }

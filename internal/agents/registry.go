@@ -79,6 +79,10 @@ type Session struct {
 	// run reads content anyone who may edit the board controls, so what it
 	// sends a person's session waits for that person (Send).
 	Run bool `json:"run,omitempty"`
+	// RunID is the run this session is the agent of, when its runner's proxy
+	// said so (runnerwire.RunIDHeader). Set once, like Run: a session never
+	// moves to another run.
+	RunID string `json:"runId,omitempty"`
 }
 
 // Address returns the canonical `<actor>/<name>` handle for this session.
@@ -118,6 +122,9 @@ type Heartbeat struct {
 	// Run: the heartbeat comes from a run (Session.Run). It is set by the
 	// transport, not by what the agent says about itself.
 	Run bool `json:"-"`
+	// RunID: the run the heartbeat comes from (Session.RunID), also set by
+	// the transport. It implies Run.
+	RunID string `json:"-"`
 }
 
 // EventFunc is called whenever sessions, messages, or asks change in a project
@@ -250,6 +257,11 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		actorName = shortActor(actorID)
 	}
 
+	runID := strings.TrimSpace(hb.RunID)
+	if runID != "" {
+		hb.Run = true
+	}
+
 	h.mu.Lock()
 	h.pruneExpiredLocked(now)
 	key := project + "\x00" + sessionID
@@ -287,6 +299,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			LastSeen:  now,
 			Online:    true,
 			Run:       hb.Run,
+			RunID:     runID,
 		}
 		h.sessions[key] = existing
 	} else {
@@ -303,6 +316,16 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		if hb.Run && !existing.Run {
 			h.mu.Unlock()
 			return Session{}, fmt.Errorf("%w: session %q is not a run's", ErrRefused, sessionID)
+		}
+		// Two runs on one runner share an owner, so the checks above let one
+		// heartbeat the other's session ID. A session bound to a run stays
+		// that run's.
+		if existing.RunID != "" && runID != "" && existing.RunID != runID {
+			h.mu.Unlock()
+			return Session{}, fmt.Errorf("%w: session %q belongs to another run", ErrRefused, sessionID)
+		}
+		if existing.RunID == "" && existing.Run {
+			existing.RunID = runID
 		}
 		if hb.Name != "" {
 			if wanted := sanitizeToken(hb.Name); wanted != "" && wanted != existing.Name {

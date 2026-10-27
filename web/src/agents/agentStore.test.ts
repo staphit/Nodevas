@@ -316,6 +316,42 @@ describe("agent-notify", () => {
     Object.defineProperty(document, "hidden", { value: false, configurable: true });
   });
 
+  it("announces a new question once, to whoever may answer it", async () => {
+    const shown: { title: string; body?: string }[] = [];
+    class FakeNotification {
+      static permission = "granted";
+      onclick: (() => void) | null = null;
+      constructor(title: string, options?: NotificationOptions) {
+        shown.push({ title, body: options?.body });
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    const ask = (over: Record<string, unknown>) => ({
+      id: "a1", project: "alpha", sessionId: "s1", sessionName: "api-claude", actorId: "alice",
+      agent: "claude", question: "Drop the old table?", status: "pending", createdAt: 1, ...over,
+    });
+    mockFetch({
+      "GET /api/agents/asks": () => ({
+        asks: [ask({}), ask({ id: "theirs", actorId: "carol" }), ask({ id: "done", status: "approved" })],
+      }),
+    });
+    useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" } });
+
+    await useAgents.getState().handleAsk("a1");
+    await useAgents.getState().handleAsk("a1");
+    await useAgents.getState().handleAsk("theirs");
+    await useAgents.getState().handleAsk("done");
+
+    const toasts = useAgents.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]).toMatchObject({ from: "api-claude", body: "Drop the old table?" });
+    expect(shown).toEqual([{ title: "api-claude is asking you", body: "Drop the old table?" }]);
+    expect(useAgents.getState().asks.map((a) => a.id)).toContain("a1");
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+  });
+
   it("excerpt collapses whitespace", () => {
     expect(excerpt("a\n\n  b")).toBe("a b");
   });

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"nodevas/internal/copilot/localllm"
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/db"
@@ -64,6 +65,13 @@ type Options struct {
 	// Remote reaches model calls made on runners, for KeySourceRunner
 	// (remote.go). Nil means only a server-held key works.
 	Remote RunnerLLM
+	// LocalModels finds a local OpenAI-compatible server (Ollama, LM
+	// Studio) on this machine's loopback, for the automatic provider
+	// (choose.go). Nil means none is looked for.
+	LocalModels func(context.Context) (localllm.Found, bool)
+	// ServerIsLocal: this server listens on loopback only, so "the server"
+	// is the person's own PC. The panel words where the model runs by it.
+	ServerIsLocal bool
 	// DefaultModel names a provider's default model when nothing else does.
 	DefaultModel func(kind string) string
 	OpenBridge   func(context.Context, toolbridge.Options) (toolbridge.Bridge, error)
@@ -78,6 +86,9 @@ type Options struct {
 	// Zero means the spec's 120 s and 60 s. Tests shorten them.
 	PermissionTimeout time.Duration
 	ClientToolTimeout time.Duration
+	// BrowserModelTimeout bounds one call to the browser's model; zero
+	// means 120 s.
+	BrowserModelTimeout time.Duration
 }
 
 // Service is the copilot. One per server.
@@ -104,6 +115,9 @@ func New(opts Options) *Service {
 	}
 	if opts.ClientToolTimeout <= 0 {
 		opts.ClientToolTimeout = defaultClientToolTimeout
+	}
+	if opts.BrowserModelTimeout <= 0 {
+		opts.BrowserModelTimeout = defaultBrowserModelTimeout
 	}
 	if opts.MaxToolCallsPerTurn <= 0 {
 		opts.MaxToolCallsPerTurn = defaultMaxToolCalls
@@ -140,37 +154,34 @@ type Status struct {
 	// is offline or has no copilot key. The panel says how to start it
 	// rather than hiding the copilot.
 	NeedsRunner bool `json:"needsRunner,omitempty"`
+
+	// ModelHost is where the model runs: server, runner or browser.
+	ModelHost string `json:"modelHost,omitempty"`
+	// Automatic: the model was picked by the free order (choose.go), not
+	// configured.
+	Automatic bool `json:"automatic,omitempty"`
+	// LocalServer names the local server found (ollama, lmstudio).
+	LocalServer string `json:"localServer,omitempty"`
+	// ServerIsLocal: the server is loopback-only, so it is this PC.
+	ServerIsLocal bool `json:"serverIsLocal,omitempty"`
+	// NeedsDownload: the browser's model is the choice but has to be
+	// downloaded first, which only the person can start.
+	NeedsDownload bool `json:"needsDownload,omitempty"`
+	// NeedsSetup: automatic, and nothing free is available; ReasonCode is
+	// ReasonNoModel.
+	NeedsSetup bool   `json:"needsSetup,omitempty"`
+	ReasonCode string `json:"reasonCode,omitempty"`
 }
 
 // Status reports whether the copilot can answer this person, and with what.
-func (s *Service) Status(ctx context.Context, actor identity.Actor) (Status, error) {
-	settings, key, _, err := s.settings.resolve(ctx)
+// browser is their browser's own model availability ("" for none).
+func (s *Service) Status(ctx context.Context, actor identity.Actor, browser string) (Status, error) {
+	plan, err := s.plan(ctx, actor, browser)
 	if err != nil {
 		return Status{}, err
 	}
-	source := effectiveKeySource(settings, key)
-	status := Status{
-		Provider:    settings.Provider,
-		Model:       settings.Model,
-		Modes:       availableModes(settings.AllowBypass),
-		AllowBypass: settings.AllowBypass,
-		KeySource:   source,
-	}
-	if source == KeySourceRunner {
-		status.Reason = s.baseUnavailableReason()
-		if status.Reason == "" {
-			runner, info, err := s.runnerTarget(ctx, actor.ID)
-			if err != nil {
-				status.Reason = err.Error()
-				status.NeedsRunner = s.opts.Remote != nil
-			} else {
-				status.Provider, status.Model, status.Runner = info.Provider, info.Model, runner.Name
-			}
-		}
-	} else {
-		status.Reason = s.unavailableReason(settings, key)
-	}
-	status.Enabled = status.Reason == ""
+	status := plan.status()
+	status.ServerIsLocal = s.opts.ServerIsLocal
 	return status, nil
 }
 
@@ -279,11 +290,15 @@ type activeTurn struct {
 	id             string
 	conversationID string
 	accountID      string
-	cancel         context.CancelFunc
+	// session fingerprints the sign-in session that started the turn.
+	session string
+	cancel  context.CancelFunc
 
 	mu          sync.Mutex
 	permissions map[string]chan permissionAnswer
 	clientCalls map[string]chan toolbridge.Result
+	// modelCalls are the browser model calls waiting for an answer.
+	modelCalls map[string]chan browserAnswer
 }
 
 type permissionAnswer struct {

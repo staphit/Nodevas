@@ -683,7 +683,8 @@ test.describe("page formats", () => {
 
     await expect(drawer.getByRole("tab", { name: /轉檔/ })).toContainText("網頁");
     await expect(drawer.getByLabel("檔案位置")).toContainText(".html");
-    await editorText(page).press("Control+End");
+    // Mod-End in CodeMirror: Command on macOS, Control elsewhere.
+    await editorText(page).press("ControlOrMeta+End");
     await expect(editorText(page)).toContainText("轉換前的內容");
   });
 });

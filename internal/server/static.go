@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"strings"
 
@@ -43,6 +44,18 @@ func (s *Server) serveStatic(c *gin.Context) {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	http.ServeFileFS(c.Writer, c.Request, s.webFS, path)
+}
+
+// QuietRequest reports a request whose line the request log may leave out
+// when it succeeds (logging.Options.Quiet): the build's hashed static assets,
+// and the container's health probe, which asks for the app shell straight
+// from this machine every half minute. A visitor loading the app is still
+// recorded, by the shell and every API call it makes.
+func QuietRequest(r *http.Request) bool {
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		return true
+	}
+	return r.URL.Path == "/" && auth.DirectLoopback(r)
 }
 
 // LogRequests is simple request logging middleware.

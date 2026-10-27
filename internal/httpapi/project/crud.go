@@ -14,16 +14,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/project"
 	"nodevas/internal/store"
 )
 
-// PostProjectImportPath imports a directory from anywhere on disk into the
-// workspace as a new project. Directories that already look like a project
-// (graph.yaml) are copied verbatim; otherwise every *.md becomes a node. An
-// empty folder becomes an empty project so documents can be moved into it later.
+// PostProjectOpen switches to a project, creating it first with create.
+//
+// On loopback it moves the server's active project, and every window follows.
+// With per-account projects it moves only the caller's current project (and
+// their own other windows): anyone who may read a project may open it, while
+// creating one stays an administrator's.
 func (a *API) PostProjectOpen(c *gin.Context) {
 	var body struct {
 		Name     string `json:"name"`
@@ -37,6 +40,17 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		httpx.Err(c, 400, fmt.Errorf("body must be {name, create?, template?}"))
 		return
 	}
+	if a.current != nil {
+		// Registered outside the administrators' group (routes.go).
+		if body.Create {
+			if err := auth.RequireAdmin(c.Request); err != nil {
+				httpx.Err(c, http.StatusForbidden, errors.New("administrator access required"))
+				return
+			}
+		}
+		a.openForCaller(c, body.Name, body.Create, body.Template)
+		return
+	}
 	if err := a.pm.Activate(body.Name, body.Create, body.Template); err != nil {
 		httpx.Err(c, 400, err)
 		return
@@ -44,6 +58,39 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 	a.pm.Hub().Broadcast("project-changed", body.Name)
 	c.JSON(200, map[string]string{
 		"root": a.visibleHostPath(a.pm.Store().Root()), "active": body.Name,
+	})
+}
+
+// openForCaller is PostProjectOpen with per-account projects.
+func (a *API) openForCaller(c *gin.Context, name string, create bool, template string) {
+	name = strings.Trim(strings.TrimSpace(name), "/")
+	if create {
+		if err := a.pm.Create(name, template); err != nil {
+			httpx.Err(c, http.StatusBadRequest, err)
+			return
+		}
+		// A new project in everyone's tree; nobody else's current one moves.
+		a.pm.Hub().Broadcast("project-changed", name)
+	}
+	if err := a.current.Open(c.Request, name); err != nil {
+		switch {
+		case errors.Is(err, ErrNotReadable):
+			// As the member routes do: probing names teaches nothing.
+			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", ErrNotReadable, nil)
+		case errors.Is(err, ErrAgentSwitch):
+			httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", err, nil)
+		default:
+			httpx.Err(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+	st, err := a.pm.StoreFor(name)
+	if err != nil {
+		httpx.Err(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, map[string]string{
+		"root": a.visibleHostPath(st.Root()), "active": name,
 	})
 }
 
@@ -153,11 +200,12 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 		}
 	}
 
-	if err := a.pm.Activate(name, false, ""); err != nil {
+	if err := a.pm.OpenForCaller(name); err != nil {
 		cleanupOnError()
 		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("匯入後開啟失敗：%w", err))
 		return
 	}
+	a.follow(c.Request, name)
 	a.pm.Hub().Broadcast("project-changed", name)
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "name": name, "files": copied})
 }
@@ -254,11 +302,12 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 
 	active := ""
 	if body.Open {
-		if err := a.pm.Activate(newName, false, ""); err != nil {
+		if err := a.pm.OpenForCaller(newName); err != nil {
 			httpx.Err(c, http.StatusInternalServerError,
 				fmt.Errorf("已複製，但開啟失敗：%w", err))
 			return
 		}
+		a.follow(c.Request, newName)
 		active = newName
 	}
 	a.pm.Hub().Broadcast("project-changed", newName)
@@ -439,6 +488,12 @@ func (a *API) PostProjectMove(c *gin.Context) {
 			return
 		}
 	}
+	if a.current != nil && !changesWorkspace {
+		// Whoever was working in the moved project stays in it, and the
+		// caller is told where they are rather than the server's default.
+		a.current.Moved(c.Request.Context(), name, newName)
+		newActive = a.currentName(c.Request)
+	}
 	a.pm.Hub().Broadcast("project-changed", newName)
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":        true,
@@ -471,6 +526,11 @@ func (a *API) PostProjectRemove(c *gin.Context) {
 	// deleted from disk loses them, so a new project there starts open.
 	if a.membership != nil && body.Mode == "disk" && resolveErr == nil {
 		a.membership.Removed(c.Request.Context(), removedDir)
+	}
+	if a.current != nil {
+		// The caller's own current project, which falls back to a default
+		// if it was the one removed.
+		active = a.currentName(c.Request)
 	}
 	a.pm.Hub().Broadcast("project-changed", active)
 	c.JSON(http.StatusOK, map[string]any{

@@ -156,7 +156,7 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		},
 		Remote: relay,
 	})
-	status, err := service.Status(ctx, ann)
+	status, err := service.Status(ctx, ann, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		status.Provider != "openai" || status.Model != "gpt-test" {
 		t.Fatalf("ann's status = %+v", status)
 	}
-	if status, _ := service.Status(ctx, bob); status.Enabled || !status.NeedsRunner || !strings.Contains(status.Reason, "nodevas runner") {
+	if status, _ := service.Status(ctx, bob, ""); status.Enabled || !status.NeedsRunner || !strings.Contains(status.Reason, "nodevas runner") {
 		t.Fatalf("bob's status = %+v", status)
 	}
 

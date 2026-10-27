@@ -25,7 +25,7 @@ import (
 func mcpServe(args []string) {
 	fs, f := newMCPFlags(flag.ExitOnError)
 	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
-	server, projectName, actor, agentRole := f.server, f.projectName, f.actor, f.agentRole
+	server, projectName, actor, agentRole, toolset := f.server, f.projectName, f.actor, f.agentRole, f.toolset
 	sessionName, model, chromaURL, ragPython := f.sessionName, f.model, f.chromaURL, f.ragPython
 
 	// Every diagnostic goes to stderr, without exception. stdout carries the
@@ -48,6 +48,13 @@ func mcpServe(args []string) {
 			*agentRole)
 		os.Exit(2)
 	}
+	tools := strings.TrimSpace(*toolset)
+	if !mcp.ValidToolset(tools) {
+		fmt.Fprintf(os.Stderr,
+			"nodevas mcp: --toolset %q is not a toolset this server knows: use %q or %q\n",
+			*toolset, mcp.ToolsetFull, mcp.ToolsetRun)
+		os.Exit(2)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,6 +73,7 @@ func mcpServe(args []string) {
 		IgnoreExclusion: strings.HasPrefix(name, "run:"),
 		ChromaURL:       *chromaURL,
 		RAGPython:       *ragPython,
+		Toolset:         tools,
 		Stderr:          os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
@@ -114,7 +122,7 @@ func runMCPArgs(value string) ([]string, bool) {
 
 // mcpFlags are `nodevas mcp`'s flags.
 type mcpFlags struct {
-	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython *string
+	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython, toolset *string
 }
 
 func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
@@ -134,6 +142,10 @@ func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
 			"the model this agent runs on, shown on the roster; empty reads NODEVAS_MODEL"),
 		chromaURL: fs.String("chroma-url", "", "enable document RAG using this local ChromaDB v2 server; requires --project"),
 		ragPython: fs.String("rag-python", "python", "Python executable with chromadb installed for local MiniLM embeddings"),
+		// Tool choice, not permission: --agent-role is what this agent may
+		// write; --toolset is which tools it is shown at all.
+		toolset: fs.String("toolset", mcp.ToolsetFull,
+			"which tools to serve: full (every tool) or run (the few a runner's run uses)"),
 	}
 }
 

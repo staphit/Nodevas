@@ -108,6 +108,25 @@ export function readPreference<K extends PreferenceKey>(key: K): PreferenceValue
   return decoded === undefined ? spec.fallback() : decoded;
 }
 
+/** Whether a value — usable or not — is stored for `key`. */
+export function hasStoredPreference(key: PreferenceKey): boolean {
+  try {
+    return storage.getItem(PREFERENCE_SCHEMA[key].key) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether this browser has stored any preference at all — the closest thing
+ * the client has to "this person has used the app here before". Used to keep a
+ * changed default from rearranging the screen of someone who never had a
+ * reason to store the old one.
+ */
+export function hasAnyStoredPreference(): boolean {
+  return PREFERENCE_KEYS.some(hasStoredPreference);
+}
+
 export function readPreferences(): PreferenceValues {
   const values = {} as PreferenceValues;
   for (const key of PREFERENCE_KEYS) {

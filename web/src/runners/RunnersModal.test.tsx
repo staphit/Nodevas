@@ -139,39 +139,16 @@ describe("RunnersModal", () => {
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("r1"));
   });
 
-  it("fetches the budget only once its section is opened", async () => {
+  it("leaves the budget to its own Settings part", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
-    const budget = vi.spyOn(api, "getRunBudget").mockResolvedValue({
-      budget: { dailyRuns: 5, dailyCostUsd: 0, dailyTokens: 0 },
-      used: { runs: 1, costUsd: 0, tokens: 0 },
-      exceeded: "",
-    });
+    const budget = vi.spyOn(api, "getRunBudget");
     useBudget.getState().reset();
 
     render(<RunnersModal onClose={vi.fn()} />);
     await screen.findByText("desktop");
+    expect(screen.queryByText("Daily budget")).not.toBeInTheDocument();
+    expect(screen.queryByText("Routing rules")).not.toBeInTheDocument();
     expect(budget).not.toHaveBeenCalled();
-
-    const section = screen.getByText("Daily budget").closest("details")!;
-    section.open = true;
-    fireEvent(section, new Event("toggle"));
-    expect(await screen.findByText("1 / 5")).toBeInTheDocument();
-    expect(budget).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens on the budget when a dispatch dialog sent us there", async () => {
-    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
-    vi.spyOn(api, "getRunBudget").mockResolvedValue({
-      budget: { dailyRuns: 0, dailyCostUsd: 0, dailyTokens: 0 },
-      used: { runs: 0, costUsd: 0, tokens: 0 },
-      exceeded: "",
-    });
-    useBudget.getState().reset();
-    useBudget.getState().requestShow(true);
-
-    render(<RunnersModal onClose={vi.fn()} />);
-    expect(await screen.findByRole("spinbutton", { name: "Runs per day" })).toBeInTheDocument();
-    expect(useBudget.getState().showRequested).toBe(false);
   });
 
   it("refreshes on runners-changed only once loaded", async () => {

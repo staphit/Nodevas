@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 102 148" width="102" height="148">
+<!-- Candy dungeon: a gingerbread gate with chocolate doors, closed -->
+<polygon points="4,98 16,104 16,8 4,2" fill="#a86e3e" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="16,104 96,144 96,48 16,8" fill="#c98a55" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="4,2 16,8 96,48 84,42" fill="#e0a874" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M16 16 L96 56" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="6 5" stroke-linecap="round"/>
+<circle cx="28" cy="12" r="4.5" fill="#ff7aa8" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/><circle cx="54" cy="25" r="4.5" fill="#7fdcc4" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/><circle cx="80" cy="38" r="4.5" fill="#ffe17a" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M34 113 V58 Q56 38 78 80 V135 Z" fill="#6b3f2a" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M49 120.5 V53 M63 127.5 V60 M34 80 L78 102 M34 98 L78 120" stroke="#4e2c1d" stroke-width="2"/>
+<path d="M56 124 V55" stroke="#7a3b5c" stroke-width="2.5"/>
+<path d="M38 86 L44 89 M52 76 L56 78" stroke="#a7715a" stroke-width="2" stroke-linecap="round"/>
+<path d="M34 113 L78 135" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

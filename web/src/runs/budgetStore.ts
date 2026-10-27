@@ -3,7 +3,7 @@ import { api, type RunBudget, type RunBudgetStatus } from "../api";
 
 /**
  * The viewer's daily run budget and today's use (GET/PUT /api/runs/budget).
- * Fetched when something shows it — the Runners dialog's Budget section, the
+ * Fetched when something shows it — the Budget part of Settings, the
  * dispatch dialog's warning — never on load.
  */
 export interface BudgetStoreState {
@@ -12,9 +12,6 @@ export interface BudgetStoreState {
   error: string | null;
   saving: boolean;
   saveError: string | null;
-  /** Set by "adjust budget" links: the Runners dialog opens on its Budget. */
-  showRequested: boolean;
-  requestShow: (show: boolean) => void;
   load: () => Promise<void>;
   /** Saves the limits; returns whether the hub took them. */
   save: (budget: RunBudget) => Promise<boolean>;
@@ -33,8 +30,6 @@ export const useBudget = create<BudgetStoreState>((set) => ({
   error: null,
   saving: false,
   saveError: null,
-  showRequested: false,
-  requestShow: (show) => set({ showRequested: show }),
 
   load: () => {
     if (inFlight) return inFlight;
@@ -77,7 +72,6 @@ export const useBudget = create<BudgetStoreState>((set) => ({
       error: null,
       saving: false,
       saveError: null,
-      showRequested: false,
     });
   },
 }));

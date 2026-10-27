@@ -16,6 +16,10 @@ const (
 	AskExpired  = "expired"
 
 	MaxAskTimeout = 10 * time.Minute
+
+	// AskEvent is emitted with the Ask when one is created, answered or
+	// expires.
+	AskEvent = "agent-ask"
 )
 
 // Ask represents one human-in-the-loop approval/question from an agent session.
@@ -120,7 +124,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		h.mu.Unlock()
 	}()
 
-	h.emit(project, "agent-ask", ask)
+	h.emit(project, AskEvent, ask)
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -133,11 +137,11 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		if err != nil {
 			return ask, err
 		}
-		h.emit(project, "agent-ask", expired)
+		h.emit(project, AskEvent, expired)
 		return expired, nil
 	case <-ctx.Done():
 		if expired, err := h.expireAsk(context.Background(), project, ask.ID); err == nil {
-			h.emit(project, "agent-ask", expired)
+			h.emit(project, AskEvent, expired)
 		}
 		return Ask{}, ctx.Err()
 	}
@@ -367,7 +371,7 @@ func (h *Hub) Answer(ctx context.Context, project, askID, decision, note string,
 		}
 	}
 
-	h.emit(project, "agent-ask", updated)
+	h.emit(project, AskEvent, updated)
 	return updated, nil
 }
 

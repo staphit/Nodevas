@@ -20,6 +20,8 @@ import {
 } from "../../icons";
 import { nodeById, reportError, useApp } from "../../store";
 import { useI18n } from "../../i18n";
+import { AutopilotPill } from "../../autopilot/AutopilotPill";
+import { useWorkstationVisible } from "../../runners/workstation";
 
 type TabContextMenuState = {
   id: string;
@@ -67,6 +69,7 @@ export function DrawerTabs({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const workstation = useWorkstationVisible();
   const tabs = useApp((s) => s.tabs);
   const graph = useApp((s) => s.graph);
   const setActiveTab = useApp((s) => s.setActiveTab);
@@ -213,6 +216,10 @@ export function DrawerTabs({
             </div>
           ))}
         </div>
+        {/* Autopilot directs agents toward this node as a goal: in the
+            panel's top row, above the node's own facets, and run from
+            Station (openAutopilot). It takes no height from the editor. */}
+        {workstation && activeTab && <AutopilotPill id={activeTab} />}
         <button className="drawer-close" aria-label={t("drawer.tabs.closePanel")} onClick={onClose}>
           <IconClose size={15} />
         </button>

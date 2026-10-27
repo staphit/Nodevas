@@ -156,12 +156,18 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// errUnreadableAccount marks a row that was found and fetched but cannot be
+// turned into an account: a value the scan cannot convert, or a role nobody can
+// interpret. Unlike a read that failed, it is about one row, so a caller that
+// must not say whether a row exists has to tell the two apart.
+var errUnreadableAccount = errors.New("unreadable account")
+
 func scanAccount(row rowScanner) (UserRecord, error) {
 	var user UserRecord
 	var role string
 	if err := row.Scan(&user.ID, &user.Name, &role, &user.Hash,
 		&user.Email, &user.CreatedAt); err != nil {
-		return UserRecord{}, err
+		return UserRecord{}, fmt.Errorf("%w: %w", errUnreadableAccount, err)
 	}
 	// The schema constrains this column, but constraints are only checked on
 	// write: a hand-edited row can hold anything, and a role nobody can
@@ -170,7 +176,7 @@ func scanAccount(row rowScanner) (UserRecord, error) {
 	case identity.RoleAdmin, identity.RoleMember:
 		user.Role = identity.Role(role)
 	default:
-		return UserRecord{}, fmt.Errorf("user %q has invalid role %q", user.Name, role)
+		return UserRecord{}, fmt.Errorf("%w: user %q has invalid role %q", errUnreadableAccount, user.Name, role)
 	}
 	return user, nil
 }
@@ -290,6 +296,21 @@ func (u *UserStore) AddWithRole(ctx context.Context, name, password string, role
 	return u.AddWithEmail(ctx, name, password, role, "")
 }
 
+// newAccountID is a fresh account ID: 16 URL-safe characters that never
+// begin with "-", which a command line taking an ID would read as a flag
+// (`nodevas account totp-reset <id>`).
+func newAccountID() (string, error) {
+	for {
+		token, err := RandomToken()
+		if err != nil {
+			return "", err
+		}
+		if id := token[:16]; id[0] != '-' {
+			return id, nil
+		}
+	}
+}
+
 // AddWithEmail creates an account that can sign in to the web UI from the
 // start. An empty email creates one that cannot until SetEmail is run.
 //
@@ -302,24 +323,24 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 	if strings.TrimSpace(email) != "" {
 		normalized, err := normalizeEmail(email)
 		if err != nil {
-			return err
+			return invalidAccount{err}
 		}
 		address = normalized
 	}
 	if !userNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid user name %q", name)
+		return invalidAccount{fmt.Errorf("invalid user name %q", name)}
 	}
 	if err := validateNewPassword(password); err != nil {
-		return err
+		return invalidAccount{err}
 	}
 	if role != "" && role != identity.RoleAdmin && role != identity.RoleMember {
-		return fmt.Errorf("invalid role %q", role)
+		return invalidAccount{fmt.Errorf("invalid role %q", role)}
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
 		return err
 	}
-	id, err := RandomToken()
+	id, err := newAccountID()
 	if err != nil {
 		return err
 	}
@@ -338,7 +359,7 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 		err := tx.QueryRowContext(ctx,
 			`SELECT 1 FROM accounts WHERE name = ? COLLATE NOCASE`, name).Scan(&exists)
 		if err == nil {
-			return fmt.Errorf("user %q already exists", name)
+			return accountExists{name}
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("look up account: %w", err)
@@ -350,7 +371,7 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 		}
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?)`,
-			id[:16], name, string(role), hash, address, db.Now())
+			id, name, string(role), hash, address, db.Now())
 		if err != nil {
 			return insertError(name, err)
 		}
@@ -366,10 +387,32 @@ func insertError(name string, err error) error {
 		return ErrEmailTaken
 	}
 	if db.IsUniqueViolation(err, "") {
-		return fmt.Errorf("user %q already exists", name)
+		return accountExists{name}
 	}
 	return fmt.Errorf("create account: %w", err)
 }
+
+// ErrInvalidAccount and ErrAccountExists classify a refused AddWithEmail for
+// a caller that answers over HTTP: the input was wrong, or the name is taken.
+// The messages are the ones the CLI has always printed; only errors.Is sees
+// the class.
+var (
+	ErrInvalidAccount = errors.New("invalid account")
+	ErrAccountExists  = errors.New("account already exists")
+)
+
+// invalidAccount is a validation failure, worded by the check that failed.
+type invalidAccount struct{ err error }
+
+func (e invalidAccount) Error() string        { return e.err.Error() }
+func (e invalidAccount) Unwrap() error        { return e.err }
+func (e invalidAccount) Is(target error) bool { return target == ErrInvalidAccount }
+
+// accountExists is a name another account already has.
+type accountExists struct{ name string }
+
+func (e accountExists) Error() string        { return fmt.Sprintf("user %q already exists", e.name) }
+func (e accountExists) Is(target error) bool { return target == ErrAccountExists }
 
 // Remove deletes an account. Session revision checks revoke its sessions on
 // their next request. The final administrator cannot be removed.
@@ -392,7 +435,7 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 			return err
 		}
 		if identity.Role(role) == identity.RoleAdmin && admins == 1 {
-			return errors.New("cannot remove the last administrator")
+			return ErrLastAdministrator
 		}
 		// Nothing else in this database points at an account row: audit_events
 		// keeps actor_id as plain text on purpose, so deleting an account does
@@ -405,6 +448,14 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 		return deleteTOTPRows(ctx, tx, id)
 	})
 }
+
+// ErrLastAdministrator and ErrLastAdministratorRole refuse the account change
+// that would leave the server without an administrator: removing the last
+// one, or making it a member. The CLI and the web UI say the same words.
+var (
+	ErrLastAdministrator     = errors.New("cannot remove the last administrator")
+	ErrLastAdministratorRole = errors.New("cannot demote the last administrator")
+)
 
 func adminCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var admins int
@@ -497,7 +548,7 @@ func (u *UserStore) SetRole(ctx context.Context, name string, role identity.Role
 			return err
 		}
 		if identity.Role(current) == identity.RoleAdmin && role == identity.RoleMember && admins == 1 {
-			return errors.New("cannot demote the last administrator")
+			return ErrLastAdministratorRole
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE accounts SET role = ? WHERE id = ?`, string(role), id); err != nil {
@@ -563,18 +614,37 @@ func (u *UserStore) Revision(ctx context.Context, id string) (string, bool) {
 // read. OAuth capabilities use this to die with password/role/account changes
 // just like sessions do.
 func (u *UserStore) ActorRevision(ctx context.Context, id string) (identity.Actor, string, bool) {
+	user, ok := u.accountRecord(ctx, id)
+	if !ok {
+		return identity.Actor{}, "", false
+	}
+	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, userRevision(user), true
+}
+
+// revisionAndEmail is Revision and the account's sign-in address, from the
+// same read.
+func (u *UserStore) revisionAndEmail(ctx context.Context, id string) (string, string, bool) {
+	user, ok := u.accountRecord(ctx, id)
+	if !ok {
+		return "", "", false
+	}
+	return userRevision(user), user.Email, true
+}
+
+// accountRecord reads one account's row by ID. Failure is treated as
+// absence.
+func (u *UserStore) accountRecord(ctx context.Context, id string) (UserRecord, bool) {
 	// The id arrives from a session cookie or a stored capability, which is to
 	// say from a client. It is a bound parameter and cannot inject, but there is
 	// no reason to carry an arbitrarily long one as far as the database.
 	if id == "" || len(id) > maxAccountIDBytes {
-		return identity.Actor{}, "", false
+		return UserRecord{}, false
 	}
 	users, err := u.accounts(ctx, accountByID, 1, id)
 	if err != nil || len(users) == 0 {
-		return identity.Actor{}, "", false
+		return UserRecord{}, false
 	}
-	user := users[0]
-	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, userRevision(user), true
+	return users[0], true
 }
 
 // FindAccount resolves one account by its exact name or sign-in address. It

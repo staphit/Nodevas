@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 88" width="160" height="88">
+<!-- Candy dungeon: a wafer path tile -->
+<polygon points="0,40 80,80 80,88 0,48" fill="#d9a464"/>
+<polygon points="80,80 160,40 160,48 80,88" fill="#c08a4c"/>
+<polygon points="80,0 160,40 80,80 0,40" fill="#f6d49a"/>
+<path d="M60 10 L140 50 M40 20 L120 60 M20 30 L100 70 M100 10 L20 50 M120 20 L40 60 M140 30 L60 70" stroke="#e2b46f" stroke-width="2"/>
+<polygon points="80,0 160,40 80,80 0,40" fill="none" stroke="#b97f45" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>

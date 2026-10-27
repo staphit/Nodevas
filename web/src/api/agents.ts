@@ -25,6 +25,13 @@ export interface AgentSession {
   inbound?: AgentInbound;
   /** The model the agent reported in its heartbeat. */
   model?: string;
+  /** The session is a run's agent (a runner dispatched it), not a person's
+   * own. Set by the hub from how the session connects. */
+  run?: boolean;
+  /** The run this session is the agent of, when the run's runner said so
+   * through its proxy. Absent from older hubs and runners: match the run by
+   * its session name then (game/joins.ts). */
+  runId?: string;
 }
 
 /** Absent on hubs older than the hold policy, which means "delivered". */

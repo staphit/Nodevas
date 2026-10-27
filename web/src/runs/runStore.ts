@@ -30,6 +30,11 @@ export interface RunStoreState {
   latestByNode: Record<string, Run>;
   /** Whether the project's recent runs were asked for (once per project). */
   projectRunsLoaded: boolean;
+  /** Every run of the project that has not ended (GET /api/runs?active=1),
+   * several per node included. Held only once something asked (the game
+   * views); refreshed by runs-changed from then on. */
+  activeRuns: Run[];
+  activeRunsLoaded: boolean;
   /** A run's changes, fetched only when someone opens its diff. */
   changesByRun: Record<string, HeldChanges>;
   changesLoading: Record<string, boolean>;
@@ -65,6 +70,9 @@ export interface RunStoreState {
   /** One request for the project's most recent runs, for the graph badges.
    * Repeated calls are free until the next reset (or a forced reload). */
   loadProjectRuns: (force?: boolean) => Promise<void>;
+  /** Fetches the project's unfinished runs; later runs-changed pushes keep
+   * them current (coalesced). */
+  loadActiveRuns: () => Promise<void>;
   /** Fetches a run's changes unless they are held for this commit already. */
   loadChanges: (runId: string, commit: string | undefined) => Promise<void>;
   /** Reloads one run from GET /api/runs/:id. */
@@ -191,6 +199,14 @@ const changesInFlight = new Map<string, Promise<void>>();
 const pipelinesInFlight = new Map<string, Promise<void>>();
 const pipelinesDirty = new Set<string>();
 let projectRunsInFlight: Promise<void> | null = null;
+// One active-runs fetch at a time, going round once more if a push lands
+// mid-way; pushes come in bursts (status, PR, CI), so they are gathered first.
+let activeInFlight: Promise<void> | null = null;
+let activeDirty = false;
+let activeTimer: ReturnType<typeof setTimeout> | null = null;
+/** How long runs-changed pushes are gathered before the active list is
+ * refetched once for the burst. */
+export const ACTIVE_RUNS_DELAY_MS = 600;
 // Bumped by reset(): a response for the previous project is dropped.
 let generation = 0;
 
@@ -198,6 +214,8 @@ const initial = {
   runsByNode: {},
   latestByNode: {},
   projectRunsLoaded: false,
+  activeRuns: [],
+  activeRunsLoaded: false,
   changesByRun: {},
   changesLoading: {},
   changesErrors: {},
@@ -293,6 +311,33 @@ export const useRuns = create<RunStoreState>((set, get) => ({
       if (projectRunsInFlight === work) projectRunsInFlight = null;
     });
     projectRunsInFlight = work;
+    return work;
+  },
+
+  loadActiveRuns: () => {
+    if (activeInFlight) {
+      activeDirty = true;
+      return activeInFlight;
+    }
+    const gen = generation;
+    set({ activeRunsLoaded: true });
+    const work = (async () => {
+      do {
+        activeDirty = false;
+        try {
+          const response = await api.listActiveRuns();
+          if (gen !== generation) return;
+          set({ activeRuns: response?.runs ?? [] });
+        } catch {
+          // Like the badges: a hub without the route, or a viewer who may
+          // not list runs, simply has none to show.
+          if (gen !== generation) return;
+        }
+      } while (activeDirty && gen === generation);
+    })().finally(() => {
+      if (activeInFlight === work) activeInFlight = null;
+    });
+    activeInFlight = work;
     return work;
   },
 
@@ -554,6 +599,13 @@ export const useRuns = create<RunStoreState>((set, get) => ({
   onRunsChanged: (nodeId) => {
     if (!nodeId) return;
     const state = get();
+    if (state.activeRunsLoaded) {
+      if (activeTimer) clearTimeout(activeTimer);
+      activeTimer = setTimeout(() => {
+        activeTimer = null;
+        void get().loadActiveRuns();
+      }, ACTIVE_RUNS_DELAY_MS);
+    }
     // A pipeline's next step or its end arrives as a change on its node.
     for (const pipeline of Object.values(state.pipelines)) {
       if (pipeline.nodeId === nodeId && !pipelineEnded(pipeline.status)) {
@@ -576,6 +628,7 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     const state = get();
     for (const nodeId of Object.keys(state.runsByNode)) void state.loadRuns(nodeId);
     if (state.projectRunsLoaded) void state.loadProjectRuns(true);
+    if (state.activeRunsLoaded) void state.loadActiveRuns();
     for (const pipeline of Object.values(state.pipelines)) {
       if (!pipelineEnded(pipeline.status)) void state.loadPipeline(pipeline.id, true);
     }
@@ -595,6 +648,10 @@ export const useRuns = create<RunStoreState>((set, get) => ({
     pipelinesInFlight.clear();
     pipelinesDirty.clear();
     projectRunsInFlight = null;
+    activeInFlight = null;
+    activeDirty = false;
+    if (activeTimer) clearTimeout(activeTimer);
+    activeTimer = null;
 
     // Live views keep their watch counts; they re-register on remount.
     set({ ...initial, watched: get().watched });

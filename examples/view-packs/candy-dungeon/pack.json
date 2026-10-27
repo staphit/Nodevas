@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "candy-dungeon",
+  "name": { "en": "Candy dungeon", "zh-TW": "糖果地城" },
+  "layout": "path",
+  "palette": {
+    "ground": "#fdf1f6",
+    "text": "#5b2a4a"
+  },
+  "sprites": {
+    "monster.attackable": "images/gumdrop.svg",
+    "monster.locked": "images/gumdrop-wrapped.svg",
+    "monster.defeated": "images/wrapper.svg",
+    "boss": "images/cake.svg",
+    "boss.defeated": "images/cake-slice.svg",
+    "hero": "images/gingerbread-hero.svg",
+    "tile.corridor": "images/tile-wafer.svg",
+    "tile.arena": "images/tile-frosted.svg",
+    "gate.closed": "images/gate-closed.svg",
+    "gate.open": "images/gate-open.svg",
+    "chest.closed": "images/chest-closed.svg",
+    "chest.open": "images/chest-open.svg",
+    "column": "images/candy-cane-column.svg",
+    "barrel": "images/candy-tin.svg"
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"nodevas/internal/db"
 	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
 )
@@ -166,9 +167,9 @@ func TestAnExpiredPasscodeIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestOTP: %v", err)
 	}
-	actor, _, _, ok := users.AccountByEmail(context.Background(), annEmail)
-	if !ok {
-		t.Fatal("AccountByEmail failed")
+	actor, _, _, err := users.AccountByEmail(context.Background(), annEmail)
+	if err != nil {
+		t.Fatalf("AccountByEmail: %v", err)
 	}
 
 	sessions.mu.Lock()
@@ -455,6 +456,151 @@ func TestACancelledRequestIsNotAFailedSignIn(t *testing.T) {
 
 	if _, _, _, err := sessions.Login(ctx, "ann", "correct-horse-battery"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Login on a cancelled context = %v, want context.Canceled", err)
+	}
+}
+
+// unreadableAccounts makes every read of the accounts table fail until the
+// returned function puts it back, the way an unreachable database would.
+func unreadableAccounts(t *testing.T, users *UserStore) func() {
+	t.Helper()
+	if _, err := users.database.ExecContext(context.Background(),
+		`ALTER TABLE accounts RENAME TO accounts_unreadable`); err != nil {
+		t.Fatalf("hide accounts: %v", err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := users.database.ExecContext(context.Background(),
+			`ALTER TABLE accounts_unreadable RENAME TO accounts`); err != nil {
+			t.Fatalf("restore accounts: %v", err)
+		}
+	}
+}
+
+// An account lookup that fails is the server's fault, not an address nobody
+// registered. Reported as one, a database outage would turn every passcode
+// request and every sign-in into an unknown-account line, which is what
+// somebody probing for accounts looks like. A cancelled request still says it
+// was cancelled, whatever the database is doing.
+func TestAFailedAccountReadIsNotAnUnknownAddress(t *testing.T) {
+	sessions, users := otpStoreForTest(t)
+	restore := unreadableAccounts(t, users)
+
+	for _, address := range []string{annEmail, "nobody@example.test"} {
+		challenge, err := sessions.RequestOTP(nil, address)
+		if err == nil || errors.Is(err, ErrNoSuchAccount) || errors.Is(err, context.Canceled) || challenge != (Challenge{}) {
+			t.Fatalf("RequestOTP(%q) with accounts unreadable = %+v, %v; want the read's own error", address, challenge, err)
+		}
+		result, err := sessions.SignInWithOTP(nil, address, "AAAAAAAA")
+		if err == nil || errors.Is(err, ErrBadCredentials) || errors.Is(err, ErrNoSuchAccount) {
+			t.Fatalf("SignInWithOTP(%q) with accounts unreadable = %v; want the read's own error", address, err)
+		}
+		if result.Refusal != (SignInRefusal{}) || result.Token != "" || result.Pending != nil {
+			t.Fatalf("SignInWithOTP(%q) with accounts unreadable = %+v; want nothing", address, result)
+		}
+	}
+	sessions.mu.Lock()
+	minted := len(sessions.otps)
+	sessions.mu.Unlock()
+	if minted != 0 {
+		t.Fatalf("%d passcodes minted while accounts were unreadable", minted)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil).WithContext(ctx)
+	request.RemoteAddr = "203.0.113.9:4242"
+	if _, err := sessions.RequestOTP(request, "carol@example.test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RequestOTP cancelled while accounts are unreadable = %v, want context.Canceled", err)
+	}
+	if _, err := sessions.SignInWithOTP(request, "carol@example.test", "AAAAAAAA"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("SignInWithOTP cancelled while accounts are unreadable = %v, want context.Canceled", err)
+	}
+
+	// Readable again, an unknown address is the refusal it always was.
+	restore()
+	if _, err := sessions.RequestOTP(nil, "dave@example.test"); !errors.Is(err, ErrNoSuchAccount) {
+		t.Fatalf("RequestOTP for an unknown address = %v, want ErrNoSuchAccount", err)
+	}
+	result, err := sessions.SignInWithOTP(nil, "dave@example.test", "AAAAAAAA")
+	if !errors.Is(err, ErrBadCredentials) || result.Refusal != (SignInRefusal{Reason: RefusedUnknownAccount}) {
+		t.Fatalf("SignInWithOTP for an unknown address = %+v, %v; want an unknown-account refusal", result.Refusal, err)
+	}
+}
+
+// A sign-in reads a registered address's account and its second-factor flag
+// in one statement, the same one an address nobody registered gets. Read by a
+// second query, the flag cost a found account a round trip more, so its 401
+// came measurably later than an unknown address's, before any passcode was
+// checked. The table it lives in is how a test sees that: unreadable, it must
+// fail every sign-in alike, rather than only those for a registered address.
+func TestASignInReadsTheSameForEveryAddress(t *testing.T) {
+	sessions, users := otpStoreForTest(t)
+	if _, err := users.database.ExecContext(context.Background(),
+		`ALTER TABLE account_totp RENAME TO account_totp_unreadable`); err != nil {
+		t.Fatalf("hide account_totp: %v", err)
+	}
+	for _, address := range []string{annEmail, "nobody@example.test"} {
+		result, err := sessions.SignInWithOTP(nil, address, "AAAAAAAA")
+		if !errors.Is(err, errAccountLookup) || errors.Is(err, ErrBadCredentials) {
+			t.Fatalf("SignInWithOTP(%q) with account_totp unreadable = %v; want the lookup's own error, as for every address", address, err)
+		}
+		if result != (SignInResult{}) {
+			t.Fatalf("SignInWithOTP(%q) with account_totp unreadable = %+v; want nothing", address, result)
+		}
+	}
+	if _, err := users.database.ExecContext(context.Background(),
+		`ALTER TABLE account_totp_unreadable RENAME TO account_totp`); err != nil {
+		t.Fatalf("restore account_totp: %v", err)
+	}
+	for _, address := range []string{annEmail, "nobody@example.test"} {
+		if _, err := sessions.SignInWithOTP(nil, address, "AAAAAAAA"); !errors.Is(err, ErrBadCredentials) {
+			t.Fatalf("SignInWithOTP(%q) = %v, want ErrBadCredentials", address, err)
+		}
+	}
+}
+
+// A database that hangs fails a read through the driver's own connect
+// timeout, and that error wraps context.DeadlineExceeded while the request is
+// still waiting for its answer. It is still the server's fault: neither an
+// address nobody registered nor a client that hung up, and nothing about it
+// may let the HTTP layer take it for either.
+func TestAStalledDatabaseIsNotACancelledRequest(t *testing.T) {
+	stall := dbtest.UseStalledPostgres(t)
+	if stall == nil {
+		t.Skipf("set %s to run against PostgreSQL", dbtest.Env)
+	}
+	users, err := NewUserStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewUserStore: %v", err)
+	}
+	t.Cleanup(func() { _ = users.Close() })
+	if users.database.Backend() != db.Postgres {
+		t.Fatalf("backend = %s, want postgres", users.database.Backend())
+	}
+	if err := users.AddWithEmail(context.Background(), "ann", "correct-horse-battery", "", annEmail); err != nil {
+		t.Fatalf("add ann: %v", err)
+	}
+	sessions := NewSessionAuth(users)
+	// No idle connection to fall back on: every read must dial the stalled
+	// server.
+	users.database.Reader().SetMaxIdleConns(0)
+	stall.Hang()
+
+	contextError := func(err error) bool {
+		return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	}
+	for _, address := range []string{annEmail, "nobody@example.test"} {
+		challenge, err := sessions.RequestOTP(nil, address)
+		if err == nil || errors.Is(err, ErrNoSuchAccount) || contextError(err) || challenge != (Challenge{}) {
+			t.Fatalf("RequestOTP(%q) with the database stalled = %+v, %v; want a failed read", address, challenge, err)
+		}
+		result, err := sessions.SignInWithOTP(nil, address, "AAAAAAAA")
+		if err == nil || errors.Is(err, ErrBadCredentials) || contextError(err) {
+			t.Fatalf("SignInWithOTP(%q) with the database stalled = %v; want a failed read", address, err)
+		}
+		if result.Refusal != (SignInRefusal{}) || result.Token != "" || result.Pending != nil {
+			t.Fatalf("SignInWithOTP(%q) with the database stalled = %+v; want nothing", address, result)
+		}
 	}
 }
 

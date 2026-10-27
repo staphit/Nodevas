@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { DialogFrame, useInlineDialog } from "../components/DialogFrame";
 import {
   USAGE_RANGES,
   type ModelPrice,
@@ -46,11 +47,7 @@ function Summary({ report }: { report: UsageReport }) {
           output: formatTokens(totals.outputTokens),
         })}
       />
-      <Tile
-        label={t("usage.tile.cost")}
-        value={formatUSD(totals.costUsd)}
-        hint={t("usage.tile.costHint")}
-      />
+      <Tile label={t("usage.tile.cost")} value={formatUSD(totals.costUsd)} hint={t("usage.tile.costHint")} />
       <Tile
         label={t("usage.tile.monthly")}
         value={formatUSD(monthly)}
@@ -88,11 +85,14 @@ function UnpricedWarning({ report, onAddPrices }: { report: UsageReport; onAddPr
 function TokenSplit({ group }: { group: UsageGroup }) {
   const { t } = useI18n();
   return (
-    <span className="usage-split" title={t("usage.splitTitle", {
-      input: formatTokensExact(group.inputTokens),
-      output: formatTokensExact(group.outputTokens),
-      cache: formatTokensExact(group.cacheReadTokens + group.cacheWriteTokens),
-    })}>
+    <span
+      className="usage-split"
+      title={t("usage.splitTitle", {
+        input: formatTokensExact(group.inputTokens),
+        output: formatTokensExact(group.outputTokens),
+        cache: formatTokensExact(group.cacheReadTokens + group.cacheWriteTokens),
+      })}
+    >
       {formatTokens(group.inputTokens)} / {formatTokens(group.outputTokens)} /{" "}
       {formatTokens(group.cacheReadTokens + group.cacheWriteTokens)}
     </span>
@@ -125,11 +125,21 @@ function AgentTable({ report }: { report: UsageReport }) {
           <thead>
             <tr>
               <th scope="col">{t("usage.col.agent")}</th>
-              <th scope="col" className="num">{t("usage.col.tokens")}</th>
-              <th scope="col" className="num">{t("usage.col.cost")}</th>
-              <th scope="col" className="num">{t("usage.col.share")}</th>
-              <th scope="col" className="num">{t("usage.col.tokensPerDay")}</th>
-              <th scope="col" className="num">{t("usage.col.costPerDay")}</th>
+              <th scope="col" className="num">
+                {t("usage.col.tokens")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.cost")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.share")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.tokensPerDay")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.costPerDay")}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -171,16 +181,24 @@ function ModelTable({ models, totals }: { models: UsageModelGroup[]; totals: Usa
               <th scope="col" className="num" title={t("usage.splitHeader")}>
                 {t("usage.col.split")}
               </th>
-              <th scope="col" className="num">{t("usage.col.cost")}</th>
-              <th scope="col" className="num">{t("usage.col.share")}</th>
+              <th scope="col" className="num">
+                {t("usage.col.cost")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.share")}
+              </th>
             </tr>
           </thead>
           <tbody>
             {models.map((m) => (
               <tr key={`${m.agent}/${m.key}`}>
-                <th scope="row" className="usage-model">{m.key || t("usage.unknownModel")}</th>
+                <th scope="row" className="usage-model">
+                  {m.key || t("usage.unknownModel")}
+                </th>
                 <td>{m.agent}</td>
-                <td className="num"><TokenSplit group={m} /></td>
+                <td className="num">
+                  <TokenSplit group={m} />
+                </td>
                 <CostCell group={m} />
                 <td className="num">{formatShare(m.totalTokens, totals.totalTokens)}</td>
               </tr>
@@ -210,11 +228,7 @@ function SessionTable({ sessions, onOpenRun }: { sessions: UsageSession[]; onOpe
   }
   const header = (key: SortKey, label: string) => (
     <th scope="col" className="num" aria-sort={sort === key ? "descending" : "none"}>
-      <button
-        type="button"
-        className={`usage-sort${sort === key ? " active" : ""}`}
-        onClick={() => setSort(key)}
-      >
+      <button type="button" className={`usage-sort${sort === key ? " active" : ""}`} onClick={() => setSort(key)}>
         {label}
         {sort === key && <span aria-hidden="true"> ↓</span>}
       </button>
@@ -359,13 +373,27 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
 
   return (
     <div className="usage-prices">
-      <p className="usage-note">
-        {t("usage.price.note", { asOf: prices?.asOf || "—" })}
-      </p>
-      {error && <div className="notify-message error" role="status">{error}</div>}
-      {forbidden && <div className="notify-message error" role="status">{t("usage.price.forbidden")}</div>}
-      {invalid && <div className="notify-message error" role="alert">{invalid}</div>}
-      {saved && <div className="notify-message ok" role="status">{t("usage.price.saved")}</div>}
+      <p className="usage-note">{t("usage.price.note", { asOf: prices?.asOf || "—" })}</p>
+      {error && (
+        <div className="notify-message error" role="status">
+          {error}
+        </div>
+      )}
+      {forbidden && (
+        <div className="notify-message error" role="status">
+          {t("usage.price.forbidden")}
+        </div>
+      )}
+      {invalid && (
+        <div className="notify-message error" role="alert">
+          {invalid}
+        </div>
+      )}
+      {saved && (
+        <div className="notify-message ok" role="status">
+          {t("usage.price.saved")}
+        </div>
+      )}
 
       <section className="usage-section" aria-label={t("usage.price.custom")}>
         <h3>{t("usage.price.custom")}</h3>
@@ -431,7 +459,9 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
                 <tr>
                   <th scope="col">{t("usage.price.model")}</th>
                   {PRICE_FIELDS.map(([field, label]) => (
-                    <th key={field} scope="col" className="num">{t(label)}</th>
+                    <th key={field} scope="col" className="num">
+                      {t(label)}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -445,7 +475,9 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
                       )}
                     </th>
                     {PRICE_FIELDS.map(([field]) => (
-                      <td key={field} className="num">${p[field]}</td>
+                      <td key={field} className="num">
+                        ${p[field]}
+                      </td>
                     ))}
                   </tr>
                 ))}
@@ -465,6 +497,7 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
  */
 export function UsageModal({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
+  const inline = useInlineDialog();
   const report = useUsage((s) => s.report);
   const loading = useUsage((s) => s.loading);
   const error = useUsage((s) => s.error);
@@ -487,11 +520,11 @@ export function UsageModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !inline) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, inline]);
 
   const tabLabel: Record<Tab, string> = {
     overview: t("usage.tab.overview"),
@@ -500,124 +533,124 @@ export function UsageModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="confirm-backdrop" onClick={onClose}>
-      <div
-        className="confirm-dialog usage-dialog usage-root"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("usage.title")}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header>
-          <span className="confirm-dialog-icon">
-            <IconUsage size={17} />
-          </span>
-          <div>
-            <h2>{t("usage.title")}</h2>
-            <p>{t("usage.description")}</p>
-          </div>
-          <button type="button" className="confirm-dialog-close" onClick={onClose} aria-label={t("common.close")}>
-            <IconClose size={14} />
-          </button>
-        </header>
+    <DialogFrame className="usage-dialog usage-root" label={t("usage.title")} onDismiss={onClose}>
+      <header>
+        <span className="confirm-dialog-icon">
+          <IconUsage size={17} />
+        </span>
+        <div>
+          <h2>{t("usage.title")}</h2>
+          <p>{t("usage.description")}</p>
+        </div>
+        <button
+          type="button"
+          className="confirm-dialog-close"
+          data-dialog-close
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
+          <IconClose size={14} />
+        </button>
+      </header>
 
-        <div className="usage-toolbar">
-          <div className="usage-tablist" role="tablist" aria-label={t("usage.title")}>
-            {TABS.map((name) => (
+      <div className="usage-toolbar">
+        <div className="usage-tablist" role="tablist" aria-label={t("usage.title")}>
+          {TABS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              id={`usage-tab-${name}`}
+              aria-selected={tab === name}
+              aria-controls={`usage-panel-${name}`}
+              className={tab === name ? "active" : undefined}
+              onClick={() => setTab(name)}
+            >
+              {tabLabel[name]}
+            </button>
+          ))}
+        </div>
+        {tab !== "prices" && (
+          <div className="usage-range" role="group" aria-label={t("usage.range")}>
+            {USAGE_RANGES.map((n) => (
               <button
-                key={name}
+                key={n}
                 type="button"
-                role="tab"
-                id={`usage-tab-${name}`}
-                aria-selected={tab === name}
-                aria-controls={`usage-panel-${name}`}
-                className={tab === name ? "active" : undefined}
-                onClick={() => setTab(name)}
+                aria-pressed={days === n}
+                className={days === n ? "active" : undefined}
+                onClick={() => void setDays(n)}
               >
-                {tabLabel[name]}
+                {n === 1 ? t("usage.range.today") : t("usage.range.days", { n })}
               </button>
             ))}
+            <button
+              type="button"
+              className="usage-icon-btn"
+              onClick={() => void refresh()}
+              aria-label={t("usage.refresh")}
+              title={t("usage.refresh")}
+              disabled={loading}
+            >
+              <IconRefresh size={13} />
+            </button>
           </div>
-          {tab !== "prices" && (
-            <div className="usage-range" role="group" aria-label={t("usage.range")}>
-              {USAGE_RANGES.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  aria-pressed={days === n}
-                  className={days === n ? "active" : undefined}
-                  onClick={() => void setDays(n)}
-                >
-                  {n === 1 ? t("usage.range.today") : t("usage.range.days", { n })}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="usage-icon-btn"
-                onClick={() => void refresh()}
-                aria-label={t("usage.refresh")}
-                title={t("usage.refresh")}
-                disabled={loading}
-              >
-                <IconRefresh size={13} />
-              </button>
-            </div>
-          )}
-        </div>
+        )}
+      </div>
 
-        <div className="usage-body" role="tabpanel" id={`usage-panel-${tab}`} aria-labelledby={`usage-tab-${tab}`}>
-          {error && tab !== "prices" && (
-            <div className="notify-message error" role="status">{error}</div>
-          )}
-          {tab === "prices" ? (
-            <PricesPanel suggested={suggested} />
-          ) : !report ? (
-            <p className="usage-empty">{loading ? t("common.loading") : t("usage.empty")}</p>
-          ) : tab === "overview" ? (
-            <>
-              <Summary report={report} />
-              <UnpricedWarning
-                report={report}
-                onAddPrices={(models) => {
-                  setSuggested(models);
-                  setTab("prices");
-                }}
-              />
-              {report.totals.totalTokens === 0 ? (
-                <p className="usage-empty">{t("usage.empty")}</p>
-              ) : (
-                <>
-                  <div className="usage-metric" role="group" aria-label={t("usage.chart.metric")}>
-                    {(["tokens", "cost"] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        aria-pressed={metric === m}
-                        className={metric === m ? "active" : undefined}
-                        onClick={() => setMetric(m)}
-                      >
-                        {m === "tokens" ? t("usage.metric.tokens") : t("usage.metric.cost")}
-                      </button>
-                    ))}
-                  </div>
-                  <UsageChart days={report.byDay} metric={metric} />
-                  <AgentTable report={report} />
-                  <ModelTable models={report.byModel} totals={report.totals} />
-                </>
-              )}
-              <p className="usage-note">{t("usage.footnote", { asOf: report.pricesAsOf || "—" })}</p>
-            </>
-          ) : (
-            <SessionTable
-              sessions={report.sessions}
-              onOpenRun={(s) => {
-                onClose();
-                openNodeRuns(s.nodeId, s.runId || undefined);
+      <div className="usage-body" role="tabpanel" id={`usage-panel-${tab}`} aria-labelledby={`usage-tab-${tab}`}>
+        {error && tab !== "prices" && (
+          <div className="notify-message error" role="status">
+            {error}
+          </div>
+        )}
+        {tab === "prices" ? (
+          <PricesPanel suggested={suggested} />
+        ) : !report ? (
+          <p className="usage-empty">{loading ? t("common.loading") : t("usage.empty")}</p>
+        ) : tab === "overview" ? (
+          <>
+            <Summary report={report} />
+            <UnpricedWarning
+              report={report}
+              onAddPrices={(models) => {
+                setSuggested(models);
+                setTab("prices");
               }}
             />
-          )}
-        </div>
+            {report.totals.totalTokens === 0 ? (
+              <p className="usage-empty">{t("usage.empty")}</p>
+            ) : (
+              <>
+                <div className="usage-metric" role="group" aria-label={t("usage.chart.metric")}>
+                  {(["tokens", "cost"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={metric === m}
+                      className={metric === m ? "active" : undefined}
+                      onClick={() => setMetric(m)}
+                    >
+                      {m === "tokens" ? t("usage.metric.tokens") : t("usage.metric.cost")}
+                    </button>
+                  ))}
+                </div>
+                <UsageChart days={report.byDay} metric={metric} />
+                <AgentTable report={report} />
+                <ModelTable models={report.byModel} totals={report.totals} />
+              </>
+            )}
+            <p className="usage-note">{t("usage.footnote", { asOf: report.pricesAsOf || "—" })}</p>
+          </>
+        ) : (
+          <SessionTable
+            sessions={report.sessions}
+            onOpenRun={(s) => {
+              onClose();
+              openNodeRuns(s.nodeId, s.runId || undefined);
+            }}
+          />
+        )}
       </div>
-    </div>
+    </DialogFrame>
   );
 }

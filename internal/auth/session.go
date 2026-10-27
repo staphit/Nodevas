@@ -3,8 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"nodevas/internal/identity"
+	"nodevas/internal/logging"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,9 @@ type Session struct {
 	// steppedUp is when this session last completed a step-up (zero: never).
 	// See stepup.go.
 	steppedUp time.Time
+	// expiryLogged is set once a request has presented the session after it
+	// expired, so that is logged once (see logSessionExpired).
+	expiryLogged bool
 }
 
 type loginBucket struct {
@@ -149,6 +154,13 @@ func (a *SessionAuth) ActiveUsers() int {
 	return count
 }
 
+// MaxActiveUsers is the seat limit SetMaxActiveUsers set; zero means none.
+func (a *SessionAuth) MaxActiveUsers() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.maxActiveUsers
+}
+
 // seatAvailableLocked reports whether this account may open a session under
 // the seat limit. Somebody already signed in on another device is always
 // allowed: the limit counts people, and their phone is not a second person.
@@ -188,22 +200,35 @@ func (a *SessionAuth) CurrentActor(ctx context.Context, id string) (identity.Act
 // MCP sidecar refuses to talk to non-loopback servers, so no legitimate agent
 // request ever reaches a session-authenticated deployment with that header.
 func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
+	actor, _, err := a.AuthenticateWithEmail(r)
+	return actor, err
+}
+
+// AuthenticateWithEmail is Authenticate, and the account's sign-in address as
+// well: the check reads the account's row on every request anyway, and the
+// request's log line names the address.
+func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, string, error) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil || cookie.Value == "" {
-		return identity.Actor{}, ErrUnauthenticated
+		return identity.Actor{}, "", ErrUnauthenticated
 	}
 	key := sessionKey(cookie.Value)
 	a.mu.Lock()
 	found, ok := a.sessions[key]
 	if !ok {
 		a.mu.Unlock()
-		return identity.Actor{}, ErrUnauthenticated
+		return identity.Actor{}, "", ErrUnauthenticated
 	}
 	now := time.Now()
 	if now.After(found.expires) {
+		first := !found.expiryLogged
+		found.expiryLogged = true
 		_ = a.removeSessionsLocked(key)
 		a.mu.Unlock()
-		return identity.Actor{}, ErrUnauthenticated
+		if first {
+			logSessionExpired(r, found.actor)
+		}
+		return identity.Actor{}, "", ErrUnauthenticated
 	}
 	actor := found.actor
 	revision := found.revision
@@ -214,18 +239,33 @@ func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
 	// busy timeout gives up. A cancelled read reads as "no such revision" and
 	// the request is refused, which is the direction an authentication check
 	// must fail in anyway.
-	currentRevision, exists := a.users.Revision(r.Context(), actor.ID)
+	currentRevision, email, exists := a.users.revisionAndEmail(r.Context(), actor.ID)
 	if !exists || currentRevision != revision {
 		a.mu.Lock()
 		if a.sessions[key] == found {
 			_ = a.removeSessionsLocked(key)
 		}
 		a.mu.Unlock()
-		return identity.Actor{}, ErrUnauthenticated
+		return identity.Actor{}, "", ErrUnauthenticated
 	}
 
 	a.renew(key, found, now)
-	return actor, nil
+	return actor, email, nil
+}
+
+// logSessionExpired writes the process-log line for an expired session that a
+// request presented. It is a log line rather than an audit row: the trail
+// records what people did, and a session running out is nobody's act. The
+// refusal forgets the session, and one whose delete did not commit stays in
+// the map, refused, until a later check retries it, marked as logged: either
+// way one session makes one line.
+func logSessionExpired(r *http.Request, actor identity.Actor) {
+	slog.Default().LogAttrs(r.Context(), slog.LevelInfo, "auth.session.expired failure",
+		logging.Event(logging.CategoryAuthentication, "auth.session.expired", logging.OutcomeFailure),
+		logging.User(actor.ID, actor.Name),
+		logging.ClientIP(ClientIP(r)),
+		logging.Request(r.Context()),
+	)
 }
 
 // renew pushes a session's expiry out, but only once it is old enough to be

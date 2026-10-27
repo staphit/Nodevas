@@ -128,6 +128,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		PermissionMode: cfg.PermissionModeFor(job.Agent),
 		AllowedTools:   cfg.AllowedTools,
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),
+		Version:        j.agentVersion(job.Agent),
 	})
 	if err != nil {
 		return fail("%v", err)

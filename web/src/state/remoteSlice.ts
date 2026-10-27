@@ -113,8 +113,14 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     saveRemoteConfig: (config: RemoteConfigInput) =>
       command(remoteScope.config(), "remote.saveConfig", "儲存備份設定失敗", async () => {
         const next = await api.putRemoteConfig(config);
-        set({ remoteConfig: next, ...(next.kind ? {} : { remoteBundles: null }) });
-        if (next.kind) await reread(get().refreshRemoteBundles, get().refreshRemoteSyncStatus);
+        // A git remote holds branches, not bundles: there is nothing to list.
+        const bundles = next.kind === "folder" ? {} : { remoteBundles: null };
+        set({ remoteConfig: next, ...bundles });
+        if (next.kind === "folder") {
+          await reread(get().refreshRemoteBundles, get().refreshRemoteSyncStatus);
+        } else if (next.kind) {
+          await reread(get().refreshRemoteSyncStatus);
+        }
         return next;
       }),
 
@@ -150,6 +156,25 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
         await get().refreshProjects();
         await get().switchProject(result.active);
         return result.active;
+      }),
+
+    // Save first, as the mail test does: what is tested is then exactly what
+    // the backups will use, and a refused save stops here.
+    testRemoteGit: (config: RemoteConfigInput) =>
+      command(remoteScope.config(), "remote.testGit", "連線測試失敗", async () => {
+        const saved = await get().saveRemoteConfig(config);
+        if (!saved.ok) throw new Error(saved.message);
+        const result = await api.testRemoteGit();
+        return result.branches;
+      }),
+
+    // The remote branch is left as it is; the side branch is new, so this
+    // can never overwrite anything.
+    keepLocalRemoteGit: (project: string) =>
+      command(remoteScope.bundle(), "remote.keepLocal", "推送失敗", async () => {
+        const result = await api.keepLocalRemoteGit(project);
+        await reread(get().refreshRemoteSyncStatus);
+        return result.branch;
       }),
 
     saveNotifySettings: (settings: NotifySettings) =>

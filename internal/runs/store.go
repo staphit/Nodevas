@@ -269,6 +269,11 @@ type Filter struct {
 	Project string
 	// NodeID, when set, keeps that node's runs only.
 	NodeID string
+	// Active keeps the runs that have not ended (queued, offered, running),
+	// every one of them: Limit is ignored, since they are bounded by what the
+	// runners can hold and queue, and a capped list would hide some of a
+	// node's parallel reviewers.
+	Active bool
 	// Viewer, when set, keeps the runs that person made or that ran on their
 	// runners. Empty means everyone's (an administrator's view).
 	Viewer string
@@ -283,16 +288,23 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
 		query += ` AND node_id = ?`
 		args = append(args, f.NodeID)
 	}
+	if f.Active {
+		query += ` AND status IN (?, ?, ?)`
+		args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning)
+	}
 	if f.Viewer != "" {
 		query += ` AND (created_by = ? OR owner_id = ?)`
 		args = append(args, f.Viewer, f.Viewer)
 	}
-	limit := f.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 50
+	query += ` ORDER BY created_at DESC, id DESC`
+	if !f.Active {
+		limit := f.Limit
+		if limit <= 0 || limit > 500 {
+			limit = 50
+		}
+		query += ` LIMIT ?`
+		args = append(args, limit)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
-	args = append(args, limit)
 	out, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err

@@ -265,23 +265,35 @@ func TestTermInputAndResize(t *testing.T) {
 
 func TestInteractiveSetting(t *testing.T) {
 	cfg := &Config{}
-	if cfg.InteractiveOn() {
-		t.Fatal("interactive is on by default")
+	if !cfg.InteractiveOn() {
+		t.Fatal("interactive is off by default")
 	}
-	if slices.Contains(capabilities(cfg), runnerwire.CapInteractive) {
-		t.Fatal("interactive capability advertised while off")
+	if got := slices.Contains(capabilities(cfg), runnerwire.CapInteractive); got != ptySupported() {
+		t.Fatalf("default: interactive capability %t, pty supported %t", got, ptySupported())
 	}
 	if err := cfg.Set("interactive", []string{"maybe"}); err == nil {
 		t.Fatal("accepted maybe")
 	}
-	if err := cfg.Set("interactive", []string{"default"}); err != nil || cfg.InteractiveOn() {
+	if err := cfg.Set("interactive", []string{"false"}); err != nil || cfg.InteractiveOn() {
+		t.Fatalf("set false: %v", err)
+	}
+	if slices.Contains(capabilities(cfg), runnerwire.CapInteractive) {
+		t.Fatal("interactive capability advertised while off")
+	}
+	if err := cfg.Set("interactive", []string{"default"}); err != nil || !cfg.InteractiveOn() || cfg.Interactive != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if err := cfg.Set("interactive", []string{"true"}); err != nil || !cfg.InteractiveOn() {
 		t.Fatalf("set true: %v", err)
 	}
-	if got := slices.Contains(capabilities(cfg), runnerwire.CapInteractive); got != ptySupported() {
-		t.Fatalf("interactive capability %t, pty supported %t", got, ptySupported())
+	// Taking interactive runs by default changes nothing about who accepts
+	// them, or whether the hub may type into them.
+	if p := cfg.AutoAcceptPolicy(); p.Enabled || p.AllowRemoteTyping {
+		t.Fatalf("default policy = %+v", p)
+	}
+	cfg.SetAutoAccept(true, Kinds)
+	if p := cfg.AutoAcceptPolicy(); slices.Contains(p.Modes, runnerwire.ModeInteractive) || p.AllowRemoteTyping {
+		t.Fatalf("autoaccept on: policy = %+v", p)
 	}
 }
 
@@ -544,6 +556,47 @@ func TestInteractiveRunViewOnly(t *testing.T) {
 		}
 		st.term.exit <- 0
 		env.hub.wait("run-view", runnerwire.TypeFinish)
+	}
+}
+
+// Interactive is on by default, and an interactive offer is still the
+// owner's to accept: auto-accept with its default modes (headless) does not
+// cover it, so it is asked about at the terminal, and a no there declines it
+// before any terminal starts.
+func TestInteractiveDefaultStillAsks(t *testing.T) {
+	asked := make(chan Offer, 1)
+	env, started := startInteractiveRunner(t, func(c *Client) {
+		c.Config.Interactive = nil
+		c.Config.AutoAccept = &runnerwire.AutoAcceptPolicy{Enabled: true, RequireStepUp: true,
+			Repos: []string{"r1"}, Agents: []string{"claude"}}
+		c.Accepter = acceptFunc(func(_ context.Context, o Offer) (bool, string) {
+			asked <- o
+			return false, ReasonDeclined
+		})
+	})
+	hello := env.hub.hello()
+	if got := slices.Contains(hello.Hello.Capabilities, runnerwire.CapInteractive); got != ptySupported() {
+		t.Fatalf("hello capabilities %q (pty supported %t)", hello.Hello.Capabilities, ptySupported())
+	}
+	job := interactiveJob("run-ask")
+	job.SteppedUp = true
+	env.hub.offer(job)
+	decline := env.hub.wait("run-ask", runnerwire.TypeDecline)
+	if decline.Reason != ReasonDeclined {
+		t.Fatalf("decline = %q", decline.Reason)
+	}
+	select {
+	case o := <-asked:
+		if o.Job.Mode != runnerwire.ModeInteractive {
+			t.Fatalf("asked about %+v", o.Job)
+		}
+	default:
+		t.Fatal("an interactive offer was decided without asking")
+	}
+	select {
+	case <-started:
+		t.Fatal("a terminal started for a declined run")
+	default:
 	}
 }
 

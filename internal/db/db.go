@@ -537,7 +537,7 @@ CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
 		stmt: `
 -- Runners: the machines that execute agent runs (nodevas runner). The hub
 -- only records them; it never starts a process itself. See
--- docs/nodevas-workstation-plan.md.
+-- docs/workstation.md.
 CREATE TABLE runners (
     id            TEXT PRIMARY KEY,
     -- Not a foreign key to accounts: on a loopback server the owner is the

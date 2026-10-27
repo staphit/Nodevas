@@ -3,6 +3,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/lockfile"
@@ -86,6 +88,14 @@ type ProjectManager struct {
 	store       *store.Store
 	stopWatch   func() error
 	searchIndex *searchIndex
+
+	// watches are the watchers on projects other than the active one that
+	// Watch was asked for, keyed like stores. They are dropped with their
+	// project's stores and whenever the active project's watcher stops.
+	watchMu sync.Mutex
+	watches map[string]func() error
+	// perAccount: see SetPerAccount.
+	perAccount atomic.Bool
 
 	// stores caches one Store per project directory; see cachedStore for why
 	// the cache is the only legal way to get one.
@@ -233,6 +243,10 @@ func (pm *ProjectManager) Close() {
 		pm.stopWatch = nil
 	}
 	pm.mu.Unlock()
+	pm.stopExtraWatches(everyWatch)
+	// Saves batch into one history commit per window; whatever is still
+	// waiting is recorded now rather than lost with the process.
+	closeStores(pm.cachedStores(), 30*time.Second)
 	// Persist the search index before dropping the workspace: it is a pure
 	// cache, but losing it on every clean shutdown means paying for a full
 	// rebuild on the next start for no reason.
@@ -320,36 +334,7 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template stri
 		return err
 	}
 	if create {
-		graphPath := filepath.Join(dir, "graph.yaml")
-		if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
-			return fmt.Errorf("project %q already exists", name)
-		} else if !os.IsNotExist(statErr) {
-			return statErr
-		}
-		if parent := pathParent(name); parent != "" && parent != "." {
-			parentDir, parentErr := pm.Resolve(parent)
-			if parentErr != nil {
-				return parentErr
-			}
-			// A plain grouping folder is an acceptable parent too.
-			if info, parentErr := store.StatProjectPath(pm.workspace, parentDir); parentErr != nil || !info.IsDir() {
-				return fmt.Errorf("parent %q does not exist", parent)
-			}
-		}
-		if err := store.MkdirAllProjectPath(pm.workspace, filepath.Join(dir, "nodes"), 0o755); err != nil {
-			return err
-		}
-		gp := filepath.Join(dir, "graph.yaml")
-		if _, err := store.StatProjectPath(pm.workspace, gp); os.IsNotExist(err) {
-			g := templateGraph(template)
-			data, merr := engine.MarshalGraph(g)
-			if merr != nil {
-				return merr
-			}
-			if werr := pm.cachedStore(dir).WriteAtomic(gp, data); werr != nil {
-				return werr
-			}
-		} else if err != nil {
+		if err := pm.createLocked(name, dir, template); err != nil {
 			return err
 		}
 	}
@@ -361,12 +346,7 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template stri
 	if _, _, err := st.LoadGraph(); err != nil {
 		return fmt.Errorf("load project %q: %w", name, err)
 	}
-	stop, err := realtime.WatchWithCallback(st, pm.hub, func(kind, id string) {
-		switch kind {
-		case "node-changed", "graph-changed":
-			pm.invalidateSearch(st.Root(), id)
-		}
-	})
+	stop, err := pm.watchStore(st)
 	if err != nil {
 		return err
 	}
@@ -378,11 +358,161 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template stri
 	if old != nil {
 		_ = old()
 	}
+	// The active project has its own watcher now; a second one would report
+	// every external edit twice.
+	pm.stopExtraWatches(func(key string) bool { return key == storeCacheKey(dir) })
 	if err := store.WriteProjectFileAtomic(pm.workspace, pm.lastFile(), []byte(name)); err != nil {
 		log.Printf("save last project: %v", err)
 	}
 	return nil
 }
+
+// SetPerAccount marks a server where each account has its own current
+// project (internal/server/current_project.go). The active project is then
+// only the default an account starts on, so opening a project for one caller
+// (OpenForCaller, an import) leaves it where it is.
+func (pm *ProjectManager) SetPerAccount(perAccount bool) { pm.perAccount.Store(perAccount) }
+
+// OpenForCaller opens a project a request just made or asked for: it becomes
+// the active project on loopback; with per-account projects it is only
+// checked to open, and making it the caller's current one is the caller's
+// business.
+func (pm *ProjectManager) OpenForCaller(name string) error {
+	if !pm.perAccount.Load() {
+		return pm.Activate(name, false, "")
+	}
+	st, err := pm.StoreFor(name)
+	if err != nil {
+		return err
+	}
+	if _, _, err := st.LoadGraph(); err != nil {
+		return fmt.Errorf("load project %q: %w", name, err)
+	}
+	return nil
+}
+
+// Create makes a new project without opening it. On a server with accounts
+// each person has their own current project (internal/server), so one person
+// creating a project must not move the project everyone else starts on.
+func (pm *ProjectManager) Create(name, template string) error {
+	pm.activateMu.Lock()
+	defer pm.activateMu.Unlock()
+	dir, err := pm.Resolve(name)
+	if err != nil {
+		return err
+	}
+	if err := pm.createLocked(name, dir, template); err != nil {
+		return err
+	}
+	if _, _, err := pm.cachedStore(dir).LoadGraph(); err != nil {
+		return fmt.Errorf("load project %q: %w", name, err)
+	}
+	return nil
+}
+
+func (pm *ProjectManager) createLocked(name, dir, template string) error {
+	graphPath := filepath.Join(dir, "graph.yaml")
+	if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
+		return fmt.Errorf("project %q already exists", name)
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
+	if parent := pathParent(name); parent != "" && parent != "." {
+		parentDir, parentErr := pm.Resolve(parent)
+		if parentErr != nil {
+			return parentErr
+		}
+		// A plain grouping folder is an acceptable parent too.
+		if info, parentErr := store.StatProjectPath(pm.workspace, parentDir); parentErr != nil || !info.IsDir() {
+			return fmt.Errorf("parent %q does not exist", parent)
+		}
+	}
+	if err := store.MkdirAllProjectPath(pm.workspace, filepath.Join(dir, "nodes"), 0o755); err != nil {
+		return err
+	}
+	if _, err := store.StatProjectPath(pm.workspace, graphPath); os.IsNotExist(err) {
+		data, merr := engine.MarshalGraph(templateGraph(template))
+		if merr != nil {
+			return merr
+		}
+		if werr := pm.cachedStore(dir).WriteAtomic(graphPath, data); werr != nil {
+			return werr
+		}
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+// watchStore starts the file watcher that reports external edits to st's
+// project to the clients in its room.
+func (pm *ProjectManager) watchStore(st *store.Store) (func() error, error) {
+	return realtime.WatchWithCallback(st, pm.hub, func(kind, id string) {
+		switch kind {
+		case "node-changed", "graph-changed":
+			pm.invalidateSearch(st.Root(), id)
+		}
+	})
+}
+
+// Watch keeps a file watcher on st's project although it is not the active
+// one: on a server with accounts, each person's current project needs its
+// external edits reported as the active project's are. Watching a project
+// already watched is a no-op, so callers may ask on every request. A watcher
+// that cannot start is logged, not fatal: the project still serves, it only
+// misses edits made outside Nodevas.
+func (pm *ProjectManager) Watch(st *store.Store) {
+	if st == nil || st == pm.Store() {
+		return
+	}
+	key := storeCacheKey(st.Root())
+	pm.watchMu.Lock()
+	defer pm.watchMu.Unlock()
+	if _, ok := pm.watches[key]; ok {
+		return
+	}
+	stop, err := pm.watchStore(st)
+	if err != nil {
+		log.Printf("watch project %s: %v", st.Root(), err)
+		return
+	}
+	if pm.watches == nil {
+		pm.watches = make(map[string]func() error)
+	}
+	pm.watches[key] = stop
+}
+
+// Watching reports whether external edits to the project in dir are being
+// reported: it is the active project, or Watch was asked for it.
+func (pm *ProjectManager) Watching(dir string) bool {
+	if active := pm.Store(); active != nil && storeCacheKey(active.Root()) == storeCacheKey(dir) {
+		pm.mu.RLock()
+		defer pm.mu.RUnlock()
+		return pm.stopWatch != nil
+	}
+	pm.watchMu.Lock()
+	defer pm.watchMu.Unlock()
+	_, ok := pm.watches[storeCacheKey(dir)]
+	return ok
+}
+
+// stopExtraWatches stops the watchers Watch started whose key matches.
+func (pm *ProjectManager) stopExtraWatches(match func(key string) bool) {
+	pm.watchMu.Lock()
+	var stops []func() error
+	for key, stop := range pm.watches {
+		if match(key) {
+			stops = append(stops, stop)
+			delete(pm.watches, key)
+		}
+	}
+	pm.watchMu.Unlock()
+	for _, stop := range stops {
+		_ = stop()
+	}
+}
+
+func everyWatch(string) bool { return true }
 
 func (pm *ProjectManager) OpenWorkspace() error {
 	pm.activateMu.Lock()
@@ -434,6 +564,7 @@ func (pm *ProjectManager) SwitchWorkspace(root string) error {
 	pm.activateMu.Lock()
 	defer pm.activateMu.Unlock()
 	previous := pm.workspace
+	pm.stopExtraWatches(everyWatch)
 	pm.setWorkspace(root)
 	if err := pm.openWorkspaceLocked(); err != nil {
 		pm.setWorkspace(previous)
@@ -513,18 +644,95 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 	return pm.cachedStore(dir), nil
 }
 
+// ListedStore is StoreFor for a project the catalog also lists: one that has
+// not been detached. It costs a stat and one small file read, where List
+// walks the workspace, so it can run on every request.
+func (pm *ProjectManager) ListedStore(name string) (*store.Store, error) {
+	st, err := pm.StoreFor(name)
+	if err != nil {
+		return nil, err
+	}
+	detached, err := pm.loadDetachedProjects()
+	if err != nil {
+		return nil, err
+	}
+	if projectIsDetached(name, detached) {
+		return nil, fmt.Errorf("project %q is not in the workspace", name)
+	}
+	return st, nil
+}
+
+// NameFor is the name ?project= takes for the project in dir: its path below
+// the workspace, slash-separated, or "." for the workspace root. It reports
+// false for a directory outside the workspace.
+func (pm *ProjectManager) NameFor(dir string) (string, bool) {
+	rel, err := filepath.Rel(pm.Workspace(), dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
 // EvictStores drops the cached stores for dir and everything under it. Call it
 // after the directory is renamed or deleted, so a later project of the same
 // name never inherits a Store pointing at the old path.
 func (pm *ProjectManager) EvictStores(dir string) {
 	prefix := storeCacheKey(dir)
+	under := func(key string) bool {
+		return key == prefix || strings.HasPrefix(key, prefix+string(filepath.Separator))
+	}
+	// A watcher holds directory handles (Windows refuses the rename while it
+	// does) and would outlive the path it watches.
+	pm.stopExtraWatches(under)
 	pm.storesMu.Lock()
-	defer pm.storesMu.Unlock()
-	for key := range pm.stores {
-		if key == prefix || strings.HasPrefix(key, prefix+string(filepath.Separator)) {
+	var evicted []*store.Store
+	for key, st := range pm.stores {
+		if under(key) {
+			evicted = append(evicted, st)
 			delete(pm.stores, key)
 		}
 	}
+	pm.storesMu.Unlock()
+	// Pending history is recorded while the folder is still where the store
+	// thinks it is; a rename then carries the repository along with it.
+	closeStores(evicted, 10*time.Second)
+}
+
+// closeStores records each store's pending history and stops its timers.
+func closeStores(stores []*store.Store, timeout time.Duration) {
+	if len(stores) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for _, st := range stores {
+		if err := st.Close(ctx); err != nil {
+			log.Printf("history for %s: %v", st.Root(), err)
+		}
+	}
+}
+
+// cachedStores is every store this manager has handed out.
+func (pm *ProjectManager) cachedStores() []*store.Store {
+	pm.storesMu.Lock()
+	defer pm.storesMu.Unlock()
+	stores := make([]*store.Store, 0, len(pm.stores))
+	for _, st := range pm.stores {
+		stores = append(stores, st)
+	}
+	return stores
+}
+
+// FlushHistory records every project's pending history now, so a backup taken
+// next holds it.
+func (pm *ProjectManager) FlushHistory(ctx context.Context) error {
+	var errs []error
+	for _, st := range pm.cachedStores() {
+		if err := st.FlushHistory(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("history for %s: %w", st.Root(), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // CatalogRoot is the directory the workspace catalog is stored in.
@@ -559,6 +767,9 @@ func (pm *ProjectManager) StopWatcher() {
 	if stop != nil {
 		_ = stop()
 	}
+	// The move may take another account's current project with it. Its
+	// watcher is started again by the next request that resolves to it.
+	pm.stopExtraWatches(everyWatch)
 }
 
 // SetWorkspace points the manager at another workspace directory. The caller

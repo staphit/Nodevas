@@ -372,6 +372,7 @@ func (s *Store) CreateNodeFolder(rel string) (string, error) {
 		return "", err
 	}
 	InvalidateNodeTree(s.root)
+	s.noteTreeChanged()
 	return clean, nil
 }
 
@@ -401,6 +402,7 @@ func (s *Store) RenameNodeFolder(rel, name string) (string, error) {
 			return "", err
 		}
 		InvalidateNodeTree(s.root)
+		s.noteTreeChanged()
 		return target, nil
 	}
 	if _, err := s.statPath(s.folderAbs(target)); err == nil {
@@ -412,6 +414,7 @@ func (s *Store) RenameNodeFolder(rel, name string) (string, error) {
 		return "", err
 	}
 	InvalidateNodeTree(s.root)
+	s.noteTreeChanged()
 	return target, nil
 }
 
@@ -456,6 +459,7 @@ func (s *Store) MoveNodeFolder(rel, parent string) (string, error) {
 		return "", err
 	}
 	InvalidateNodeTree(s.root)
+	s.noteTreeChanged()
 	return target, nil
 }
 
@@ -501,6 +505,7 @@ func (s *Store) DeleteNodeFolder(rel string) error {
 		return err
 	}
 	InvalidateNodeTree(s.root)
+	s.noteTreeChanged()
 	return nil
 }
 
@@ -557,6 +562,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 	}
 	if moved {
 		InvalidateNodeTree(s.root)
+		s.noteTreeChanged()
 	}
 	return nil
 }

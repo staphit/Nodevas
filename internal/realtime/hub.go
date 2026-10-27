@@ -349,6 +349,20 @@ func (h *Hub) Broadcast(evType, id string) {
 	h.send(Event{Type: evType, ID: id}, func(*wsClient) bool { return true })
 }
 
+// BroadcastActor queues an event for every connection of one account,
+// whatever project they watch: news that is that person's alone, such as
+// their current project moving, which nobody else should be pulled along by.
+func (h *Hub) BroadcastActor(actorID, evType, id string) {
+	if actorID == "" {
+		return
+	}
+	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.actor.ID == actorID
+	})
+}
+
 // BroadcastRoom queues an event for the clients watching one project.
 //
 // A client that never subscribed still receives everything: older clients (and

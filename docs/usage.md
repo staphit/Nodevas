@@ -12,6 +12,7 @@ Two sources feed it:
 Every figure is an **API-equivalent estimate**. An agent signed in with a subscription pays nothing per token, and the prices are a vendor's list prices on a date. Use the cost to compare plans and harnesses, not as a bill.
 
 - When an agent says what something cost, that figure is used: Claude Code's `-p` result, and OpenCode. In the report it is `reportedCostUsd`.
+- OpenCode 2 reports tokens at the end of each step but not after its last one, so an OpenCode 2 run's tokens and cost leave out the step that wrote the answer.
 - Otherwise the cost is estimated from the price table (`estimatedCostUsd`).
 - Tokens of a model with no price are counted in `unpricedTokens` and in no cost.
 

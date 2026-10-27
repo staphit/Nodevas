@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "neon-station",
+  "name": { "en": "Neon station", "zh-TW": "霓虹太空站" },
+  "layout": "rooms",
+  "palette": {
+    "ground": "#0e1726",
+    "text": "#e6eef7"
+  },
+  "sprites": {
+    "agent.working": "images/astro-working.svg",
+    "agent.reviewing": "images/astro-reviewing.svg",
+    "agent.asking-user": "images/astro-asking.svg",
+    "agent.awaiting-accept": "images/astro-awaiting.svg",
+    "agent.waiting-ci": "images/astro-waiting-ci.svg",
+    "agent.failed": "images/astro-failed.svg",
+    "agent.idle": "images/astro-idle.svg",
+    "agent.offline": "images/astro-offline.svg",
+    "agent.standing": "images/astro-standing.svg",
+    "desk.empty": "images/console-empty.svg",
+    "table": "images/holo-table.svg"
+  }
+}

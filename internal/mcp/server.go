@@ -54,6 +54,9 @@ type Options struct {
 	// ExclusionFile overrides where the folder exclusion list is read from;
 	// empty is agentsetup.NetworkConfigPath().
 	ExclusionFile string
+	// Toolset picks the tools served: ToolsetFull (or empty), every tool, or
+	// ToolsetRun, the few a runner's run needs. See toolset.go.
+	Toolset string
 }
 
 // DefaultActor names an agent when the operator did not.
@@ -98,6 +101,10 @@ func NewServerWithClose(ctx context.Context, opts Options) (*mcp.Server, func(),
 
 func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	closeWorker := func() {}
+	allowed, err := toolsetTools(opts.Toolset)
+	if err != nil {
+		return nil, nil, err
+	}
 	workDir := opts.WorkDir
 	if workDir == "" {
 		workDir, _ = os.Getwd()
@@ -169,7 +176,7 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 		Name:    "nodevas",
 		Version: Version,
 	}, &mcp.ServerOptions{
-		Instructions: instructions(client.Project()),
+		Instructions: instructions(client.Project(), allowed != nil),
 	})
 	registerReadTools(server, client)
 	if opts.ChromaURL != "" {
@@ -184,6 +191,9 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 	registerNetworkTools(server, client)
 	registerResources(server, client)
 	registerPrompt(server, client)
+	if allowed != nil {
+		server.AddReceivingMiddleware(toolsetGuard(opts.Toolset, allowed))
+	}
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			if method == "tools/call" && req != nil && req.GetParams() != nil {
@@ -214,7 +224,7 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 
 func displayProject(name string) string {
 	if name == "" {
-		return "(the server's active project)"
+		return "(your current project: the one you have open; the server's active project on loopback)"
 	}
 	return name
 }
@@ -227,11 +237,18 @@ func displayRole(role string) string {
 }
 
 // instructions is what the client shows the model about this server as a whole,
-// so the per-tool descriptions do not each have to repeat the loop.
-func instructions(project string) string {
+// so the per-tool descriptions do not each have to repeat the loop. A run's
+// prompt already says which node to work and how, and its toolset has no
+// queue, so its instructions do not describe one.
+func instructions(project string, run bool) string {
 	scope := "the project this server was started with"
 	if project != "" {
 		scope = fmt.Sprintf("the %q project", project)
+	}
+	if run {
+		return fmt.Sprintf(`Nodevas tools act on %s; edits appear live.
+Work only the node your run's prompt names, as it says; do not take other tasks. Give a claimed task back unfinished with release_task.
+Report only achieved results.`, scope)
 	}
 	return fmt.Sprintf(`Nodevas tools act on %s; edits appear live.
 Workflow: get_ready_tasks -> claim_task -> get_node -> do the work -> set_node_status.

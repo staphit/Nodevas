@@ -14,7 +14,7 @@ import (
 )
 
 type seenRequest struct {
-	method, uri, auth, accessID, accessSecret, role, project, contentType, cookie, body string
+	method, uri, auth, accessID, accessSecret, role, project, contentType, cookie, body, runID string
 }
 
 func TestProxyForwards(t *testing.T) {
@@ -29,6 +29,7 @@ func TestProxyForwards(t *testing.T) {
 			accessID: r.Header.Get(runnerwire.AccessClientIDHeader), accessSecret: r.Header.Get(runnerwire.AccessClientSecretHeader),
 			role: r.Header.Get("X-Nodevas-Agent-Role"), project: r.Header.Get("X-Nodevas-Project"),
 			contentType: r.Header.Get("Content-Type"), cookie: r.Header.Get("Cookie"), body: string(body),
+			runID: r.Header.Get(runnerwire.RunIDHeader),
 		})
 		mu.Unlock()
 		if strings.HasSuffix(r.URL.Path, "/agents/inbox") {
@@ -62,6 +63,7 @@ func TestProxyForwards(t *testing.T) {
 	req.Header.Set("X-Nodevas-Project", "demo")
 	req.Header.Set("Authorization", "Bearer agent-made-this-up")
 	req.Header.Set("Cookie", "session=stolen")
+	req.Header.Set(runnerwire.RunIDHeader, "someone-elses-run")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +79,7 @@ func TestProxyForwards(t *testing.T) {
 	want := seenRequest{
 		method: "POST", uri: "/base/api/runner/proxy/nodes/n%2F1/claim?project=demo&x=1", auth: "Bearer " + testToken,
 		accessID: "cid", accessSecret: "csec", role: "worker", project: "demo", contentType: "application/json",
-		body: `{"a":1}`,
+		body: `{"a":1}`, runID: "run-1",
 	}
 	if got != want {
 		t.Fatalf("hub saw %+v\nwant     %+v", got, want)

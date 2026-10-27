@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 var historyVersionPattern = regexp.MustCompile(
@@ -151,29 +152,73 @@ func (s *Store) pruneHistory(dir string) error {
 	return nil
 }
 
-// WriteVersioned = snapshot previous version + atomic write. Its only caller is the
+// WriteVersioned = keep the previous version + atomic write. Its only caller is the
 // restore path, where the version being replaced is the one the user was just
-// looking at, so the snapshot is unconditional.
+// looking at, so keeping it is unconditional.
 func (s *Store) WriteVersioned(path string, data []byte) error {
-	if err := s.snapshotHistoryAlways(path); err != nil {
+	return s.writeVersionedLocked(identity.Actor{}, "", path, data)
+}
+
+// writeVersionedLocked is WriteVersioned on behalf of actor. Caller holds s.mu.
+func (s *Store) writeVersionedLocked(actor identity.Actor, kind, path string, data []byte) error {
+	backend := s.history()
+	if err := backend.beforeOverwrite(path, true); err != nil {
 		return fmt.Errorf("snapshot %s: %w", filepath.Base(path), err)
 	}
 	if err := s.WriteAtomic(path, data); err != nil {
 		return err
 	}
 	s.noteHistoryWrite(path, Rev(data))
+	backend.wrote(actor, kind, []string{path})
 	return nil
 }
 
-// HistoryVersion describes one snapshot of a file.
+// HistoryVersion describes one version of a file. Name is what read and
+// restore take: a copy's file name for the file backend, a commit ID for git.
 type HistoryVersion struct {
 	Name string `json:"name"`
 	At   string `json:"at"`
 	Size int64  `json:"size"`
+	// Author is who saved this version, when the backend knows (git).
+	Author string `json:"author,omitempty"`
 }
 
-// ListHistory returns snapshots for a project-relative file, newest first.
+// ListHistory returns the versions of a project-relative file, newest first.
 func (s *Store) ListHistory(rel string) ([]HistoryVersion, error) {
+	return s.history().list(rel)
+}
+
+// RestoreHistory rolls a file back to a version for actor. The current
+// version is kept first, so a restore can itself be undone, and the restore
+// is recorded at once rather than at the end of the save window.
+func (s *Store) RestoreHistory(actor identity.Actor, rel, version string) error {
+	backend := s.history()
+	data, err := backend.read(rel, version)
+	if err != nil {
+		return err
+	}
+	target, err := backend.restoreTarget(rel)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	err = s.writeVersionedLocked(actor, "restore", target, data)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	backend.commitSoon()
+	return nil
+}
+
+// ReadHistory returns the bytes of one version, for previewing it before
+// deciding to restore it.
+func (s *Store) ReadHistory(rel, version string) ([]byte, error) {
+	return s.history().read(rel, version)
+}
+
+// listHistoryFiles is ListHistory for the file backend.
+func (s *Store) listHistoryFiles(rel string) ([]HistoryVersion, error) {
 	dir, err := s.historyDir(rel)
 	if err != nil {
 		return nil, err
@@ -200,29 +245,8 @@ func (s *Store) ListHistory(rel string) ([]HistoryVersion, error) {
 	return out, nil
 }
 
-// RestoreHistory rolls a file back to a snapshot. The current version is
-// snapshotted first, so a restore can itself be undone.
-func (s *Store) RestoreHistory(rel, version string) error {
-	dir, err := s.historyDir(rel)
-	if err != nil {
-		return err
-	}
-	if !historyVersionPattern.MatchString(version) ||
-		filepath.Ext(version) != filepath.Ext(filepath.FromSlash(rel)) {
-		return fmt.Errorf("invalid version name")
-	}
-	data, err := s.ReadFile(filepath.Join(dir, version))
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.WriteVersioned(filepath.Join(s.root, filepath.FromSlash(rel)), data)
-}
-
-// ReadHistory returns the bytes of one snapshot, for previewing a version
-// before deciding to restore it.
-func (s *Store) ReadHistory(rel, version string) ([]byte, error) {
+// readHistoryFile is ReadHistory for the file backend: one snapshot's bytes.
+func (s *Store) readHistoryFile(rel, version string) ([]byte, error) {
 	dir, err := s.historyDir(rel)
 	if err != nil {
 		return nil, err
@@ -370,9 +394,12 @@ func (s *Store) ListTrash() ([]TrashItem, error) {
 
 // RestoreTrash moves a trashed node file back and re-registers the node in
 // graph.yaml (definition rebuilt from the file's frontmatter snapshot).
-func (s *Store) RestoreTrash(file string) (string, error) {
+func (s *Store) RestoreTrash(actor identity.Actor, file string) (string, error) {
+	// A restore is recorded at once, like a delete; with nothing written this
+	// is a no-op.
+	defer s.history().commitSoon()
 	if strings.HasPrefix(file, "pages/") {
-		return s.restoreTrashedNodePage(file)
+		return s.restoreTrashedNodePage(actor, file)
 	}
 	if strings.ContainsAny(file, `/\`) || filepath.Base(file) != file || !strings.HasSuffix(file, ".md") {
 		return "", fmt.Errorf("invalid trash file")
@@ -421,7 +448,7 @@ func (s *Store) RestoreTrash(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{
 		{
 			path:          s.NodePath(id),
 			data:          data,
@@ -443,7 +470,7 @@ func (s *Store) RestoreTrash(file string) (string, error) {
 	return id, nil
 }
 
-func (s *Store) restoreTrashedNodePage(file string) (string, error) {
+func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (string, error) {
 	clean := filepath.ToSlash(filepath.Clean(file))
 	if !strings.HasPrefix(clean, "pages/") ||
 		strings.Count(clean, "/") != 1 ||
@@ -500,7 +527,7 @@ func (s *Store) restoreTrashedNodePage(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{
 		{path: s.NodePagesManifestPath(page.NodeID), data: manifestData},
 		{
 			path:          s.NodePagePath(page.NodeID, page.PageID, format),

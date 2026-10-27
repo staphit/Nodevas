@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconFolder, IconFolderOpen, IconImport, IconPlus } from "../icons";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import {
+  IconCompass,
+  IconFolder,
+  IconFolderOpen,
+  IconImport,
+  IconMore,
+  IconPlus,
+} from "../icons";
+import { OPEN_START_SCREEN_EVENT, useNewProjectRequest } from "./StartScreen";
 import { api } from "../api";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
@@ -39,6 +47,7 @@ import {
   type ProjectMenuTarget,
 } from "./explorer/ProjectContextMenu";
 import { pickProject } from "./ProjectPickerDialog";
+import { useViewer } from "./SignIn";
 
 /**
  * The scrim behind the phone-width explorer overlay. Rendered only when the
@@ -101,6 +110,12 @@ export function Sidebar() {
     null,
   );
   const nodesExpanded = usePreference("explorerNodesExpanded");
+  const toolsExpanded = usePreference("explorerToolsExpanded");
+  // Copying an example in creates a project, an administrator's call on a
+  // team server; a standalone install has no viewer and may.
+  const viewer = useViewer();
+  const canCreateProjects = !viewer || viewer.role === "admin";
+  const toolsId = useId();
   const workspaceExpanded = usePreference("explorerWorkspaceExpanded");
   const [validationExpanded, setValidationExpanded] = useState(false);
   const [projectTransferNotice, setProjectTransferNotice] = useState<string | null>(
@@ -203,6 +218,16 @@ export function Sidebar() {
     projectOrder,
     setProjectSort: (sort) => updateUIPreference("explorerProjectSort", sort),
   });
+
+  // "Start with a blank project" from the start screen, in a workspace that
+  // already has work in it: the same form the New project button opens.
+  const newProjectRequested = useNewProjectRequest((state) => state.pending);
+  const beginProjectCreate = create.beginProjectCreate;
+  useEffect(() => {
+    if (!newProjectRequested) return;
+    useNewProjectRequest.getState().set(false);
+    beginProjectCreate({ mode: "project", parent: "" });
+  }, [newProjectRequested, beginProjectCreate]);
 
   const workspaceName =
     workspace.split(/[\\/]/).filter(Boolean).at(-1) || "workspace";
@@ -317,7 +342,10 @@ export function Sidebar() {
             {t("sidebar.projectCount", { count: String(projects.length) })}
           </span>
         </div>
-        <div className="explorer-create-actions" aria-label={t("sidebar.tools")}>
+        {/* One action up front — a first project is all a new workspace needs —
+            and the rest one press away. The fold is remembered, so someone
+            who uses them keeps them open. */}
+        <div className="explorer-primary-actions">
           <button
             type="button"
             className="primary"
@@ -326,6 +354,20 @@ export function Sidebar() {
             <IconPlus size={13} />
             {t("sidebar.newProject")}
           </button>
+          <button
+            type="button"
+            className={`explorer-more-toggle${toolsExpanded ? " active" : ""}`}
+            onClick={() => updateUIPreference("explorerToolsExpanded", !toolsExpanded)}
+            aria-expanded={toolsExpanded}
+            aria-controls={toolsId}
+            title={t("sidebar.moreTools")}
+            aria-label={t("sidebar.moreTools")}
+          >
+            <IconMore size={15} />
+          </button>
+        </div>
+        {toolsExpanded && (
+        <div id={toolsId} className="explorer-create-actions" aria-label={t("sidebar.tools")}>
           <button
             type="button"
             onClick={() =>
@@ -377,8 +419,21 @@ export function Sidebar() {
             <IconFolderOpen size={13} />
             {t("sidebar.connectWorkspace")}
           </button>
+          {canCreateProjects && (
+          <button
+            type="button"
+            className="explorer-example-action"
+            onClick={() => window.dispatchEvent(new Event(OPEN_START_SCREEN_EVENT))}
+            title={t("sidebar.openExampleTitle")}
+          >
+            <IconCompass size={13} />
+            {t("sidebar.openExample")}
+          </button>
+          )}
         </div>
+        )}
         <ProjectTransferBar
+          showActions={toolsExpanded}
           transfer={transfer}
           activeProject={activeProject}
           setProjectTransferNotice={setProjectTransferNotice}

@@ -5,6 +5,9 @@
  * implementation (`LaneView`) because they render the same nodes on the same
  * grid with the same selection and drag rules; the split that matters to
  * callers is which pane they are mounting, so that is what they name.
+ *
+ * The game views (the war room and the boss map) used to be skins of this
+ * pane; they are Station's now (src/station), and Info keeps the cards.
  */
 
 import { LaneView, type PaneProps } from "./LaneView";

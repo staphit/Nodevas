@@ -457,6 +457,16 @@ func TestRunMailToAPersonIsHeld(t *testing.T) {
 		if _, err := hub.Touch(Heartbeat{SessionID: "a1", Project: "p", ActorID: "alice", Run: true}); !errors.Is(err, ErrRefused) {
 			t.Fatalf("run took over the person's session: %v", err)
 		}
+		// Nor does another run on the same runner take over a run's session.
+		if _, err := hub.Touch(Heartbeat{SessionID: "rb", Project: "p", ActorID: "alice", RunID: "run-b"}); err != nil {
+			t.Fatalf("second run's own session: %v", err)
+		}
+		if _, err := hub.Touch(Heartbeat{SessionID: "rb", Project: "p", ActorID: "alice", RunID: "run-c"}); !errors.Is(err, ErrRefused) {
+			t.Fatalf("a run took over another run's session: %v", err)
+		}
+		if s, err := hub.Touch(Heartbeat{SessionID: "rb", Project: "p", ActorID: "alice", RunID: "run-b"}); err != nil || s.RunID != "run-b" {
+			t.Fatalf("run's own heartbeat after the refusal = %+v, %v", s, err)
+		}
 		// Nor does a session shed the run mark.
 		if s, err := hub.Touch(Heartbeat{SessionID: "r1", Project: "p", ActorID: "alice"}); err != nil || !s.Run {
 			t.Fatalf("run session after a plain heartbeat = %+v, %v", s, err)

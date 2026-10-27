@@ -8,6 +8,7 @@ import {
   api,
   streamTurn,
   UnauthorizedError,
+  type CopilotBrowserModel,
   type CopilotDecision,
   type CopilotMode,
   type CopilotSettings,
@@ -18,6 +19,11 @@ import {
 } from "../api";
 import { translate } from "../i18n";
 import { useApp } from "../store";
+import {
+  browserModelAvailability,
+  downloadBrowserModel as startBrowserModelDownload,
+  runBrowserModel,
+} from "./browserModel";
 import { runClientTool, SUPPORTED_CLIENT_TOOLS } from "./clientTools";
 import { useCopilot } from "./copilotStore";
 import { cancelSpeech } from "./speech";
@@ -40,10 +46,30 @@ export function turnContext(): CopilotTurnContext {
   };
 }
 
-export async function refreshCopilotStatus(): Promise<void> {
+/** This browser's built-in model, as the server is told it; undefined when there is none. */
+async function browserModel(refresh = false): Promise<CopilotBrowserModel | undefined> {
+  const availability = await browserModelAvailability(refresh);
+  return availability === "unsupported" ? undefined : availability;
+}
+
+/** The mode a turn may run in: the browser's model never runs without asking. */
+function usableMode(mode: CopilotMode): CopilotMode {
+  const status = useCopilot.getState().status;
+  return status?.provider === "browser" && mode === "bypassPermissions" ? "default" : mode;
+}
+
+function applyStatus(status: CopilotStatus): void {
+  const copilot = useCopilot.getState();
+  copilot.setStatus(status);
+  const mode = usableMode(copilot.mode);
+  // Not setMode: the person's saved default stays what they chose.
+  if (mode !== copilot.mode) useCopilot.setState({ mode });
+}
+
+export async function refreshCopilotStatus(refreshBrowser = false): Promise<void> {
   try {
-    const status = await api.getCopilotStatus();
-    useCopilot.getState().setStatus(status);
+    const status = await api.getCopilotStatus(await browserModel(refreshBrowser));
+    applyStatus(status);
   } catch (error) {
     // 404 (no copilot on this server) and every other failure hide the button.
     if (error instanceof UnauthorizedError) return;
@@ -53,9 +79,26 @@ export async function refreshCopilotStatus(): Promise<void> {
 
 /** The copilot's status, fetched fresh (the settings tab shows it). */
 export async function fetchCopilotStatus(): Promise<CopilotStatus> {
-  const status = await api.getCopilotStatus();
-  useCopilot.getState().setStatus(status);
+  const status = await api.getCopilotStatus(await browserModel());
+  applyStatus(status);
   return status;
+}
+
+/**
+ * Downloads the browser's built-in model. Call it from a click: the Prompt
+ * API starts a download only from a user gesture.
+ */
+export async function downloadBrowserModel(): Promise<void> {
+  const copilot = useCopilot.getState();
+  if (copilot.download.active) return;
+  copilot.setDownload({ active: true, progress: 0, error: null });
+  try {
+    await startBrowserModelDownload((progress) => useCopilot.getState().setDownload({ progress }));
+    useCopilot.getState().setDownload({ active: false, progress: 1 });
+  } catch (error) {
+    useCopilot.getState().setDownload({ active: false, progress: null, error: errorText(error) });
+  }
+  await refreshCopilotStatus(true);
 }
 
 /** The administrator's copilot settings; rejects for everyone else (403). */
@@ -70,13 +113,29 @@ export async function saveCopilotKeySource(keySource: "auto" | "runner" | "serve
   return saved;
 }
 
+/** Which model provider the copilot uses (administrators only); "auto" is the free default. */
+export async function saveCopilotProvider(provider: "auto" | "anthropic" | "openai"): Promise<CopilotSettings> {
+  const saved = await api.putCopilotSettings({ provider });
+  await refreshCopilotStatus();
+  return saved;
+}
+
 /**
  * A runner came or went: when model calls run on runners, that may turn the
  * copilot on or off for this person.
  */
 export function runnersChanged(): void {
   const { status, serverState } = useCopilot.getState();
-  if (status?.keySource === "runner" || serverState === "needsRunner") void refreshCopilotStatus();
+  // A runner may also bring a local model (Ollama on that PC) to automatic mode.
+  if (
+    status?.keySource === "runner" ||
+    status?.automatic ||
+    serverState === "needsRunner" ||
+    serverState === "needsSetup" ||
+    serverState === "needsDownload"
+  ) {
+    void refreshCopilotStatus();
+  }
 }
 
 export async function loadConversations(): Promise<void> {
@@ -126,7 +185,9 @@ export function availableModes(): CopilotMode[] {
   const offered: CopilotMode[] = status?.modes?.length
     ? status.modes
     : ["plan", "default", "acceptEdits", "bypassPermissions"];
-  return offered.filter((mode) => mode !== "bypassPermissions" || status?.allowBypass);
+  return offered.filter(
+    (mode) => mode !== "bypassPermissions" || (status?.allowBypass && status.provider !== "browser"),
+  );
 }
 
 export async function changeMode(mode: CopilotMode): Promise<void> {
@@ -169,6 +230,34 @@ async function handleClientTool(
   }
 }
 
+/**
+ * Runs a model call on this browser's built-in model and hands the raw answer
+ * to the server, which parses it and carries the turn on. A failure is
+ * reported too, so the turn ends with the reason instead of its timeout.
+ */
+async function handleModelRequest(
+  conversationId: string,
+  turnId: string | null,
+  event: Extract<CopilotTurnEvent, { type: "model_request" }>,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!turnId) return;
+  let result: { requestId: string; output?: string; error?: string };
+  try {
+    const output = await runBrowserModel(event.modelRequest, signal);
+    result = { requestId: event.requestId, output };
+  } catch (error) {
+    if (signal.aborted) return;
+    result = { requestId: event.requestId, error: errorText(error) };
+  }
+  if (signal.aborted) return;
+  try {
+    await api.sendCopilotModelResult(conversationId, turnId, result);
+  } catch (error) {
+    useCopilot.getState().setNotice(errorText(error));
+  }
+}
+
 function finishConversationIfEnded(): void {
   if (!endAfterTurn) return;
   endAfterTurn = false;
@@ -187,6 +276,9 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
   let finished = false;
   const abort = new AbortController();
   controller = abort;
+  // Model calls on this device stop with the turn, whichever way it ends.
+  const modelAbort = new AbortController();
+  abort.signal.addEventListener("abort", () => modelAbort.abort());
   try {
     if (!id) {
       const conversation = await api.createCopilotConversation(project, copilot.mode);
@@ -197,14 +289,16 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
       }));
     }
     const conversationId = id;
+    const onDevice = await browserModel();
     for await (const event of streamTurn(
       conversationId,
       {
         text,
         source,
-        mode: useCopilot.getState().mode,
+        mode: usableMode(useCopilot.getState().mode),
         context: turnContext(),
         clientTools: SUPPORTED_CLIENT_TOOLS,
+        ...(onDevice ? { browserModel: onDevice } : {}),
       },
       abort.signal,
     )) {
@@ -212,6 +306,9 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
       if (event.type === "client_tool_call") {
         // Not awaited: the server keeps streaming (or waits) meanwhile.
         void handleClientTool(conversationId, useCopilot.getState().turnId, event);
+      }
+      if (event.type === "model_request") {
+        void handleModelRequest(conversationId, useCopilot.getState().turnId, event, modelAbort.signal);
       }
       if (event.type === "turn_finished") finished = true;
     }
@@ -223,6 +320,7 @@ export async function sendTurn(raw: string, source: CopilotSource): Promise<void
       useCopilot.getState().endTurn(errorText(error));
     }
   } finally {
+    modelAbort.abort();
     if (controller === abort) controller = null;
     finishConversationIfEnded();
     // The server may have titled the conversation from its first turn.

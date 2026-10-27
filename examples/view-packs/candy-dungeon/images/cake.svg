@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 260" width="280" height="260">
+<!-- Candy dungeon: the boss, a giant cake -->
+<ellipse cx="140" cy="246" rx="124" ry="12" fill="#7a3b5c" fill-opacity=".2"/>
+<ellipse cx="140" cy="234" rx="122" ry="20" fill="#fff" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<ellipse cx="140" cy="232" rx="100" ry="13" fill="#fdeef4"/>
+<path d="M34 162 V224 A106 18 0 0 0 246 224 V162 Z" fill="#ff9cc2" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M34 162 A106 18 0 0 0 246 162 V170 A106 18 0 0 1 34 170 Z" fill="#fff"/>
+<rect x="44" y="168" width="12" height="18" rx="6" fill="#fff"/><rect x="70" y="172" width="12" height="12" rx="6" fill="#fff"/><rect x="96" y="174" width="12" height="22" rx="6" fill="#fff"/><rect x="124" y="176" width="12" height="14" rx="6" fill="#fff"/><rect x="150" y="176" width="12" height="20" rx="6" fill="#fff"/><rect x="178" y="174" width="12" height="12" rx="6" fill="#fff"/><rect x="204" y="172" width="12" height="18" rx="6" fill="#fff"/><rect x="228" y="166" width="12" height="12" rx="6" fill="#fff"/>
+<ellipse cx="140" cy="162" rx="106" ry="18" fill="#ffc2d9" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M66 106 V160 A74 13 0 0 0 214 160 V106 Z" fill="#fff1dc" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="74" y="110" width="10" height="16" rx="5" fill="#7a4a3a"/><rect x="96" y="114" width="10" height="10" rx="5" fill="#7a4a3a"/><rect x="118" y="116" width="10" height="18" rx="5" fill="#7a4a3a"/><rect x="140" y="117" width="10" height="12" rx="5" fill="#7a4a3a"/><rect x="162" y="116" width="10" height="16" rx="5" fill="#7a4a3a"/><rect x="184" y="113" width="10" height="10" rx="5" fill="#7a4a3a"/>
+<ellipse cx="140" cy="106" rx="74" ry="13" fill="#7a4a3a" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M96 62 V104 A44 9 0 0 0 184 104 V62 Z" fill="#c9a7ff" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<ellipse cx="140" cy="62" rx="44" ry="9" fill="#e4d4ff" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M114 58 V36 M166 58 V36" stroke="#7fdcc4" stroke-width="7"/>
+<path d="M114 52 V48 M114 42 V38 M166 52 V48 M166 42 V38" stroke="#fff" stroke-width="7"/>
+<path d="M114 22 Q120 30 114 34 Q108 30 114 22 Z M166 22 Q172 30 166 34 Q160 30 166 22 Z" fill="#ffb347"/>
+<path d="M140 40 Q143 22 156 14" fill="none" stroke="#4f8a3a" stroke-width="3.5" stroke-linecap="round"/>
+<circle cx="140" cy="46" r="14" fill="#ff4d6d" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M133 40 Q136 36 141 36" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+<path d="M78 136 L82 128 M110 140 L106 132 M170 140 L174 132 M200 134 L204 142" stroke="#ff7aa8" stroke-width="4" stroke-linecap="round"/>
+<path d="M150 136 L158 136 M122 128 L128 132" stroke="#7fdcc4" stroke-width="4" stroke-linecap="round"/>
+<path d="M90 196 L118 202 L112 214 L90 208 Z M190 196 L162 202 L168 214 L190 208 Z" fill="#5b2a4a"/>
+<path d="M98 228 L108 218 L118 228 L128 218 L140 228 L152 218 L162 228 L172 218 L182 228" fill="none" stroke="#5b2a4a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

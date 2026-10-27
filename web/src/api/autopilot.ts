@@ -205,6 +205,15 @@ export interface AutopilotView {
   tasks: TaskInstance[] | null;
 }
 
+/** Mirrors runnerwire.AutopilotListResponse: GET /api/autopilot without a
+ * goal, oldest first. */
+export interface AutopilotListResponse {
+  autopilots: AutopilotView[] | null;
+}
+
+/** Statuses the list route takes; it lists both when given none. */
+export type LiveAutopilotStatus = "running" | "paused";
+
 export interface CreateAutopilotRequest {
   goalNodeId: string;
   policy: AutopilotPolicy;
@@ -292,6 +301,14 @@ export const autopilotApi = {
       if (error instanceof RequestError && error.status === 404) return null;
       throw error;
     }
+  },
+  /** The project's live autopilots (running and paused, or only the
+   * statuses given), each with its tasks. Anyone who may read the project
+   * sees them. */
+  listActiveAutopilots: async (statuses: LiveAutopilotStatus[] = []): Promise<AutopilotView[]> => {
+    const qs = statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : "";
+    const response = await req<AutopilotListResponse>(`/api/autopilot${qs}`);
+    return (response.autopilots ?? []).map(normalizeAutopilotView);
   },
   getAutopilot: async (id: string) =>
     normalizeAutopilotView(await req<AutopilotView>(autopilotPath(id))),

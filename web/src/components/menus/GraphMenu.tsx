@@ -55,23 +55,33 @@ export function GraphMenu({
       <button type="button" role="menuitem" onClick={() => createCanvasAnnotation(contextMenu)}>
         {t("graphMenu.newAnnotation")}
       </button>
-      <div className="lane-context-title logic-gate-create-title">{t("graphMenu.newGate")}</div>
-      <div className="logic-gate-create-grid">
-        {NEW_GATE_OPERATORS.map(({ operator }) => (
-          <button
-            key={operator}
-            type="button"
-            role="menuitem"
-            onClick={() => createStandaloneLogicGate(contextMenu, operator)}
-          >
-            <b>{operator.toUpperCase()}</b>
-            <span>{operatorHint[operator]}</span>
-          </button>
-        ))}
-      </div>
-      <div className="lane-context-help">
-        {t("graphMenu.help")}
-      </div>
+      {/* Dragging one node onto another is all a plain dependency needs, so
+          standalone gates wait behind the advanced disclosure. */}
+      <details className="dependency-advanced">
+        <summary>
+          <span>{t("dependency.advanced")}</span>
+          <small>{t("graphMenu.newGate")}</small>
+        </summary>
+        <div className="dependency-advanced-body">
+          <p className="lane-context-field-help">{t("graphMenu.advancedHint")}</p>
+          <div className="logic-gate-create-grid">
+            {NEW_GATE_OPERATORS.map(({ operator }) => (
+              <button
+                key={operator}
+                type="button"
+                role="menuitem"
+                onClick={() => createStandaloneLogicGate(contextMenu, operator)}
+              >
+                <b>{operator.toUpperCase()}</b>
+                <span>{operatorHint[operator]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="lane-context-help">
+            {t("graphMenu.help")}
+          </div>
+        </div>
+      </details>
     </>
   );
 }

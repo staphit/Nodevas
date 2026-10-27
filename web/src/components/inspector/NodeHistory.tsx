@@ -30,7 +30,9 @@ function NodeHistory({
   const { t, language } = useI18n();
   const runState = useApp((s) => s.runState);
   const graph = useApp((s) => s.graph);
-  const [versions, setVersions] = useState<{ name: string; at: string; size: number }[]>([]);
+  const [versions, setVersions] = useState<
+    { name: string; at: string; size: number; author?: string }[]
+  >([]);
   const [open, setOpen] = useState(false);
   /** Snapshot being looked at before deciding whether to restore it. */
   const [viewing, setViewing] = useState<{
@@ -87,10 +89,15 @@ function NodeHistory({
     }
   };
 
-  const restore = async (version: string) => {
+  // A version's name is opaque (a commit ID with git), so the dialog names it
+  // by its time.
+  const restore = async (version: string, at: string) => {
     const confirmed = await confirmAction({
       title: t("history.restoreTitle"),
-      description: t("history.restoreDescription", { path, version }),
+      description: t("history.restoreDescription", {
+        path,
+        version: formatLocalizedDateTime(at, language),
+      }),
       confirmLabel: t("history.restoreVersion"),
     });
     if (!confirmed) return;
@@ -128,6 +135,7 @@ function NodeHistory({
               <li key={v.name}>
                 <span className="mono nh-time">{formatLocalizedDateTime(v.at, language)}</span>
                 <span className="nh-size">{v.size}B</span>
+                {v.author && <span className="nh-by">by {v.author}</span>}
                 <button
                   type="button"
                   className={viewing?.name === v.name ? "on" : ""}
@@ -143,7 +151,7 @@ function NodeHistory({
                   <IconEye size={12} />
                   {t("history.preview")}
                 </button>
-                <button type="button" onClick={() => void restore(v.name).catch(reportError)}>
+                <button type="button" onClick={() => void restore(v.name, v.at).catch(reportError)}>
                   {t("history.restore")}
                 </button>
               </li>
@@ -162,7 +170,7 @@ function NodeHistory({
               <span className="nh-preview-hint">{t("history.readOnlyHint")}</span>
               <button
                 type="button"
-                onClick={() => void restore(viewing.name).catch(reportError)}
+                onClick={() => void restore(viewing.name, viewing.at).catch(reportError)}
               >
                 {t("history.restoreThis")}
               </button>

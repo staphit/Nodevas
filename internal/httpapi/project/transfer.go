@@ -81,7 +81,11 @@ func (a *API) GetProjectExport(c *gin.Context) {
 	}
 	defer releaseProjectExport()
 
-	scope, err := a.pm.ExportScope(strings.TrimSpace(c.Request.URL.Query().Get("project")))
+	target := strings.TrimSpace(c.Request.URL.Query().Get("project"))
+	if target == "" {
+		target = a.currentName(c.Request)
+	}
+	scope, err := a.pm.ExportScope(target)
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
@@ -191,6 +195,7 @@ func (a *API) PostProjectImport(c *gin.Context) {
 		httpx.ErrWithStatus(c, err)
 		return
 	}
+	a.follow(c.Request, activateName)
 	c.JSON(http.StatusCreated, map[string]string{
 		"active": activateName,
 		"root":   a.visibleHostPath(destination),

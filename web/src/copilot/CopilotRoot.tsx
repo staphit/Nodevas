@@ -11,7 +11,7 @@ import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
 import { parseVoiceDecision } from "./decisions";
 import { IconMic } from "./icons";
-import { RunnerHelp } from "./RunnerHelp";
+import { OPEN_KEYS, RunnerHelp } from "./RunnerHelp";
 import { decide, projectChanged, refreshCopilotStatus, sendTurn } from "./session";
 import { cancelSpeech, useSpeechRecognition, useSpeechSynthesis } from "./speech";
 
@@ -161,9 +161,11 @@ export function CopilotRoot() {
     };
   }, [serverState]);
 
-  // On, but waiting for this person's runner, which holds the key for the
-  // model calls: the button stays, and opens how to start it.
-  if (serverState === "needsRunner") {
+  // On, but without a model yet: this person's runner (which holds the key)
+  // is offline, the browser's model still has to be downloaded, or nothing
+  // free is set up. The button stays, and opens what to do about it.
+  const waitingKey = OPEN_KEYS[serverState];
+  if (waitingKey) {
     return open ? (
       <RunnerHelp onClose={() => setOpen(false)} />
     ) : (
@@ -172,8 +174,8 @@ export function CopilotRoot() {
         type="button"
         className="copilot-fab is-offline"
         onClick={() => setOpen(true)}
-        aria-label={t("copilot.runner.open")}
-        title={t("copilot.runner.open")}
+        aria-label={t(waitingKey)}
+        title={t(waitingKey)}
       >
         <IconMic size={20} />
       </button>

@@ -243,7 +243,8 @@ var terminalEnv = []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
 
 // InteractiveCommand starts the OpenCode TUI:
 //
-//	opencode <worktree> [-m <provider/model>] --prompt <prompt>
+//	opencode <worktree> [-m <provider/model>] --prompt <prompt>    (1.x)
+//	opencode <worktree> --standalone --prompt <prompt>            (2.x)
 //
 // with OPENCODE_CONFIG_CONTENT as for a headless run, except that what a
 // headless run denies is asked about: someone is at the terminal. Checked
@@ -251,6 +252,11 @@ var terminalEnv = []string{"TERM=xterm-256color", "COLORTERM=truecolor"}
 // the TUI; --prompt: prompt to use). npm installs opencode as a .cmd shim on
 // Windows, so a prompt cmd.exe cannot pass on goes in the task file; reading
 // it, outside the worktree, is one of the things OpenCode asks about.
+//
+// 2.x's TUI takes no -m, so the job's model goes in the config's model; a
+// model OpenCode does not know there falls back to the default rather than
+// failing. Without --standalone the TUI would use the shared background
+// service and its environment instead of this run's (see OpenCode).
 func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if env.Binary == "" || env.Workdir == "" {
 		return nil, fmt.Errorf("opencode: binary and workdir are required")
@@ -264,7 +270,16 @@ func (OpenCode) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd, e
 		return nil, fmt.Errorf("opencode: %w", err)
 	}
 	args := []string{env.Workdir}
-	if job.Model != "" && job.Model != "default" {
+	model := job.Model != "" && job.Model != "default"
+	switch {
+	case openCode2(env):
+		args = append(args, "--standalone")
+		if model {
+			if config, err = withConfigKey(config, "model", job.Model); err != nil {
+				return nil, err
+			}
+		}
+	case model:
 		args = append(args, "-m", job.Model)
 	}
 	args = append(args, "--prompt", prompt)

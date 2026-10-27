@@ -69,8 +69,28 @@ export interface PermissionRequest {
   submitting?: boolean;
 }
 
-/** needsRunner: the copilot is on, but its model calls wait for this person's runner. */
-export type ServerState = "unknown" | "disabled" | "needsRunner" | "ready";
+/**
+ * needsRunner: the copilot is on, but its model calls wait for this person's runner.
+ * needsDownload: the browser's built-in model is the choice, once downloaded.
+ * needsSetup: automatic (free) mode, and no free model is available yet.
+ */
+export type ServerState = "unknown" | "disabled" | "needsRunner" | "needsDownload" | "needsSetup" | "ready";
+
+/** The on-device model download: progress 0..1 while it runs. */
+export interface BrowserModelDownload {
+  active: boolean;
+  progress: number | null;
+  error: string | null;
+}
+
+export function serverStateOf(status: CopilotStatus | null): ServerState {
+  if (!status) return "disabled";
+  if (status.enabled) return "ready";
+  if (status.needsRunner) return "needsRunner";
+  if (status.needsDownload) return "needsDownload";
+  if (status.needsSetup) return "needsSetup";
+  return "disabled";
+}
 
 /** The part of the state a turn event can change. */
 export interface TurnState {
@@ -99,6 +119,7 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   lastSource: CopilotSource;
   /** Transient line under the header (load failures, speech errors). */
   notice: string | null;
+  download: BrowserModelDownload;
 
   setStatus: (status: CopilotStatus | null) => void;
   setOpen: (open: boolean) => void;
@@ -108,6 +129,7 @@ export interface CopilotState extends TurnState, CopilotPrefs {
   setMode: (mode: CopilotMode) => void;
   setSpeakReplies: (speak: boolean) => void;
   setNotice: (notice: string | null) => void;
+  setDownload: (download: Partial<BrowserModelDownload>) => void;
   /** Starts a turn: adds the optimistic user bubble. */
   beginTurn: (text: string, source: CopilotSource) => void;
   applyEvent: (event: CopilotTurnEvent) => void;
@@ -380,6 +402,9 @@ export function reduceTurnEvent(state: TurnState, event: CopilotTurnEvent): Part
       };
     }
     case "ping":
+    case "model_request":
+      // The browser runs its model call in session.ts; what the model says
+      // comes back from the server as ordinary events.
       return {};
     default:
       // A newer server may send events this client does not know; ignore them.
@@ -400,17 +425,14 @@ export const useCopilot = create<CopilotState>((set, get) => ({
   defaultMode: initialPrefs.defaultMode,
   lastSource: "text",
   notice: null,
+  download: { active: false, progress: null, error: null },
   items: [],
   pending: [],
   running: false,
   turnId: null,
   lastReply: null,
 
-  setStatus: (status) =>
-    set({
-      status,
-      serverState: status?.enabled ? "ready" : status?.needsRunner ? "needsRunner" : "disabled",
-    }),
+  setStatus: (status) => set({ status, serverState: serverStateOf(status) }),
   setOpen: (open) => set({ open }),
   toggleOpen: () => set({ open: !get().open }),
   setConversations: (conversations) => set({ conversations }),
@@ -432,6 +454,7 @@ export const useCopilot = create<CopilotState>((set, get) => ({
     set({ speakReplies });
   },
   setNotice: (notice) => set({ notice }),
+  setDownload: (download) => set((state) => ({ download: { ...state.download, ...download } })),
   beginTurn: (text, source) =>
     set((state) => ({
       running: true,

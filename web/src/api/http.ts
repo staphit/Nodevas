@@ -175,6 +175,8 @@ export async function req<T>(
     if (res.status === 403) throw new AuthError(403, msg);
     throw new RequestError(res.status, msg, code);
   }
+  // 204: done, nothing to say (DELETE /api/packs/:id).
+  if (res.status === 204) return undefined as T;
   const body = await res.json();
   return verify ? verify(body, url) : (body as T);
 }

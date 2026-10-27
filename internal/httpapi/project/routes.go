@@ -21,13 +21,21 @@ func (a *API) Register(api *gin.RouterGroup) {
 
 	admin := api.Group("")
 	admin.Use(httpx.RequireAdmin)
-	admin.POST("/projects/open", a.PostProjectOpen)
+	if a.current != nil {
+		// With per-account projects, opening one moves only the caller's own
+		// view, so anyone may; the handler keeps creating one for admins.
+		api.POST("/projects/open", a.PostProjectOpen)
+	} else {
+		// It moves the project every window shows.
+		admin.POST("/projects/open", a.PostProjectOpen)
+	}
 	admin.POST("/projects/remove", a.PostProjectRemove)
 	admin.POST("/projects/move", a.PostProjectMove)
 	admin.POST("/projects/copy", a.PostProjectCopy)
 	admin.POST("/projects/folder", a.PostProjectFolder)
 	admin.POST("/projects/import-path", a.PostProjectImportPath)
 	admin.POST("/projects/import", a.PostProjectImport)
+	admin.POST("/projects/example", a.PostProjectExample)
 	admin.POST("/workspaces/add", a.PostWorkspaceAdd)
 	admin.POST("/workspaces/open", a.PostWorkspaceOpen)
 	admin.POST("/workspaces/remove", a.PostWorkspaceRemove)

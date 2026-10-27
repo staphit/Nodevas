@@ -71,10 +71,180 @@
 
 /* ---------- board chrome on a phone ---------- */
 
-/* On a wide window the hint sentence is already visible, so its toggle would
-   only be a second way to read the same line. */
+/* ---------- board chrome: second tier ---------- */
+
+/* The gesture sentence lives behind this button at every width now; it used to
+   run across the whole desktop header all the time. */
+.board-title {
+  position: relative;
+}
 .board-hint-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.board-hint-toggle[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.board-title-hint {
   display: none;
+}
+/* Hangs under the header rather than taking a row of it. */
+.board-title-hint.open {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 14px;
+  z-index: var(--z-popover, 60);
+  display: block;
+  max-width: min(560px, calc(100% - 28px));
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+
+/* A folded pane says what opening it does. */
+.board-show-pane {
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.board-show-pane:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+}
+
+/* The ⋯ menu at the end of each pane header. Pinned to the window by the
+   component (the header strip scrolls on a phone and would clip it). */
+.board-overflow {
+  display: inline-flex;
+  margin-left: auto;
+}
+.board-overflow-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.board-overflow-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.board-overflow-panel {
+  z-index: var(--z-popover, 60);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.board-overflow-panel {
+  display: grid;
+  width: 270px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+.board-overflow-menu {
+  display: flex;
+  min-width: 200px;
+  flex-direction: column;
+  padding: 4px;
+}
+.board-overflow-item {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.board-overflow-item > span:first-of-type {
+  flex: 1;
+}
+.board-overflow-item:hover:not(:disabled),
+.board-overflow-item:focus-visible {
+  background: var(--hover);
+}
+.board-overflow-item:disabled {
+  color: var(--text-3, var(--text-2));
+  opacity: 0.55;
+  cursor: default;
+}
+.board-overflow-check {
+  width: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.board-overflow-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.board-overflow-extra {
+  border-top: 1px solid var(--border);
+}
+.board-overflow-section {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+}
+.board-overflow-section .timeline-size-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.board-overflow-section label {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 7px;
+}
+.board-overflow-section label span {
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.board-overflow-section input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: ew-resize;
+}
+.board-overflow-section output {
+  color: var(--text);
+  font: 600 10px/1.2 var(--mono);
+  text-align: right;
+}
+.board-overflow-section small {
+  color: var(--text-2);
+  font-size: 9.5px;
+  line-height: 1.35;
 }
 
 /* Appended, not merged into the rules above: this file is one ordered slice and
@@ -148,23 +318,23 @@
      deliberate tap. Drawn small because a full-height button would set the
      strip's height for everyone, with the 44px target restored below. */
   .board-hint-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     width: 28px;
+    height: auto;
     min-height: 28px;
-    padding: 0;
-    border: 1px solid var(--border);
     border-radius: 5px;
-    background: var(--surface-2);
-    color: var(--text-2);
     font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
   }
-  .board-hint-toggle[aria-expanded="true"] {
-    border-color: var(--accent);
-    color: var(--accent);
+  /* In the scrolling strip, not pushed to its far end. */
+  .board-overflow {
+    margin-left: 0;
+  }
+  .board-overflow-trigger {
+    min-width: 36px;
+    min-height: 32px;
+  }
+  .board-overflow-item {
+    min-height: 44px;
+    font-size: 13px;
   }
   /* The collapse chevron and the hint toggle are the two controls here drawn
      smaller than a fingertip. Growing them would grow the strip, so the hit
@@ -184,15 +354,14 @@
     height: 44px;
     transform: translate(-50%, -50%);
   }
-  .board-title-hint {
-    display: none;
-  }
   /* Pinned to the viewport rather than given a row: the strip it lives in
      clips its own overflow, and a sentence that scrolls sideways one word at a
      time is not readable anyway. The same reasoning parks the cell-size
      popover at the bottom of the screen further down this file. */
   .board-title-hint.open {
     position: fixed;
+    top: auto;
+    max-width: none;
     /* Undoes the strip's nowrap: out of the strip it is a paragraph again. */
     white-space: normal;
     z-index: var(--z-popover, 60);

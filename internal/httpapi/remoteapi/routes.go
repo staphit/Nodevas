@@ -6,7 +6,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 )
 
-// Register serves cloud backup. See remote.go and sync.go.
+// Register serves cloud backup. See remote.go, sync.go and git.go.
 func (a *API) Register(api *gin.RouterGroup) {
 	admin := api.Group("")
 	admin.Use(httpx.RequireAdmin)
@@ -17,4 +17,6 @@ func (a *API) Register(api *gin.RouterGroup) {
 	admin.GET("/remote/list", a.getRemoteList)
 	admin.POST("/remote/push", a.postRemotePush)
 	admin.POST("/remote/import", a.postRemoteImport)
+	admin.POST("/remote/git/test", a.postGitTest)
+	admin.POST("/remote/git/keep-local", a.postGitKeepLocal)
 }

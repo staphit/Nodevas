@@ -4,6 +4,11 @@
  * The controls above a pane: collapse, primary create action, zoom, graph
  * filters and analysis, timeline orientation and cell size, and the pane's
  * notice line. Presentational — every action arrives as a callback.
+ *
+ * Two tiers. The header itself keeps what a first board needs — create, fit,
+ * filter, and for the timeline its direction — and everything else sits in
+ * the `⋯` menu at the end of the row: toggles such as snapping and the
+ * minimap, the axis sides, and the sliders for card and cell size.
  */
 
 import { useId, useState } from "react";
@@ -11,10 +16,12 @@ import { useId, useState } from "react";
 import { IconAlignGuides, IconPlus, IconResizeHorizontal } from "../icons";
 import type { GraphAnalysis } from "../analysis";
 import { InlineNotice } from "./InteractionPrimitives";
+import { OverflowMenu, type OverflowMenuItem } from "./menus/OverflowMenu";
 import { GRAPH_GESTURE_MODES, type GraphGestureMode } from "./canvas/gestureMode";
 import { useCoarsePointer, useTouchCapable } from "./touch";
 import type { LaneContextMenu } from "./LaneView";
 import { useI18n } from "../i18n";
+import { useStageSkinItems } from "../game/stageSkin";
 
 /**
  * How far the graph will stretch its cards and their text away from the sizes
@@ -164,6 +171,114 @@ export function BoardToolbar({
       ? t("board.hint.graphTouch")
       : t("board.hint.graphMouse")
     : t("board.hint.timeline");
+  const alerts = analysis.overdue.size + analysis.violations.length;
+  // The pane's other skins (war room, boss map), last in the graph's menu.
+  const skinItems = useStageSkinItems();
+
+  // The graph's second tier. Ordered by how often each is reached for: the
+  // analysis panel (also a button of its own while it has something to say),
+  // then fitting, then the drag aids, then the minimap.
+  const graphOverflowItems: OverflowMenuItem[] = [
+    {
+      id: "analysis",
+      label: t("board.analysis", { count: String(alerts || "") }).trim(),
+      checked: analysisOpen,
+      onSelect: () => setAnalysisOpen((open) => !open),
+    },
+    {
+      id: "fit-selected",
+      label: t("board.fitSelected"),
+      disabled: !selectedIDs.length,
+      onSelect: () => fitGraph(true),
+    },
+    {
+      id: "snap-guides",
+      label: t("board.alignGuides"),
+      title: t("board.alignGuidesTitle"),
+      icon: <IconAlignGuides size={13} />,
+      checked: snapGuides,
+      separatorBefore: true,
+      onSelect: () => setSnapGuides(!snapGuides),
+    },
+    {
+      id: "snap-grid",
+      label: t("board.snapGrid"),
+      title: t("board.snapGridTitle"),
+      checked: snapToGrid,
+      onSelect: () => setSnapToGrid(!snapToGrid),
+    },
+    {
+      id: "align-all",
+      label: t("board.alignAll"),
+      title: t("board.alignAllTitle"),
+      disabled: !canAlignToGrid,
+      onSelect: alignAllToGrid,
+    },
+    {
+      id: "minimap",
+      label: t("board.minimap"),
+      title: t("board.minimapTitle"),
+      checked: minimapVisible,
+      separatorBefore: true,
+      onSelect: () => setMinimapVisible(!minimapVisible),
+    },
+    ...skinItems,
+  ];
+
+  // The timeline's: which side each axis sits on, and whether empty days fold.
+  // Direction stays in the header — it changes the whole board, and it is what
+  // the tour points at.
+  const timelineOverflowItems: OverflowMenuItem[] = [
+    ...(timelineOrientation === "vertical"
+      ? [
+          {
+            id: "vnode-axis",
+            label: t("board.nodeRow", {
+              position: timelineVNodeAxis === "top" ? t("board.top") : t("board.bottom"),
+            }),
+            title: t("board.axisToggleNodeRowTitle"),
+            onSelect: () =>
+              changeTimelineVNodeAxis(timelineVNodeAxis === "top" ? "bottom" : "top"),
+          },
+          {
+            id: "vdate-axis",
+            label: t("board.dateColumn", {
+              position: timelineVDateAxis === "right" ? t("board.right") : t("board.left"),
+            }),
+            title: t("board.axisToggleDateColumnTitle"),
+            onSelect: () =>
+              changeTimelineVDateAxis(timelineVDateAxis === "right" ? "left" : "right"),
+          },
+        ]
+      : [
+          {
+            id: "date-axis",
+            label: t("board.dateRow", {
+              position: timelineDateAxis === "top" ? t("board.top") : t("board.bottom"),
+            }),
+            title: t("board.axisToggleDateRowTitle"),
+            onSelect: () =>
+              changeTimelineDateAxis(timelineDateAxis === "top" ? "bottom" : "top"),
+          },
+          {
+            id: "node-axis",
+            label: t("board.nodeColumn", {
+              position: timelineNodeAxis === "left" ? t("board.left") : t("board.right"),
+            }),
+            title: t("board.axisToggleNodeColumnTitle"),
+            onSelect: () =>
+              changeTimelineNodeAxis(timelineNodeAxis === "left" ? "right" : "left"),
+          },
+        ]),
+    {
+      id: "collapse-empty",
+      label: t("board.collapseEmpty"),
+      checked: collapseEmpty,
+      separatorBefore: true,
+      onSelect: () => setCollapse(!collapseEmpty),
+    },
+  ];
+
   return (
     <div className="board-title">
       {/* One wrapper around every control in the header. On a desktop it is
@@ -184,6 +299,13 @@ export function BoardToolbar({
         <span className="board-title-main">
           {isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         </span>
+        {/* A folded pane is one line of header; the chevron alone is easy to
+            miss, so it says in words what opening it does. */}
+        {collapsed && (
+          <button type="button" className="board-show-pane" onClick={onToggle}>
+            {isGraph ? t("board.showGraph") : t("board.showTimeline")}
+          </button>
+        )}
         {!collapsed && (
           <button
             type="button"
@@ -211,43 +333,11 @@ export function BoardToolbar({
             ))}
           </div>
         )}
-        {!collapsed && (
-          <>
-            {/* The hint costs a whole row of an already crowded phone header, so
-                at that width it hides behind this toggle instead. It is a real
-                button rather than a tooltip because the touch wording is the only
-                place these gestures are taught, and a finger cannot hover to read
-                a title. Above 720px the toggle is hidden and the sentence shows
-                as before. */}
-            <button
-              type="button"
-              className="board-hint-toggle"
-              onClick={() => setHintOpen((open) => !open)}
-              aria-expanded={hintOpen}
-              aria-controls={hintId}
-              title={t("board.hintToggle")}
-            >
-              ⓘ
-            </button>
-            <span id={hintId} className={`board-title-hint${hintOpen ? " open" : ""}`}>
-              {hint}
-            </span>
-          </>
-        )}
-        {!collapsed && (
-          <button
-            type="button"
-            className="board-zoom-reset"
-            onClick={() => zoomAt(1)}
-            disabled={zoom === 1}
-            title={t("board.resetZoomTitle")}
-            aria-label={t("board.currentZoom", { value: String(Math.round(zoom * 100)) })}
-          >
-            {Math.round(zoom * 100)}%
-          </button>
-        )}
         {isGraph && !collapsed && (
           <>
+            <button type="button" className="board-tool-button" onClick={() => fitGraph(false)}>
+              {t("board.fitAll")}
+            </button>
             <button
               type="button"
               className={`board-tool-button${graphToolsOpen ? " active" : ""}`}
@@ -256,118 +346,21 @@ export function BoardToolbar({
             >
               {t("board.filterView")}
             </button>
-            <button
-              type="button"
-              className={`board-tool-button analysis${analysisOpen ? " active" : ""}${
-                analysis.overdue.size || analysis.violations.length ? " alert" : ""
-              }`}
-              onClick={() => setAnalysisOpen((open) => !open)}
-              aria-expanded={analysisOpen}
-            >
-              {t("board.analysis", {
-                count: String(analysis.overdue.size + analysis.violations.length || ""),
-              })}
-            </button>
-            <button
-              type="button"
-              className={`board-tool-button snap${snapGuides ? " active" : ""}`}
-              aria-pressed={snapGuides}
-              onClick={() => setSnapGuides(!snapGuides)}
-              title={t("board.alignGuidesTitle")}
-            >
-              <IconAlignGuides size={13} />
-              {t("board.alignGuides")}
-            </button>
-            {/* Two questions the zoom cannot answer, because zoom moves the box
-                and the words in it together: how big the cards are next to the
-                board, and how big the words are inside them. Both sit behind
-                one summary so a header that already scrolls on a phone gains
-                one control rather than two. */}
-            <details className="graph-scale-control">
-              <summary title={t("board.scaleTitle")}>
-                {t("board.scaleSummary", {
-                  node: String(Math.round(nodeScale * 100)),
-                  text: String(Math.round(cardFontScale * 100)),
-                })}
-              </summary>
-              <div className="timeline-size-popover">
-                <div className="timeline-size-heading">
-                  <b>{t("board.displayScale")}</b>
-                  <button
-                    type="button"
-                    disabled={nodeScale === 1 && cardFontScale === 1}
-                    onClick={resetCardScale}
-                  >
-                    {t("board.reset100")}
-                  </button>
-                </div>
-                <label>
-                  <span>{t("board.nodeScale")}</span>
-                  <input
-                    type="range"
-                    min={GRAPH_SCALE_MIN}
-                    max={GRAPH_SCALE_MAX}
-                    step={GRAPH_SCALE_STEP}
-                    value={nodeScale}
-                    onChange={(event) => setNodeScale(Number(event.target.value))}
-                  />
-                  <output>{Math.round(nodeScale * 100)}%</output>
-                </label>
-                <label>
-                  <span>{t("board.textSize")}</span>
-                  <input
-                    type="range"
-                    min={GRAPH_SCALE_MIN}
-                    max={GRAPH_SCALE_MAX}
-                    step={GRAPH_SCALE_STEP}
-                    value={cardFontScale}
-                    onChange={(event) =>
-                      setCardFontScale(Number(event.target.value))
-                    }
-                  />
-                  <output>{Math.round(cardFontScale * 100)}%</output>
-                </label>
-                <small>{t("board.scaleHint")}</small>
-              </div>
-            </details>
-            <button type="button" className="board-tool-button" onClick={() => fitGraph(false)}>
-              {t("board.fitAll")}
-            </button>
-            <button
-              type="button"
-              className="board-tool-button"
-              disabled={!selectedIDs.length}
-              onClick={() => fitGraph(true)}
-            >
-              {t("board.fitSelected")}
-            </button>
-            <button
-              type="button"
-              className={`board-tool-button${snapToGrid ? " active" : ""}`}
-              aria-pressed={snapToGrid}
-              onClick={() => setSnapToGrid(!snapToGrid)}
-              title={t("board.snapGridTitle")}
-            >
-              {t("board.snapGrid")}
-            </button>
-            <button
-              type="button"
-              className="board-tool-button"
-              disabled={!canAlignToGrid}
-              onClick={alignAllToGrid}
-              title={t("board.alignAllTitle")}
-            >
-              {t("board.alignAll")}
-            </button>
-            <button
-              type="button"
-              className={`board-tool-button${minimapVisible ? " active" : ""}`}
-              aria-pressed={minimapVisible}
-              onClick={() => setMinimapVisible(!minimapVisible)}
-              title={t("board.minimapTitle")}
-            >
-              {t("board.minimap")}
-            </button>
+            {/* Out of the way until it has something to report: an overdue
+                node or a broken dependency puts the count back in the header,
+                and the menu always has it. */}
+            {(alerts > 0 || analysisOpen) && (
+              <button
+                type="button"
+                className={`board-tool-button analysis${analysisOpen ? " active" : ""}${
+                  alerts ? " alert" : ""
+                }`}
+                onClick={() => setAnalysisOpen((open) => !open)}
+                aria-expanded={analysisOpen}
+              >
+                {t("board.analysis", { count: String(alerts || "") })}
+              </button>
+            )}
           </>
         )}
         {!isGraph && selectedNodeId && (
@@ -377,45 +370,161 @@ export function BoardToolbar({
         )}
         {/* Groups the timeline-only layout controls so the JSX reads as one
             block. It is `display: contents` at every width — the strip around it
-            already does the scrolling that these six controls need on a phone,
-            and a nested scroller would only trap the swipe. */}
+            already does the scrolling these controls need on a phone, and a
+            nested scroller would only trap the swipe. */}
         {!isGraph && !collapsed && (
-        <div className="timeline-layout-controls">
-          <div className="timeline-orientation" role="group" aria-label={t("board.timelineDirection")}>
-            <button
-              type="button"
-              className={timelineOrientation === "vertical" ? "active" : ""}
-              aria-pressed={timelineOrientation === "vertical"}
-              onClick={() => changeTimelineOrientation("vertical")}
-              title={t("board.dateTopBottom")}
-            >
-              {t("board.vertical")}
-            </button>
-            <button
-              type="button"
-              className={timelineOrientation === "horizontal" ? "active" : ""}
-              aria-pressed={timelineOrientation === "horizontal"}
-              onClick={() => changeTimelineOrientation("horizontal")}
-              title={t("board.dateLeftRight")}
-            >
-              {t("board.horizontal")}
-            </button>
+          <div className="timeline-layout-controls">
+            <div className="timeline-orientation" role="group" aria-label={t("board.timelineDirection")}>
+              <button
+                type="button"
+                className={timelineOrientation === "vertical" ? "active" : ""}
+                aria-pressed={timelineOrientation === "vertical"}
+                onClick={() => changeTimelineOrientation("vertical")}
+                title={t("board.dateTopBottom")}
+              >
+                {t("board.vertical")}
+              </button>
+              <button
+                type="button"
+                className={timelineOrientation === "horizontal" ? "active" : ""}
+                aria-pressed={timelineOrientation === "horizontal"}
+                onClick={() => changeTimelineOrientation("horizontal")}
+                title={t("board.dateLeftRight")}
+              >
+                {t("board.horizontal")}
+              </button>
+            </div>
+            {timelineOrientation === "horizontal" && (
+              <div className="timeline-width-stepper" role="group" aria-label={t("board.timelineColumnWidth")}>
+                <IconResizeHorizontal size={13} />
+                <button
+                  type="button"
+                  aria-label={t("board.shrinkTimelineColumn")}
+                  disabled={timelineCellWidth <= TIMELINE_CELL_MIN_W}
+                  onClick={() => setTimelineCellSize("width", timelineCellWidth - 16)}
+                >
+                  −
+                </button>
+                <output aria-live="polite">{timelineCellWidth}px</output>
+                <button
+                  type="button"
+                  aria-label={t("board.expandTimelineColumn")}
+                  disabled={timelineCellWidth >= TIMELINE_CELL_MAX_W}
+                  onClick={() => setTimelineCellSize("width", timelineCellWidth + 16)}
+                >
+                  ＋
+                </button>
+              </div>
+            )}
           </div>
-          <details className="timeline-size-control">
-            <summary title={t("board.cellTitle")}>
-              <IconResizeHorizontal size={13} />
-              {t("board.cellSummary", {
-                width: String(timelineCellWidth),
-                height: String(timelineCellHeight),
-                auto: timelineCellAuto ? t("board.auto") : "",
-              })}
-            </summary>
-            <div className="timeline-size-popover">
+        )}
+        {/* Only worth a place while it says something: at 100% the reset has
+            nothing to do. */}
+        {!collapsed && zoom !== 1 && (
+          <button
+            type="button"
+            className="board-zoom-reset"
+            onClick={() => zoomAt(1)}
+            title={t("board.resetZoomTitle")}
+            aria-label={t("board.currentZoom", { value: String(Math.round(zoom * 100)) })}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+        )}
+        {!collapsed && (
+          <>
+            {/* The gestures used to be spelled out in a sentence across the
+                header, all the time. They are one press away instead, at every
+                width: a real button rather than a tooltip, because the touch
+                wording is the only place these gestures are taught and a
+                finger cannot hover to read a title. */}
+            <button
+              type="button"
+              className="board-hint-toggle"
+              onClick={() => setHintOpen((open) => !open)}
+              aria-expanded={hintOpen}
+              aria-controls={hintId}
+              aria-label={t("board.hintToggle")}
+              title={t("board.hintToggle")}
+            >
+              ?
+            </button>
+            <span
+              id={hintId}
+              className={`board-title-hint${hintOpen ? " open" : ""}`}
+              role="note"
+            >
+              {hint}
+            </span>
+          </>
+        )}
+        {isGraph && !collapsed && (
+          <OverflowMenu
+            className="board-overflow"
+            triggerClassName="board-tool-button"
+            placement="fixed"
+            label={t("board.moreGraphTools")}
+            items={graphOverflowItems}
+          >
+            {/* Two questions the zoom cannot answer, because zoom moves the
+                box and the words in it together: how big the cards are next
+                to the board, and how big the words are inside them. */}
+            <div className="board-overflow-section" role="group" aria-label={t("board.displayScale")}>
               <div className="timeline-size-heading">
-                <b>{t("board.cellSize")}</b>
+                <b>{t("board.displayScale")}</b>
+                <button
+                  type="button"
+                  disabled={nodeScale === 1 && cardFontScale === 1}
+                  onClick={resetCardScale}
+                >
+                  {t("board.reset100")}
+                </button>
+              </div>
+              <label>
+                <span>{t("board.nodeScale")}</span>
+                <input
+                  type="range"
+                  min={GRAPH_SCALE_MIN}
+                  max={GRAPH_SCALE_MAX}
+                  step={GRAPH_SCALE_STEP}
+                  value={nodeScale}
+                  onChange={(event) => setNodeScale(Number(event.target.value))}
+                />
+                <output>{Math.round(nodeScale * 100)}%</output>
+              </label>
+              <label>
+                <span>{t("board.textSize")}</span>
+                <input
+                  type="range"
+                  min={GRAPH_SCALE_MIN}
+                  max={GRAPH_SCALE_MAX}
+                  step={GRAPH_SCALE_STEP}
+                  value={cardFontScale}
+                  onChange={(event) => setCardFontScale(Number(event.target.value))}
+                />
+                <output>{Math.round(cardFontScale * 100)}%</output>
+              </label>
+              <small>{t("board.scaleHint")}</small>
+            </div>
+          </OverflowMenu>
+        )}
+        {!isGraph && !collapsed && (
+          <OverflowMenu
+            className="board-overflow"
+            triggerClassName="board-tool-button"
+            placement="fixed"
+            label={t("board.moreTimelineTools")}
+            items={timelineOverflowItems}
+          >
+            <div className="board-overflow-section" role="group" aria-label={t("board.cellSize")}>
+              <div className="timeline-size-heading">
+                <b>
+                  {t("board.cellSize")} · {timelineCellWidth}×{timelineCellHeight}
+                </b>
                 <button
                   type="button"
                   className={timelineCellAuto ? "active" : ""}
+                  aria-pressed={timelineCellAuto}
                   onClick={useAutoTimelineCellSize}
                 >
                   {t("board.autoCellSize")}
@@ -429,9 +538,7 @@ export function BoardToolbar({
                   max={TIMELINE_CELL_MAX_W}
                   step={8}
                   value={timelineCellWidth}
-                  onChange={(event) =>
-                    setTimelineCellSize("width", Number(event.target.value))
-                  }
+                  onChange={(event) => setTimelineCellSize("width", Number(event.target.value))}
                 />
                 <output>{timelineCellWidth}px</output>
               </label>
@@ -443,99 +550,14 @@ export function BoardToolbar({
                   max={TIMELINE_CELL_MAX_H}
                   step={4}
                   value={timelineCellHeight}
-                  onChange={(event) =>
-                    setTimelineCellSize("height", Number(event.target.value))
-                  }
+                  onChange={(event) => setTimelineCellSize("height", Number(event.target.value))}
                 />
                 <output>{timelineCellHeight}px</output>
               </label>
               <small>{t("board.cellHint")}</small>
             </div>
-          </details>
-          {timelineOrientation === "horizontal" && (
-          <div className="timeline-width-stepper" role="group" aria-label={t("board.timelineColumnWidth")}>
-            <IconResizeHorizontal size={13} />
-            <button
-              type="button"
-              aria-label={t("board.shrinkTimelineColumn")}
-              disabled={timelineCellWidth <= TIMELINE_CELL_MIN_W}
-              onClick={() => setTimelineCellSize("width", timelineCellWidth - 16)}
-            >
-              −
-            </button>
-            <output aria-live="polite">{timelineCellWidth}px</output>
-            <button
-              type="button"
-              aria-label={t("board.expandTimelineColumn")}
-              disabled={timelineCellWidth >= TIMELINE_CELL_MAX_W}
-              onClick={() => setTimelineCellSize("width", timelineCellWidth + 16)}
-            >
-              ＋
-            </button>
-          </div>
-          )}
-          {timelineOrientation === "vertical" && (
-          <div className="timeline-orientation" role="group" aria-label={t("board.axisPosition")}>
-            <button
-              type="button"
-              onClick={() =>
-                changeTimelineVNodeAxis(timelineVNodeAxis === "top" ? "bottom" : "top")
-              }
-              title={t("board.axisToggleNodeRowTitle")}
-            >
-              {t("board.nodeRow", {
-                position: timelineVNodeAxis === "top" ? t("board.top") : t("board.bottom"),
-              })}
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                changeTimelineVDateAxis(timelineVDateAxis === "right" ? "left" : "right")
-              }
-              title={t("board.axisToggleDateColumnTitle")}
-            >
-              {t("board.dateColumn", {
-                position: timelineVDateAxis === "right" ? t("board.right") : t("board.left"),
-              })}
-            </button>
-          </div>
-          )}
-          {timelineOrientation === "horizontal" && (
-          <div className="timeline-orientation" role="group" aria-label={t("board.axisPosition")}>
-            <button
-              type="button"
-              onClick={() =>
-                changeTimelineDateAxis(timelineDateAxis === "top" ? "bottom" : "top")
-              }
-              title={t("board.axisToggleDateRowTitle")}
-            >
-              {t("board.dateRow", {
-                position: timelineDateAxis === "top" ? t("board.top") : t("board.bottom"),
-              })}
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                changeTimelineNodeAxis(timelineNodeAxis === "left" ? "right" : "left")
-              }
-              title={t("board.axisToggleNodeColumnTitle")}
-            >
-              {t("board.nodeColumn", {
-                position: timelineNodeAxis === "left" ? t("board.left") : t("board.right"),
-              })}
-            </button>
-          </div>
-          )}
-          <label className="board-title-opt">
-            <input
-              type="checkbox"
-              checked={collapseEmpty}
-              onChange={(e) => setCollapse(e.target.checked)}
-            />
-            {t("board.collapseEmpty")}
-          </label>
-      </div>
-      )}
+          </OverflowMenu>
+        )}
       </div>
       {isGraph && graphNotice && (
         <InlineNotice kind={graphNotice.kind === "ok" ? "success" : "error"}>

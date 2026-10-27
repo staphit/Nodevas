@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"nodevas/internal/agents"
 	"nodevas/internal/audit"
@@ -24,6 +25,7 @@ import (
 	"nodevas/internal/runs"
 	"nodevas/internal/store"
 	"nodevas/internal/usage"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -65,6 +67,10 @@ type Server struct {
 	members *members.Store
 	// users is the account store on a server with accounts; nil on loopback.
 	users *auth.UserStore
+	// current is each account's current project (current_project.go): made
+	// persistent by UseMembersDB, in memory by Handler otherwise, and used
+	// only with accounts.
+	current *currentProjects
 
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
@@ -117,6 +123,20 @@ func (s *Server) BuiltHandler() http.Handler {
 	return nil
 }
 
+// agentsRoom is the room for an agents.Hub project key. The agents hub keys a
+// project by its root with the slashes at either end trimmed, so on a system
+// whose absolute paths start with one ("/srv/ws/main"), the key has lost it
+// and matches no room.
+func agentsRoom(key string) string {
+	if key == "" || filepath.IsAbs(key) {
+		return key
+	}
+	if root := "/" + key; filepath.IsAbs(root) {
+		return root
+	}
+	return key
+}
+
 func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 	s := &Server{
 		pm:       pm,
@@ -133,6 +153,7 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		if s.hub == nil {
 			return
 		}
+		projectRoot = agentsRoom(projectRoot)
 		// A notify message pops up on its recipient's screen, so it travels
 		// as its own event naming the message; everything else is one
 		// "reload the agent panel" signal.
@@ -140,6 +161,16 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 			id, _ := payload.(string)
 			s.hub.BroadcastRoom(projectRoot, "agent-notify", id)
 			return
+		}
+		// A new question waits on somebody: it also travels as its own event
+		// naming the ask, so the person who can answer is told. Its answer or
+		// expiry is only a panel reload.
+		if ask, ok := payload.(agents.Ask); ok && eventType == agents.AskEvent && ask.Status == agents.AskPending {
+			if projectRoot == "" {
+				s.hub.Broadcast(agents.AskEvent, ask.ID)
+			} else {
+				s.hub.BroadcastRoom(projectRoot, agents.AskEvent, ask.ID)
+			}
 		}
 		// An external session's changes are news for one node: the event
 		// names it, so only a browser showing that node refetches.
@@ -195,6 +226,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.stopOnce.Do(func() { close(s.stop) })
 	if s.pm == nil || s.remotes == nil {
 		return hubErr
+	}
+	// Pending history goes into the repository first, so the final backup
+	// carries it. A failure is the history's problem, not the backup's.
+	if err := s.pm.FlushHistory(ctx); err != nil {
+		log.Printf("flush history before backup: %v", err)
 	}
 	return errors.Join(hubErr, s.remotes.FinalBackup(ctx))
 }

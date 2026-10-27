@@ -75,7 +75,12 @@ function FileChips({ message }: { message: AgentMessage }) {
   );
 }
 
-export function AgentPanel({ onClose }: { onClose: () => void }) {
+/**
+ * The agent network: who is online, what waits on you (asks, held mail) and
+ * the messages. Floating over the board in Info; docked in Station's right
+ * column (docked), where it stays put: no close button, no focus grab.
+ */
+export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; docked?: boolean }) {
   const { language, t } = useI18n();
   const headingId = useId();
   const heldHeadingId = useId();
@@ -120,11 +125,11 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const pendingAsks = asks.filter((a) => a.status === "pending");
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!docked) inputRef.current?.focus();
+  }, [docked]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape" && !event.defaultPrevented) {
+    if (event.key === "Escape" && !event.defaultPrevented && onClose) {
       event.preventDefault();
       onClose();
     }
@@ -179,10 +184,10 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <aside
-      id="agent-network-panel"
-      className="copilot-panel agent-panel"
-      role="dialog"
-      aria-modal="false"
+      id={docked ? "agent-network-docked" : "agent-network-panel"}
+      className={`copilot-panel agent-panel${docked ? " is-docked" : ""}`}
+      role={docked ? "region" : "dialog"}
+      aria-modal={docked ? undefined : "false"}
       aria-labelledby={headingId}
       tabIndex={-1}
       onKeyDown={onKeyDown}
@@ -226,15 +231,17 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
           >
             <IconUsage size={14} />
           </button>
-          <button
-            type="button"
-            className="copilot-icon-btn"
-            onClick={onClose}
-            aria-label={t("agents.close")}
-            title={`${t("agents.close")} (Esc)`}
-          >
-            <IconClose size={14} />
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              className="copilot-icon-btn"
+              onClick={onClose}
+              aria-label={t("agents.close")}
+              title={`${t("agents.close")} (Esc)`}
+            >
+              <IconClose size={14} />
+            </button>
+          )}
         </div>
       </header>
 

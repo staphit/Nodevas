@@ -194,6 +194,34 @@ func (s *Store) Live(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// InProject returns the ids of a project's autopilot runs in the given
+// statuses, oldest first.
+func (s *Store) InProject(ctx context.Context, project string, statuses ...string) ([]string, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	query := `SELECT id FROM autopilot_runs WHERE project = ? AND status IN (?` +
+		strings.Repeat(", ?", len(statuses)-1) + `) ORDER BY created_at, id`
+	args := []any{project}
+	for _, status := range statuses {
+		args = append(args, status)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // Tasks returns an autopilot's task instances, unordered.
 func (s *Store) Tasks(ctx context.Context, autopilotID string) ([]runnerwire.TaskInstance, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT data FROM autopilot_tasks WHERE autopilot_id = ?`, autopilotID)

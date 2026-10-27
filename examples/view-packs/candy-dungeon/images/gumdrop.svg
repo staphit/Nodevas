@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+<!-- Candy dungeon: a gumdrop monster, open to work -->
+<ellipse cx="48" cy="88" rx="32" ry="6" fill="#7a3b5c" fill-opacity=".2"/>
+<path d="M16 86 Q12 56 30 40 Q48 26 66 40 Q84 56 80 86 Q48 92 16 86 Z" fill="#ff7aa8" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M28 52 Q33 42 43 39" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="4" stroke-linecap="round"/>
+<circle cx="62" cy="50" r="2" fill="#fff"/><circle cx="70" cy="68" r="2" fill="#fff"/><circle cx="24" cy="72" r="2" fill="#fff"/><circle cx="54" cy="82" r="2" fill="#fff"/>
+<ellipse cx="38" cy="62" rx="6" ry="7" fill="#fff"/><ellipse cx="58" cy="62" rx="6" ry="7" fill="#fff"/>
+<circle cx="39" cy="64" r="3" fill="#7a3b5c"/><circle cx="57" cy="64" r="3" fill="#7a3b5c"/>
+<path d="M30 51 L43 56 M66 51 L53 56" stroke="#7a3b5c" stroke-width="3" stroke-linecap="round"/>
+<path d="M40 75 Q48 81 56 75" fill="none" stroke="#7a3b5c" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M44 76 L46 81 L48 77 Z" fill="#fff"/>
+</svg>

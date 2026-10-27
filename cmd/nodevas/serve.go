@@ -24,9 +24,11 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/config"
 	"nodevas/internal/copilot"
+	"nodevas/internal/copilot/localllm"
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
 	"nodevas/internal/db"
+	"nodevas/internal/gitrepo"
 	copilotapi "nodevas/internal/httpapi/copilot"
 	"nodevas/internal/identity"
 	"nodevas/internal/logging"
@@ -36,6 +38,7 @@ import (
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/secrets"
 	"nodevas/internal/server"
+	"nodevas/internal/store"
 	"nodevas/web"
 )
 
@@ -189,6 +192,16 @@ func serveArgValue(args []string, name string) (string, bool, error) {
 // each one gets is the whole of what an operator has to go on.
 func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *db.DB) {
 	hub := realtime.NewHub()
+	// Version history goes to each project's own git repository when git is
+	// installed. NODEVAS_HISTORY=files keeps the older copies under
+	// .vised/history instead.
+	historyMode, err := store.ParseHistoryMode(os.Getenv("NODEVAS_HISTORY"))
+	if err != nil {
+		log.Fatalf("NODEVAS_HISTORY: %v", err)
+	}
+	store.SetDefaultHistoryMode(historyMode)
+	slog.Info("version history", slog.String("mode", string(historyMode)),
+		slog.Bool("git", gitrepo.Available()), slog.String("git_unavailable", gitrepo.UnavailableReason()))
 	pm, err := project.NewProjectManager(root, hub)
 	if err != nil {
 		// Another instance holding the workspace is an ordinary situation on
@@ -287,6 +300,15 @@ func serve(args []string) {
 		"json for a log shipper (Elastic Common Schema field names), text for a terminal")
 	copilotEnabled := fs.Bool("copilot", serveConfig.Copilot.Enabled,
 		"offer the voice copilot; it also needs a model API key (NODEVAS_COPILOT_API_KEY) or a local OpenAI-compatible base URL")
+	withRunner := fs.Bool("with-runner", false,
+		"require the runner a standalone hub starts on this machine anyway: serve stops if it cannot start "+
+			"(without it, that is a warning); refused on a networked hub")
+	noRunner := fs.Bool("no-runner", false,
+		"do not start a runner for this hub on this machine (a standalone hub starts one by default; "+
+			"each run is still accepted at this terminal)")
+	var repos repoFlags
+	fs.Var(&repos, "repo", "a git repository the local runner may work in (repeatable; implies --with-runner; "+
+		"without it, the repositories already in the runner's settings)")
 
 	abusePreAuthGlobalRate := fs.Float64("abuse-pre-auth-global-rate", serveConfig.Abuse.PreAuthGlobalRate, "pre-auth global rate limit (req/s)")
 	abusePreAuthGlobalBurst := fs.Float64("abuse-pre-auth-global-burst", serveConfig.Abuse.PreAuthGlobalBurst, "pre-auth global burst capacity")
@@ -422,6 +444,13 @@ func serve(args []string) {
 	remote := isRemoteDeployment(*listen, *behindProxy)
 	useTLS := *certFile != ""
 	proxyOnlyTransport := *behindProxy && isLoopbackHost(*listen)
+	runnerMode, runnerNote, err := planLocalRunner(*withRunner, *noRunner, repos, remote, useTLS, serveConfig.Access.Enabled())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if runnerNote != "" {
+		log.Print(runnerNote)
+	}
 
 	hub, pm, database := bootstrapWorkspace(root)
 	defer pm.Close()
@@ -584,6 +613,30 @@ func serve(args []string) {
 		}
 	}
 
+	// The local runner's settings are written before it is started: a token
+	// the hub cannot mint is not a runner that retries forever. Asked for
+	// (--with-runner, --repo), a runner that cannot be set up or started stops
+	// serve; started by default, it is a warning and the hub serves without
+	// one, which is what --no-runner would have done. Either way nothing is
+	// left half-started: the settings are written whole or not at all, and a
+	// runner that failed to start is not running.
+	localRunnerConfig := ""
+	runnerFailed := func(err error) {
+		if runnerMode == explicitLocalRunner {
+			log.Fatalf("local runner: %v", err)
+		}
+		log.Printf("WARNING: local runner not started: %v; the hub serves without it "+
+			"(--no-runner silences this, --with-runner makes it fatal)", err)
+		localRunnerConfig = ""
+	}
+	if runnerMode != noLocalRunner {
+		localRunnerConfig = localRunnerConfigPath(pm.CatalogRoot(), pm.Workspace())
+		if err := prepareLocalRunner(context.Background(), localRunnerConfig,
+			localHubURL(*listen, *port), repos, srv.LocalRunnerToken, os.Stderr); err != nil {
+			runnerFailed(err)
+		}
+	}
+
 	addr := net.JoinHostPort(*listen, fmt.Sprint(*port))
 	httpServer := &http.Server{
 		Addr: addr,
@@ -596,6 +649,8 @@ func serve(args []string) {
 			// forwarding headers a second time here would be a second answer
 			// to the question of who the client is.
 			ClientIP: auth.ClientIP,
+			// The health probe and static assets, when they succeed.
+			Quiet: server.QuietRequest,
 		})(protectHTTPTransport(srv.Handler())),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -615,22 +670,38 @@ func serve(args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Bound before serving, so a local runner started next finds the hub
+	// already listening.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("serve: %v", err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		if useTLS {
-			errCh <- httpServer.ListenAndServeTLS(*certFile, *keyFile)
+			errCh <- httpServer.ServeTLS(listener, *certFile, *keyFile)
 			return
 		}
-		errCh <- httpServer.ListenAndServe()
+		errCh <- httpServer.Serve(listener)
 	}()
+	stopRunner := func() {}
+	if localRunnerConfig != "" {
+		if stop, err := startLocalRunner(localRunnerConfig, os.Stdin, os.Stderr); err != nil {
+			runnerFailed(err)
+		} else {
+			stopRunner = stop
+		}
+	}
 
 	select {
 	case err := <-errCh:
+		stopRunner()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("serve: %v", err)
 		}
 	case <-ctx.Done():
 		log.Print("shutting down")
+		stopRunner()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -695,15 +766,19 @@ func newCopilotService(
 				"openai":    strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
 			},
 		},
-		NewProvider:         provider.New,
-		Remote:              runnerLLM,
+		NewProvider: provider.New,
+		Remote:      runnerLLM,
+		// No provider and no key: Ollama or LM Studio on this machine is
+		// the free fallback (after the browser's own model and a runner's).
+		LocalModels:         localllm.New().Detect,
+		ServerIsLocal:       !remote,
 		DefaultModel:        provider.DefaultModel,
 		OpenBridge:          toolbridge.Open,
 		Handler:             router,
 		AgentRole:           identity.AgentClass(cfg.AgentRole),
 		MaxToolCallsPerTurn: cfg.MaxToolCallsPerTurn,
 	})
-	if status, err := service.Status(context.Background(), identity.Local); err != nil {
+	if status, err := service.Status(context.Background(), identity.Local, ""); err != nil {
 		slog.Warn("copilot settings could not be read", logging.Err(err))
 	} else if status.Enabled {
 		slog.Info("copilot ready",

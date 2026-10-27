@@ -28,6 +28,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
@@ -170,7 +171,8 @@ func digestOTP(code string) [sha256.Size]byte {
 // about which it was.
 //
 // The returned Challenge is the caller's to deliver and then forget. An
-// unknown address gives ErrNoSuchAccount, which the HTTP layer swallows.
+// unknown address gives ErrNoSuchAccount, and an account lookup that failed
+// gives that failure; the HTTP layer swallows both.
 func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, error) {
 	source := ""
 	if r != nil {
@@ -193,17 +195,21 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 		return Challenge{}, ErrTooManyOTPRequests
 	}
 
-	actor, revision, registered, ok := a.users.AccountByEmail(ctx, address)
-	if !ok {
+	actor, revision, registered, err := a.users.AccountByEmail(ctx, address)
+	if err != nil {
 		// A caller who hung up did not offer an address that failed, so say so
 		// rather than ErrNoSuchAccount. The HTTP layer answers 202 either way,
 		// so this changes nothing an unauthenticated client can see; what it
 		// changes is the audit line, which should not record a probe that
 		// nobody made.
-		if err := contextFailure(ctx); err != nil {
-			return Challenge{}, err
+		if ctxErr := contextFailure(ctx); ctxErr != nil {
+			return Challenge{}, ctxErr
 		}
-		return Challenge{}, ErrNoSuchAccount
+		// A read that failed is the server's fault, not an unknown address,
+		// and the line says error rather than unknown-account: an outage
+		// must not read as somebody probing for accounts. It fails for every
+		// address alike, and the client still gets the same 202.
+		return Challenge{}, err
 	}
 
 	code, err := newOTP()
@@ -239,8 +245,10 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 // back.
 //
 // An unknown address, no passcode outstanding, and a wrong passcode all give
-// the same ErrBadCredentials, after the same throttle charges, without a hash
-// pass on any of them, so neither the answer nor its timing says which.
+// the same ErrBadCredentials, after the same throttle charges and the same one
+// database statement, without a hash pass on any of them, so neither the
+// answer nor its timing says which. Only the result's Refusal does, and it
+// goes no further than the server's log.
 func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInResult, error) {
 	source := ""
 	if r != nil {
@@ -259,33 +267,59 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 	if !a.allowEmailLogin(key, source) {
 		return SignInResult{}, ErrTooManyLogins
 	}
-	if addressErr != nil || len(otp) == 0 || len(otp) > MaxOTPBytes {
-		return SignInResult{}, ErrBadCredentials
+	// The refusals below share one error; SignInResult.Refusal tells them
+	// apart for the server's log, and only there.
+	if addressErr != nil {
+		return SignInResult{Refusal: SignInRefusal{Reason: RefusedUnknownAccount}}, ErrBadCredentials
+	}
+	if len(otp) == 0 || len(otp) > MaxOTPBytes {
+		return SignInResult{Refusal: SignInRefusal{Reason: RefusedBadCredentials}}, ErrBadCredentials
 	}
 
-	actor, revision, _, ok := a.users.AccountByEmail(ctx, address)
-	if !ok {
+	// One statement, the account and whether it has a second factor together,
+	// so a registered address costs the same round trips as one nobody
+	// registered (signInAccount).
+	found, err := a.users.signInAccount(ctx, address)
+	if err != nil {
 		// Same reasoning as the password path: a cancelled read is not a wrong
 		// address, and recording it as one would put a failed sign-in in the
 		// trail for a person who simply closed the tab.
-		if err := contextFailure(ctx); err != nil {
-			return SignInResult{}, err
+		if ctxErr := contextFailure(ctx); ctxErr != nil {
+			return SignInResult{}, ctxErr
 		}
-		return SignInResult{}, ErrBadCredentials
-	}
-	// Read before the critical section, like the account itself. A failed
-	// read fails the sign-in: not knowing whether the second factor is
-	// required must never read as "it is not".
-	needsSecondFactor, err := a.users.TOTPEnabled(ctx, actor.ID)
-	if err != nil {
+		if errors.Is(err, ErrNoSuchAccount) {
+			return SignInResult{Refusal: SignInRefusal{Reason: RefusedUnknownAccount}}, ErrBadCredentials
+		}
+		if errors.Is(err, errUnreadableAccount) {
+			// A row that arrived but will not read, a role nobody can
+			// interpret say, exists only for an address that is registered.
+			// Answered with anything but the refusal an unknown address gets,
+			// it would say so before any passcode was checked. So it gets that
+			// refusal, and only its reason tells the server's log that this
+			// one was the server's fault. The account cannot sign in either
+			// way; the cause goes to the operator alone.
+			log.Printf("sign-in refused: %v", err)
+			return SignInResult{Refusal: SignInRefusal{Reason: RefusedServerFault}}, ErrBadCredentials
+		}
+		// Nor is a read that failed: no credential was judged. It goes back
+		// as the server's fault, which the HTTP layer answers with a 500 and
+		// logs as error, before any hash pass, as the refusals above are. A
+		// database that cannot be read fails for every address alike, so the
+		// 500 says nothing about this one.
 		return SignInResult{}, err
+	}
+	actor, revision, needsSecondFactor := found.actor, found.revision, found.secondFactor
+	// From here a refusal is a refusal for this account, and the log may say
+	// so: the address is the one registered on it, not the one typed.
+	refused := func(reason string) SignInResult {
+		return SignInResult{Refusal: SignInRefusal{Reason: reason, Account: actor, Email: found.email}}
 	}
 
 	// For a two-factor account the first token is the pending sign-in's
 	// ticket rather than a session.
 	token, csrf, err := newSessionTokens()
 	if err != nil {
-		return SignInResult{}, err
+		return refused(""), err
 	}
 
 	// Everything from here to the new session is one critical section: the
@@ -301,7 +335,7 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 	// cannot reach this map, so the check has to happen here.
 	if pending == nil || now.After(pending.expires) || pending.revision != revision {
 		delete(a.otps, actor.ID)
-		return SignInResult{}, ErrBadCredentials
+		return refused(RefusedExpiredCode), ErrBadCredentials
 	}
 	offered := digestOTP(otp)
 	if subtle.ConstantTimeCompare(pending.digest[:], offered[:]) != 1 {
@@ -310,8 +344,9 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 			// Burn it. Guessing must cost a fresh request, which is throttled
 			// and which the account holder sees arrive in their inbox.
 			delete(a.otps, actor.ID)
+			return refused(RefusedTooManyAttempts), ErrBadCredentials
 		}
-		return SignInResult{}, ErrBadCredentials
+		return refused(RefusedBadCredentials), ErrBadCredentials
 	}
 	if needsSecondFactor {
 		// The passcode has done its job and is spent. Nothing else changes
@@ -323,7 +358,7 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 	// The seat check, the revocation and the new session; see
 	// finishSignInLocked. A failure there leaves the passcode good for a retry.
 	if err := a.finishSignInLocked(actor, revision, token, now); err != nil {
-		return SignInResult{}, err
+		return refused(""), err
 	}
 	// Single use. Spent only once the session exists, which is safe because
 	// the lock is still held: no replay can run between the check above and

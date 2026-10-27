@@ -105,6 +105,21 @@ describe("autopilot API", () => {
     expect(view?.run.policy.review.reviewers).toEqual([]);
   });
 
+  it("lists the project's live autopilots without a goal", async () => {
+    const fetch = mockFetch({ autopilots: [VIEW] });
+    const views = await autopilotApi.listActiveAutopilots();
+    expect(sent(fetch).url).toBe("/api/autopilot");
+    expect(views).toHaveLength(1);
+    expect(views[0].tasks?.[0].stages).toEqual([]);
+    expect(views[0].run.counts.total).toBe(0);
+  });
+
+  it("narrows the live list to the statuses asked for, and reads null as none", async () => {
+    const fetch = mockFetch({ autopilots: null });
+    expect(await autopilotApi.listActiveAutopilots(["paused"])).toEqual([]);
+    expect(sent(fetch).url).toBe("/api/autopilot?status=paused");
+  });
+
   it("sends run and task actions to their routes", async () => {
     const fetch = mockFetch({});
     await autopilotApi.autopilotAction("ap1", "pause");

@@ -89,7 +89,7 @@ func TestCommittedPageDeleteReturnsSuccessAndRestartCleansSource(t *testing.T) {
 	if entries := cleanupQueueEntries(t, restarted); len(entries) != 0 {
 		t.Fatalf("restart left completed page cleanup markers: %v", entries)
 	}
-	if _, err := restarted.RestoreTrash(outcome.TrashFile); err != nil {
+	if _, err := restarted.RestoreTrash(identity.Local, outcome.TrashFile); err != nil {
 		t.Fatalf("cleanup retry damaged restorable trash: %v", err)
 	}
 }

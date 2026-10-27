@@ -2,8 +2,9 @@ import { lazy, Suspense, useEffect, useRef } from "react";
 import { useViewer } from "../components/SignIn";
 import { useI18n } from "../i18n";
 import { IconClose } from "../icons";
-import { useApp } from "../store";
+import { useApp, usePreference } from "../store";
 import { useAgents } from "./agentStore";
+import { useWorkstationVisible } from "../runners/workstation";
 
 const AgentPanel = lazy(() =>
   import("./AgentPanel").then((m) => ({ default: m.AgentPanel })),
@@ -56,6 +57,11 @@ export function AgentNetworkRoot() {
   const refreshAll = useAgents((s) => s.refreshAll);
   const setViewer = useAgents((s) => s.setViewer);
   const activeProject = useApp((s) => s.activeProject);
+  // The floating button is a workstation surface; the store behind it keeps
+  // refreshing, and an agent joining the network is what turns it on.
+  const workstation = useWorkstationVisible();
+  // Station docks the panel in its own column: nothing floats over it.
+  const station = usePreference("projectMode") === "station";
 
   const onlineCount = sessions.filter((s) => s.online).length;
   const pendingAskCount = asks.filter((a) => a.status === "pending").length;
@@ -72,11 +78,11 @@ export function AgentNetworkRoot() {
 
   // Auto-open the panel when a new ask_user request arrives from an agent.
   useEffect(() => {
-    if (pendingAskCount > prevPendingRef.current) {
+    if (pendingAskCount > prevPendingRef.current && !station) {
       setOpen(true);
     }
     prevPendingRef.current = pendingAskCount;
-  }, [pendingAskCount, setOpen]);
+  }, [pendingAskCount, setOpen, station]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -94,9 +100,11 @@ export function AgentNetworkRoot() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  if (station) return null;
+
   return (
     <>
-      {!open && (
+      {!open && workstation && (
         <button
           type="button"
           className={`agent-fab${waitingCount > 0 ? " has-pending-ask" : ""}${

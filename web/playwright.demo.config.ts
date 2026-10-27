@@ -6,8 +6,8 @@ const PORT = Number(process.env.VISED_E2E_PORT ?? 5702);
  * The README's feature videos.
  *
  * Not a test run: e2e/demo-videos.spec.ts drives the real app through one
- * feature per test while Playwright records the page, and e2e/demo-encode.mjs
- * turns the recordings into the GIF and MP4 files under docs/videos/. The
+ * feature per test while it records the page, and e2e/demo-encode.mjs turns
+ * the recordings into the GIF and MP4 files under docs/videos/. The
  * hub's runner, run, autopilot, usage and agent routes are answered by the
  * spec, so no runner or agent has to exist. Run it with:
  *
@@ -23,9 +23,13 @@ export default defineConfig({
   outputDir: "demo-videos/.results",
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
-    viewport: { width: 1440, height: 900 },
-    video: { mode: "on", size: { width: 1440, height: 900 } },
-    colorScheme: "light",
+    // Drawn at twice the pixels, so the camera can push in without blurring
+    // the UI. The spec records the page itself (Playwright's video is in CSS
+    // pixels).
+    viewport: { width: 1440, height: 810 },
+    deviceScaleFactor: 2,
+    video: "off",
+    colorScheme: "dark",
     locale: "en-US",
   },
   webServer: {

@@ -3,6 +3,7 @@ package adapter
 import (
 	"encoding/json"
 	"io"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -234,5 +235,146 @@ func TestOpenCodeInteractiveCommand(t *testing.T) {
 	}
 	if id, _ := envValue(cmd.Env, RunIDEnv); id != "run-1" {
 		t.Errorf("run id env = %q", id)
+	}
+}
+
+// opencode2_stream.jsonl is a real opencode 2.1.4 run (paths sanitised) with
+// the run's 2.x config: nodevas's tools offered directly, execute denied. It
+// globs, calls nodevas_ping, reads two files, asks a subagent and answers.
+// 2.x calls the call ID part.id and prints no step_finish after the answer.
+func TestOpenCode2ParseStream(t *testing.T) {
+	events, outcome := parseWith(t, OpenCode{}.NewParser(), "opencode2_stream.jsonl")
+	const (
+		log    = runnerwire.EventLog
+		text   = runnerwire.EventText
+		call   = runnerwire.EventToolCall
+		result = runnerwire.EventToolResult
+		usage  = runnerwire.EventUsage
+	)
+	want := []string{log, call, result, call, result, usage, call, result, call, result, call, result, usage,
+		call, result, usage, text}
+	if got := eventTypes(events); !slices.Equal(got, want) {
+		t.Fatalf("event types = %v\nwant %v", got, want)
+	}
+	if c := events[1]; c.Tool != "glob" || c.ToolID != "call_dee5cd698ddd46e2b1cc8e93" {
+		t.Errorf("glob call = %+v", c)
+	}
+	if c, r := events[6], events[7]; c.Tool != "mcp__nodevas__ping" || r.ToolID != c.ToolID || r.Text != "the secret word is zebra" {
+		t.Errorf("mcp call = %+v, result %+v", c, r)
+	}
+	if c := events[13]; c.Tool != "subagent" {
+		t.Errorf("subagent call = %+v", c)
+	}
+	last := events[15].Usage
+	if last == nil || last.InputTokens != 11708 || last.OutputTokens != 1626 || last.CacheReadTokens != 6144 {
+		t.Errorf("usage = %+v", last)
+	}
+	if outcome.IsError || !strings.Contains(outcome.Summary, "zebra") || outcome.Usage == nil {
+		t.Errorf("outcome = %+v", outcome)
+	}
+}
+
+// opencode2_error.jsonl: 2.x's line for a model it has no route to.
+func TestOpenCode2ParseError(t *testing.T) {
+	_, outcome := parseWith(t, OpenCode{}.NewParser(), "opencode2_error.jsonl")
+	if !outcome.IsError || outcome.Error != "provider.no-route: Model unavailable: nosuch/model" {
+		t.Errorf("outcome = %+v", outcome)
+	}
+}
+
+// OpenCode 2: a private server per run, no --dir, MCP servers under
+// mcp.servers, nodevas's tools out of Code Mode, and execute (JavaScript with
+// fetch) denied short of full.
+func TestOpenCode2Command(t *testing.T) {
+	job := runnerwire.Job{RunID: "run-1", NodeID: "n-42", Prompt: "Do it", Model: "opencode/big-pickle"}
+	env := RunEnv{
+		Binary:     "/usr/bin/opencode",
+		Workdir:    "/data/worktrees/run-1",
+		MCP:        MCPServer{Command: "/opt/nodevas", Args: []string{"mcp"}},
+		DisableMCP: []string{"repoEvil", "nodevas"},
+		Version:    "opencode v2.1.4",
+	}
+	cmd, err := OpenCode{}.Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/usr/bin/opencode", "run", "--standalone", "--format", "json", "-m", "opencode/big-pickle"}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("args = %q\nwant %q", cmd.Args, want)
+	}
+	if pwd, _ := envValue(cmd.Env, "PWD"); cmd.Dir != env.Workdir || pwd != env.Workdir {
+		t.Errorf("dir = %q, PWD = %q", cmd.Dir, pwd)
+	}
+	type config struct {
+		MCP struct {
+			Servers map[string]map[string]any `json:"servers"`
+		} `json:"mcp"`
+		Permission map[string]string `json:"permission"`
+	}
+	read := func(cmd *exec.Cmd) config {
+		t.Helper()
+		raw, _ := envValue(cmd.Env, openCodeConfigEnv)
+		var c config
+		if err := json.Unmarshal([]byte(raw), &c); err != nil {
+			t.Fatalf("config %q: %v", raw, err)
+		}
+		return c
+	}
+	c := read(cmd)
+	nodevas, evil := c.MCP.Servers["nodevas"], c.MCP.Servers["repoEvil"]
+	if len(c.MCP.Servers) != 2 || nodevas["type"] != "local" || nodevas["codemode"] != false ||
+		nodevas["timeout"] != float64(900_000) || nodevas["enabled"] != nil {
+		t.Errorf("nodevas = %v", nodevas)
+	}
+	// A server is switched off with a whole entry: 2.x drops one without a
+	// type, and a remote one starts no program.
+	if evil["type"] != "remote" || evil["disabled"] != true || evil["url"] == "" || evil["command"] != nil {
+		t.Errorf("repoEvil = %v", evil)
+	}
+	if p := c.Permission; p["execute"] != "deny" || p["nodevas_*"] != "allow" || p["bash"] != "deny" || p["webfetch"] != "deny" {
+		t.Errorf("permission = %v", p)
+	}
+	for mode, rule := range map[string]string{"read-only": "deny", "edit": "deny", "full": "allow"} {
+		env.PermissionMode = mode
+		cmd, err := OpenCode{}.Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := read(cmd).Permission["execute"]; got != rule {
+			t.Errorf("%s: execute = %q, want %q", mode, got, rule)
+		}
+	}
+
+	// An unknown version is 1.x.
+	env.Version = ""
+	if cmd, _ := (OpenCode{}).Command(job, env); !slices.Contains(cmd.Args, "--dir") || slices.Contains(cmd.Args, "--standalone") {
+		t.Errorf("unknown version args = %q", cmd.Args)
+	}
+}
+
+func TestOpenCode2InteractiveCommand(t *testing.T) {
+	env := interactiveEnv(t, "/usr/local/bin/opencode")
+	env.Version = "2.1.4"
+	job := interactiveJob()
+	job.Agent, job.Model = "opencode", "opencode/big-pickle"
+	cmd, err := OpenCode{}.InteractiveCommand(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := cmd.Args[1:]
+	if want := []string{env.Workdir, "--standalone", "--prompt"}; len(args) != 4 || !slices.Equal(args[:3], want) {
+		t.Fatalf("args = %q", args)
+	}
+	raw, _ := envValue(cmd.Env, openCodeConfigEnv)
+	var config struct {
+		Model      string            `json:"model"`
+		Permission map[string]string `json:"permission"`
+	}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		t.Fatal(err)
+	}
+	// The TUI takes no -m; someone at the terminal is asked about execute.
+	if config.Model != "opencode/big-pickle" || config.Permission["execute"] != "ask" {
+		t.Errorf("config = %s", raw)
 	}
 }

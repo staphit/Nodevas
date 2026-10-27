@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 )
 
 // ImportNodes recreates a payload in this project under fresh node ids.
@@ -17,7 +18,7 @@ import (
 // dependency on a node left behind, an assignee whose id is taken by someone
 // else — is dropped and reported as a warning rather than failing the whole
 // transfer.
-func (s *Store) ImportNodes(payload *nodeTransferPayload) (*nodeTransferResult, error) {
+func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) (*nodeTransferResult, error) {
 	if payload == nil || len(payload.nodes) == 0 {
 		return nil, errors.New("nothing to import")
 	}
@@ -206,7 +207,7 @@ func (s *Store) ImportNodes(payload *nodeTransferPayload) (*nodeTransferResult, 
 		checkRevision: true,
 		expectedRev:   graphRev,
 	})
-	if err := s.applyUpdatesLocked(updates); err != nil {
+	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return nil, err
 	}
 

@@ -90,21 +90,39 @@ func (a *API) postLoginTOTP(c *gin.Context) {
 	if cookie, err := c.Request.Cookie(signInTicketCookie); err == nil {
 		ticket = cookie.Value
 	}
-	result, err := accounts.CompleteSignIn(c.Request, ticket, strings.TrimSpace(body.Code))
+	code := strings.TrimSpace(body.Code)
+	result, err := accounts.CompleteSignIn(c.Request, ticket, code)
 	if err != nil {
+		// The step takes an authenticator code or a recovery code; the log
+		// line says which kind was refused, judged by its shape alone.
+		method := authMethod(auth.SecondFactorKind(code))
 		if errors.Is(err, auth.ErrSignInExpired) {
 			clearSignInTicket(c)
 			httpx.Coded(c, http.StatusUnauthorized, "SIGNIN_EXPIRED", err, nil)
-			a.recordAuthEvent(c, "auth.signin.failed", result.Actor, map[string]any{"reason": "signin-expired"})
+			a.recordAuth(c, refusedSignIn("signin-expired", method, result.Refusal))
 			return
 		}
-		a.finishSignIn(c, result.Actor, "", "", err, nil)
+		a.finishSignIn(c, method, result, err, nil)
 		return
 	}
 	clearSignInTicket(c)
 	a.recordRecoveryUse(c, result.Actor.ID, result.Actor.Name, result.Proof, "signin")
-	a.finishSignIn(c, result.Actor, result.Token, result.CSRF, nil,
+	a.finishSignIn(c, authMethod(result.Proof.Method), result, nil,
 		map[string]any{"secondFactor": result.Proof.Method})
+}
+
+// authMethod names what proved a sign-in step, or was offered to, in the
+// log's words.
+func authMethod(proof string) string {
+	switch proof {
+	case auth.SecondFactorTOTP:
+		return audit.MethodTOTP
+	case auth.SecondFactorRecovery:
+		return audit.MethodRecoveryCode
+	default:
+		// auth.StepUpMethodEmail, or a one-factor sign-in: the mailed passcode.
+		return audit.MethodOTP
+	}
 }
 
 // recordRecoveryUse writes the trail line for a spent recovery code. It is a
@@ -123,13 +141,7 @@ func (a *API) recordRecoveryUse(c *gin.Context, actorID, actorName string, proof
 // recordAuthEventAs is recordAuthEvent for a caller holding the actor's ID
 // and name rather than an identity.Actor.
 func (a *API) recordAuthEventAs(c *gin.Context, action, actorID, actorName string, detail map[string]any) {
-	if a.audit == nil {
-		return
-	}
-	a.audit.RecordOrLog(c.Request.Context(), audit.Event{
-		At: time.Now(), ActorID: actorID, ActorName: actorName, Action: action,
-		ClientIP: auth.ClientIP(c.Request), Detail: detail,
-	})
+	a.recordAuth(c, audit.Event{ActorID: actorID, ActorName: actorName, Action: action, Detail: detail})
 }
 
 // totpAccounts is the accounts authenticator, or the answer for a server

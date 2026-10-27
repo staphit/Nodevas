@@ -76,7 +76,8 @@ export const test = base.extend<{}, { workerServer: { baseURL: string } }>({
 
       const server = spawn(
         binary,
-        ["serve", "--project", workspace, "--port", String(port)],
+        // No runner: these specs answer the runner routes themselves.
+        ["serve", "--project", workspace, "--port", String(port), "--no-runner"],
         {
           stdio: "inherit",
           env: {
@@ -141,11 +142,19 @@ export { expect };
  * The language must be pinned for the same reason: the app defaults to
  * English, but the specs assert on zh-TW labels, so a fresh profile would
  * fail every locator that names a control.
+ *
+ * Two first-visit defaults are pinned the same way. A new browser opens on the
+ * graph alone and keeps the agent workstation out of sight until it sees a
+ * runner or a run; these specs drive the timeline and the run controls
+ * directly, often against mocked runners that arrive after the first paint, so
+ * they start from a browser that has both on.
  */
 export async function declineTour(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("vised-tour-prompt", "declined");
     localStorage.setItem("vised-language", "zh-TW");
+    localStorage.setItem("vised-pane-timeline", "1");
+    localStorage.setItem("vised-agent-workstation", "1");
   });
 }
 

@@ -33,9 +33,8 @@ import { NodeMetaForm } from "./inspector/NodeMetaForm";
 import { NodeRelations } from "./inspector/NodeRelations";
 import { NodeTimeline } from "./inspector/NodeTimeline";
 import { NodeRuns } from "../runs/NodeRuns";
-import { AutopilotPanel } from "../autopilot/AutopilotPanel";
-import { useAutopilot } from "../autopilot/autopilotStore";
 import { useRuns } from "../runs/runStore";
+import { useWorkstationVisible } from "../runners/workstation";
 import { DocumentPreview } from "./drawer/DocumentPreview";
 import { DrawerTabs } from "./drawer/DrawerTabs";
 import { EditorToolbar } from "./drawer/EditorToolbar";
@@ -372,8 +371,9 @@ export function TabBody({
     return () => releaseLock(id);
   }, [id, requestLock, releaseLock]);
 
+  const workstation = useWorkstationVisible();
   const [drawerView, setDrawerView] = useState<
-    "content" | "relations" | "timeline" | "appearance" | "runs" | "autopilot"
+    "content" | "relations" | "timeline" | "appearance" | "runs"
   >("content");
   // "Runs" in a node menu, or a dispatch that just went out, asks for this
   // node's runs; the body showing that node consumes the request.
@@ -383,14 +383,6 @@ export function TabBody({
     setDrawerView("runs");
     useRuns.getState().clearShowRunsRequest();
   }, [showRunsRequest, id]);
-  // "Autopilot" in a node menu, or a task waiting for a person, asks for the
-  // goal's Autopilot tab the same way.
-  const showAutopilotRequest = useAutopilot((s) => s.showRequest);
-  useEffect(() => {
-    if (showAutopilotRequest?.nodeId !== id) return;
-    setDrawerView("autopilot");
-    useAutopilot.getState().clearShowRequest();
-  }, [showAutopilotRequest, id]);
   // The panel is one column of panes with the document last, which a desktop
   // drawer has the height to show all at once and a phone sheet does not: on a
   // 390px screen 基本資料 and 實際狀態 together are taller than half the sheet,
@@ -864,6 +856,8 @@ export function TabBody({
         >
           {t("drawer.appearance")}
         </button>
+        {/* Agent workstation tabs: only once the workstation is on. */}
+        {workstation && (
         <button
           type="button"
           role="tab"
@@ -873,22 +867,13 @@ export function TabBody({
         >
           {t("drawer.runs")}
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "autopilot"}
-          className={drawerView === "autopilot" ? "active" : ""}
-          onClick={() => setDrawerView("autopilot")}
-        >
-          {t("drawer.autopilot")}
-        </button>
+        )}
       </div>
 
       {drawerView === "relations" && <NodeRelations id={id} />}
       {drawerView === "timeline" && <NodeTimeline id={id} />}
       {drawerView === "appearance" && <NodeAppearance id={id} />}
       {drawerView === "runs" && <NodeRuns id={id} />}
-      {drawerView === "autopilot" && <AutopilotPanel id={id} />}
 
       <div className="node-content-view" hidden={drawerView !== "content"}>
         <NodeHistory

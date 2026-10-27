@@ -140,20 +140,31 @@ for (const [name, viewport] of Object.entries({
     await page.route(/\/api\/autopilot(\?|\/)/, (route) => route.fulfill({ json: view(ids) }));
     await page.route(/\/api\/runners/, (route) => route.fulfill({ json: { runners: [] } }));
 
+    // The goal's node panel says how far Autopilot is, and opens it in Station.
     await page.getByText("目標").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "自動駕駛" }).click();
+    // In the panel's top row, not a tab beside the node's own facets.
+    const pill = drawer.getByRole("button", { name: /^自動推進中：已完成 1／3 個任務/ });
+    await expect(pill).toBeVisible();
+    await expect(drawer.getByRole("tab", { name: "自動推進" })).toHaveCount(0);
+    // The task cards on the board carry their autopilot stage.
+    await expect(page.getByLabel("自動推進：等你審查 · 人工審查").first()).toBeAttached();
+    await pill.click();
 
-    await expect(drawer.getByText("等待你審查（1）")).toBeVisible();
-    await expect(drawer.getByRole("table")).toBeVisible();
-    await expect(drawer.getByRole("row")).toHaveCount(4);
+    const goal = page.locator(".station-goal");
+    await expect(goal.getByRole("heading", { name: "目標：目標" })).toBeVisible();
+    await expect(goal.getByText("等待你審查（1）")).toBeVisible();
+    await expect(goal.getByRole("table")).toBeVisible();
+    await expect(goal.getByRole("row")).toHaveCount(4);
     await expectNoHorizontalOverflow(page);
     await shot(page, `${name}-panel`);
-    await drawer.getByRole("table").scrollIntoViewIfNeeded();
+    await goal.getByRole("table").scrollIntoViewIfNeeded();
     await shot(page, `${name}-grid`);
 
-    // The task cards on the board carry their autopilot stage.
-    await expect(page.getByLabel("自動駕駛：等你審查 · 人工審查").first()).toBeAttached();
+    // And back: the goal is a node of the Info graph.
+    await goal.getByRole("button", { name: "在資訊中顯示" }).click();
+    await expect(page.getByRole("button", { name: "資訊", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("dialog", { name: "節點編輯" })).toBeVisible();
   });
 }

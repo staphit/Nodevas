@@ -37,6 +37,11 @@ var (
 	ErrAccessMissing = errors.New("no cloudflare access token")
 	// ErrAccessInvalid covers every way a present token can fail.
 	ErrAccessInvalid = errors.New("invalid cloudflare access token")
+	// ErrAccessAudience and ErrAccessExpired are two of those ways, named so
+	// the log can tell a token for another application, or one that ran out,
+	// from a forgery. Both are ErrAccessInvalid to errors.Is.
+	ErrAccessAudience = fmt.Errorf("%w: wrong audience", ErrAccessInvalid)
+	ErrAccessExpired  = fmt.Errorf("%w: expired", ErrAccessInvalid)
 )
 
 // AccessClaims are the parts of a verified Access token Nodevas reads. A
@@ -241,7 +246,7 @@ func (v *AccessVerifier) Verify(ctx context.Context, token string) (AccessClaims
 		}
 	}
 	if !audOK {
-		return AccessClaims{}, fmt.Errorf("%w: wrong audience", ErrAccessInvalid)
+		return AccessClaims{}, ErrAccessAudience
 	}
 	now := v.now()
 	if payload.Exp == nil {
@@ -249,7 +254,7 @@ func (v *AccessVerifier) Verify(ctx context.Context, token string) (AccessClaims
 	}
 	expires := unixTime(*payload.Exp)
 	if now.After(expires.Add(accessLeeway)) {
-		return AccessClaims{}, fmt.Errorf("%w: expired", ErrAccessInvalid)
+		return AccessClaims{}, ErrAccessExpired
 	}
 	if payload.Nbf != nil && now.Add(accessLeeway).Before(unixTime(*payload.Nbf)) {
 		return AccessClaims{}, fmt.Errorf("%w: not yet valid", ErrAccessInvalid)

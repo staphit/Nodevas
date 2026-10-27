@@ -671,7 +671,7 @@ func TestTurnRefusals(t *testing.T) {
 	if err := off.service.Turn(ctx, TurnRequest{Actor: alice, ConversationID: conversation.ID, Text: "hi"}, noEmit); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("no key = %v", err)
 	}
-	status, err := off.service.Status(ctx, alice)
+	status, err := off.service.Status(ctx, alice, "")
 	if err != nil {
 		t.Fatal(err)
 	}

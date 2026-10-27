@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"nodevas/internal/runnerwire"
@@ -12,7 +13,8 @@ import (
 
 // OpenCode runs sst's OpenCode CLI headless:
 //
-//	opencode run --format json --dir <worktree> [-m <provider/model>]
+//	opencode run --format json --dir <worktree> [-m <provider/model>]   (1.x)
+//	opencode run --standalone --format json [-m <provider/model>]       (2.x)
 //
 // with the prompt on stdin (a non-terminal stdin is read as the message) and
 // OPENCODE_CONFIG_CONTENT holding the run's config: the nodevas MCP server and
@@ -37,11 +39,57 @@ import (
 // are not the owner's. The runner removes those from the worktree as well,
 // because opencode 1.18.23's newer config loader ignores the variable (see
 // repoconfig.go).
+//
+// OpenCode 2 (checked against 2.1.4) differs in four ways that matter here:
+//   - `run` has no --dir and, without --standalone, hands the run to the
+//     owner's shared background service, which keeps its own environment and
+//     so ignores this run's config and OPENCODE_DISABLE_PROJECT_CONFIG.
+//     --standalone gives the run a private server that reads both.
+//   - Its `execute` tool runs JavaScript that may call fetch, past a webfetch
+//     deny, so it is denied short of full.
+//   - MCP tools are reached only through `execute` unless their server says
+//     codemode: false, which nodevas's does; its tools are then offered
+//     directly, as nodevas_<tool>, and allowed by name.
+//   - MCP servers are configured under mcp.servers, and an entry that lacks
+//     its type is dropped rather than merged, so a server is switched off
+//     with a whole entry.
+//
+// OpenCodeUnsupported says why the OpenCode that printed version cannot take
+// runs, or "" when it can. The adapter is verified against 1.x and 2.x; a
+// later major version changed enough before (2.x dropped `run --dir`) that
+// it is refused until checked. A version it cannot read is left to fail, or
+// not, on its own.
+func OpenCodeUnsupported(version string) string {
+	if major := openCodeMajor(version); major >= 3 {
+		return fmt.Sprintf("opencode: version %d is not supported yet; runs need OpenCode 1.x or 2.x", major)
+	}
+	return ""
+}
+
 type OpenCode struct{}
+
+// openCodeMajor is the major version in an `opencode --version` line, or 0.
+func openCodeMajor(version string) int {
+	for _, field := range strings.Fields(version) {
+		major, _, found := strings.Cut(strings.TrimPrefix(field, "v"), ".")
+		if n, err := strconv.Atoi(major); found && err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// OpenCodeV2 says whether the OpenCode that printed version is 2.x. An
+// unknown version is taken as 1.x, what the adapter was first written for.
+func OpenCodeV2(version string) bool { return openCodeMajor(version) == 2 }
+
+// openCode2 says whether the run's OpenCode is 2.x.
+func openCode2(env RunEnv) bool { return OpenCodeV2(env.Version) }
 
 // OpenCodePermissionModes are the runner's permission settings for OpenCode
 // runs: read-only (no edits, no shell, no web), edit (edits, no shell, no
 // web) and full (edits, any shell command and the web, without asking).
+// OpenCode 2's execute tool, which can reach the web, is offered in full only.
 var OpenCodePermissionModes = []string{"read-only", "edit", "full"}
 
 // DefaultOpenCodePermission lets the agent edit files in its worktree and
@@ -74,6 +122,9 @@ func (OpenCode) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		return nil, err
 	}
 	args := []string{"run", "--format", "json", "--dir", env.Workdir}
+	if openCode2(env) {
+		args = []string{"run", "--standalone", "--format", "json"}
+	}
 	if job.Model != "" && job.Model != "default" {
 		args = append(args, "-m", job.Model)
 	}
@@ -128,6 +179,13 @@ func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 		return "", fmt.Errorf("opencode: unknown permission setting %q (want one of %s)",
 			mode, strings.Join(OpenCodePermissionModes, ", "))
 	}
+	if openCode2(env) {
+		permission["execute"] = "deny"
+		if mode == "full" {
+			permission["execute"] = "allow"
+		}
+		permission["nodevas_*"] = "allow"
+	}
 	if interactive {
 		for tool, rule := range permission {
 			if rule == "deny" {
@@ -150,8 +208,22 @@ func openCodeConfig(env RunEnv, interactive, readOnly bool) (string, error) {
 			servers[name] = map[string]any{"enabled": false}
 		}
 	}
+	var mcp any = servers
+	if openCode2(env) {
+		nodevas := servers["nodevas"].(map[string]any)
+		delete(nodevas, "enabled")
+		nodevas["codemode"] = false
+		for name := range servers {
+			if name != "nodevas" {
+				// Nothing listens on the discard port, and a disabled server
+				// is not connected to anyway.
+				servers[name] = map[string]any{"type": "remote", "url": "http://127.0.0.1:9", "disabled": true}
+			}
+		}
+		mcp = map[string]any{"servers": servers}
+	}
 	inline := map[string]any{
-		"mcp":        servers,
+		"mcp":        mcp,
 		"permission": permission,
 	}
 	if readOnly {
@@ -195,7 +267,10 @@ type openCodePart struct {
 	// tool
 	Tool   string `json:"tool"`
 	CallID string `json:"callID"`
-	State  *struct {
+	// ID is the part's own ID in 1.x and the tool call's in 2.x, which has no
+	// callID.
+	ID    string `json:"id"`
+	State *struct {
 		Status string          `json:"status"`
 		Input  json.RawMessage `json:"input"`
 		Output string          `json:"output"`
@@ -301,8 +376,12 @@ func openCodeTool(part *openCodePart) []runnerwire.RunEvent {
 	if rest, ok := strings.CutPrefix(name, "nodevas_"); ok {
 		name = "mcp__nodevas__" + rest
 	}
-	call := runnerwire.RunEvent{Type: runnerwire.EventToolCall, Tool: name, ToolID: part.CallID}
-	result := runnerwire.RunEvent{Type: runnerwire.EventToolResult, ToolID: part.CallID}
+	id := part.CallID
+	if id == "" {
+		id = part.ID
+	}
+	call := runnerwire.RunEvent{Type: runnerwire.EventToolCall, Tool: name, ToolID: id}
+	result := runnerwire.RunEvent{Type: runnerwire.EventToolResult, ToolID: id}
 	if s := part.State; s != nil {
 		call.Input = clip(compactJSON(s.Input))
 		result.Text = s.Output
@@ -318,7 +397,8 @@ func openCodeTool(part *openCodePart) []runnerwire.RunEvent {
 }
 
 // openCodeErrorText reads an error line's error: {"name": …, "data":
-// {"message": …}}, {"message": …} or a string.
+// {"message": …}}, {"message": …}, 2.x's {"type": …, "message": …} or a
+// string.
 func openCodeErrorText(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -329,6 +409,7 @@ func openCodeErrorText(raw json.RawMessage) string {
 	}
 	var e struct {
 		Name    string `json:"name"`
+		Type    string `json:"type"`
 		Message string `json:"message"`
 		Data    struct {
 			Message string `json:"message"`
@@ -336,6 +417,9 @@ func openCodeErrorText(raw json.RawMessage) string {
 	}
 	if json.Unmarshal(raw, &e) != nil {
 		return ""
+	}
+	if e.Name == "" {
+		e.Name = e.Type
 	}
 	message := strings.TrimSpace(e.Data.Message)
 	if message == "" {

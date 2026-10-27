@@ -72,7 +72,7 @@ func TestImportNodesRewritesNodeLinks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := target.ImportNodes(payload)
+			result, err := target.ImportNodes(identity.Local, payload)
 			if err != nil {
 				t.Fatal(err)
 			}

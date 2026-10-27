@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 260" width="280" height="260">
+<!-- Candy dungeon: the boss defeated, one slice left -->
+<ellipse cx="140" cy="246" rx="124" ry="12" fill="#7a3b5c" fill-opacity=".2"/>
+<ellipse cx="140" cy="234" rx="122" ry="20" fill="#fff" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<ellipse cx="140" cy="232" rx="100" ry="13" fill="#fdeef4"/>
+<circle cx="66" cy="230" r="3" fill="#f7c98b"/><circle cx="222" cy="238" r="2.5" fill="#f7c98b"/><circle cx="190" cy="240" r="3" fill="#ff9cc2"/>
+<circle cx="76" cy="242" r="2.5" fill="#ff9cc2"/><circle cx="58" cy="238" r="2" fill="#f7c98b"/>
+<polygon points="84,184 206,166 206,176 84,194" fill="#ff9cc2"/><polygon points="84,194 206,176 206,188 84,206" fill="#f7c98b"/><polygon points="84,206 206,188 206,194 84,212" fill="#fff"/><polygon points="84,212 206,194 206,199 84,217" fill="#ff5c8a"/><polygon points="84,217 206,199 206,212 84,230" fill="#f7c98b"/>
+<polygon points="84,184 206,166 206,212 84,230" fill="none" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="84,184 132,148 206,166" fill="#ffc2d9" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M112 180 V190 M150 174 V188 M184 169 V177" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+<path d="M118 196 L128 206 M128 196 L118 206 M160 190 L170 200 M170 190 L160 200" stroke="#5b2a4a" stroke-width="4" stroke-linecap="round"/>
+<path d="M232 226 Q238 210 250 206" fill="none" stroke="#4f8a3a" stroke-width="3" stroke-linecap="round"/>
+<circle cx="230" cy="230" r="11" fill="#ff4d6d" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

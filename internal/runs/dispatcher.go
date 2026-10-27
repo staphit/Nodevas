@@ -51,7 +51,21 @@ type Dispatcher struct {
 	// observers are told every run and pipeline change (W7 autopilot).
 	observersMu sync.RWMutex
 	observers   []func(Update)
+
+	// usageAt is when each running run's live usage was last announced
+	// (usageChanged), so a chatty agent costs one runs change per
+	// UsageAnnounceInterval rather than one per event batch.
+	usageMu sync.Mutex
+	usageAt map[string]time.Time
 }
+
+// UsageAnnounceInterval is the least time between two runs changes a running
+// run's live token usage causes. The figure itself is stored with every batch
+// that carries one (Store.AppendEvents); only the announcement waits, and the
+// finish announces the final figure whatever the interval. Each
+// announcement makes every browser watching the project reload that node's
+// runs, so it is kept to what an energy bar needs.
+const UsageAnnounceInterval = 15 * time.Second
 
 // Update is one change an observer hears about: a run (status, changes, PR,
 // CI, merge, verdict) or, with Pipeline set, a pipeline's state. Observers
@@ -161,6 +175,9 @@ func (d *Dispatcher) finished(r Record) {
 func (d *Dispatcher) Store() *Store { return d.store }
 
 func (d *Dispatcher) notifyChanged(r Record) {
+	if runnerwire.RunFinal(r.Status) {
+		d.forgetUsage(r.ID)
+	}
 	d.termStatus(r)
 	if d.changed != nil {
 		d.changed(r.Project, r.NodeID)
@@ -368,7 +385,51 @@ func (d *Dispatcher) Events(ctx context.Context, runnerID, runID string, events 
 		return err
 	}
 	d.notifyEvents(r)
+	if carriesUsage(events) {
+		d.usageChanged(r)
+	}
 	return nil
+}
+
+func carriesUsage(events []runnerwire.RunEvent) bool {
+	for _, event := range events {
+		if event.Type == runnerwire.EventUsage && event.Usage != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// usageChanged announces a running run's new live usage as a runs change, so
+// run lists (which show usage) refresh without following the run's events;
+// at most once per UsageAnnounceInterval per run. Only the realtime hook is
+// told: nothing the observers act on has changed.
+func (d *Dispatcher) usageChanged(r Record) {
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	at := now()
+	d.usageMu.Lock()
+	last, seen := d.usageAt[r.ID]
+	due := !seen || at.Sub(last) >= UsageAnnounceInterval
+	if due {
+		if d.usageAt == nil {
+			d.usageAt = map[string]time.Time{}
+		}
+		d.usageAt[r.ID] = at
+	}
+	d.usageMu.Unlock()
+	if due && d.changed != nil {
+		d.changed(r.Project, r.NodeID)
+	}
+}
+
+// forgetUsage drops an ended run's announcement time.
+func (d *Dispatcher) forgetUsage(runID string) {
+	d.usageMu.Lock()
+	delete(d.usageAt, runID)
+	d.usageMu.Unlock()
 }
 
 // Changes records what a run committed, from its runner. Only the first

@@ -19,7 +19,7 @@ import (
 func humanOnlyNodeServer(t *testing.T) (*Server, *project.ProjectManager) {
 	t.Helper()
 	srv, pm := twoProjectServer(t)
-	if _, err := pm.Store().CreateNode(&engine.Node{
+	if _, err := pm.Store().CreateNode(identity.Local, &engine.Node{
 		ID: "sealed", Title: "Sealed", WriteAccess: engine.WriteAccessHumanOnly,
 	}, ""); err != nil {
 		t.Fatalf("create human-only node: %v", err)

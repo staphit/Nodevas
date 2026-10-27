@@ -5,9 +5,12 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -18,9 +21,30 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/logging"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
+
+// recoverPanics is gin.Recovery with the panic reported as one structured
+// record. gin's own report is a colored dump over dozens of lines, and the log
+// is read one JSON object per line, so it would arrive as dozens of records
+// nobody can filter; on a broken connection it also dumps the request's
+// headers, cookies included. Here the request is named by its id, never
+// dumped. A broken connection is still aborted quietly, as gin does.
+func recoverPanics() gin.HandlerFunc {
+	return gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, recovered any) {
+		r := c.Request
+		slog.Default().LogAttrs(r.Context(), slog.LevelError, "panic serving a request",
+			slog.String("event.code", "http.panic"),
+			slog.String("error.message", fmt.Sprint(recovered)),
+			slog.String("error.stack_trace", string(debug.Stack())),
+			logging.HTTPRequest(r.Method, r.URL.Path, http.StatusInternalServerError),
+			logging.Request(r.Context()),
+		)
+		c.AbortWithStatus(http.StatusInternalServerError)
+	})
+}
 
 // secureHTTP is the first middleware in the chain: it sets the headers every
 // response carries and rejects unsafe requests that fail the origin or media
@@ -124,6 +148,7 @@ func (s *Server) withAuth(c *gin.Context) {
 	if proxied, ok := runnerProxiedFrom(r.Context()); ok {
 		ctx := auth.WithRevalidator(auth.WithActor(r.Context(), proxied.actor), proxied.still)
 		c.Request = r.WithContext(ctx)
+		logging.SetUser(ctx, proxied.actor.ID, proxied.actor.Name)
 		c.Next()
 		return
 	}
@@ -146,7 +171,7 @@ func (s *Server) withAuth(c *gin.Context) {
 		s.withRunnerAuth(c)
 		return
 	}
-	actor, err := s.auth.Authenticate(r)
+	actor, email, err := s.authenticate(r)
 	if err != nil {
 		httpx.Err(c, http.StatusUnauthorized, err)
 		return
@@ -177,6 +202,8 @@ func (s *Server) withAuth(c *gin.Context) {
 	// The actor rides on the request context, not gin's key/value st, so
 	// ActorFrom keeps working anywhere a *http.Request is all that is at hand.
 	requestContext := auth.WithActor(r.Context(), actor)
+	logging.SetUser(requestContext, actor.ID, actor.Name)
+	logging.SetUserEmail(requestContext, email)
 	if s.auth.Remote() {
 		validationRequest := r.Clone(context.Background())
 		requestContext = auth.WithRevalidator(requestContext, func() bool {
@@ -186,6 +213,17 @@ func (s *Server) withAuth(c *gin.Context) {
 	}
 	c.Request = r.WithContext(requestContext)
 	c.Next()
+}
+
+// authenticate is s.auth.Authenticate, and the account's sign-in address when
+// the authenticator reads it on the way, as accounts do, for the request's
+// log lines.
+func (s *Server) authenticate(r *http.Request) (identity.Actor, string, error) {
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		return accounts.AuthenticateWithEmail(r)
+	}
+	actor, err := s.auth.Authenticate(r)
+	return actor, "", err
 }
 
 // runnerPathPrefix is where the runner-token routes live. /api/runners (the
@@ -216,8 +254,10 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	ctx := runners.WithRunner(auth.WithActor(r.Context(), runners.ActorFor(runner)), runner)
+	actor := runners.ActorFor(runner)
+	ctx := runners.WithRunner(auth.WithActor(r.Context(), actor), runner)
 	c.Request = r.WithContext(ctx)
+	logging.SetUser(ctx, actor.ID, actor.Name)
 	c.Next()
 }
 
@@ -227,7 +267,20 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 func (s *Server) withRequestProject(c *gin.Context) {
 	r := c.Request
 	name := httpx.RequestProjectName(r)
-	if name == "" || !httpx.ProjectScopedPath(r.URL.Path) {
+	if !httpx.ProjectScopedPath(r.URL.Path) {
+		c.Next()
+		return
+	}
+	if name == "" {
+		// With accounts, a request naming no project works in its actor's
+		// own current project (current_project.go), not the server's. An
+		// actor who may open none falls through to the active project, and
+		// the access gate turns them away there.
+		if !accountLevelPath(r.URL.Path) {
+			if _, st, ok := s.currentProject(r); ok {
+				c.Request = r.WithContext(httpx.WithStore(r.Context(), st))
+			}
+		}
 		c.Next()
 		return
 	}
@@ -248,10 +301,18 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	r := c.Request
 	if !strings.HasPrefix(r.URL.Path, "/api/") ||
 		!isUnsafeMethod(r.Method) ||
-		strings.HasPrefix(r.URL.Path, "/api/auth/") {
+		strings.HasPrefix(r.URL.Path, "/api/auth/") ||
+		// A pack belongs to no project; its handlers write their own
+		// server-wide pack.install and pack.remove rows.
+		r.URL.Path == "/api/packs" || strings.HasPrefix(r.URL.Path, "/api/packs/") {
 		c.Next()
 		return
 	}
+	// A handler may add what it knows about its write beyond the method and
+	// the path (audit.Annotate), such as which account a membership change
+	// was for.
+	ctx, annotated := audit.Annotatable(r.Context())
+	c.Request = r.WithContext(ctx)
 	c.Next()
 	if c.Writer.Status() >= 400 {
 		return
@@ -265,9 +326,12 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	// The database trail is the one that is queried. It records server-wide
 	// events too, and it survives a project being deleted.
 	if s.audit != nil {
-		project := ""
-		if st := httpx.StoreFor(r, s.pm); st != nil {
-			project = st.Root()
+		note := annotated()
+		project := note.Project
+		if project == "" {
+			if st := httpx.StoreFor(r, s.pm); st != nil {
+				project = st.Root()
+			}
 		}
 		s.audit.RecordOrLog(r.Context(), audit.Event{
 			At:        time.Now(),
@@ -275,7 +339,12 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 			ActorID:   actor.ID,
 			ActorName: actor.Name,
 			Action:    op,
+			Target:    note.Target,
 			ClientIP:  auth.ClientIP(r),
+			Detail:    note.Detail,
+			// The address withAuth read with the session, for the line; the
+			// row names the account by ID, as it always has.
+			ActorEmail: logging.UserEmailFrom(r.Context()),
 		})
 	}
 }

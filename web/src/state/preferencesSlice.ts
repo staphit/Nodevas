@@ -6,6 +6,8 @@
  */
 
 import {
+  hasAnyStoredPreference,
+  hasStoredPreference,
   readPreference,
   readPreferences,
   resetPreferences,
@@ -19,8 +21,27 @@ type SetAppState = (
   partial: Partial<AppState> | ((state: AppState) => Partial<AppState>),
 ) => void;
 
+/**
+ * The timeline used to open by default on any window wider than a phone, and a
+ * person who never folded it never stored an answer. Before the new default
+ * (closed) can apply, such a browser — one that has stored *something*, so has
+ * been here before — gets the old default written down, once. A browser with
+ * nothing stored is a first visit and simply takes the new default.
+ *
+ * Writing it, rather than deciding it on every read, is what keeps the answer
+ * stable: the first preference a new visitor stores would otherwise make them
+ * look like a returning one and pop the timeline open mid-session.
+ */
+export function settleTimelineDefault(): void {
+  if (hasStoredPreference("paneTimeline")) return;
+  const returning = hasAnyStoredPreference();
+  const wide = typeof window === "undefined" || window.innerWidth > 720;
+  writePreference("paneTimeline", returning && wide);
+}
+
 /** Both panes hidden leaves an empty stage; timeline wins that tie. */
 export function initialPaneOpen(): { graph: boolean; timeline: boolean } {
+  settleTimelineDefault();
   const graph = readPreference("paneGraph");
   const timeline = readPreference("paneTimeline");
   if (!graph && !timeline) {

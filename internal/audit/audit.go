@@ -39,6 +39,28 @@ type Event struct {
 	Target    string
 	ClientIP  string
 	Detail    map[string]any // free-form, stored as JSON text
+
+	// The fields below reach only the event's line in the process log (see
+	// log.go). The table has no column for them, so a stored row reads exactly
+	// as it always has, and Query never fills them in.
+
+	// ActorEmail is the sign-in address of the actor, or of the subject when
+	// there is no actor, when the caller has it cheaply; for a sign-in step
+	// that named no account, the address typed, once it parsed as one. The
+	// trail itself names accounts by ID.
+	ActorEmail string
+	// SubjectID and SubjectName are the account a refused sign-in named. Its
+	// row names no actor, because nobody signed in, but whose account somebody
+	// tried is the first thing asked about a failed sign-in, so the line names
+	// the subject as its user when the event has no actor.
+	SubjectID   string
+	SubjectName string
+	// AuthMethod is how a sign-in step was made (MethodOTP, MethodTOTP, ...),
+	// for a caller that knows more than the action says.
+	AuthMethod string
+	// Reason is why the event failed, in the log's kebab-case vocabulary, for
+	// a caller that knows more than the detail says.
+	Reason string
 }
 
 // Two-factor authentication events (internal/auth/totp*.go). Every change to
@@ -263,7 +285,7 @@ func (s *Store) AcknowledgeFallbacks(expectedFallbackEvents uint64) (Health, err
 // New returns a store over an open workspace database.
 func New(database *db.DB) *Store { return &Store{db: database} }
 
-// Record writes one event.
+// Record writes one event to the table, and only there.
 //
 // It returns the error rather than swallowing it, and the caller decides what
 // to do about the request that caused it. That split is the point: the audit
@@ -300,10 +322,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	return nil
 }
 
-// RecordOrLog records the event and, when the database write fails, writes the
-// whole event to the process log at error level instead. It also exposes a
-// degraded write-health signal until a later audit database write succeeds.
-// Overall health remains degraded until the fallback counter is acknowledged.
+// RecordOrLog writes the event's line to the process log (log.go) and records
+// it. When the database write fails, it also writes the whole event to the
+// process log at error level. It exposes a degraded write-health signal until
+// a later audit database write succeeds. Overall health remains degraded until
+// the fallback counter is acknowledged.
 //
 // This is the failure mode the package is designed around: the request that
 // produced the event still succeeds, but the event is not lost — it lands in
@@ -311,6 +334,28 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 // so the trail can be reconciled by hand. Silently returning is not an option
 // a security trail can offer.
 func (s *Store) RecordOrLog(ctx context.Context, event Event) {
+	logEvent(ctx, event)
+	s.recordOrFallBack(ctx, event)
+}
+
+// RecordOrLogLater is RecordOrLog for an event whose outcome is settled after
+// its row is written: a passcode is recorded as handed to delivery, and
+// whether it went out is known once the mail relay has answered. The row is
+// written now, exactly as RecordOrLog writes it; the event's line waits for
+// the returned function, which takes that answer: nil writes the line as the
+// event has it, and an error writes it as a failure, for reason error, with
+// the error's text. Call it once. Until then the event is in the trail and
+// not yet in the log, so the log has one line for it, with the outcome that
+// stuck.
+func (s *Store) RecordOrLogLater(ctx context.Context, event Event) func(error) {
+	line := laterLine(ctx, event)
+	s.recordOrFallBack(ctx, event)
+	return line
+}
+
+// recordOrFallBack is RecordOrLog without the event's line: the row, or the
+// fallback line and the degraded health when the row cannot be written.
+func (s *Store) recordOrFallBack(ctx context.Context, event Event) {
 	err := s.Record(ctx, event)
 	if err == nil {
 		health, recovered := s.markRecovered()
@@ -498,6 +543,9 @@ var credentialWords = map[string]bool{
 	"pin": true, "otp": true, "password": true, "passcode": true,
 	"secret": true, "token": true, "credential": true, "credentials": true,
 	"apikey": true,
+	// What carries a session or an Access token rather than being one; the
+	// detail reaches the process log too (log.go), and these never may.
+	"cookie": true, "cookies": true, "authorization": true, "jwt": true,
 }
 
 var credentialSubstrings = []string{"password", "secret", "token"}

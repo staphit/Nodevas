@@ -1,0 +1,667 @@
+/* Info | Station: the top bar's switch and Station's layout. */
+
+.mode-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 22 + the frame's 6 = the project picker's 28: the bar keeps its height. */
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mode-switch button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.mode-switch button.active {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+.mode-switch-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.station-loading {
+  flex: 1;
+  padding: 24px;
+  color: var(--text-2);
+}
+
+/* Roster | live view and timeline | waiting and the agent panel. */
+.station {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) minmax(320px, 380px);
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg);
+  align-items: start;
+}
+.station-center,
+.station-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.station-side {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 80px);
+}
+
+.station-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  min-width: 0;
+}
+.station-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.station-panel-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.station-panel-meta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.station-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.station-empty {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+/* Roster */
+.station-roster {
+  position: sticky;
+  top: 0;
+}
+.station-roster-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.station-actor {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.station-actor:hover:not(:disabled) {
+  background: var(--hover);
+}
+.station-actor:disabled {
+  cursor: default;
+}
+.station-avatar {
+  position: relative;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid var(--border);
+}
+.station-actor.tone-work .station-avatar,
+.station-actor.tone-review .station-avatar {
+  border-color: var(--st-progress-fg);
+}
+.station-actor.tone-ask .station-avatar,
+.station-actor.tone-wait .station-avatar {
+  border-color: var(--st-ready-fg);
+}
+.station-actor.tone-bad .station-avatar {
+  border-color: var(--st-failed-fg);
+}
+.station-avatar.agent-claude {
+  background: #f6e6dc;
+  color: #8a4a22;
+}
+.station-avatar.agent-codex {
+  background: #e3ede4;
+  color: #2e6b34;
+}
+.station-avatar.agent-gemini {
+  background: #e2eef4;
+  color: #1f5f99;
+}
+.station-avatar.agent-opencode {
+  background: #ece6f6;
+  color: #5a3e8c;
+}
+.station-avatar.agent-antigravity {
+  background: #f4e8f0;
+  color: #8a2f6b;
+}
+.station-actor-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.station-actor-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.station-actor-line,
+.station-actor-room {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.station-actor.tone-ask .station-pose {
+  color: var(--st-ready-fg);
+  font-weight: 600;
+}
+.station-actor.tone-bad .station-pose {
+  color: var(--st-failed-fg);
+  font-weight: 600;
+}
+.station-roster-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Live view: the game stage, sized as a card rather than a pane. */
+.station .lane-wrap.game-stage.station-live {
+  height: clamp(420px, 58vh, 760px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.station-live-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.station-live-loading {
+  height: clamp(420px, 58vh, 760px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+/* Who worked on what */
+.station-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  list-style: none;
+  margin: 0 0 0 auto;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.station-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-bar {
+  width: 14px;
+  height: 8px;
+  border-radius: 3px;
+}
+.legend-bar.is-run,
+.station-bar.is-run {
+  background: var(--st-progress-fg);
+}
+.legend-bar.is-review,
+.station-bar.is-review {
+  background: #7a5bb0;
+}
+.legend-mark,
+.station-mark {
+  width: 9px;
+  height: 9px;
+}
+.legend-mark.is-ask,
+.station-mark.is-ask {
+  background: var(--st-ready-fg);
+  transform: rotate(45deg);
+}
+.legend-mark.is-message,
+.station-mark.is-message {
+  background: var(--text);
+  border-radius: 50%;
+}
+.legend-mark.is-limit,
+.station-mark.is-limit {
+  background: var(--st-failed-fg);
+}
+.station-lanes {
+  display: flex;
+  flex-direction: column;
+}
+.station-lane {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 32px;
+  border-top: 1px solid var(--border);
+}
+.station-lane-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.station-lane-track {
+  position: relative;
+  height: 32px;
+}
+.station-bar {
+  position: absolute;
+  top: 8px;
+  height: 16px;
+  min-width: 6px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.station-bar span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.station-bar.status-failed {
+  background: var(--st-failed-fg);
+}
+.station-bar.is-open {
+  box-shadow: inset -3px 0 0 rgba(255, 255, 255, 0.55);
+}
+.station-mark {
+  position: absolute;
+  top: 11px;
+  margin-left: -5px;
+  border: 1.5px solid var(--surface);
+  box-sizing: content-box;
+}
+.station-axis {
+  border-top: 0;
+  min-height: 18px;
+}
+.station-axis-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+/* Waiting on you */
+.station-waiting-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.station-waiting-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text);
+}
+.station-waiting-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+.station-waiting-sub {
+  font-size: 12px;
+  color: var(--text-2);
+}
+/* The agent panel, docked: in the column instead of over the board. */
+.agent-panel.is-docked {
+  position: static;
+  width: auto;
+  flex: 1;
+  min-height: 420px;
+  max-height: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: none;
+  animation: none;
+  overflow: hidden;
+  z-index: auto;
+}
+
+/* The voice copilot's button sits bottom right, which in Station is the
+   docked panel's composer: on a wide screen it moves left of that column. */
+@media (min-width: 1181px) {
+  .app.mode-station .copilot-fab {
+    right: calc(min(380px, 30vw) + 36px);
+  }
+}
+
+/* Narrower: the side column moves under the live view. */
+@media (max-width: 1180px) {
+  .station {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+  .station-side {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: none;
+  }
+}
+/* Phone: one column. */
+@media (max-width: 760px) {
+  .station {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+  .station-roster {
+    position: static;
+  }
+  .station-lane {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+}
+/* The top bar is full at these widths: the switch keeps its icons (and the
+   badge), the names go to the tooltip, and the project type chip yields. */
+@media (max-width: 1280px) {
+  .mode-switch button {
+    padding: 0 7px;
+    gap: 4px;
+  }
+  .mode-switch button span:not(.mode-switch-badge) {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .topbar .crumb-workspace,
+  .topbar .crumb-separator,
+  .topbar .project-type {
+    display: none;
+  }
+}
+/* A phone: the switch gets a row of its own under the bar, two halves,
+   rather than squeezing the project picker to nothing. */
+@media (max-width: 720px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .mode-switch {
+    order: 10;
+    flex: 1 1 100%;
+  }
+  .mode-switch button {
+    flex: 1 1 0;
+    justify-content: center;
+    height: 32px;
+  }
+  .mode-switch button span:not(.mode-switch-badge) {
+    display: inline;
+  }
+}
+
+/* Settings → Appearance → View packs */
+.view-pack-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.view-pack-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.view-pack-meta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* The node panel's Autopilot pill, in its top row. */
+.autopilot-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  margin: 0 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.autopilot-pill:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+.autopilot-pill.is-live {
+  border-color: var(--st-progress-fg);
+}
+.autopilot-pill.is-waiting {
+  border-color: var(--st-ready-fg);
+}
+.autopilot-pill-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+/* Settings: the parts on the left, one part at a time on the right. The
+   dialogs draw inline here (DialogFrame) as panes of the page. */
+.settings-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg);
+  align-items: start;
+}
+.settings-page-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.settings-page-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-page-group h2 {
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.settings-page-group h2 small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-page-nav button {
+  text-align: left;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.settings-page-nav button:hover {
+  background: var(--hover);
+}
+.settings-page-nav button.active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  font-weight: 600;
+}
+.settings-page-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings-page-pane {
+  position: static;
+  width: 100%;
+  max-width: 980px;
+  max-height: none;
+  overflow: visible;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+.settings-page-pane > h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+/* Budget and routing pad themselves for a section of a dialog; as parts of
+   their own the pane's padding is enough. */
+.settings-page-pane > .budget-settings,
+.settings-page-pane > .routing-settings {
+  padding: 0;
+}
+/* A pane of the page's own reads like the dialogs beside it (.settings-body). */
+.settings-page-pane > .settings-section {
+  font-size: 12px;
+}
+/* A dialog drawn inline keeps its own look (.confirm-dialog) and padding. */
+.settings-page-pane.confirm-dialog {
+  padding: 0;
+  overflow: hidden;
+}
+.settings-tabs[hidden] {
+  display: none;
+}
+/* Inline, a dialog has nothing to close. */
+.settings-page-pane [data-dialog-close] {
+  display: none;
+}
+@media (max-width: 760px) {
+  .settings-page {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .settings-page-nav {
+    position: static;
+  }
+}

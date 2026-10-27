@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/runnerwire"
@@ -107,7 +107,13 @@ func (a *API) postStepUpRequest(c *gin.Context) {
 		c.JSON(http.StatusOK, map[string]any{"ok": true, "method": auth.SecondFactorTOTP})
 		return
 	}
-	a.recordAuthEvent(c, "auth.stepup.request", actor, map[string]any{"delivered": err == nil})
+	requested := audit.Event{
+		ActorID: actor.ID, ActorName: actor.Name, Action: audit.ActionStepUpRequest,
+		Detail: map[string]any{"delivered": err == nil}, Reason: deliveryFailureReason(c.Request.Context(), err),
+	}
+	if err != nil {
+		a.recordAuth(c, requested)
+	}
 	switch {
 	case err == nil:
 	case errors.Is(err, auth.ErrTooManyOTPRequests):
@@ -123,16 +129,18 @@ func (a *API) postStepUpRequest(c *gin.Context) {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
 	}
-	go a.deliverStepUp(challenge)
+	// Like a sign-in passcode's: the row now, the line once the relay has
+	// answered.
+	sent := a.recordAuthLater(c, requested)
+	go a.deliverStepUp(challenge, sent)
 	c.JSON(http.StatusAccepted, map[string]any{"ok": true, "method": auth.StepUpMethodEmail})
 }
 
-func (a *API) deliverStepUp(challenge auth.Challenge) {
+// deliverStepUp is deliverPasscode for a step-up passcode.
+func (a *API) deliverStepUp(challenge auth.Challenge, sent func(error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 	defer cancel()
-	if err := a.mailer.Send(ctx, challenge.Email, stepUpSubject, stepUpBody(challenge)); err != nil {
-		log.Printf("step-up passcode delivery to %s failed: %v", challenge.Actor, err)
-	}
+	sent(a.mailer.Send(ctx, challenge.Email, stepUpSubject, stepUpBody(challenge)))
 }
 
 // postStepUp verifies a step-up passcode and marks the session stepped up.
@@ -148,7 +156,8 @@ func (a *API) postStepUp(c *gin.Context) {
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
-	result, err := accounts.VerifyStepUpProof(c.Request, strings.TrimSpace(body.Code))
+	code := strings.TrimSpace(body.Code)
+	result, err := accounts.VerifyStepUpProof(c.Request, code)
 	if err != nil {
 		status, reason := http.StatusUnauthorized, "bad-code"
 		switch {
@@ -162,19 +171,40 @@ func (a *API) postStepUp(c *gin.Context) {
 		default:
 			status, reason = http.StatusInternalServerError, "error"
 		}
-		a.recordAuthEvent(c, "auth.stepup.failed", actor, map[string]any{"reason": reason})
+		a.recordAuth(c, audit.Event{
+			ActorID: actor.ID, ActorName: actor.Name, Action: audit.ActionStepUpFailed,
+			Detail: map[string]any{"reason": reason}, AuthMethod: stepUpAttemptMethod(accounts, c.Request, code),
+		})
 		httpx.Err(c, status, err)
 		return
 	}
 	until := result.Until.UTC().Format(time.RFC3339)
 	a.recordRecoveryUse(c, actor.ID, actor.Name, auth.SecondFactorProof{
 		Method: result.Method, RecoveryCodesLeft: result.RecoveryCodesLeft}, "stepup")
-	a.recordAuthEvent(c, "auth.stepup", actor, map[string]any{"until": until, "method": result.Method})
+	a.recordAuth(c, audit.Event{
+		ActorID: actor.ID, ActorName: actor.Name, Action: audit.ActionStepUp,
+		Detail: map[string]any{"until": until, "method": result.Method}, AuthMethod: authMethod(result.Method),
+	})
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, stepUpStatusBody{
 		StepUpStatus: runnerwire.StepUpStatus{Required: true, Active: true, Until: until},
 		Method:       stepUpMethodFor(result.Method),
 	})
+}
+
+// stepUpAttemptMethod is what a refused step-up code was offered as, for the
+// log line: the mailed passcode, or for an account with an authenticator,
+// whichever kind of code it is shaped like. "" when the session cannot say.
+func stepUpAttemptMethod(accounts *auth.SessionAuth, r *http.Request, code string) string {
+	method, err := accounts.StepUpMethod(r)
+	switch {
+	case err != nil:
+		return ""
+	case method == auth.SecondFactorTOTP:
+		return authMethod(auth.SecondFactorKind(code))
+	default:
+		return audit.MethodOTP
+	}
 }
 
 // stepUpMethodFor is the method a session steps up with, given what proved

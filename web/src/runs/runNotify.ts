@@ -11,10 +11,19 @@ import { useRuns } from "./runStore";
  * ended — without saying which. The run is fetched and read for the newest of
  * those that has not been told yet; each is told once per (run, kind) — per
  * merge request and per PR head where those can recur.
+ *
+ * A run that failed on its agent's usage limit (rate limit or used-up quota)
+ * says so rather than plain "failed". And since a run's end is when the
+ * viewer's daily budget can run out, each run-notify also checks it, telling
+ * once per UTC day and limit.
  */
 export type RunNotifyKind =
   | "succeeded"
   | "failed"
+  // The agent hit its usage limit: rate limited, or quota/credit used up.
+  | "limit"
+  // The viewer's daily run budget is used up.
+  | "budget"
   | "ci-failed"
   | "merged"
   | "merge-failed"
@@ -86,6 +95,13 @@ export function runNotifyKind(
       key: `pipeline:${pipeline.id}:${pipeline.status}`,
     };
   }
+  if (
+    run.status === "failed" &&
+    (run.failureKind === "rate_limit" || run.failureKind === "quota") &&
+    fresh(run.finishedAt, now)
+  ) {
+    return { kind: "limit", key: `${run.id}:limit` };
+  }
   if ((run.status === "succeeded" || run.status === "failed") && fresh(run.finishedAt, now)) {
     return { kind: run.status, key: `${run.id}:${run.status}` };
   }
@@ -112,6 +128,17 @@ export function runNotifyText(
       return { title: t("runNotify.succeeded", { name }), body: pr };
     case "failed":
       return { title: t("runNotify.failed", { name }), body: run.error ?? "" };
+    case "limit":
+      return {
+        title: t(run.failureKind === "quota" ? "runNotify.quota" : "runNotify.rateLimit", {
+          agent: run.agent,
+          name,
+        }),
+        body: run.error ?? "",
+      };
+    case "budget":
+      // Budget toasts are made by checkBudget, not from a run.
+      return { title: "", body: "" };
     case "ci-failed":
       return { title: t("runNotify.ciFailed", { number: run.prNumber ?? "" }), body: name };
     case "merged":
@@ -151,8 +178,55 @@ export interface RunToastState {
   /** Fetches the run and toasts what changed; resolves once handled. */
   handleRunNotify: (runId: string) => Promise<void>;
   dismiss: (id: number) => void;
-  /** Dismisses the toast and opens the node's Runs tab on its run. */
+  /** Shows a toast, and a system notification (tagged tag) while the page is
+   * hidden. */
+  push: (toast: Omit<RunToast, "id">, tag: string) => void;
+  /** Dismisses the toast and opens what it is about: the node's Runs tab on
+   * its run, or the budget. */
   open: (id: number) => void;
+}
+
+/** Opens what a toast is about. */
+function openToast(toast: Pick<RunToast, "kind" | "nodeId" | "runId">): void {
+  if (toast.kind === "budget") {
+    window.dispatchEvent(new CustomEvent("nodevas-open-budget"));
+    return;
+  }
+  openNodeRuns(toast.nodeId, toast.runId);
+}
+
+/** UTC day, as the hub counts the budget. */
+function utcDay(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * Tells once per UTC day and limit that the viewer's daily budget is used up.
+ * A viewer with no limits set has nothing to be told.
+ */
+async function checkBudget(push: RunToastState["push"]): Promise<void> {
+  let status;
+  try {
+    status = await api.getRunBudget();
+  } catch {
+    return;
+  }
+  const exceeded = status?.exceeded;
+  if (!exceeded) return;
+  const key = `budget:${utcDay()}:${exceeded}`;
+  if (told.has(key)) return;
+  told.add(key);
+  const t = (k: string, values?: Record<string, string | number>) => translate(k, undefined, values);
+  push(
+    {
+      runId: "",
+      nodeId: "",
+      kind: "budget",
+      title: t("runNotify.budget"),
+      body: t("budget.exceeded", { limit: t(`budget.limit.${exceeded}`) }),
+    },
+    `nodevas-${key}`,
+  );
 }
 
 let nextId = 1;
@@ -191,19 +265,19 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
         pipeline = null;
       }
     }
+    void checkBudget(get().push);
     const what = runNotifyKind(run, Date.now(), pipeline);
     if (!what || told.has(what.key)) return;
     told.add(what.key);
     const { title, body } = runNotifyText(run, what.kind, pipeline);
+    get().push(
+      { runId: run.id, nodeId: run.nodeId, kind: what.kind, title, body },
+      `nodevas-run-${what.key}`,
+    );
+  },
 
-    const toast: RunToast = {
-      id: nextId++,
-      runId: run.id,
-      nodeId: run.nodeId,
-      kind: what.kind,
-      title,
-      body,
-    };
+  push: (fields, tag) => {
+    const toast: RunToast = { id: nextId++, ...fields };
     set((state) => {
       const toasts = [...state.toasts, toast];
       for (const dropped of toasts.slice(0, Math.max(0, toasts.length - MAX_TOASTS))) {
@@ -220,9 +294,7 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
     // The toast is on the page; a hidden page (a phone in a pocket, another
     // tab) also gets a system notification when this browser allows one.
     if (typeof document !== "undefined" && document.hidden) {
-      showSystemNotification(title, body, `nodevas-run-${what.key}`, () =>
-        openNodeRuns(run.nodeId, run.id),
-      );
+      showSystemNotification(toast.title, toast.body, tag, () => openToast(toast));
     }
   },
 
@@ -236,6 +308,6 @@ export const useRunToasts = create<RunToastState>((set, get) => ({
   open: (id) => {
     const toast = get().toasts.find((item) => item.id === id);
     get().dismiss(id);
-    if (toast) openNodeRuns(toast.nodeId, toast.runId);
+    if (toast) openToast(toast);
   },
 }));

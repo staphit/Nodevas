@@ -8,14 +8,14 @@ import (
 func TestMCPArgsForPrefersTheRunsCommandLine(t *testing.T) {
 	own := []string{"--server", "http://127.0.0.1:5666", "--actor", "mcp:antigravity"}
 	run := []string{"--server", "http://127.0.0.1:41234/r/secret", "--project", "p", "--agent-role", "worker",
-		"--actor", "run:antigravity", "--session-name", "repo-antigravity-default-abc123"}
+		"--actor", "run:antigravity", "--session-name", "repo-antigravity-default-abc123", "--toolset", "run"}
 	cases := []struct {
 		name, env string
 		want      []string
 	}{
 		{"unset", "", own},
 		{"the run's", `["mcp","--server","http://127.0.0.1:41234/r/secret","--project","p","--agent-role","worker",` +
-			`"--actor","run:antigravity","--session-name","repo-antigravity-default-abc123"]`, run},
+			`"--actor","run:antigravity","--session-name","repo-antigravity-default-abc123","--toolset","run"]`, run},
 		{"no flags", `["mcp"]`, []string{}},
 		{"not mcp", `["serve","--server","x"]`, own},
 		{"not JSON", `--server x`, own},

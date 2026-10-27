@@ -295,13 +295,13 @@ func TestAccountByEmailFindsTheRegisteredAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	actor, revision, stored, ok := users.AccountByEmail(ctx, "  ann@example.test")
-	if !ok || actor.Name != "ann" || stored != "Ann@Example.test" || revision == "" {
-		t.Fatalf("AccountByEmail = %+v %q %q %v", actor, revision, stored, ok)
+	actor, revision, stored, err := users.AccountByEmail(ctx, "  ann@example.test")
+	if err != nil || actor.Name != "ann" || stored != "Ann@Example.test" || revision == "" {
+		t.Fatalf("AccountByEmail = %+v %q %q %v", actor, revision, stored, err)
 	}
 	for _, address := range []string{"", "nobody@example.test", "not an address", strings.Repeat("a", maxEmailBytes) + "@x.test"} {
-		if _, _, _, ok := users.AccountByEmail(ctx, address); ok {
-			t.Fatalf("%q resolved to an account", address)
+		if _, _, _, err := users.AccountByEmail(ctx, address); !errors.Is(err, ErrNoSuchAccount) {
+			t.Fatalf("AccountByEmail(%q) = %v, want ErrNoSuchAccount", address, err)
 		}
 	}
 }
@@ -449,5 +449,18 @@ func TestAccountCreationRefusesAnUnusablePassword(t *testing.T) {
 	}
 	if got := users.Count(context.Background()); got != 0 {
 		t.Fatalf("Count = %d, want the account not to have been created", got)
+	}
+}
+
+// An account ID never reads as a flag on a command line that takes one.
+func TestNewAccountIDNeverStartsWithADash(t *testing.T) {
+	for range 2000 {
+		id, err := newAccountID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(id) != 16 || id[0] == '-' {
+			t.Fatalf("id %q", id)
+		}
 	}
 }

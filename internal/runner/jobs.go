@@ -165,6 +165,29 @@ func (j *jobs) setAgents(agents []runnerwire.Agent) {
 	j.mu.Unlock()
 }
 
+// withoutOpenCode2ACP is ad, except that an OpenCode 2 run set to go over
+// ACP goes through `opencode run` instead, and note says so. OpenCode 2's acp
+// takes no --cwd or --standalone, so it would run in the owner's background
+// service, with that service's environment rather than this run's config.
+func withoutOpenCode2ACP(ad adapter.Adapter, version string) (adapter.Adapter, string) {
+	if _, acp := ad.(adapter.OpenCodeACP); acp && adapter.OpenCodeV2(version) {
+		return adapter.OpenCode{}, "OpenCode 2 does not run over ACP on this runner yet; using opencode run"
+	}
+	return ad, ""
+}
+
+// agentVersion is the version line Detect read for kind, or "".
+func (j *jobs) agentVersion(kind string) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, agent := range j.agents {
+		if agent.Kind == kind {
+			return agent.Version
+		}
+	}
+	return ""
+}
+
 // active is the hello's Active list: accepted runs whose finish the hub has
 // not had yet. A finished run is listed until its finish goes out, or the hub
 // would fail it for being missing a moment before hearing it succeeded.
@@ -481,7 +504,11 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		return runnerwire.RunResult{Status: runnerwire.RunFailed, ExitCode: -1, FailureKind: kind,
 			Error: adapter.Truncate(fmt.Sprintf(format, args...), runnerwire.MaxSummaryBytes)}, ""
 	}
-	ad := j.c.adapterFor(job.Agent)
+	version := j.agentVersion(job.Agent)
+	ad, note := withoutOpenCode2ACP(j.c.adapterFor(job.Agent), version)
+	if note != "" {
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: note})
+	}
 	bin, err := j.c.Commands.LookPath(adapter.Binary(job.Agent))
 	if err != nil {
 		return fail(runnerwire.FailureAgentAbsent, "%s is no longer on PATH", adapter.Binary(job.Agent))
@@ -523,6 +550,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		AllowedTools:     cfg.AllowedTools,
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
+		Version:          version,
 	}
 	cmd, err := ad.Command(job, runEnv)
 	if err != nil {
@@ -663,7 +691,9 @@ func permissionText(cfg *Config, kind string) string {
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
-// runner's proxy, as a worker, under a session name that says which run it is.
+// runner's proxy, as a worker, under a session name that says which run it is,
+// with only the tools a run uses: each definition is paid for on every model
+// call.
 func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 	model := job.Model
 	if model == "" {
@@ -684,6 +714,7 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 		"--agent-role", "worker",
 		"--actor", "run:" + job.Agent,
 		"--session-name", repoName + "-" + job.Agent + "-" + slug(model) + "-" + runID,
+		"--toolset", "run",
 	}
 }
 

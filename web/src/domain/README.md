@@ -40,7 +40,7 @@ UI  →  store command  →  applyGraphCommand(draft, command)   (純函式，�
                       →  operation state: pending → saved | error | conflict
 ```
 
-`graphOps.ts` 判斷哪些指令 op-able（畫布拖曳、節點縮放、節點欄位、時間軸排序、刪除關係）：
+`state/graphOps.ts` 判斷哪些指令 op-able（畫布拖曳、節點縮放、節點欄位、時間軸排序、刪除關係）：
 這些走 `/api/graph/ops`，不帶 baseRev，所以兩人改同一張圖的不同部分不會互相 409，
 且套用後採用伺服器合併後的 graph。其餘指令仍走整檔 `PUT /api/graph`。
 

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 118" width="40" height="118">
+<!-- Candy dungeon: a candy-cane column -->
+<ellipse cx="20" cy="113" rx="18" ry="3.5" fill="#7a3b5c" fill-opacity=".2"/>
+<rect x="9" y="18" width="22" height="86" fill="#fff"/>
+<polygon points="9,30 31,20 31,26 9,36" fill="#ff4d6d"/><polygon points="9,44 31,34 31,40 9,50" fill="#ff4d6d"/><polygon points="9,58 31,48 31,54 9,64" fill="#ff4d6d"/><polygon points="9,72 31,62 31,68 9,78" fill="#ff4d6d"/><polygon points="9,86 31,76 31,82 9,92" fill="#ff4d6d"/><polygon points="9,100 31,90 31,96 9,106" fill="#ff4d6d"/>
+<rect x="9" y="18" width="22" height="86" fill="none" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="4" y="100" width="32" height="12" rx="4" fill="#ff9cc2" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<path d="M5 22 Q5 4 20 4 Q35 4 35 22 Z" fill="#7fdcc4" stroke="#7a3b5c" stroke-width="2.5" stroke-linejoin="round"/>
+<circle cx="14" cy="13" r="1.5" fill="#fff"/><circle cx="24" cy="10" r="1.5" fill="#fff"/><circle cx="28" cy="17" r="1.5" fill="#fff"/>
+</svg>

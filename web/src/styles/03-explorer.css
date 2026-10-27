@@ -1167,14 +1167,55 @@ div.tree-empty-row {
     flex-wrap: wrap;
     row-gap: 4px;
   }
-  .board-title-hint {
-    order: 10;
-    flex-basis: 100%;
-  }
   .project-settings-dialog {
     width: 100%;
   }
   .settings-list li {
     align-items: flex-start;
   }
+}
+
+/* ---------- explorer: primary action and the folded tools ---------- */
+.explorer-primary-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.explorer-primary-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+.explorer-primary-actions button.primary {
+  flex: 1;
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.explorer-primary-actions .explorer-more-toggle {
+  width: 36px;
+  padding: 0;
+  color: var(--text-2);
+}
+.explorer-primary-actions .explorer-more-toggle[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.explorer-primary-actions button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.explorer-primary-actions + .explorer-create-actions {
+  margin-top: 6px;
+}
+.explorer-create-actions .explorer-example-action {
+  grid-column: 1 / -1;
 }

@@ -93,7 +93,7 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 		checkRevision: true,
 		expectedRev:   baseRev,
 	})
-	if err := s.applyUpdatesLocked(updates); err != nil {
+	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return "", err
 	}
 	return Rev(data), nil
@@ -181,7 +181,7 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	if err != nil {
 		return "", "", err
 	}
-	if err := s.applyUpdatesLocked([]fileUpdate{{
+	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
 		path:          s.NodePath(id),
 		data:          out,
 		checkRevision: true,

@@ -22,12 +22,21 @@ COPY . .
 COPY --from=web-build /src/web/dist ./web/dist
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
+# The commit this image is built from (.git is not in the build context, so Go
+# cannot stamp it). The hub reports it to its runners, and the installer uses
+# it to fetch the matching runner binary from GitHub. Empty is fine: the hub
+# then reports none and the installer keeps the latest build.
+ARG NODEVAS_COMMIT=""
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
-    go build -tags=nomsgpack -trimpath -ldflags="-s -w" \
+    go build -tags=nomsgpack -trimpath \
+    -ldflags="-s -w -X nodevas/internal/buildinfo.commit=${NODEVAS_COMMIT}" \
     -o /out/nodevas ./cmd/nodevas
 
 FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
-RUN apk add --no-cache ca-certificates tzdata \
+# git: each project's version history is a git repository it keeps
+# (docs/history-and-backup.md); without git the hub falls back to file
+# copies.
+RUN apk add --no-cache ca-certificates tzdata git \
     && addgroup -S -g 568 nodevas \
     && adduser -S -D -H -u 568 -G nodevas nodevas \
     && install -d -o 568 -g 568 /data
@@ -39,4 +48,6 @@ EXPOSE 5666
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5666/ || exit 1
 ENTRYPOINT ["/usr/local/bin/nodevas"]
-CMD ["serve", "--project", "/data"]
+# --no-runner: the image has no coding agents, so a runner in it could take
+# no run. Runners belong on the machines that have them.
+CMD ["serve", "--project", "/data", "--no-runner"]
