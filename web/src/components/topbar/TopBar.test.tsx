@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor, RunBudgetStatus, Runner } from "../../api";
@@ -6,13 +6,11 @@ import type { Graph } from "../../types";
 import { readPreferences } from "../../preferences";
 import { useRunners } from "../../runners/runnerStore";
 import { useBudget } from "../../runs/budgetStore";
-import { openSettings } from "../../settings/openSettings";
 import { useApp } from "../../store";
 import { replayTour } from "./actions";
 import { AccountMenu } from "./AccountMenu";
 import { ProjectMenu } from "./ProjectMenu";
 import { RunnerPill } from "./RunnerPill";
-import { SettingsButton, ThemeButton } from "./SettingsButton";
 import { TopBar } from "./TopBar";
 
 const auth = vi.hoisted(() => ({ viewer: null as Actor | null, signOut: vi.fn() }));
@@ -99,53 +97,6 @@ describe("ProjectMenu", () => {
   });
 });
 
-describe("SettingsButton", () => {
-  it("opens Settings in one click, shows pressed, and a second click goes back", async () => {
-    const user = userEvent.setup();
-    useApp.setState({ preferences: { ...useApp.getState().preferences, projectMode: "station" } });
-    render(<SettingsButton />);
-    const button = screen.getByRole("button", { name: "Settings" });
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    // A label in words, not a bare gear.
-    expect(button.textContent).toBe("Settings");
-
-    await user.click(button);
-    expect(useApp.getState().preferences.projectMode).toBe("settings");
-    expect(button).toHaveAttribute("aria-pressed", "true");
-
-    // Back to where the viewer was, not always the board.
-    await user.click(button);
-    expect(useApp.getState().preferences.projectMode).toBe("station");
-    expect(button).toHaveAttribute("aria-pressed", "false");
-  });
-
-  it("is pressed however Settings was entered, and leaves to the board by default", async () => {
-    const user = userEvent.setup();
-    render(<SettingsButton />);
-    act(() => openSettings("account"));
-    const button = screen.getByRole("button", { name: "Settings" });
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    await user.click(button);
-    expect(useApp.getState().preferences.projectMode).toBe("info");
-  });
-});
-
-describe("ThemeButton", () => {
-  it("names the theme it switches to and flips it", async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<ThemeButton />);
-    const button = screen.getByRole("button", { name: "Switch to light mode" });
-    expect(button).toHaveAttribute("title", "Switch to light mode");
-    await user.click(button);
-    expect(toggleTheme).toHaveBeenCalledTimes(1);
-    unmount();
-
-    useApp.setState({ theme: "light" });
-    render(<ThemeButton />);
-    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toBeTruthy();
-  });
-});
-
 describe("AccountMenu", () => {
   // A loopback server has no session, so no account to show.
   it("is not drawn without an account", () => {
@@ -218,7 +169,7 @@ describe("RunnerPill", () => {
 });
 
 describe("TopBar", () => {
-  it("holds the project menu, Board | Station, search, Settings and the theme, and nothing else it used to", () => {
+  it("holds the project menu, Board | Station | Settings and search, and nothing else it used to", () => {
     render(<TopBar />);
     expect(screen.getByRole("heading", { name: "Nodevas" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Project: Beta" })).toBeTruthy();
@@ -226,7 +177,8 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Station" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Search or command/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeTruthy();
+    // The theme is in Settings › General, not on the bar.
+    expect(screen.queryByRole("button", { name: /light mode|dark mode/ })).toBeNull();
     // Standalone: no account, so no avatar.
     expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
     // Relocated: the explorer toggle, the project <select>, the help and tour icons.

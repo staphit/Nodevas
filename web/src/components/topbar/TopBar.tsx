@@ -23,7 +23,6 @@ import { AccountMenu } from "./AccountMenu";
 import { openCommandPalette } from "./actions";
 import { ProjectMenu } from "./ProjectMenu";
 import { RunnerPill } from "./RunnerPill";
-import { SettingsButton, ThemeButton } from "./SettingsButton";
 
 export function TopBar() {
   const { t } = useI18n();
@@ -61,8 +60,6 @@ export function TopBar() {
           <span className="command-trigger-text">{t("topbar.searchOrCommand")}</span> <kbd>Ctrl/⌘ K</kbd>
         </button>
         <RunnerPill />
-        <SettingsButton />
-        <ThemeButton />
         <AccountMenu />
       </div>
     </header>

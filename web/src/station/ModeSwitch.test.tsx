@@ -51,10 +51,11 @@ describe("ModeSwitch", () => {
 
   // Settings is entered from the account menu; there both halves are the way
   // back, so neither is pressed.
-  it("has no Settings half, and presses neither half in Settings", () => {
-    useApp.setState({ preferences: { ...useApp.getState().preferences, projectMode: "settings" } });
+  it("switches between Board, Station and Settings, one pressed at a time", () => {
     render(<ModeSwitch />);
-    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(useApp.getState().preferences.projectMode).toBe("settings");
+    expect(screen.getByRole("button", { name: "Settings" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Board" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("button", { name: "Station" }).getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Board" }));
