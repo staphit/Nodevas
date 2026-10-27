@@ -85,16 +85,17 @@ test.describe("theme", () => {
 
     await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
     await page.getByRole("menuitem", { name: "設定", exact: true }).click();
-    await page.getByRole("button", { name: "外觀與語言" }).click();
-    const dialog = page.getByRole("region", { name: "專案設定" });
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
+    await page.getByRole("button", { name: /^編輯器、版面與主題包/ }).click();
+    const dialog = page.getByRole("region", { name: "編輯器、版面與主題包", exact: true });
     await dialog.getByRole("button", { name: "重設全部本機偏好" }).click();
     await page.getByRole("button", { name: "重設", exact: true }).click();
 
     // The reset wipes every local preference — including the pinned zh-TW
-    // language — so the dialog has to be found again under its English name.
+    // language — so the row has to be found again under its English name.
     // The notice itself was translated at click time, before the language
-    // flipped, so it still reads in Chinese inside the English dialog.
-    const resetDialog = page.getByRole("region", { name: "Project settings" });
+    // flipped, so it still reads in Chinese inside the English row.
+    const resetDialog = page.getByRole("region", { name: "Editor, layout and view packs", exact: true });
     await expect(resetDialog.getByText("已重設全部本機偏好")).toBeVisible();
     // Still in Settings: the reset does not throw you out of it.
     await page.getByRole("button", { name: "Board", exact: true }).click();

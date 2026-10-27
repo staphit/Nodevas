@@ -6,20 +6,13 @@ import { confirmAction } from "../ConfirmDialog";
 import type { SettingsNotify } from "./notify";
 import { ViewPacksEditor } from "./ViewPacksEditor";
 
-/** Local preferences only — nothing here reaches the project files. */
-export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
+/** Local preferences only — nothing here reaches the project files. The
+ * theme, the language and the tour; the rest of the local preferences are
+ * LayoutEditor's, a row of their own in Settings. */
+export function AppearanceEditor() {
   const { language, setLanguage, t } = useI18n();
-  const resetUIPreferences = useApp((s) => s.resetUIPreferences);
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
-  const updateUIPreference = useApp((s) => s.updateUIPreference);
-  const editorMode = usePreference("editorMode");
-  const editorFontSize = usePreference("editorFontSize");
-  const editorOutline = usePreference("editorOutline");
-  const fontSizes = Array.from(
-    { length: EDITOR_FONT_SIZE.max - EDITOR_FONT_SIZE.min + 1 },
-    (_, index) => EDITOR_FONT_SIZE.min + index,
-  );
 
   return (
     <section className="settings-section">
@@ -59,6 +52,26 @@ export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
           {t("appearance.replayTour")}
         </button>
       </div>
+    </section>
+  );
+}
+
+/** The editor's defaults, the layout resets and the view packs: local
+ * preferences too, less often changed. */
+export function LayoutEditor({ notify }: { notify: SettingsNotify }) {
+  const { t } = useI18n();
+  const resetUIPreferences = useApp((s) => s.resetUIPreferences);
+  const updateUIPreference = useApp((s) => s.updateUIPreference);
+  const editorMode = usePreference("editorMode");
+  const editorFontSize = usePreference("editorFontSize");
+  const editorOutline = usePreference("editorOutline");
+  const fontSizes = Array.from(
+    { length: EDITOR_FONT_SIZE.max - EDITOR_FONT_SIZE.min + 1 },
+    (_, index) => EDITOR_FONT_SIZE.min + index,
+  );
+
+  return (
+    <section className="settings-section">
       {/* The same preferences the drawer's toolbar changes: a default here is
           whatever the editor was last left at. */}
       <p className="settings-hint">{t("appearance.editorHint")}</p>

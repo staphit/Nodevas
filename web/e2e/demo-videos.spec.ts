@@ -941,11 +941,11 @@ test("usage", async ({ page }) => {
   await openBoard(page);
   await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
   const account = page.getByRole("button", { name: "Account and settings" });
-  say("Usage lives in Settings", "Next to runners, routing and the daily budget.");
+  say("Usage lives in Settings", "Agents › Advanced, beside routing and the daily budget.");
   await pause(page, 1200);
   await focus(page, account, { pad: 80, minW: 640, hold: 600 });
   const parts = page.getByRole("navigation", { name: "Settings" });
-  const region = page.getByRole("region", { name: "Usage" });
+  const region = page.getByRole("region", { name: "Usage", exact: true });
   await cut(page, async () => {
     await glide(page, account);
     await glide(page, page.getByRole("menuitem", { name: "Settings" }));
@@ -953,7 +953,9 @@ test("usage", async ({ page }) => {
     await pause(page, 300);
     await focus(page, parts, { pad: 40, minW: 720, d: 0 });
   });
-  await glide(page, parts.getByRole("button", { name: "Usage", exact: true }));
+  await glide(page, parts.getByRole("button", { name: /^Agents/ }));
+  await glide(page, page.getByRole("button", { name: /^Advanced/ }));
+  await glide(page, page.getByRole("button", { name: /^Usage details/ }));
   await expect(region).toBeVisible();
   await pause(page, 600);
   say("By day, agent and model", "Tokens and API-equivalent cost for the last 30 days.");
@@ -975,9 +977,9 @@ test("usage", async ({ page }) => {
   await pause(page, 500);
   await focus(page, region, { pad: 16, hold: 2400 });
   say("A daily budget", "Past the limit, the hub refuses new runs.");
-  const budget = parts.getByRole("button", { name: "Daily budget" });
+  const budget = page.getByRole("button", { name: /^Daily budget/ });
   await glide(page, budget);
-  const budgetRegion = page.getByRole("region", { name: "Daily budget" });
+  const budgetRegion = page.getByRole("region", { name: "Daily budget", exact: true });
   await expect(budgetRegion).toBeVisible();
   await pause(page, 400);
   await focus(page, [budgetRegion.getByText(/^Limits on your runs/), budgetRegion.getByRole("button", { name: "Save budget" })], {
@@ -1156,7 +1158,7 @@ test("two-factor-and-device-link", async ({ page }) => {
     await glide(page, account);
     await glide(page, page.getByRole("menuitem", { name: "Settings" }));
     await expect(parts).toBeVisible();
-    await glide(page, parts.getByRole("button", { name: "Your account" }));
+    await glide(page, parts.getByRole("button", { name: /^Account/ }));
     await pause(page, 600);
     await hidePointer(page);
     await focus(page, page.getByRole("button", { name: "Set up" }), { pad: 200, minW: 760, d: 0 });
@@ -1180,10 +1182,10 @@ test("two-factor-and-device-link", async ({ page }) => {
   await glide(page, saved);
   await pause(page, 900);
 
-  say("Link a new runner", "A one-time device link from Settings, Runners.");
-  const runners = page.getByRole("region", { name: "Runners" });
+  say("Link a new runner", "A one-time device link from Settings, Agents.");
+  const runners = page.getByRole("region", { name: "Agents", exact: true });
   await cut(page, async () => {
-    await glide(page, parts.getByRole("button", { name: "Runners" }));
+    await glide(page, parts.getByRole("button", { name: /^Agents/ }));
     await expect(runners).toBeVisible();
     await pause(page, 500);
     await hidePointer(page);

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePacks } from "../../game/packStore";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
-import { AppearanceEditor } from "./AppearanceEditor";
+import { AppearanceEditor, LayoutEditor } from "./AppearanceEditor";
 
 vi.mock("../SignIn", () => ({ useViewer: () => null }));
 
@@ -19,7 +19,7 @@ describe("AppearanceEditor", () => {
   it("replays the tour from Info, where its targets are", () => {
     const started = vi.fn(() => expect(useApp.getState().preferences.projectMode).toBe("info"));
     window.addEventListener("nodevas-tour-start", started);
-    render(<AppearanceEditor notify={notify()} />);
+    render(<AppearanceEditor />);
 
     fireEvent.click(screen.getByRole("button", { name: "Replay the tour" }));
     expect(started).toHaveBeenCalledTimes(1);
@@ -27,7 +27,7 @@ describe("AppearanceEditor", () => {
   });
 
   it("edits the same editor preferences the drawer uses", () => {
-    render(<AppearanceEditor notify={notify()} />);
+    render(<LayoutEditor notify={notify()} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Editing mode" }), { target: { value: "source" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Text size" }), { target: { value: "18" } });

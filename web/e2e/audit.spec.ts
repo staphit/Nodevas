@@ -70,7 +70,8 @@ async function mockAudit(page: Page) {
 async function openAudit(page: Page) {
   await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
   await page.getByRole("menuitem", { name: "設定", exact: true }).click();
-  await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: "稽核紀錄" }).click();
+  await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^帳號/ }).click();
+  await page.getByRole("button", { name: /^稽核紀錄/ }).click();
 }
 
 test("an administrator reads the audit trail and acknowledges fallbacks", async ({ page }) => {

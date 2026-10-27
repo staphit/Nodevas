@@ -5,7 +5,7 @@ import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { formatClock } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
-import { RunnersModal } from "./RunnersModal";
+import { AutoAcceptSettings } from "./RunnersModal";
 import { useRunners } from "./runnerStore";
 
 function runner(id: string, name: string, autoAccept?: AutoAcceptPolicy): Runner {
@@ -59,12 +59,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("RunnersModal auto-accept policies", () => {
+describe("Auto-accept policies (Settings › Agents › Advanced)", () => {
   it("shows each runner's policy read-only, with how to change it", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [strict, relaxed, off, old] });
     vi.spyOn(api, "getStepUp").mockResolvedValue({ required: true, active: false });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<AutoAcceptSettings />);
 
     const first = await screen.findByTestId("runner-policy-r1");
     expect(within(first).getByText("On")).toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("RunnersModal auto-accept policies", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [strict] });
     vi.spyOn(api, "getStepUp").mockResolvedValue({ required: true, active: false });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<AutoAcceptSettings />);
     expect(await screen.findByText(/Not verified: runners that ask for it/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Verify identity" }));
     expect(await screen.findByRole("dialog", { name: "Verify it's you" })).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("RunnersModal auto-accept policies", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [strict] });
     vi.spyOn(api, "getStepUp").mockResolvedValue({ required: true, active: true, until });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<AutoAcceptSettings />);
     expect(await screen.findByText(`Verified until ${formatClock(until)}`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Verify again" })).toBeInTheDocument();
   });
@@ -120,7 +120,7 @@ describe("RunnersModal auto-accept policies", () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [strict] });
     const status = vi.spyOn(api, "getStepUp").mockResolvedValue({ required: false, active: false });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<AutoAcceptSettings />);
     const policy = await screen.findByTestId("runner-policy-r1");
     await vi.waitFor(() => expect(status).toHaveBeenCalled());
     await vi.waitFor(() => expect(useStepUp.getState().status).toEqual({ required: false, active: false }));

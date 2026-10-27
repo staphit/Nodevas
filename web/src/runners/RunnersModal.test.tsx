@@ -5,7 +5,7 @@ import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useBudget } from "../runs/budgetStore";
-import { RunnersModal } from "./RunnersModal";
+import { RunnersPanel } from "./RunnersModal";
 import { useRunners } from "./runnerStore";
 
 const desktop: Runner = {
@@ -63,27 +63,66 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("RunnersModal", () => {
-  it("lists runners with their agents, models and repos", async () => {
+describe("RunnersPanel", () => {
+  it("lists each runner in one line, with its details folded away", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop, laptop] });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
 
     expect(await screen.findByText("desktop")).toBeInTheDocument();
     expect(screen.getByText("laptop")).toBeInTheDocument();
-    expect(screen.getByText(/Online/)).toBeInTheDocument();
-    expect(screen.getByText(/Never connected/)).toBeInTheDocument();
+    // Installed agents only; the missing gemini is a detail.
+    expect(screen.getByText("Online · claude · 1 repo")).toBeInTheDocument();
+    expect(screen.getByText("Never connected")).toBeInTheDocument();
+    expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
+    expect(screen.queryByText("github.com/staphit/Nodevas")).not.toBeInTheDocument();
+    // One primary button: Add runner.
+    expect(screen.getAllByRole("button").filter((button) => button.classList.contains("primary"))).toHaveLength(1);
+
+    const details = screen.getByRole("button", { name: "Details for desktop" });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("PC-01 · windows/amd64 · nodevas 1.2.3")).toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
     expect(screen.getByText("2.1.0 (Claude Code)")).toBeInTheDocument();
     expect(screen.getByText("CLI default ★")).toBeInTheDocument();
     expect(screen.getByText("opus")).toBeInTheDocument();
     expect(screen.getByText("Not installed")).toBeInTheDocument();
     expect(screen.getByText("github.com/staphit/Nodevas")).toBeInTheDocument();
+
+    fireEvent.click(details);
+    expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
+  });
+
+  it("opens the add form when asked from outside, once", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+    const opened = vi.fn();
+
+    const view = render(<RunnersPanel addRequested onAddOpened={opened} />);
+    expect(await screen.findByLabelText("Runner name")).toBeInTheDocument();
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    // Drawn again with the request answered, it starts closed.
+    view.unmount();
+    render(<RunnersPanel addRequested={false} onAddOpened={opened} />);
+    await screen.findByText(/No runners yet/);
+    expect(screen.queryByLabelText("Runner name")).not.toBeInTheDocument();
+  });
+
+  it("leaves auto-accept and notifications to their own places", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+    expect(screen.queryByText("Auto-accept")).not.toBeInTheDocument();
+    expect(screen.queryByText(/System notifications|toasts/)).not.toBeInTheDocument();
   });
 
   it("shows an empty state", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: null });
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     expect(await screen.findByText(/No runners yet/)).toBeInTheDocument();
   });
 
@@ -96,7 +135,7 @@ describe("RunnersModal", () => {
       .spyOn(api, "createRunner")
       .mockResolvedValue({ runner: laptop, token: "nvr_secret-token" });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     await screen.findByText(/No runners yet/);
 
     fireEvent.click(screen.getByRole("button", { name: "Add runner" }));
@@ -120,7 +159,7 @@ describe("RunnersModal", () => {
 
     render(
       <>
-        <RunnersModal onClose={vi.fn()} />
+        <RunnersPanel />
         <ConfirmDialogHost />
       </>,
     );
@@ -144,7 +183,7 @@ describe("RunnersModal", () => {
     const budget = vi.spyOn(api, "getRunBudget");
     useBudget.getState().reset();
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     await screen.findByText("desktop");
     expect(screen.queryByText("Daily budget")).not.toBeInTheDocument();
     expect(screen.queryByText("Routing rules")).not.toBeInTheDocument();

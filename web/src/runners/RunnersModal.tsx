@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { DialogFrame, useInlineDialog } from "../components/DialogFrame";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { Runner } from "../api";
 import { confirmAction } from "../components/ConfirmDialog";
-import { IconClose, IconComputer, IconShield, IconTrash } from "../icons";
+import { IconShield, IconTrash } from "../icons";
 import { MODE_INTERACTIVE } from "../runs/autoAccept";
 import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
 import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
 import { languageLocale, useI18n } from "../i18n";
-import { RunNotifySettings } from "../runs/RunToasts";
-import { CopyButton, LinkDeviceDialog, RunnerAccessTokenSettings } from "./LinkDevice";
+import { CopyButton, LinkDeviceDialog } from "./LinkDevice";
 import { useTeamServer } from "../components/SignIn";
 import { useRunners } from "./runnerStore";
 
@@ -125,7 +123,7 @@ export function AutoAcceptPolicyView({ runner }: { runner: Runner }) {
   );
 }
 
-/** The step-up line at the top of the Runners dialog: whether this browser
+/** The step-up line above the auto-accept policies: whether this browser
  * is verified, and the way to verify. Nothing on a hub without step-up. */
 function StepUpRow({ onVerify }: { onVerify: () => void }) {
   const { t } = useI18n();
@@ -150,10 +148,91 @@ function StepUpRow({ onVerify }: { onVerify: () => void }) {
   );
 }
 
+/** How many runners here auto-accept, of how many. */
+export function autoAcceptCounts(runners: readonly Runner[]): { on: number; total: number } {
+  return {
+    on: runners.filter((runner) => runner.info?.autoAccept?.enabled).length,
+    total: runners.length,
+  };
+}
+
+/**
+ * Every runner's auto-accept allowlist, read-only, with the step-up line that
+ * decides whether a strict runner takes this browser's runs: Settings ›
+ * Agents › Advanced › Auto-accept. Changing a policy is a command on that
+ * runner (AUTOACCEPT_COMMANDS); there is no way to do it from the web.
+ */
+export function AutoAcceptSettings() {
+  const { t } = useI18n();
+  const runners = useRunners((s) => s.runners);
+  const loaded = useRunners((s) => s.loaded);
+  const refresh = useRunners((s) => s.refresh);
+  const [stepUpOpen, setStepUpOpen] = useState(false);
+  const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+
+  useEffect(() => {
+    if (!useRunners.getState().loaded) void refresh();
+  }, [refresh]);
+  // W6: whether this browser is stepped up, asked afresh on every open.
+  useEffect(() => {
+    void useStepUp.getState().load();
+  }, []);
+
+  return (
+    <div className="runner-autoaccept-list">
+      <StepUpRow onVerify={() => setStepUpOpen(true)} />
+      {!loaded ? (
+        <p className="runner-empty">{t("common.loading")}</p>
+      ) : runners.length === 0 ? (
+        <p className="runner-empty">{t("runners.empty")}</p>
+      ) : (
+        <ul className="runner-list">
+          {runners.map((runner) => (
+            <li key={runner.id} className="runner-card">
+              <strong>{runner.name}</strong>
+              <AutoAcceptPolicyView runner={runner} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
+    </div>
+  );
+}
+
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+/** "Online · claude, codex · 2 repos": a runner in one line. */
+export function runnerSummary(runner: Runner, t: Translate): string {
+  const seen = runner.online
+    ? t("runners.online")
+    : runner.lastSeenAt
+      ? t("runners.lastSeen", { when: relativeTime(runner.lastSeenAt) })
+      : t("runners.neverConnected");
+  const info = runner.info;
+  if (!info) return seen;
+  const agents = (info.agents ?? []).filter((agent) => agent.installed).map((agent) => agent.kind);
+  const repos = info.repos?.length ?? 0;
+  return [
+    seen,
+    agents.join(", "),
+    repos === 1 ? t("settingsPage.runnerRepoOne") : t("settingsPage.runnerRepos", { count: repos }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * A runner in one line: whether it is up, its agents and how many repos.
+ * The long parts (the machine, every agent's version and models, the repos'
+ * paths) open under Details.
+ */
 function RunnerCard({ runner }: { runner: Runner }) {
   const { t } = useI18n();
   const revoke = useRunners((s) => s.revoke);
   const revoking = useRunners((s) => Boolean(s.revoking[runner.id]));
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
   const info = runner.info;
   const agents = info?.agents ?? [];
   const repos = info?.repos ?? [];
@@ -168,11 +247,11 @@ function RunnerCard({ runner }: { runner: Runner }) {
     if (ok) await revoke(runner.id);
   };
 
-  const seen = runner.online
-    ? t("runners.online")
-    : runner.lastSeenAt
-      ? t("runners.lastSeen", { when: relativeTime(runner.lastSeenAt) })
-      : t("runners.neverConnected");
+  const machine = info
+    ? [info.hostname, info.os && `${info.os}/${info.arch}`, info.version && `nodevas ${info.version}`]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   return (
     <li className="runner-card" data-testid={`runner-${runner.id}`}>
@@ -180,11 +259,18 @@ function RunnerCard({ runner }: { runner: Runner }) {
         <span className={`runner-dot${runner.online ? " online" : ""}`} aria-hidden="true" />
         <div className="runner-card-title">
           <strong>{runner.name}</strong>
-          <span>
-            {seen}
-            {runner.ownerName ? ` · ${runner.ownerName}` : ""}
-          </span>
+          <span>{runnerSummary(runner, t)}</span>
         </div>
+        <button
+          type="button"
+          className="runner-copy"
+          aria-expanded={open}
+          aria-controls={open ? detailsId : undefined}
+          aria-label={t("settingsPage.runnerDetailsFor", { name: runner.name })}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {t("settingsPage.runnerDetails")}
+        </button>
         <button
           type="button"
           className="runner-revoke"
@@ -197,60 +283,59 @@ function RunnerCard({ runner }: { runner: Runner }) {
         </button>
       </div>
 
-      {info && (
-        <div className="runner-meta">
-          {[info.hostname, info.os && `${info.os}/${info.arch}`, info.version && `nodevas ${info.version}`]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-      )}
+      {open && (
+        <div id={detailsId} className="runner-details">
+          {machine && <div className="runner-meta">{machine}</div>}
+          {runner.ownerName && <div className="runner-meta">{runner.ownerName}</div>}
 
-      {agents.length > 0 && (
-        <div className="runner-section">
-          <span className="runner-section-label">{t("runners.agents")}</span>
-          <ul className="runner-agents">
-            {agents.map((agent) => (
-              <li key={agent.kind} className={agent.installed ? "" : "missing"}>
-                <span className="runner-agent-kind">{agent.kind}</span>
-                <span className="runner-agent-version">
-                  {agent.installed ? agent.version || t("runners.installed") : agent.error || t("runners.notInstalled")}
-                </span>
-                {agent.installed && agent.models.length > 0 && (
-                  <span className="runner-models">
-                    {agent.models.map((model) => (
-                      <span
-                        key={model.id}
-                        className={`runner-model${model.default ? " default" : ""}`}
-                        title={model.default ? t("runners.defaultModel") : undefined}
-                      >
-                        {model.label || model.id}
-                        {model.default ? " ★" : ""}
+          {agents.length > 0 && (
+            <div className="runner-section">
+              <span className="runner-section-label">{t("runners.agents")}</span>
+              <ul className="runner-agents">
+                {agents.map((agent) => (
+                  <li key={agent.kind} className={agent.installed ? "" : "missing"}>
+                    <span className="runner-agent-kind">{agent.kind}</span>
+                    <span className="runner-agent-version">
+                      {agent.installed
+                        ? agent.version || t("runners.installed")
+                        : agent.error || t("runners.notInstalled")}
+                    </span>
+                    {agent.installed && agent.models.length > 0 && (
+                      <span className="runner-models">
+                        {agent.models.map((model) => (
+                          <span
+                            key={model.id}
+                            className={`runner-model${model.default ? " default" : ""}`}
+                            title={model.default ? t("runners.defaultModel") : undefined}
+                          >
+                            {model.label || model.id}
+                            {model.default ? " ★" : ""}
+                          </span>
+                        ))}
                       </span>
-                    ))}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-      {info && <AutoAcceptPolicyView runner={runner} />}
-
-      {info && (
-        <div className="runner-section">
-          <span className="runner-section-label">{t("runners.repos")}</span>
-          {repos.length > 0 ? (
-            <ul className="runner-repos">
-              {repos.map((repo) => (
-                <li key={repo.id}>
-                  <strong>{repo.name}</strong>
-                  <span>{repo.remote || repo.path}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <span className="runner-empty-inline">{t("runners.noRepos")}</span>
+          {info && (
+            <div className="runner-section">
+              <span className="runner-section-label">{t("runners.repos")}</span>
+              {repos.length > 0 ? (
+                <ul className="runner-repos">
+                  {repos.map((repo) => (
+                    <li key={repo.id}>
+                      <strong>{repo.name}</strong>
+                      <span>{repo.remote || repo.path}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="runner-empty-inline">{t("runners.noRepos")}</span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -259,12 +344,26 @@ function RunnerCard({ runner }: { runner: Runner }) {
 }
 
 /**
- * The machines that run agents for this hub. The hub only lists them and hands
- * out tokens; adding a repo or running anything happens on the runner itself.
+ * The machines that run agents for this hub, in Settings › Agents. The hub
+ * only lists them and hands out tokens; adding a repo or running anything
+ * happens on the runner itself.
+ *
+ * Each runner is one line with its details folded away; "Add runner", the
+ * one primary button here, opens its form in place. The daily budget,
+ * routing rules, each runner's auto-accept policy, usage and the runners'
+ * Access token are rows of Agents › Advanced beside this; browser
+ * notifications are under General.
  */
-export function RunnersModal({ onClose }: { onClose: () => void }) {
+export function RunnersPanel({
+  addRequested = false,
+  onAddOpened,
+}: {
+  /** Asked from outside (the search box) to open the add form; the panel
+   * opens it and says so, so the request does not outlive it. */
+  addRequested?: boolean;
+  onAddOpened?: () => void;
+}) {
   const { t } = useI18n();
-  const inline = useInlineDialog();
   const runners = useRunners((s) => s.runners);
   const loading = useRunners((s) => s.loading);
   const loaded = useRunners((s) => s.loaded);
@@ -274,7 +373,7 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   const create = useRunners((s) => s.create);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  // The token lives only in this dialog's state: closing it is the last time
+  // The token lives only in this panel's state: leaving it is the last time
   // anyone sees it, which is the point.
   const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
 
@@ -282,23 +381,15 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
     void refresh();
   }, [refresh]);
 
-  // W6: whether this browser is stepped up, asked afresh on every open.
-  const [stepUpOpen, setStepUpOpen] = useState(false);
-  const closeStepUp = useCallback(() => setStepUpOpen(false), []);
+  useEffect(() => {
+    if (!addRequested) return;
+    setAdding(true);
+    onAddOpened?.();
+  }, [addRequested, onAddOpened]);
+
   const teamServer = useTeamServer();
   const [linkOpen, setLinkOpen] = useState(false);
   const closeLink = useCallback(() => setLinkOpen(false), []);
-  useEffect(() => {
-    void useStepUp.getState().load();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !inline) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, inline]);
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -314,137 +405,109 @@ export function RunnersModal({ onClose }: { onClose: () => void }) {
   const loginCommand = `nodevas runner login --hub ${hub}`;
 
   return (
-    <DialogFrame className="runners-dialog" label={t("runners.title")} onDismiss={onClose}>
-      <header>
-        <span className="confirm-dialog-icon">
-          <IconComputer size={17} />
-        </span>
-        <div>
-          <h2>{t("runners.title")}</h2>
-          <p>{t("runners.description")}</p>
-        </div>
-        <button
-          type="button"
-          className="confirm-dialog-close"
-          data-dialog-close
-          onClick={onClose}
-          aria-label={t("common.close")}
-        >
-          <IconClose size={14} />
-        </button>
-      </header>
-
-      <div className="runners-body">
-        {created && (
-          <section className="runner-token" aria-label={t("runners.token")}>
-            <strong>{t("runners.tokenTitle", { name: created.name })}</strong>
-            <p className="runner-token-warning" role="alert">
-              {t("runners.tokenWarning")}
-            </p>
-            <div className="runner-token-row">
-              <input
-                readOnly
-                value={created.token}
-                aria-label={t("runners.token")}
-                onFocus={(event) => event.currentTarget.select()}
-              />
-              <CopyButton value={created.token} label={t("runners.copyToken")} />
-            </div>
-            <ol className="runner-steps">
-              <li>
-                {t("runners.stepLogin")}
-                <div className="runner-token-row">
-                  <code>{loginCommand}</code>
-                  <CopyButton value={loginCommand} label={t("runners.copyCommand")} />
-                </div>
-                <span className="runner-hint">{t("runners.stepAccess")}</span>
-              </li>
-              <li>
-                {t("runners.stepStart")}
-                <div className="runner-token-row">
-                  <code>nodevas runner</code>
-                </div>
-              </li>
-            </ol>
-            <button type="button" className="runner-done" onClick={() => setCreated(null)}>
-              {t("runners.tokenSaved")}
-            </button>
-          </section>
-        )}
-
-        {error && (
-          <div className="notify-message error" role="status">
-            {error}
+    <div className="runners-panel">
+      {created && (
+        <section className="runner-token" aria-label={t("runners.token")}>
+          <strong>{t("runners.tokenTitle", { name: created.name })}</strong>
+          <p className="runner-token-warning" role="alert">
+            {t("runners.tokenWarning")}
+          </p>
+          <div className="runner-token-row">
+            <input
+              readOnly
+              value={created.token}
+              aria-label={t("runners.token")}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <CopyButton value={created.token} label={t("runners.copyToken")} />
           </div>
-        )}
-
-        <StepUpRow onVerify={() => setStepUpOpen(true)} />
-
-        {!loaded || (loading && runners.length === 0) ? (
-          <p className="runner-empty">{t("common.loading")}</p>
-        ) : runners.length === 0 ? (
-          <p className="runner-empty">{t("runners.empty")}</p>
-        ) : (
-          <ul className="runner-list">
-            {runners.map((runner) => (
-              <RunnerCard key={runner.id} runner={runner} />
-            ))}
-          </ul>
-        )}
-
-        {adding && (
-          <form
-            className="runner-add"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <label htmlFor="runner-name">{t("runners.name")}</label>
-            <div className="runner-token-row">
-              <input
-                id="runner-name"
-                value={name}
-                maxLength={64}
-                autoFocus
-                placeholder={t("runners.namePlaceholder")}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <button type="submit" className="primary" disabled={creating || !name.trim()}>
-                {t("runners.create")}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* The daily budget and routing rules are Settings parts of their
-            own, beside this one. */}
-        <RunNotifySettings />
-        {/* Device links and the edge's Access token are for runners on
-              other machines reaching a team server; a standalone hub is only
-              reachable from this one, where "Add runner" is the way in. */}
-        {teamServer && <RunnerAccessTokenSettings />}
-      </div>
-
-      <footer>
-        {!adding && teamServer && (
-          <button type="button" onClick={() => setLinkOpen(true)}>
-            {t("runners.link.open")}
+          <ol className="runner-steps">
+            <li>
+              {t("runners.stepLogin")}
+              <div className="runner-token-row">
+                <code>{loginCommand}</code>
+                <CopyButton value={loginCommand} label={t("runners.copyCommand")} />
+              </div>
+              <span className="runner-hint">{t("runners.stepAccess")}</span>
+            </li>
+            <li>
+              {t("runners.stepStart")}
+              <div className="runner-token-row">
+                <code>nodevas runner</code>
+              </div>
+            </li>
+          </ol>
+          <button type="button" className="runner-done" onClick={() => setCreated(null)}>
+            {t("runners.tokenSaved")}
           </button>
-        )}
-        {!adding && (
-          <button type="button" className="primary" onClick={() => setAdding(true)}>
-            {t("runners.add")}
-          </button>
-        )}
-        {adding && (
+        </section>
+      )}
+
+      {error && (
+        <div className="notify-message error" role="status">
+          {error}
+        </div>
+      )}
+
+      {!loaded || (loading && runners.length === 0) ? (
+        <p className="runner-empty">{t("common.loading")}</p>
+      ) : runners.length === 0 ? (
+        <p className="runner-empty">{t("runners.empty")}</p>
+      ) : (
+        <ul className="runner-list">
+          {runners.map((runner) => (
+            <RunnerCard key={runner.id} runner={runner} />
+          ))}
+        </ul>
+      )}
+
+      {adding && (
+        <form
+          className="runner-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <label htmlFor="runner-name">{t("runners.name")}</label>
+          <div className="runner-token-row">
+            <input
+              id="runner-name"
+              value={name}
+              maxLength={64}
+              autoFocus
+              placeholder={t("runners.namePlaceholder")}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <button type="submit" className="primary" disabled={creating || !name.trim()}>
+              {t("runners.create")}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="runners-actions">
+        {adding ? (
           <button type="button" onClick={() => setAdding(false)}>
             {t("common.cancel")}
           </button>
+        ) : (
+          <>
+            <button type="button" className="primary" onClick={() => setAdding(true)}>
+              {t("runners.add")}
+            </button>
+            {/* Device links are for runners on other machines reaching a
+                team server; a standalone hub is only reachable from this
+                one, where "Add runner" is the way in. */}
+            {teamServer && (
+              <button type="button" onClick={() => setLinkOpen(true)}>
+                {t("runners.link.open")}
+              </button>
+            )}
+          </>
         )}
-      </footer>
-      {stepUpOpen && <StepUpDialog onClose={closeStepUp} />}
+      </div>
       {linkOpen && <LinkDeviceDialog onClose={closeLink} />}
-    </DialogFrame>
+    </div>
   );
 }

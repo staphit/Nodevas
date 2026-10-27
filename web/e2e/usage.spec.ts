@@ -100,7 +100,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 async function expectInViewport(page: Page, width: number) {
-  const dialog = page.getByRole("region", { name: "用量" });
+  const dialog = page.getByRole("region", { name: "用量", exact: true });
   const box = await dialog.boundingBox();
   expect(box).not.toBeNull();
   const gutter = width < 640 ? 15 : 0;
@@ -123,7 +123,7 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["設計稿"]);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-usage")));
 
-    const dialog = page.getByRole("region", { name: "用量" });
+    const dialog = page.getByRole("region", { name: "用量", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("$42.37").first()).toBeVisible();
     await expect(dialog.getByText(/token 沒有價格/)).toBeVisible();
@@ -160,7 +160,7 @@ test("usage opens from the agents panel", async ({ page }) => {
   });
   await page.getByRole("button", { name: "開啟 Agent 協作面板" }).click();
   await page.getByRole("dialog", { name: "Agent 協作網路" }).getByRole("button", { name: "用量" }).click();
-  const dialog = page.getByRole("region", { name: "用量" });
+  const dialog = page.getByRole("region", { name: "用量", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("$42.37").first()).toBeVisible();
   await shot(page, "desktop-dark");

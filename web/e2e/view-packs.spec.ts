@@ -33,8 +33,9 @@ test("view pack: installed from settings, drawn in Station, removed", async ({ p
 
   await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
   await page.getByRole("menuitem", { name: "設定", exact: true }).click();
-  await page.getByRole("button", { name: "外觀與語言" }).click();
-  const dialog = page.getByRole("region", { name: "專案設定" });
+  await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
+  await page.getByRole("button", { name: /^編輯器、版面與主題包/ }).click();
+  const dialog = page.getByRole("region", { name: "編輯器、版面與主題包", exact: true });
   await dialog.locator('input[type="file"][accept*="zip"]').setInputFiles(zipExample("candy-dungeon"));
   await expect(dialog.getByText("已安裝 candy-dungeon.zip。")).toBeVisible({ timeout: 15_000 });
   await expect(dialog.getByText("糖果地城")).toBeVisible();
