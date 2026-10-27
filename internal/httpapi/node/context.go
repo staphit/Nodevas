@@ -84,6 +84,7 @@ func (a *API) getNodeContext(c *gin.Context) {
 	c.JSON(200, map[string]any{
 		"node": n, "content": content, "rev": rev,
 		"status":   engine.ComputeStatuses(g, state)[id],
+		"nodeType": g.TypeOf(n),
 		"upstream": upstream, "downstream": downstream,
 	})
 }

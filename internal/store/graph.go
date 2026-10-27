@@ -62,6 +62,11 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 			return "", fmt.Errorf("cannot remove node %q through graph save; use the node delete endpoint", node.ID)
 		}
 	}
+	// Node types decide what agents may do, so an agent may neither redefine
+	// them nor retype a node into or out of a type it may not complete.
+	if err := checkNodeTypesEdit(actor, currentGraph.NodeTypes, g.NodeTypes); err != nil {
+		return "", err
+	}
 	data, err := s.marshalGraph(g)
 	if err != nil {
 		return "", err
@@ -78,6 +83,11 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 		// (existing == nil) is anyone's to add.
 		if err := checkNodeWrite(actor, existing); err != nil {
 			return "", err
+		}
+		if existing != nil {
+			if err := checkKindChange(actor, currentGraph, existing.Kind, n.Kind); err != nil {
+				return "", err
+			}
 		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {

@@ -61,15 +61,20 @@ type getNodeInput struct {
 }
 
 type getNodeOutput struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title,omitempty"`
-	Kind     string   `json:"kind,omitempty"`
-	Status   string   `json:"status"`
-	Priority string   `json:"priority,omitempty"`
-	Assignee string   `json:"assignee,omitempty"`
-	Deadline string   `json:"deadline,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Requires string   `json:"requires,omitempty"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	// TypeLabel names the node's type; AgentMode says whether agents work it
+	// ("dispatch"), only break it down ("autopilot"), or leave it to people
+	// ("none").
+	TypeLabel string   `json:"typeLabel,omitempty"`
+	AgentMode string   `json:"agentMode,omitempty"`
+	Status    string   `json:"status"`
+	Priority  string   `json:"priority,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
+	Deadline  string   `json:"deadline,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Requires  string   `json:"requires,omitempty"`
 	// WriteAccess is who may modify this node: absent means everyone; "worker",
 	// "orchestrator" and "human-only" each refuse anything below that rank.
 	WriteAccess string   `json:"writeAccess,omitempty"`
@@ -188,6 +193,9 @@ func readNode(ctx context.Context, client *Client, in getNodeInput) (getNodeOutp
 		Status:      content.Status,
 		Upstream:    content.Upstream,
 		Downstream:  content.Downstream,
+	}
+	if content.NodeType != nil {
+		out.TypeLabel, out.AgentMode = content.NodeType.Label, string(content.NodeType.AgentMode)
 	}
 	out.Body, out.Truncated, out.NextOffset = sliceBody(content.Content, in.Offset, in.MaxBodyChars)
 	return out, nil

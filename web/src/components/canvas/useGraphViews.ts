@@ -9,7 +9,8 @@
 
 import { useState } from "react";
 import { useI18n } from "../../i18n";
-import { reportError } from "../../store";
+import { reportError, useApp } from "../../store";
+import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
 import type { GraphNode, SavedView, Status } from "../../types";
@@ -64,11 +65,29 @@ export function useGraphViews({
 
   const applyBatchStatus = (status: Status) => {
     if (!selectedIDs.length) return;
+    // A type with no status, or one that settles itself, is not set by hand:
+    // those are left out and the notice says how many.
+    const graph = useApp.getState().graph;
+    const settable = selectedIDs.filter((id) => {
+      const kind = graph?.nodes?.find((node) => node.id === id)?.kind;
+      const { completion } = nodeTypeById(graph, kind);
+      return completion !== "none" && completion !== "auto";
+    });
+    const skipped = selectedIDs.length - settable.length;
+    if (!settable.length) {
+      setGraphNotice({ text: t("canvasOps.statusBatchSkipped", { count: skipped }), kind: "error" });
+      return;
+    }
     setShortcutBusy(true);
-    void Promise.all(selectedIDs.map((id) => setStatus(id, status, t("canvasOps.batchUpdateActor"))))
+    void Promise.all(settable.map((id) => setStatus(id, status, t("canvasOps.batchUpdateActor"))))
       .then(() =>
         setGraphNotice({
-          text: t("canvasOps.statusBatchUpdated", { count: selectedIDs.length }),
+          text: skipped
+            ? `${t("canvasOps.statusBatchUpdated", { count: settable.length })} ${t(
+                "canvasOps.statusBatchSkipped",
+                { count: skipped },
+              )}`
+            : t("canvasOps.statusBatchUpdated", { count: settable.length }),
           kind: "ok",
         }),
       )

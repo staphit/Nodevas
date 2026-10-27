@@ -89,6 +89,8 @@
 .appearance-shape-mark.shape-round { border-radius: 5px; }
 .appearance-shape-mark.shape-pill { border-radius: 999px; }
 .appearance-shape-mark.shape-ellipse { border-radius: 50%; }
+.appearance-shape-mark.shape-dashed { border-radius: 3px; border-style: dashed; }
+.appearance-shape-mark.shape-thick { border-radius: 4px; border-width: 3px; }
 .appearance-shape-mark.shape-diamond,
 .appearance-shape-mark.shape-hexagon {
   border-color: transparent;
@@ -111,6 +113,11 @@
   clip-path: polygon(14% 0, 86% 0, 100% 50%, 86% 100%, 14% 100%, 0 50%);
   background: currentColor;
   border: 0;
+}
+.appearance-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
 }
 .appearance-slider {
   display: flex;

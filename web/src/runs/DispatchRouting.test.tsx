@@ -282,7 +282,8 @@ describe("DispatchDialog routing", () => {
     });
     render(<DispatchDialog nodeId="alpha" onClose={vi.fn()} onCreated={vi.fn()} />);
     const note = await screen.findByTestId("dispatch-rule-note");
-    expect(note).toHaveTextContent("From rule: Node kind = task");
+    // A kind rule reads as the type's name.
+    expect(note).toHaveTextContent("From rule: Node kind = Task");
     expect(note).toHaveTextContent("This runner does not offer gemini/flash; using claude/sonnet.");
   });
 

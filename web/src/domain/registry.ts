@@ -130,7 +130,7 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   workflow: {
     id: "workflow",
     title: "工作流程定義",
-    sourceOfTruth: "graph.yaml → ui.customStatuses / ui.planStatuses",
+    sourceOfTruth: "graph.yaml → ui.customStatuses / ui.planStatuses / node_types",
     diskPath: "graph.yaml",
     api: ["GET /api/graph", "PUT /api/graph"],
     owner: "Project Settings／Workflow",

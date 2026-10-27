@@ -21,6 +21,8 @@ import { NodeLinkPicker } from "../NodeLinkPicker";
 import { confirmAction } from "../ConfirmDialog";
 import { NodeAppearance } from "./NodeAppearance";
 import { useI18n } from "../../i18n";
+import { isKnownKind, normalizeKind } from "../../domain/graph/nodeTypes";
+import { nodeTypeLabel, useNodeTypes } from "../../nodeTypeTheme";
 
 /** Reports a command that failed; a success needs no word of its own. */
 function reportCommand(run: Promise<CommandResult>) {
@@ -156,6 +158,10 @@ export function NodeMetaForm({ id }: { id: string }) {
     .join("|");
   useEffect(() => setDraftLinks(null), [id, linksSignature]);
 
+  const nodeTypes = useNodeTypes();
+  const currentKind = normalizeKind(node?.kind) || "task";
+  const legacyKind = isKnownKind(graph, currentKind) ? "" : currentKind;
+
   const commitMeta = useCallback(
     (field: "kind" | "priority" | "writeAccess", value: string) => {
       reportCommand(updateNodeMetadata(id, { [field]: value } as NodeMetadataPatch));
@@ -216,24 +222,36 @@ export function NodeMetaForm({ id }: { id: string }) {
           <label htmlFor={`kind-${id}`}>{t("node.meta.kind")}</label>
           <select
             id={`kind-${id}`}
-            value={node?.kind ?? "task"}
+            value={currentKind}
             onChange={(e) => commitMeta("kind", e.target.value)}
           >
-            {(
-              [
-                "task",
-                "scene",
-                "event",
-                "choice",
-                "gate",
-                "start",
-                "end",
-              ] as const
-            ).map((value) => (
-              <option key={value} value={value}>
-                {t(`node.meta.kind.${value}`)}
+            <optgroup label={t("nodeType.builtin")}>
+              {nodeTypes
+                .filter((type) => type.builtin)
+                .map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {nodeTypeLabel(type, t)}
+                  </option>
+                ))}
+            </optgroup>
+            {nodeTypes.some((type) => !type.builtin) && (
+              <optgroup label={t("nodeType.custom")}>
+                {nodeTypes
+                  .filter((type) => !type.builtin)
+                  .map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.label}
+                    </option>
+                  ))}
+              </optgroup>
+            )}
+            {/* A free-form kind from an older file reads as Task but is shown
+                as written, so changing it is a choice rather than an accident. */}
+            {legacyKind && (
+              <option value={legacyKind} disabled>
+                {legacyKind}
               </option>
-            ))}
+            )}
           </select>
           <label htmlFor={`entry-${id}`}>{t("node.meta.entry")}</label>
           <select

@@ -5,7 +5,7 @@
 // without React. Labels are not here either: skins put them through t().
 
 import type { AgentAsk, AgentMessage } from "../api/agents";
-import type { LogicGateOperator, NodeKind } from "../types";
+import type { AgentMode, LogicGateOperator, NodeKind } from "../types";
 
 /** What clicking an entity opens. A skin maps each kind to an existing UI
  * action (open the node, open the run in the drawer, show a diff, open the
@@ -172,6 +172,8 @@ export interface Monster {
   nodeId: string;
   title: string;
   kind: NodeKind | string;
+  /** Whether an agent may be sent at it; absent reads as "dispatch". */
+  agentMode?: AgentMode;
   /** The node's priority, as difficulty. */
   priority: string;
   status: string;

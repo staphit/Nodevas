@@ -149,6 +149,12 @@
   background: var(--surface-2);
   color: var(--text);
 }
+/* The header's type chip: the card's label, and the way to change it. */
+.drawer-type-button .col-card-type {
+  max-width: 120px;
+  font-size: 11px;
+  line-height: 16px;
+}
 
 /* The strip of open nodes: only drawn once there is more than one. */
 .tab-bar {
@@ -373,6 +379,15 @@
 }
 .status-control-shape {
   display: inline-flex;
+}
+.status-control-readonly {
+  font-size: 12px;
+  color: var(--text);
+}
+.status-control.no-status .status-control-readonly,
+.status-control-hint {
+  color: var(--text-2);
+  font-size: 11px;
 }
 .status-control.staged .status-control-select {
   border-color: var(--accent);

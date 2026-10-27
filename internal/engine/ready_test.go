@@ -459,3 +459,92 @@ func TestASettledNodeIsNotReportedAsBlocked(t *testing.T) {
 		}
 	}
 }
+
+const flowGraph = `
+version: 1
+nodes:
+  - id: open
+    kind: start
+  - id: work
+    requires: open
+  - id: close
+    kind: end
+    requires: work
+  - id: research
+    kind: note
+  - id: review
+    kind: gate
+    requires: research
+`
+
+func parseFlow(t *testing.T) *Graph {
+	t.Helper()
+	g, err := ParseGraph([]byte(flowGraph))
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	return g
+}
+
+func TestStartAndEndSettleThemselves(t *testing.T) {
+	g := parseFlow(t)
+	st := ComputeStatuses(g, stateWith(nil))
+	if st["open"] != StatusDone {
+		t.Errorf("start = %s, want done at once", st["open"])
+	}
+	if st["close"] != StatusReady {
+		t.Errorf("end = %s, want ready while work is open", st["close"])
+	}
+	st = ComputeStatuses(g, stateWith(map[string]Status{"work": StatusDone}))
+	if st["close"] != StatusDone {
+		t.Errorf("end = %s, want done once work is done", st["close"])
+	}
+}
+
+func TestAnExplicitStatusOnAnAutomaticNodeWins(t *testing.T) {
+	g := parseFlow(t)
+	st := ComputeStatuses(g, stateWith(map[string]Status{"open": StatusSkipped}))
+	if st["open"] != StatusSkipped {
+		t.Fatalf("start = %s, want the explicit skipped", st["open"])
+	}
+}
+
+func TestAnAutomaticNodeBehindAHalfWiredGateStaysReady(t *testing.T) {
+	g := parseFlow(t)
+	g.UI = &UIState{LogicGates: []LogicGate{{ID: "g1", Operator: "and", Inputs: []string{"work"}, Output: "close"}}}
+	st := ComputeStatuses(g, stateWith(map[string]Status{"work": StatusDone}))
+	if st["close"] != StatusReady {
+		t.Fatalf("end = %s, want ready behind an incomplete gate", st["close"])
+	}
+}
+
+func TestANotePrerequisiteNeverBlocks(t *testing.T) {
+	g := parseFlow(t)
+	readiness := ComputeReadiness(g, stateWith(nil))
+	if !strings.Contains(strings.Join(ids(readiness.Ready), ","), "review") {
+		t.Fatalf("review held back by a note: ready=%v blocked=%v", ids(readiness.Ready), ids(readiness.Blocked))
+	}
+}
+
+func TestNotesAndAutomaticNodesAreNotWork(t *testing.T) {
+	g := parseFlow(t)
+	readiness := ComputeReadiness(g, stateWith(nil))
+	listed := append(ids(readiness.Ready), ids(readiness.Blocked)...)
+	for _, id := range listed {
+		if id == "research" || id == "open" || id == "close" {
+			t.Fatalf("%s was listed: %v", id, listed)
+		}
+	}
+	if readiness.Busy != 0 {
+		t.Fatalf("busy = %d, want 0 (start's derived done is not work)", readiness.Busy)
+	}
+	for _, task := range readiness.Ready {
+		want := "dispatch"
+		if task.ID == "review" {
+			want = "none"
+		}
+		if task.AgentMode != want {
+			t.Errorf("%s agentMode = %q, want %q", task.ID, task.AgentMode, want)
+		}
+	}
+}

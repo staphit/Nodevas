@@ -37,6 +37,18 @@
   padding-inline: calc(var(--card-w, 152px) * 0.15);
   text-align: center;
 }
+/* Reference material (Note): outside the flow, so it reads lighter. */
+.col-card.shape-dashed {
+  border: 1.5px dashed var(--card-border-color, var(--text-2));
+  border-radius: 6px;
+  background: var(--card-bg, transparent);
+  color: var(--text-2);
+}
+/* A big requirement (Goal): the heavier frame says "this one holds others". */
+.col-card.shape-thick {
+  border-width: 3.5px;
+  border-radius: 10px;
+}
 /* ---- outline for the clipped shapes ---- */
 /* A border drawn on the box is cut off by the clip, which used to leave a
    sliver near one vertex and nothing along the edges. Instead the element
@@ -123,9 +135,15 @@
 .col-card.shape-pill .col-card-head {
   justify-content: center;
 }
+/* Too narrow for the assignee and marker, but the type label stays: it is
+   what tells a reader what the shape means. */
+.col-card.shape-diamond .col-card-meta > :not(.col-card-type),
+.col-card.shape-pill .col-card-meta > :not(.col-card-type) {
+  display: none;
+}
 .col-card.shape-diamond .col-card-meta,
 .col-card.shape-pill .col-card-meta {
-  display: none;
+  justify-content: center;
 }
 .col-card.shape-ellipse .col-card-meta,
 .col-card.shape-hexagon .col-card-meta {
@@ -151,6 +169,35 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+/* The card's type label: small, in the type's colour, first on the meta line. */
+.col-card-type {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  padding: 0 5px;
+  border: 1px solid var(--card-type-color, var(--text-2));
+  border-radius: 999px;
+  /* The type colour is picked for its hue, not its contrast (an orange
+     Review on a white card is ~2:1), so the text leans toward the theme's
+     text colour: darker on light, lighter on dark, still reading as the hue. */
+  color: color-mix(in srgb, var(--card-type-color, var(--text-2)) 55%, var(--text));
+  font-size: calc(10px * var(--card-font-scale, 1));
+  line-height: calc(13px * var(--card-font-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-card-meta .col-card-type {
+  flex: none;
+}
+/* A type with no status (Note) carries no status tint. */
+.col-card.no-status {
+  background: var(--card-bg, var(--surface));
+}
+.col-card.no-status:not(.shape-dashed) {
+  border-top-color: var(--card-border-color, var(--border));
 }
 
 /* Explicit text placement wins over the shape's default, which is why these

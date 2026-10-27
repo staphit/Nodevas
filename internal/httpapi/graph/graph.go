@@ -32,9 +32,12 @@ func (a *API) getGraph(c *gin.Context) {
 	}
 	if c.Query("view") == "outline" {
 		// Agent outlines need topology and status, not UI state or validation.
+		// The layout and the resolved node types tell a planner which kinds
+		// fit this board and which of them agents may work.
 		c.JSON(200, map[string]any{
 			"graph": &engine.Graph{Version: g.Version, Nodes: g.Nodes, Edges: g.Edges},
 			"rev":   rev, "statuses": engine.ComputeStatuses(g, rs),
+			"layout": g.Type, "nodeTypes": g.ResolvedNodeTypes(),
 		})
 		return
 	}

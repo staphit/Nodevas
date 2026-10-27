@@ -32,9 +32,17 @@ type StartRequest struct {
 	ActorID, ActorName string
 	// SteppedUpAt is the dispatcher's step-up (RFC3339Nano), or "".
 	SteppedUpAt string
-	// LoadNode returns the node's title and content; found false means the
-	// graph has no such node. It is called once the runner checks pass.
-	LoadNode func() (title, content string, found bool, err error)
+	// LoadNode returns the node's title, content and type; found false means
+	// the graph has no such node. It is called once the runner checks pass.
+	LoadNode func() (NodeInfo, bool, error)
+}
+
+// NodeInfo is what a run needs to know about its node. Type is the node
+// type's id and AgentMode its agent mode, which decides whether the node may
+// be dispatched at all.
+type NodeInfo struct {
+	Title, Content, Type string
+	AgentMode            engine.AgentMode
 }
 
 // Start-refusal codes (StartError.Code).
@@ -43,6 +51,8 @@ const (
 	StartNotFound     = "not_found"
 	StartPrecondition = "precondition"
 	StartBudget       = "budget"
+	// StartNodeType: the node's type does not let agents work it.
+	StartNodeType = "node_type"
 )
 
 // StartError is why Start refused a run, worded for a person.
@@ -53,6 +63,9 @@ type StartError struct {
 	Msg  string
 	// Budget is the owner's budget for StartBudget.
 	Budget runnerwire.BudgetStatus
+	// NodeType and AgentMode name the refusing type for StartNodeType.
+	NodeType  string
+	AgentMode engine.AgentMode
 }
 
 func (e *StartError) Error() string { return e.Msg }
@@ -64,7 +77,7 @@ func (e *StartError) Is(target error) bool {
 		return target == ErrInvalid
 	case StartNotFound:
 		return target == ErrNotFound
-	case StartPrecondition, StartBudget:
+	case StartPrecondition, StartBudget, StartNodeType:
 		return target == ErrPrecondition
 	}
 	return false
@@ -153,13 +166,24 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		return Record{}, &StartError{Code: StartBudget, Msg: BudgetMessage(budget), Budget: budget}
 	}
 
-	title, content, found, err := req.LoadNode()
+	node, found, err := req.LoadNode()
 	if err != nil {
 		return Record{}, err
 	}
 	if !found {
 		return Record{}, &StartError{Code: StartNotFound, What: "node", Msg: "node not found"}
 	}
+	if !AgentModeAllows(node.AgentMode, body.Kind) {
+		typeName := node.Type
+		if typeName == "" {
+			typeName = "task"
+		}
+		return Record{}, &StartError{
+			Code: StartNodeType, NodeType: node.Type, AgentMode: node.AgentMode,
+			Msg: "a " + typeName + " node cannot be dispatched to an agent",
+		}
+	}
+	title, content := node.Title, node.Content
 	if title == "" {
 		title = body.NodeID
 	}
@@ -195,6 +219,17 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		return Record{}, err
 	}
 	return d.Submit(ctx, record), nil
+}
+
+// AgentModeAllows is the node-type gate on a run: an implement run needs a
+// type agents are dispatched to; a plan run (breaking the node down) also
+// accepts an Autopilot type such as Goal. An empty mode allows nothing, so a
+// caller that forgets to resolve the type fails closed.
+func AgentModeAllows(mode engine.AgentMode, kind string) bool {
+	if kind == runnerwire.JobPlan {
+		return mode == engine.AgentDispatch || mode == engine.AgentAutopilot
+	}
+	return mode == engine.AgentDispatch
 }
 
 // CheckAgainstHello resolves the request's agent, model and repo against

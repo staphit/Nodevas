@@ -21,6 +21,7 @@ import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
 import { RunModeTabs } from "./RunModeTabs";
 import { useRuns } from "./runStore";
+import { useNodeType } from "../nodeTypeTheme";
 
 /** The hub's cap on GET /api/runs. */
 const RUN_LIST_CAP = 50;
@@ -818,6 +819,9 @@ export function NodeRuns({ id }: { id: string }) {
   const loadRuns = useRuns((s) => s.loadRuns);
   const selectRun = useRuns((s) => s.selectRun);
   const openDispatch = useRuns((s) => s.openDispatch);
+  // Only a type an agent may work gets a "new run" button; a Goal's runs come
+  // from Autopilot and a Review's from nobody.
+  const canDispatch = useNodeType({ nodeId: id }).agentMode === "dispatch";
 
   useEffect(() => {
     void loadRuns(id);
@@ -860,10 +864,12 @@ export function NodeRuns({ id }: { id: string }) {
           {t("runs.title")}
           {list.length > 0 && <span className="node-runs-count">{list.length}</span>}
         </h3>
-        <button type="button" className="run-dispatch-button" onClick={() => openDispatch(id)}>
-          <IconSend size={13} />
-          <span>{t("runs.newRun")}</span>
-        </button>
+        {canDispatch && (
+          <button type="button" className="run-dispatch-button" onClick={() => openDispatch(id)}>
+            <IconSend size={13} />
+            <span>{t("runs.newRun")}</span>
+          </button>
+        )}
       </div>
 
       {error && (

@@ -15,7 +15,9 @@
 
 import { isBuiltinPlanStatus } from "../plan";
 import type {
+  BuiltinNodeKind,
   BuiltinPlanStatus,
+  CustomNodeTypeId as WireCustomNodeTypeId,
   BuiltinStatus,
   CustomStatus,
   HistoryEvent,
@@ -56,6 +58,15 @@ export type BuiltinMilestoneType = BuiltinPlanStatus;
 export type MilestoneTypeDefinition = PlanStatusDefinition;
 /** One expected milestone on a node. */
 export type PlannedMilestone = PlanMilestone;
+
+// ---------------------------------------------------------------------------
+// Node types (graph.yaml-owned)
+// ---------------------------------------------------------------------------
+
+/** Engine-defined node type ids. */
+export type BuiltinNodeType = BuiltinNodeKind;
+/** Project-defined node type id (`graph.yaml → node_types`). */
+export type CustomNodeTypeId = WireCustomNodeTypeId;
 
 // ---------------------------------------------------------------------------
 // UI copy

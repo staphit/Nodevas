@@ -14,6 +14,7 @@ import {
   operationScope,
 } from "./operations";
 import { coalesceRequest } from "./coalesce";
+import { nodeTypeErrorMessage } from "../nodeTypeErrors";
 import { generations } from "./internals";
 import { pushUndo } from "./undo";
 import type { AppSlice, RunSlice } from "./types";
@@ -88,7 +89,8 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
       get().settleOperation(scope, { status: "saved", operation: name });
       return commandSucceeded(name, scope, undefined);
     } catch (e) {
-      const message = describeFailure(e, "套用實際狀態失敗");
+      const message =
+        nodeTypeErrorMessage(e, nodeId) ?? describeFailure(e, "套用實際狀態失敗");
       get().settleOperation(scope, { status: "error", operation: name, message });
       return commandFailed(name, scope, message);
     }

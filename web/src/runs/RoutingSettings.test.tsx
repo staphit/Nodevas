@@ -334,3 +334,53 @@ describe("rule helpers", () => {
     ]);
   });
 });
+
+describe("RoutingSettings: node kinds", () => {
+  it("offers the types agents work, custom ones included, and keeps a stale value", async () => {
+    useApp.setState({
+      graph: {
+        version: 1,
+        nodes: [],
+        nodeTypes: [
+          {
+            id: "custom-type-1",
+            label: "Draft",
+            agentMode: "dispatch",
+            completion: "anyone",
+            countsInProgress: true,
+          },
+          {
+            id: "custom-type-2",
+            label: "Character",
+            agentMode: "none",
+            completion: "none",
+            countsInProgress: false,
+          },
+        ],
+      },
+    });
+    vi.spyOn(api, "getRouting").mockResolvedValue({
+      rules: [
+        rule({ id: "a", match: "kind", value: "custom-type-1" }),
+        rule({ id: "b", match: "kind", value: "custom-type-9" }),
+      ],
+    });
+    render(<RoutingSettings />);
+    await screen.findByRole("listitem", { name: "Rule 2" });
+
+    const kind = combo(ruleItem(1), "Kind");
+    expect(kind.value).toBe("custom-type-1");
+    const options = within(kind).getAllByRole("option").map((option) => option.textContent);
+    expect(options).toContain("Draft");
+    expect(options).toContain("Goal");
+    // Not agent work: not a route.
+    expect(options).not.toContain("Character");
+    expect(options).not.toContain("Review");
+    expect(within(ruleItem(1)).getByText(/Node kind = Draft/)).toBeInTheDocument();
+
+    // A type that is gone stays visible as written.
+    const stale = combo(ruleItem(2), "Kind");
+    expect(stale.value).toBe("custom-type-9");
+    expect(within(stale).getByRole("option", { name: "custom-type-9" })).toBeInTheDocument();
+  });
+});

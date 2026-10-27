@@ -24,6 +24,7 @@ import { useCoarsePointer, useTouchCapable } from "./touch";
 import type { LaneContextMenu } from "./LaneView";
 import { useI18n } from "../i18n";
 import { useApp, usePreference } from "../store";
+import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
 
 /**
  * How far the graph will stretch its cards and their text away from the sizes
@@ -163,6 +164,7 @@ export function BoardToolbar({
   planNotice,
 }: BoardToolbarProps) {
   const { t } = useI18n();
+  const nodeTypes = useNodeTypes();
   // Two different questions, so two different answers. The gesture control has
   // to exist wherever a finger can land — an iPad with a keyboard attached
   // reports a fine primary pointer, and hiding the control there would take
@@ -361,15 +363,33 @@ export function BoardToolbar({
           </button>
         )}
         {!collapsed && (
-          <button
-            type="button"
-            className="board-primary-action"
-            onClick={() => openNodeCreationMenu(viewportCreationAnchor())}
-            title={t("board.newNodeTitle")}
-          >
-            <IconPlus size={13} />
-            {t("board.newNode")}
-          </button>
+          // Split: the button makes a Task, the caret picks any other type —
+          // the project's own included.
+          <span className="board-new-node">
+            <button
+              type="button"
+              className="board-primary-action"
+              onClick={() => openNodeCreationMenu(viewportCreationAnchor())}
+              title={t("board.newNodeTitle")}
+            >
+              <IconPlus size={13} />
+              {t("board.newNode")}
+            </button>
+            <OverflowMenu
+              className="board-overflow"
+              triggerClassName="board-primary-action board-new-node-caret"
+              placement="fixed"
+              align="start"
+              label={t("board.newNodeType")}
+              trigger={<span aria-hidden>▾</span>}
+              items={nodeTypes.map((type) => ({
+                id: type.id,
+                label: nodeTypeLabel(type, t),
+                onSelect: () =>
+                  openNodeCreationMenu({ ...viewportCreationAnchor(), nodeKind: type.id }),
+              }))}
+            />
+          </span>
         )}
         {isGraph && !collapsed && touchCapable && (
           <div className="gesture-mode" role="group" aria-label={t("board.gestureLabel")}>

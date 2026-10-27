@@ -307,6 +307,82 @@ describe("LaneView", () => {
     expect(card.title).toContain("起始節點");
   });
 
+  it("labels every card with its type and draws the type's shape", () => {
+    useApp.setState({
+      graph: {
+        ...graph([
+          { id: "a", title: "設計稿" },
+          { id: "b", title: "編輯審稿", kind: "gate" },
+          { id: "c", title: "暗線", kind: "custom-type-1" },
+          { id: "d", title: "改過形狀", kind: "gate" },
+          { id: "e", title: "角色表", kind: "note" },
+        ]),
+        nodeTypes: [
+          {
+            id: "custom-type-1",
+            label: "伏筆",
+            shape: "diamond",
+            color: "#c9a7ff",
+            agentMode: "none",
+            completion: "anyone",
+            countsInProgress: true,
+          },
+        ],
+        ui: { nodeStyles: { d: { shape: "pill" } } },
+      },
+    });
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const card = (id: string) =>
+      container.querySelector<HTMLElement>(`.col-card[data-node-id="${id}"]`)!;
+
+    expect(card("a").querySelector(".col-card-type")).toHaveTextContent("任務");
+    expect(card("a")).toHaveClass("shape-round");
+    expect(card("b").querySelector(".col-card-type")).toHaveTextContent("審核");
+    expect(card("b")).toHaveClass("shape-hexagon");
+    expect(card("c").querySelector(".col-card-type")).toHaveTextContent("伏筆");
+    expect(card("c")).toHaveClass("shape-diamond");
+    // The chip is the meta line's first member.
+    expect(card("b").querySelector(".col-card-meta")?.firstElementChild).toHaveClass(
+      "col-card-type",
+    );
+    // The type is in what a screen reader and the tooltip say.
+    expect(card("b")).toHaveAccessibleName("編輯審稿 · 審核 · 準備");
+    expect(card("b").title).toContain("類型：審核");
+    // A per-node shape still wins over the type's.
+    expect(card("d")).toHaveClass("shape-pill");
+    expect(card("d")).not.toHaveClass("shape-hexagon");
+    // A note has no status: no status class and no status marker.
+    expect(card("e")).toHaveClass("no-status", "shape-dashed");
+    expect(card("e").className).not.toMatch(/status-/);
+    expect(card("e").querySelector(".col-card-head svg")).toBeNull();
+    expect(card("e")).toHaveAccessibleName("角色表 · 筆記");
+  });
+
+  it("creates any type from the New node caret, Task from the button", async () => {
+    useApp.setState({
+      graph: {
+        ...graph([{ id: "a", title: "設計稿" }]),
+        nodeTypes: [
+          {
+            id: "custom-type-1",
+            label: "伏筆",
+            agentMode: "none",
+            completion: "anyone",
+            countsInProgress: true,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    await user.click(screen.getByRole("button", { name: "選擇新節點的類型" }));
+    const menu = screen.getByRole("menu", { name: "選擇新節點的類型" });
+    expect(within(menu).getByRole("menuitem", { name: "審核" })).toBeInTheDocument();
+    await user.click(within(menu).getByRole("menuitem", { name: "伏筆" }));
+    expect(screen.getByRole("combobox", { name: "類型" })).toHaveValue("custom-type-1");
+  });
+
   it("opens a short node menu from a right click or the card's ⋯", async () => {
     const user = userEvent.setup();
     const { container } = render(<LaneView variant="graph" {...paneProps} />);

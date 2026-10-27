@@ -292,6 +292,25 @@
 .board-primary-action:active {
   transform: translateY(1px);
 }
+/* "+ New node" and its type caret read as one split button. */
+.board-new-node {
+  display: inline-flex;
+  align-items: stretch;
+}
+.board-new-node > .board-primary-action {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.board-new-node > .board-overflow {
+  display: inline-flex;
+}
+.board-new-node .board-new-node-caret {
+  height: 100%;
+  padding-inline: 5px;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 
 .board-tool-button {
   padding: 3px 8px;

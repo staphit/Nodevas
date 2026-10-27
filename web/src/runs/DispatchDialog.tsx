@@ -28,7 +28,8 @@ import {
   trimAgentModel,
 } from "./AgentModelFields";
 import { budgetExceededText } from "./BudgetSettings";
-import { matchTakesValue, routeLabel } from "./RoutingSettings";
+import { matchTakesValue, routeLabel, useRouteKinds } from "./RoutingSettings";
+import { nodeTypeErrorMessage } from "../nodeTypeErrors";
 import { fetchRouteSuggestion, useRouting } from "./routingStore";
 import { useBudget } from "./budgetStore";
 import { useRuns } from "./runStore";
@@ -87,6 +88,7 @@ export function DispatchDialog({
   onCreated: (run: Run) => void;
 }) {
   const { t } = useI18n();
+  const { kindLabel } = useRouteKinds();
   const viewer = useViewer();
   const nodeTitle = useApp(
     (s) => s.graph?.nodes?.find((node) => node.id === nodeId)?.title || nodeId,
@@ -234,7 +236,7 @@ export function DispatchDialog({
     routingRules?.find((rule) => rule.id === suggestion?.ruleId)?.value ??
     "";
   const ruleNote = suggestion
-    ? t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue) })
+    ? t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
     : "";
   const wanted = suggestion ? (suggestion.pipeline?.implement ?? suggestion.target) : undefined;
   const ruleMisses: string[] = [];
@@ -285,8 +287,11 @@ export function DispatchDialog({
     } catch (caught) {
       const text = caught instanceof Error ? caught.message : String(caught);
       const overBudget = caught instanceof RequestError && caught.status === 429;
+      const typeRefusal = nodeTypeErrorMessage(caught, nodeId);
       setError(
-        caught instanceof AuthError && caught.status === 403
+        typeRefusal
+          ? typeRefusal
+          : caught instanceof AuthError && caught.status === 403
           ? t("runs.permissionDenied", { message: text })
           : // On this route a 409 only ever means the runner cannot take runs.
             caught instanceof ConflictError

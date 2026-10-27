@@ -53,7 +53,10 @@ type Graph struct {
 	Nodes   []*Node        `yaml:"nodes" json:"nodes"`
 	Edges   []*Edge        `yaml:"edges,omitempty" json:"edges,omitempty"`
 	Flags   map[string]any `yaml:"flags,omitempty" json:"flags,omitempty"`
-	UI      *UIState       `yaml:"ui,omitempty" json:"ui,omitempty"`
+	// NodeTypes is the project's sparse type list: every custom type, plus a
+	// built-in only when its shape or colour is overridden (nodetypes.go).
+	NodeTypes []NodeTypeDef `yaml:"node_types,omitempty" json:"nodeTypes,omitempty"`
+	UI        *UIState      `yaml:"ui,omitempty" json:"ui,omitempty"`
 }
 
 // User is a project-level assignable person. ID stays stable when the display
@@ -67,7 +70,7 @@ type User struct {
 type Node struct {
 	ID       string `yaml:"id" json:"id"`
 	Title    string `yaml:"title,omitempty" json:"title,omitempty"`
-	Kind     string `yaml:"kind,omitempty" json:"kind,omitempty"`         // task|scene|choice|gate|start|end
+	Kind     string `yaml:"kind,omitempty" json:"kind,omitempty"`         // built-in type id, custom-type-*, or "" (task)
 	Priority string `yaml:"priority,omitempty" json:"priority,omitempty"` // urgent|high|medium|low
 	Assignee string `yaml:"assignee,omitempty" json:"assignee,omitempty"`
 	// Deadline is a local time "2006-01-02T15:04" or date "2006-01-02"
@@ -176,8 +179,9 @@ type NodeStyle struct {
 	// top/middle/bottom. Empty means the shape's default.
 	Align  string `yaml:"align,omitempty" json:"align,omitempty"`
 	VAlign string `yaml:"valign,omitempty" json:"valign,omitempty"`
-	// Shape is the drawn outline: rect (default), round, pill, ellipse,
-	// diamond or hexagon. Purely visual — layout still uses the box.
+	// Shape overrides the node type's outline: rect, round, pill, ellipse,
+	// diamond, hexagon, dashed or thick. Empty means the type's default.
+	// Purely visual — layout still uses the box.
 	Shape string `yaml:"shape,omitempty" json:"shape,omitempty"`
 }
 

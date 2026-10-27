@@ -16,6 +16,10 @@
  * staged status with no visible way to apply it would be a change that
  * silently never happens, hence the button. The optional note travels with the
  * entry and sits behind a small toggle, since most changes do not carry one.
+ *
+ * The node's type can take the picker away: a type with no status (a Note)
+ * says so instead, and one that settles itself once its prerequisites do
+ * (Start, End) shows the state it is in, read-only.
  */
 
 import { useEffect, useState } from "react";
@@ -29,6 +33,7 @@ import {
 import { localizedStatusLabel, useI18n } from "../../i18n";
 import type { Status } from "../../types";
 import { OperationStatus } from "../InteractionPrimitives";
+import { useNodeType } from "../../nodeTypeTheme";
 
 export function LifecyclePanel({ id }: { id: string }) {
   const { t } = useI18n();
@@ -38,6 +43,7 @@ export function LifecyclePanel({ id }: { id: string }) {
   const stageLifecycleStatus = useApp((state) => state.stageLifecycleStatus);
   const commitStagedLifecycle = useApp((state) => state.commitStagedLifecycle);
   const operation = useOperation(operationScope.lifecycle(id));
+  const { completion } = useNodeType({ nodeId: id });
 
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const status: Status = statuses[id] ?? "ready";
@@ -55,6 +61,27 @@ export function LifecyclePanel({ id }: { id: string }) {
   useEffect(() => {
     if (!unsaved) setNoteOpen(false);
   }, [unsaved]);
+
+  if (completion === "none") {
+    return (
+      <div className="status-control no-status" role="group" aria-label={t("lifecycle.title")}>
+        <span className="status-control-readonly">{t("lifecycle.noStatus")}</span>
+      </div>
+    );
+  }
+  if (completion === "auto") {
+    return (
+      <div className="status-control auto-status" role="group" aria-label={t("lifecycle.title")}>
+        <span className="status-control-shape" aria-hidden="true">
+          <StatusShape status={visibleStatus} definitions={customStatuses} />
+        </span>
+        <span className="status-control-readonly">
+          {localizedStatusLabel(visibleStatus, customStatuses)}
+        </span>
+        <small className="status-control-hint">{t("lifecycle.autoStatus")}</small>
+      </div>
+    );
+  }
 
   return (
     <div

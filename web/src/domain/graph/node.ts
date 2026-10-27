@@ -23,11 +23,13 @@ import {
   logicGateOwningEdge,
 } from "./logicGate";
 import { edgeRelation } from "./edgeStyle";
+import { isKnownKind, normalizeKind } from "./nodeTypes";
 import { appendRequirement, editableGateOperator, topLevelOp } from "./requires";
 
 export interface NodeMetadataPatch {
   title?: string;
-  kind?: NodeKind;
+  /** A type id; normalized and checked against the project's types. */
+  kind?: NodeKind | string;
   priority?: GraphNode["priority"];
   /** "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm", local time. Empty clears it. */
   deadline?: string;
@@ -59,7 +61,15 @@ export function updateNodeMetadata(
 ): void {
   const node = findNode(graph, nodeId);
   if ("title" in patch) node.title = blankToUndefined(patch.title);
-  if ("kind" in patch) node.kind = (blankToUndefined(patch.kind) as NodeKind) ?? undefined;
+  if ("kind" in patch) {
+    const kind = normalizeKind(patch.kind);
+    // A legacy free-form kind may be written back unchanged; a new value has
+    // to name a type this project knows.
+    if (kind !== (node.kind ?? "") && !isKnownKind(graph, kind)) {
+      throw invalid("未知的節點類型。");
+    }
+    node.kind = (kind as NodeKind) || undefined;
+  }
   if ("priority" in patch) {
     node.priority = blankToUndefined(patch.priority) as GraphNode["priority"];
   }

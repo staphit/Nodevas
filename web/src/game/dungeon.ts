@@ -9,11 +9,9 @@ import { analyzeGraph, isSettledStatus, type GraphAnalysis } from "../analysis";
 import type { AutopilotView } from "../api/autopilot";
 import { runFinal, type Run } from "../api/runs";
 import { logicGateRelation } from "../domain/graph/logicGate";
+import { nodeTypeOf } from "../domain/graph/nodeTypes";
 import type { Graph, GraphNode, HistoryEvent, Status } from "../types";
 import type { Boss, Door, Dungeon, Monster, MonsterState, Party } from "./world";
-
-/** Node kinds that mark the flow rather than hold work: no HP, no monster. */
-export const MARKER_KINDS: ReadonlySet<string> = new Set(["start", "end", "event"]);
 
 /** Task states a party stands on. */
 const PARTY_STATES: ReadonlySet<string> = new Set(["running", "waiting_review", "waiting_human"]);
@@ -40,9 +38,16 @@ export interface DungeonInputs {
   now: number;
 }
 
-/** Whether a node counts toward the boss's HP and is drawn as a monster. */
-export function countsAsWork(node: Pick<GraphNode, "kind">): boolean {
-  return !MARKER_KINDS.has(node.kind ?? "");
+/**
+ * Whether a node counts toward the boss's HP and is drawn as a monster: its
+ * type counts in progress. Start, End and Note mark or annotate the flow
+ * rather than hold work, and neither does a custom type that says so.
+ */
+export function countsAsWork(
+  node: Pick<GraphNode, "kind">,
+  graph?: Graph | null,
+): boolean {
+  return nodeTypeOf(graph, node).countsInProgress;
 }
 
 export function monsterState(
@@ -111,13 +116,14 @@ export function buildDungeon(inputs: DungeonInputs): Dungeon {
     }
   }
 
-  const monsters: Monster[] = nodes.filter(countsAsWork).map((node) => {
+  const monsters: Monster[] = nodes.filter((node) => countsAsWork(node, graph)).map((node) => {
     const status = statuses[node.id] ?? "ready";
     const state = monsterState(node.id, status, analysis, graph);
     return {
       nodeId: node.id,
       title: node.title ?? "",
       kind: node.kind ?? "",
+      agentMode: nodeTypeOf(graph, node).agentMode,
       priority: node.priority ?? "",
       status,
       state,

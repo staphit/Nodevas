@@ -119,3 +119,18 @@ describe("CommandPalette: what the top bar no longer shows", () => {
     expect(screen.queryByRole("textbox", { name: "Search" })).toBeNull();
   });
 });
+
+describe("CommandPalette: new nodes by type", () => {
+  it("creates a Review from \"New node: Review\"", async () => {
+    const createNode = vi.fn(async () => "n1");
+    useApp.setState({
+      createNode,
+      graph: { version: 1, nodes: [], edges: [] },
+    });
+    const user = userEvent.setup();
+    open();
+    search("Review");
+    await user.click(screen.getByRole("option", { name: /^New node: Review/ }));
+    expect(createNode).toHaveBeenCalledWith({ title: expect.any(String), kind: "gate" });
+  });
+});

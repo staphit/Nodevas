@@ -66,7 +66,9 @@ export function monsterActions(monster: Monster, ctx: MonsterActionContext): Mon
     actions.push({ id: "runs", label: t("game.action.runs"), run: () => openNodeRuns(monster.nodeId) });
   }
   if (monster.state === "attackable") {
-    if (ctx.canDispatch) {
+    // Only a type an agent may take on (a Review or Decision waits for a
+    // person) is offered as a fight.
+    if (ctx.canDispatch && (monster.agentMode ?? "dispatch") === "dispatch") {
       // The dispatch dialog asks before anything runs: an "attack" costs
       // tokens, so it is never a single click.
       actions.push({

@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import type { Graph } from "../../types";
-import { AssigneeField } from "./NodeMetaForm";
+import { AssigneeField, NodeMetaForm } from "./NodeMetaForm";
 
 const updateNode = vi.fn(async () => ({ ok: true }));
 
@@ -49,5 +49,46 @@ describe("AssigneeField", () => {
     fireEvent.change(input, { target: { value: "Cid" } });
     input.blur();
     expect(updateNode).toHaveBeenCalledWith({ type: "node.assignByName", nodeId: "a", name: "Cid" });
+  });
+});
+
+describe("NodeMetaForm type", () => {
+  const updateNodeMetadata = vi.fn(async () => ({ ok: true as const }));
+
+  function form(kind: string) {
+    useApp.setState({
+      graph: {
+        version: 1,
+        nodes: [{ id: "a", title: "A", kind }],
+        edges: [],
+        nodeTypes: [
+          {
+            id: "custom-type-1",
+            label: "Foreshadowing",
+            agentMode: "none",
+            completion: "none",
+            countsInProgress: false,
+          },
+        ],
+      } as Graph,
+      updateNodeMetadata: updateNodeMetadata as never,
+    });
+    render(<NodeMetaForm id="a" />);
+    return screen.getByRole("combobox", { name: "Type" }) as HTMLSelectElement;
+  }
+
+  it("lists built-in and custom types, and commits the id", () => {
+    const select = form("gate");
+    expect(select.value).toBe("gate");
+    expect(within(select).getByRole("group", { name: "Built-in" })).toBeInTheDocument();
+    expect(within(select).getByRole("group", { name: "Custom" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "custom-type-1" } });
+    expect(updateNodeMetadata).toHaveBeenCalledWith("a", { kind: "custom-type-1" });
+  });
+
+  it("shows a legacy free-form kind as written, without offering it", () => {
+    const select = form("bug");
+    expect(select.value).toBe("bug");
+    expect(within(select).getByRole("option", { name: "bug" })).toBeDisabled();
   });
 });

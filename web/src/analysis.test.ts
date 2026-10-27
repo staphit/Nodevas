@@ -392,3 +392,71 @@ describe("deprecated status spreads", () => {
     expect(analysis.deprecatedNodeIds.has("e")).toBe(false);
   });
 });
+
+describe("node types in the analysis", () => {
+  // start → write → end, with a note wired in as a prerequisite of `write`.
+  function story(): Graph {
+    return {
+      version: 1,
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "bible", kind: "note" },
+        { id: "write", kind: "scene", requires: "start and bible" },
+        { id: "end", kind: "end", requires: "write" },
+      ],
+      edges: [
+        { from: "start", to: "write" },
+        { from: "bible", to: "write" },
+        { from: "write", to: "end" },
+      ],
+      ui: {
+        plans: {
+          bible: [
+            { status: "started", date: "2000-01-01" },
+            { status: "done", date: "2000-01-02" },
+          ],
+        },
+      },
+    };
+  }
+
+  it("never lets a note block, nor counts it late or blocked", () => {
+    const analysis = analyzeGraph(story(), { start: "done" }, new Date("2026-01-01T12:00:00"));
+    expect(analysis.blocked.has("write")).toBe(false);
+    expect(analysis.blocking.has("bible")).toBe(false);
+    expect(analysis.blocked.has("bible")).toBe(false);
+    expect(analysis.overdue.has("bible")).toBe(false);
+    expect(analysis.entryNodeIds.has("bible")).toBe(false);
+  });
+
+  it("keeps notes off the critical path and weighs Start and End nothing", () => {
+    const analysis = analyzeGraph(story(), {});
+    // The path ends on the last node that is work, never on an End marker.
+    expect(analysis.criticalPath).toEqual(["start", "write"]);
+    expect(analysis.criticalNodeIds.has("bible")).toBe(false);
+    expect(analysis.criticalNodeIds.has("end")).toBe(false);
+    // Only the scene takes a day.
+    expect(analysis.criticalDays).toBe(1);
+    expect(analysis.hasCycle).toBe(false);
+  });
+
+  it("treats a custom type with no status like a note", () => {
+    const graph: Graph = {
+      version: 1,
+      nodes: [{ id: "who", kind: "custom-type-1" }, { id: "b", requires: "who" }],
+      edges: [{ from: "who", to: "b" }],
+      nodeTypes: [
+        {
+          id: "custom-type-1",
+          label: "角色",
+          agentMode: "none",
+          completion: "none",
+          countsInProgress: false,
+        },
+      ],
+    };
+    const analysis = analyzeGraph(graph, {});
+    expect(analysis.blocked.has("b")).toBe(false);
+    expect(analysis.criticalPath).toEqual(["b"]);
+  });
+});

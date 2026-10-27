@@ -41,6 +41,7 @@ export type SettingsRow =
   | "usage"
   | "accessToken"
   | "statuses"
+  | "nodeTypes"
   | "milestones"
   | "people"
   | "backup"

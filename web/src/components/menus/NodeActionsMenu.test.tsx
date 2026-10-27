@@ -122,6 +122,39 @@ describe("NodeActionsMenu", () => {
     expect(agent).toHaveFocus();
   });
 
+  it("follows the node type's agent mode", async () => {
+    act(() => useApp.getState().updateUIPreference("agentWorkstation", true));
+    const user = userEvent.setup();
+
+    // A Review is for a person: no agent submenu at all.
+    const review = render(
+      <div role="menu">
+        <NodeActionsMenu
+          contextMenu={{ kind: "node-actions", nodeId: "a", x: 0, y: 0 }}
+          graph={{ version: 1, nodes: [{ id: "a", title: "Alpha", kind: "gate" }], edges: [] }}
+          nodeTitle={() => "Alpha"}
+          openTab={vi.fn(async () => {})}
+          selectNode={vi.fn()}
+          duplicateNode={vi.fn(async () => "a2")}
+          deleteNode={vi.fn(async () => {})}
+          createGroupFromSelection={vi.fn()}
+          setContextMenu={vi.fn()}
+        />
+      </div>,
+    );
+    expect(screen.queryByRole("menuitem", { name: "Dispatch to agent" })).not.toBeInTheDocument();
+    review.unmount();
+
+    // A Goal goes to Autopilot, never to a single dispatch.
+    menu({ graph: { version: 1, nodes: [{ id: "a", title: "Alpha", kind: "goal" }], edges: [] } });
+    await user.click(screen.getByRole("menuitem", { name: "Dispatch to agent" }));
+    const submenu = screen.getByRole("menu", { name: "Dispatch to agent" });
+    expect(within(submenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Autopilot",
+      "Runs",
+    ]);
+  });
+
   it("moves with the arrow keys", async () => {
     const user = userEvent.setup();
     menu();

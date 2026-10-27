@@ -69,6 +69,8 @@ import { useAgents } from "../../agents/agentStore";
 import { RunCardBadge } from "../../runs/RunChanges";
 import { AutopilotCardBadge } from "../../autopilot/AutopilotCardBadge";
 import { safeCssColor } from "../../cssColor";
+import { nodeTypeOf } from "../../domain/graph/nodeTypes";
+import { NodeTypeChip, effectiveShape, nodeTypeLabel } from "../../nodeTypeTheme";
 
 type ConnectionHandlers = ReturnType<typeof useConnectionDrag>["handlers"];
 type CardResizeHandlers = ReturnType<typeof useCardResize>["handlers"];
@@ -237,9 +239,16 @@ export function GraphCanvas({
         : analysis.entryNodeIds.has(id)
           ? { kind: "start", label: t("canvas.entryLabel") }
           : null;
-  const cardDetails = (node: GraphNode, status: Status, assigned: string) => [
+  const cardDetails = (
+    node: GraphNode,
+    status: Status,
+    assigned: string,
+    typeLabel: string,
+    hasStatus: boolean,
+  ) => [
     node.title || node.id,
-    `${localizedStatusLabel(status, customStatuses)} · ${assigned}`,
+    t("board.card.type", { type: typeLabel }),
+    hasStatus ? `${localizedStatusLabel(status, customStatuses)} · ${assigned}` : assigned,
     ...(analysis.blocked.has(node.id) ? [t("board.card.waitingDetail")] : []),
     ...(analysis.blocking.has(node.id) ? [t("board.card.blockingDetail")] : []),
     ...(analysis.entryNodeIds.has(node.id)
@@ -515,6 +524,12 @@ export function GraphCanvas({
         const isDragging = drag?.ids.includes(n.id) === true && drag.moved;
         const isConnectionTarget = connectionDrag?.targetId === n.id;
         const nodeStyle = graph?.ui?.nodeStyles?.[n.id];
+        // The type decides the default look; a per-node style still wins.
+        const nodeType = nodeTypeOf(graph, n);
+        const typeLabel = nodeTypeLabel(nodeType, t);
+        const shape = effectiveShape(nodeStyle, nodeType);
+        const hasStatus = nodeType.completion !== "none";
+        const borderColor = safeCssColor(nodeStyle?.borderColor || nodeType.color);
         const filteredOut = !matchesViewFilter(n);
         const resizing = cardResize?.nodeId === n.id ? cardResize : null;
         const liveWidth = resizing ? resizing.width : c.width;
@@ -527,7 +542,7 @@ export function GraphCanvas({
             data-node-id={n.id}
             role="button"
             tabIndex={0}
-            className={`col-card status-${st}${errorNodes.has(n.id) ? " has-error" : ""}${
+            className={`col-card ${hasStatus ? `status-${st}` : "no-status"}${errorNodes.has(n.id) ? " has-error" : ""}${
               activeTab === n.id ? " active" : ""
             }${selectedGraphNodeIDs.has(n.id) ? " selected" : ""}${
               isDragging ? " lifting" : ""
@@ -549,7 +564,7 @@ export function GraphCanvas({
                   ? " connection-target invalid"
                   : " connection-target valid"
                 : ""
-            }${nodeStyle?.shape ? ` shape-${nodeStyle.shape}` : ""}${
+            }${shape !== "rect" ? ` shape-${shape}` : ""}${
               nodeStyle?.align ? ` align-${nodeStyle.align}` : ""
             }${nodeStyle?.valign ? ` valign-${nodeStyle.valign}` : ""}`}
             style={{
@@ -563,8 +578,9 @@ export function GraphCanvas({
               // Fill and outline travel as variables: a clipped shape
               // draws its own edge and cannot use the box border.
               ["--card-bg" as string]: safeCssColor(nodeStyle?.color),
-              ["--card-border-color" as string]: safeCssColor(nodeStyle?.borderColor),
-              borderColor: safeCssColor(nodeStyle?.borderColor),
+              ["--card-border-color" as string]: borderColor,
+              ["--card-type-color" as string]: safeCssColor(nodeType.color) || undefined,
+              borderColor,
               color: safeCssColor(nodeStyle?.textColor),
               transform: isDragging
                 ? `translate(${drag.dx}px, ${drag.dy}px)`
@@ -620,15 +636,21 @@ export function GraphCanvas({
               if (connectionDrag?.sourceId === n.id) connectionHandlers.cancel();
             }}
             aria-selected={selectedGraphNodeIDs.has(n.id)}
-            title={cardDetails(n, st, assigned).join("\n")}
+            aria-label={[
+              n.title || n.id,
+              typeLabel,
+              ...(hasStatus ? [localizedStatusLabel(st, customStatuses)] : []),
+            ].join(" · ")}
+            title={cardDetails(n, st, assigned, typeLabel, hasStatus).join("\n")}
           >
             <span className="col-card-head">
-              <StatusShape status={st} definitions={customStatuses} />
+              {hasStatus && <StatusShape status={st} definitions={customStatuses} />}
               <span className="col-card-title">{n.title || n.id}</span>
               <RunCardBadge nodeId={n.id} />
               <AutopilotCardBadge nodeId={n.id} />
             </span>
             <span className="col-card-meta">
+              <NodeTypeChip type={nodeType} />
               <span
                 className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
                 data-assignee-prefix={t("canvas.assigneePrefix")}

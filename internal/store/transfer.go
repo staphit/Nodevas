@@ -66,8 +66,10 @@ type nodeTransferPayload struct {
 	users          []engine.User
 	planStatuses   []engine.PlanStatusDefinition
 	customStatuses []engine.StatusDefinition
-	flags          map[string]any
-	journal        []engine.HistoryEvent
+	// nodeTypes are the source's custom type definitions the nodes use.
+	nodeTypes []engine.NodeTypeDef
+	flags     map[string]any
+	journal   []engine.HistoryEvent
 }
 
 // nodeTransferResult reports what landed in the target project.

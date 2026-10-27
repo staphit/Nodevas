@@ -23,7 +23,7 @@ import (
 type createNodeInput struct {
 	Title       string   `json:"title" jsonschema:"what the task is, in a few words"`
 	Body        string   `json:"body,omitempty" jsonschema:"the markdown ticket: what to do, and how to tell when it is done"`
-	Kind        string   `json:"kind,omitempty" jsonschema:"task, scene, choice, gate, start or end (default task)"`
+	Kind        string   `json:"kind,omitempty" jsonschema:"type id: task (default), goal, scene, event, gate (review: a person approves), choice (decision), start, end, note (reference, no status), or a project custom-type-* id from get_graph_outline nodeTypes"`
 	Priority    string   `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
 	Assignee    string   `json:"assignee,omitempty" jsonschema:"who should do it; must already be a person on this board"`
 	Deadline    string   `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or YYYY-MM-DDTHH:mm"`
@@ -53,7 +53,7 @@ type updateBodyOutput struct {
 type updateMetaInput struct {
 	ID          string   `json:"id" jsonschema:"the node id"`
 	Title       *string  `json:"title,omitempty"`
-	Kind        *string  `json:"kind,omitempty"`
+	Kind        *string  `json:"kind,omitempty" jsonschema:"type id, as create_node's kind"`
 	Priority    *string  `json:"priority,omitempty" jsonschema:"urgent, high, medium or low"`
 	Assignee    *string  `json:"assignee,omitempty"`
 	Deadline    *string  `json:"deadline,omitempty" jsonschema:"YYYY-MM-DD, or empty to clear it"`

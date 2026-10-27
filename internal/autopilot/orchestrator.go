@@ -384,18 +384,34 @@ func (o *Orchestrator) syncMembers(w *work) {
 		}
 		t.Title = w.dag.title(id)
 		t.Upstream = slices.Clone(w.dag.upstream[id])
+		// A task waiting for a person (a Review, a Decision) is re-read on
+		// every pass: the person finishing it on the board is what releases it.
+		if t.Hold == runnerwire.HoldPerson && t.RunID == "" && t.PipelineID == "" && !final1(t.State) {
+			switch {
+			case skippedOnBoard(statuses[id]):
+				t.Hold = ""
+				setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[id])+" on the board")
+			case engine.Settled(statuses[id], boardStatuses(w.graph)):
+				t.Hold = ""
+				setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, string(statuses[id])+" on the board")
+			}
+			continue
+		}
 		if t.RunID != "" || t.PipelineID != "" || final1(t.State) || t.Hold != "" {
 			continue
 		}
+		nodeType := w.dag.nodeType(id)
 		switch {
-		case !w.dag.dispatchable(id):
-			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, "not a task ("+w.dag.nodes[id].Kind+"): nothing to implement")
 		case skippedOnBoard(statuses[id]):
 			// Set aside on the board (a revision's replan skips what it made
 			// obsolete): it settles what waits on it, and shows as skipped.
 			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[id])+" on the board")
 		case engine.Settled(statuses[id], boardStatuses(w.graph)):
 			setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, "already "+string(statuses[id])+" on the board")
+		case !w.dag.dispatchable(id) && (nodeType.Completion == engine.CompletionPeople || nodeType.Completion == engine.CompletionAnyone):
+			hold(t, runnerwire.HoldPerson, "", "a "+nodeType.Label+" node: waiting for a person")
+		case !w.dag.dispatchable(id):
+			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, "not a task ("+nodeType.Label+"): nothing to implement")
 		case w.dag.inCycle(id):
 			setState(t, runnerwire.TaskFailed, "", "on a dependency cycle: it can never become ready")
 		default:
@@ -836,8 +852,11 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 	record, err := o.opts.Runs.Start(ctx, runs.StartRequest{
 		Body: body, Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName,
 		SteppedUpAt: rec.SteppedUpAt,
-		LoadNode: func() (string, string, bool, error) {
-			return t.Title, content, true, nil
+		// The DAG only schedules dispatchable members, so the type gate in
+		// runs.Start passes; it is still stated rather than assumed.
+		LoadNode: func() (runs.NodeInfo, bool, error) {
+			nodeType := w.dag.nodeType(t.NodeID)
+			return runs.NodeInfo{Title: t.Title, Content: content, Type: nodeType.ID, AgentMode: nodeType.AgentMode}, true, nil
 		},
 	})
 	if err != nil {
@@ -983,6 +1002,9 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 	}
 	if g == nil || g.NodeByID(in.GoalNodeID) == nil {
 		return runnerwire.AutopilotView{}, fmt.Errorf("%w: goal node", ErrNotFound)
+	}
+	if goalType := g.TypeOf(g.NodeByID(in.GoalNodeID)); goalType.AgentMode != engine.AgentDispatch && goalType.AgentMode != engine.AgentAutopilot {
+		return runnerwire.AutopilotView{}, fmt.Errorf("%w: a %s node cannot be an Autopilot goal", ErrNodeType, goalType.Label)
 	}
 	d := buildDAG(g, in.GoalNodeID)
 	if len(d.order) == 0 {

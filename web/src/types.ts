@@ -1,6 +1,56 @@
 // Mirrors internal/engine JSON shapes.
 
-export type NodeKind = "task" | "scene" | "choice" | "gate" | "event" | "start" | "end" | "";
+/** Built-in node type ids. Mirrors `internal/engine/nodetypes.go`. */
+export type BuiltinNodeKind =
+  | "task"
+  | "goal"
+  | "scene"
+  | "event"
+  | "gate"
+  | "choice"
+  | "start"
+  | "end"
+  | "note";
+/** A project-defined node type (`graph.yaml → node_types`). */
+export type CustomNodeTypeId = `custom-type-${string}`;
+/** A node's type id. "" means Task. */
+export type NodeKind = BuiltinNodeKind | CustomNodeTypeId | "";
+
+/** Who may hand a node of this type to an agent. */
+export type AgentMode = "none" | "dispatch" | "autopilot";
+/**
+ * Who settles a node of this type: anyone (a person or a successful run),
+ * people only, automatically once its prerequisites settle, or nobody — the
+ * type has no status at all and sits outside the flow.
+ */
+export type NodeCompletion = "anyone" | "people" | "auto" | "none";
+
+/**
+ * Stored, sparse form (`graph.yaml → node_types`). A custom entry carries every
+ * behaviour field; a built-in entry only its shape and colour override.
+ */
+export interface NodeTypeDef {
+  id: string;
+  label?: string;
+  shape?: NodeShape;
+  color?: string;
+  agentMode?: AgentMode;
+  completion?: NodeCompletion;
+  countsInProgress?: boolean;
+}
+
+/** Resolved form: every field set. */
+export interface NodeType {
+  id: string;
+  /** English for built-ins; the UI localizes them by id. */
+  label: string;
+  builtin: boolean;
+  shape: NodeShape;
+  color?: string;
+  agentMode: AgentMode;
+  completion: NodeCompletion;
+  countsInProgress: boolean;
+}
 
 export type BuiltinStatus =
   | "locked"
@@ -47,7 +97,8 @@ export interface NodeLinkRef {
 export interface GraphNode {
   id: string;
   title?: string;
-  kind?: NodeKind;
+  /** Legacy free-form values (e.g. "bug") still load and read as Task. */
+  kind?: NodeKind | string;
   priority?: "urgent" | "high" | "medium" | "low" | "";
   assignee?: string;
   /** "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD" (end of that day), local time. */
@@ -135,14 +186,19 @@ export interface LogicGate {
   applied?: string;
 }
 
-/** Card outline on the canvas. Absent means the default rectangle. */
+/**
+ * Card outline on the canvas. A node's type picks the default; a per-node
+ * `ui.nodeStyles[id].shape` overrides it.
+ */
 export type NodeShape =
   | "rect"
   | "round"
   | "pill"
   | "ellipse"
   | "diamond"
-  | "hexagon";
+  | "hexagon"
+  | "dashed"
+  | "thick";
 
 export type NodeAlign = "left" | "center" | "right";
 export type NodeVAlign = "top" | "middle" | "bottom";
@@ -200,6 +256,8 @@ export interface Graph {
   nodes: GraphNode[] | null;
   edges?: GraphEdge[] | null;
   flags?: Record<string, unknown>;
+  /** Project node types: custom ones plus built-in shape/colour overrides. */
+  nodeTypes?: NodeTypeDef[];
   ui?: {
     positions?: Record<string, { x: number; y: number }>;
     /** Timeline-only node order. Graph positions never affect this sequence. */

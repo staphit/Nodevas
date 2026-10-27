@@ -68,3 +68,19 @@ func TestPromptHandoff(t *testing.T) {
 		t.Error("a plain run is told about a handoff")
 	}
 }
+
+// A planner reads the board's types and picks one per node, so a story board
+// is broken into scenes and events, and reference material into notes.
+func TestPlanPromptsChooseNodeTypes(t *testing.T) {
+	job := runnerwire.Job{NodeID: "n-1", NodeTitle: "Book one", Prompt: "Write it.", Kind: runnerwire.JobPlan}
+	for name, prompt := range map[string]string{"plan": planPrompt(job), "replan": replanPrompt(job)} {
+		for _, want := range []string{"get_graph_outline", `"scene"`, `"event"`, `"note"`, `"gate"`, `"choice"`, "non-note"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s prompt missing %q", name, want)
+			}
+		}
+		if strings.Contains(prompt, `kind "task", a short title`) {
+			t.Errorf("%s prompt still forces every node to a task", name)
+		}
+	}
+}

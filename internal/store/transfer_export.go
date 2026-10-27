@@ -194,6 +194,18 @@ func (s *Store) ExportNodes(ids []string, forMove bool) (*nodeTransferPayload, e
 		}
 	}
 
+	// A custom node type exists only because this project defines it, so it
+	// travels with the nodes that use it.
+	usedKind := map[string]bool{}
+	for _, node := range payload.nodes {
+		usedKind[node.Kind] = true
+	}
+	for _, definition := range g.NodeTypes {
+		if !engine.IsBuiltinNodeKind(definition.ID) && usedKind[definition.ID] {
+			payload.nodeTypes = append(payload.nodeTypes, definition)
+		}
+	}
+
 	journal, err := s.readJournalForNodesLocked(selection)
 	if err != nil {
 		return nil, err

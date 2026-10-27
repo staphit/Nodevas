@@ -6,6 +6,7 @@ package store
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"nodevas/internal/engine"
@@ -167,6 +168,89 @@ func freeLogicGateID(preferred string, used map[string]bool) string {
 	for n := 2; ; n++ {
 		candidate := fmt.Sprintf("%s-%d", preferred, n)
 		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+// mergeNodeTypes adds the custom node types the moved nodes use. A type the
+// target already defines identically is reused; a type whose label the target
+// already uses maps onto that one; a type whose id the target uses for a
+// different type is added under a fresh id, because custom ids are numbered
+// per project (custom-type-1, -2, ...) and a clash says nothing about the two
+// being the same type. Past the custom-type limit the nodes fall back to Task.
+// The returned map rewrites node kinds. An agent may not change the project's
+// types (checkNodeTypesEdit), so for one (canAdd false) a type the target
+// lacks is not added: its nodes fall back to Task.
+func mergeNodeTypes(
+	g *engine.Graph,
+	definitions []engine.NodeTypeDef,
+	canAdd bool,
+	warn func(string, ...any),
+) map[string]string {
+	mapping := map[string]string{}
+	byID := map[string]engine.NodeTypeDef{}
+	byLabel := map[string]engine.NodeTypeDef{}
+	customs := 0
+	for _, definition := range g.NodeTypes {
+		byID[definition.ID] = definition
+		if !engine.IsBuiltinNodeKind(definition.ID) {
+			customs++
+			byLabel[strings.ToLower(strings.TrimSpace(definition.Label))] = definition
+		}
+	}
+	for _, definition := range definitions {
+		if engine.IsBuiltinNodeKind(definition.ID) {
+			continue
+		}
+		label := strings.ToLower(strings.TrimSpace(definition.Label))
+		if existing, ok := byID[definition.ID]; ok && reflect.DeepEqual(existing, definition) {
+			continue
+		}
+		if existing, ok := byLabel[label]; ok {
+			if existing.ID != definition.ID {
+				mapping[definition.ID] = existing.ID
+			}
+			if !reflect.DeepEqual(existing, renamedAs(definition, existing)) {
+				warn("節點類型「%s」在目標專案已存在但設定不同，沿用目標專案的設定", definition.Label)
+			}
+			continue
+		}
+		if !canAdd {
+			warn("節點類型「%s」不在目標專案，agent 不能新增類型，相關節點改為任務", definition.Label)
+			mapping[definition.ID] = engine.NodeKindTask
+			continue
+		}
+		if customs >= engine.MaxCustomNodeTypes {
+			warn("節點類型「%s」超過目標專案的類型上限，相關節點改為任務", definition.Label)
+			mapping[definition.ID] = engine.NodeKindTask
+			continue
+		}
+		if _, clash := byID[definition.ID]; clash {
+			fresh := freeNodeTypeID(byID)
+			mapping[definition.ID] = fresh
+			definition.ID = fresh
+		}
+		g.NodeTypes = append(g.NodeTypes, definition)
+		byID[definition.ID] = definition
+		byLabel[label] = definition
+		customs++
+	}
+	return mapping
+}
+
+// renamedAs is definition under existing's id and label, so comparing the two
+// compares only what the type does and how it looks.
+func renamedAs(definition, existing engine.NodeTypeDef) engine.NodeTypeDef {
+	definition.ID, definition.Label = existing.ID, existing.Label
+	return definition
+}
+
+// freeNodeTypeID is the first custom-type-N the target does not use.
+func freeNodeTypeID(used map[string]engine.NodeTypeDef) string {
+	for n := 1; ; n++ {
+		candidate := fmt.Sprintf("%s%d", engine.CustomNodeTypePrefix, n)
+		if _, taken := used[candidate]; !taken {
 			return candidate
 		}
 	}

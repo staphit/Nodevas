@@ -59,6 +59,12 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	assignees := mergeUsers(g, payload.users, warn)
 	planStatuses := mergePlanStatuses(g, payload.planStatuses, warn)
 	mergeCustomStatuses(g, payload.customStatuses)
+	nodeTypes := mergeNodeTypes(g, payload.nodeTypes, !actor.IsAgent(), warn)
+	for _, node := range imported {
+		if mapped, ok := nodeTypes[node.Kind]; ok {
+			node.Kind = mapped
+		}
+	}
 	for name, value := range payload.flags {
 		if g.Flags == nil {
 			g.Flags = map[string]any{}

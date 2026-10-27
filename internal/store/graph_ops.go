@@ -172,7 +172,16 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			node.Title = *op.Title
 		}
 		if op.Kind_ != nil {
-			node.Kind = *op.Kind_
+			kind := engine.NormalizeNodeKind(*op.Kind_)
+			// An unknown type is refused as new input; a legacy value the node
+			// already carries may be written back unchanged.
+			if !graph.KnownNodeKind(kind) && kind != node.Kind {
+				return unknownNodeTypeError(node.ID, kind)
+			}
+			if err := checkKindChange(actor, graph, node.Kind, kind); err != nil {
+				return err
+			}
+			node.Kind = kind
 		}
 		if op.Priority != nil {
 			node.Priority = *op.Priority

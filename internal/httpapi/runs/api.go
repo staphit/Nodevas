@@ -154,12 +154,15 @@ func (a *API) create(c *gin.Context) {
 	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
 		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
 		SteppedUpAt: steppedUpAt,
-		LoadNode: func() (string, string, bool, error) {
-			node, content, err := loadNode(st, body.NodeID)
+		LoadNode: func() (runs.NodeInfo, bool, error) {
+			node, nodeType, content, err := loadNode(st, body.NodeID)
 			if err != nil || node == nil {
-				return "", "", false, err
+				return runs.NodeInfo{}, false, err
 			}
-			return node.Title, content, true, nil
+			return runs.NodeInfo{
+				Title: node.Title, Content: content,
+				Type: nodeType.ID, AgentMode: nodeType.AgentMode,
+			}, true, nil
 		},
 	})
 	if err != nil {
@@ -185,35 +188,39 @@ func startFailed(c *gin.Context, err error) {
 	case runs.StartBudget:
 		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
 			errors.New(refused.Msg), map[string]any{"exceeded": refused.Budget.Exceeded})
+	case runs.StartNodeType:
+		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, errors.New(refused.Msg),
+			map[string]any{"nodeType": refused.NodeType, "agentMode": refused.AgentMode})
 	default:
 		invalid(c, "%s", refused.Msg)
 	}
 }
 
-// loadNode returns the node and its body text, or a nil node when the graph
-// has no such node.
-func loadNode(st *store.Store, id string) (*engine.Node, string, error) {
+// loadNode returns the node, its resolved type and its body text, or a nil
+// node when the graph has no such node.
+func loadNode(st *store.Store, id string) (*engine.Node, engine.NodeType, string, error) {
 	graph, _, err := st.LoadGraph()
 	if err != nil {
-		return nil, "", err
+		return nil, engine.NodeType{}, "", err
 	}
 	node := graph.NodeByID(id)
 	if node == nil {
-		return nil, "", nil
+		return nil, engine.NodeType{}, "", nil
 	}
+	nodeType := graph.TypeOf(node)
 	raw, _, err := st.LoadNodeContent(id)
 	if errors.Is(err, fs.ErrNotExist) {
-		return node, "", nil
+		return node, nodeType, "", nil
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, engine.NodeType{}, "", err
 	}
 	file, err := engine.ParseNodeFile([]byte(raw))
 	if err != nil {
 		// Unparseable frontmatter: the text is still the task.
-		return node, raw, nil
+		return node, nodeType, raw, nil
 	}
-	return node, file.Body, nil
+	return node, nodeType, file.Body, nil
 }
 
 // BuildPrompt assembles the task a runner is offered (runs.BuildPrompt).

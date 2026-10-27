@@ -148,3 +148,25 @@ describe("LifecyclePanel", () => {
     expect(useApp.getState().stagedLifecycle.a?.status).toBe("in_progress");
   });
 });
+
+describe("LifecyclePanel and node types", () => {
+  it("has nothing to pick for a type with no status", () => {
+    useApp.setState({
+      graph: { version: 1, nodes: [{ id: "a", title: "角色表", kind: "note" }], edges: [] },
+    });
+    render(<LifecyclePanel id="a" />);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText("沒有狀態：流程外的參考資料")).toBeInTheDocument();
+  });
+
+  it("shows a self-settling type's state read-only", () => {
+    useApp.setState({
+      graph: { version: 1, nodes: [{ id: "a", title: "開場", kind: "start" }], edges: [] },
+      statuses: { a: "done" },
+    });
+    render(<LifecyclePanel id="a" />);
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText("完成")).toBeInTheDocument();
+    expect(screen.getByText("前置完成時自動設定")).toBeInTheDocument();
+  });
+});

@@ -17,7 +17,9 @@ import type {
   Graph,
   LogicGateOperator,
   NodeLinkRef,
+  CustomNodeTypeId,
   NodeStyle,
+  NodeTypeDef,
   SavedView,
   StatusDefinition,
 } from "../types";
@@ -27,6 +29,7 @@ import * as canvas from "./graph/canvas";
 import * as gates from "./graph/logicGate";
 import { applyImport, type ImportPayload } from "./graph/importer";
 import * as node from "./graph/node";
+import * as nodeTypes from "./graph/nodeTypes";
 import * as plan from "./graph/plan";
 import * as workflow from "./graph/workflow";
 import type { DomainId } from "./registry";
@@ -91,7 +94,17 @@ export type WorkflowCommand =
       id: MilestoneType;
       /** Also drop milestones already scheduled with this type. */
       removeScheduled?: boolean;
-    };
+    }
+  | {
+      type: "workflow.addNodeType";
+      definition: Omit<NodeTypeDef, "id"> & { id?: CustomNodeTypeId };
+    }
+  | {
+      type: "workflow.updateNodeType";
+      id: string;
+      patch: Partial<Omit<NodeTypeDef, "id">>;
+    }
+  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId };
 
 export type CanvasCommand =
   | {
@@ -237,6 +250,13 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return workflow.removeMilestoneType(graph, command.id, {
         removeScheduled: command.removeScheduled,
       });
+    case "workflow.addNodeType":
+      void nodeTypes.addNodeType(graph, command.definition);
+      return;
+    case "workflow.updateNodeType":
+      return nodeTypes.updateNodeType(graph, command.id, command.patch);
+    case "workflow.removeNodeType":
+      return nodeTypes.removeNodeType(graph, command.id);
 
     case "canvas.moveNodes":
       if (command.shift) canvas.shiftBoard(graph, command.shift);
@@ -331,6 +351,9 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "workflow.addMilestoneType": "新增里程碑類型",
   "workflow.updateMilestoneType": "修改里程碑類型",
   "workflow.removeMilestoneType": "刪除里程碑類型",
+  "workflow.addNodeType": "新增節點類型",
+  "workflow.updateNodeType": "修改節點類型",
+  "workflow.removeNodeType": "刪除節點類型",
   "canvas.moveNodes": "移動節點",
   "canvas.setTimelineOrder": "調整時間軸順序",
   "canvas.setGatePlacement": "移動條件閘",

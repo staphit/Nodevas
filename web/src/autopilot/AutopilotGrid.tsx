@@ -284,11 +284,18 @@ export function AutopilotGrid({
             const depth = Math.min(depths[task.nodeId] ?? 0, 6);
             const upstream = (task.upstream ?? []).map((id) => titles.get(id) ?? id);
             const pr = safeExternalUrl(task.prUrl);
-            // Held because its node changed or left the goal: a person
-            // retries it (accepting the node as it is now) or skips it.
-            const heldPending = task.hold === "changed" || task.hold === "removed";
+            // Held because its node changed or left the goal: a person retries
+            // it (accepting the node as it is now) or skips it. A task held
+            // because its type is one only a person settles (a Review, a
+            // Decision) is released by finishing it on the board; there is
+            // nothing to retry, so it can only be skipped here (the hub's
+            // Retry refuses a person hold).
+            const waitsForPerson = task.hold === "person";
+            const heldPending =
+              task.hold === "changed" || task.hold === "removed" || waitsForPerson;
             const canRetry =
               active &&
+              !waitsForPerson &&
               (task.state === "failed" ||
                 task.state === "upstream_failed" ||
                 task.state === "skipped" ||

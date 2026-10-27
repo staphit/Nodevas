@@ -97,6 +97,9 @@ type Snapshot struct {
 	Rev      string                   `json:"rev"`
 	Statuses map[string]engine.Status `json:"statuses"`
 	Issues   []engine.Issue           `json:"issues"`
+	// Layout and NodeTypes come with the outline view only.
+	Layout    string            `json:"layout,omitempty"`
+	NodeTypes []engine.NodeType `json:"nodeTypes,omitempty"`
 }
 
 // Graph fetches the whole graph for callers that explicitly need a snapshot.
@@ -139,6 +142,9 @@ type NodeContext struct {
 	Status     string   `json:"status"`
 	Upstream   []string `json:"upstream"`
 	Downstream []string `json:"downstream"`
+	// NodeType is the node's resolved type; a server older than node types
+	// sends none.
+	NodeType *engine.NodeType `json:"nodeType,omitempty"`
 }
 
 func (c *Client) NodeContext(ctx context.Context, id string) (*NodeContext, error) {

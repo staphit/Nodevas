@@ -11,7 +11,7 @@
  * only has to open it once.
  */
 
-import { useId, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, type PointerEvent as ReactPointerEvent } from "react";
 import { BUILTIN_PLAN_STATUSES } from "../../plan";
 import { useApp, usePreference } from "../../store";
 import { StatusShape, statusOptions } from "../../statusTheme";
@@ -28,6 +28,7 @@ import {
   mergeNodeStyle,
 } from "../inspector/AppearanceControls";
 import type { LaneContextMenu } from "../LaneView";
+import { nodeTypeLabel, useNodeType, useNodeTypes } from "../../nodeTypeTheme";
 
 export interface NodeCreateMenuProps {
   contextMenu: Extract<LaneContextMenu, { kind: "node-create" }>;
@@ -45,6 +46,9 @@ export interface NodeCreateMenuProps {
   setNodeCreateWriteAccess: (writeAccess: string) => void;
   nodeCreateStyle: NodeStyle;
   setNodeCreateStyle: (update: (current: NodeStyle) => NodeStyle) => void;
+  /** Type id the node is created as. */
+  nodeCreateKind: string;
+  setNodeCreateKind: (kind: string) => void;
   nodePlanDates: Partial<Record<PlanStatus, string>>;
   setNodePlanDates: (
     update: (
@@ -79,6 +83,8 @@ export function NodeCreateMenu({
   setNodeCreateWriteAccess,
   nodeCreateStyle,
   setNodeCreateStyle,
+  nodeCreateKind,
+  setNodeCreateKind,
   nodePlanDates,
   setNodePlanDates,
   nodeCustomPlanDrafts,
@@ -93,6 +99,15 @@ export function NodeCreateMenu({
   const advancedOpen = usePreference("nodeCreateAdvanced");
   const advancedID = useId();
   const previewStatus: Status = nodeCreateStatus || "ready";
+  const nodeTypes = useNodeTypes();
+  const nodeType = useNodeType({ kind: nodeCreateKind });
+  // A type that settles itself, or has no status at all, takes no initial one.
+  const takesStatus = nodeType.completion !== "none" && nodeType.completion !== "auto";
+  // A status picked for an earlier type must not ride along to one that
+  // cannot take it: the hub would refuse it after the node was created.
+  useEffect(() => {
+    if (!takesStatus && nodeCreateStatus) setNodeCreateStatus("");
+  }, [takesStatus, nodeCreateStatus, setNodeCreateStatus]);
 
   return (
     <form
@@ -126,6 +141,20 @@ export function NodeCreateMenu({
           maxLength={256}
           disabled={nodeCreateBusy}
         />
+      </label>
+      <label className="lane-context-field node-create-field">
+        {t("nodeCreate.type")}
+        <select
+          value={nodeCreateKind}
+          disabled={nodeCreateBusy}
+          onChange={(event) => setNodeCreateKind(event.target.value)}
+        >
+          {nodeTypes.map((type) => (
+            <option key={type.id} value={type.id}>
+              {nodeTypeLabel(type, t)}
+            </option>
+          ))}
+        </select>
       </label>
       <div className="node-create-id-hint">
         <span aria-hidden>#</span>
@@ -251,6 +280,7 @@ export function NodeCreateMenu({
           </span>
         </button>
         <div id={advancedID} hidden={!advancedOpen} className="node-create-advanced-body">
+          {takesStatus && (
           <label className="lane-context-field node-create-field">
             {t("nodeCreate.actualStatus")}
             <select
@@ -266,6 +296,7 @@ export function NodeCreateMenu({
               ))}
             </select>
           </label>
+          )}
           <label className="lane-context-field node-create-field">
             {t("node.meta.writeAccess")}
             <select
@@ -279,12 +310,14 @@ export function NodeCreateMenu({
               <option value="human-only">{t("node.writeAccess.humanOnly")}</option>
             </select>
           </label>
+          {takesStatus && (
           <div className="node-create-status-preview">
             <StatusShape status={previewStatus} definitions={customStatuses} />
             <span>
               {t("nodeCreate.statusJournalHint")}
             </span>
           </div>
+          )}
           <AppearanceControls
             idPrefix={`node-create${advancedID}`}
             style={nodeCreateStyle}
@@ -295,6 +328,8 @@ export function NodeCreateMenu({
             customStatuses={customStatuses}
             previewTitle={nodeCreateTitle || t("nodeCreate.newNode")}
             disabled={nodeCreateBusy}
+            typeShape={nodeType.shape}
+            previewType={nodeType}
           />
         </div>
       </section>

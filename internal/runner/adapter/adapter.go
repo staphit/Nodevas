@@ -237,6 +237,18 @@ func GoalTag(id string) string { return "goal:" + id }
 // break the goal into tasks on the board with requires edges between them,
 // changing no files. Every task carries GoalTag, and the goal waits for the
 // tasks nothing else waits for, so it becomes ready when all of them are done.
+// planOutlineStep has the planner read the board's layout and node types, so
+// it can pick the type each new node should be.
+const planOutlineStep = "2b. Call get_graph_outline once to read `layout` and `nodeTypes`.\n"
+
+// planKindRule is how a planner picks each node's kind. Static text: the
+// project's own type labels reach the planner only as board data.
+const planKindRule = "choose each node's kind: in a story-layout board, writing units are \"scene\" and plot beats " +
+	"or turning points are \"event\"; a person's approval or editorial/proofreading pass is \"gate\"; a branch is " +
+	"\"choice\"; reference material (character sheets, settings, research) is \"note\" and is never linked to the goal " +
+	"or given dependencies; otherwise \"task\"; a custom type from nodeTypes may be used by id when it fits. Only nodes " +
+	"whose agentMode is dispatch are worked by agents."
+
 func planPrompt(job runnerwire.Job) string {
 	if strings.TrimSpace(job.Review) != "" {
 		return replanPrompt(job)
@@ -253,14 +265,15 @@ func planPrompt(job runnerwire.Job) string {
 	b.WriteString("Rules for this run:\n")
 	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push. Anything you change is thrown away.\n")
 	fmt.Fprintf(&b, "2. Read the goal with the nodevas MCP tool get_node (id %q), then read the code you need to plan well.\n", job.NodeID)
+	b.WriteString(planOutlineStep)
 	b.WriteString("3. Break the goal into small tasks, each one independently reviewable and mergeable as one pull request. " +
 		"Prefer a handful of well-scoped tasks over many tiny ones.\n")
-	fmt.Fprintf(&b, "4. Create each task with create_node: kind \"task\", a short title, a body saying what to change and how "+
+	fmt.Fprintf(&b, "4. Create each task with create_node: %s Give it a short title, a body saying what to change and how "+
 		"to tell it is done (files, acceptance checks), and tags including %q. Use dependsOn for the tasks it needs "+
 		"finished first (create those first so you have their ids), or link_nodes afterwards (from: the task that "+
-		"must finish first, to: the task that waits).\n", GoalTag(job.NodeID))
+		"must finish first, to: the task that waits).\n", planKindRule, GoalTag(job.NodeID))
 	fmt.Fprintf(&b, "5. Add a requires edge only where one task really needs another's change; independent tasks run in parallel. "+
-		"Finally link every task that no other task waits for to the goal (link_nodes from: that task, to: %q), so the "+
+		"Finally link every non-note node that no other node waits for to the goal (link_nodes from: that node, to: %q), so the "+
 		"goal is done when all its tasks are.\n", job.NodeID)
 	b.WriteString("6. Do not claim, start or change the status of the goal or the tasks, and do not edit the goal node.\n")
 	b.WriteString("7. Finish with a short summary: the tasks you created (id and title) and the order they can run in.\n\n")
@@ -292,15 +305,16 @@ func replanPrompt(job runnerwire.Job) string {
 	fmt.Fprintf(&b, "2. Read the goal with the nodevas MCP tool get_node (id %q): its body keeps the original requirement "+
 		"and, under \"Revisions\", the changes, newest last. Read the existing tasks you need with get_node, then "+
 		"the code you need to plan well.\n", job.NodeID)
+	b.WriteString(planOutlineStep)
 	b.WriteString("3. Decide for every existing task listed below: keep (still needed as it is; every task that is " +
 		"done is kept, whatever the change), change (still needed but its scope changes; only a task that has not " +
 		"started), skip (no longer needed; only a task that has not started; a task is never deleted), or flag (a " +
 		"task marked running that the change affects: it is not changed; say what the change means for it).\n")
-	fmt.Fprintf(&b, "4. Create only the new work the change needs, with create_node: kind \"task\", a short title, a "+
+	fmt.Fprintf(&b, "4. Create only the new work the change needs, with create_node: %s Give it a short title, a "+
 		"body saying what to change and how to tell it is done, and tags including %q. Use dependsOn for the tasks "+
 		"it needs finished first, new or existing, or link_nodes afterwards (from: the task that must finish first, "+
-		"to: the task that waits). Do not recreate a task that exists.\n", GoalTag(job.NodeID))
-	fmt.Fprintf(&b, "5. Link every new task that no other task waits for to the goal (link_nodes from: that task, to: %q). "+
+		"to: the task that waits). Do not recreate a task that exists.\n", planKindRule, GoalTag(job.NodeID))
+	fmt.Fprintf(&b, "5. Link every new non-note node that no other node waits for to the goal (link_nodes from: that node, to: %q). "+
 		"Do not remove existing links.\n", job.NodeID)
 	b.WriteString("6. Do not claim, start or change the status of the goal or any task, do not edit any existing " +
 		"node, and do not dispatch or merge anything: the server applies your keep, change and skip after you " +

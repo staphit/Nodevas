@@ -33,6 +33,9 @@ func Validate(g *Graph) []Issue {
 	if g.Version < 1 {
 		add("error", "", "version", -1, "version must be at least 1")
 	}
+	for _, problem := range NodeTypeDefProblems(g.NodeTypes) {
+		add("error", "", "node_types", -1, "%s", problem)
+	}
 
 	ids := map[string]bool{}
 	for index, n := range g.Nodes {
@@ -61,6 +64,9 @@ func Validate(g *Graph) []Issue {
 			add("error", n.ID, "write_access", -1, "invalid write_access %q", n.WriteAccess)
 		}
 		ids[n.ID] = true
+		if !g.KnownNodeKind(NormalizeNodeKind(n.Kind)) {
+			add("warning", n.ID, "kind", -1, "unknown node type %q; treated as Task", n.Kind)
+		}
 		for i, effect := range n.Effects {
 			if err := ValidateEffect(effect.Set); err != nil {
 				add("error", n.ID, fmt.Sprintf("effects[%d]", i), -1, "%s", err)
@@ -240,6 +246,9 @@ func Validate(g *Graph) []Issue {
 			if !ids[nodeID] {
 				add("error", nodeID, "ui.node_styles", -1, "node style references unknown node %q", nodeID)
 			}
+			if !ValidNodeShape(style.Shape) {
+				add("warning", nodeID, "ui.node_styles", -1, "unknown shape %q", style.Shape)
+			}
 			if math.IsNaN(style.Width) || math.IsInf(style.Width, 0) ||
 				math.IsNaN(style.Height) || math.IsInf(style.Height, 0) ||
 				(style.Width != 0 && (style.Width < 120 || style.Width > 360)) ||
@@ -292,8 +301,16 @@ func Validate(g *Graph) []Issue {
 			joinCycle(cycle))
 	}
 
-	// Disconnected nodes: no requires, not referenced, no edges.
-	if len(g.Nodes) > 1 {
+	// Disconnected nodes: no requires, not referenced, no edges. A node
+	// without status (Note) is reference material that lives outside the
+	// flow on purpose, so it is neither flagged nor counted.
+	inFlow := 0
+	for _, n := range g.Nodes {
+		if n != nil && g.TypeOf(n).Completion != CompletionNone {
+			inFlow++
+		}
+	}
+	if inFlow > 1 {
 		connected := map[string]bool{}
 		for id, refs := range deps {
 			if len(refs) > 0 {
@@ -311,7 +328,7 @@ func Validate(g *Graph) []Issue {
 			connected[e.To] = true
 		}
 		for _, n := range g.Nodes {
-			if n == nil {
+			if n == nil || g.TypeOf(n).Completion == CompletionNone {
 				continue
 			}
 			if n.ID != "" && !connected[n.ID] {

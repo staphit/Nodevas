@@ -25,7 +25,9 @@ import (
 // The dependency half mirrors the editor's own blocked/blocking analysis
 // (web/src/analysis.ts) so the agent's list agrees with the picture a person is
 // looking at. The two must be changed together; they are duplicated because the
-// canvas computes it live in the browser and the agent cannot.
+// canvas computes it live in the browser and the agent cannot. That includes
+// the node-type rules: a type without status (Note) never blocks and is never
+// listed, and an automatic type (Start, End) is never listed either.
 
 // builtinSettled are the statuses that always count as finished. `deprecated`
 // is here for the same reason as in the editor: work that was dropped is not
@@ -181,8 +183,16 @@ func blockedWithFlags(g *Graph, statuses map[string]Status, flags map[string]any
 	}
 	definitions := statusDefinitions(g)
 	done := map[string]bool{}
+	noStatus := map[string]bool{}
 	for _, node := range g.Nodes {
 		if node == nil {
+			continue
+		}
+		// A node without status is reference material: wired in as a
+		// prerequisite it must never hold anything back.
+		if g.TypeOf(node).Completion == CompletionNone {
+			noStatus[node.ID] = true
+			done[node.ID] = true
 			continue
 		}
 		if Settled(statusOf(statuses, node.ID), definitions) {
@@ -197,7 +207,7 @@ func blockedWithFlags(g *Graph, statuses map[string]Status, flags map[string]any
 	}
 
 	for _, node := range g.Nodes {
-		if node == nil || Settled(statusOf(statuses, node.ID), definitions) {
+		if node == nil || noStatus[node.ID] || Settled(statusOf(statuses, node.ID), definitions) {
 			continue
 		}
 		if gate, hasGate := gates[node.ID]; hasGate && !logicGateComplete(gate) {
@@ -214,6 +224,35 @@ func blockedWithFlags(g *Graph, statuses map[string]Status, flags map[string]any
 		}
 	}
 	return blocked
+}
+
+// deriveAutoStatuses settles the automatic nodes (Start, End) that have no
+// explicit status: each becomes done once its own condition holds. One
+// settling can release the next, so it repeats until nothing changes; every
+// pass settles at least one node or stops, which bounds it.
+func deriveAutoStatuses(g *Graph, rs *RunState, out map[string]Status, auto []string) {
+	if len(auto) == 0 {
+		return
+	}
+	flags := EffectiveFlags(g, rs)
+	pending := append([]string(nil), auto...)
+	for pass := 0; pass <= len(auto) && len(pending) > 0; pass++ {
+		blocked := blockedWithFlags(g, out, flags)
+		next := pending[:0]
+		changed := false
+		for _, id := range pending {
+			if _, isBlocked := blocked[id]; isBlocked {
+				next = append(next, id)
+				continue
+			}
+			out[id] = StatusDone
+			changed = true
+		}
+		pending = next
+		if !changed {
+			return
+		}
+	}
 }
 
 func requiresBlockers(expr dsl.Expr, done map[string]bool) []string {
@@ -276,13 +315,15 @@ func dedupe(ids []string) []string {
 
 // ReadyNode is one actionable task.
 type ReadyNode struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title,omitempty"`
-	Kind     string   `json:"kind,omitempty"`
-	Priority string   `json:"priority,omitempty"`
-	Assignee string   `json:"assignee,omitempty"`
-	Deadline string   `json:"deadline,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Kind  string `json:"kind,omitempty"`
+	// AgentMode is the node type's: only "dispatch" nodes are worked by agents.
+	AgentMode string   `json:"agentMode,omitempty"`
+	Priority  string   `json:"priority,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
+	Deadline  string   `json:"deadline,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
 	// BlockedBy identifies the inputs relevant to a blocked prerequisite or
 	// gate condition. It can be empty for an unwired gate whose condition is
 	// false; Reason and the gate fields still explain why the node is blocked.
@@ -325,18 +366,25 @@ func ComputeReadiness(g *Graph, rs *RunState) Readiness {
 		if node == nil {
 			continue
 		}
+		// Notes have no status and Start/End settle themselves: neither is
+		// work anybody picks up, so they are counted nowhere.
+		nodeType := g.TypeOf(node)
+		if nodeType.Completion == CompletionNone || nodeType.Completion == CompletionAuto {
+			continue
+		}
 		if statusOf(statuses, node.ID) != StatusReady {
 			result.Busy++
 			continue
 		}
 		entry := ReadyNode{
-			ID:       node.ID,
-			Title:    node.Title,
-			Kind:     node.Kind,
-			Priority: node.Priority,
-			Assignee: node.Assignee,
-			Deadline: node.Deadline,
-			Tags:     node.Tags,
+			ID:        node.ID,
+			Title:     node.Title,
+			Kind:      node.Kind,
+			AgentMode: string(nodeType.AgentMode),
+			Priority:  node.Priority,
+			Assignee:  node.Assignee,
+			Deadline:  node.Deadline,
+			Tags:      node.Tags,
 		}
 		if waiting, isBlocked := blocked[node.ID]; isBlocked {
 			entry.BlockedBy = waiting

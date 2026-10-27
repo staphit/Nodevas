@@ -25,6 +25,7 @@ import { useI18n } from "../../i18n";
 import { OperationStatus } from "../InteractionPrimitives";
 import { NodeTitleField } from "../inspector/NodeMetaForm";
 import { DrawerMenu } from "./DrawerMenu";
+import { NodeTypeMenu } from "./NodeTypeMenu";
 
 type TabContextMenuState = {
   id: string;
@@ -204,6 +205,7 @@ export function DrawerTabs({
     <>
       <div className="drawer-head">
         <NodeTitleField key={activeTab} id={activeTab} />
+        <NodeTypeMenu id={activeTab} />
         {current?.dirty && (
           <span className="dirty-dot" role="img" aria-label={t("drawer.tabs.unsaved")} />
         )}

@@ -311,3 +311,39 @@ func itoa(value int) string {
 	}
 	return digits
 }
+
+// The outline names the board's layout and its types, so a planner can pick
+// one; create_node accepts the input aliases and stores the canonical id.
+func TestTheOutlineListsNodeTypesAndCreateAcceptsAliases(t *testing.T) {
+	url, pm := liveServer(t)
+	session := mcpSession(t, url, "")
+	var outline Outline
+	call(t, session, "get_graph_outline", nil, &outline)
+	if len(outline.NodeTypes) != len(engine.BuiltinNodeTypes()) {
+		t.Fatalf("node types = %+v", outline.NodeTypes)
+	}
+	var gate OutlineNodeType
+	for _, nodeType := range outline.NodeTypes {
+		if nodeType.ID == "gate" {
+			gate = nodeType
+		}
+	}
+	if gate.Label != "Review" || gate.AgentMode != "none" || gate.Completion != "people" {
+		t.Fatalf("gate = %+v", gate)
+	}
+
+	var created createNodeOutput
+	call(t, session, "create_node", map[string]any{"title": "Pick an ending", "kind": "decision"}, &created)
+	graph, _, err := pm.Store().LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node := graph.NodeByID(created.ID); node == nil || node.Kind != "choice" {
+		t.Fatalf("created = %+v", node)
+	}
+	var read getNodeOutput
+	call(t, session, "get_node", map[string]any{"id": created.ID}, &read)
+	if read.TypeLabel != "Decision" || read.AgentMode != "none" {
+		t.Fatalf("get_node = %+v", read)
+	}
+}

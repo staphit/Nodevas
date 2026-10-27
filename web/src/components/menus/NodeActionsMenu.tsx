@@ -23,6 +23,7 @@ import {
 import { IconSend, IconTerminal } from "../../icons";
 import { useI18n } from "../../i18n";
 import { openAutopilot } from "../../autopilot/openAutopilot";
+import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import { openNodeDetail } from "../drawer/openNodeDetail";
 import { openNodeRuns } from "../../runs/RunsRoot";
 import { useRuns } from "../../runs/runStore";
@@ -65,6 +66,12 @@ export function NodeActionsMenu({
   const workstation = useWorkstationVisible();
   const nodeId = contextMenu.nodeId;
   const title = nodeTitle(nodeId);
+  // A type agents cannot work gets no agent submenu at all; a Goal's is
+  // Autopilot first and no single dispatch.
+  const agentMode = nodeTypeById(
+    graph,
+    graph?.nodes?.find((node) => node.id === nodeId)?.kind,
+  ).agentMode;
   const [submenu, setSubmenu] = useState<Submenu>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -156,7 +163,7 @@ export function NodeActionsMenu({
       >
         <span>{t("board.nodeMenu.open")}</span>
       </button>
-      {workstation && (
+      {workstation && agentMode !== "none" && (
         <>
           {submenuTrigger("agent", t("board.nodeMenu.agent"), <IconSend size={13} />)}
           {submenu === "agent" && (
@@ -166,15 +173,28 @@ export function NodeActionsMenu({
               aria-label={t("board.nodeMenu.agent")}
               data-submenu="agent"
             >
-              <button
-                type="button"
-                role="menuitem"
-                className="node-actions-item"
-                onClick={run(() => useRuns.getState().openDispatch(nodeId))}
-              >
-                <IconSend size={13} />
-                <span>{t("nodeMenu.dispatch")}</span>
-              </button>
+              {agentMode === "autopilot" && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="node-actions-item"
+                  onClick={run(() => openAutopilot(nodeId))}
+                >
+                  <IconSend size={13} />
+                  <span>{t("nodeMenu.autopilot")}</span>
+                </button>
+              )}
+              {agentMode === "dispatch" && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="node-actions-item"
+                  onClick={run(() => useRuns.getState().openDispatch(nodeId))}
+                >
+                  <IconSend size={13} />
+                  <span>{t("nodeMenu.dispatch")}</span>
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -184,15 +204,17 @@ export function NodeActionsMenu({
                 <IconTerminal size={13} />
                 <span>{t("nodeMenu.runs")}</span>
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="node-actions-item"
-                onClick={run(() => openAutopilot(nodeId))}
-              >
-                <IconSend size={13} />
-                <span>{t("nodeMenu.autopilot")}</span>
-              </button>
+              {agentMode === "dispatch" && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="node-actions-item"
+                  onClick={run(() => openAutopilot(nodeId))}
+                >
+                  <IconSend size={13} />
+                  <span>{t("nodeMenu.autopilot")}</span>
+                </button>
+              )}
             </div>
           )}
         </>

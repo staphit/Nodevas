@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
 )
 
@@ -243,7 +244,7 @@ func Suggest(rules []runnerwire.RouteRule, node RouteNode) runnerwire.RouteSugge
 				return strings.EqualFold(strings.TrimSpace(tag), rule.Value)
 			})
 		case runnerwire.RouteKind:
-			return strings.EqualFold(nodeKind(node.Kind), rule.Value)
+			return strings.EqualFold(nodeKind(node.Kind), nodeKind(rule.Value))
 		case runnerwire.RouteProject:
 			return rule.Project != "" && rule.Project == node.Project
 		case runnerwire.RouteDefault:
@@ -272,13 +273,14 @@ func Suggest(rules []runnerwire.RouteRule, node RouteNode) runnerwire.RouteSugge
 	return runnerwire.RouteSuggestion{}
 }
 
-// nodeKind is a node's kind as the board shows it: a node without one is a
-// task.
+// nodeKind is a node's type id as the board shows it: a node without one is
+// a task, and the input aliases (review, decision) name their built-in, so a
+// rule written either way matches. Custom type ids pass through.
 func nodeKind(kind string) string {
-	if strings.TrimSpace(kind) == "" {
-		return "task"
+	if k := engine.NormalizeNodeKind(kind); k != "" {
+		return k
 	}
-	return strings.TrimSpace(kind)
+	return engine.NodeKindTask
 }
 
 // ResolveAgentModel checks an agent and model against a runner's hello and

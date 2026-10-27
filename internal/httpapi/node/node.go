@@ -84,6 +84,9 @@ func (a *API) postNode(c *gin.Context) {
 	}
 	id, err := httpx.StoreFor(c.Request, a.pm).CreateNode(auth.ActorFrom(c.Request), &body.Node, body.Body)
 	if err != nil {
+		if httpx.WriteDenied(c, err) {
+			return
+		}
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
 			httpx.Conflict(c, conflict)

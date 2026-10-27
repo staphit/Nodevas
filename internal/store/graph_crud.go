@@ -57,8 +57,9 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 		return "", fmt.Errorf("node file: %w", err)
 	}
 	hydrateNodeFromMeta(n, nf.Meta)
+	n.Kind = engine.NormalizeNodeKind(n.Kind)
 	if n.Kind == "" {
-		n.Kind = "task"
+		n.Kind = engine.NodeKindTask
 	}
 	// Normalized before SyncFrontmatter below, or "all" would land in the
 	// document's frontmatter while the graph stores "". The enum itself is
@@ -69,6 +70,9 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 	g, graphRev, err := s.loadGraphLocked()
 	if err != nil {
 		return "", err
+	}
+	if !g.KnownNodeKind(n.Kind) {
+		return "", unknownNodeTypeError(n.ID, n.Kind)
 	}
 	if n.ID == "" {
 		n.ID, err = s.nextNodeIDLocked(g)

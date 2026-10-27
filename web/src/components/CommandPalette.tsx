@@ -23,6 +23,7 @@ import {
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
+import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
 import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
 import { packName, usePacks } from "../game/packStore";
 import {
@@ -131,6 +132,7 @@ export function CommandPalette() {
   const switchProject = useApp((state) => state.switchProject);
   const openTab = useApp((state) => state.openTab);
   const createNode = useApp((state) => state.createNode);
+  const nodeTypes = useNodeTypes();
   const togglePane = useApp((state) => state.togglePane);
   const toggleTheme = useApp((state) => state.toggleTheme);
   const updateUIPreference = useApp((state) => state.updateUIPreference);
@@ -267,6 +269,20 @@ export function CommandPalette() {
           await createNode({ title: t("palette.untitledNode"), kind: "task" });
         },
       },
+      // One per type, so "new review" or a custom type's name finds it.
+      ...nodeTypes.map<Command>((type) => {
+        const label = nodeTypeLabel(type, t);
+        return {
+          key: `new-node-${type.id}`,
+          title: t("palette.newNodeOfType", { type: label }),
+          detail: t("palette.createIn", { project: activeProject || t("topbar.project") }),
+          keywords: `node create add type ${type.id} ${type.label} ${label} 建立 類型`,
+          icon: <IconPlus size={15} />,
+          run: async () => {
+            await createNode({ title: t("palette.untitledNode"), kind: type.id });
+          },
+        };
+      }),
       {
         key: "toggle-graph",
         title: paneOpen.graph ? t("palette.hideGraph") : t("palette.showGraph"),
@@ -594,6 +610,7 @@ export function CommandPalette() {
     activeTab,
     canCreateProjects,
     createNode,
+    nodeTypes,
     explorerCollapsed,
     projects,
     workspaces,

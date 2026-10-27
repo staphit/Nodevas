@@ -200,6 +200,7 @@ const (
 	HoldChanged   = "changed"   // the node's content changed after start
 	HoldRemoved   = "removed"   // the node left the goal after start
 	HoldSensitive = "sensitive" // the PR touches CI, manifests or scripts
+	HoldPerson    = "person"    // a node type a person completes (Review, Decision)
 )
 
 // MaxAutopilotTasks bounds the tasks one autopilot run works.

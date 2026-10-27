@@ -16,10 +16,12 @@ import (
 // goal; a person can do either by hand. Deprecated edges are not
 // dependencies and do not count. The goal itself is never a task.
 //
-// Only task nodes (kind "" or "task") are dispatched. Other kinds a plan may
-// hold (gates, start/end markers, scenes) are part of the DAG for ordering
-// but have nothing to implement: they are skipped, and a skipped task
-// satisfies whatever waits on it.
+// Only members whose node type has agent mode "dispatch" are dispatched (Task,
+// Scene, Event and dispatch-mode custom types). The others stay in the DAG for
+// ordering: a type a person completes (Review, Decision, a goal inside the
+// goal) holds until the board shows it settled; an automatic one (Start, End)
+// is skipped, and a skipped task satisfies whatever waits on it. A node
+// without status (Note) is reference material and never a member.
 
 // GoalTag is the tag that makes a node one of goal id's tasks, as a plan run
 // writes it (adapter.GoalTag on the runner).
@@ -33,15 +35,21 @@ type dag struct {
 	order    []string
 	upstream map[string][]string
 	nodes    map[string]*engine.Node
+	// typeOf resolves a member's node type against the graph it came from.
+	typeOf func(*engine.Node) engine.NodeType
 }
 
 // buildDAG collects the goal's members from the graph. A cycle among them
 // (the board allows drawing one) leaves its nodes at the end of the order,
 // where nothing ever schedules them; the orchestrator fails them instead.
 func buildDAG(g *engine.Graph, goal string) dag {
-	d := dag{goal: goal, upstream: map[string][]string{}, nodes: map[string]*engine.Node{}}
+	d := dag{goal: goal, upstream: map[string][]string{}, nodes: map[string]*engine.Node{}, typeOf: g.TypeOf}
 	if g == nil || g.NodeByID(goal) == nil {
 		return d
+	}
+	noStatus := func(id string) bool {
+		n := g.NodeByID(id)
+		return n != nil && g.TypeOf(n).Completion == engine.CompletionNone
 	}
 	into := map[string][]string{}
 	for _, e := range g.Edges {
@@ -56,7 +64,7 @@ func buildDAG(g *engine.Graph, goal string) dag {
 		id := queue[0]
 		queue = queue[1:]
 		for _, from := range into[id] {
-			if from == goal || members[from] || g.NodeByID(from) == nil {
+			if from == goal || members[from] || g.NodeByID(from) == nil || noStatus(from) {
 				continue
 			}
 			members[from] = true
@@ -65,7 +73,7 @@ func buildDAG(g *engine.Graph, goal string) dag {
 	}
 	tag := GoalTag(goal)
 	for _, n := range g.Nodes {
-		if n != nil && n.ID != goal && slices.ContainsFunc(n.Tags, func(t string) bool { return strings.EqualFold(strings.TrimSpace(t), tag) }) {
+		if n != nil && n.ID != goal && !noStatus(n.ID) && slices.ContainsFunc(n.Tags, func(t string) bool { return strings.EqualFold(strings.TrimSpace(t), tag) }) {
 			members[n.ID] = true
 		}
 	}
@@ -170,14 +178,22 @@ func (d dag) title(id string) string {
 	return id
 }
 
-// dispatchable reports whether a member has something to implement.
+// dispatchable reports whether a member has something an agent implements:
+// its type's agent mode is dispatch.
 func (d dag) dispatchable(id string) bool {
 	n := d.nodes[id]
 	if n == nil {
 		return false
 	}
-	kind := strings.TrimSpace(n.Kind)
-	return kind == "" || kind == "task"
+	return d.nodeType(id).AgentMode == engine.AgentDispatch
+}
+
+// nodeType is a member's resolved type (Task when unknown).
+func (d dag) nodeType(id string) engine.NodeType {
+	if d.typeOf == nil {
+		return (*engine.Graph)(nil).TypeOf(d.nodes[id])
+	}
+	return d.typeOf(d.nodes[id])
 }
 
 // inCycle reports whether a member sits on a dependency cycle (it never

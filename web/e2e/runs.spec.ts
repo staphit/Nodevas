@@ -472,7 +472,8 @@ for (const [name, viewport] of Object.entries({
     await dialog.getByRole("button", { name: "新增規則" }).click();
     const second = dialog.getByRole("listitem", { name: "規則 2" });
     await second.getByRole("combobox", { name: "比對" }).selectOption("kind");
-    await second.getByRole("combobox", { name: "類型" }).fill("chore");
+    // The kind is picked from the project's types that agents work.
+    await second.getByRole("combobox", { name: "類型" }).selectOption("scene");
     await second.getByRole("combobox", { name: "目標 agent" }).selectOption("claude");
     await second.getByText("Fallback 鏈（0）").click();
     await second.getByRole("button", { name: "新增 fallback" }).click();
@@ -485,7 +486,7 @@ for (const [name, viewport] of Object.entries({
     expect(puts).toHaveLength(1);
     const sent = (puts[0] as { rules: { id: string; match: string; value?: string }[] }).rules;
     expect(sent.map((rule) => [rule.match, rule.value])).toEqual([
-      ["kind", "chore"],
+      ["kind", "scene"],
       ["tag", "review"],
     ]);
     expect(sent[0]).toMatchObject({

@@ -14,6 +14,7 @@ import { confirmAction } from "../ConfirmDialog";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
+import { isKnownKind, normalizeKind } from "../../domain/graph/nodeTypes";
 import type { Graph, GraphNode } from "../../types";
 import type { ImportBundleChoice } from "./ImportBundleDialog";
 import { readBundleManifest, type BundleManifest } from "./projectArchive";
@@ -403,7 +404,12 @@ export function useProjectTransfer({
         const created = await api.createNode(
           {
             title: source.vised?.title || heading || t("explorer.untitledNode"),
-            kind: source.vised?.kind || "task",
+            // A custom type from another project is not defined here; the
+            // node comes in as a Task rather than failing the whole import.
+            kind: (() => {
+              const kind = normalizeKind(source.vised?.kind);
+              return kind && isKnownKind(useApp.getState().graph, kind) ? kind : "task";
+            })(),
           },
           stripFrontmatter(source.text || ""),
         );

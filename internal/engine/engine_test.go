@@ -157,8 +157,9 @@ func TestComputeStatuses(t *testing.T) {
 	rs := NewRunState(now)
 
 	st := ComputeStatuses(g, rs)
-	if st["intro"] != StatusReady {
-		t.Errorf("intro = %s, want ready (no requires)", st["intro"])
+	// intro is a Start: with no requires it settles itself.
+	if st["intro"] != StatusDone {
+		t.Errorf("intro = %s, want done (a start settles itself)", st["intro"])
 	}
 	if st["chapter-1"] != StatusReady {
 		t.Errorf("chapter-1 = %s, want ready", st["chapter-1"])
@@ -192,9 +193,10 @@ func TestComputeStatuses(t *testing.T) {
 	if st["chapter-2"] != StatusReady {
 		t.Errorf("chapter-2 = %s, want ready", st["chapter-2"])
 	}
-	// nor: neither side-quest nor chapter-2 done → hidden ending unlocks.
-	if st["hidden-ending"] != StatusReady {
-		t.Errorf("hidden-ending = %s, want ready", st["hidden-ending"])
+	// nor: neither side-quest nor chapter-2 done → the hidden ending, an End,
+	// settles itself.
+	if st["hidden-ending"] != StatusDone {
+		t.Errorf("hidden-ending = %s, want done", st["hidden-ending"])
 	}
 	// karma still 0 → side-quest locked.
 	if st["side-quest"] != StatusReady {
@@ -450,5 +452,49 @@ func TestNodeFileNoFrontmatter(t *testing.T) {
 	}
 	if nf.Body != "plain markdown\n" || len(nf.Meta) != 0 {
 		t.Errorf("wrong parse: %+v", nf)
+	}
+}
+
+func TestValidateNodeTypes(t *testing.T) {
+	g, err := ParseGraph([]byte(`
+version: 1
+node_types:
+  - id: custom-type-1
+    label: Lore
+    agent_mode: dispatch
+    completion: none
+    counts_in_progress: false
+nodes:
+  - id: a
+  - id: b
+    requires: a
+  - id: lore
+    kind: note
+  - id: odd
+    kind: bug
+    requires: b
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notConnected, unknown, typeError bool
+	for _, issue := range Validate(g) {
+		switch {
+		case issue.NodeID == "lore" && strings.Contains(issue.Msg, "not connected"):
+			notConnected = true
+		case issue.NodeID == "odd" && issue.Severity == "warning" && strings.Contains(issue.Msg, "unknown node type"):
+			unknown = true
+		case issue.Field == "node_types" && issue.Severity == "error":
+			typeError = true
+		}
+	}
+	if notConnected {
+		t.Error("an unconnected note was flagged")
+	}
+	if !unknown {
+		t.Error("unknown kind not warned")
+	}
+	if !typeError {
+		t.Error("bad node_types not reported")
 	}
 }

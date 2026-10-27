@@ -85,8 +85,23 @@ import { useTimelineOrderDrag } from "./lane/useTimelineOrderDrag";
 
 export type LaneContextMenu =
   | { kind: "plan"; x: number; y: number; nodeId: string; date: string }
-  | { kind: "graph"; x: number; y: number; col: number; row: number }
-  | { kind: "node-create"; x: number; y: number; col: number; row: number }
+  | {
+      kind: "graph";
+      x: number;
+      y: number;
+      col: number;
+      row: number;
+      /** The type a new node starts as; Task when absent. */
+      nodeKind?: string;
+    }
+  | {
+      kind: "node-create";
+      x: number;
+      y: number;
+      col: number;
+      row: number;
+      nodeKind?: string;
+    }
   | {
       kind: "edge";
       x: number;
@@ -1014,6 +1029,7 @@ export function LaneView({
     nodeCreation.setNodePlanDates({});
     nodeCreation.setNodeCustomPlanDrafts([]);
     nodeCreation.setNodeCreateError(null);
+    nodeCreation.setNodeCreateKind(menu.nodeKind || "task");
     setContextMenu({ ...menu, kind: "node-create" });
   };
 

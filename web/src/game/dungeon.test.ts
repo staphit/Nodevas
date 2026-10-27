@@ -63,12 +63,35 @@ function monster(d: ReturnType<typeof dungeon>, id: string) {
 }
 
 describe("monsters", () => {
-  it("leaves start, end and event markers out", () => {
+  it("leaves start, end and notes out; an event is work", () => {
     expect(countsAsWork({ kind: "start" })).toBe(false);
-    expect(countsAsWork({ kind: "event" })).toBe(false);
+    expect(countsAsWork({ kind: "end" })).toBe(false);
+    expect(countsAsWork({ kind: "note" })).toBe(false);
+    expect(countsAsWork({ kind: "event" })).toBe(true);
     expect(countsAsWork({ kind: "task" })).toBe(true);
     expect(countsAsWork({})).toBe(true);
-    expect(dungeon({}).monsters.map((m) => m.nodeId)).toEqual(["schema", "design", "api", "login"]);
+    // A custom type that does not count stays out too.
+    const custom: Graph = {
+      version: 1,
+      nodes: [],
+      nodeTypes: [
+        {
+          id: "custom-type-1",
+          label: "伏筆",
+          agentMode: "none",
+          completion: "none",
+          countsInProgress: false,
+        },
+      ],
+    };
+    expect(countsAsWork({ kind: "custom-type-1" }, custom)).toBe(false);
+    expect(dungeon({}).monsters.map((m) => m.nodeId)).toEqual([
+      "schema",
+      "design",
+      "api",
+      "login",
+      "launch",
+    ]);
   });
 
   it("locks a node that is blocked although the server calls it ready", () => {
@@ -140,13 +163,20 @@ describe("monsters", () => {
 
 describe("boss", () => {
   it("has HP for every unsettled work node", () => {
+    // The launch event is work too: five monsters, two of them settled.
     const d = dungeon({ schema: "done", design: SETTLED_CUSTOM });
-    expect(d.boss).toEqual({ name: "main", hp: 2, maxHp: 4, ratio: 0.5, defeated: false });
+    expect(d.boss).toEqual({ name: "main", hp: 3, maxHp: 5, ratio: 0.6, defeated: false });
   });
 
   it("is defeated when everything settled, and an empty project is no fight", () => {
-    const d = dungeon({ schema: "done", design: "done", api: "done", login: "skipped" });
-    expect(d.boss).toMatchObject({ hp: 0, maxHp: 4, ratio: 0, defeated: true });
+    const d = dungeon({
+      schema: "done",
+      design: "done",
+      api: "done",
+      login: "skipped",
+      launch: "done",
+    });
+    expect(d.boss).toMatchObject({ hp: 0, maxHp: 5, ratio: 0, defeated: true });
     expect(bossOf([], "empty")).toEqual({ name: "empty", hp: 0, maxHp: 0, ratio: 0, defeated: false });
     expect(buildDungeon({ graph: null, statuses: {}, runs: [], autopilots: [], projectName: "x", now: NOW }).boss.maxHp).toBe(0);
   });

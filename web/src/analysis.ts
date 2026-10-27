@@ -3,6 +3,7 @@ import {
   logicGateIsComplete,
   logicGateRelation,
 } from "./domain/graph/logicGate";
+import { nodeTypeOf } from "./domain/graph/nodeTypes";
 import { evaluateRequires } from "./domain/graph/requires";
 import type {
   Graph,
@@ -121,6 +122,8 @@ function gateBlockers(gate: LogicGate, done: Set<string>): string[] {
 }
 
 function nodeDuration(node: GraphNode, graph: Graph): number {
+  // Start, End and other types that are not work take no time on the path.
+  if (!nodeTypeOf(graph, node).countsInProgress) return 0;
   const plans = graph.ui?.plans?.[node.id];
   const start = milestone(plans, "started");
   const done = milestone(plans, "done");
@@ -152,16 +155,31 @@ export function analyzeGraph(
   };
   if (!graph) return result;
 
-  const nodes = graph.nodes ?? [];
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const allNodes = graph.nodes ?? [];
+  const byId = new Map(allNodes.map((node) => [node.id, node]));
+  // A type with no status (a Note) is reference material outside the flow:
+  // never late, never blocked, never on the critical path, and as a
+  // prerequisite it holds nothing back. Every check below runs on `nodes`.
+  const outsideFlow = new Set(
+    allNodes
+      .filter((node) => nodeTypeOf(graph, node).completion === "none")
+      .map((node) => node.id),
+  );
+  const nodes = allNodes.filter((node) => !outsideFlow.has(node.id));
   const statusDefinitions = graph.ui?.customStatuses ?? [];
   const settled = (status: Status) => isSettledStatus(status, statusDefinitions);
   const requiredEdges = (graph.edges ?? []).filter(
-    (edge) => edgeBlocks(edge) && byId.has(edge.from) && byId.has(edge.to),
+    (edge) =>
+      edgeBlocks(edge) &&
+      byId.has(edge.from) &&
+      byId.has(edge.to) &&
+      !outsideFlow.has(edge.from) &&
+      !outsideFlow.has(edge.to),
   );
-  const done = new Set(
-    nodes.filter((node) => settled(statuses[node.id] ?? "ready")).map((node) => node.id),
-  );
+  const done = new Set([
+    ...nodes.filter((node) => settled(statuses[node.id] ?? "ready")).map((node) => node.id),
+    ...outsideFlow,
+  ]);
   const effectiveFlags = { ...(graph.flags ?? {}), ...runtimeFlags };
   const today = localDay(now);
 
@@ -352,6 +370,7 @@ export function analyzeGraph(
   }
   let end = "";
   for (const [id, days] of distance) {
+    if (!nodeTypeOf(graph, byId.get(id)).countsInProgress) continue;
     if (!end || days > (distance.get(end) ?? 0)) end = id;
   }
   if (end) {

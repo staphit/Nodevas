@@ -24,6 +24,9 @@ var (
 	// ErrConflict is a goal that already has a live autopilot, or an action
 	// its state does not allow.
 	ErrConflict = errors.New("autopilot conflict")
+	// ErrNodeType is a goal whose node type agents may not work (a Review,
+	// a Decision, a Note…).
+	ErrNodeType = errors.New("node type forbids agents")
 )
 
 func invalidf(format string, args ...any) error {

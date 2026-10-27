@@ -10,6 +10,7 @@ import { useSignOut, useTeamServer, useViewer } from "../components/SignIn";
 import { localizedPlanStatusLabel, useI18n } from "../i18n";
 import { RunNotifySettings } from "../runs/RunToasts";
 import { useApp } from "../store";
+import { isBuiltinKind } from "../domain/graph/nodeTypes";
 import type { SettingsPage, SettingsRow } from "./openSettings";
 import { listValue, SettingsDisclosure } from "./SettingsDisclosure";
 
@@ -67,6 +68,9 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
   const plans = graph?.ui?.planStatuses ?? [];
   const milestones = plans.map((plan) => localizedPlanStatusLabel(plan.id, plans, language));
   const people = (graph?.users ?? []).map((user) => user.name || user.id);
+  const customTypes = (graph?.nodeTypes ?? [])
+    .filter((type) => !isBuiltinKind(type.id))
+    .map((type) => type.label ?? type.id);
   return (
     <section className="settings-page-pane settings-card" aria-label={t("settingsPage.page.project")}>
       <h2>
@@ -80,6 +84,14 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
         onToggle={() => toggleRow("statuses")}
       >
         <ProjectSettings tab="workflow" />
+      </SettingsDisclosure>
+      <SettingsDisclosure
+        label={t("settings.nodeTypes")}
+        value={listValue(customTypes) || t("settingsPage.builtInOnly")}
+        open={row === "nodeTypes"}
+        onToggle={() => toggleRow("nodeTypes")}
+      >
+        <ProjectSettings tab="nodeTypes" />
       </SettingsDisclosure>
       <SettingsDisclosure
         label={t("settings.milestones")}

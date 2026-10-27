@@ -22,6 +22,7 @@ import (
 	"nodevas/internal/project"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/store"
 )
 
 const maxBody = 16 << 10
@@ -66,6 +67,8 @@ func fail(c *gin.Context, err error) {
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
 	case errors.Is(err, ap.ErrConflict):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
+	case errors.Is(err, ap.ErrNodeType):
+		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
 	}

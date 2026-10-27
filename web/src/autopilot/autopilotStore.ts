@@ -9,6 +9,7 @@ import {
   type HumanReviewRequest,
   type TaskInstance,
 } from "../api";
+import { nodeTypeErrorMessage } from "../nodeTypeErrors";
 
 /** Where a task node stands in an autopilot run, for its board badge. */
 export interface TaskMark {
@@ -210,7 +211,8 @@ export const useAutopilot = create<AutopilotStoreState>((set, get) => {
         if (!get().views[run.id]) hold({ run, tasks: [] });
         return true;
       } catch (error) {
-        set((s) => ({ errors: { ...s.errors, [goalNodeId]: message(error) } }));
+        const text = nodeTypeErrorMessage(error, goalNodeId) ?? message(error);
+        set((s) => ({ errors: { ...s.errors, [goalNodeId]: text } }));
         return false;
       }
     },

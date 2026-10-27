@@ -398,6 +398,11 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 	if g.NodeByID(nodeID) == nil {
 		return nil, fmt.Errorf("node %q not found", nodeID)
 	}
+	// A type without status (Note) takes none from anybody, including the
+	// actor-less Autopilot and Copilot writers that come through here.
+	if nodeType := g.TypeOf(g.NodeByID(nodeID)); nodeType.Completion == engine.CompletionNone {
+		return nil, noStatusError(nodeID, nodeType)
+	}
 	if strings.HasPrefix(string(status), "custom-status-") {
 		// loadGraphLocked already merged the workspace vocabulary in, so this
 		// check covers both project-local and workspace-wide definitions.

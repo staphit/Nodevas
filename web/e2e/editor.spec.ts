@@ -310,7 +310,9 @@ test.describe("node card appearance", () => {
     await expect(card.first()).toHaveClass(/shape-hexagon/);
 
     await drawer.getByRole("button", { name: "重設為預設外觀" }).click();
-    await expect(card.first()).not.toHaveClass(/shape-/);
+    // Back to the node type's own shape: a Task is a rounded card.
+    await expect(card.first()).not.toHaveClass(/shape-hexagon/);
+    await expect(card.first()).toHaveClass(/shape-round/);
   });
 
   test("outlines a clipped shape on every edge, in the chosen colour", async ({

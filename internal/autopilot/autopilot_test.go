@@ -746,13 +746,57 @@ func TestBoardAndNonTasks(t *testing.T) {
 	_ = b.SetStatus("", "done", engine.StatusDone, "me", "")
 	h := newHarness(t, b)
 	v := h.create(runnerwire.AutopilotPolicy{MaxParallel: 3})
-	if task(v, "done").State != runnerwire.TaskSuccess || task(v, "g").State != runnerwire.TaskSkipped ||
-		task(v, "a").State != runnerwire.TaskQueued || task(v, "x").State != runnerwire.TaskFailed ||
+	// A review waits for a person, and what depends on it waits with it.
+	if task(v, "done").State != runnerwire.TaskSuccess || task(v, "g").State != runnerwire.TaskWaitingHuman ||
+		task(v, "g").Hold != runnerwire.HoldPerson ||
+		task(v, "a").State != runnerwire.TaskNone || task(v, "x").State != runnerwire.TaskFailed ||
 		!strings.Contains(task(v, "x").Reason, "cycle") {
 		t.Fatalf("states = %s", states(v))
 	}
 	if h.runs.startsFor("done") != 0 || h.runs.startsFor("g") != 0 {
 		t.Fatal("dispatched a settled node or a gate")
+	}
+	// The person approves the review on the board: it succeeds and releases a.
+	_ = b.SetStatus("", "g", engine.StatusDone, "me", "")
+	v = h.view(v.Run.ID)
+	if task(v, "g").State != runnerwire.TaskSuccess || task(v, "g").Hold != "" || task(v, "a").State != runnerwire.TaskQueued {
+		t.Fatalf("after the review: %s", states(v))
+	}
+}
+
+func TestStoryWritingUnitsAreDispatchedAndNotesAreNotMembers(t *testing.T) {
+	b := newBoard([]string{"goal:goal", "s:scene", "e:event", "sub:goal", "n:note", "open:start"},
+		[]string{"open>s", "s>e", "e>goal", "sub>goal", "n>goal"})
+	h := newHarness(t, b)
+	v := h.create(runnerwire.AutopilotPolicy{MaxParallel: 3})
+	if task(v, "n").NodeID != "" {
+		t.Fatalf("a note linked into the goal became a task: %s", states(v))
+	}
+	if task(v, "open").State != runnerwire.TaskSuccess {
+		t.Fatalf("a start settles itself: %s", states(v))
+	}
+	if task(v, "s").State != runnerwire.TaskQueued || h.runs.startsFor("s") != 1 {
+		t.Fatalf("a scene was not dispatched: %s", states(v))
+	}
+	if task(v, "sub").State != runnerwire.TaskWaitingHuman || h.runs.startsFor("sub") != 0 {
+		t.Fatalf("a goal inside the goal was dispatched: %s", states(v))
+	}
+	h.finishWithPR(task(v, "s").RunID)
+	v = h.view(v.Run.ID)
+	if h.runs.startsFor("e") != 1 {
+		t.Fatalf("an event was not dispatched once its scene finished: %s", states(v))
+	}
+}
+
+func TestAGoalOfANonAgentTypeIsRefused(t *testing.T) {
+	for _, kind := range []string{"gate", "note", "choice"} {
+		b := newBoard([]string{"goal:" + kind, "a"}, []string{"a>goal"})
+		h := newHarness(t, b)
+		_, err := h.o.Create(h.ctx, CreateInput{Project: "main", GoalNodeID: "goal",
+			Policy: runnerwire.AutopilotPolicy{}, Actor: h.bea})
+		if !errors.Is(err, ErrNodeType) {
+			t.Fatalf("%s goal: err = %v, want ErrNodeType", kind, err)
+		}
 	}
 }
 
@@ -882,5 +926,19 @@ func TestAnyEditorMayReview(t *testing.T) {
 	}
 	if len(h.runs.reviews) != 1 {
 		t.Fatalf("reviews = %q", h.runs.reviews)
+	}
+}
+
+func TestAGoalTypedGoalIsStillMarkedDoneByTheAutopilot(t *testing.T) {
+	b := newBoard([]string{"goal:goal", "r:gate"}, []string{"r>goal"})
+	h := newHarness(t, b)
+	v := h.create(runnerwire.AutopilotPolicy{})
+	if task(v, "r").Hold != runnerwire.HoldPerson {
+		t.Fatalf("review not held for a person: %s", states(v))
+	}
+	_ = b.SetStatus("", "r", engine.StatusDone, "me", "")
+	v = h.view(v.Run.ID)
+	if v.Run.Status != runnerwire.AutopilotSucceeded || h.board.status("goal") != engine.StatusDone {
+		t.Fatalf("run %s goal=%s states=%s", v.Run.Status, h.board.status("goal"), states(v))
 	}
 }

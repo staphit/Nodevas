@@ -4,6 +4,7 @@ import { OperationStatus, InlineNotice } from "./InteractionPrimitives";
 import { AppearanceEditor, LayoutEditor } from "./settings/AppearanceEditor";
 import { CopilotEditor } from "./settings/CopilotEditor";
 import { MilestoneTypeEditor } from "./settings/MilestoneTypeEditor";
+import { NodeTypeEditor } from "./settings/NodeTypeEditor";
 import { PeopleEditor } from "./settings/PeopleEditor";
 import { StatusVocabularyEditor } from "./settings/StatusVocabularyEditor";
 import { TwoFactorEditor } from "./settings/TwoFactorEditor";
@@ -14,6 +15,7 @@ import type { SettingsNotify } from "./settings/notify";
 
 export type SettingsTab =
   | "workflow"
+  | "nodeTypes"
   | "milestones"
   | "people"
   | "server"
@@ -51,7 +53,8 @@ export function ProjectSettings({
 
   // Stable so an editor's effects do not restart every time a banner changes.
   const notify: SettingsNotify = useMemo(() => ({ onError: setError, onNotice: setNotice }), []);
-  const workflow = tab === "workflow" || tab === "milestones" || tab === "people";
+  const workflow =
+    tab === "workflow" || tab === "nodeTypes" || tab === "milestones" || tab === "people";
 
   return (
     <div className="settings-editor">
@@ -69,6 +72,8 @@ export function ProjectSettings({
       {notice && !error && <InlineNotice kind="success">{notice}</InlineNotice>}
 
       {tab === "workflow" && <StatusVocabularyEditor notify={notify} />}
+
+      {tab === "nodeTypes" && <NodeTypeEditor notify={notify} />}
 
       {tab === "milestones" && <MilestoneTypeEditor notify={notify} />}
 

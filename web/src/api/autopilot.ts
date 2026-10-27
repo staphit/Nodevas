@@ -197,7 +197,9 @@ export interface TaskInstance {
   updatedAt: string;
 }
 
-export type TaskHold = "changed" | "removed" | "sensitive";
+/** `person`: a member agents cannot work (a Review, a Decision) waits for a
+ * person to settle it on the board. */
+export type TaskHold = "changed" | "removed" | "sensitive" | "person";
 
 export interface AutopilotView {
   run: AutopilotRun;

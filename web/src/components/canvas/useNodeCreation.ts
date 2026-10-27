@@ -69,6 +69,9 @@ export function useNodeCreation({
   // Empty means "everyone may write", the default a new node keeps.
   const [nodeCreateWriteAccess, setNodeCreateWriteAccess] = useState("");
   const [nodeCreateStyle, setNodeCreateStyle] = useState<NodeStyle>({});
+  // The type the node is created as. The toolbar's caret and the palette can
+  // preselect one; the plain button and the canvas menu start as Task.
+  const [nodeCreateKind, setNodeCreateKind] = useState("task");
   const [nodePlanDates, setNodePlanDates] = useState<
     Partial<Record<PlanStatus, string>>
   >({});
@@ -136,7 +139,7 @@ export function useNodeCreation({
       const id = await createNode(
         {
           title: nodeCreateTitle.trim(),
-          kind: "task",
+          kind: nodeCreateKind || "task",
           ...(nodeCreateWriteAccess ? { writeAccess: nodeCreateWriteAccess } : {}),
         },
         {
@@ -173,6 +176,7 @@ export function useNodeCreation({
       setNodeCreateStatus("");
       setNodeCreateWriteAccess("");
       setNodeCreateStyle({});
+      setNodeCreateKind("task");
       setContextMenu(null);
     } catch (error) {
       setNodeCreateError((error as Error).message || t("nodeCreate.failed"));
@@ -193,6 +197,8 @@ export function useNodeCreation({
     setNodeCreateWriteAccess,
     nodeCreateStyle,
     setNodeCreateStyle,
+    nodeCreateKind,
+    setNodeCreateKind,
     nodePlanDates,
     setNodePlanDates,
     customPlanDraftKey,

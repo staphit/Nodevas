@@ -301,8 +301,13 @@ func EffectiveFlags(g *Graph, rs *RunState) map[string]any {
 // Explicit history wins; nodes without history are ready ("未開始").
 // Requires expressions remain graph metadata and validation input, but do not
 // lock lifecycle transitions.
+//
+// The one exception is a type that completes automatically (Start, End): with
+// no explicit history it is derived done once its prerequisites settle. The
+// derived status is never journaled.
 func ComputeStatuses(g *Graph, rs *RunState) map[string]Status {
 	out := map[string]Status{}
+	var auto []string
 	for _, n := range g.Nodes {
 		if n == nil {
 			continue
@@ -314,6 +319,10 @@ func ComputeStatuses(g *Graph, rs *RunState) map[string]Status {
 			}
 		}
 		out[n.ID] = StatusReady
+		if g.TypeOf(n).Completion == CompletionAuto {
+			auto = append(auto, n.ID)
+		}
 	}
+	deriveAutoStatuses(g, rs, out, auto)
 	return out
 }

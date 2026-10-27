@@ -305,3 +305,48 @@
     align-items: flex-start;
   }
 }
+
+/* Settings › This project › Node types: one row per type. */
+.node-type-list .node-type-row {
+  row-gap: 6px;
+}
+.node-type-row .col-card-type {
+  flex: none;
+  max-width: 120px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.node-type-name {
+  min-width: 80px;
+  font-weight: 600;
+}
+.node-type-row select {
+  max-width: 220px;
+}
+.node-type-row input[type="color"] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+}
+.node-type-clear {
+  min-width: 22px;
+  padding: 0 4px;
+}
+.node-type-behaviour {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.node-type-behaviour-fields {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.node-type-behaviour-fields .danger {
+  margin-left: auto;
+}

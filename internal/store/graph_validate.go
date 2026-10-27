@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"nodevas/internal/engine"
 )
@@ -32,6 +33,9 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	}
 	if len(g.Users) > maxGraphUsers {
 		return fmt.Errorf("graph has too many users (maximum %d)", maxGraphUsers)
+	}
+	if err := engine.ValidateNodeTypeDefs(g.NodeTypes); err != nil {
+		return err
 	}
 	userIDs := make(map[string]struct{}, len(g.Users))
 	userNames := make(map[string]struct{}, len(g.Users))
@@ -66,6 +70,13 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 		}
 		if len(node.Requires) > 64<<10 || len(node.Title) > 64<<10 {
 			return fmt.Errorf("node %q contains an oversized title or requirement", node.ID)
+		}
+		// An unknown kind is kept (it reads as Task), including a legacy
+		// free-text one ("bug", "伏筆"), so old graphs stay saveable; only its
+		// size and control characters are checked here. New unknown kinds are
+		// refused on the write paths.
+		if len(node.Kind) > 64 || strings.IndexFunc(node.Kind, unicode.IsControl) >= 0 {
+			return fmt.Errorf("node %q has an invalid type %q", node.ID, node.Kind)
 		}
 		switch node.Priority {
 		case "", "urgent", "high", "medium", "low":
