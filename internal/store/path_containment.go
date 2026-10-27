@@ -666,7 +666,7 @@ func writeProjectFileAtomic(rootPath, path string, data []byte, perm os.FileMode
 		markWrite(filepath.Join(rootPath, tmpRel))
 		markWrite(filepath.Join(rootPath, rel))
 	}
-	if err := root.Rename(tmpRel, rel); err != nil {
+	if err := renameReplacing(root, tmpRel, rel); err != nil {
 		_ = root.Remove(tmpRel)
 		return err
 	}
