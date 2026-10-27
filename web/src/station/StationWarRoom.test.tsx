@@ -1,18 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useMemo } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type AutopilotRun, type AutopilotView, type Run } from "../api";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
+import { buildWorld } from "../game/buildWorld";
+import { GameActionsProvider } from "../game/GameActions";
 import { readPreferences } from "../preferences";
+import { useRunners } from "../runners/runnerStore";
 import { useRuns } from "../runs/runStore";
+import { useSettingsRequest } from "../settings/openSettings";
 import { useApp } from "../store";
 import { controlRows, formatElapsed, pauseAllPlan } from "./control";
 import { useControl } from "./controlStore";
-import type { World } from "../game/world";
-import { useRunners } from "../runners/runnerStore";
-import { StationControl, StationControlReport, StationPauseButton } from "./StationControl";
-import { useSettingsRequest } from "../settings/openSettings";
+import { StationControlReport, StationPauseButton } from "./StationControl";
 import { useStation } from "./stationStore";
+import { StationWarRoom } from "./StationWarRoom";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -100,7 +103,7 @@ beforeEach(() => {
       nodes: [
         { id: "alpha", title: "Fix the login" },
         { id: "beta", title: "Add a test" },
-        { id: "goal", title: "Ship login" },
+        { id: "goal", title: "Ship login", kind: "goal" },
       ],
       edges: [],
     } as never,
@@ -111,90 +114,119 @@ beforeEach(() => {
   useControl.setState({ pausing: false, result: null, error: "" });
   vi.spyOn(api, "listProjectRuns").mockResolvedValue({ runs: [] });
   vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
-  // A runner is there: the list, not the call to add one.
-  useRunners.setState({ loaded: true, loading: false, error: null, runners: [{ id: "r1" } as never] });
-  useStation.getState().setLiveView("list");
+  // A runner is there: the war room, not the call to add one.
+  useRunners.setState({
+    loaded: true,
+    loading: false,
+    error: null,
+    runners: [{ id: "r1", name: "desktop", online: true, info: { agents: [] } } as never],
+  });
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount(world?: World) {
+/** Station's war room section over the stores, as StationView mounts it
+ * (useWorld, minus its loaders). */
+function Harness() {
+  const graph = useApp((s) => s.graph);
+  const runs = useRuns((s) => s.activeRuns);
+  const runners = useRunners((s) => s.runners);
+  const world = useMemo(
+    () => buildWorld({ graph, runs, runners, sessions: [], asks: [], held: [], messages: [], now: Date.now() }),
+    [graph, runs, runners],
+  );
+  return <StationWarRoom world={world} />;
+}
+
+function mount() {
   return render(
-    <>
+    <GameActionsProvider>
       <StationPauseButton />
       <StationControlReport />
-      <StationControl world={world} />
+      <Harness />
       <ConfirmDialogHost />
-    </>,
+    </GameActionsProvider>,
   );
 }
 
-/** The "In progress" rows, in order. */
-async function rows() {
-  const list = await screen.findByRole("list", { name: "In progress" });
-  return within(list).getAllByRole("listitem");
+/** A character in the war room, by the node it works on. */
+function desk(node: string) {
+  return screen.findByRole("button", { name: new RegExp(`, on “${node}”`) });
 }
 
-/** Opens a row's ⋯ menu. */
-function menuOf(row: HTMLElement) {
-  fireEvent.click(within(row).getByRole("button", { name: /^Actions for / }));
+/** Opens a character's or a tile's menu. */
+function menuOf(trigger: HTMLElement) {
+  fireEvent.click(trigger);
   return screen.getByRole("menu");
 }
 
-describe("StationControl", () => {
-  it("lists the active runs and autopilots one line each, and a count", async () => {
+describe("StationWarRoom", () => {
+  it("draws the room straight away, a character per active run, and a count", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
     mount();
 
-    await waitFor(async () => expect(await rows()).toHaveLength(3));
-    const [first, second, pilot] = await rows();
-    // Not started yet first, then running, then the autopilot.
-    expect(within(first).getByText("Fix the login")).toBeInTheDocument();
-    expect(within(first).getByText(/^Implement · Claude opus · desktop · /)).toBeInTheDocument();
-    expect(within(first).getByText("Awaiting acceptance")).toBeInTheDocument();
-    expect(within(second).getByText("Add a test")).toBeInTheDocument();
-    // The review run is a step of the autopilot's task (by its pipeline).
-    expect(
-      await within(second).findByText(/^Review · Codex gpt-5 · laptop · .* · 12\.3K tokens · \$0\.042 · Ship login$/),
-    ).toBeInTheDocument();
-    expect(within(pilot).getByText("Ship login")).toBeInTheDocument();
-    expect(within(pilot).getByText("1 of 4 tasks done")).toBeInTheDocument();
-    expect(screen.getByTitle("2 active runs")).toHaveTextContent("2");
+    expect(screen.getByRole("region", { name: "War room" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^View: / })).not.toBeInTheDocument();
+    await desk("Fix the login");
+    await desk("Add a test");
+    await waitFor(() => expect(screen.getByTitle("2 active runs")).toHaveTextContent("2"));
+    // The same room in words, for a screen reader.
+    const text = screen.getByTestId("war-room-text");
+    expect(within(text).getByText(/^Codex gpt-5 in desktop: reviewing, on “Add a test”\./)).toBeInTheDocument();
+  });
 
-    // Each row keeps its actions behind one ⋯.
-    expect(within(second).getAllByRole("button")).toHaveLength(1);
-    const menu = menuOf(second);
+  it("opens a run's actions from its character", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
+    mount();
+
+    const reviewer = await desk("Add a test");
+    await screen.findByText("1 of 4 tasks done");
+    const menu = menuOf(reviewer);
     // The first item takes focus once the panel is placed.
     expect(within(menu).getByRole("menuitem", { name: "Open run" })).toHaveFocus();
     expect(within(menu).getByRole("menuitem", { name: "View changes" })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "Open “Add a test”" })).toBeInTheDocument();
+    // The review run is a step of the autopilot's task (by its pipeline).
     expect(within(menu).getByRole("menuitem", { name: "Open goal “Ship login”" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Pause autopilot" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Cancel run" })).toBeInTheDocument();
     // Escape closes it and hands focus back.
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(within(second).getByRole("button", { name: /^Actions for / })).toHaveFocus();
+    expect(reviewer).toHaveFocus();
 
-    expect(within(menuOf(first)).queryByRole("menuitem", { name: "Pause autopilot" })).not.toBeInTheDocument();
+    fireEvent.click(within(menuOf(reviewer)).getByRole("menuitem", { name: "Open goal “Ship login”" }));
+    expect(useStation.getState().goal).toBe("goal");
+
+    expect(
+      within(menuOf(await desk("Fix the login"))).queryByRole("menuitem", { name: "Pause autopilot" }),
+    ).not.toBeInTheDocument();
     // An outside click closes it too.
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("opens the goal from a row and steers its autopilot", async () => {
+  it("shows a live autopilot as a tile, and steers it", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot()]);
     const action = vi.spyOn(api, "autopilotAction").mockResolvedValue(undefined as never);
     vi.spyOn(api, "getAutopilot").mockResolvedValue(makePilot({ status: "paused" }));
     mount();
 
-    const [pilot] = await rows();
-    fireEvent.click(within(menuOf(pilot)).getByRole("menuitem", { name: "Open goal “Ship login”" }));
+    const tiles = await screen.findByRole("list", { name: "Autopilots" });
+    const [pilot] = within(tiles).getAllByRole("listitem");
+    expect(within(pilot).getByText("Ship login")).toBeInTheDocument();
+    expect(within(pilot).getByText("1 of 4 tasks done")).toBeInTheDocument();
+    // The node's type label, as on its board card.
+    expect(within(pilot).getByText("Goal")).toBeInTheDocument();
+    const actions = within(pilot).getByRole("button", { name: "Actions for Ship login" });
+    fireEvent.click(within(menuOf(actions)).getByRole("menuitem", { name: "Open goal “Ship login”" }));
     expect(useStation.getState().goal).toBe("goal");
-    fireEvent.click(within(menuOf(pilot)).getByRole("menuitem", { name: "Pause autopilot" }));
+    fireEvent.click(within(menuOf(actions)).getByRole("menuitem", { name: "Pause autopilot" }));
     await waitFor(() => expect(action).toHaveBeenCalledWith("ap1", "pause"));
   });
 
@@ -204,8 +236,7 @@ describe("StationControl", () => {
     const cancel = vi.spyOn(api, "cancelRun").mockResolvedValue(makeRun({ status: "cancelled" }));
     mount();
 
-    const [row] = await rows();
-    fireEvent.click(within(menuOf(row)).getByRole("menuitem", { name: "Cancel run" }));
+    fireEvent.click(within(menuOf(await desk("Fix the login"))).getByRole("menuitem", { name: "Cancel run" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Cancel this run?")).toBeInTheDocument();
     expect(
@@ -309,58 +340,53 @@ describe("StationControl", () => {
     list.mockResolvedValue({ runs: [offered, reviewing] });
     useRuns.getState().onRunsChanged("beta");
     await waitFor(() => expect(screen.getByTitle("2 active runs")).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText("Add a test")).toBeInTheDocument();
+    expect(await desk("Add a test")).toBeInTheDocument();
   });
 
-  it("folds the tasks waiting on prerequisites into one line", async () => {
+  it("folds the tasks waiting on prerequisites into one line of tiles", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
-    const world = {
-      dungeon: {
-        monsters: [
-          { nodeId: "beta", title: "Add a test", state: "locked", blockers: ["alpha"] },
-          { nodeId: "alpha", title: "Fix the login", state: "attackable", blockers: [] },
+    const openTab = vi.fn().mockResolvedValue(undefined);
+    useApp.setState({
+      graph: {
+        nodes: [
+          { id: "alpha", title: "Fix the login" },
+          { id: "beta", title: "Add a test", requires: "alpha" },
         ],
-      },
-    } as unknown as World;
-    mount(world);
-
-    const expand = await screen.findByRole("button", { name: "Expand" });
-    expect(screen.getByText("1 tasks waiting on prerequisites")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting on Fix the login")).not.toBeInTheDocument();
-    fireEvent.click(expand);
-    expect(screen.getByRole("button", { name: "Collapse" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Waiting on Fix the login")).toBeInTheDocument();
-  });
-
-  it("offers one view menu: the list, the war room, the boss map", async () => {
-    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [offered] });
-    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+        edges: [{ from: "alpha", to: "beta" }],
+      } as never,
+      statuses: {},
+      openTab,
+    } as never);
     mount();
-    await rows();
 
-    fireEvent.click(screen.getByRole("button", { name: "View: List" }));
-    const menu = screen.getByRole("menu", { name: "View: List" });
-    expect(within(menu).getByRole("menuitemradio", { name: "List" })).toHaveAttribute("aria-checked", "true");
-    expect(within(menu).getByRole("menuitemradio", { name: "War room" })).toHaveAttribute("aria-checked", "false");
-    expect(within(menu).queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Boss map" }));
-    expect(useApp.getState().preferences.stageSkin).toBe("dungeon");
-    expect(useStation.getState().liveView).toBe("game");
-    expect(screen.queryByRole("list", { name: "In progress" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "View: Boss map" }));
-    const again = screen.getByRole("menu");
-    expect(within(again).getByRole("menuitemcheckbox", { name: "Show as text" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    fireEvent.click(within(again).getByRole("menuitemradio", { name: "List" }));
-    expect(useStation.getState().liveView).toBe("list");
-    expect(await screen.findByRole("list", { name: "In progress" })).toBeInTheDocument();
+    const fold = await screen.findByRole("button", { name: /1 tasks waiting on prerequisites/ });
+    expect(fold).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Waiting on Fix the login")).not.toBeInTheDocument();
+    fireEvent.click(fold);
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Waiting on Fix the login")).toBeInTheDocument();
+    // Its title opens the node.
+    fireEvent.click(screen.getByRole("button", { name: "Add a test" }));
+    expect(openTab).toHaveBeenCalledWith("beta");
   });
 
-  it("asks for a runner instead of empty views when there is none", async () => {
+  it("folds the runs that ended in the last hour, each a tile with its menu", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    useStation.setState({ runs: [makeRun({ id: "gone", status: "failed", finishedAt: new Date().toISOString() })] });
+    mount();
+
+    const fold = await screen.findByRole("button", { name: /Recently ended \(1\)/ });
+    fireEvent.click(fold);
+    const tiles = screen.getByRole("list", { name: "Recently ended (1)" });
+    expect(within(tiles).getByText("Fix the login")).toBeInTheDocument();
+    const menu = menuOf(within(tiles).getByRole("button", { name: "Actions for Fix the login" }));
+    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "Cancel run" })).not.toBeInTheDocument();
+  });
+
+  it("asks for a runner instead of an empty room when there is none", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
     useRunners.setState({ loaded: false, runners: [], error: null });

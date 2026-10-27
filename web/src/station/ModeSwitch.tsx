@@ -8,7 +8,7 @@ import { useMemo } from "react";
 
 import { canManageSession, useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
-import { setProjectMode } from "../game/stageSkin";
+import { setProjectMode } from "./projectMode";
 import { useI18n } from "../i18n";
 import { IconCanvas, IconSpark } from "../icons";
 import { useBudget } from "../runs/budgetStore";

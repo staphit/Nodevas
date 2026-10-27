@@ -17,7 +17,6 @@ import { lifecycleApi } from "./lifecycle";
 import { membersApi } from "./members";
 import { nodesApi } from "./nodes";
 import { notifyApi } from "./notify";
-import { packsApi } from "./packs";
 import { remoteApi } from "./remote";
 import { runnersApi } from "./runners";
 import { runsApi } from "./runs";
@@ -34,7 +33,6 @@ export {
   UnauthorizedError,
 } from "./http";
 export { ApiShapeError } from "./verify";
-export type { ViewPack, ViewPackLayout } from "./packs";
 export type { GraphOp, GraphOpsResponse, GraphResponse } from "./graph";
 export type {
   NodePageInfo,
@@ -272,7 +270,6 @@ export const api = {
   ...usageApi,
   ...membersApi,
   ...accountsApi,
-  ...packsApi,
   ...autopilotApi,
   ...planApi,
   ...controlApi,

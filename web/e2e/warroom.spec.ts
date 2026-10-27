@@ -1,14 +1,15 @@
 import { type Page } from "@playwright/test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, freshProject, test } from "./fixture";
 
-// The game views (war room, boss map) against the real binary. The project's
-// nodes, dependencies, a logic gate and statuses are written through the real
-// API; the routes a runner or an agent would feed (runners, runs, autopilot,
+// Station's war room against the real binary. The project's nodes,
+// dependencies, a logic gate and statuses are written through the real API;
+// the routes a runner or an agent would feed (runners, runs, autopilot,
 // budget, the agent network) are answered here, so no runner has to exist.
 //
-// Set GAME_SHOTS_DIR to also write screenshots of both views in both themes.
+// Set GAME_SHOTS_DIR to also write screenshots of it in both themes and on a
+// phone.
 
 const TITLES = [
   "DB schema",
@@ -382,16 +383,18 @@ async function closeAgentPanel(page: Page) {
   await expect(page.locator("#agent-network-panel")).toBeHidden();
 }
 
-test("war room: opened in Station from the command palette, a character opens its node", async ({ page }) => {
+test("war room: Station draws it straight away, a character opens its node and its run's actions", async ({ page }) => {
   await openStaged(page);
   await closeAgentPanel(page);
-  // The graph's ⋯ menu no longer carries Station's views; the palette does.
+  // The palette finds Station by the war room's name too.
   await page.evaluate(() => window.dispatchEvent(new Event("nodevas-command-palette")));
-  await page.getByPlaceholder(/Search projects, nodes/).fill("Station: War room");
+  await page.getByPlaceholder(/Search projects, nodes/).fill("war room");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Station" })).toHaveAttribute("aria-pressed", "true");
   const stage = page.getByRole("region", { name: "War room" });
   await expect(stage).toBeVisible();
+  // No view to pick: the room is the view.
+  await expect(page.getByRole("button", { name: /^View: / })).toHaveCount(0);
 
   const claude = stage.getByRole("button", { name: /Claude opus in mac-mini: working, on “Auth API”/ });
   await expect(claude).toBeVisible();
@@ -399,44 +402,29 @@ test("war room: opened in Station from the command palette, a character opens it
   await expect(stage.getByRole("button", { name: /Gemini 2\.5-pro in build-box: working.*Took over from Claude opus/ })).toBeVisible();
   await expect(stage.getByRole("button", { name: /Claude sonnet in Terminals: waiting for your answer/ })).toBeVisible();
 
+  // A character's menu holds its run's actions, as the list's rows did.
   await claude.click();
+  await expect(page.getByRole("menuitem", { name: "Open run" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "View changes" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Cancel run" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Open “Auth API”" }).click();
   await expect(page.locator(".drawer").getByLabel("Title", { exact: true })).toHaveValue("Auth API");
 
-  // The same world as text, from the view menu of "In progress" (under the
-  // node's panel until that closes).
+  // The live autopilot is a tile under the room; the tasks waiting on
+  // prerequisites fold into one line of tiles.
   await page.keyboard.press("Escape");
   await expect(page.locator(".drawer")).toHaveCount(0);
-  await page.getByRole("button", { name: "View: War room" }).click();
-  await page.getByRole("menuitemcheckbox", { name: "Show as text" }).click();
-  await expect(stage.getByText(/Claude opus in mac-mini: working, on “Auth API”/)).toBeVisible();
+  const pilots = stage.getByRole("list", { name: "Autopilots" });
+  await expect(pilots.getByText("Deploy")).toBeVisible();
+  await pilots.getByRole("button", { name: "Actions for Deploy" }).click();
+  await expect(page.getByRole("menuitem", { name: "Pause autopilot" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const waitingFold = stage.getByRole("button", { name: /tasks waiting on prerequisites/ });
+  await waitingFold.click();
+  await expect(stage.getByText(/^Waiting on /).first()).toBeVisible();
 });
 
-test("boss map: opened in Station from the command palette, a locked monster opens its blocker", async ({ page }) => {
-  await openStaged(page);
-  await closeAgentPanel(page);
-  await page.evaluate(() => window.dispatchEvent(new Event("nodevas-command-palette")));
-  await page.getByPlaceholder(/Search projects, nodes/).fill("Boss map");
-  await page.keyboard.press("Enter");
-  const stage = page.getByRole("region", { name: "Boss map" });
-  await expect(stage).toBeVisible();
-  await expect(stage.getByRole("meter", { name: "Boss HP" })).toHaveAttribute("aria-valuenow", "7");
-
-  const login = stage.getByRole("button", { name: /Monster “Login form”: locked\. Locked by Auth API/ });
-  await expect(login).toBeVisible();
-  await expect(stage.getByRole("button", { name: /Door \(AND\) to “Deploy”: shut/ })).toBeVisible();
-  await expect(stage.getByRole("button", { name: /Autopilot party for “Deploy”: 1 of 5 done/ })).toBeVisible();
-  // The sprites are served from the binary.
-  await expect
-    .poll(() => stage.locator("img.game-sprite").first().evaluate((img: HTMLImageElement) => img.naturalWidth))
-    .toBeGreaterThan(0);
-
-  await login.click();
-  await page.getByRole("menuitem", { name: "Open blocker “Auth API”" }).click();
-  await expect(page.locator(".drawer").getByLabel("Title", { exact: true })).toHaveValue("Auth API");
-});
-
-test("station: what waits on you, who is working, the agent messages and the last hour", async ({ page }) => {
+test("station: what waits on you, the war room, who is working, the agent messages and the last hour", async ({ page }) => {
   await openStaged(page, { "vised-project-mode": "station" });
   // Nothing floats over Station: the agent panel is docked in its column.
   await expect(page.locator("#agent-network-panel")).toHaveCount(0);
@@ -444,9 +432,17 @@ test("station: what waits on you, who is working, the agent messages and the las
   const waiting = page.getByRole("region", { name: "Waiting on you" });
   await expect(waiting.getByRole("button", { name: "Answer" }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: /^Station/ }).locator(".mode-switch-badge")).toHaveText(/\d+/);
-  // The list is the default view; the game views are one menu away.
-  await expect(page.getByRole("button", { name: "View: List" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
+  // Then the war room, drawn straight away, and right under it who worked on
+  // what.
+  const room = page.getByRole("region", { name: "War room" });
+  await expect(room).toBeVisible();
+  await expect(room.getByRole("button", { name: /Claude opus in mac-mini: working/ })).toBeVisible();
+  const order = await page.locator(".station-center > section").evaluateAll((sections) =>
+    sections.map((section) => section.className),
+  );
+  const at = order.findIndex((name) => name.includes("station-warroom"));
+  expect(at).toBeGreaterThan(-1);
+  expect(order[at + 1]).toContain("station-activity");
   // Who is working unfolds from Today.
   await page.getByRole("button", { name: /working · \d+ in all/ }).click();
   await expect(page.locator(".station-actor").first()).toBeVisible();
@@ -463,97 +459,24 @@ test("station: what waits on you, who is working, the agent messages and the las
   await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
 });
 
-const PACKS_DIR = join(import.meta.dirname, "..", "..", "examples", "view-packs");
-
-/** examples/view-packs packs as GET /api/packs lists them, their images
- * served from the repository. */
-async function mockPacks(page: Page, ids: string[]) {
-  const packs = ids.map((id) => {
-    const manifest = JSON.parse(readFileSync(join(PACKS_DIR, id, "pack.json"), "utf8"));
-    const sprites: Record<string, string> = {};
-    for (const [key, path] of Object.entries(manifest.sprites as Record<string, string>)) {
-      sprites[key] = `/api/packs/${id}/files/${path}?v=1`;
-    }
-    return { ...manifest, sprites, installedAt: 1, installedBy: "bea" };
-  });
-  await page.route("**/api/packs", (route) => route.fulfill({ json: { packs } }));
-  await page.route("**/api/packs/*/files/**", (route) => {
-    const [, id, path] = new URL(route.request().url()).pathname.match(/^\/api\/packs\/([^/]+)\/files\/(.+)$/)!;
-    route.fulfill({ body: readFileSync(join(PACKS_DIR, id, path)), contentType: "image/svg+xml" });
-  });
-}
-
-test("view pack: Station draws the war room with an installed pack", async ({ page }) => {
-  await mockPacks(page, ["neon-station"]);
-  await openStaged(page, { "vised-project-mode": "station" });
-  await page.getByRole("button", { name: "View: List" }).click();
-  await page.getByRole("menuitemradio", { name: "Neon station" }).click();
-  const stage = page.getByRole("region", { name: "Neon station" });
-  await expect(stage).toBeVisible({ timeout: 15_000 });
-  await expect(stage).toHaveAttribute("data-pack", "neon-station");
-
-  // The working agent is drawn with the pack's picture, and it loads.
-  const working = stage.locator('[data-pose="working"] img.pack-sprite').first();
-  await expect(working).toHaveAttribute("src", /\/api\/packs\/neon-station\/files\/images\/astro-working\.svg/);
-  await expect.poll(() => working.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
-  // The question is still marked by Nodevas, not just by the picture.
-  await expect(stage.locator('[data-pose="asking-user"] .game-badge.hand').first()).toBeVisible();
-  // The palette reaches the board.
-  const ground = await stage.locator(".game-board").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(ground).toBe("rgb(14, 23, 38)");
-
-  // Remembered across a reload, and the built-in view is one click away.
-  await page.reload();
-  await expect(page.getByRole("region", { name: "Neon station" })).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "View: Neon station" }).click();
-  await page.getByRole("menuitemradio", { name: "War room" }).click();
-  await expect(page.getByRole("region", { name: "War room" })).toBeVisible();
-  await expect(page.locator(".station img.pack-sprite")).toHaveCount(0);
-});
-
-test("game views: screenshots in both themes", async ({ page }) => {
+test("war room: screenshots in both themes and on a phone", async ({ page }) => {
   const dir = process.env.GAME_SHOTS_DIR;
   test.skip(!dir, "set GAME_SHOTS_DIR to write screenshots");
   mkdirSync(dir!, { recursive: true });
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await mockPacks(page, ["neon-station", "candy-dungeon"]);
-  // Station's "In progress" draws its game view rather than its list.
-  await openStaged(page, {
-    "vised-explorer-collapsed": "1",
-    "vised-project-mode": "station",
-    "nodevas-station-view": "game",
-  });
-  for (const [pack, name] of [
-    ["neon-station", "Neon station"],
-    ["candy-dungeon", "Candy dungeon"],
-  ] as const) {
-    await page.evaluate((id) => localStorage.setItem("vised-station-pack", id), pack);
-    await page.reload();
-    await expect(page.getByRole("region", { name })).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(1_200);
-    await page.screenshot({ path: join(dir!, `station-pack-${pack}.png`) });
-  }
-  await page.evaluate(() => localStorage.setItem("vised-station-pack", ""));
+  await openStaged(page, { "vised-explorer-collapsed": "1", "vised-project-mode": "station" });
   for (const theme of ["light", "dark"] as const) {
-    for (const skin of ["warroom", "dungeon"] as const) {
-      await page.evaluate(
-        ([t, s]) => {
-          localStorage.setItem("vised-theme", t);
-          localStorage.setItem("vised-stage-skin", s);
-        },
-        [theme, skin],
-      );
-      await page.reload();
-      const name = skin === "warroom" ? "War room" : "Boss map";
-      await expect(page.getByRole("region", { name })).toBeVisible({ timeout: 15_000 });
-      // Sprites decode, bubbles and badges settle.
-      await page.waitForTimeout(1_200);
-      await page.screenshot({ path: join(dir!, `station-${skin}-${theme}.png`) });
-    }
+    await page.evaluate((t) => localStorage.setItem("vised-theme", t), theme);
+    await page.reload();
+    const room = page.getByRole("region", { name: "War room" });
+    await expect(room).toBeVisible({ timeout: 15_000 });
+    // Bubbles and badges settle.
+    await page.waitForTimeout(1_200);
+    await room.screenshot({ path: join(dir!, `station-warroom-${theme}.png`) });
   }
-  // A phone, light: each view scrolls and zooms inside its pane; the page
-  // itself scrolls sideways no more than it does with the cards.
+  // A phone, light: the rooms stack and each scrolls inside itself; the page
+  // scrolls sideways no more than it does with the cards.
   await page.setViewportSize({ width: 390, height: 844 });
   const pageOverflow = () =>
     page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -567,15 +490,12 @@ test("game views: screenshots in both themes", async ({ page }) => {
   if (await close.isVisible({ timeout: 5_000 }).catch(() => false)) await close.click();
   const baseline = await pageOverflow();
   await page.evaluate(() => localStorage.setItem("vised-project-mode", "station"));
-  for (const skin of ["warroom", "dungeon"] as const) {
-    await page.evaluate((s) => localStorage.setItem("vised-stage-skin", s), skin);
-    await page.reload();
-    const stage = page.getByRole("region", { name: skin === "warroom" ? "War room" : "Boss map" });
-    await expect(stage).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(800);
-    expect(await pageOverflow()).toBeLessThanOrEqual(baseline);
-    const right = await stage.evaluate((element) => element.getBoundingClientRect().right);
-    expect(right).toBeLessThanOrEqual(390 + 1);
-    await page.screenshot({ path: join(dir!, `station-${skin}-phone.png`) });
-  }
+  await page.reload();
+  const room = page.getByRole("region", { name: "War room" });
+  await expect(room).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(800);
+  expect(await pageOverflow()).toBeLessThanOrEqual(baseline);
+  const right = await room.evaluate((element) => element.getBoundingClientRect().right);
+  expect(right).toBeLessThanOrEqual(390 + 1);
+  await page.screenshot({ path: join(dir!, "station-warroom-phone.png"), fullPage: true });
 });

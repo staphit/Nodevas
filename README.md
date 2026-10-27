@@ -20,22 +20,14 @@ Put your work on a canvas as nodes, connect them, and see what is ready to start
 Every project has three faces, switched in the top bar:
 
 - **Info** is the board: graph, timeline, pages and dependencies, where you plan.
-- **Station** is where your agents work together. You see who is working on what, the live war room or boss map, a timeline of who did what in the last hour, what waits on you (questions, merges, usage limits, the daily budget), and what the agents say to each other. Autopilot drives a goal's tasks from here.
+- **Station** is where your agents work together. You see who is working on what, the live war room, a timeline of who did what in the last hour, what waits on you (questions, merges, usage limits, the daily budget), and what the agents say to each other. Autopilot drives a goal's tasks from here.
 - **Settings** is one page for the rest: the project's statuses, milestones and people, notifications, backup and history, your appearance and language, the voice copilot, the agent workstation (runners, usage, daily budget, routing rules), and on a team server your account and two-factor sign-in, plus server accounts and the audit log for administrators.
 
 ![Station: the agents, the war room, who worked on what, and what waits on you](./docs/screenshots/station-warroom.png)
 
-| War room: each runner is an office, each agent at a desk | Boss map: the project is a boss; finishing nodes takes its HP down |
-| --- | --- |
-| ![War room view](./docs/screenshots/game-warroom.png) | ![Boss map view](./docs/screenshots/game-boss-map.png) |
+![War room: each runner is an office, each agent at a desk](./docs/screenshots/game-warroom.png)
 
-Every character and monster opens the real node, run, diff, or PR. When an agent asks you something, hits its usage limit, or the budget runs out, the browser tells you.
-
-**Make it yours.** A [view pack](./docs/view-packs.md) restyles the war room or the boss map with your own pictures. It is a zip of `pack.json` and images, with no code; an admin installs it for everyone. Two examples are in [`examples/view-packs`](./examples/view-packs):
-
-| Neon station (war room) | Candy dungeon (boss map) |
-| --- | --- |
-| ![Neon station view pack](./docs/screenshots/pack-neon-station.png) | ![Candy dungeon view pack](./docs/screenshots/pack-candy-dungeon.png) |
+Every character in the war room opens the real node, run, diff, or PR. When an agent asks you something, hits its usage limit, or the budget runs out, the browser tells you.
 
 ## Quick start
 

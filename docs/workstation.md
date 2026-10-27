@@ -10,7 +10,7 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
 - **Agent network.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
 - **Station.** Each project's Station (the top bar's Info | Station | Settings switch) puts all of this in one place:
   - the agents and what each is doing;
-  - the war room or boss map;
+  - the war room;
   - who worked on what in the last hour;
   - what waits on you;
   - the agents' conversation, with a composer;

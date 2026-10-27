@@ -1,4 +1,4 @@
-// Seeds the app's stores with one small scene for the game views' component
+// Seeds the app's stores with one small scene for the war room's component
 // tests, and stubs every loader and action the views call, so nothing goes
 // to the network and every click can be asserted. Not imported by app code.
 

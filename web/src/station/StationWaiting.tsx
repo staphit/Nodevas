@@ -1,7 +1,7 @@
 // "Waiting on you", first in Station's main column: everything the hub knows
 // is stopped on a person (station/waiting.ts), each with the one action that
 // unblocks it and, where it helps, a second. The answers themselves happen
-// where they always did: the ask and held-mail dialogs of the game views, a
+// where they always did: the war room's ask and held-mail dialogs, a
 // goal's review, a node's Runs tab.
 
 import { useMemo } from "react";

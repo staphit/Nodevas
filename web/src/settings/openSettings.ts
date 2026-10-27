@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { setProjectMode } from "../game/stageSkin";
+import { setProjectMode } from "../station/projectMode";
 import { useApp } from "../store";
 
 /**

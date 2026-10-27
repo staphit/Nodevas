@@ -1,6 +1,6 @@
-// Station's small menus: the "⋯" on each row of "In progress" and the view
-// picker in its header. Like the app's overflow menu (components/menus), but
-// with a trigger of the caller's own (a label, not only the ⋯ icon) and
+// Station's small menus: the "⋯" on a tile, and a war-room character's
+// actions. Like the app's overflow menu (components/menus), but with a
+// trigger of the caller's own (a label, a drawing, not only the ⋯ icon) and
 // radio items for a choice of one. The first item takes focus, the arrows
 // cycle, Escape and a choice hand focus back, an outside click closes.
 
@@ -22,7 +22,7 @@ export interface StationMenuItem {
   id: string;
   label: string;
   onSelect: () => void;
-  /** A choice of one (the view picker): drawn as a radio item. */
+  /** A choice of one: drawn as a radio item. */
   selected?: boolean;
   /** An on/off setting: drawn as a checkbox item. */
   checked?: boolean;
@@ -33,6 +33,13 @@ export interface StationMenuItem {
   separatorBefore?: boolean;
 }
 
+/** Who or what the menu is about, over its items: a war-room character's
+ * name and what it is doing. Read out through the trigger's own label. */
+export interface StationMenuHeading {
+  title: string;
+  detail?: string;
+}
+
 const UNPLACED: CSSProperties = { position: "fixed", left: 0, top: 0, visibility: "hidden" };
 const ITEM_SELECTOR = '[role^="menuitem"]:not(:disabled)';
 
@@ -41,6 +48,9 @@ export function StationMenu({
   label,
   trigger,
   triggerClassName = "station-menu-trigger",
+  heading,
+  className,
+  style,
 }: {
   items: StationMenuItem[];
   /** Names the menu, and the trigger when it shows only an icon. */
@@ -48,12 +58,17 @@ export function StationMenu({
   /** What the trigger shows; the label is its accessible name either way. */
   trigger: ReactNode;
   triggerClassName?: string;
+  heading?: StationMenuHeading;
+  /** Extra classes and placement for the wrapper, for a trigger that is
+   * positioned on a drawing. */
+  className?: string;
+  style?: CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   // Undefined until the panel is placed: it shows hidden till then, and the
   // first item takes focus only once it is visible (a hidden button cannot).
-  const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
-  const ready = open && style !== undefined;
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | undefined>(undefined);
+  const ready = open && panelStyle !== undefined;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +84,7 @@ export function StationMenu({
   // Right-aligned under the trigger, kept on screen; placed before paint.
   useLayoutEffect(() => {
     if (!open) {
-      setStyle(undefined);
+      setPanelStyle(undefined);
       return;
     }
     const place = () => {
@@ -81,7 +96,7 @@ export function StationMenu({
         menu.offsetWidth,
         menu.offsetHeight,
       );
-      setStyle({ position: "fixed", left: point.left, top: point.top });
+      setPanelStyle({ position: "fixed", left: point.left, top: point.top });
     };
     place();
     window.addEventListener("resize", place);
@@ -134,7 +149,7 @@ export function StationMenu({
   };
 
   return (
-    <div className="station-menu" ref={rootRef}>
+    <div className={`station-menu${className ? ` ${className}` : ""}`} style={style} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
@@ -155,9 +170,15 @@ export function StationMenu({
           className="station-menu-panel"
           role="menu"
           aria-label={label}
-          style={style ?? UNPLACED}
+          style={panelStyle ?? UNPLACED}
           onKeyDown={onMenuKeyDown}
         >
+          {heading && (
+            <div className="station-menu-head" aria-hidden="true">
+              <strong>{heading.title}</strong>
+              {heading.detail && <span>{heading.detail}</span>}
+            </div>
+          )}
           {items.map((item) => {
             const role =
               item.selected !== undefined ? "menuitemradio" : item.checked !== undefined ? "menuitemcheckbox" : "menuitem";

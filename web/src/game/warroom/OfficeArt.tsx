@@ -3,7 +3,16 @@
 // same drawing works in light and dark and nothing is fetched. Every part a
 // pose changes carries a class the stylesheet animates or hides.
 
-import { isoProject, type Tile } from "../layout";
+/** A tile's diamond on screen: w wide, h = w / 2 tall (2:1 dimetric). */
+interface Tile {
+  w: number;
+  h: number;
+}
+
+/** The screen position of floor point (col, row)'s top corner. */
+function isoProject(col: number, row: number, tile: Tile): { x: number; y: number } {
+  return { x: ((col - row) * tile.w) / 2, y: ((col + row) * tile.h) / 2 };
+}
 
 export const OFFICE_TILE: Tile = { w: 64, h: 32 };
 /** Height of the back walls, in px. */

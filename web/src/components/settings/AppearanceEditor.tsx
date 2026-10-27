@@ -4,7 +4,6 @@ import { EDITOR_FONT_SIZE, EDITOR_MODES } from "../../preferences/schema";
 import { confirmAction } from "../ConfirmDialog";
 import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
-import { ViewPacksEditor } from "./ViewPacksEditor";
 
 /** Local preferences only — nothing here reaches the project files. The
  * theme, the language, the tour and help; the rest of the local preferences
@@ -56,8 +55,8 @@ export function AppearanceEditor() {
   );
 }
 
-/** The editor's defaults, the layout resets and the view packs: local
- * preferences too, less often changed. */
+/** The editor's defaults and the layout resets: local preferences too,
+ * less often changed. */
 export function LayoutEditor({ notify }: { notify: SettingsNotify }) {
   const { t } = useI18n();
   const resetUIPreferences = useApp((s) => s.resetUIPreferences);
@@ -159,7 +158,6 @@ export function LayoutEditor({ notify }: { notify: SettingsNotify }) {
           {t("appearance.resetAll")}
         </button>
       </div>
-      <ViewPacksEditor notify={notify} />
     </section>
   );
 }

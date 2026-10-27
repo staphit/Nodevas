@@ -67,8 +67,6 @@ var accountLevelPaths = []string{
 	"/api/usage/prices",
 	"/api/notify/",
 	"/api/audit",
-	// View packs are the workspace's; admins install them for everyone.
-	"/api/packs/",
 }
 
 // readOnlyPosts are POST routes that change nothing: a viewer may use them.

@@ -1,7 +1,7 @@
 // What the top bar's menus and the command palette both do. Plain functions,
 // so either can call them without the other mounted.
 
-import { setProjectMode } from "../../game/stageSkin";
+import { setProjectMode } from "../../station/projectMode";
 import { useApp } from "../../store";
 
 /** The event the command palette opens on; `detail.view` picks its view. */

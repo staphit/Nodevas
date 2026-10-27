@@ -254,32 +254,6 @@
   color: var(--st-failed-fg);
   font-weight: 600;
 }
-/* Live view: the game stage, filling the "In progress" card under its
-   header rather than a pane of its own. */
-.station .lane-wrap.game-stage.station-live {
-  height: clamp(420px, 58vh, 760px);
-  margin: 0 -12px -12px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 10px 10px;
-  overflow: hidden;
-}
-.station-live-hint {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.station-live-loading {
-  height: clamp(420px, 58vh, 760px);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-2);
-}
-
 /* Who worked on what */
 .station-legend {
   display: flex;
@@ -474,52 +448,108 @@
   font-size: 14px;
   font-weight: 600;
 }
-.station-head-gap {
-  flex: 1;
-}
 .station-head-end {
   margin-left: auto;
 }
 
-/* In progress: one line per run or autopilot, its actions behind ⋯. */
-.station-progress-list {
-  list-style: none;
+/* The war room section: the room, then tiles for what it does not draw. */
+.station-warroom-loading {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.station-warroom-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.station-warroom-extras:empty {
+  display: none;
+}
+.station-warroom-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Tiles: Station's items as small cards, shaped like the board's node cards,
+   as many to a row as fit. A tile never stretches across a wide window. */
+.station-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 8px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
-.station-progress-row {
+.station-tile {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 6px 0;
-  border-top: 1px solid var(--border);
+  min-width: 0;
+  max-width: 360px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--st-progress-fg);
+  border-radius: 7px;
+  background: var(--surface);
   font-size: 13px;
   color: var(--text);
 }
-.station-progress-list.is-ended .station-progress-row,
-.station-progress-list.is-locked .station-progress-row {
-  color: var(--text-2);
+.station-tile.dot-queued,
+.station-tile.dot-offered,
+.station-tile.dot-paused {
+  border-top-color: var(--st-ready-fg);
 }
-.station-progress-text {
-  flex: 1;
+.station-tile.dot-failed {
+  border-top-color: var(--st-failed-fg);
+}
+.station-tile.dot-succeeded {
+  border-top-color: var(--st-done-fg);
+}
+.station-tile.dot-cancelled,
+.station-tile.dot-declined,
+.station-tile.dot-off {
+  border-top-color: var(--st-locked-fg);
+}
+.station-tiles.is-muted .station-tile {
+  background: var(--surface-2);
+}
+.station-tile .col-card-head {
+  min-height: 28px;
+}
+.station-tile-title {
+  font-size: 13px;
+}
+.station-tile-title.is-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.station-tile-title.is-link:hover {
+  text-decoration: underline;
+}
+.station-tile-meta {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.station-tile-line {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.station-progress-title {
+  max-width: 100%;
   overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
-  text-align: left;
 }
-.station-progress-meta {
-  font-size: 12px;
-  color: var(--text-2);
-  overflow-wrap: anywhere;
-}
+
 .station-progress-bar {
   width: min(220px, 100%);
   height: 4px;
@@ -547,16 +577,6 @@
 .station-dot.status-declined,
 .station-dot.is-off {
   background: var(--st-locked-fg);
-}
-.station-locked-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  border-top: 1px solid var(--border);
-}
-.station-locked-line .station-progress-meta {
-  flex: 1;
 }
 .station-cta {
   display: flex;
@@ -622,6 +642,19 @@
   background: var(--surface);
   box-shadow: 0 16px 40px var(--shadow);
 }
+.station-menu-head {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 6px;
+  font-size: 12px;
+}
+.station-menu-head span {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .station-menu-item {
   display: flex;
   min-height: 32px;
@@ -661,7 +694,20 @@
     width: 44px;
     min-height: 44px;
   }
-  .station-menu-item {
+  .station-menu-head {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 6px;
+  font-size: 12px;
+}
+.station-menu-head span {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.station-menu-item {
     min-height: 44px;
   }
 }
@@ -822,25 +868,6 @@
   .mode-switch button span:not(.mode-switch-badge) {
     display: inline;
   }
-}
-
-/* Settings → Appearance → View packs */
-.view-pack-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-}
-.view-pack-name {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.view-pack-meta {
-  font-size: 12px;
-  color: var(--text-2);
 }
 
 /* The node panel's Autopilot pill, in its top row. */
@@ -1036,11 +1063,6 @@
 .station-control-result .run-link-button {
   margin-left: auto;
 }
-.station-control-note {
-  display: block;
-  font-size: 11px;
-  color: var(--text-2);
-}
 .station-control-dialog-body {
   padding: 0 18px 12px;
   font-size: 12px;
@@ -1059,4 +1081,63 @@
 }
 .station-control-dialog-body .run-hint {
   margin: 8px 0 0;
+}
+
+/* The dialogs a war-room click or a waiting item opens (GameActions). */
+.game-dialog {
+  width: min(480px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px var(--shadow);
+}
+.game-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.game-dialog-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.game-dialog-close {
+  border: 0;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.game-held-route {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.game-held-body {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+.game-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.game-dialog-actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.game-dialog-actions button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
 }

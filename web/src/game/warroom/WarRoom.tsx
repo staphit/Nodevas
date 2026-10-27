@@ -1,14 +1,23 @@
 // The war room: one isometric room per runner (plus the terminal room for
 // agents people run on their own machines), a desk per character. Each
-// character is a real button; its menu holds what can be done about it.
+// character is a real button; its menu holds what can be done about it (a
+// run's own controls, through station/runMenuItems). Station mounts it
+// lazily (StationWarRoom), so its code and styles only reach a browser that
+// opens Station. A text list of the same rooms is there for screen readers.
 
-import { Fragment, memo, useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+import "../game.css";
 
 import { excerpt } from "../../agents/agentStore";
 import { useI18n } from "../../i18n";
+import { useWorkstationVisible } from "../../runners/workstation";
+import type { ControlRow } from "../../station/control";
+import { setProjectMode } from "../../station/projectMode";
+import { RunMenu } from "../../station/runMenuItems";
+import { StationMenu, type StationMenuItem } from "../../station/StationMenu";
+import { useApp } from "../../store";
 import { useGameActions } from "../GameActions";
-import { GameMenu, type GameMenuState } from "../GameMenu";
-import { ZoomControl } from "../Zoom";
 import {
   actionLabel,
   actorLabel,
@@ -19,9 +28,10 @@ import {
   formatTokens,
   roomName,
   type TitleOf,
+  type Translate,
 } from "../labels";
-import type { Actor, Meeting, Office, Room } from "../world";
-import { PackArt } from "../packs";
+import { usePageHidden, useReducedMotion } from "../useMotion";
+import type { Actor, ClickTarget, Meeting, Office, Room } from "../world";
 import { at, DeskSvg, RoomShell, roomFrame, SeatedFigure, StandingFigure, TableSvg } from "./OfficeArt";
 import { layoutRoom, type Seat } from "./roomLayout";
 
@@ -37,55 +47,147 @@ export const POSE_GLYPH: Record<Actor["pose"], string> = {
   idle: "·",
 };
 
-export function WarRoom({ office, titleOf }: { office: Office; titleOf: TitleOf }) {
+export interface WarRoomProps {
+  office: Office;
+  titleOf: TitleOf;
+  /** The run behind a character, with its autopilot: what its menu acts on. */
+  rowOf: (runId: string) => ControlRow | undefined;
+}
+
+/** The room as Station shows it: still under reduced motion, paused in a
+ * background tab, and a way back when the workstation is hidden. */
+export default function WarRoomStage(props: WarRoomProps) {
+  const reduced = useReducedMotion();
+  const hidden = usePageHidden();
+  const workstation = useWorkstationVisible();
+  const announcement = useOfficeAnnouncements(props.office, workstation);
+  return (
+    <div className="game-stage" data-motion={reduced ? "reduced" : "full"} data-paused={hidden ? "true" : undefined}>
+      {workstation ? (
+        <>
+          <WarRoom {...props} />
+          <WarRoomText office={props.office} />
+        </>
+      ) : (
+        <WarRoomOff />
+      )}
+      <div className="visually-hidden" aria-live="polite">
+        {announcement}
+      </div>
+    </div>
+  );
+}
+
+/** The war room shows the agent workstation; with it hidden there is
+ * nothing to draw, so say how to bring it back. */
+function WarRoomOff() {
   const { t } = useI18n();
-  const { dispatch } = useGameActions();
-  const [menu, setMenu] = useState<GameMenuState | null>(null);
-  // A wide window has room to draw the office larger than its 1:1 art.
-  const [zoom, setZoom] = useState(() => (typeof window !== "undefined" && window.innerWidth >= 1200 ? 1.2 : 1));
+  return (
+    <div className="game-empty" role="status">
+      <p>{t("game.warroom.off")}</p>
+      <p className="game-empty-hint">{t("game.warroom.offHint")}</p>
+      <div className="game-empty-actions">
+        <button
+          type="button"
+          className="board-tool-button active"
+          onClick={() => useApp.getState().updateUIPreference("agentWorkstation", true)}
+        >
+          {t("workstation.enable")}
+        </button>
+        <button type="button" className="board-tool-button" onClick={() => setProjectMode("info")}>
+          {t("mode.toInfo")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Says a raised hand or a held message once, when it appears: heartbeats
+ * rebuild the world every few seconds and must not repeat it. */
+function useOfficeAnnouncements(office: Office, active: boolean): string {
+  const { t } = useI18n();
+  const seen = useRef<Set<string> | null>(null);
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!active) return;
+    const current = new Set<string>();
+    const fresh: string[] = [];
+    for (const actor of office.actors) {
+      const who = agentWho(actor.agent, actor.model);
+      if (actor.ask) {
+        current.add(`ask:${actor.ask.id}`);
+        if (seen.current && !seen.current.has(`ask:${actor.ask.id}`)) fresh.push(t("game.announce.ask", { who }));
+      }
+      for (const message of actor.heldMail) {
+        current.add(`held:${message.id}`);
+        if (seen.current && !seen.current.has(`held:${message.id}`)) fresh.push(t("game.announce.held", { who }));
+      }
+    }
+    seen.current = current;
+    if (fresh.length) setText(fresh.join(" "));
+  }, [office, active, t]);
+  return text;
+}
+
+/** Rooms worth drawing: every runner's, and the terminal room once someone
+ * is in it. */
+function shownRooms(office: Office): Room[] {
+  return office.rooms.filter((room) => room.kind !== "terminal" || room.actorIds.length > 0);
+}
+
+/** Installed agent kinds with nobody of that kind at a desk: the free desks. */
+function freeDesks(room: Room, actors: Actor[]): string[] {
+  const busy = new Map<string, number>();
+  for (const actor of actors) busy.set(actor.agent, (busy.get(actor.agent) ?? 0) + 1);
+  return room.agentKinds.filter((kind) => {
+    const left = busy.get(kind) ?? 0;
+    if (left > 0) busy.set(kind, left - 1);
+    return left === 0;
+  });
+}
+
+/** The same rooms as plain text, for a screen reader: who sits where doing
+ * what, and the free desks. The characters' buttons are the controls. */
+function WarRoomText({ office }: { office: Office }) {
+  const { t } = useI18n();
   const actorsById = useMemo(() => new Map(office.actors.map((actor) => [actor.id, actor])), [office.actors]);
-  const rooms = office.rooms.filter((room) => room.kind !== "terminal" || room.actorIds.length > 0);
-
-  // The sprites are memoised on what they show; a click reads the current
-  // character, whose actions may have changed without its look changing.
-  const latest = useRef(actorsById);
-  latest.current = actorsById;
-  const openActor = useCallback(
-    (actorId: string, room: Room, anchor: HTMLElement) => {
-      const actor = latest.current.get(actorId);
-      if (!actor) return;
-      setMenu({
-        anchor,
-        title: agentWho(actor.agent, actor.model),
-        detail: actorLabel(t, actor, roomName(t, room)),
-        items: actor.actions.map((target, i) => ({
-          id: `${target.kind}-${i}`,
-          label: actionLabel(t, target, titleOf),
-          urgent: target.kind === "ask" || target.kind === "held-message",
-          onSelect: () => dispatch(target),
-        })),
-      });
-    },
-    [dispatch, t, titleOf],
+  const rooms = shownRooms(office);
+  if (rooms.length === 0) return null;
+  return (
+    <div className="visually-hidden" data-testid="war-room-text">
+      {rooms.map((room) => {
+        const name = roomName(t, room);
+        const actors = room.actorIds.map((id) => actorsById.get(id)).filter((actor): actor is Actor => Boolean(actor));
+        const free = freeDesks(room, actors);
+        const status =
+          room.kind === "runner" && room.online !== null
+            ? ` (${room.online ? t("game.room.online") : t("game.room.offline")})`
+            : "";
+        return (
+          <Fragment key={room.id}>
+            <h3>
+              {t("game.room.label", { name })}
+              {status}
+            </h3>
+            <ul>
+              {actors.map((actor) => (
+                <li key={actor.id}>{actorLabel(t, actor, name)}</li>
+              ))}
+              {free.map((kind, index) => (
+                <li key={`free-${kind}-${index}`}>{t("game.warroom.emptyDesk", { agent: agentName(kind) })}</li>
+              ))}
+            </ul>
+          </Fragment>
+        );
+      })}
+    </div>
   );
+}
 
-  const openMeeting = useCallback(
-    (meeting: Meeting, anchor: HTMLElement) => {
-      setMenu({
-        anchor,
-        title: t("game.meeting.title", { title: meeting.nodeTitle || meeting.nodeId }),
-        detail: meetingLabel(t, meeting),
-        items: [
-          {
-            id: "node",
-            label: actionLabel(t, meeting.target, titleOf),
-            onSelect: () => dispatch(meeting.target),
-          },
-        ],
-      });
-    },
-    [dispatch, t, titleOf],
-  );
+export function WarRoom({ office, titleOf, rowOf }: WarRoomProps) {
+  const { t } = useI18n();
+  const actorsById = useMemo(() => new Map(office.actors.map((actor) => [actor.id, actor])), [office.actors]);
+  const rooms = shownRooms(office);
 
   if (rooms.length === 0) {
     return (
@@ -98,9 +200,10 @@ export function WarRoom({ office, titleOf }: { office: Office; titleOf: TitleOf 
 
   return (
     <div className="game-office">
-      <div className="game-office-hud">
-        {office.energy && <span>{t("game.energy.today")}</span>}
-        {office.energy?.cap ? (
+      {office.energy && (
+        <div className="game-office-hud">
+          <span>{t("game.energy.today")}</span>
+          {office.energy.cap ? (
             <span
               className="game-meter"
               role="meter"
@@ -116,31 +219,26 @@ export function WarRoom({ office, titleOf }: { office: Office; titleOf: TitleOf 
               />
             </span>
           ) : null}
-        {office.energy && (
-          <span className="game-office-hud-value">
-            {energyLabel(t, office.energy.used, office.energy.cap)}
-          </span>
-        )}
-        <ZoomControl zoom={zoom} onZoom={setZoom} />
-      </div>
-      <div className="game-rooms" style={{ zoom }}>
+          <span className="game-office-hud-value">{energyLabel(t, office.energy.used, office.energy.cap)}</span>
+        </div>
+      )}
+      <div className="game-rooms">
         {rooms.map((room) => (
           <RoomView
             key={room.id}
             room={room}
             actorsById={actorsById}
             meetings={office.meetings.filter((meeting) => meeting.roomId === room.id)}
-            onActor={openActor}
-            onMeeting={openMeeting}
+            titleOf={titleOf}
+            rowOf={rowOf}
           />
         ))}
       </div>
-      {menu && <GameMenu menu={menu} onClose={() => setMenu(null)} />}
     </div>
   );
 }
 
-export function meetingLabel(t: (key: string, values?: Record<string, string | number>) => string, meeting: Meeting): string {
+export function meetingLabel(t: Translate, meeting: Meeting): string {
   const parts = [
     t("game.meeting.label", {
       title: meeting.nodeTitle || meeting.nodeId,
@@ -159,22 +257,23 @@ function RoomView({
   room,
   actorsById,
   meetings,
-  onActor,
-  onMeeting,
+  titleOf,
+  rowOf,
 }: {
   room: Room;
   actorsById: ReadonlyMap<string, Actor>;
   meetings: Meeting[];
-  onActor: (actorId: string, room: Room, anchor: HTMLElement) => void;
-  onMeeting: (meeting: Meeting, anchor: HTMLElement) => void;
+  titleOf: TitleOf;
+  rowOf: (runId: string) => ControlRow | undefined;
 }) {
   const { t } = useI18n();
+  const { dispatch } = useGameActions();
   const layout = useMemo(() => layoutRoom(room, actorsById, meetings), [room, actorsById, meetings]);
   const frame = roomFrame(layout.cols, layout.rows);
   const name = roomName(t, room);
   const meetingById = new Map(meetings.map((meeting) => [meeting.pipelineId, meeting]));
 
-  type Item = { key: string; depth: number; node: React.ReactNode };
+  type Item = { key: string; depth: number; node: ReactNode };
   const items: Item[] = [];
   const place = (col: number, row: number) => {
     const p = at(frame, col, row);
@@ -191,9 +290,7 @@ function RoomView({
           aria-hidden="true"
           title={desk.agent ? t("game.warroom.emptyDesk", { agent: agentName(desk.agent) }) : undefined}
         >
-          <PackArt keys={["desk.empty"]} className="game-desk empty" width={80} height={96}>
-            <DeskSvg empty />
-          </PackArt>
+          <DeskSvg empty />
         </div>
       ),
     });
@@ -210,8 +307,8 @@ function RoomView({
           seatKind={seat.kind}
           label={actorLabel(t, actor, name)}
           place={place(seat.col, seat.row)}
-          room={room}
-          onOpen={onActor}
+          row={actor.runId ? rowOf(actor.runId) : undefined}
+          titleOf={titleOf}
         />
       ),
     });
@@ -219,38 +316,43 @@ function RoomView({
   for (const table of layout.tables) {
     const meeting = meetingById.get(table.pipelineId);
     if (!meeting) continue;
+    const label = meetingLabel(t, meeting);
     items.push({
       key: `table-${table.pipelineId}`,
       depth: table.col + table.row - 0.01,
       node: (
-        <button
-          type="button"
-          className={`game-seat table${meeting.waitingHuman ? " waiting-human" : ""}`}
+        <StationMenu
+          className="game-slot"
           style={place(table.col, table.row)}
-          aria-label={meetingLabel(t, meeting)}
-          onClick={(event) => onMeeting(meeting, event.currentTarget)}
-        >
-          <PackArt keys={["table"]} className="game-table" width={96} height={56}>
-            <TableSvg />
-          </PackArt>
-          {meeting.votes.length > 0 && (
-            <span className="game-votes" aria-hidden="true">
-              {meeting.votes.map((vote, i) => (
-                <span key={i} className={`game-vote vote--${vote.verdict}`}>
-                  {vote.verdict === "approve" ? "✓" : vote.verdict === "changes" ? "✗" : "•"}
+          label={label}
+          heading={{ title: t("game.meeting.title", { title: meeting.nodeTitle || meeting.nodeId }), detail: label }}
+          triggerClassName={`game-seat table${meeting.waitingHuman ? " waiting-human" : ""}`}
+          items={[
+            { id: "node", label: actionLabel(t, meeting.target, titleOf), onSelect: () => dispatch(meeting.target) },
+          ]}
+          trigger={
+            <>
+              <TableSvg />
+              {meeting.votes.length > 0 && (
+                <span className="game-votes" aria-hidden="true">
+                  {meeting.votes.map((vote, i) => (
+                    <span key={i} className={`game-vote vote--${vote.verdict}`}>
+                      {vote.verdict === "approve" ? "✓" : vote.verdict === "changes" ? "✗" : "•"}
+                    </span>
+                  ))}
                 </span>
-              ))}
-            </span>
-          )}
-          {meeting.waitingHuman && (
-            <span className="game-badge waiting" aria-hidden="true">
-              !
-            </span>
-          )}
-          <span className="game-nameplate" aria-hidden="true">
-            <span className="game-nameplate-title">✎ {meeting.nodeTitle || meeting.nodeId}</span>
-          </span>
-        </button>
+              )}
+              {meeting.waitingHuman && (
+                <span className="game-badge waiting" aria-hidden="true">
+                  !
+                </span>
+              )}
+              <span className="game-nameplate" aria-hidden="true">
+                <span className="game-nameplate-title">✎ {meeting.nodeTitle || meeting.nodeId}</span>
+              </span>
+            </>
+          }
+        />
       ),
     });
   }
@@ -289,13 +391,14 @@ interface ActorSpriteProps {
   seatKind: Seat["kind"];
   label: string;
   place: { left: number; top: number; zIndex: number };
-  room: Room;
-  onOpen: (actorId: string, room: Room, anchor: HTMLElement) => void;
+  /** The run it is, when it is one in view. */
+  row?: ControlRow;
+  titleOf: TitleOf;
 }
 
-/** What a character shows: when none of it changed, a heartbeat that
- * rebuilt the world does not redraw it. The label carries the ask, the held
- * mail, the bubble, the swap and the energy. */
+/** What a character shows and offers: when none of it changed, a heartbeat
+ * that rebuilt the world does not redraw it. The label carries the ask, the
+ * held mail, the bubble, the swap and the energy; the row, the run's state. */
 function sameSprite(a: ActorSpriteProps, b: ActorSpriteProps): boolean {
   return (
     a.label === b.label &&
@@ -304,84 +407,103 @@ function sameSprite(a: ActorSpriteProps, b: ActorSpriteProps): boolean {
     a.actor.nodeTitle === b.actor.nodeTitle &&
     a.actor.energy?.used === b.actor.energy?.used &&
     a.actor.energy?.cap === b.actor.energy?.cap &&
+    sameTargets(a.actor.actions, b.actor.actions) &&
     a.seatKind === b.seatKind &&
     a.place.left === b.place.left &&
     a.place.top === b.place.top &&
     a.place.zIndex === b.place.zIndex &&
-    a.room.id === b.room.id &&
-    a.room.name === b.room.name &&
-    a.onOpen === b.onOpen
+    a.row === b.row &&
+    a.titleOf === b.titleOf
   );
 }
 
-const ActorSprite = memo(function ActorSprite({ actor, seatKind, label, place, room, onOpen }: ActorSpriteProps) {
+function sameTargets(a: ClickTarget[], b: ClickTarget[]): boolean {
+  return a.length === b.length && a.every((target, i) => JSON.stringify(target) === JSON.stringify(b[i]));
+}
+
+/** Targets a run's own menu does not already cover: a question it asked, a
+ * held message to it (both urgent, so first), its PR. */
+const EXTRA_FOR_RUN: ReadonlySet<ClickTarget["kind"]> = new Set(["ask", "held-message", "pr"]);
+
+const ActorSprite = memo(function ActorSprite({ actor, seatKind, label, place, row, titleOf }: ActorSpriteProps) {
+  const { t } = useI18n();
+  const { dispatch } = useGameActions();
   const style: CSSProperties = place;
   const standing = seatKind !== "desk";
   const energy = actor.energy;
   const ratio = energy?.cap ? Math.min(1, energy.used / energy.cap) : undefined;
-  return (
-    <button
-      type="button"
-      className={`game-seat actor ${seatKind} pose-${actor.pose} agent--${agentColorKey(actor.agent)}${
-        actor.swappedFrom ? " swapped" : ""
-      }${actor.ask ? " has-ask" : ""}`}
-      style={style}
-      aria-label={label}
-      data-actor={actor.id}
-      data-pose={actor.pose}
-      onClick={(event) => onOpen(actor.id, room, event.currentTarget)}
-    >
-      {standing ? (
-        <PackArt keys={["agent.standing"]} className="game-standing" width={40} height={64}>
+  const asItem = (target: ClickTarget, i: number): StationMenuItem => ({
+    id: `${target.kind}-${i}`,
+    label: actionLabel(t, target, titleOf),
+    onSelect: () => dispatch(target),
+  });
+  const urgentFirst = (targets: ClickTarget[]) =>
+    [...targets].sort(
+      (x, y) => Number(y.kind === "ask" || y.kind === "held-message") - Number(x.kind === "ask" || x.kind === "held-message"),
+    );
+  const shell = {
+    label,
+    heading: { title: agentWho(actor.agent, actor.model), detail: label },
+    className: "game-slot",
+    style,
+    triggerClassName: `game-seat actor ${seatKind} pose-${actor.pose} agent--${agentColorKey(actor.agent)}${
+      actor.swappedFrom ? " swapped" : ""
+    }${actor.ask ? " has-ask" : ""}`,
+    trigger: (
+      <>
+        {standing ? (
           <StandingFigure clipboard={seatKind === "meeting"} />
-        </PackArt>
-      ) : (
-        <PackArt keys={[`agent.${actor.pose}`, "agent"]} className="game-desk" width={80} height={96}>
+        ) : (
           <DeskSvg>
             <SeatedFigure />
           </DeskSvg>
-        </PackArt>
-      )}
-      <span className="game-pose-glyph" aria-hidden="true">
-        {POSE_GLYPH[actor.pose]}
-      </span>
-      {actor.ask && (
-        <span className="game-badge hand" aria-hidden="true">
-          ✋?
+        )}
+        <span className="game-pose-glyph" aria-hidden="true">
+          {POSE_GLYPH[actor.pose]}
         </span>
-      )}
-      {actor.heldMail.length > 0 && (
-        <span className="game-badge mail" aria-hidden="true">
-          ✉{actor.heldMail.length > 1 ? actor.heldMail.length : ""}
-        </span>
-      )}
-      {actor.swappedFrom && (
-        <span className="game-badge swap" aria-hidden="true">
-          ⇄ {agentName(actor.swappedFrom.agent)}
-        </span>
-      )}
-      {actor.bubble && (
-        <span className="game-bubble" aria-hidden="true">
-          {excerpt(actor.bubble.body, 48)}
-        </span>
-      )}
-      {/* At a meeting the table carries the node's name. */}
-      {seatKind !== "meeting" && (actor.nodeTitle || energy) && (
-        <span className="game-nameplate" aria-hidden="true">
-          <span className="game-nameplate-title">{actor.nodeTitle || agentName(actor.agent)}</span>
-          {energy && (
-            <span className="game-energy" title={formatTokens(energy.used)}>
-              {ratio !== undefined ? (
-                <span className="game-energy-bar">
-                  <span style={{ width: `${Math.max(4, ratio * 100)}%` }} />
-                </span>
-              ) : (
-                <span className="game-energy-count">⚡{formatTokens(energy.used)}</span>
-              )}
-            </span>
-          )}
-        </span>
-      )}
-    </button>
-  );
+        {actor.ask && (
+          <span className="game-badge hand" aria-hidden="true">
+            ✋?
+          </span>
+        )}
+        {actor.heldMail.length > 0 && (
+          <span className="game-badge mail" aria-hidden="true">
+            ✉{actor.heldMail.length > 1 ? actor.heldMail.length : ""}
+          </span>
+        )}
+        {actor.swappedFrom && (
+          <span className="game-badge swap" aria-hidden="true">
+            ⇄ {agentName(actor.swappedFrom.agent)}
+          </span>
+        )}
+        {actor.bubble && (
+          <span className="game-bubble" aria-hidden="true">
+            {excerpt(actor.bubble.body, 48)}
+          </span>
+        )}
+        {/* At a meeting the table carries the node's name. */}
+        {seatKind !== "meeting" && (actor.nodeTitle || energy) && (
+          <span className="game-nameplate" aria-hidden="true">
+            <span className="game-nameplate-title">{actor.nodeTitle || agentName(actor.agent)}</span>
+            {energy && (
+              <span className="game-energy" title={formatTokens(energy.used)}>
+                {ratio !== undefined ? (
+                  <span className="game-energy-bar">
+                    <span style={{ width: `${Math.max(4, ratio * 100)}%` }} />
+                  </span>
+                ) : (
+                  <span className="game-energy-count">⚡{formatTokens(energy.used)}</span>
+                )}
+              </span>
+            )}
+          </span>
+        )}
+      </>
+    ),
+  };
+  if (actor.kind === "run" && row) {
+    const extra = urgentFirst(actor.actions.filter((target) => EXTRA_FOR_RUN.has(target.kind))).map(asItem);
+    return <RunMenu row={row} titleOf={titleOf} extra={extra} {...shell} />;
+  }
+  return <StationMenu items={urgentFirst(actor.actions).map(asItem)} {...shell} />;
 }, sameSprite);

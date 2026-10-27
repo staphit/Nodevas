@@ -1,15 +1,14 @@
-// The game views' world: what the war room and the boss map draw, in terms
-// of no particular skin. Everything here is plain data built by pure
-// functions (buildWorld.ts) from store snapshots, so a skin only decides how
-// an entity looks, never what it means, and the whole model is testable
-// without React. Labels are not here either: skins put them through t().
+// The war room's world: what it draws, in terms of no particular drawing.
+// Everything here is plain data built by pure functions (buildWorld.ts) from
+// store snapshots, so the drawing only decides how an entity looks, never
+// what it means, and the whole model is testable without React. Labels are
+// not here either: the drawing puts them through t().
 
 import type { AgentAsk, AgentMessage } from "../api/agents";
-import type { AgentMode, LogicGateOperator, NodeKind } from "../types";
 
-/** What clicking an entity opens. A skin maps each kind to an existing UI
- * action (open the node, open the run in the drawer, show a diff, open the
- * autopilot panel); the model only says which. */
+/** What clicking an entity opens. The drawing maps each kind to an existing
+ * UI action (open the node, open the run in the drawer, show a diff); the
+ * model only says which. */
 export type ClickTarget =
   | { kind: "node"; nodeId: string }
   | { kind: "run"; runId: string; nodeId: string }
@@ -21,13 +20,10 @@ export type ClickTarget =
   | { kind: "session"; sessionId: string }
   | { kind: "ask"; askId: string; sessionId: string }
   | { kind: "held-message"; messageId: string }
-  | { kind: "autopilot"; autopilotId: string; goalNodeId: string }
   | { kind: "pr"; runId: string; url: string };
 
-// ---- War room -------------------------------------------------------------
-
 /** What an agent character is doing, most urgent first (see pose.ts for the
- * precedence). Every pose needs a non-colour cue in the skin. */
+ * precedence). Every pose needs a non-colour cue in the drawing. */
 export type Pose =
   /** Its session timed out, or the runner it sits at is offline. */
   | "offline"
@@ -65,7 +61,7 @@ export const TERMINAL_ROOM_ID = "terminal";
 export interface Room {
   id: string;
   kind: RoomKind;
-  /** The runner's name; "" for the terminal room (the skin names it). */
+  /** The runner's name; "" for the terminal room (the drawing names it). */
   name: string;
   runnerId?: string;
   ownerName?: string;
@@ -82,7 +78,7 @@ export interface Room {
 export interface Energy {
   /** Input + output tokens. */
   used: number;
-  /** The daily token budget, when one is set; the skin draws a bar only
+  /** The daily token budget, when one is set; the drawing shows a bar only
    * then, a counter otherwise. */
   cap?: number;
 }
@@ -161,92 +157,8 @@ export interface Office {
   energy?: Energy;
 }
 
-// ---- Boss map ---------------------------------------------------------------
-
-/** attackable: open to work (not settled, nothing blocks it; the server's
- * "ready" alone does not mean that). locked: something blocks it.
- * defeated: settled (done, skipped, deprecated or a settled custom state). */
-export type MonsterState = "attackable" | "locked" | "defeated";
-
-export interface Monster {
-  nodeId: string;
-  title: string;
-  kind: NodeKind | string;
-  /** Whether an agent may be sent at it; absent reads as "dispatch". */
-  agentMode?: AgentMode;
-  /** The node's priority, as difficulty. */
-  priority: string;
-  status: string;
-  state: MonsterState;
-  /** What blocks it, by node id, while locked. */
-  blockers: string[];
-  /** An entrance: nothing points at it. */
-  entry: boolean;
-  /** On the critical path: the corridor to the boss. */
-  critical: boolean;
-  /** Only reachable through deprecated wires: drawn faded. */
-  faded: boolean;
-  /** A run or an autopilot task is at work on it. */
-  engaged: boolean;
-  /** A run's PR on it was merged. */
-  merged: boolean;
-  target: ClickTarget;
-}
-
-/** A boolean logic gate in front of its output node. */
-export interface Door {
-  gateId: string;
-  operator: LogicGateOperator;
-  inputs: string[];
-  output: string;
-  open: boolean;
-  /** Why it is shut, by node id. */
-  blockers: string[];
-  /** The first blocker while shut, the output once open. */
-  target: ClickTarget;
-}
-
-export interface Boss {
-  /** The project's name, as the caller knows it. */
-  name: string;
-  /** Unsettled nodes, start/end/event excluded. */
-  hp: number;
-  maxHp: number;
-  /** hp / maxHp, 0 for an empty project. */
-  ratio: number;
-  defeated: boolean;
-}
-
-/** A live autopilot, moving through its goal's tasks. */
-export interface Party {
-  autopilotId: string;
-  goalNodeId: string;
-  status: string;
-  /** Tasks it is on now (running or waiting on a review or a person), in
-   * the autopilot's topological order. */
-  positions: string[];
-  /** Tasks waiting for a person. */
-  waitingHuman: string[];
-  total: number;
-  done: number;
-  failed: number;
-  target: ClickTarget;
-}
-
-export interface Dungeon {
-  boss: Boss;
-  monsters: Monster[];
-  doors: Door[];
-  parties: Party[];
-  /** Completions: lifecycle history events that reached done. */
-  xp: number;
-  /** Nodes with a merged run PR, in graph order. */
-  mergedNodeIds: string[];
-}
-
 export interface World {
   /** The clock the world was built for. */
   now: number;
   office: Office;
-  dungeon: Dungeon;
 }

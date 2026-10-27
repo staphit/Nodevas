@@ -65,8 +65,6 @@ export type WSEvent = {
     | "agent-notify"
     // A new question from an agent; the id is the ask's.
     | "agent-ask"
-    // A view pack was installed or removed (docs/view-packs.md).
-    | "packs-changed"
     | "runners-changed"
     | "runs-changed"
     | "run-events"

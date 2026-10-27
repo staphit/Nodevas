@@ -1,10 +1,10 @@
-// Words for the world model's entities, shared by the scenes and the list
-// view so a sprite's accessible name and its list sentence always agree.
+// Words for the world model's entities, shared by the war room's drawing and
+// its text list so a sprite's accessible name and its sentence always agree.
 // Everything goes through t(); product names (Claude, Codex…) are not
 // translated.
 
 import { excerpt } from "../agents/agentStore";
-import type { Actor, ClickTarget, Door, Monster, Party, Room } from "./world";
+import type { Actor, ClickTarget, Room } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -107,61 +107,7 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf)
       return t("game.action.ask");
     case "held-message":
       return t("game.action.held");
-    case "autopilot":
-      return t("game.action.autopilot");
     case "pr":
       return t("game.action.pr");
   }
-}
-
-export function monsterStateLabel(t: Translate, monster: Pick<Monster, "state">): string {
-  return t(`game.monster.${monster.state}`);
-}
-
-export function monsterLabel(t: Translate, monster: Monster, titleOf: TitleOf): string {
-  const parts = [
-    t("game.monster.label", {
-      title: monster.title || monster.nodeId,
-      state: monsterStateLabel(t, monster),
-    }),
-  ];
-  if (monster.state === "locked" && monster.blockers.length) {
-    parts.push(
-      t("game.monster.lockedBy", {
-        names: monster.blockers.map((id) => titleOf(id) || id).join(", "),
-      }),
-    );
-  }
-  if (monster.engaged) parts.push(t("game.monster.engaged"));
-  if (monster.merged) parts.push(t("game.monster.merged"));
-  if (monster.critical) parts.push(t("game.monster.critical"));
-  if (monster.entry) parts.push(t("game.monster.entry"));
-  return parts.join(" ");
-}
-
-export function doorLabel(t: Translate, door: Door, titleOf: TitleOf): string {
-  const output = titleOf(door.output) || door.output;
-  return door.open
-    ? t("game.door.open", { operator: door.operator.toUpperCase(), output })
-    : t("game.door.shut", {
-        operator: door.operator.toUpperCase(),
-        output,
-        names: door.blockers.map((id) => titleOf(id) || id).join(", "),
-      });
-}
-
-export function partyLabel(t: Translate, party: Party, titleOf: TitleOf): string {
-  const at = party.positions.map((id) => titleOf(id) || id).join(", ");
-  const parts = [
-    t("game.party.label", {
-      goal: titleOf(party.goalNodeId) || party.goalNodeId,
-      done: party.done,
-      total: party.total,
-    }),
-  ];
-  parts.push(t(`game.party.status.${party.status}`));
-  if (at) parts.push(t("game.party.at", { names: at }));
-  if (party.waitingHuman.length) parts.push(t("game.party.waiting", { count: party.waitingHuman.length }));
-  if (party.failed) parts.push(t("game.party.failed", { count: party.failed }));
-  return parts.join(" ");
 }

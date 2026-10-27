@@ -101,17 +101,6 @@ function numberPref(
   };
 }
 
-/** A string that must match pattern; "" (the fallback) is always valid. */
-function stringPref(key: string, scope: PreferenceScope, pattern: RegExp): PreferenceSpec<string> {
-  return {
-    key,
-    scope,
-    fallback: () => "",
-    decode: (raw) => (raw === "" || pattern.test(raw) ? raw : undefined),
-    encode: (value) => value,
-  };
-}
-
 function stringListPref(
   key: string,
   scope: PreferenceScope,
@@ -194,30 +183,11 @@ export const PREFERENCE_SCHEMA = {
     typeof window === "undefined" || window.innerWidth > 720,
   ),
   /**
-   * How the upper pane draws the board: the dependency cards (the default,
-   * and what every existing browser keeps), or one of the two game views —
-   * the war room (an isometric office of runners and their agents) or the
-   * boss map (the project as a dungeon). Display only; the board is the same.
-   */
-  stageSkin: enumPref(
-    "vised-stage-skin",
-    "layout",
-    ["cards", "warroom", "dungeon"] as const,
-    () => "cards" as const,
-  ),
-  /**
    * Which face of the project is shown: Info, the board as it always was
-   * (graph, board, timeline, pages), or Station, where the project's agents
-   * work together — the live war room or boss map, who is doing what, what
-   * waits on you, and what the agents say to each other. In Station, the
-   * view is stageSkin's game view; "cards" there means the war room.
+   * (graph, board, timeline, pages), Station, where the project's agents
+   * work together — the live war room, who is doing what, what waits on
+   * you, and what the agents say to each other — or Settings.
    */
-  /**
-   * The view pack Station draws with (docs/view-packs.md), by id; "" is the
-   * built-in war room or boss map. A pack that is gone falls back to the
-   * built-in view of its layout.
-   */
-  stationPack: stringPref("vised-station-pack", "layout", /^[a-z0-9-]{1,40}$/),
   projectMode: enumPref(
     "vised-project-mode",
     "layout",

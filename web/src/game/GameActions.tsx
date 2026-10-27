@@ -1,7 +1,7 @@
-// What a click in a game view does. Every ClickTarget the world model hands
+// What a click in the war room does. Every ClickTarget the world model hands
 // out maps to a real action of the app: open the node, open the run in the
-// drawer, show a diff, answer an ask, decide a held message, open the
-// autopilot, follow a PR link. The views never invent behaviour of their own.
+// drawer, show a diff, answer an ask, decide a held message, follow a PR
+// link. The views never invent behaviour of their own.
 
 import {
   createContext,
@@ -18,7 +18,6 @@ import { createPortal } from "react-dom";
 import type { SessionChange } from "../api/runs";
 import { AskCard } from "../agents/AskCard";
 import { useAgents } from "../agents/agentStore";
-import { openAutopilot } from "../autopilot/openAutopilot";
 import { useI18n } from "../i18n";
 import { RunDiffDialog } from "../runs/DiffViewer";
 import { SessionDiffDialog } from "../runs/NodeSessions";
@@ -118,9 +117,6 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
           return;
         case "held-message":
           open({ kind: "held", messageId: target.messageId });
-          return;
-        case "autopilot":
-          openAutopilot(target.goalNodeId);
           return;
         case "pr":
           openExternal(target.url);

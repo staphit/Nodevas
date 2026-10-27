@@ -30,7 +30,6 @@ import { useRunners } from "./runners/runnerStore";
 import { useSessions } from "./runs/sessionStore";
 import { RunsRoot } from "./runs/RunsRoot";
 import { openSettings } from "./settings/openSettings";
-import { usePacks } from "./game/packStore";
 import { useStation } from "./station/stationStore";
 import { useRuns } from "./runs/runStore";
 import { useRunToasts } from "./runs/runNotify";
@@ -290,10 +289,6 @@ function MainApp() {
           // The id is a new question: toast it to whoever may answer, with a
           // system notification when this browser allows one.
           void useAgents.getState().handleAsk(ev.id ?? "");
-          break;
-        case "packs-changed":
-          // A view pack was installed or removed: a loaded list refetches.
-          usePacks.getState().onPacksChanged();
           break;
         case "runners-changed":
           // Only refetched once the Runners dialog has loaded them; a board

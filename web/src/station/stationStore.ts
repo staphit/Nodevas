@@ -25,22 +25,6 @@ export interface StationStoreState {
   load: () => Promise<void>;
   onRunsChanged: () => void;
   reset: () => void;
-  /** What the "In progress" card draws: its list, or the game view the
-   * stageSkin preference names. Remembered per browser. */
-  liveView: StationLiveView;
-  setLiveView: (view: StationLiveView) => void;
-}
-
-export type StationLiveView = "list" | "game";
-
-const LIVE_VIEW_KEY = "nodevas-station-view";
-
-function readLiveView(): StationLiveView {
-  try {
-    return localStorage.getItem(LIVE_VIEW_KEY) === "game" ? "game" : "list";
-  } catch {
-    return "list";
-  }
 }
 
 const COALESCE_MS = 800;
@@ -53,15 +37,6 @@ export const useStation = create<StationStoreState>((set, get) => ({
   watching: false,
   goal: null,
   goalProject: "",
-  liveView: readLiveView(),
-  setLiveView: (liveView) => {
-    set({ liveView });
-    try {
-      localStorage.setItem(LIVE_VIEW_KEY, liveView);
-    } catch {
-      /* remembered for this visit only */
-    }
-  },
   focusGoal: (goal, project = "") => set({ goal, goalProject: goal ? project : "" }),
   project: "",
   openProject: (project) => {

@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { usePacks } from "../../game/packStore";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import { AppearanceEditor, LayoutEditor } from "./AppearanceEditor";
@@ -10,7 +9,6 @@ vi.mock("../SignIn", () => ({ useViewer: () => null }));
 
 beforeEach(() => {
   useApp.setState({ preferences: { ...readPreferences(), language: "en", projectMode: "settings" } });
-  usePacks.setState({ packs: [], loaded: true, busy: false, load: async () => {} });
 });
 
 const notify = () => ({ onError: vi.fn(), onNotice: vi.fn() });

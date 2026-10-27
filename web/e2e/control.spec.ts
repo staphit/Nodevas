@@ -126,7 +126,7 @@ async function expectNoHorizontalOverflow(page: Page) {
   );
   expect(overflow).toBeLessThanOrEqual(1);
   const panel = await page
-    .locator(".station-control")
+    .locator(".station-warroom")
     .evaluate((element) => element.scrollWidth - element.clientWidth);
   expect(panel).toBeLessThanOrEqual(1);
 }
@@ -140,7 +140,7 @@ for (const [name, viewport] of Object.entries({
   desktop: { width: 1440, height: 900 },
   phone: { width: 390, height: 844 },
 })) {
-  test(`control center lists runs and pauses everything on ${name}`, async ({ page }) => {
+  test(`war room shows the runs and Station pauses everything on ${name}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await freshProject(page, ["Auth API", "Login form", "Ship login"]);
     const ids = await nodeIds(page);
@@ -151,22 +151,27 @@ for (const [name, viewport] of Object.entries({
     });
     await page.reload();
 
-    const panel = page.locator(".station-control");
-    await expect(panel.getByRole("heading", { name: "In progress" })).toBeVisible({ timeout: 15_000 });
+    const panel = page.getByRole("region", { name: "War room" });
+    await expect(panel.getByRole("heading", { name: "War room" })).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByTitle("3 active runs")).toHaveText("3");
-    const list = panel.getByRole("list", { name: "In progress" });
-    // Three live runs and the autopilot, one line each.
-    await expect(list.getByRole("listitem")).toHaveCount(4);
-    await expect(list.getByText(/Codex gpt-5/)).toBeVisible();
-    // The review run belongs to the autopilot's task, by its pipeline.
-    await expect(list.getByText(/^Review · .* · Ship login$/)).toBeVisible();
-    await expect(panel.getByText("1 of 3 tasks done")).toBeVisible();
-    // Its actions sit behind one ⋯.
-    const review = list.getByRole("listitem").filter({ hasText: "Review · " });
-    await review.getByRole("button", { name: /^Actions for / }).click();
+    // Three live runs, each a character in the room.
+    await expect(panel.getByRole("button", { name: /^Claude opus in mac-mini: working, on “Auth API”/ })).toBeVisible();
+    await expect(panel.getByRole("button", { name: /^Codex gpt-5 in mac-mini: waiting to be accepted/ })).toBeVisible();
+    const review = panel.getByRole("button", { name: /^Gemini 2\.5-pro in .*: reviewing, on “Login form”/ });
+    await expect(review).toBeVisible();
+    // The review run belongs to the autopilot's task, by its pipeline: its
+    // menu steers that autopilot.
+    await review.click();
+    await expect(page.getByRole("menuitem", { name: "Open goal “Ship login”" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Pause autopilot" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("menu")).toHaveCount(0);
+    // The autopilot is a tile under the room.
+    const pilots = panel.getByRole("list", { name: "Autopilots" });
+    await expect(pilots.getByText("1 of 3 tasks done")).toBeVisible();
+    await pilots.getByRole("button", { name: "Actions for Ship login" }).click();
+    await expect(page.getByRole("menuitem", { name: "Pause autopilot" })).toBeVisible();
+    await page.keyboard.press("Escape");
     // The recently ended run is folded away until asked for.
     const toggle = panel.getByRole("button", { name: /Recently ended \(1\)/ });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");

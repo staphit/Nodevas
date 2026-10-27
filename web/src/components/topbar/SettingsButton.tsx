@@ -9,7 +9,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { setProjectMode, type ProjectMode } from "../../game/stageSkin";
+import { setProjectMode, type ProjectMode } from "../../station/projectMode";
 import { IconMoon, IconSun } from "../../icons";
 import { useI18n } from "../../i18n";
 import { useApp, usePreference } from "../../store";

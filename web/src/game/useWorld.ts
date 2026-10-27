@@ -7,7 +7,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { analyzeGraph } from "../analysis";
 import { runFinal, type Run } from "../api/runs";
 import { useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
@@ -73,7 +72,7 @@ function usePresenceTick(): number {
   return tick;
 }
 
-/** Loads what the game views need and the board does not load by itself. */
+/** Loads what the war room needs and the board does not load by itself. */
 function useWorldLoads(activeProject: string, tick: number) {
   useEffect(() => {
     // refresh() also marks the list loaded, which is what lets
@@ -128,12 +127,10 @@ function useWorldLoads(activeProject: string, tick: number) {
   }, [activeRuns]);
 }
 
-/** The world the game views draw, rebuilt when a slice it reads changes,
+/** The world the war room draws, rebuilt when a slice it reads changes,
  * on every presence tick, and when a speech bubble runs out. */
 export function useWorld(): World {
   const graph = useApp((s) => s.graph);
-  const statuses = useApp((s) => s.statuses);
-  const runState = useApp((s) => s.runState);
   const activeProject = useApp((s) => s.activeProject);
 
   const activeRuns = useRuns((s) => s.activeRuns);
@@ -145,7 +142,6 @@ export function useWorld(): World {
   const asks = useAgents((s) => s.asks);
   const held = useAgents((s) => s.held);
   const messages = useAgents((s) => s.messages);
-  const views = useAutopilot((s) => s.views);
   const budget = useBudget((s) => s.status);
 
   const tick = usePresenceTick();
@@ -153,21 +149,15 @@ export function useWorld(): World {
   const [bubbleClock, setBubbleClock] = useState(0);
   useWorldLoads(activeProject, tick);
 
-  const analysis = useMemo(() => analyzeGraph(graph, statuses), [graph, statuses]);
   const runs = useMemo(
     () => mergeRuns(activeRuns, latestByNode, runsByNode),
     [activeRuns, latestByNode, runsByNode],
   );
-  const autopilots = useMemo(() => Object.values(views), [views]);
 
   const world = useMemo(
     () =>
       buildWorld({
         graph,
-        statuses,
-        analysis,
-        history: runState?.history,
-        projectName: activeProject,
         runs,
         runners,
         sessions,
@@ -175,7 +165,6 @@ export function useWorld(): World {
         held,
         messages,
         pipelines,
-        autopilots,
         budget,
         // The real clock, not the tick: a message that arrived mid-tick must
         // show its bubble now, not at the next boundary.
@@ -184,10 +173,6 @@ export function useWorld(): World {
     // tick and bubbleClock are the clock's inputs: they rebuild the world.
     [
       graph,
-      statuses,
-      analysis,
-      runState,
-      activeProject,
       runs,
       runners,
       sessions,
@@ -195,7 +180,6 @@ export function useWorld(): World {
       held,
       messages,
       pipelines,
-      autopilots,
       budget,
       tick,
       bubbleClock,

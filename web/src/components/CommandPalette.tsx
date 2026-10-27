@@ -25,17 +25,9 @@ import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
 import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
 import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
-import { packName, usePacks } from "../game/packStore";
-import {
-  setProjectMode,
-  setStageSkin,
-  setStationPack,
-  STAGE_SKIN_LABEL,
-  useStageSkinChoices,
-  useStationView,
-} from "../game/stageSkin";
 import { openSettings, type SettingsSection } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
+import { setProjectMode } from "../station/projectMode";
 import { confirmAction } from "./ConfirmDialog";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
 import { useTeamServer, useViewer } from "./SignIn";
@@ -155,11 +147,7 @@ export function CommandPalette() {
   const canCreateProjects = !viewer || viewer.role === "admin";
   const workstation = useWorkstationVisible();
   const workstationInUse = useWorkstationInUse();
-  const stationView = useStationView();
   const projectMode = usePreference("projectMode");
-  const skinChoices = useStageSkinChoices();
-  const packs = usePacks((s) => s.packs);
-  const stationPack = usePreference("stationPack");
   const projects = useApp((state) => state.projects);
   const workspaces = useApp((state) => state.workspaces);
   const switchWorkspace = useApp((state) => state.switchWorkspace);
@@ -382,8 +370,7 @@ export function CommandPalette() {
           ]
         : []),
     ];
-    // Board and Station, and Station's views; what is showing is not offered
-    // again.
+    // Board and Station; what is showing is not offered again.
     if (projectMode !== "info") {
       list.push({
         key: "project-mode-info",
@@ -399,31 +386,9 @@ export function CommandPalette() {
         key: "open-station",
         title: t("topbar.cmd.openStation"),
         detail: t("mode.station.detail"),
-        keywords: "station agents waiting runs today 工作站 等你 執行",
+        keywords: "station agents waiting runs today war room 工作站 等你 執行 戰情室",
         icon: <IconSpark size={15} />,
         run: () => setProjectMode("station"),
-      });
-    }
-    for (const skin of skinChoices) {
-      if (projectMode === "station" && !stationPack && skin === stationView) continue;
-      list.push({
-        key: `stage-skin-${skin}`,
-        title: t("game.menu.openInStation", { name: t(STAGE_SKIN_LABEL[skin]) }),
-        detail: t(`game.palette.${skin}`),
-        keywords: "station agents view skin game war room boss dungeon 工作站 檢視 遊戲 戰情室 地城 頭目",
-        icon: <IconTree size={15} />,
-        run: () => setStageSkin(skin),
-      });
-    }
-    for (const pack of packs) {
-      if (projectMode === "station" && stationPack === pack.id) continue;
-      list.push({
-        key: `view-pack-${pack.id}`,
-        title: t("game.menu.openInStation", { name: packName(pack, language) }),
-        detail: t("packs.paletteDetail"),
-        keywords: `station pack view skin ${pack.id} 工作站 主題包`,
-        icon: <IconTree size={15} />,
-        run: () => setStationPack(pack),
       });
     }
     // The top bar's Runners and Usage icons went into its runner pill; these
@@ -626,11 +591,7 @@ export function CommandPalette() {
     saveTab,
     snapGuides,
     snapToGrid,
-    skinChoices,
-    stationView,
     projectMode,
-    packs,
-    stationPack,
     language,
     theme,
     toggleTheme,

@@ -57,14 +57,11 @@ describe("useWorld", () => {
     expect(loaders.loadActive).toHaveBeenCalledTimes(1);
   });
 
-  it("merges the newest run per node into the world with the active ones", () => {
+  it("puts the active runs at desks", () => {
     seedScene(NOW);
     const { result } = renderHook(() => useWorld());
     const office = result.current.office;
-    // The active list's runs sit at desks…
     expect(office.actors.map((actor) => actor.id)).toContain(`run:${RUN_WORKING}`);
-    // …and latestByNode's merged run counts on the map.
-    expect(result.current.dungeon.mergedNodeIds).toEqual(["schema"]);
   });
 
   it("fetches the pipeline of a review run and the node of a fallback run once", () => {

@@ -191,8 +191,7 @@ export function BoardToolbar({
 
   // The graph's second tier. Ordered by how often each is reached for:
   // fitting, then the drag aids, then what else is on screen, then help. The
-  // war room and boss map are Station's own views and its switch (and the
-  // command palette) is where they are opened from.
+  // war room is Station's, opened from the top bar or the command palette.
   const graphOverflowItems: OverflowMenuItem[] = [
     {
       id: "fit-all",

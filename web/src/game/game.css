@@ -1,5 +1,4 @@
-/* Game views: the war room and the boss map. Loaded with the GameStage chunk
- * only. Colours are tokens, redefined for [data-theme="dark"]; every animated
+/* The war room. Loaded with its chunk only (Station imports it lazily). Colours are tokens, redefined for [data-theme="dark"]; every animated
  * state also has a static glyph, and reduced motion (the media query, or
  * data-motion="reduced" set from it) stops all of it. */
 
@@ -30,17 +29,6 @@
   --game-badge-fail: #c0392b;
   --game-energy: #28a36a;
   --game-energy-bg: rgba(23, 33, 43, 0.15);
-  --game-dungeon-bg: #2b2621;
-  --game-hp: #d64545;
-  --game-hp-bg: rgba(0, 0, 0, 0.35);
-  --game-monster: #6cc04a;
-  --game-monster-1: #4a9fd6;
-  --game-monster-2: #d9663b;
-  --game-monster-3: #9c4fd6;
-  --game-monster-belly: rgba(255, 255, 255, 0.35);
-  --game-boss: #7b2d8b;
-  --game-boss-wing: #4b1a57;
-  --game-gold: #f2c14e;
   --game-table: #b98a5e;
   --game-table-side: #8d6544;
 
@@ -74,48 +62,11 @@
   --game-bubble-bg: #e7edf1;
   --game-bubble-fg: #11161b;
   --game-energy-bg: rgba(255, 255, 255, 0.14);
-  --game-dungeon-bg: #15120f;
   --game-table: #8a6a4c;
   --game-table-side: #5c4531;
 }
 
-/* ---------- stage shell ---------- */
-.game-stage .game-head {
-  gap: 10px;
-}
-.game-board {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  background: var(--bg);
-}
-.stage.split .lane-wrap.game-stage.pane-collapsed .game-board {
-  display: none;
-}
-.game-skin-switch {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.game-skin-switch button {
-  border: 0;
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: 10px;
-  padding: 3px 8px;
-  cursor: pointer;
-}
-.game-skin-switch button + button {
-  border-left: 1px solid var(--border);
-}
-.game-skin-switch button.active {
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
+/* ---------- shell ---------- */
 .game-empty {
   max-width: 520px;
   margin: 48px auto;
@@ -150,7 +101,7 @@
   color: var(--text-2);
 }
 
-/* Shared meters: the office's energy and the boss's HP. */
+/* The office's energy meter. */
 .game-meter {
   position: relative;
   display: inline-block;
@@ -172,19 +123,20 @@
 .game-meter-fill.full {
   background: var(--game-badge-fail);
 }
-.game-meter.hp {
-  background: var(--game-hp-bg);
+/* A character or a table is a menu (StationMenu): its wrapper sits on the
+   floor anchor, and the button hangs from it as the art always did. */
+.game-slot {
+  position: absolute;
+  width: 0;
+  height: 0;
 }
-.game-meter.hp .game-meter-fill {
-  background: var(--game-hp);
+.game-slot > .game-seat {
+  left: 0;
+  top: 0;
 }
 
 /* Sprites are buttons: no button chrome, a visible focus ring. */
-.game-seat,
-.game-monster-tile,
-.game-door,
-.game-party,
-.game-boss {
+.game-seat {
   position: absolute;
   padding: 0;
   border: 0;
@@ -193,17 +145,12 @@
   color: var(--text);
   font: inherit;
 }
-.game-seat:focus-visible,
-.game-monster-tile:focus-visible,
-.game-door:focus-visible,
-.game-party:focus-visible,
-.game-boss:focus-visible {
+.game-seat:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 8px;
 }
-.game-seat:hover .figure,
-.game-monster-tile:hover .creature {
+.game-seat:hover .figure {
   filter: brightness(1.08);
 }
 
@@ -245,7 +192,7 @@
 
 /* ---------- war room ---------- */
 .game-office {
-  padding: 12px 16px 24px;
+  padding: 4px 0 8px;
 }
 .game-office-hud {
   display: flex;
@@ -379,9 +326,7 @@
 
 .game-desk .shadow,
 .game-standing .shadow,
-.game-table .shadow,
-.game-monster .shadow,
-.game-boss-art .shadow {
+.game-table .shadow {
   fill: var(--game-shadow);
 }
 .game-desk .chair {
@@ -704,497 +649,10 @@
   background: var(--game-badge-fail);
 }
 
-/* ---------- boss map ---------- */
-.game-dungeon {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  background: var(--game-dungeon-bg);
-}
-.game-dungeon-hud {
-  position: sticky;
-  top: 0;
-  left: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 8px 16px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-}
-.game-hud-boss {
-  font-weight: 700;
-}
-.game-hud-value {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-2);
-}
-.game-zoom {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-.game-zoom output {
-  min-width: 36px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-.game-dungeon-empty {
-  padding: 16px;
-  color: #d6d0c4;
-}
-.game-viewport {
-  flex: 1;
-  overflow: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-.game-scene-sizer {
-  position: relative;
-  margin: 0 auto;
-}
-.game-scene {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform-origin: 0 0;
-}
-.game-floors {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-.game-sprite {
-  position: absolute;
-  max-width: none;
-  user-select: none;
-  pointer-events: none;
-}
-.game-sprite.corridor {
-  opacity: 0.92;
-}
-.game-sprite.room.defeated {
-  filter: saturate(0.5) brightness(0.92);
-}
-.game-sprite.room.critical {
-  filter: drop-shadow(0 0 5px var(--game-gold));
-}
-.game-sprite.faded {
-  opacity: 0.45;
-}
-
-.game-monster-tile {
-  width: 80px;
-  height: 92px;
-}
-.game-monster-tile .game-monster {
-  position: absolute;
-  left: 16px;
-  top: 28px;
-  overflow: visible;
-}
-.game-monster .body {
-  fill: var(--game-monster);
-}
-.game-monster.rank-1 .body {
-  fill: var(--game-monster-1);
-}
-.game-monster.rank-2 .body {
-  fill: var(--game-monster-2);
-}
-.game-monster.rank-3 .body {
-  fill: var(--game-monster-3);
-}
-.game-monster .belly {
-  fill: var(--game-monster-belly);
-}
-.game-monster .horn {
-  fill: #f1e5c8;
-}
-.game-monster .crown {
-  fill: var(--game-gold);
-}
-.game-monster .eye {
-  fill: #fff;
-}
-.game-monster .pupil {
-  fill: #1f2937;
-}
-.game-monster .mouth {
-  fill: none;
-  stroke: #1f2937;
-  stroke-width: 1.6;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.game-monster .chains {
-  display: none;
-  stroke: #9ca3af;
-  stroke-width: 2.4;
-  stroke-dasharray: 3 2;
-}
-.state-attackable .creature {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: game-bob 1.6s ease-in-out infinite;
-}
-.state-locked .game-monster .body {
-  fill: #8b8f96;
-}
-.state-locked .game-monster .chains {
-  display: inline;
-}
-.state-locked .game-monster .creature {
-  opacity: 0.85;
-}
-.game-monster-tile.engaged .creature {
-  animation: game-hit 0.9s ease-in-out infinite;
-}
-.game-monster-tile.faded {
-  opacity: 0.5;
-}
-.game-monster-tile .loot {
-  pointer-events: none;
-}
-.game-state-glyph {
-  position: absolute;
-  left: 4px;
-  top: 30px;
-  font-size: 11px;
-  line-height: 1;
-  color: #fff;
-  text-shadow: 0 1px 2px #000;
-  pointer-events: none;
-}
-.game-monster-tile .game-nameplate {
-  top: calc(100% - 22px);
-}
-.game-badge.fight {
-  right: 6px;
-  top: 30px;
-  background: #e8811a;
-  animation: game-pulse 0.9s ease-in-out infinite;
-}
-.game-badge.entry {
-  left: 0;
-  top: 54px;
-  background: var(--st-done-fg);
-}
-.game-xp {
-  position: absolute;
-  left: 50%;
-  top: 6px;
-  transform: translateX(-50%);
-  color: var(--game-gold);
-  font-weight: 800;
-  font-size: 14px;
-  text-shadow: 0 1px 2px #000;
-  pointer-events: none;
-}
-.game-monster-tile.fresh .game-xp {
-  animation: game-float 2.4s ease-out both;
-}
-
-.game-door {
-  position: absolute;
-}
-.game-door .game-sprite {
-  pointer-events: none;
-}
-.game-door-op {
-  position: absolute;
-  left: 50%;
-  top: 30%;
-  transform: translateX(-50%);
-  padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(15, 23, 42, 0.8);
-  color: #fff;
-  font: 700 9px var(--mono);
-  pointer-events: none;
-}
-.game-door.shut .game-door-op::after {
-  content: " 🔒";
-}
-
-.game-party {
-  width: 32px;
-  height: 46px;
-}
-.game-hero {
-  position: absolute;
-  left: 50%;
-  bottom: 4px;
-  transform: translateX(-50%);
-  background-repeat: no-repeat;
-  background-position: 0 0;
-}
-.game-hero.running {
-  animation: game-run 0.8s steps(10) infinite;
-}
-.game-party-flag {
-  position: absolute;
-  left: 50%;
-  top: -14px;
-  transform: translateX(-50%);
-  padding: 0 5px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.game-boss {
-  width: 140px;
-  height: 172px;
-}
-.game-boss-art {
-  position: absolute;
-  left: 0;
-  top: 22px;
-  overflow: visible;
-}
-.game-boss-art .body {
-  fill: var(--game-boss);
-}
-.game-boss-art .wing {
-  fill: var(--game-boss-wing);
-}
-.game-boss-art .belly {
-  fill: rgba(255, 255, 255, 0.18);
-}
-.game-boss-art .horn {
-  fill: #f1e5c8;
-}
-.game-boss-art .crown {
-  fill: var(--game-gold);
-}
-.game-boss-art .eye {
-  fill: #ffd34d;
-}
-.game-boss-art .eyes-defeated {
-  display: none;
-  stroke: #fff;
-  stroke-width: 3;
-}
-.game-boss-art .mouth {
-  fill: none;
-  stroke: #fff;
-  stroke-width: 2.4;
-  stroke-linejoin: round;
-}
-.game-boss-art .creature {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: game-breathe 3.2s ease-in-out infinite;
-}
-.game-boss.defeated .game-boss-art .creature {
-  filter: grayscale(1);
-  opacity: 0.6;
-  animation: none;
-}
-.game-boss.defeated .eyes {
-  display: none;
-}
-.game-boss.defeated .eyes-defeated {
-  display: inline;
-}
-.game-boss.hit .game-boss-art {
-  animation: game-shake 0.5s ease-in-out 2;
-}
-.game-boss-bar {
-  position: absolute;
-  left: 15px;
-  top: 0;
-  width: 110px;
-  height: 9px;
-  border-radius: 5px;
-  background: var(--game-hp-bg);
-  border: 1px solid rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-.game-boss-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--game-hp);
-  transition: width 500ms var(--ease-out);
-}
-.game-boss-name {
-  position: absolute;
-  left: 50%;
-  bottom: -4px;
-  transform: translateX(-50%);
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-/* ---------- list view ---------- */
-.game-list {
-  max-width: 920px;
-  padding: 12px 16px 24px;
-  font-size: 13px;
-}
-.game-list-group h3 {
-  margin: 14px 0 6px;
-  font-size: 13px;
-}
-.game-list ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.game-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
-}
-.game-list-text {
-  flex: 1 1 260px;
-  min-width: 0;
-}
-.game-list-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.game-list .muted {
-  color: var(--text-2);
-}
-.game-list-line {
-  margin: 4px 0;
-}
-
-/* ---------- menu and dialogs ---------- */
-.game-menu {
-  z-index: 90;
-  min-width: 200px;
-  max-width: min(320px, calc(100vw - 16px));
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: 0 8px 28px var(--shadow);
-}
-.game-menu-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 8px 6px;
-  font-size: 12px;
-}
-.game-menu-head span {
-  color: var(--text-2);
-  font-size: 11px;
-}
-.game-menu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  text-align: left;
-  font-size: 12px;
-  cursor: pointer;
-}
-.game-menu-item:hover,
-.game-menu-item:focus-visible {
-  background: var(--hover);
-}
-.game-menu-item.urgent {
-  font-weight: 700;
-  color: var(--st-ready-fg);
-}
-.game-dialog {
-  width: min(480px, 100%);
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-  padding: 12px 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: 0 12px 40px var(--shadow);
-}
-.game-dialog-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.game-dialog-head h2 {
-  margin: 0;
-  font-size: 15px;
-}
-.game-dialog-close {
-  border: 0;
-  background: none;
-  font-size: 18px;
-  cursor: pointer;
-  color: var(--text-2);
-}
-.game-held-route {
-  color: var(--text-2);
-  font-size: 12px;
-}
-.game-held-body {
-  margin: 8px 0;
-  padding: 8px 10px;
-  border-left: 3px solid var(--accent);
-  background: var(--surface-2);
-  white-space: pre-wrap;
-  font-size: 13px;
-}
-.game-dialog-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.game-dialog-actions button {
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
-  cursor: pointer;
-}
-.game-dialog-actions button.primary {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
-}
-
 /* ---------- phone ---------- */
 @media (max-width: 720px) {
-  .game-skin-switch {
-    display: none;
-  }
-  .game-office {
-    padding: 10px 8px 20px;
-  }
   .game-rooms {
     gap: 10px;
-  }
-  .game-list {
-    padding: 10px 12px 20px;
   }
 }
 
@@ -1235,33 +693,6 @@
   from { opacity: 0; transform: translateX(-30%) translateY(4px); }
   to { opacity: 1; transform: translateX(-30%) translateY(0); }
 }
-@keyframes game-bob {
-  0%, 100% { transform: translateY(0) scaleY(1); }
-  50% { transform: translateY(-2px) scaleY(1.04); }
-}
-@keyframes game-hit {
-  0%, 70%, 100% { transform: translateX(0); filter: none; }
-  80% { transform: translateX(-2px); filter: brightness(1.6); }
-  90% { transform: translateX(2px); }
-}
-@keyframes game-float {
-  from { opacity: 0; transform: translate(-50%, 6px); }
-  15% { opacity: 1; }
-  to { opacity: 0; transform: translate(-50%, -28px); }
-}
-@keyframes game-run {
-  from { background-position: 0 0; }
-  to { background-position: -290px 0; }
-}
-@keyframes game-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.02, 0.985); }
-}
-@keyframes game-shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-4px); }
-  75% { transform: translateX(4px); }
-}
 
 /* A page in the background: everything holds still. */
 .game-stage[data-paused="true"] *,
@@ -1278,38 +709,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .game-stage *,
-  .game-stage *::after,
-  .game-menu,
-  .game-dialog {
+  .game-stage *::after {
     animation: none !important;
     transition: none !important;
   }
-}
-
-/* View packs (docs/view-packs.md). A pack's picture takes the built-in art's
-   box and class, keeps its proportions and stands bottom centre. */
-.pack-sprite {
-  display: block;
-  object-fit: contain;
-  object-position: 50% 100%;
-}
-.game-hero.pack-sprite {
-  background-repeat: no-repeat;
-  background-position: 50% 100%;
-  animation: none;
-}
-/* A pack's palette is the ground the scene stands on and the text written
-   straight on it (the office HUD and the boss line). Rooms and the boss
-   map's HUD are cards on that ground and keep the theme's own colours. */
-.game-stage.has-pack {
-  --game-dungeon-bg: var(--pack-ground, #2b2621);
-}
-.game-stage.has-pack .game-board {
-  background: var(--pack-ground, var(--bg));
-}
-.game-stage.has-pack .game-office-hud,
-.game-stage.has-pack .game-office-hud-value,
-.game-stage.has-pack .game-zoom output,
-.game-stage.has-pack .game-boss-name {
-  color: var(--pack-text, var(--text));
 }
