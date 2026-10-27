@@ -9,6 +9,7 @@
   "signedUpdates": false,
   "scripts": {
     "check": "node --check main.cjs",
+    "test": "node --test scripts/",
     "pack:mac": "node scripts/pack.mjs --mac --universal",
     "pack:win": "node scripts/pack.mjs --win"
   },

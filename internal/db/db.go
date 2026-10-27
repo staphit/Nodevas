@@ -91,6 +91,14 @@ func (d *DB) Local() *DB {
 	return d
 }
 
+// Search is the search index's own small pool (two connections, its own
+// writer), so reindexing never queues behind audit and session writes on the
+// single main writer.
+//
+// RED PHASE stub: the main writer, which is exactly the queueing the real
+// pool removes.
+func (d *DB) Search() *sql.DB { return d.write }
+
 // Writer is the single write connection, for a caller that needs the handle
 // itself. Prefer the Exec and Tx methods.
 func (d *DB) Writer() *sql.DB { return d.write }
@@ -164,6 +172,18 @@ func PathFor(root string) string {
 func Open(root string) (*DB, error) {
 	return openWith(root, os.LookupEnv)
 }
+
+// ErrNotImplemented is what the red-phase stubs return.
+var ErrNotImplemented = errors.New("db: not implemented")
+
+// OpenRoot opens the workspace's database: the external server named by
+// URLEnv/URLFileEnv, or the workspace's embedded cluster (internal/dbconn).
+// No SQLite file, no fallback: a server unreachable within WaitEnv is an
+// error wrapping ErrUnreachable. Under `go test` without a URL it refuses to
+// start a cluster and says to use internal/testpg.
+//
+// RED PHASE stub.
+func OpenRoot(root string) (*DB, error) { return nil, ErrNotImplemented }
 
 func openWith(root string, lookup func(string) (string, bool)) (*DB, error) {
 	path := PathFor(root)

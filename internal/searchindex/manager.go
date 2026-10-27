@@ -30,6 +30,7 @@ package searchindex
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -55,6 +56,12 @@ const (
 // collapsing a burst of search-as-you-type keystrokes onto a single walk. It
 // is a var only so tests can pin it.
 var revalidateAfter = 250 * time.Millisecond
+
+// ErrNoIndex is a Manager without a database: there is nowhere to keep an
+// index, and the caller falls back to its direct scan.
+//
+// RED PHASE: declared only; NewManager still keeps a private in-memory index.
+var ErrNoIndex = errors.New("searchindex: no database, no index")
 
 // Manager caches one index per project directory, over one database.
 type Manager struct {
