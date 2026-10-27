@@ -64,6 +64,24 @@ describe("Sidebar tools", () => {
     expect(useApp.getState().preferences.explorerToolsExpanded).toBe(true);
   });
 
+  // The explorer is projects and nodes; validation warnings live in the
+  // board's Problems panel now.
+  it("lists projects and nodes without a validation section", () => {
+    useApp.setState({ issues: [{ severity: "error", nodeId: "a", msg: "Broken" }] });
+    render(<Sidebar />);
+    expect(screen.getByRole("button", { name: /Draft/ })).toBeInTheDocument();
+    expect(screen.queryByText("Validation")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Broken/)).not.toBeInTheDocument();
+  });
+
+  it("folds itself from its own heading", async () => {
+    const user = userEvent.setup();
+    useApp.getState().updateUIPreference("explorerCollapsed", false);
+    render(<Sidebar />);
+    await user.click(screen.getByRole("button", { name: "Collapse project explorer" }));
+    expect(useApp.getState().preferences.explorerCollapsed).toBe(true);
+  });
+
   // The workspace context menu clicks these inputs too, so they must exist
   // while the row that normally fronts them is folded away.
   it("keeps the import inputs mounted while folded", () => {

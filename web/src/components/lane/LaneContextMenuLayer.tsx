@@ -1,5 +1,5 @@
 /**
- * The board's right-click menu: one floating panel, six bodies.
+ * The board's right-click menu: one floating panel, seven bodies.
  *
  * Which body is shown follows the menu kind. The panel measures itself to stay
  * on screen, and the node form — the one big enough to cover what it is about
@@ -17,7 +17,8 @@ import { EdgeMenu, type EdgeMenuProps } from "../menus/EdgeMenu";
 import { GraphMenu, type GraphMenuProps } from "../menus/GraphMenu";
 import { LogicGateMenu } from "../menus/LogicGateMenu";
 import { NodeCreateMenu } from "../menus/NodeCreateMenu";
-import { NodeMenu, type NodeMenuProps } from "../menus/NodeMenu";
+import { NodeActionsMenu, type NodeActionsMenuProps } from "../menus/NodeActionsMenu";
+import { NodeMenu } from "../menus/NodeMenu";
 import { PlanMenu } from "../menus/PlanMenu";
 import type { LaneContextMenu } from "../LaneView";
 
@@ -52,10 +53,10 @@ export interface LaneContextMenuLayerProps {
   nodeTitle: (id: string | undefined) => string;
   logicGates: LogicGate[];
   planStatusDefinitions: PlanStatusDefinition[];
-  openTab: NodeMenuProps["openTab"];
+  openTab: NodeActionsMenuProps["openTab"];
   selectNode: (id: string) => void;
-  duplicateNode: NodeMenuProps["duplicateNode"];
-  deleteNode: NodeMenuProps["deleteNode"];
+  duplicateNode: NodeActionsMenuProps["duplicateNode"];
+  deleteNode: NodeActionsMenuProps["deleteNode"];
   openNodeCreationMenu: GraphMenuProps["openNodeCreationMenu"];
   createCanvasGroup: GraphMenuProps["createCanvasGroup"];
   createCanvasAnnotation: GraphMenuProps["createCanvasAnnotation"];
@@ -104,6 +105,8 @@ export function LaneContextMenuLayer({
       className={`lane-context-menu${
         contextMenu.kind === "node-create" ? " node-create-menu" : ""
       }${contextMenu.kind === "node" ? " condition-menu" : ""}${
+        contextMenu.kind === "node-actions" ? " node-actions-menu" : ""
+      }${
         contextMenu.kind === "logic-gate" ? " standalone-gate-menu" : ""
       }${dragging ? " dragging" : ""}`}
       role="menu"
@@ -148,6 +151,18 @@ export function LaneContextMenuLayer({
           toggleLogicGateOutput={wiring.toggleLogicGateOutput}
           deleteStandaloneLogicGate={wiring.deleteStandaloneLogicGate}
         />
+      ) : contextMenu.kind === "node-actions" ? (
+        <NodeActionsMenu
+          key={contextMenu.nodeId}
+          contextMenu={contextMenu}
+          graph={graph}
+          nodeTitle={nodeTitle}
+          openTab={openTab}
+          selectNode={selectNode}
+          duplicateNode={duplicateNode}
+          deleteNode={deleteNode}
+          setContextMenu={setContextMenu}
+        />
       ) : contextMenu.kind === "node" ? (
         <NodeMenu
           // A fresh menu per node, so "Advanced conditions" opens or closes
@@ -157,10 +172,6 @@ export function LaneContextMenuLayer({
           contextMenu={contextMenu}
           nodeTitle={nodeTitle}
           assignExistingLogicGateToNode={wiring.assignExistingLogicGateToNode}
-          openTab={openTab}
-          selectNode={selectNode}
-          duplicateNode={duplicateNode}
-          deleteNode={deleteNode}
           setContextMenu={setContextMenu}
         />
       ) : (

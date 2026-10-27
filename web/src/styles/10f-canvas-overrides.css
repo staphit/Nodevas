@@ -247,6 +247,63 @@
   line-height: 1.35;
 }
 
+/* ---------- graph header: Filter, Problems and the explorer's way back ---------- */
+.board-filter {
+  display: inline-flex;
+}
+.board-filter > .board-overflow {
+  margin-left: 0;
+}
+.board-filter .board-overflow-trigger {
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+/* Pushes Problems and ⋯ to the end of the row. */
+.board-title-spacer {
+  flex: 1;
+}
+.board-problems {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.board-problems-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-weight: 700;
+  text-align: center;
+}
+.board-problems.has-problems .board-problems-badge {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.board-title-spacer + .board-problems + .board-overflow {
+  margin-left: 0;
+}
+.board-explorer-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.board-explorer-toggle:hover,
+.board-explorer-toggle:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Appended, not merged into the rules above: this file is one ordered slice and
    these are overrides that have to win over it. 14-touch.css explains why the
    board toolbar's phone treatment lives here rather than there. */
@@ -327,6 +384,13 @@
   /* In the scrolling strip, not pushed to its far end. */
   .board-overflow {
     margin-left: 0;
+  }
+  .board-title-spacer {
+    display: none;
+  }
+  .board-explorer-toggle,
+  .board-problems {
+    min-height: 32px;
   }
   .board-overflow-trigger {
     min-width: 36px;

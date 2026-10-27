@@ -156,6 +156,34 @@
   gap: 8px;
   padding: 2px 5px 0;
 }
+/* Folds the explorer away; the board header's » brings it back. */
+.explorer-collapse {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.explorer-collapse:hover,
+.explorer-collapse:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .explorer-collapse {
+    width: 36px;
+    height: 36px;
+  }
+}
 .explorer-heading h3 {
   margin: 0;
   color: var(--text);

@@ -1,4 +1,10 @@
-/** Graph filter and saved-view panel [B-06]. */
+/**
+ * Graph filter and saved-view panel [B-06].
+ *
+ * Lives in the board header's Filter popover: one column of fields, then the
+ * saved views. The trigger shows how many filters are on, so a dimmed board
+ * always says why.
+ */
 
 import type { Graph, SavedView, Status, StatusDefinition } from "../types";
 import { localizedStatusLabel, useI18n } from "../i18n";
@@ -10,6 +16,13 @@ export interface ViewFilter {
   tag: string;
   priority: string;
   sort: "manual" | "title" | "priority" | "status" | "assignee";
+}
+
+/** Filters that hide or dim nodes. Sorting reorders and is not counted. */
+export function activeFilterCount(filter: ViewFilter): number {
+  return [filter.query.trim(), filter.status, filter.assignee, filter.tag, filter.priority].filter(
+    Boolean,
+  ).length;
 }
 
 export interface GraphToolsPanelProps {
@@ -48,6 +61,7 @@ export function GraphToolsPanel({
         setViewFilter((current) => ({ ...current, query: event.target.value }))
       }
       placeholder={t("graphTools.query")}
+      aria-label={t("graphTools.query")}
     />
     <select
       value={viewFilter.status}
@@ -143,6 +157,7 @@ export function GraphToolsPanel({
         value={savedViewName}
         onChange={(event) => setSavedViewName(event.target.value)}
         placeholder={t("graphTools.viewName")}
+        aria-label={t("graphTools.viewName")}
         maxLength={80}
       />
       <button type="button" disabled={!savedViewName.trim()} onClick={saveCurrentView}>

@@ -18,7 +18,7 @@ import { EmptyState } from "./InteractionPrimitives";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
 import { GraphBatchToolbar } from "./GraphBatchToolbar";
-import { GraphToolsPanel } from "./GraphToolsPanel";
+import { GraphToolsPanel, activeFilterCount } from "./GraphToolsPanel";
 import { TimelineGrid } from "./timeline/TimelineGrid";
 import { TimelineCards } from "./timeline/TimelineCards";
 import { useTimelineLayout } from "./timeline/useTimelineLayout";
@@ -29,6 +29,7 @@ import { usePlanMenu } from "./timeline/usePlanMenu";
 import { useNarrowViewport } from "./TopbarOverflow";
 import { GraphCanvas } from "./canvas/GraphCanvas";
 import { GraphMinimap } from "./canvas/GraphMinimap";
+import { ProblemsPanel, problemCount } from "./canvas/ProblemsPanel";
 import { useCardResize } from "./canvas/useCardResize";
 import { useCardDrag } from "./canvas/useCardDrag";
 import {
@@ -71,7 +72,6 @@ import {
   graphObstacleRects,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
-import { GraphAnalysisPanel } from "./lane/GraphAnalysisPanel";
 import {
   LaneContextMenuLayer,
   useLaneContextMenu,
@@ -94,6 +94,9 @@ export type LaneContextMenu =
       edges: { from: string; to: string }[];
     }
   | { kind: "logic-gate"; x: number; y: number; gateId: string }
+  /** The node's short menu: open, agents, add dependency, duplicate, trash. */
+  | { kind: "node-actions"; x: number; y: number; nodeId: string }
+  /** The node's dependency editor, from "Add dependency…" or a wire's gate. */
   | { kind: "node"; x: number; y: number; nodeId: string };
 
 export type GraphSelection =
@@ -200,8 +203,9 @@ export function LaneView({
   const [graphSelection, setGraphSelection] = useState<GraphSelection>(null);
   const { graphNotice, setGraphNotice, planNotice, setPlanNotice } =
     useLaneNotices();
-  const [graphToolsOpen, setGraphToolsOpen] = useState(false);
-  const [analysisOpen, setAnalysisOpen] = useState(false);
+  // The Problems side panel: the schedule analysis and the validation
+  // warnings, beside the board instead of on top of it.
+  const [problemsOpen, setProblemsOpen] = useState(false);
   // What a plain drag means, for a pointer with no modifier keys to hold. The
   // modifiers keep working in every mode, so this only ever adds a way in.
   const [gestureMode, setGestureMode] = useState<GraphGestureMode>("select");
@@ -1129,11 +1133,24 @@ export function LaneView({
         cardFontScale={cardFontScale}
         setCardFontScale={setCardFontScale}
         resetCardScale={resetCardScale}
-        graphToolsOpen={graphToolsOpen}
-        setGraphToolsOpen={setGraphToolsOpen}
-        analysisOpen={analysisOpen}
-        setAnalysisOpen={setAnalysisOpen}
-        analysis={analysis}
+        filterPanel={
+          <GraphToolsPanel
+            graph={graph}
+            customStatuses={customStatuses}
+            selectableStatuses={selectableStatuses}
+            viewFilter={viewFilter}
+            setViewFilter={setViewFilter}
+            savedViewName={savedViewName}
+            setSavedViewName={setSavedViewName}
+            saveCurrentView={saveCurrentView}
+            applySavedView={applySavedView}
+            removeSavedView={removeSavedView}
+          />
+        }
+        activeFilters={activeFilterCount(viewFilter)}
+        problemCount={problemCount(analysis, issues)}
+        problemsOpen={problemsOpen}
+        setProblemsOpen={setProblemsOpen}
         fitGraph={fitGraph}
         snapToGrid={snapToGrid}
         setSnapToGrid={setSnapToGrid}
@@ -1166,7 +1183,8 @@ export function LaneView({
         graphNotice={graphNotice}
         planNotice={planNotice}
       />
-      {isGraph && !collapsed && selectedIDs.length > 0 && (
+      {/* Two or more: one node has its own menu and its drawer. */}
+      {isGraph && !collapsed && selectedIDs.length > 1 && (
         <GraphBatchToolbar
           graph={graph}
           customStatuses={customStatuses}
@@ -1183,28 +1201,8 @@ export function LaneView({
           onSelectedNodeChange={onSelectedNodeChange}
         />
       )}
-      {isGraph && !collapsed && graphToolsOpen && (
-        <GraphToolsPanel
-          graph={graph}
-          customStatuses={customStatuses}
-          selectableStatuses={selectableStatuses}
-          viewFilter={viewFilter}
-          setViewFilter={setViewFilter}
-          savedViewName={savedViewName}
-          setSavedViewName={setSavedViewName}
-          saveCurrentView={saveCurrentView}
-          applySavedView={applySavedView}
-          removeSavedView={removeSavedView}
-        />
-      )}
-      {isGraph && !collapsed && analysisOpen && (
-        <GraphAnalysisPanel
-          analysis={analysis}
-          selectNode={selectNode}
-          nodeTitle={nodeTitle}
-        />
-      )}
       {collapsed ? null : (
+      <div className={`lane-body${isGraph && problemsOpen ? " problems-open" : ""}`}>
       <div
         ref={boardRef}
         className={`board pan-enabled${panning ? " panning" : ""}`}
@@ -1392,8 +1390,7 @@ export function LaneView({
           )}
         </div>
       </div>
-      )}
-      {isGraph && !collapsed && minimapVisible && cols.length > 0 && (
+      {isGraph && minimapVisible && cols.length > 0 && (
         <GraphMinimap
           cols={cols}
           selectedGraphNodeIDs={selectedGraphNodeIDs}
@@ -1406,6 +1403,20 @@ export function LaneView({
           centerX={centerX}
           rowTop={rowTop}
         />
+      )}
+      {isGraph && problemsOpen && (
+        <ProblemsPanel
+          analysis={analysis}
+          issues={issues}
+          nodeTitle={nodeTitle}
+          onPick={(nodeId) => {
+            selectNode(nodeId);
+            void openTab(nodeId).catch(reportError);
+          }}
+          onClose={() => setProblemsOpen(false)}
+        />
+      )}
+      </div>
       )}
 
       {contextMenu && (

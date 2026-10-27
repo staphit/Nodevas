@@ -2,23 +2,23 @@
  * Workspace tree [B-06].
  *
  * The explorer's tree: workspace roots → projects → the active project's nodes
- * and trash. Presentational apart from reading nothing itself — every action
+ * and trash. Validation warnings are not here: they are in the board's
+ * Problems panel, beside the schedule findings. Presentational apart from
+ * reading nothing itself — every action
  * and every piece of state arrives as a prop, so the sidebar keeps ownership of
  * drag state and context menus.
  */
 
 import type { CSSProperties } from "react";
 import type { ProjectEntry, TrashItem, WorkspaceEntry } from "../../state/types";
-import type { GraphNode, Issue, Status, StatusDefinition } from "../../types";
+import type { GraphNode, Status, StatusDefinition } from "../../types";
 import {
-  IconCheck,
   IconDoc,
   IconFolder,
   IconFolderOpen,
   IconPlus,
   IconRestore,
   IconTrash,
-  IconWarning,
 } from "../../icons";
 import { useI18n } from "../../i18n";
 import { reportError } from "../../store";
@@ -122,7 +122,6 @@ export interface WorkspaceTreeProps {
 
   statuses: Record<string, Status>;
   customStatuses: StatusDefinition[];
-  issues: Issue[];
   userNames: Map<string, string>;
   activeNodes: GraphNode[];
   visibleNodes: GraphNode[];
@@ -147,8 +146,6 @@ export interface WorkspaceTreeProps {
 
   trash: TrashItem[];
   restoreTrash: (file: string) => Promise<void>;
-  validationExpanded: boolean;
-  setValidationExpanded: (open: boolean) => void;
 }
 
 export function WorkspaceTree({
@@ -181,7 +178,6 @@ export function WorkspaceTree({
   toggleNodeSelection,
   statuses,
   customStatuses,
-  issues,
   userNames,
   activeNodes,
   visibleNodes,
@@ -200,8 +196,6 @@ export function WorkspaceTree({
   moveNodesToFolder,
   trash,
   restoreTrash,
-  validationExpanded,
-  setValidationExpanded,
 }: WorkspaceTreeProps) {
   const { t } = useI18n();
   return (
@@ -642,47 +636,6 @@ export function WorkspaceTree({
                       }}
                     />
                   )}
-
-                  <details
-                    className="tree-special-folder"
-                    open={validationExpanded}
-                    onToggle={(event) =>
-                      setValidationExpanded(
-                        (event.currentTarget as HTMLDetailsElement).open,
-                      )
-                    }
-                  >
-                    <summary>
-                      <span className="tree-chevron">›</span>
-                      <IconWarning size={12} />
-                      <span>{t("explorer.validation")}</span>
-                      <span className="tree-count">{issues.length}</span>
-                    </summary>
-                    {issues.length === 0 ? (
-                      <div className="tree-ok-msg">
-                        <IconCheck size={12} /> {t("explorer.noIssues")}
-                      </div>
-                    ) : (
-                      <ul className="issue-list">
-                        {issues.map((issue, index) => (
-                          <li
-                            key={index}
-                            className={`issue-${issue.severity}`}
-                            onClick={() =>
-                              issue.nodeId &&
-                              void openTab(issue.nodeId).catch(reportError)
-                            }
-                          >
-                            <IconWarning size={12} />
-                            <span>
-                              <b className="mono">{issue.nodeId ?? "graph"}</b>
-                              {issue.field ? `.${issue.field}` : ""}: {issue.msg}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </details>
 
                   {trash.length > 0 && (
                     <details className="tree-special-folder">
