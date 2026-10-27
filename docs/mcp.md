@@ -119,6 +119,27 @@ The MCP process follows the agent's session as it changes: after Claude Code's `
   the project does not define) alongside problems, but does not count them as
   problems.
 
+### Roles
+
+`nodevas mcp --role <role>` acts in an agent role (`planner`, `qa`, `tester`,
+`executor`, `reviewer`, `researcher` or a project's `custom-role-<id>`): the
+session lists only that role's tools and declares the role on every request
+(`X-Nodevas-Role`), and the server refuses whatever the role may not do. A
+role never raises the `--agent-role` class. `--tools a,b,c` narrows the tools
+further (a runner passes the hub's allowlist for each run); an unknown tool
+name fails at start. Without `--role` a session is a legacy one with every
+tool, as before, except that on a project with stages it may not set a task
+done itself (`STAGE_GATE_PENDING`): the pipeline does, after its stages. `nodevas setup-agent --role <role>` writes the flag into the
+agents' configs.
+
+- `set_acceptance` replaces a node's acceptance criteria (checkable one-line
+  items, kept ids). Only a person, the planner or QA may write them, and once
+  an Executor starts on the node they are locked (`ACCEPTANCE_LOCKED`).
+- `create_subgraph` takes `acceptance` (a list of strings) per node.
+- `tools/list` leaves out each tool's output schema; results are unchanged
+  (structured content, and its JSON as text), at a third less of every call's
+  tool payload.
+
 Reads use small defaults: `get_node` returns up to 2,000 body characters, and
 `get_graph_outline` returns 25 nodes per page. Use `maxBodyChars` (up to 60,000)
 or `limit` (up to 200) for larger reads, and follow the returned offsets/cursors.

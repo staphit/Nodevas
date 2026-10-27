@@ -22,7 +22,15 @@ npm --prefix web exec -- vitest run
 npm run build --prefix web
 ```
 
-For end-to-end tests, install Playwright Chromium first:
+Database tests run on PostgreSQL. With nothing set, each test binary starts the embedded server (`internal/testpg`, a template initdb'd once per machine under the user cache directory) and gives every test a fresh migrated database; the first run downloads the pinned binaries. To use a server you already run instead:
+
+```bash
+NODEVAS_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:5432/postgres?sslmode=disable go test ./...
+```
+
+`NODEVAS_PG_REAL=1` makes the embedded-server tests that need the real binaries fail instead of skipping when they are missing (CI's `embedded-pg` job).
+
+For end-to-end tests, install Playwright Chromium first. The run shares one PostgreSQL (`NODEVAS_E2E_DATABASE_URL`, or the embedded one `global-setup` starts) with a database per worker:
 
 ```bash
 npm --prefix web exec -- playwright install --with-deps chromium

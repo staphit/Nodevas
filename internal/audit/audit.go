@@ -8,8 +8,8 @@
 // and that a project deletion takes with it. It also gives server-wide events —
 // a sign-in has no project — somewhere to live at all.
 //
-// Everything here is written so an operator can read it in DB Browser for
-// SQLite without this program: timestamps are RFC3339 UTC text, and Detail is
+// Everything here is written so an operator can read it in a database tool
+// (psql, TablePlus, DBeaver) without this program: timestamps are RFC3339 UTC text, and Detail is
 // JSON text that is sanitised on the way in so a row is never a wall of escaped
 // control characters, and never a credential.
 package audit
@@ -92,14 +92,14 @@ const (
 const (
 	DefaultLimit = 200
 	MaxLimit     = 1000
-	// MaxOffset is how deep paging may go. SQLite reaches OFFSET n by counting
+	// MaxOffset is how deep paging may go. The database reaches OFFSET n by counting
 	// out n rows and throwing them away, so an unbounded offset is a full table
 	// scan a caller can order by typing a large number into a query string.
 	MaxOffset = 100_000
 )
 
 // Filter string bounds. A filter value is a bound parameter and cannot inject,
-// but ActionPrefix becomes a LIKE pattern that SQLite evaluates once per
+// but ActionPrefix becomes a LIKE pattern the database evaluates once per
 // candidate row, so a megabyte of it is a megabyte of comparison per row. These
 // are refused rather than truncated: a truncated filter silently answers a
 // different question than the one that was asked.

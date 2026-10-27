@@ -206,8 +206,11 @@ export const PREFERENCE_SCHEMA = {
       "workstation",
       "runners",
       "usage",
+      "analytics",
       "budget",
       "routing",
+      "roles",
+      "stages",
       "copilot",
       "server",
       "account",
@@ -227,6 +230,13 @@ export const PREFERENCE_SCHEMA = {
   // showing, which is where a first-time user needs it most.
   explorerCollapsed: boolPref("vised-explorer-collapsed", "explorer", () =>
     typeof window !== "undefined" && window.innerWidth <= 720,
+  ),
+  /** The sidebar's tab: the node list, files, git, or agents. */
+  explorerTab: enumPref(
+    "vised-explorer-tab",
+    "explorer",
+    ["nodes", "files", "git", "agent"] as const,
+    () => "nodes" as const,
   ),
   explorerExpandedProjects: stringListPref(
     "vised-explorer-expanded-projects",

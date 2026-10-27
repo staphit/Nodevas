@@ -18,7 +18,7 @@ jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       # gin's binding package pulls in a MessagePack codec this server never
       # renders. Dropping it saves ~9 MB in the shipped binary; every build of
@@ -61,14 +61,27 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Every package's tests on the service container: internal/testpg gives
+      # each test a fresh migrated database on it. (The embedded-pg job below
+      # runs the same helpers against the embedded server instead.)
       - name: Test
-        run: go test ./...
-
-      # The same database tests again, against a real PostgreSQL server.
-      - name: Test on PostgreSQL
         env:
           NODEVAS_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -count=1 ./internal/db/... ./internal/auth/ ./internal/audit/ ./internal/httpapi/system/
+        run: go test ./...
+
+      # SQLite is linked only by the one-time importer (internal/legacysqlite),
+      # and a build without it links none at all.
+      - name: Only the importer links SQLite
+        run: |
+          go build -tags nomsgpack,nosqliteimport ./...
+          if go list -deps -tags nomsgpack,nosqliteimport ./cmd/nodevas | grep -q '^modernc.org/sqlite$'; then
+            echo "the nosqliteimport build still links modernc.org/sqlite"
+            exit 1
+          fi
+          if go list -f '{{.ImportPath}} {{join .Imports " "}}' ./... | grep 'modernc.org/sqlite' | grep -v '^nodevas/internal/legacysqlite '; then
+            echo "only internal/legacysqlite may import modernc.org/sqlite"
+            exit 1
+          fi
 
       # A public repository is read by people looking for a way in. A known-bad
       # dependency is the cheapest one to find, so the build fails on it rather
@@ -130,12 +143,78 @@ jobs:
       - name: Known vulnerabilities in the desktop shell
         run: npm audit --audit-level=high --prefix desktop
 
+  # The embedded PostgreSQL on every desktop platform, with the real pinned
+  # binaries: install (verified against the compiled-in SHA-256), loopback
+  # only, secrets, supervision, stale-pid recovery, a serve that starts it,
+  # answers and stops it. Without NODEVAS_TEST_DATABASE_URL the database tests
+  # here run on internal/testpg's embedded server too.
+  embedded-pg:
+    name: Embedded PostgreSQL (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GOFLAGS: -tags=nomsgpack
+      NODEVAS_PG_REAL: "1"
+      NODEVAS_PG_HOME: ${{ github.workspace }}/../nodevas-pg
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The archive is keyed on the manifest that pins it: a new pin is a new
+      # download, verified again.
+      - name: Cache the PostgreSQL binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/../nodevas-pg/dist
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/embeddedpg/manifest.go') }}
+
+      - name: Install the pinned PostgreSQL
+        run: |
+          go run ./cmd/nodevas db install-postgres
+          echo "NODEVAS_PG_BINARIES=$NODEVAS_PG_HOME/dist/17.11.1-$(go env GOOS)-$(go env GOARCH)" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: >-
+          go test -count=1 ./internal/embeddedpg/... ./internal/dbconn/... ./internal/db/...
+          ./internal/searchindex/... ./internal/legacysqlite/... ./cmd/nodevas/
+
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
     # The suite drives the real binary, so it needs both toolchains. It runs
     # on its own so a browser hiccup never hides a Go or unit-test failure.
     timeout-minutes: 25
+    # One server for the run; every worker gets a database of its own on it
+    # (web/e2e/database.ts).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODEVAS_E2E_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres?sslmode=disable
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

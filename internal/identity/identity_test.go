@@ -137,3 +137,31 @@ func TestUnsetRoleIsOmittedFromJSON(t *testing.T) {
 		t.Error("a role-less record must not gain administration")
 	}
 }
+
+func TestHasRoleOnlyForAgents(t *testing.T) {
+	agent := Actor{ID: "u", Agent: AgentWorker, AgentRole: "tester"}
+	if !agent.HasRole() {
+		t.Fatal("a worker in the tester role has no role")
+	}
+	if (Actor{ID: "u", Agent: AgentWorker}).HasRole() {
+		t.Fatal("a legacy worker has a role")
+	}
+	if (Actor{ID: "u", AgentRole: "tester"}).HasRole() {
+		t.Fatal("a person has a role: humans ignore AgentRole")
+	}
+}
+
+func TestLowerClassNeverRaises(t *testing.T) {
+	cases := []struct{ a, b, want AgentClass }{
+		{AgentOrchestrator, AgentWorker, AgentWorker},
+		{AgentWorker, AgentOrchestrator, AgentWorker},
+		{AgentOrchestrator, AgentOrchestrator, AgentOrchestrator},
+		{AgentHuman, AgentWorker, AgentWorker},
+		{AgentOrchestrator, AgentHuman, AgentOrchestrator},
+	}
+	for _, c := range cases {
+		if got := LowerClass(c.a, c.b); got != c.want {
+			t.Errorf("LowerClass(%q, %q) = %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}

@@ -39,6 +39,8 @@ type SubgraphNode struct {
 	Tags        []string `json:"tags,omitempty"`
 	DependsOn   []string `json:"dependsOn,omitempty"`
 	Refs        []string `json:"refs,omitempty"`
+	// Acceptance is the node's acceptance criteria, one line each.
+	Acceptance []string `json:"acceptance,omitempty"`
 }
 
 // SubgraphEdge makes an existing node (To) wait for From, a key or an id.
@@ -187,6 +189,28 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			err.Msg = field + ".kind: " + err.Msg
 			return zero, err
 		}
+		if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
+			return zero, err
+		}
+		if len(in.DependsOn) > 0 || len(in.Refs) > 0 {
+			if err := checkRole(actor, g, engine.CapLink, nil); err != nil {
+				return zero, err
+			}
+		}
+		if len(in.Acceptance) > 0 {
+			if len(in.Acceptance) > engine.MaxAcceptanceItems {
+				return zero, invalidSubgraph(field+".acceptance", "at most %d criteria", engine.MaxAcceptanceItems)
+			}
+			acceptance := &engine.Acceptance{By: acceptanceAttribution(actor)}
+			for _, text := range in.Acceptance {
+				acceptance.Items = append(acceptance.Items, engine.AcceptanceItem{Text: strings.TrimSpace(text)})
+			}
+			acceptance.Items = engine.AssignAcceptanceIDs(acceptance.Items)
+			if err := checkAcceptanceWrite(actor, g, n, nil, acceptance, true); err != nil {
+				return zero, err
+			}
+			n.Acceptance = acceptance
+		}
 		access[i] = normalizeWriteAccess(n.WriteAccess)
 		files[i], nodes[i] = nf, n
 	}
@@ -227,10 +251,10 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	}
 	touched := map[string]bool{}
 	apply := func(op GraphOp, field string) error {
-		if err := applyGraphOp(actor, g, op, touched); err != nil {
+		if err := applyGraphOp(actor, g, op, touched, func(string) bool { return false }); err != nil {
 			var writeDenied *ErrNodeWriteDenied
 			var typeDenied *ErrNodeTypeDenied
-			if errors.As(err, &writeDenied) || errors.As(err, &typeDenied) {
+			if errors.As(err, &writeDenied) || errors.As(err, &typeDenied) || roleDeniedAs(err) {
 				return err
 			}
 			return invalidSubgraph(field, "%v", err)
@@ -334,6 +358,13 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data, checkRevision: true, expectedRev: graphRev})
 	if err := s.applyUpdatesLocked(actor, updates); err != nil {
 		return zero, err
+	}
+	if actor.RunID != "" {
+		createdIDs := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			createdIDs = append(createdIDs, n.ID)
+		}
+		s.recordCreatedByRunLocked(actor.RunID, createdIDs)
 	}
 	result.Rev = Rev(data)
 	result.Issues = after

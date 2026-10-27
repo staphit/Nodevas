@@ -18,9 +18,9 @@
 // two projects are searched in parallel. entry.size is atomic precisely so the
 // eviction sweep can read a project's footprint without waiting for its lock.
 //
-// SQLite serialises writers underneath all of this, which is a queue and not a
-// correctness problem: the connection pool is one connection, so two projects
-// indexing at once take turns instead of colliding.
+// PostgreSQL takes it from there: writes go through the database's small
+// search pool and each node is one upsert, so two projects indexing at once
+// interleave, and two writers indexing the same node leave one row.
 //
 // Both a query handler and the filesystem watcher call in concurrently. Every
 // exported method takes the locks itself; nothing on projectIndex or document
@@ -30,6 +30,7 @@ package searchindex
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -56,13 +57,17 @@ const (
 // is a var only so tests can pin it.
 var revalidateAfter = 250 * time.Millisecond
 
+// ErrNoIndex is a Manager without a database: there is nowhere to keep an
+// index, and the caller falls back to its direct scan.
+var ErrNoIndex = errors.New("searchindex: no database, no index")
+
 // Manager caches one index per project directory, over one database.
 type Manager struct {
 	mu      sync.Mutex
 	entries map[string]*entry
 	store   *docStore
 	// database is the workspace database, or nil when the caller did not give
-	// one and the index has to keep itself.
+	// one; every search then answers ErrNoIndex.
 	database *db.DB
 }
 
@@ -77,13 +82,9 @@ type entry struct {
 	validated time.Time
 }
 
-// NewManager returns a cache with no database of its own.
-//
-// The index then lives in a private in-memory SQLite database: results are the
-// same, and the only thing lost is that the next process has to read the
-// project's files again instead of finding its rows already written. Prefer
-// NewManagerWithDB, which puts them in the workspace database where they
-// survive a restart.
+// NewManager returns a cache with no database. It holds no index: every
+// search answers ErrNoIndex and the caller scans the files directly. Use
+// NewManagerWithDB.
 func NewManager() *Manager {
 	return &Manager{entries: make(map[string]*entry)}
 }
@@ -104,36 +105,56 @@ func (m *Manager) Search(root, lowered string) ([]Match, error) {
 
 // SearchContext is Search with a deadline the caller controls.
 func (m *Manager) SearchContext(ctx context.Context, root, lowered string) ([]Match, error) {
-	docs, err := m.docs(ctx)
-	if err != nil {
-		return nil, err
+	return retryDropped(m, func() ([]Match, error) {
+		docs, err := m.docs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		e := m.entryFor(root)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if err := e.ensureLocked(ctx, docs); err != nil {
+			return nil, err
+		}
+		e.size.Store(e.index.bytes)
+		return e.index.query(ctx, lowered)
+	})
+}
+
+// retryDropped runs a search once more, from an empty cache and a recreated
+// table, when it failed because search_documents is gone. Dropping the table
+// is a supported thing for an operator to do (it is derived data), and the
+// alternative is a server whose search stays broken until it restarts.
+func retryDropped[T any](m *Manager, run func() (T, error)) (T, error) {
+	out, err := run()
+	if err == nil || !isUndefinedTable(err) {
+		return out, err
 	}
-	e := m.entryFor(root)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := e.ensureLocked(ctx, docs); err != nil {
-		return nil, err
-	}
-	e.size.Store(e.index.bytes)
-	return e.index.query(ctx, lowered)
+	m.mu.Lock()
+	m.store = nil
+	m.entries = make(map[string]*entry)
+	m.mu.Unlock()
+	return run()
 }
 
 // RankContext is the ranked search: the project's best limit matches for a
 // query of keywords or a whole sentence (see projectIndex.rank). The locking
 // and the fallback contract are SearchContext's.
 func (m *Manager) RankContext(ctx context.Context, root, query string, limit int) ([]Ranked, error) {
-	docs, err := m.docs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	e := m.entryFor(root)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := e.ensureLocked(ctx, docs); err != nil {
-		return nil, err
-	}
-	e.size.Store(e.index.bytes)
-	return e.index.rank(ctx, query, limit)
+	return retryDropped(m, func() ([]Ranked, error) {
+		docs, err := m.docs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		e := m.entryFor(root)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if err := e.ensureLocked(ctx, docs); err != nil {
+			return nil, err
+		}
+		e.size.Store(e.index.bytes)
+		return e.index.rank(ctx, query, limit)
+	})
 }
 
 // Update applies a watcher event. An empty nodeID means graph.yaml changed.
@@ -183,8 +204,8 @@ func (m *Manager) Flush() {}
 //
 // It is the answer to the index and the files having disagreed for any reason
 // at all, and it is safe by construction: every row is derived from Markdown
-// and YAML that this deletes nothing of. It empties every project's rows
-// because a contentless FTS5 table can only be emptied wholesale.
+// and YAML that this deletes nothing of. It empties every project's rows:
+// whatever disagreed may not have been confined to one.
 func (m *Manager) Rebuild(ctx context.Context) error {
 	docs, err := m.docs(ctx)
 	if err != nil {
@@ -221,31 +242,25 @@ func (m *Manager) Prune(ctx context.Context, roots []string) error {
 	return docs.prune(ctx, keep)
 }
 
-// Close releases the in-memory database a Manager built for itself. A database
-// passed to NewManagerWithDB belongs to the caller and is left open.
+// Close drops what the cache holds. The database belongs to the caller and is
+// left open.
 func (m *Manager) Close() error {
 	m.mu.Lock()
-	docs := m.store
 	m.store = nil
 	m.entries = make(map[string]*entry)
 	m.mu.Unlock()
-	if docs == nil {
-		return nil
-	}
-	return docs.close()
+	return nil
 }
 
-// docs returns the store, opening the private in-memory one on first use.
+// docs returns the store, creating its table on first use.
 func (m *Manager) docs(ctx context.Context) (*docStore, error) {
 	m.mu.Lock()
+	if m.database == nil {
+		m.mu.Unlock()
+		return nil, ErrNoIndex
+	}
 	if m.store == nil {
-		var err error
-		if m.database != nil {
-			m.store = newDocStore(m.database)
-		} else if m.store, err = newMemoryDocStore(); err != nil {
-			m.mu.Unlock()
-			return nil, err
-		}
+		m.store = newDocStore(m.database)
 	}
 	docs := m.store
 	m.mu.Unlock()

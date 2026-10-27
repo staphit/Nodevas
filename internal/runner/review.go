@@ -50,8 +50,50 @@ var prURLExact = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(:\d+)?(/[A-Za-z0-9.
 
 // checkKind vets an offer's W5 fields; "" means fine.
 func checkKind(job *runnerwire.Job, cfg *Config) string {
+	if len(job.TestFiles) > runnerwire.MaxTestFiles {
+		return "the job names too many test files"
+	}
+	if len(job.Acceptance) > runnerwire.MaxCheckResults {
+		return "the job names too many acceptance criteria"
+	}
 	switch job.Kind {
 	case runnerwire.JobImplement:
+		return ""
+	case runnerwire.JobTest:
+		// A Tester round starts its own branch and draft PR.
+		if job.Branch != "" || job.PRURL != "" {
+			return "a test job names no pull request"
+		}
+		return ""
+	case runnerwire.JobVerify:
+		if job.Verify == nil {
+			return "a verify job names no phase or head"
+		}
+		switch job.Verify.Phase {
+		case runnerwire.VerifyRed, runnerwire.VerifyGreen:
+		default:
+			return fmt.Sprintf("unknown verify phase %q", job.Verify.Phase)
+		}
+		if !shaPattern.MatchString(job.Verify.Head) {
+			return fmt.Sprintf("the verify head %q is not a commit sha", job.Verify.Head)
+		}
+		if job.Branch == "" || checkBase(job.Branch) != nil {
+			return fmt.Sprintf("pull request branch %q is not a plain branch name", job.Branch)
+		}
+		if len(job.PRURL) > 512 || !prURLExact.MatchString(job.PRURL) {
+			return fmt.Sprintf("%q is not a pull request URL", job.PRURL)
+		}
+		return ""
+	case runnerwire.JobJudge:
+		if job.Branch != "" || job.PRURL != "" {
+			return "a judge job names no pull request"
+		}
+		if len(job.Acceptance) == 0 {
+			return "a judge job needs the acceptance criteria to judge"
+		}
+		if job.Verify != nil && job.Verify.Phase != runnerwire.VerifyGoal {
+			return "a judge job verifies only a goal"
+		}
 		return ""
 	case runnerwire.JobPlan:
 		// A plan names no pull request and pushes nothing. Its Review, if
@@ -324,6 +366,9 @@ func (j *jobs) executeReview(ctx context.Context, r *run, pr prCheck) {
 		result.Error = `review gave no verdict (no final "VERDICT: approve" or "VERDICT: changes" line)`
 	} else {
 		result.Verdict = verdict
+		// A staged pipeline's reviewer acknowledges the Executor's changes
+		// to the Tester's files on a line of its own.
+		result.GuardAck = verdict == runnerwire.VerdictApprove && parseGuardAck(text)
 	}
 	j.finish(r, result)
 }

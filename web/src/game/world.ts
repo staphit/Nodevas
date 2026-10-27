@@ -128,6 +128,11 @@ export interface Actor {
   energy?: Energy;
   /** The review pipeline it sits in. */
   pipelineId?: string;
+  /** Agent roles: a run's role (its record's, or its kind's for a legacy
+   * run); a session never has one. */
+  role?: string;
+  /** The latest verify of its pipeline, for a Tester or Executor. */
+  testState?: "red" | "green";
   /** What a click opens. */
   target: ClickTarget;
   /** Everything the character's popover offers, target first. */

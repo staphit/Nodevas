@@ -91,6 +91,8 @@ function report(over: Partial<UsageReport> = {}): UsageReport {
         ...bucket({ inputTokens: 90_000, costUsd: 4 }),
       },
     ],
+    byRole: [],
+    byNode: [],
     ...over,
   };
 }
@@ -133,6 +135,25 @@ afterEach(() => {
 });
 
 describe("UsageModal", () => {
+  // W-21: spend by the run's role.
+  it("shows usage by role", async () => {
+    vi.spyOn(api, "getUsage").mockResolvedValue(
+      report({
+        byRole: [
+          { key: "executor", ...bucket({ inputTokens: 900_000, costUsd: 7, runs: 2 }) },
+          { key: "reviewer", ...bucket({ inputTokens: 100_000, costUsd: 1.5, runs: 1 }) },
+          { key: "copilot", ...bucket({ inputTokens: 50_000, costUsd: 0.25 }) },
+        ],
+      }),
+    );
+    render(<UsageModal onClose={vi.fn()} />);
+    const roles = await screen.findByRole("region", { name: "By role" });
+    expect(within(roles).getByText("Executor")).toBeInTheDocument();
+    expect(within(roles).getByText("Reviewer")).toBeInTheDocument();
+    expect(within(roles).getByText("$7.00")).toBeInTheDocument();
+    expect(within(roles).getByText("copilot")).toBeInTheDocument();
+  });
+
   it("shows totals, the monthly projection and the tables", async () => {
     const get = vi.spyOn(api, "getUsage").mockResolvedValue(report());
     render(<UsageModal onClose={vi.fn()} />);

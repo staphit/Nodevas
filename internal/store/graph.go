@@ -71,9 +71,21 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 	if err := checkOfficeStyleEdit(actor, currentGraph.OfficeStyle, g.OfficeStyle); err != nil {
 		return "", err
 	}
-	data, err := s.marshalGraph(g)
-	if err != nil {
+	// Roles and stages decide what agents may do, so the same holds for them.
+	if err := checkAgentRolesEdit(actor, currentGraph.AgentRoles, g.AgentRoles); err != nil {
 		return "", err
+	}
+	if err := checkWorkflowEdit(actor, "", currentGraph.Workflow, g.Workflow); err != nil {
+		return "", err
+	}
+	var createdByRun map[string]bool
+	if actor.HasRole() && actor.RunID != "" {
+		createdByRun = map[string]bool{}
+		for id, entry := range s.loadCreatedByLocked().Nodes {
+			if entry.Run == actor.RunID {
+				createdByRun[id] = true
+			}
+		}
 	}
 	updates := make([]fileUpdate, 0, len(g.Nodes)+1)
 	for _, n := range g.Nodes {
@@ -93,6 +105,9 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 				return "", err
 			}
 		}
+		if err := s.checkNodeSaveRoles(actor, currentGraph, existing, n, createdByRun[n.ID]); err != nil {
+			return "", err
+		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {
 			return "", fmt.Errorf("sync node %s: %w", n.ID, err)
@@ -100,6 +115,11 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 		if update != nil {
 			updates = append(updates, *update)
 		}
+	}
+	// Marshalled after the node loop: it normalizes acceptance in place.
+	data, err := s.marshalGraph(g)
+	if err != nil {
+		return "", err
 	}
 	updates = append(updates, fileUpdate{
 		path:          s.GraphPath(),
@@ -186,6 +206,9 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	if err := checkNodeWrite(actor, n); err != nil {
 		return "", "", err
 	}
+	if err := checkRole(actor, g, engine.CapBody, n); err != nil {
+		return "", "", err
+	}
 	nf, err := engine.ParseNodeFile([]byte(content))
 	if err != nil {
 		return "", "", fmt.Errorf("node file: %w", err)
@@ -205,4 +228,50 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	}
 	_ = s.DeleteDraft(id) // saved: draft no longer needed
 	return string(out), Rev(out), nil
+}
+
+// checkNodeSaveRoles applies the role, workflow and acceptance rules to one
+// node a whole-graph save adds or changes. A new node is a create; a changed
+// one is a metadata edit unless only its acceptance changed. The stored
+// acceptance is normalized in place (lock and attribution).
+func (s *Store) checkNodeSaveRoles(actor identity.Actor, g *engine.Graph, existing, n *engine.Node, createdByRun bool) error {
+	var beforeWorkflow *engine.Workflow
+	var beforeAcceptance *engine.Acceptance
+	if existing != nil {
+		beforeWorkflow, beforeAcceptance = existing.Workflow, existing.Acceptance
+	}
+	if err := checkWorkflowEdit(actor, n.ID, beforeWorkflow, n.Workflow); err != nil {
+		return err
+	}
+	if existing == nil {
+		if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
+			return err
+		}
+	} else {
+		rest, was := *n, *existing
+		rest.Acceptance, was.Acceptance = nil, nil
+		if !reflect.DeepEqual(&rest, &was) {
+			if err := checkRole(actor, g, engine.CapMeta, existing); err != nil {
+				return err
+			}
+		}
+	}
+	if !acceptanceEqual(beforeAcceptance, n.Acceptance) {
+		normalized := normalizeAcceptance(actor, beforeAcceptance, n.Acceptance)
+		if !actor.IsAgent() {
+			n.Acceptance = normalized
+		}
+		if err := checkAcceptanceWrite(actor, g, n, beforeAcceptance, n.Acceptance, createdByRun || existing == nil); err != nil {
+			return err
+		}
+		if actor.IsAgent() && n.Acceptance != nil {
+			by := acceptanceAttribution(actor)
+			if n.Acceptance.EqualItems(beforeAcceptance) && beforeAcceptance != nil {
+				by = beforeAcceptance.By
+			}
+			n.Acceptance = &engine.Acceptance{Items: engine.AssignAcceptanceIDs(n.Acceptance.Items),
+				Locked: n.Acceptance.Locked, By: by}
+		}
+	}
+	return nil
 }

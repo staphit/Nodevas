@@ -26,15 +26,16 @@ import {
 import { useRouting } from "./routingStore";
 import { normalizeKind } from "../domain/graph/nodeTypes";
 import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
+import { useRoleOptions } from "../roles/roleLabels";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
 /** Longest tag or kind value a rule takes. */
 export const MAX_ROUTE_VALUE_CHARS = 64;
 
-/** Whether a match kind takes a value (a tag or a node kind). */
+/** Whether a match kind takes a value (a tag, a node kind or a role). */
 export function matchTakesValue(match: string): boolean {
-  return match === "tag" || match === "kind";
+  return match === "tag" || match === "kind" || match === "role";
 }
 
 /**
@@ -47,11 +48,18 @@ export function routeLabel(
   match: string,
   value?: string,
   kindLabel?: (kind: string) => string | undefined,
+  roleLabel?: (role: string) => string | undefined,
 ): string {
   switch (match) {
     case "tag":
-    case "kind": {
-      const shown = match === "kind" && value ? (kindLabel?.(value) ?? value) : value;
+    case "kind":
+    case "role": {
+      const shown =
+        match === "kind" && value
+          ? (kindLabel?.(value) ?? value)
+          : match === "role" && value
+            ? (roleLabel?.(value) ?? value)
+            : value;
       return shown
         ? t("routing.labelValue", { match: t(`routing.match.${match}`), value: shown })
         : t(`routing.match.${match}`);
@@ -218,6 +226,7 @@ function RuleEditor({
   const errorIds = { match: useId(), value: useId(), scope: useId(), target: useId(), more: useId() };
   const name = t("routing.ruleN", { n: index + 1 });
   const { options: kindOptions, kindLabel } = useRouteKinds();
+  const { options: roleOptions, roleLabel } = useRoleOptions();
   const shown = (field: RuleField) => (showErrors && problems[field] ? t(problems[field]!) : "");
 
   const runner = runners.find((item) => item.id === rule.runnerId);
@@ -245,6 +254,8 @@ function RuleEditor({
   const kindValue = (rule.value ?? "").trim();
   const staleKind =
     kindValue && !kindOptions.some((option) => option.value === kindValue) ? kindValue : "";
+  const staleRole =
+    kindValue && !roleOptions.some((option) => option.value === kindValue) ? kindValue : "";
 
   return (
     <li className="route-rule" data-testid={`route-rule-${index}`} aria-label={name}>
@@ -253,7 +264,7 @@ function RuleEditor({
           {index + 1}
         </span>
         <strong className="route-rule-summary">
-          {routeLabel(t, rule.match, (rule.value ?? "").trim(), kindLabel)}
+          {routeLabel(t, rule.match, (rule.value ?? "").trim(), kindLabel, roleLabel)}
           {rule.target.agent ? ` → ${agentModelText(rule.target)}` : ""}
         </strong>
         <ReorderButtons
@@ -313,7 +324,31 @@ function RuleEditor({
           </div>
         )}
 
-        {matchTakesValue(rule.match) && rule.match !== "kind" && (
+        {rule.match === "role" && (
+          <div className="run-field">
+            <label className="run-field-label" htmlFor={ids.value}>{t("routing.value.role")}</label>
+            <select
+              id={ids.value}
+              value={kindValue}
+              aria-invalid={shown("value") ? true : undefined}
+              aria-describedby={shown("value") ? errorIds.value : undefined}
+              onChange={(event) => onChange({ ...rule, value: event.target.value })}
+            >
+              <option value="" disabled>
+                {t("routing.valuePlaceholder.role")}
+              </option>
+              {roleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              {staleRole && <option value={staleRole}>{staleRole}</option>}
+            </select>
+            <FieldError id={errorIds.value} text={shown("value")} />
+          </div>
+        )}
+
+        {matchTakesValue(rule.match) && rule.match !== "kind" && rule.match !== "role" && (
           <div className="run-field">
             <label className="run-field-label" htmlFor={ids.value}>{t(`routing.value.${rule.match}`)}</label>
             <input

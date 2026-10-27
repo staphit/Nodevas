@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
 )
 
@@ -29,6 +30,53 @@ type PipelineRecord struct {
 	// Awaiting is AwaitingHuman while a running pipeline waits for a person
 	// (PipelineState.Status then says waiting_human); "" otherwise.
 	Awaiting string
+	// Config is what the pipeline froze about agent roles and workflow
+	// stages when it was made; nil for a legacy pipeline. Tries counts a
+	// staged pipeline's retries.
+	Config *StagedConfig
+	Tries  Tries
+}
+
+// StagedConfig is run_pipelines.stages: the workflow a pipeline froze, the
+// tools each role's runs are offered, and the node's acceptance items.
+// Staged false is a Light (or override-free legacy-shaped) pipeline whose
+// runs still carry roles.
+type StagedConfig struct {
+	Workflow   *engine.Workflow            `json:"workflow"`
+	Staged     bool                        `json:"staged,omitempty"`
+	Story      bool                        `json:"story,omitempty"`
+	Tools      map[string][]string         `json:"tools,omitempty"`
+	Acceptance []runnerwire.AcceptanceItem `json:"acceptance,omitempty"`
+}
+
+// Tries is run_pipelines.tries: a staged pipeline's retry counters and the
+// heads its red and green runs verified.
+type Tries struct {
+	Tester    int    `json:"tester,omitempty"`
+	Green     int    `json:"green,omitempty"`
+	CI        int    `json:"ci,omitempty"`
+	RedHead   string `json:"redHead,omitempty"`
+	GreenHead string `json:"greenHead,omitempty"`
+}
+
+// StagesSnapshot is the API's copy of a frozen workflow.
+func StagesSnapshot(w *engine.Workflow) *runnerwire.StagesSnapshot { return stagesSnapshot(w) }
+
+// stagesSnapshot is the API's copy of a frozen workflow.
+func stagesSnapshot(w *engine.Workflow) *runnerwire.StagesSnapshot {
+	if w == nil {
+		return nil
+	}
+	n := w.Normalized()
+	return &runnerwire.StagesSnapshot{
+		Preset: n.Preset,
+		Stages: map[string]bool{
+			"planner": n.Stages.Planner, "goalQa": n.Stages.GoalQA, "tester": n.Stages.Tester,
+			"reviewer": n.Stages.Reviewer, "ci": n.Stages.CI, "goalReview": n.Stages.GoalReview,
+		},
+		ReviewerSkipBelowLines: n.ReviewerSkipBelowLines, MaxGreenTries: n.MaxGreenTries,
+		MaxTesterRounds: n.MaxTesterRounds, Judge: n.Judge,
+	}
 }
 
 // AwaitingHuman is PipelineRecord.Awaiting while a person must review.
@@ -40,6 +88,9 @@ type NewPipeline struct {
 	Pipeline                            runnerwire.Pipeline
 	Fallbacks                           []runnerwire.AgentModel
 	JobPrompt, Prompt                   string
+	// Config, Phase: a pipeline with agent roles (nil: legacy).
+	Config *StagedConfig
+	Phase  string
 }
 
 // CreatePipeline records a running pipeline at round 1.
@@ -62,13 +113,21 @@ func (s *Store) CreatePipeline(ctx context.Context, in NewPipeline) (PipelineRec
 	if err != nil {
 		return PipelineRecord{}, err
 	}
+	stages := ""
+	if in.Config != nil {
+		rawConfig, err := json.Marshal(in.Config)
+		if err != nil {
+			return PipelineRecord{}, err
+		}
+		stages = string(rawConfig)
+	}
 	now := s.stamp()
 	if _, err := s.db.ExecContext(ctx, `
 INSERT INTO run_pipelines (id, owner_id, created_by, project, node_id, pipeline, fallbacks,
-                           job_prompt, prompt, round, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+                           job_prompt, prompt, round, status, created_at, updated_at, stages, phase)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 		id, in.OwnerID, in.CreatedBy, in.Project, in.NodeID, string(raw), fallbacks,
-		in.JobPrompt, in.Prompt, runnerwire.PipelineRunning, now, now); err != nil {
+		in.JobPrompt, in.Prompt, runnerwire.PipelineRunning, now, now, stages, in.Phase); err != nil {
 		return PipelineRecord{}, err
 	}
 	return s.Pipeline(ctx, id)
@@ -77,14 +136,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
 // Pipeline returns one pipeline with its runs' IDs, oldest first.
 func (s *Store) Pipeline(ctx context.Context, id string) (PipelineRecord, error) {
 	var p PipelineRecord
-	var raw, fallbacks string
+	var raw, fallbacks, stages, testFiles, guard, tries string
 	var round int64
 	err := s.db.QueryRowContext(ctx, `
 SELECT id, owner_id, created_by, project, node_id, pipeline, fallbacks, job_prompt, prompt,
-       branch, pr_url, round, status, reason, awaiting, created_at, updated_at
+       branch, pr_url, round, status, reason, awaiting, created_at, updated_at,
+       stages, phase, test_files, guard, tries
 FROM run_pipelines WHERE id = ?`, id).Scan(
 		&p.ID, &p.OwnerID, &p.CreatedBy, &p.Project, &p.NodeID, &raw, &fallbacks, &p.JobPrompt, &p.Prompt,
-		&p.Branch, &p.PRURL, &round, &p.Status, &p.Reason, &p.Awaiting, &p.CreatedAt, &p.UpdatedAt)
+		&p.Branch, &p.PRURL, &round, &p.Status, &p.Reason, &p.Awaiting, &p.CreatedAt, &p.UpdatedAt,
+		&stages, &p.Phase, &testFiles, &guard, &tries)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PipelineRecord{}, ErrNotFound
 	}
@@ -96,6 +157,25 @@ FROM run_pipelines WHERE id = ?`, id).Scan(
 	}
 	p.Round = int(round)
 	p.Fallbacks = decodeChain(fallbacks)
+	if stages != "" {
+		var config StagedConfig
+		if json.Unmarshal([]byte(stages), &config) == nil && config.Workflow != nil {
+			p.Config = &config
+			p.Stages = stagesSnapshot(config.Workflow)
+		}
+	}
+	if testFiles != "" {
+		_ = json.Unmarshal([]byte(testFiles), &p.TestFiles)
+	}
+	if guard != "" {
+		var report runnerwire.GuardReport
+		if json.Unmarshal([]byte(guard), &report) == nil {
+			p.Guard = &report
+		}
+	}
+	if tries != "" {
+		_ = json.Unmarshal([]byte(tries), &p.Tries)
+	}
 	if p.Status == runnerwire.PipelineRunning && p.Awaiting == AwaitingHuman {
 		p.Status = runnerwire.PipelineWaitingHuman
 	}
@@ -324,4 +404,74 @@ func (s *Store) RoundVotes(ctx context.Context, pipelineID string, round int) ([
 		}
 	}
 	return out, nil
+}
+
+// SetStaged writes a running staged pipeline's phase, the Tester's files, the
+// diff guard and the retry counters. It reports whether the pipeline was
+// still running.
+func (s *Store) SetStaged(ctx context.Context, id, phase string, testFiles []string, guard *runnerwire.GuardReport, tries Tries) (bool, error) {
+	files := ""
+	if len(testFiles) > 0 {
+		if len(testFiles) > runnerwire.MaxTestFiles {
+			testFiles = testFiles[:runnerwire.MaxTestFiles]
+		}
+		raw, err := json.Marshal(testFiles)
+		if err != nil {
+			return false, err
+		}
+		files = string(raw)
+	}
+	rawGuard := ""
+	if guard != nil {
+		raw, err := json.Marshal(guard)
+		if err != nil {
+			return false, err
+		}
+		rawGuard = string(raw)
+	}
+	rawTries, err := json.Marshal(tries)
+	if err != nil {
+		return false, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE run_pipelines SET phase = ?, test_files = ?, guard = ?, tries = ?, updated_at = ?
+WHERE id = ? AND status = ?`,
+		phase, files, rawGuard, string(rawTries), s.stamp(), id, runnerwire.PipelineRunning)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
+// AwaitHumanReason is AwaitHuman with the reason a person is needed, for a
+// staged pipeline that cannot go on by itself (tests that already pass, no
+// test command, protected files changed without a reviewer).
+func (s *Store) AwaitHumanReason(ctx context.Context, id string, round int, reason string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE run_pipelines SET awaiting = ?, reason = ?, updated_at = ?
+WHERE id = ? AND status = ? AND round = ? AND awaiting = ''`,
+		AwaitingHuman, Truncate(reason, MaxErrorBytes), s.stamp(), id, runnerwire.PipelineRunning, int64(round))
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
+// SetPipelinePR replaces a running pipeline's pull request: a new Tester
+// round starts its own branch and draft PR (the runner never reopens one),
+// and the stages that follow work on that one.
+func (s *Store) SetPipelinePR(ctx context.Context, id, branch, prURL string) (bool, error) {
+	if prURL == "" {
+		return false, invalidf("missing pull request")
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE run_pipelines SET branch = ?, pr_url = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		Truncate(branch, maxShortField), Truncate(prURL, MaxPRURLBytes), s.stamp(), id, runnerwire.PipelineRunning)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }

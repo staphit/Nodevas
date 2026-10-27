@@ -193,6 +193,10 @@ func dependencyOpsRequireReload(ops []store.GraphOp) bool {
 		switch op.Kind {
 		case "add-edge", "remove-edge", "set-edge-style":
 			return true
+		// The server normalizes these (criteria ids, lock, attribution), so
+		// peers reload the stored result rather than replay the request.
+		case "acceptance", "workflow", "node-workflow", "agent-roles":
+			return true
 		}
 	}
 	return false

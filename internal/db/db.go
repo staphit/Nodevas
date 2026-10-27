@@ -1,6 +1,8 @@
 // Package db is the workspace's database: the operational data a workspace
-// needs that is not the user's content. It is a SQLite file by default, or a
-// PostgreSQL server when URLEnv names one (see postgres.go).
+// needs that is not the user's content. It is PostgreSQL: the server named by
+// NODEVAS_DATABASE_URL (a NAS, a hosted deployment), or the workspace's own
+// embedded cluster that serve starts on 127.0.0.1 (internal/dbconn,
+// internal/embeddedpg).
 //
 // The line this package draws matters. Node bodies stay Markdown files and the
 // graph stays YAML, because being readable in a text editor, diffable in git
@@ -9,11 +11,9 @@
 // server settings, the search index — which in a file layout meant a scatter
 // of JSON and JSONL that could only be edited safely by this program.
 //
-// One file, at <workspace>/.vised/nodevas.db, so an operator can open it in DB
-// Browser for SQLite, TablePlus or DBeaver and look at or fix a row without
-// this program's help. The driver is pure Go (modernc.org/sqlite): a cgo one
-// would need a C toolchain on Windows and would complicate the iOS framework
-// build, which is built with cgo disabled.
+// Until the release that introduced the embedded server a workspace kept this
+// data in a SQLite file, <workspace>/.vised/nodevas.db. internal/legacysqlite
+// imports such a file once; nothing here reads it.
 package db
 
 import (
@@ -21,75 +21,54 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"nodevas/internal/dbconn"
 	"nodevas/internal/workspace"
 )
 
-// FileName is the database file inside a workspace's data directory.
+// FileName is the legacy SQLite database file inside a workspace's data
+// directory: what internal/legacysqlite imports. Nothing opens it otherwise.
 const FileName = "nodevas.db"
 
-// busyTimeout is how long a statement waits for another writer before giving
-// up. The other writer is usually the operator's DB tool holding a transaction
-// open while they look at a row; a few seconds outlasts that without hanging a
-// request forever.
-const busyTimeout = 5 * time.Second
-
-// maxReaders bounds the read pool. WAL lets readers run alongside the writer,
-// so this is about not opening a file handle per in-flight request rather than
-// about correctness; a workspace is served to a handful of people.
+// maxReaders bounds the read pool: a workspace is served to a handful of
+// people, and every connection is a server backend.
 const maxReaders = 4
 
+// searchConns is the search index's pool size: its own writer and a reader,
+// so a reindex never waits behind an audit append on the main writer.
+const searchConns = 2
+
 // DB is an open workspace database: one connection for writing, a pool for
-// reading.
+// reading, and a small pool of the search index's own.
 //
-// SQLite admits a single writer, so the write handle is capped at one
-// connection and the queueing happens in Go rather than as a pile of
-// SQLITE_BUSY errors. WAL lets readers run concurrently with that writer, so
-// the read pool is several connections and a search no longer waits behind an
-// audit row being appended.
-//
-// The read connections are opened PRAGMA query_only, which is defence in
-// depth rather than tidiness: a read path that is ever tricked into carrying a
-// mutation — an injection, a mistake, a stray Exec — is refused by SQLite
-// itself instead of relying on every caller having picked the right handle.
+// The write pool is one connection, so the transactions that count and then
+// insert ("the first account is an administrator", "the last administrator
+// cannot be removed") stay serialised in Go rather than depending on an
+// isolation level. The read connections run default_transaction_read_only,
+// which is defence in depth rather than tidiness: a read path that is ever
+// tricked into carrying a mutation is refused by the server itself instead of
+// relying on every caller having picked the right handle.
 type DB struct {
-	write *sql.DB
-	read  *sql.DB
-	path  string
-	// backend is SQLite unless the workspace was pointed at a PostgreSQL
-	// server with URLEnv.
-	backend Backend
-	// local is the workspace's SQLite file when backend is Postgres: the
-	// search index stays there (see Local). Nil on SQLite, where the file is
-	// this DB.
-	local *DB
+	write  *sql.DB
+	read   *sql.DB
+	search *sql.DB
+	path   string
+	// mode is "external" or "embedded" ("" for a URL opened directly).
+	mode    string
+	dataDir string
+	port    int
+	exited  <-chan error
+	release func() error
 }
 
-// Backend reports which engine this handle talks to.
-func (d *DB) Backend() Backend {
-	if d.backend == "" {
-		return SQLite
-	}
-	return d.backend
-}
-
-// Local is the workspace's own SQLite database. It is this DB on SQLite; on
-// PostgreSQL it is the file beside the workspace, which keeps the search
-// index: that index is derived from the Markdown, is rebuilt when it is
-// missing, and is built on SQLite's FTS5, so moving it to the server would buy
-// nothing but a second full-text dialect to maintain.
-func (d *DB) Local() *DB {
-	if d.local != nil {
-		return d.local
-	}
-	return d
-}
+// Search is the search index's own small pool (two connections, its own
+// writer), so reindexing never queues behind audit and session writes on the
+// single main writer.
+func (d *DB) Search() *sql.DB { return d.search }
 
 // Writer is the single write connection, for a caller that needs the handle
 // itself. Prefer the Exec and Tx methods.
@@ -131,953 +110,115 @@ func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) 
 	return d.write.BeginTx(ctx, opts)
 }
 
-// Close shuts both handles, and the local file on PostgreSQL, reporting every
-// failure.
+// Close shuts the pools and then releases the embedded cluster, which the
+// last holder in the process stops. It reports every failure.
 func (d *DB) Close() error {
 	readErr := d.read.Close()
 	writeErr := d.write.Close()
-	var localErr error
-	if d.local != nil {
-		localErr = d.local.Close()
+	searchErr := d.search.Close()
+	var releaseErr error
+	if d.release != nil {
+		releaseErr = d.release()
+		d.release = nil
 	}
-	return errors.Join(writeErr, readErr, localErr)
+	return errors.Join(writeErr, readErr, searchErr, releaseErr)
 }
 
-// Path returns the database file, or the PostgreSQL server without its
-// credentials, for an operator being told where to point their tools.
+// Path returns the PostgreSQL server without its credentials, for an
+// operator being told where the data lives.
 func (d *DB) Path() string { return d.path }
 
-// PathFor returns where a workspace's database lives.
+// Mode is "external" for a server named by URLEnv, "embedded" for the
+// workspace's own cluster, "embedded-client" for a cluster another process
+// (serve) owns, and "" for a URL opened directly with OpenPostgres.
+func (d *DB) Mode() string { return d.mode }
+
+// DataDir is the embedded cluster's data directory, "" otherwise.
+func (d *DB) DataDir() string { return d.dataDir }
+
+// Port is the embedded cluster's loopback port, 0 otherwise.
+func (d *DB) Port() int { return d.port }
+
+// Exited fires when this process's embedded server died and could not be
+// restarted. It is nil for an external server.
+func (d *DB) Exited() <-chan error { return d.exited }
+
+// PathFor returns where a workspace's legacy SQLite database lives.
 func PathFor(root string) string {
 	return filepath.Join(root, workspace.DataDir, FileName)
 }
 
-// Open opens (creating if needed) the database for a workspace and brings its
-// schema up to date.
-//
-// With URLEnv set the operational data lives on that PostgreSQL server and the
-// workspace's SQLite file keeps only the search index. A server that cannot be
-// reached within WaitEnv is not fatal: the workspace falls back to its SQLite
-// file for everything, as it ran before the server existed, and says so in the
-// log. Nothing is copied back when the server returns — rows written during a
-// fallback stay in the file.
-func Open(root string) (*DB, error) {
-	return openWith(root, os.LookupEnv)
-}
+// ErrNotImplemented is no longer returned; it is kept for the tests that
+// assert a refusal is a real one and not a stub.
+var ErrNotImplemented = errors.New("db: not implemented")
 
-func openWith(root string, lookup func(string) (string, bool)) (*DB, error) {
-	path := PathFor(root)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("database directory: %w", err)
-	}
-	local, err := OpenAt(path)
+// OpenRoot opens the workspace's database: the external server named by
+// URLEnv/URLFileEnv, or the workspace's embedded cluster (internal/dbconn).
+// No SQLite file, no fallback: a server unreachable within WaitEnv is an
+// error wrapping ErrUnreachable. Under `go test` without a URL it refuses to
+// start a cluster and says to use internal/testpg.
+func OpenRoot(root string) (*DB, error) {
+	rawURL, err := URLFromEnv(os.LookupEnv)
 	if err != nil {
 		return nil, err
 	}
-	rawURL, err := URLFromEnv(lookup)
+	if rawURL == "" && testing.Testing() {
+		return nil, fmt.Errorf("db.OpenRoot under go test without %s would start a real embedded cluster; "+
+			"use internal/testpg (testpg.New, or testpg.UseEnv before code that opens the workspace)", URLEnv)
+	}
+	wait, err := waitFromEnv(os.LookupEnv)
 	if err != nil {
-		local.Close()
 		return nil, err
 	}
-	if rawURL == "" {
-		return local, nil
-	}
-	wait, err := waitFromEnv(lookup)
+	resolved, err := dbconn.Resolve(root)
 	if err != nil {
-		local.Close()
 		return nil, err
 	}
-	remote, err := OpenPostgres(rawURL, wait)
-	if errors.Is(err, ErrUnreachable) {
-		slog.Warn("PostgreSQL is unreachable; using the workspace SQLite database until the next restart",
-			slog.String("event.code", "db.postgres_fallback"),
-			slog.String("path", local.Path()),
-			slog.String("error", err.Error()))
-		return local, nil
+	mode := "external"
+	if resolved.Embedded {
+		// The cluster answered SELECT 1 already; a short wait covers a
+		// supervisor restart in progress.
+		wait, mode = 10*time.Second, "embedded"
+		if resolved.Client {
+			mode = "embedded-client"
+		}
 	}
+	database, err := OpenPostgres(resolved.URL, wait)
 	if err != nil {
-		local.Close()
+		_ = resolved.Release()
 		return nil, err
 	}
-	remote.local = local
-	return remote, nil
-}
-
-// OpenAt opens a database by path. Tests use it; Open is what the server calls.
-func OpenAt(path string) (*DB, error) {
-	// Pragmas travel in the DSN rather than being executed once after opening,
-	// because a pragma is per connection: a pool would apply them to the first
-	// connection and quietly run the rest without them.
-	//
-	// _txlock=immediate makes a write transaction take its lock at BEGIN
-	// rather than at the first write. Without it, two transactions that both
-	// start by reading and then write deadlock into SQLITE_BUSY, which is the
-	// classic way a SQLite application starts failing under concurrency.
-	//
-	// synchronous=NORMAL trades a crash-window of the last transaction for not
-	// fsyncing on every commit. The content of record is still the Markdown
-	// and YAML on disk; this database holds operational data whose tail a
-	// crash may lose.
-	writeDSN := "file:" + path + "?_txlock=immediate" +
-		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=foreign_keys(ON)" +
-		fmt.Sprintf("&_pragma=busy_timeout(%d)", busyTimeout.Milliseconds())
-
-	writer, err := sql.Open("sqlite", writeDSN)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	// One writer, always. Letting database/sql open several does not give
-	// SQLite more than one, it only turns a queue into failures.
-	writer.SetMaxOpenConns(1)
-	writer.SetMaxIdleConns(1)
-	writer.SetConnMaxLifetime(0)
-
-	// query_only comes last so the pragmas before it still apply, and
-	// journal_mode is absent because setting it is itself a write.
-	readDSN := "file:" + path + "?_pragma=foreign_keys(ON)" +
-		fmt.Sprintf("&_pragma=busy_timeout(%d)", busyTimeout.Milliseconds()) +
-		"&_pragma=query_only(1)"
-	reader, err := sql.Open("sqlite", readDSN)
-	if err != nil {
-		writer.Close()
-		return nil, fmt.Errorf("open %s for reading: %w", path, err)
-	}
-	reader.SetMaxOpenConns(maxReaders)
-	reader.SetMaxIdleConns(maxReaders)
-	reader.SetConnMaxLifetime(0)
-
-	database := &DB{write: writer, read: reader, path: path, backend: SQLite}
-
-	// The writer runs first: it is what creates the file and puts it in WAL
-	// mode, and a reader opened against a database that does not exist yet
-	// would create an empty one in the default journal mode.
-	if err := database.migrate(context.Background()); err != nil {
-		database.Close()
-		return nil, err
-	}
-
-	// The file holds password hashes, sign-in addresses and session hashes. On a
-	// shared machine it must not be world-readable, like the other workspace
-	// credentials. Done after the migration so the WAL sidecars exist to be
-	// tightened too.
-	if err := restrictPermissions(path); err != nil {
-		database.Close()
-		return nil, err
-	}
+	database.mode, database.dataDir, database.port = mode, resolved.DataDir, resolved.Port
+	database.exited, database.release = resolved.Exited, resolved.Release
 	return database, nil
 }
 
-// restrictPermissions tightens the database and its WAL sidecars. Chmod is a
-// no-op on Windows, where the file inherits the directory's ACL instead.
-func restrictPermissions(path string) error {
-	for _, name := range []string{path, path + "-wal", path + "-shm"} {
-		if err := os.Chmod(name, 0o600); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("secure %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
 // migration is one step. Steps are append-only and never edited once released:
-// an edited migration is one that some workspaces ran and others did not.
+// an edited migration is one that some databases ran and others did not.
 type migration struct {
 	name string
 	stmt string
 }
 
-// migrations run in order, once each, recorded in schema_migrations.
-//
-// Every table here is meant to be readable and, where it makes sense,
-// editable by hand in a database tool. That is why the timestamps are ISO-8601
-// text rather than Unix integers: an operator scanning the audit table should
-// see when something happened without converting anything.
-var migrations = []migration{
-	{
-		name: "0001_accounts",
-		stmt: `
-CREATE TABLE accounts (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    role        TEXT NOT NULL CHECK (role IN ('admin', 'member')),
-    -- argon2id, PHC format. Never a plaintext password or PIN: this column is
-    -- one-way on purpose, so pasting a password in here does not create a
-    -- working login, it creates an account nobody can use.
-    password_hash TEXT NOT NULL DEFAULT '',
-    pin_hash      TEXT NOT NULL DEFAULT '',
-    -- Where this account's one-time passcodes are sent. Changing it changes
-    -- who can complete a sign-in, so it is a credential, not a contact field.
-    email       TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL
-) STRICT;
-CREATE UNIQUE INDEX accounts_name_nocase ON accounts (name COLLATE NOCASE);
-`,
-	},
-	{
-		name: "0002_audit",
-		stmt: `
-CREATE TABLE audit_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    at          TEXT NOT NULL,
-    -- The project this happened in, or '' for server-wide events such as a
-    -- sign-in. Not a foreign key: projects come and go on disk, and losing the
-    -- audit trail because a project was deleted defeats the point of it.
-    project     TEXT NOT NULL DEFAULT '',
-    actor_id    TEXT NOT NULL DEFAULT '',
-    actor_name  TEXT NOT NULL DEFAULT '',
-    action      TEXT NOT NULL,
-    target      TEXT NOT NULL DEFAULT '',
-    client_ip   TEXT NOT NULL DEFAULT '',
-    -- Free-form JSON for whatever the action needs. Kept as text so a reader
-    -- can see it without this program.
-    detail      TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX audit_events_at ON audit_events (at DESC);
-CREATE INDEX audit_events_actor ON audit_events (actor_id, at DESC);
-CREATE INDEX audit_events_project ON audit_events (project, at DESC);
-`,
-	},
-	{
-		name: "0003_settings",
-		stmt: `
-CREATE TABLE settings (
-    -- Dotted keys, e.g. 'notify.smtp.host'. A flat key/value table rather than
-    -- a column per setting: settings are added often, and a migration per
-    -- checkbox is not worth it.
-    key         TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-) STRICT;
-`,
-	},
-	{
-		name: "0004_search_index",
-		stmt: `
--- Derived data: everything here can be rebuilt from the Markdown on disk, so
--- it is safe to delete this table's contents if it ever disagrees with them.
-CREATE TABLE search_documents (
-    project     TEXT NOT NULL,
-    node_id     TEXT NOT NULL,
-    path        TEXT NOT NULL DEFAULT '',
-    title       TEXT NOT NULL DEFAULT '',
-    -- Modification time of the file this row was built from, so a rescan can
-    -- skip what has not changed.
-    modified_at TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (project, node_id, path)
-) STRICT;
-
--- The columns hold *pre-tokenised* text, not the original: internal/searchindex
--- already tokenises for a corpus that is mostly Chinese, where whitespace
--- carries no word boundaries and FTS5's own unicode61 would index a whole
--- paragraph as one term. So the app emits its bigrams and single characters
--- separated by spaces, and FTS5 is left doing what it is good at — posting
--- lists — rather than guessing where Chinese words end.
-CREATE VIRTUAL TABLE search_fts USING fts5 (
-    title,
-    body,
-    content = '',
-    tokenize = 'unicode61'
-);
-`,
-	},
-	{
-		name: "0005_sessions",
-		stmt: `
--- Signed-in browsers. Sessions used to live only in memory, which logged
--- everyone out on every restart; with people editing the same board at once
--- that is a deploy-shaped interruption rather than a tidy default.
---
--- Outliving the process is safe because a session is not authority by itself:
--- every request re-reads the account's revision and refuses a session whose
--- account has since changed or gone. See auth.SessionAuth.Authenticate.
-CREATE TABLE sessions (
-    -- sha256 of the cookie value, hex. Never the cookie itself: this file is
-    -- copied to object storage three times a day, and a backup must not be a
-    -- bag of working credentials.
-    token_hash  TEXT PRIMARY KEY,
-    -- Not a foreign key to accounts: the visitor session belongs to no account,
-    -- and a removed account is already handled by the revision check.
-    user_id     TEXT NOT NULL,
-    user_name   TEXT NOT NULL DEFAULT '',
-    user_role   TEXT NOT NULL DEFAULT '',
-    -- The account revision this session was opened against.
-    revision    TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL,
-    expires_at  TEXT NOT NULL
-) STRICT;
-CREATE INDEX sessions_user ON sessions (user_id);
-CREATE INDEX sessions_expires ON sessions (expires_at);
-`,
-	},
-	{
-		name: "0006_email_sign_in",
-		stmt: `
--- Web sign-in is now an email address and a mailed passcode. The PIN is gone,
--- so its hashes are cleared rather than left behind as a credential nothing
--- checks: a hash nobody verifies is still something a stolen backup can be
--- guessed against. The column stays because dropping one rewrites the table,
--- and an empty column costs nothing.
---
--- Clearing it also changes every account's revision, which signs out every
--- session opened under the old two-factor rule. That is the intended
--- direction: a session should not outlive the rule that admitted it.
---
--- An account with an address but no PIN is one an administrator shut out with
--- ` + "`nodevas user pin-clear`" + `: that cleared the PIN and left the address, and
--- sign-in only ever looked at accounts holding a PIN. Now the address alone
--- signs in, so the leftover would quietly re-admit the account. Its address
--- goes first, before the PINs that tell the two cases apart are cleared, and
--- that also keeps the duplicate step below choosing only among accounts that
--- could actually sign in.
-UPDATE accounts SET email = '' WHERE pin_hash = '';
-UPDATE accounts SET pin_hash = '';
-
--- The address is now how an account is found, so two accounts must not share
--- one, compared the way a person types it — Ann@Example.test and
--- ann@example.test are one mailbox. A workspace that already holds such a pair
--- would fail the index below and refuse to start, so the later account loses
--- its address first and the oldest keeps it; an operator re-registers the
--- other with ` + "`nodevas user email`" + `. Refusing to start over it would leave a
--- server down for something one command fixes.
-UPDATE accounts SET email = ''
- WHERE email != ''
-   AND rowid NOT IN (
-       SELECT MIN(rowid) FROM accounts WHERE email != '' GROUP BY email COLLATE NOCASE);
-CREATE UNIQUE INDEX accounts_email_nocase ON accounts (email COLLATE NOCASE) WHERE email != '';
-`,
-	},
-	{
-		name: "0007_copilot",
-		stmt: `
--- The voice copilot's conversations and transcripts (see COPILOT.md). They
--- belong to the account that held them, never to the project's content: a
--- transcript is not a node, and a project shared with others must not show
--- one person's dictation to the rest.
---
--- Timestamps here are Unix milliseconds rather than the RFC3339 text the other
--- tables use. A conversation produces several entries a second, and a
--- transcript is ordered by seq, not by time; the millisecond value is what
--- the browser shows and sorts conversations by without parsing anything.
-CREATE TABLE copilot_conversations (
-    id          TEXT PRIMARY KEY,
-    -- Not a foreign key to accounts: on a loopback server the account is the
-    -- built-in "local" actor, which has no row.
-    account_id  TEXT NOT NULL,
-    project     TEXT NOT NULL,
-    title       TEXT NOT NULL DEFAULT '',
-    mode        TEXT NOT NULL DEFAULT 'default',
-    created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
-) STRICT;
-CREATE INDEX copilot_conversations_owner ON copilot_conversations (account_id, project, updated_at);
-
-CREATE TABLE copilot_entries (
-    id               TEXT PRIMARY KEY,
-    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
-    seq              INTEGER NOT NULL,
-    kind             TEXT NOT NULL,             -- user | assistant | tool | notice
-    source           TEXT NOT NULL DEFAULT '',  -- voice | text (user entries)
-    text             TEXT NOT NULL DEFAULT '',
-    tool_name        TEXT NOT NULL DEFAULT '',
-    tool_input       TEXT NOT NULL DEFAULT '',
-    tool_output      TEXT NOT NULL DEFAULT '',
-    tool_status      TEXT NOT NULL DEFAULT '',  -- ok | error | denied
-    -- provider.Message JSON, replayed to the model on the next turn. The
-    -- columns above are what the panel reads, so a transcript renders without
-    -- decoding a vendor payload.
-    message          TEXT NOT NULL DEFAULT '',
-    created_at       INTEGER NOT NULL,
-    UNIQUE (conversation_id, seq)
-) STRICT;
-`,
-	},
-	{
-		name: "0008_agent_network",
-		stmt: `
--- Agent-to-agent messages and human-in-the-loop ask requests.
-CREATE TABLE agent_messages (
-    id              TEXT PRIMARY KEY,
-    project         TEXT NOT NULL,
-    sender_actor    TEXT NOT NULL,
-    sender_session  TEXT NOT NULL DEFAULT '',
-    sender_agent    TEXT NOT NULL DEFAULT '',
-    recipient       TEXT NOT NULL,
-    reply_to        TEXT NOT NULL DEFAULT '',
-    thread_id       TEXT NOT NULL DEFAULT '',
-    node_id         TEXT NOT NULL DEFAULT '',
-    body            TEXT NOT NULL,
-    created_at      INTEGER NOT NULL,
-    read_at         INTEGER NOT NULL DEFAULT 0
-) STRICT;
-CREATE INDEX agent_messages_inbox ON agent_messages (project, recipient, read_at, created_at);
-CREATE INDEX agent_messages_project ON agent_messages (project, created_at);
-
-CREATE TABLE agent_asks (
-    id            TEXT PRIMARY KEY,
-    project       TEXT NOT NULL,
-    session_id    TEXT NOT NULL,
-    session_name  TEXT NOT NULL,
-    actor_id      TEXT NOT NULL,
-    agent         TEXT NOT NULL DEFAULT '',
-    question      TEXT NOT NULL,
-    about_msg_id  TEXT NOT NULL DEFAULT '',
-    node_id       TEXT NOT NULL DEFAULT '',
-    status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
-    decided_by    TEXT NOT NULL DEFAULT '',
-    note          TEXT NOT NULL DEFAULT '',
-    created_at    INTEGER NOT NULL,
-    decided_at    INTEGER NOT NULL DEFAULT 0
-) STRICT;
-CREATE INDEX agent_asks_project ON agent_asks (project, status, created_at);
-`,
-	},
-	{
-		name: "0009_runners",
-		stmt: `
--- Runners: the machines that execute agent runs (nodevas runner). The hub
--- only records them; it never starts a process itself. See
--- docs/workstation.md.
-CREATE TABLE runners (
-    id            TEXT PRIMARY KEY,
-    -- Not a foreign key to accounts: on a loopback server the owner is the
-    -- built-in "local" actor, which has no row.
-    owner_id      TEXT NOT NULL,
-    owner_name    TEXT NOT NULL DEFAULT '',
-    name          TEXT NOT NULL,
-    created_at    TEXT NOT NULL,
-    last_seen_at  TEXT NOT NULL DEFAULT '',
-    -- The runner's last hello (runnerwire.Info) as JSON, shown as given. The
-    -- hub never acts on a path or command in it.
-    info          TEXT NOT NULL DEFAULT '',
-    -- Revoked runners stay as a record of what once had access.
-    revoked_at    TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX runners_owner ON runners (owner_id, created_at);
-
-CREATE TABLE runner_tokens (
-    -- sha256 of the token, hex. Never the token: a backup of this database
-    -- must not be a bag of working credentials.
-    token_hash  TEXT PRIMARY KEY,
-    runner_id   TEXT NOT NULL REFERENCES runners(id),
-    created_at  TEXT NOT NULL,
-    revoked_at  TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX runner_tokens_runner ON runner_tokens (runner_id);
-`,
-	},
-	{
-		name: "0010_runs",
-		stmt: `
--- Runs: one agent CLI invocation on a runner for one board node. The hub
--- records and relays them; only the runner executes anything.
-CREATE TABLE runs (
-    id               TEXT PRIMARY KEY,
-    -- The project's name as ?project= takes it ("." for the workspace root),
-    -- not its path: the name is what a runner's agent sends back through the
-    -- proxy, and a path on the hub is none of the runner's business.
-    project          TEXT NOT NULL,
-    node_id          TEXT NOT NULL,
-    -- Not foreign keys: a run outlives its runner being revoked, and its
-    -- record must not vanish with it.
-    runner_id        TEXT NOT NULL,
-    runner_name      TEXT NOT NULL DEFAULT '',
-    -- The runner's owner when the run was made. Who may see and cancel a run
-    -- is decided from this, not from a join that a revoked runner breaks.
-    owner_id         TEXT NOT NULL,
-    agent            TEXT NOT NULL,
-    model            TEXT NOT NULL DEFAULT '',
-    repo_id          TEXT NOT NULL,
-    repo_name        TEXT NOT NULL DEFAULT '',
-    base             TEXT NOT NULL DEFAULT '',
-    branch           TEXT NOT NULL DEFAULT '',
-    -- The dispatcher's extra instructions as typed.
-    prompt           TEXT NOT NULL DEFAULT '',
-    -- What the runner is offered: the node as it read when the run was made,
-    -- so a run that waits in the queue still does what was asked.
-    node_title       TEXT NOT NULL DEFAULT '',
-    job_prompt       TEXT NOT NULL DEFAULT '',
-    status           TEXT NOT NULL CHECK (status IN ('queued', 'offered', 'declined', 'running', 'succeeded', 'failed', 'cancelled')),
-    error            TEXT NOT NULL DEFAULT '',
-    summary          TEXT NOT NULL DEFAULT '',
-    exit_code        INTEGER NOT NULL DEFAULT 0,
-    -- runnerwire.Usage as JSON, or '' before the first usage report.
-    usage            TEXT NOT NULL DEFAULT '',
-    pr_url           TEXT NOT NULL DEFAULT '',
-    ci_status        TEXT NOT NULL DEFAULT '',
-    created_by       TEXT NOT NULL,
-    created_by_name  TEXT NOT NULL DEFAULT '',
-    created_at       TEXT NOT NULL,
-    started_at       TEXT NOT NULL DEFAULT '',
-    finished_at      TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX runs_node ON runs (project, node_id, created_at);
-CREATE INDEX runs_runner ON runs (runner_id, status);
-
-CREATE TABLE run_events (
-    run_id   TEXT NOT NULL REFERENCES runs(id),
-    -- The runner's own 1, 2, 3… for the run; a resent batch collides here.
-    seq      INTEGER NOT NULL,
-    type     TEXT NOT NULL,
-    at       TEXT NOT NULL DEFAULT '',
-    -- The whole runnerwire.RunEvent as JSON, as the API returns it.
-    payload  TEXT NOT NULL,
-    PRIMARY KEY (run_id, seq)
-) STRICT;
-`,
-	},
-	{
-		name: "0011_agent_network_w15",
-		stmt: `
--- Agent network W1.5: a session may hold its inbound mail for a person to
--- approve, a message may ask to pop up on the recipient's screen, and it may
--- carry small text files. Existing rows were delivered when they were sent.
-ALTER TABLE agent_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'delivered' CHECK (status IN ('delivered', 'held', 'rejected'));
-ALTER TABLE agent_messages ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;
--- The account behind the recipient session when the message was sent. Who
--- may approve a held message, or read its files, is decided from this: the
--- session itself is in memory and gone after a restart.
-ALTER TABLE agent_messages ADD COLUMN recipient_actor TEXT NOT NULL DEFAULT '';
-ALTER TABLE agent_messages ADD COLUMN decided_by TEXT NOT NULL DEFAULT '';
-ALTER TABLE agent_messages ADD COLUMN decided_at INTEGER NOT NULL DEFAULT 0;
-CREATE INDEX agent_messages_status ON agent_messages (project, status, created_at);
-
--- Attachments: UTF-8 text only, so TEXT holds them on either engine.
-CREATE TABLE agent_message_files (
-    message_id  TEXT NOT NULL REFERENCES agent_messages(id),
-    name        TEXT NOT NULL,
-    size        INTEGER NOT NULL,
-    sha256      TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    PRIMARY KEY (message_id, name)
-) STRICT;
-`,
-	},
-	{
-		name: "0012_run_changes",
-		stmt: `
--- What a run changed and the pull request it opened (W3). The runner commits,
--- pushes and opens the PR with its owner's own gh login; the hub only records
--- what it reports.
-ALTER TABLE runs ADD COLUMN commit_sha    TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN files_changed INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE runs ADD COLUMN additions     INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE runs ADD COLUMN deletions     INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE runs ADD COLUMN pr_number     INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE runs ADD COLUMN pr_state      TEXT    NOT NULL DEFAULT '';
--- Why no PR could be opened (no origin, gh not signed in, push refused).
-ALTER TABLE runs ADD COLUMN pr_error      TEXT    NOT NULL DEFAULT '';
-
--- One row per run, written once: a resent changes message is ignored.
-CREATE TABLE run_changes (
-    run_id          TEXT PRIMARY KEY REFERENCES runs(id),
-    commit_sha      TEXT NOT NULL DEFAULT '',
-    base            TEXT NOT NULL DEFAULT '',
-    -- []runnerwire.FileChange as JSON.
-    files           TEXT NOT NULL DEFAULT '[]',
-    additions       INTEGER NOT NULL DEFAULT 0,
-    deletions       INTEGER NOT NULL DEFAULT 0,
-    -- The unified diff, at most runnerwire.MaxPatchBytes; '' when dropped.
-    patch           TEXT NOT NULL DEFAULT '',
-    patch_truncated INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL
-) STRICT;
-`,
-	},
-	{
-		name: "0013_run_merges_budgets",
-		stmt: `
--- Remote merge approval and budgets (W4). The hub records approvals and
--- relays them to the run's runner, which merges with its owner's own gh
--- login; it never merges anything itself.
-
--- The PR head the CI status belongs to; an approval must name it.
-ALTER TABLE runs ADD COLUMN pr_head_sha TEXT NOT NULL DEFAULT '';
--- Run usage per owner and day, for budgets.
-CREATE INDEX runs_owner_created ON runs (owner_id, created_at);
-
-CREATE TABLE run_merges (
-    id                TEXT PRIMARY KEY,
-    run_id            TEXT NOT NULL REFERENCES runs(id),
-    -- The PR head the approver saw; the runner refuses if the PR moved on.
-    head_sha          TEXT NOT NULL,
-    status            TEXT NOT NULL CHECK (status IN ('pending', 'merged', 'failed', 'expired')),
-    -- Why it failed or expired; '' when merged.
-    reason            TEXT NOT NULL DEFAULT '',
-    requested_by      TEXT NOT NULL,
-    requested_by_name TEXT NOT NULL DEFAULT '',
-    created_at        TEXT NOT NULL,
-    finished_at       TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX run_merges_run ON run_merges (run_id, created_at);
--- At most one approval waits per run.
-CREATE UNIQUE INDEX run_merges_one_pending ON run_merges (run_id) WHERE status = 'pending';
-
--- Per-owner daily limits on new runs; zero means no limit.
-CREATE TABLE run_budgets (
-    owner_id        TEXT PRIMARY KEY,
-    daily_runs      INTEGER NOT NULL DEFAULT 0,
-    daily_cost_usd  REAL    NOT NULL DEFAULT 0,
-    daily_tokens    INTEGER NOT NULL DEFAULT 0,
-    updated_at      TEXT NOT NULL
-) STRICT;
-`,
-	},
-	{
-		name: "0014_run_routing",
-		stmt: `
--- Routing, fallback and pipelines (W5). Every rule is the owner's own; the hub
--- only picks what a run asks for, the runner still decides whether to take it.
-
--- A run's job kind ('' implement, 'review', 'revise'), how it failed, a
--- review's verdict, the run it falls back from and the pipeline it is a step
--- of.
-ALTER TABLE runs ADD COLUMN kind         TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN failure_kind TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN verdict      TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN retry_of     TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN pipeline_id  TEXT NOT NULL DEFAULT '';
--- The rest of the fallback chain, []runnerwire.AgentModel as JSON ('' none).
-ALTER TABLE runs ADD COLUMN fallbacks    TEXT NOT NULL DEFAULT '';
--- What a review or revise job is offered: the PR branch, its pull request,
--- and (revise) the review it addresses.
-ALTER TABLE runs ADD COLUMN job_branch   TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN job_pr_url   TEXT NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN review       TEXT NOT NULL DEFAULT '';
-CREATE INDEX runs_pipeline ON runs (pipeline_id, created_at);
-
--- One owner's routing rules, in order: a PUT replaces them all.
-CREATE TABLE run_routes (
-    owner_id    TEXT NOT NULL,
-    position    INTEGER NOT NULL,
-    -- runnerwire.RouteRule as JSON.
-    rule        TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    PRIMARY KEY (owner_id, position)
-) STRICT;
-
--- Implement → review (→ revise → review…) for one node.
-CREATE TABLE run_pipelines (
-    id          TEXT PRIMARY KEY,
-    -- The runner's owner, as on runs.
-    owner_id    TEXT NOT NULL,
-    created_by  TEXT NOT NULL,
-    project     TEXT NOT NULL,
-    node_id     TEXT NOT NULL,
-    -- runnerwire.Pipeline as JSON, models resolved when it was dispatched.
-    pipeline    TEXT NOT NULL,
-    -- The implement step's fallback chain, []runnerwire.AgentModel as JSON.
-    fallbacks   TEXT NOT NULL DEFAULT '',
-    -- The task as first offered and the dispatcher's extra instructions; every
-    -- step starts from them.
-    job_prompt  TEXT NOT NULL DEFAULT '',
-    prompt      TEXT NOT NULL DEFAULT '',
-    -- The pull request the implement step opened, which later steps work on.
-    branch      TEXT NOT NULL DEFAULT '',
-    pr_url      TEXT NOT NULL DEFAULT '',
-    round       INTEGER NOT NULL DEFAULT 1,
-    status      TEXT NOT NULL CHECK (status IN ('running', 'approved', 'changes_left', 'failed', 'cancelled')),
-    reason      TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-) STRICT;
-CREATE INDEX run_pipelines_node ON run_pipelines (project, node_id, created_at);
-`,
-	},
-	{
-		name: "0015_run_mode",
-		stmt: `
--- Interactive runs (W2.5): the agent runs as its TUI in a pseudo-terminal on
--- the runner, relayed to the browser. '' is headless.
-ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT '' CHECK (mode IN ('', 'interactive'));
-`,
-	},
-	{
-		name: "0016_w6",
-		stmt: `
--- Remote dispatch and external sessions (W6).
-
--- When this browser session last re-proved its identity with a mailed
--- passcode ('' never). A step-up lasts a window from this moment; a new
--- sign-in is a new row and starts without one.
-ALTER TABLE sessions ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
-
--- The dispatcher's step-up when the run was made ('' none). Offers vouch for
--- the dispatcher (runnerwire.Job.SteppedUp) only within the window from it.
-ALTER TABLE runs ADD COLUMN stepped_up_at TEXT NOT NULL DEFAULT '';
-
--- What an agent in its owner's own terminal changed while it held a node, as
--- its hook reported it: one row per project, node and session.
-CREATE TABLE session_changes (
-    id            TEXT PRIMARY KEY,
-    -- The project's name as ?project= takes it, as on runs.
-    project       TEXT NOT NULL,
-    node_id       TEXT NOT NULL,
-    session_id    TEXT NOT NULL,
-    session_name  TEXT NOT NULL DEFAULT '',
-    agent         TEXT NOT NULL DEFAULT '',
-    actor_id      TEXT NOT NULL DEFAULT '',
-    repo          TEXT NOT NULL DEFAULT '',
-    branch        TEXT NOT NULL DEFAULT '',
-    -- []string as JSON, at most runnerwire.MaxSessionFiles.
-    files         TEXT NOT NULL DEFAULT '[]',
-    -- runnerwire.RunChanges as JSON, replaced at every Stop; '' none yet.
-    snapshot      TEXT NOT NULL DEFAULT '',
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-) STRICT;
-CREATE UNIQUE INDEX session_changes_key ON session_changes (project, node_id, session_id);
-CREATE INDEX session_changes_node ON session_changes (project, node_id, updated_at);
-`,
-	},
-	{
-		name: "0017_usage",
-		stmt: `
--- Token usage (internal/usage). Runs keep theirs on runs.usage; these are
--- the agents their owners run in their own terminals, as their hooks report.
-
--- One row per project, session and model: the session's running totals for
--- that model, replaced by every report (a report is cumulative, never a
--- delta).
-CREATE TABLE agent_session_usage (
-    -- The project's name as ?project= takes it, as on runs.
-    project            TEXT NOT NULL,
-    session_id         TEXT NOT NULL,
-    model              TEXT NOT NULL,
-    actor_id           TEXT NOT NULL DEFAULT '',
-    actor_name         TEXT NOT NULL DEFAULT '',
-    session_name       TEXT NOT NULL DEFAULT '',
-    agent              TEXT NOT NULL DEFAULT '',
-    input_tokens       INTEGER NOT NULL DEFAULT 0,
-    output_tokens      INTEGER NOT NULL DEFAULT 0,
-    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
-    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-    -- What the agent itself said it cost (USD); 0 when it said nothing.
-    reported_cost_usd  REAL NOT NULL DEFAULT 0,
-    first_at           TEXT NOT NULL,
-    updated_at         TEXT NOT NULL,
-    PRIMARY KEY (project, session_id, model)
-) STRICT;
-CREATE INDEX agent_session_usage_updated ON agent_session_usage (project, updated_at);
--- Usage over a window reads runs by project and creation time.
-CREATE INDEX runs_project_created ON runs (project, created_at);
-
--- The owner's own prices (USD per million tokens), over the built-in table.
-CREATE TABLE usage_prices (
-    model                 TEXT PRIMARY KEY,
-    input_per_mtok        REAL NOT NULL DEFAULT 0,
-    output_per_mtok       REAL NOT NULL DEFAULT 0,
-    cache_read_per_mtok   REAL NOT NULL DEFAULT 0,
-    cache_write_per_mtok  REAL NOT NULL DEFAULT 0,
-    updated_at            TEXT NOT NULL,
-    updated_by            TEXT NOT NULL DEFAULT ''
-) STRICT;
-`,
-	},
-	{
-		name: "0018_project_members",
-		stmt: `
--- Who may reach a project (internal/members). A project with no rows here is
--- open to every signed-in account, as before; once it has members, only they
--- and server administrators may.
-CREATE TABLE project_members (
-    -- The project's directory as project.Key normalizes it: the same key the
-    -- realtime rooms and the store cache use, so a request and a socket agree
-    -- on which project they reach.
-    project    TEXT NOT NULL,
-    -- accounts.id. Not a foreign key: a removed account's rows stop matching
-    -- anyone and are dropped when the project's members are next written.
-    user_id    TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
-    added_by   TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (project, user_id)
-) STRICT;
-CREATE INDEX project_members_user ON project_members (user_id);
-`,
-	},
-	{
-		name: "0019_autopilot",
-		stmt: `
--- Autopilot (W7, internal/autopilot): a goal node's tasks worked as a DAG.
--- One row per autopilot run; at most one running or paused per goal.
-CREATE TABLE autopilot_runs (
-    id              TEXT PRIMARY KEY,
-    -- The project's name as ?project= takes it, as on runs.
-    project         TEXT NOT NULL,
-    goal_node_id    TEXT NOT NULL,
-    status          TEXT NOT NULL CHECK (status IN ('running', 'paused', 'succeeded', 'failed', 'cancelled')),
-    -- runnerwire.AutopilotPolicy as JSON.
-    policy          TEXT NOT NULL,
-    reason          TEXT NOT NULL DEFAULT '',
-    created_by      TEXT NOT NULL,
-    created_by_name TEXT NOT NULL DEFAULT '',
-    -- The creator's step-up when the autopilot started, recorded on its
-    -- runs as POST /api/runs records the dispatcher's.
-    stepped_up_at   TEXT NOT NULL DEFAULT '',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    finished_at     TEXT NOT NULL DEFAULT ''
-) STRICT;
-CREATE INDEX autopilot_runs_goal ON autopilot_runs (project, goal_node_id, created_at);
-CREATE UNIQUE INDEX autopilot_runs_live ON autopilot_runs (project, goal_node_id)
-    WHERE status IN ('running', 'paused');
-
--- One row per task instance: runnerwire.TaskInstance as JSON, plus the
--- columns an update is looked up by.
-CREATE TABLE autopilot_tasks (
-    autopilot_id TEXT NOT NULL REFERENCES autopilot_runs(id),
-    node_id      TEXT NOT NULL,
-    state        TEXT NOT NULL,
-    run_id       TEXT NOT NULL DEFAULT '',
-    pipeline_id  TEXT NOT NULL DEFAULT '',
-    data         TEXT NOT NULL,
-    updated_at   TEXT NOT NULL,
-    PRIMARY KEY (autopilot_id, node_id)
-) STRICT;
-CREATE INDEX autopilot_tasks_run ON autopilot_tasks (run_id);
-CREATE INDEX autopilot_tasks_pipeline ON autopilot_tasks (pipeline_id);
-`,
-	},
-	{
-		name: "0020_review_votes",
-		stmt: `
--- Review consensus and human review (W7). A pipeline round may have several
--- reviewers voting on the same PR head, and a person deciding after them.
-
--- 'human' while a running pipeline waits for a person's review; '' else. The
--- status stays 'running' so every other step's checks still hold.
-ALTER TABLE run_pipelines ADD COLUMN awaiting TEXT NOT NULL DEFAULT '';
-
--- One row per reviewer per round: agent reviewers by their position in the
--- pipeline's list ('0', '1', …), a person as 'human'.
-CREATE TABLE review_votes (
-    pipeline_id TEXT NOT NULL,
-    round       INTEGER NOT NULL,
-    reviewer    TEXT NOT NULL,
-    agent       TEXT NOT NULL DEFAULT '',
-    model       TEXT NOT NULL DEFAULT '',
-    -- '' while the review runs; abstain when it failed or gave no verdict.
-    verdict     TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'approve', 'changes', 'abstain')),
-    run_id      TEXT NOT NULL DEFAULT '',
-    -- A person's comment (a review run's text is its run's summary).
-    comment     TEXT NOT NULL DEFAULT '',
-    actor_id    TEXT NOT NULL DEFAULT '',
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    PRIMARY KEY (pipeline_id, round, reviewer)
-) STRICT;
-CREATE INDEX review_votes_run ON review_votes (run_id);
-`,
-	},
-	{
-		name: "0021_account_totp",
-		stmt: `
--- An authenticator app (TOTP, RFC 6238) as a second factor beside the mailed
--- passcode (internal/auth/totp*.go). One row per account that has begun or
--- finished enrolling. Not a foreign key, like project_members: removing an
--- account deletes its row in the same transaction.
-CREATE TABLE account_totp (
-    user_id      TEXT PRIMARY KEY,
-    -- The shared secret, AES-256-GCM under the machine key (internal/secrets),
-    -- base64. Never the base32 secret itself: a copy of this database must not
-    -- be a copy of everybody's authenticator.
-    secret       TEXT NOT NULL,
-    created_at   TEXT NOT NULL,
-    -- '' while the enrollment waits for its confirming code; the confirmation
-    -- time once the factor is required at sign-in and step-up.
-    enabled_at   TEXT NOT NULL DEFAULT '',
-    -- The last time step accepted. A code for this step or an earlier one is
-    -- refused, so a code read over a shoulder cannot be used a second time.
-    last_counter INTEGER NOT NULL DEFAULT 0
-) STRICT;
-
--- Single-use recovery codes: sha256 digests only, shown once at enrollment.
-CREATE TABLE account_recovery_codes (
-    user_id    TEXT NOT NULL,
-    code_hash  TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    used_at    TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (user_id, code_hash)
-) STRICT;
-`,
-	},
-	{
-		name: "0022_copilot_followups",
-		stmt: `
--- Plan runs a copilot turn started (start_breakdown), so the copilot can
--- follow up in that conversation by itself when the run ends: the goal's new
--- tasks and the question whether to start the autopilot (COPILOT.md,
--- "Follow-up"). Kept in the database, not in memory, so a hub restart while a
--- plan run is still going does not lose the follow-up.
-CREATE TABLE copilot_followups (
-    id               TEXT PRIMARY KEY,
-    conversation_id  TEXT NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
-    -- The conversation's owner, who dispatched the run.
-    account_id       TEXT NOT NULL,
-    goal_node_id     TEXT NOT NULL,
-    run_id           TEXT NOT NULL,
-    -- The panel's language when the run was started, for the reply.
-    language         TEXT NOT NULL DEFAULT '',
-    status           TEXT NOT NULL DEFAULT 'pending', -- pending | delivered | dropped
-    -- 1 once the person opened the conversation after the follow-up landed;
-    -- until then the panel shows it as unread.
-    seen             INTEGER NOT NULL DEFAULT 0,
-    created_at       INTEGER NOT NULL,
-    delivered_at     INTEGER NOT NULL DEFAULT 0
-) STRICT;
-CREATE INDEX copilot_followups_run ON copilot_followups (run_id, status);
-CREATE INDEX copilot_followups_conversation ON copilot_followups (conversation_id, status);
-`,
-	},
-	{
-		name: "0023_copilot_followup_revisions",
-		stmt: `
--- A follow-up is a breakdown's (start_breakdown) or a revision's
--- (revise_goal): the person changed a goal's requirement, its autopilot was
--- paused, and a replan run reconciles the goal's tasks. revision is what the
--- follow-up needs to report the replan as a diff: the change, the autopilot
--- and whether it was running, and the goal's tasks before (JSON).
-ALTER TABLE copilot_followups ADD COLUMN kind TEXT NOT NULL DEFAULT 'breakdown';
-ALTER TABLE copilot_followups ADD COLUMN revision TEXT NOT NULL DEFAULT '';
-`,
-	},
-	{
-		name: "0024_run_handoff",
-		stmt: `
--- Handoff (internal/runs/handoff.go): a run that hit its agent's usage limit
--- names the local branch its runner kept the partial work on, and its note;
--- the next run is offered them (job_handoff_*). retry_at is set while a run
--- waits, queued, for that limit to reset: the dispatcher offers it once the
--- time comes (or a person says "retry now"), so the wait survives a restart.
--- limit_waits counts the waits in a task's lineage, to bound them.
-ALTER TABLE runs ADD COLUMN handoff_branch     TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN handoff_note       TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN job_handoff_branch TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN job_handoff_note   TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN retry_at           TEXT    NOT NULL DEFAULT '';
-ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
-CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
-`,
-	},
-}
-
 // migrate applies the pending steps in one transaction each.
+//
+// Every step, and the bookkeeping table itself, runs under the migration
+// advisory lock: two processes opening one empty database at once (serve and
+// a CLI command, two test binaries) would otherwise both run CREATE TABLE IF
+// NOT EXISTS, which is not safe against a concurrent CREATE TABLE.
 func (d *DB) migrate(ctx context.Context) error {
-	bootstrap, steps := `
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    name       TEXT PRIMARY KEY,
-    applied_at TEXT NOT NULL
-) STRICT`, migrations
-	if d.Backend() == Postgres {
-		bootstrap, steps = pgSchemaMigrations, pgMigrations
-	}
-	if _, err := d.ExecContext(ctx, bootstrap); err != nil {
+	if err := d.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, pgSchemaMigrations)
+		return err
+	}); err != nil {
 		return fmt.Errorf("schema_migrations: %w", err)
 	}
 
 	applied := map[string]bool{}
-	rows, err := d.QueryContext(ctx, `SELECT name FROM schema_migrations`)
+	rows, err := d.write.QueryContext(ctx, `SELECT name FROM schema_migrations`)
 	if err != nil {
 		return fmt.Errorf("read schema_migrations: %w", err)
 	}
@@ -1094,31 +235,29 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		return err
 	}
 
-	for _, step := range steps {
+	for _, step := range pgMigrations {
 		if applied[step.name] {
 			continue
 		}
 		if err := d.inTx(ctx, func(tx *sql.Tx) error {
-			if d.Backend() == Postgres {
-				// Another process may have applied this step since the read
-				// above; the lock orders the two and the recheck skips it.
-				if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
-					return err
-				}
-				var done int
-				err := tx.QueryRowContext(ctx,
-					`SELECT 1 FROM schema_migrations WHERE name = ?`, step.name).Scan(&done)
-				if err == nil {
-					return nil
-				}
-				if !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
+			// Another process may have applied this step since the read
+			// above; the lock orders the two and the recheck skips it.
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
+				return err
+			}
+			var done int
+			err := tx.QueryRowContext(ctx,
+				`SELECT 1 FROM schema_migrations WHERE name = ?`, step.name).Scan(&done)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
 			}
 			if _, err := tx.ExecContext(ctx, step.stmt); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx,
+			_, err = tx.ExecContext(ctx,
 				`INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`,
 				step.name, Now())
 			return err

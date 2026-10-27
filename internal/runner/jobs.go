@@ -270,6 +270,25 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if !found {
 		return repo, fmt.Sprintf("repository %q is not on this runner's allowlist", job.RepoID)
 	}
+	// A verify job runs no agent: the repo's own test command (verify.go).
+	if job.Kind == runnerwire.JobVerify {
+		if job.Mode != runnerwire.ModeHeadless {
+			return repo, "a verify job is headless"
+		}
+		if reason := checkKind(job, cfg); reason != "" {
+			return repo, reason
+		}
+		busy := 0
+		for _, r := range j.runs {
+			if r.finish == nil {
+				busy++
+			}
+		}
+		if limit := cfg.MaxConcurrentRuns(); busy >= limit {
+			return repo, fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
+		}
+		return repo, ""
+	}
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
@@ -352,7 +371,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	// repository's, open, and on the branch the job names, before anyone is
 	// asked to accept.
 	var check prCheck
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise {
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise || job.Kind == runnerwire.JobVerify {
 		var reason string
 		check, reason = j.checkPR(ctx, r)
 		if ctx.Err() != nil {
@@ -391,6 +410,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	case runnerwire.JobPlan:
 		j.executePlan(ctx, r)
+		return
+	case runnerwire.JobVerify:
+		j.executeVerify(ctx, r, check)
+		return
+	case runnerwire.JobJudge:
+		j.executeJudge(ctx, r)
 		return
 	}
 
@@ -741,15 +766,20 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 	if repoName == "" {
 		repoName = "repo"
 	}
-	return []string{
+	args := []string{
 		"mcp",
 		"--server", server,
 		"--project", job.Project,
-		"--agent-role", "worker",
+		"--agent-role", roleAgentClass(job),
 		"--actor", "run:" + job.Agent,
 		"--session-name", repoName + "-" + job.Agent + "-" + slug(model) + "-" + runID,
-		"--toolset", "run",
 	}
+	// A role job is served its role's tools only (the hub's allowlist); a
+	// legacy job keeps the run toolset, exactly as before.
+	if role := roleArgs(job); role != nil {
+		return append(args, role...)
+	}
+	return append(args, "--toolset", "run")
 }
 
 func (j *jobs) proxyFor() (*Proxy, error) {

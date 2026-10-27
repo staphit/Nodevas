@@ -4,6 +4,7 @@
 //	              [--hostname name[,name...]] [--behind-proxy]
 //	              [--trusted-proxy ip-or-cidr[,ip-or-cidr...]]
 //	              [--repo <git dir>]... [--no-runner | --with-runner]
+//	              [--stop-on-stdin-close]
 //	nodevas user  add|passwd|email|remove|role|list --project <dir> [--user <name>]
 //	              [--email addr | --clear] [--password-stdin]
 //	nodevas account totp-reset [--project <dir>] <email-or-id-or-name>
@@ -22,9 +23,11 @@
 //	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE  SMTP secret
 //	NODEVAS_SECRET_KEY  base64 32-byte key encrypting stored secrets
 //	                    (a machine-local secrets/master.key is generated if unset)
-//	NODEVAS_DATABASE_URL  postgres://… to keep accounts, sessions, settings and
-//	                    the audit trail on a PostgreSQL server instead of the
-//	                    workspace's SQLite file (the search index stays local)
+//	NODEVAS_DATABASE_URL  postgres://… (or NODEVAS_DATABASE_URL_FILE) to keep the
+//	                    workspace's data on an existing PostgreSQL server;
+//	                    unset, serve starts the workspace's own embedded
+//	                    PostgreSQL on 127.0.0.1 (binaries: NODEVAS_PG_BINARIES,
+//	                    or a verified download into NODEVAS_PG_HOME)
 //
 // A subcommand per file: serve.go, user.go, account.go, db.go, runner.go, agents.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
@@ -78,6 +81,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    [--repo <git dir>]... [--no-runner | --with-runner]  (loopback: a runner here starts by default)")
 	fmt.Fprintln(os.Stderr,
+		"                    [--stop-on-stdin-close]  (shut down when stdin closes: how a launcher stops serve on Windows)")
+	fmt.Fprintln(os.Stderr,
 		"                    [--smtp-host h --smtp-port 587 --smtp-from addr --smtp-user u]  (password: NODEVAS_SMTP_PASSWORD or NODEVAS_SMTP_PASSWORD_FILE)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas user add|passwd|email|remove|role|list --project <dir> [--user <name>] [--role admin|member]")
@@ -94,7 +99,13 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas db status|copy-to-postgres --project <dir> [--replace]")
+		"       nodevas db status|detach [--project <dir>]  (where the data lives; give a copied workspace its own database)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas db dump --out <file> | restore --in <file> [--project <dir>]  (backup with the bundled pg_dump)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas db install-postgres [--archive <file>] [--target os-arch] [--out <dir>]  (offline install of the pinned PostgreSQL)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas db import-sqlite [--project <dir>] [--report]  (one-time import of a pre-PostgreSQL workspace's nodevas.db)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas setup-agent [--agents claude,codex,gemini,opencode,antigravity] [--remove] [--dry-run] [--server url] [--project <name>] [--actor <name>]")
 	fmt.Fprintln(os.Stderr,
@@ -104,5 +115,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"       nodevas agents who|send|listen|exclude  (Agent chat from a terminal; nodevas agents help)")
 	fmt.Fprintln(os.Stderr,
-		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
+		"                    (database: NODEVAS_DATABASE_URL names a server, waited for up to NODEVAS_DATABASE_WAIT=30s;")
+	fmt.Fprintln(os.Stderr,
+		"                    unset, the workspace's embedded PostgreSQL starts on 127.0.0.1)")
 }

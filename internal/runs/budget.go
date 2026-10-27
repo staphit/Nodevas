@@ -92,30 +92,15 @@ func (s *Store) BudgetStatus(ctx context.Context, ownerID string) (runnerwire.Bu
 	now := s.clock().UTC()
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT usage FROM runs WHERE owner_id = ? AND created_at >= ? AND created_at < ?`,
-		ownerID, formatStamp(day), formatStamp(day.AddDate(0, 0, 1)))
+		`SELECT usage, cost_usd, cost_settled FROM runs WHERE owner_id = ? AND created_at >= ? AND created_at < ? AND kind <> ?`,
+		ownerID, formatStamp(day), formatStamp(day.AddDate(0, 0, 1)), runnerwire.JobVerify)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		if err := addBudgetRow(rows, &out); err != nil {
 			return out, err
-		}
-		out.Used.Runs++
-		if raw == "" {
-			continue
-		}
-		var usage runnerwire.Usage
-		if json.Unmarshal([]byte(raw), &usage) != nil {
-			continue
-		}
-		if usage.CostUSD > 0 && !math.IsInf(usage.CostUSD, 0) {
-			out.Used.CostUSD += usage.CostUSD
-		}
-		if tokens := usage.InputTokens + usage.OutputTokens; tokens > 0 {
-			out.Used.Tokens += tokens
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -150,4 +135,34 @@ func BudgetMessage(st runnerwire.BudgetStatus) string {
 		return fmt.Sprintf("daily token budget reached: %d of %d tokens today (UTC)", st.Used.Tokens, st.Budget.DailyTokens)
 	}
 	return ""
+}
+
+// addBudgetRow counts one run (usage, cost_usd, cost_settled) toward a
+// day's use: its settled cost (an estimate for CLIs that report $0), or a
+// legacy run's reported cost, and its tokens.
+func addBudgetRow(rows interface{ Scan(...any) error }, out *runnerwire.BudgetStatus) error {
+	var raw string
+	var cost float64
+	var settled bool
+	if err := rows.Scan(&raw, &cost, &settled); err != nil {
+		return err
+	}
+	out.Used.Runs++
+	if settled && cost > 0 && !math.IsInf(cost, 0) && !math.IsNaN(cost) {
+		out.Used.CostUSD += cost
+	}
+	if raw == "" {
+		return nil
+	}
+	var usage runnerwire.Usage
+	if json.Unmarshal([]byte(raw), &usage) != nil {
+		return nil
+	}
+	if !settled && usage.CostUSD > 0 && !math.IsInf(usage.CostUSD, 0) {
+		out.Used.CostUSD += usage.CostUSD
+	}
+	if tokens := usage.InputTokens + usage.OutputTokens; tokens > 0 {
+		out.Used.Tokens += tokens
+	}
+	return nil
 }

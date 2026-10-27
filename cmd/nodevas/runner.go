@@ -98,6 +98,11 @@ func runnerUsage(w io.Writer) {
                                              allow runs in this git repository (asks to confirm)
        nodevas runner repo list
        nodevas runner repo remove <id|name>
+       nodevas runner repo set <id|name> --test-command "go test ./..." [--test-timeout <minutes>]
+                                             the repository's test command, for verify jobs (red
+                                             before the work, green after); it stays on this
+                                             machine, the hub only learns that one is set.
+                                             --test-command "" clears it
        nodevas runner autoaccept on|off|show the offers that start without asking here:
        nodevas runner autoaccept step-up required|optional
        nodevas runner autoaccept repo add|remove <id|name|path>
@@ -105,6 +110,8 @@ func runnerUsage(w io.Writer) {
        nodevas runner autoaccept mode add|remove headless|interactive
        nodevas runner autoaccept allow-shell on|off
        nodevas runner autoaccept remote-typing on|off
+       nodevas runner autoaccept verify on|off  take verify jobs (the repo's test command on code an
+                                             agent wrote; no agent runs) unasked, for listed repos
                                              an offer is auto-accepted only when auto-accept is on,
                                              the dispatcher stepped up on the hub (unless optional),
                                              its repo, agent and mode are all listed, and its agent
@@ -370,6 +377,13 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 		interactive += " (the default)"
 	}
 	setting("interactive", fmt.Sprintf("%t (%s)", cfg.InteractiveOn(), interactive))
+	repoBrowse := "the hub's Explorer may list and read your registered repos, read-only, secrets hidden"
+	if !cfg.RepoBrowseOn() {
+		repoBrowse = "repo browsing from the hub is refused"
+	} else if cfg.RepoBrowse == nil {
+		repoBrowse += " (the default)"
+	}
+	setting("repoBrowse", fmt.Sprintf("%t (%s)", cfg.RepoBrowseOn(), repoBrowse))
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)
@@ -634,6 +648,8 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 	fs, configFlag := newRunnerFlags("repo " + sub)
 	name := fs.String("name", "", "display name")
 	yes := fs.Bool("yes", false, "skip the confirmation")
+	testCommand := fs.String("test-command", "", "repo set: the repository's test command, argv-style (no shell unless you write sh -c)")
+	testTimeout := fs.Int("test-timeout", 0, "repo set: minutes before the test command is stopped (0 is the default, 20)")
 	rest, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
@@ -680,6 +696,29 @@ func runnerRepo(args []string, in *bufio.Reader, stdout, stderr io.Writer) error
 		fmt.Fprintf(stdout, "added %s as %q (id %s); a running runner reports it within 5 minutes, or restart it\n",
 			repo.Path, repo.Name, repo.ID)
 		return nil
+	case "set":
+		if len(rest) != 1 {
+			return errUsage
+		}
+		set := false
+		fs.Visit(func(f *flag.Flag) { set = set || f.Name == "test-command" || f.Name == "test-timeout" })
+		if !set {
+			return errUsage
+		}
+		repo, err := cfg.SetRepoTestCommand(rest[0], *testCommand, *testTimeout)
+		if err != nil {
+			return err
+		}
+		if err := runner.SaveConfig(path, cfg); err != nil {
+			return err
+		}
+		if command, timeout := cfg.RepoTestCommand(repo.ID); len(command) > 0 {
+			fmt.Fprintf(stdout, "%s: test command %q (stopped after %s); restart the runner to use it\n",
+				repo.Name, strings.Join(command, " "), timeout)
+		} else {
+			fmt.Fprintf(stdout, "%s: no test command; verify jobs are declined until one is set\n", repo.Name)
+		}
+		return nil
 	case "remove":
 		if len(rest) != 1 {
 			return errUsage
@@ -709,6 +748,9 @@ func printRepos(w io.Writer, cfg *runner.Config) {
 			line += "  " + repo.Remote
 		}
 		fmt.Fprintln(w, line)
+		if command, timeout := cfg.RepoTestCommand(repo.ID); len(command) > 0 {
+			fmt.Fprintf(w, "      test command: %s (stopped after %s)\n", strings.Join(command, " "), timeout)
+		}
 	}
 }
 

@@ -42,6 +42,10 @@ RUN apk add --no-cache ca-certificates tzdata git \
     && install -d -o 568 -g 568 /data
 COPY --from=go-build /out/nodevas /usr/local/bin/nodevas
 USER 568:568
+# The database is always an external server here (NODEVAS_DATABASE_URL or
+# NODEVAS_DATABASE_URL_FILE): an image that started its own embedded
+# PostgreSQL inside /data would be a second, unbacked-up database.
+ENV NODEVAS_REQUIRE_DATABASE_URL=1
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 5666

@@ -122,6 +122,17 @@ jobs:
           go build -tags nomsgpack -trimpath -ldflags="-s -w" \
             -o desktop/resources/bin/nodevas.exe ./cmd/nodevas
 
+      # The embedded PostgreSQL ships inside the installer, so a desktop user
+      # never downloads it. The same Go code serve uses fetches the pinned
+      # archive, refuses it unless its SHA-256 matches the manifest compiled
+      # into the binary, extracts the allowlist and stamps it.
+      - name: Bundle the pinned PostgreSQL
+        shell: bash
+        run: |
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target windows-amd64 --out desktop/resources/pg/win32-x64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/win32-x64 windows-amd64
+
       # electron-builder downloads the Electron it packages itself, and the
       # nsis/zip targets need no package's install script.
       - name: Install desktop dependencies
@@ -140,6 +151,8 @@ jobs:
           test -n "${zip_path}"
           unpacked="desktop/dist/win-unpacked/resources/bin/nodevas.exe"
           test -f "${unpacked}"
+          node desktop/scripts/verify-pg-bundle.mjs desktop/dist/win-unpacked/resources/pg/win32-x64 windows-amd64
+          test -f desktop/dist/win-unpacked/resources/pg/win32-x64/bin/postgres.exe
           echo "::warning::Installer is unsigned. Configure Windows code signing for SmartScreen-friendly releases."
 
       - name: Create release checksums

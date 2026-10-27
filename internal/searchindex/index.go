@@ -3,8 +3,8 @@
 //
 // What lives in memory is only what it takes to decide that nothing has to be
 // read: the graph's order, and per node its title, its metadata line and the
-// freshness stamp of the files it was built from. The text and the postings are
-// in SQLite (see persist.go).
+// freshness stamp of the files it was built from. The text and the tokens are
+// in PostgreSQL (see persist.go).
 //
 // Nothing in this file locks. Every method here is called with the owning
 // entry's mutex held (see manager.go for the locking contract).
@@ -124,7 +124,28 @@ type projectIndex struct {
 	order   []string
 	docs    map[string]*document
 	bytes   int64
+
+	// pending is what write queued and flush has not yet written, at most one
+	// entry per node (pendingAt indexes it). A cold project is thousands of
+	// nodes, and one transaction each would spend the build waiting on
+	// commits; batches of them spend it indexing.
+	pending      []pendingWrite
+	pendingAt    map[string]int
+	pendingBytes int
 }
+
+// pendingWrite is one node queued for the database.
+type pendingWrite struct {
+	doc   *storedDoc
+	stamp string
+}
+
+const (
+	// writeBatch and writeBatchBytes bound one flush: enough nodes to make the
+	// commit cheap, few enough bytes that one transaction stays small.
+	writeBatch      = 64
+	writeBatchBytes = 4 << 20
+)
 
 func newProjectIndex(root string, docs *docStore) *projectIndex {
 	clean := cleanRoot(root)
@@ -267,8 +288,10 @@ func pageStamps(root, dir string) ([]fileStamp, error) {
 
 // ---------- writing ----------
 
-// write indexes one node: it stores the text, replaces the node's postings and
-// records what the row was built from.
+// write indexes one node: it queues the text and the tokens, together with
+// what the row was built from, for the next flush. Every caller flushes before
+// it returns, so a write is in the database by the time the method that made
+// it is done.
 func (ix *projectIndex) write(ctx context.Context, id, title, meta, body string, doc fileStamp, pages []fileStamp) error {
 	meta = truncateRunes(meta, docTextLimit)
 	budget := docTextLimit - len(meta) - 1
@@ -278,11 +301,47 @@ func (ix *projectIndex) write(ctx context.Context, id, title, meta, body string,
 	body = truncateRunes(body, budget)
 	stamp := freshness(doc, pages)
 	path := relativePath(ix.root, doc.Path)
-	stored := &storedDoc{nodeID: id, title: title, path: path, meta: meta, body: body}
-	if err := ix.store.put(ctx, ix.project, stored, stamp); err != nil {
+	return ix.queue(ctx, &storedDoc{nodeID: id, title: title, path: path, meta: meta, body: body}, stamp)
+}
+
+// queue adds a node to the pending batch, replacing an earlier write of the
+// same node, and flushes when the batch is full.
+func (ix *projectIndex) queue(ctx context.Context, doc *storedDoc, stamp string) error {
+	if ix.pendingAt == nil {
+		ix.pendingAt = make(map[string]int, writeBatch)
+	}
+	write := pendingWrite{doc: doc, stamp: stamp}
+	if at, ok := ix.pendingAt[doc.nodeID]; ok {
+		ix.pendingBytes -= len(ix.pending[at].doc.meta) + len(ix.pending[at].doc.body)
+		ix.pending[at] = write
+	} else {
+		ix.pendingAt[doc.nodeID] = len(ix.pending)
+		ix.pending = append(ix.pending, write)
+	}
+	ix.pendingBytes += len(doc.meta) + len(doc.body)
+	if len(ix.pending) >= writeBatch || ix.pendingBytes >= writeBatchBytes {
+		return ix.flush(ctx)
+	}
+	return nil
+}
+
+// flush writes the pending batch in one transaction and only then records the
+// nodes in memory: a batch that failed leaves memory saying the rows are old,
+// so the next reconcile writes them again.
+func (ix *projectIndex) flush(ctx context.Context) error {
+	if len(ix.pending) == 0 {
+		return nil
+	}
+	batch := ix.pending
+	ix.pending, ix.pendingBytes = nil, 0
+	clear(ix.pendingAt)
+	if err := ix.store.putMany(ctx, ix.project, batch); err != nil {
 		return err
 	}
-	ix.setDoc(&document{id: id, title: title, meta: meta, path: path, stamp: stamp})
+	for _, write := range batch {
+		doc := write.doc
+		ix.setDoc(&document{id: doc.nodeID, title: doc.title, meta: doc.meta, path: doc.path, stamp: write.stamp})
+	}
 	return nil
 }
 
@@ -308,12 +367,12 @@ func relativePath(root, path string) string {
 // query returns every document whose stored text contains the (already
 // lowercased) query, in graph order.
 //
-// Two stages, and the second one is not optional. FTS5 is searching tokens this
-// package produced, and those tokens are character bigrams: a document holding
-// "ab" and "bc" anywhere satisfies a MATCH for the bigrams of "abc" without
-// containing "abc". Moving the posting lists into SQLite changed where the
-// candidates come from, not that they are candidates, so containsFold still has
-// to see the query as a substring of the text before a document is a result.
+// Two stages, and the second one is not optional. The database is searching
+// tokens this package produced, and those tokens are character bigrams: a
+// document holding "ab" and "bc" anywhere matches the bigrams of "abc" without
+// containing "abc". Where the candidates come from changed, not that they are
+// candidates, so containsFold still has to see the query as a substring of the
+// text before a document is a result.
 func (ix *projectIndex) query(ctx context.Context, lowered string) ([]Match, error) {
 	candidates, err := ix.store.candidates(ctx, ix.project, queryTokens(lowered))
 	if err != nil {
@@ -345,7 +404,10 @@ func (ix *projectIndex) refreshNode(ctx context.Context, id string) error {
 	if !ok {
 		return ix.refreshGraph(ctx)
 	}
-	return ix.reindex(ctx, id, doc.title, doc.meta)
+	if err := ix.reindex(ctx, id, doc.title, doc.meta); err != nil {
+		return err
+	}
+	return ix.flush(ctx)
 }
 
 // refreshGraph re-parses graph.yaml and reconciles the document set with it.
@@ -390,6 +452,9 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := ix.flush(ctx); err != nil {
+		return err
+	}
 	for id := range ix.docs {
 		if _, ok := live[id]; !ok {
 			if err := ix.store.remove(ctx, ix.project, id); err != nil {
@@ -410,12 +475,7 @@ func (ix *projectIndex) rewriteMeta(ctx context.Context, old *document, title, m
 		return err
 	}
 	meta = truncateRunes(meta, docTextLimit)
-	stored := &storedDoc{nodeID: old.id, title: title, path: old.path, meta: meta, body: body}
-	if err := ix.store.put(ctx, ix.project, stored, old.stamp); err != nil {
-		return err
-	}
-	ix.setDoc(&document{id: old.id, title: title, meta: meta, path: old.path, stamp: old.stamp})
-	return nil
+	return ix.queue(ctx, &storedDoc{nodeID: old.id, title: title, path: old.path, meta: meta, body: body}, old.stamp)
 }
 
 // ---------- the freshness net ----------
@@ -538,14 +598,17 @@ func (ix *projectIndex) reconcile(ctx context.Context) (bool, error) {
 		}
 		changed = true
 	}
+	if err := ix.flush(ctx); err != nil {
+		return false, err
+	}
 	return changed, nil
 }
 
 // Ranked is one result of a ranked search. Match is the tier it ranked in:
 // "title" (the query is the node's title), "phrase" (the text contains the
 // whole query) or "terms" (it shares some of the query's terms). Score is
-// BM25 negated, so higher is better; an exact title the terms did not reach
-// scores 0.
+// BM25 (FTS5's bm25() negated), so higher is better; an exact title the
+// terms did not reach scores 0.
 type Ranked struct {
 	NodeID string
 	Title  string
@@ -616,7 +679,7 @@ func (ix *projectIndex) rank(ctx context.Context, query string, limit int) ([]Ra
 		case containsFold(text, lowered):
 			match = MatchPhrase
 		}
-		out = append(out, Ranked{NodeID: id, Title: doc.title, Text: text, Match: match, Score: -doc.bm25})
+		out = append(out, Ranked{NodeID: id, Title: doc.title, Text: text, Match: match, Score: doc.score})
 	}
 	sort.SliceStable(out, func(a, b int) bool {
 		if ta, tb := matchTier(out[a].Match), matchTier(out[b].Match); ta != tb {

@@ -16,7 +16,7 @@ func TestAuditFallbackAcknowledgementRequiresCSRFAndAuditsItsOwnOutcome(t *testi
 	server, _, inbox, database := accountServerWithAuditDBForTest(t)
 	cookies, csrf := signIn(t, server, inbox, testEmail)
 	handler := server.Handler()
-	t.Cleanup(func() { _, _ = database.Writer().Exec("PRAGMA query_only = OFF") })
+	t.Cleanup(func() { _, _ = database.Writer().Exec("SET default_transaction_read_only = off") })
 
 	acknowledge := func(expected uint64, token string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -39,11 +39,11 @@ func TestAuditFallbackAcknowledgementRequiresCSRFAndAuditsItsOwnOutcome(t *testi
 
 	// Produce a deterministic fallback, then prove writes have recovered. The
 	// overall status must stay degraded until the operator acknowledges count 1.
-	if _, err := database.Writer().Exec("PRAGMA query_only = ON"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = on"); err != nil {
 		t.Fatal(err)
 	}
 	server.audit.RecordOrLog(context.Background(), audit.Event{Action: "test initial fallback"})
-	if _, err := database.Writer().Exec("PRAGMA query_only = OFF"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = off"); err != nil {
 		t.Fatal(err)
 	}
 	server.audit.RecordOrLog(context.Background(), audit.Event{Action: "test write recovery"})
@@ -74,15 +74,15 @@ func TestAuditFallbackAcknowledgementRequiresCSRFAndAuditsItsOwnOutcome(t *testi
 	// Reconcile a second observed fallback, but make the acknowledgement
 	// request's own middleware write fail. The HTTP action completed, yet the
 	// newly lost audit event must immediately create count 3 and re-degrade.
-	if _, err := database.Writer().Exec("PRAGMA query_only = ON"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = on"); err != nil {
 		t.Fatal(err)
 	}
 	server.audit.RecordOrLog(context.Background(), audit.Event{Action: "test second fallback"})
-	if _, err := database.Writer().Exec("PRAGMA query_only = OFF"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = off"); err != nil {
 		t.Fatal(err)
 	}
 	server.audit.RecordOrLog(context.Background(), audit.Event{Action: "test second recovery"})
-	if _, err := database.Writer().Exec("PRAGMA query_only = ON"); err != nil {
+	if _, err := database.Writer().Exec("SET default_transaction_read_only = on"); err != nil {
 		t.Fatal(err)
 	}
 	response = acknowledge(2, csrf)

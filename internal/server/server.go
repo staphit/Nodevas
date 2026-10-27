@@ -6,12 +6,14 @@ import (
 	"errors"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/autopilot"
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
@@ -56,6 +58,12 @@ type Server struct {
 	usage *usage.Store
 	// llm relays copilot model calls to runners; nil until UseRunnersDB.
 	llm *runners.LLMRelay
+	// repo relays read-only repo browsing to runners (the Explorer); nil
+	// until UseRunnersDB.
+	repo *runners.RepoRelay
+	// analyticsDB is the workspace database agent analytics reads (pure
+	// SQL, never a model); nil until UseRunnersDB.
+	analyticsDB *db.DB
 	// links holds device link codes and runnerAccess the Access service
 	// token they carry (runner_links.go); nil until UseRunnersDB.
 	links        *runners.Links
@@ -312,6 +320,10 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
+	// Agent roles: a staged pipeline's evidence goes on its node's history,
+	// and its approval marks the node done (the Executor may not).
+	s.runs.SetEvidence(s.recordEvidence)
+	s.runs.SetOnApproved(s.stagedApproved)
 	// Runs waiting for an agent's usage limit to reset are offered again
 	// when it has (internal/runs/handoff.go); the waits are stored, so this
 	// picks up those a restart interrupted.
@@ -322,6 +334,14 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	}()
 	safego.Loop(retries, "run retries", func(ctx context.Context) { s.runs.RunRetries(ctx, runs.RetryInterval) })
 	s.llm = runners.NewLLMRelay(s.runners)
+	s.repo = runners.NewRepoRelay(s.runners)
+	s.analyticsDB = database
+	if s.agents != nil {
+		// External sessions' action log is analytics history, kept even
+		// where the agent network itself runs in memory.
+		s.agents.SetActionLog(database)
+	}
+	s.startAnalytics(database)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
 	// the same relay.
@@ -397,6 +417,40 @@ func (s *Server) auditRun(entry runs.AuditEntry) {
 		At: time.Now(), Project: project, ActorID: entry.ActorID, ActorName: entry.ActorName,
 		Action: entry.Action, Target: entry.Target, Detail: entry.Detail,
 	})
+}
+
+// recordEvidence appends a staged pipeline's evidence (red/green runs, the
+// diff guard, judge checks) to its node's journal.
+func (s *Server) recordEvidence(project, nodeID, runID, kind, outcome, summary string) {
+	if s.pm == nil {
+		return
+	}
+	st, err := s.pm.StoreFor(project)
+	if err != nil {
+		return
+	}
+	if err := st.AppendEvidence(nodeID, kind, summary); err != nil {
+		slog.Warn("runs: record evidence", slog.String("node", nodeID), slog.Any("error", err))
+		return
+	}
+	s.broadcastProject(project, "state-changed", "")
+}
+
+// stagedApproved marks a node done when its staged pipeline is approved: the
+// pipeline, not the Executor, finishes the node, with the evidence noted.
+func (s *Server) stagedApproved(project, nodeID, evidence string) {
+	if s.pm == nil {
+		return
+	}
+	st, err := s.pm.StoreFor(project)
+	if err != nil {
+		return
+	}
+	_ = st.AppendEvidence(nodeID, "approved", evidence)
+	if _, err := st.SetStatus(nodeID, engine.StatusDone, "pipeline", evidence); err != nil {
+		slog.Warn("runs: mark approved node done", slog.String("node", nodeID), slog.Any("error", err))
+	}
+	s.broadcastProject(project, "state-changed", "")
 }
 
 // broadcastProject tells the clients watching a project, named as ?project=

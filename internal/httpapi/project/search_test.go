@@ -14,6 +14,7 @@ import (
 	"nodevas/internal/engine"
 	projectdomain "nodevas/internal/project"
 	"nodevas/internal/realtime"
+	"nodevas/internal/testpg"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,6 +49,9 @@ func searchTestWorkspace(t *testing.T, count int) *projectdomain.ProjectManager 
 		t.Fatal(err)
 	}
 	t.Cleanup(pm.Close)
+	// The index lives in the workspace database, as serve wires it; without
+	// one every search is the direct scan and nothing is ranked.
+	pm.UseDatabase(testpg.New(t))
 	return pm
 }
 

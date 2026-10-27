@@ -235,8 +235,8 @@ func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, st
 	a.mu.Unlock()
 
 	// The request's context, so a client that disconnects mid-request releases
-	// the read slot this query is holding instead of pinning it until SQLite's
-	// busy timeout gives up. A cancelled read reads as "no such revision" and
+	// the read slot this query is holding instead of pinning it until the
+	// query gives up on its own. A cancelled read reads as "no such revision" and
 	// the request is refused, which is the direction an authentication check
 	// must fail in anyway.
 	currentRevision, email, exists := a.users.revisionAndEmail(r.Context(), actor.ID)

@@ -152,3 +152,22 @@ func (b ProjectBoard) SetStatus(name, nodeID string, status engine.Status, by, n
 	_, err = st.SetStatus(nodeID, status, by, note)
 	return err
 }
+
+// CreatedByRun is the run whose agent created a node, or "".
+func (b ProjectBoard) CreatedByRun(name, nodeID string) string {
+	st, err := b.PM.StoreFor(name)
+	if err != nil {
+		return ""
+	}
+	return st.CreatedByRun(nodeID)
+}
+
+// LockAcceptance locks a node's acceptance criteria as the hub, when an
+// Executor starts on it.
+func (b ProjectBoard) LockAcceptance(name, nodeID string) error {
+	st, err := b.PM.StoreFor(name)
+	if err != nil {
+		return err
+	}
+	return st.LockAcceptance(nodeID)
+}

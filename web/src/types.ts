@@ -119,6 +119,76 @@ export interface GraphNode {
    * points and Problems all ignore it. Stored on the node that uses the note.
    */
   refs?: string[];
+  /** Acceptance criteria (Task, Scene, Event, Goal and custom worked types). */
+  acceptance?: Acceptance;
+  /** A Goal's workflow-stage override of its project's (Autopilot types only). */
+  workflow?: Workflow;
+}
+
+/** One acceptance criterion; ids ("a1", "a2"…) are stable across edits. */
+export interface AcceptanceItem {
+  id: string;
+  text: string;
+}
+
+/** A node's acceptance criteria. The hub locks them when an Executor is dispatched. */
+export interface Acceptance {
+  items: AcceptanceItem[];
+  locked?: boolean;
+  by?: string;
+}
+
+/** Which stages of the task and goal flows a project runs. */
+export interface WorkflowStages {
+  planner: boolean;
+  goalQa: boolean;
+  tester: boolean;
+  reviewer: boolean;
+  ci: boolean;
+  goalReview: boolean;
+}
+
+export type WorkflowPreset = "light" | "standard" | "full" | "custom";
+
+/** A project's (or a Goal's) workflow stages and cost levers. Absent is legacy. */
+export interface Workflow {
+  preset: WorkflowPreset;
+  stages: WorkflowStages;
+  reviewerSkipBelowLines?: number;
+  maxQaRounds?: number;
+  maxTesterRounds?: number;
+  maxGreenTries?: number;
+  testGlobs?: string[];
+  /** "" judges by tests (code); "checklist" by a model's checklist (story). */
+  judge?: "" | "checklist";
+}
+
+export type Capability = "read" | "claim" | "status" | "body" | "create" | "link" | "meta" | "acceptance" | "message" | "verdict";
+
+/** A project's stored (sparse) agent role: a custom role, or a built-in's tool/type override. */
+export interface AgentRoleDef {
+  id: string;
+  label?: string;
+  basedOn?: string;
+  rank?: "worker" | "orchestrator";
+  tools?: string[];
+  writeTypes?: string[];
+  acceptanceTypes?: string[];
+  instructions?: string;
+}
+
+/** A resolved agent role. */
+export interface AgentRole {
+  id: string;
+  label: string;
+  builtin: boolean;
+  basedOn?: string;
+  rank: "worker" | "orchestrator";
+  tools: string[];
+  writeTypes: string[];
+  acceptanceTypes: string[];
+  caps: Capability[];
+  instructions?: string;
 }
 
 export interface GraphUser {
@@ -267,6 +337,10 @@ export interface Graph {
   flags?: Record<string, unknown>;
   /** Project node types: custom ones plus built-in shape/colour overrides. */
   nodeTypes?: NodeTypeDef[];
+  /** Project agent roles: custom ones plus built-in tool/type overrides. */
+  agentRoles?: AgentRoleDef[];
+  /** Project workflow stages; absent or null is legacy. */
+  workflow?: Workflow | null;
   /** How the project's office looks in Station (graph.yaml office_style);
    * absent: the layout's default (game/officeStyle.ts). */
   officeStyle?: OfficeStyle;

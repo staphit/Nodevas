@@ -22,6 +22,11 @@ import {
   type CatalogAgent,
 } from "../runs/AgentModelFields";
 import type { ImplementChoice } from "./policy";
+import { costHint, estimateCost } from "../domain/graph/stages";
+import { presetName } from "../roles/stageLabels";
+import { stageChain } from "../roles/StageChain";
+import { openSettings } from "../settings/openSettings";
+import type { Workflow } from "../types";
 
 function range(n: number): number[] {
   return Array.from({ length: n }, (_, i) => i + 1);
@@ -124,6 +129,7 @@ export function PolicyEditor({
   runners,
   showErrors,
   problems,
+  stages = null,
 }: {
   value: AutopilotPolicy;
   onChange: (value: AutopilotPolicy) => void;
@@ -134,6 +140,8 @@ export function PolicyEditor({
   runners: Runner[];
   showErrors: boolean;
   problems: string[];
+  /** The goal's workflow stages; they decide the review when set (legacy: null). */
+  stages?: Workflow | null;
 }) {
   const { t } = useI18n();
   const ids = {
@@ -228,6 +236,32 @@ export function PolicyEditor({
         )}
       </fieldset>
 
+      {stages ? (
+        <fieldset className="autopilot-fieldset">
+          <legend>{t("autopilot.review")}</legend>
+          <p className="ap-stages-line">
+            {t("stages.goal.summary", {
+              preset: presetName(stages.preset, t),
+              cost: costHint(estimateCost(stages)),
+            })}
+          </p>
+          <small className="run-hint">
+            {stageChain(stages)
+              .map((step) =>
+                step === "tester" || step === "executor" || step === "reviewer"
+                  ? t(`roles.name.${step}`)
+                  : t(`stages.step.${step}`),
+              )
+              .join(" → ")}
+            {stages.stages.goalQa ? ` · ${t("stages.stage.goalQa")}` : ""}
+            {stages.stages.goalReview ? ` · ${t("stages.stage.goalReview")}` : ""}
+          </small>
+          <small className="run-hint">{t("stages.goal.reviewersFromRoles")}</small>
+          <button type="button" className="run-link-button" onClick={() => openSettings("stages")}>
+            {t("stages.goal.changeInSettings")}
+          </button>
+        </fieldset>
+      ) : (
       <fieldset className="autopilot-fieldset">
         <legend>{t("autopilot.review")}</legend>
         <label className="run-field" htmlFor={ids.mode}>
@@ -318,6 +352,7 @@ export function PolicyEditor({
           </>
         )}
       </fieldset>
+      )}
 
       <fieldset className="autopilot-fieldset autopilot-grid-fields">
         <legend>{t("autopilot.execution")}</legend>

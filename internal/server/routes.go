@@ -36,7 +36,7 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(recoverPanics(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withAuditTrail)
+	router.Use(recoverPanics(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withRoleGuard, s.withAuditTrail)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
@@ -74,6 +74,9 @@ func (s *Server) Handler() http.Handler {
 			return proxied
 		})
 		agentsAPI.UseRunOf(func(r *http.Request) string { return proxiedRunIDFrom(r.Context()) })
+		if s.runs != nil {
+			agentsAPI.UseRunUsage(s.runs.Store().SetUsageFromSession)
+		}
 		if s.usage != nil {
 			agentsAPI.UseUsage(s.usage, func(projectKey string) {
 				if s.hub == nil {
@@ -92,12 +95,16 @@ func (s *Server) Handler() http.Handler {
 		usageapi.New(s.pm, s.usage).Register(api)
 	}
 	if s.runners != nil {
-		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithLinks(s.runnerLinkOptions()).Register(api)
+		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithRepo(s.repo).WithLinks(s.runnerLinkOptions()).Register(api)
 	}
 	if s.runs != nil {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
 		s.configureStepUp(runsAPI)
+		runsAPI.UseAutoRoute(s.autoRouteRequest)
 		runsAPI.Register(api)
+		// Agent analytics (pure SQL and rules) and the Explorer.
+		s.analyticsAPI().Register(api)
+		s.explorerAPI().Register(api)
 		if s.autopilot != nil {
 			autopilotAPI := autopilotapi.New(s.pm, s.autopilot)
 			s.configureAutopilotStepUp(autopilotAPI)

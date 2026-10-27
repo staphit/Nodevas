@@ -480,6 +480,10 @@ func isExpensivePath(path string) bool {
 		path == "/api/graph/subgraph" {
 		return true
 	}
+	// Repo browsing reaches a person's runner and its disk.
+	if strings.HasPrefix(path, "/api/explorer/repos/") {
+		return true
+	}
 	return strings.HasPrefix(path, "/api/remote/") &&
 		path != "/api/remote/config" &&
 		path != "/api/remote/sync/status"

@@ -178,6 +178,11 @@ export type {
   RoutingConfig,
   RunKind,
   RunPipeline,
+  CheckResult,
+  GuardReport,
+  RoleSettings,
+  RoleSettingsResponse,
+  VerifyResult,
 } from "./runs";
 export {
   FAILURE_KINDS,
@@ -185,6 +190,7 @@ export {
   MAX_PIPELINE_ROUNDS,
   MAX_ROUTE_RULES,
   pipelineEnded,
+  ROUTE_AUTO,
   ROUTE_MATCHES,
 } from "./runs";
 export { MAX_USAGE_DAYS, USAGE_RANGES } from "./usage";

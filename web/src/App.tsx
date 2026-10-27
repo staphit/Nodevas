@@ -9,7 +9,9 @@ import { connectWS } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
 import { reportError, useApp, usePreference } from "./store";
-import { Sidebar, SidebarBackdrop } from "./components/Sidebar";
+import { SidebarBackdrop } from "./components/Sidebar";
+import ExplorerShell from "./explorer/ExplorerShell";
+import { useExplorer } from "./explorer/explorerStore";
 import { GraphPane } from "./components/GraphPane";
 import { TimelinePane } from "./components/TimelinePane";
 import { ConfirmDialogHost } from "./components/ConfirmDialog";
@@ -51,6 +53,7 @@ const Drawer = lazyWithRetry(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
 );
 const StationView = lazyWithRetry(() => import("./station/StationView"));
+const ExplorerMain = lazyWithRetry(() => import("./explorer/ExplorerMain"));
 const SettingsView = lazyWithRetry(() => import("./settings/SettingsView"));
 const PopoutEditor = lazyWithRetry(() =>
   import("./components/PopoutEditor").then((module) => ({
@@ -81,6 +84,8 @@ function MainApp() {
   const clearError = useApp((s) => s.clearError);
   const updateUIPreference = useApp((s) => s.updateUIPreference);
   const explorerCollapsed = usePreference("explorerCollapsed");
+  // A file, diff or agent the Explorer opened stands in for the board.
+  const explorerView = useExplorer((s) => s.view !== null);
   const projectMode = usePreference("projectMode");
   // Agents seen in this workspace turn the workstation on.
   useWorkstationAutoEnable();
@@ -459,7 +464,7 @@ function MainApp() {
               : { width: explorerWidth, flexBasis: explorerWidth }
           }
         >
-          {!explorerCollapsed && <Sidebar />}
+          {!explorerCollapsed && <ExplorerShell />}
         </div>
         {!explorerCollapsed && (
           <ResizeHandle
@@ -481,7 +486,13 @@ function MainApp() {
             }}
           />
         )}
-        <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
+        {explorerView ? (
+          <Suspense fallback={<div className="station-loading">{t("common.loading")}</div>}>
+            <ExplorerMain />
+          </Suspense>
+        ) : (
+          <ResizableStage paneOpen={paneOpen} togglePane={togglePane} />
+        )}
           </ViewErrorBoundary>
         )}
       </div>

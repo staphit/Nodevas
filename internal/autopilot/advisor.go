@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -79,7 +80,9 @@ var errNoAgent = errors.New("no installed agent on the owner's runners can take 
 // installed agent on its default model.
 type rulesAdvisor struct {
 	routing func(ctx context.Context, ownerID string) ([]runnerwire.RouteRule, error)
-	kind    func(project, nodeID string) (kind string, tags []string)
+	// route is auto routing (Options.Route), asked when no rule matches.
+	route RouteFunc
+	kind  func(project, nodeID string) (kind string, tags []string)
 }
 
 func (r rulesAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error) {
@@ -96,6 +99,8 @@ func (r rulesAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error
 			kind, tags = r.kind(in.Project, in.NodeID)
 		}
 		s := runs.Suggest(rules, runs.RouteNode{Project: in.Project, Kind: kind, Tags: tags})
+		s = routeWith(ctx, r.route, RouteRequest{OwnerID: in.OwnerID, Project: in.Project, NodeID: in.NodeID,
+			Role: engine.RoleExecutor, Manual: s})
 		if s.RuleID != "" {
 			if chain := usable(append([]runnerwire.AgentModel{s.Target}, s.Fallbacks...), in.Agents); len(chain) > 0 {
 				return Choice{Implement: chain, Reason: "routing rule " + s.RuleID}, nil

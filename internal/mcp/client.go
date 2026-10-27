@@ -119,6 +119,7 @@ type Client struct {
 	project    string
 	actor      string
 	agentRole  string
+	role       string
 	http       *http.Client
 	customHTTP bool
 
@@ -172,7 +173,10 @@ type ClientOptions struct {
 	// reads as a human session. Like Actor it is fixed for the process, so a
 	// tool call cannot talk the agent into a stronger role mid-session.
 	AgentRole string
-	Timeout   time.Duration
+	// Role is the agent role every request declares (auth.RoleHeaderName);
+	// empty sends no header. Fixed for the process, like AgentRole.
+	Role    string
+	Timeout time.Duration
 	// Model is the model the agent runs on, reported in heartbeats; empty
 	// falls back to NODEVAS_MODEL.
 	Model string
@@ -264,6 +268,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		project:     strings.TrimSpace(opts.Project),
 		actor:       actor,
 		agentRole:   strings.TrimSpace(opts.AgentRole),
+		role:        strings.TrimSpace(opts.Role),
 		http:        httpClient,
 		customHTTP:  opts.HTTPClient != nil,
 		sessionID:   sessionID,
@@ -309,6 +314,9 @@ func (c *Client) Actor() string { return c.actor }
 // AgentRole is the write-permission class this client declares on every
 // request; empty means it presents as a human session.
 func (c *Client) AgentRole() string { return c.agentRole }
+
+// Role is the agent role this client declares on every request ("" none).
+func (c *Client) Role() string { return c.role }
 
 // BaseURL is the server this client talks to, for diagnostics.
 func (c *Client) BaseURL() string { return c.base.String() }
@@ -430,6 +438,9 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 	// against it server-side.
 	if c.agentRole != "" {
 		request.Header.Set(auth.AgentRoleHeaderName, c.agentRole)
+	}
+	if c.role != "" {
+		request.Header.Set(auth.RoleHeaderName, c.role)
 	}
 
 	response, err := c.httpFor(ctx).Do(request)

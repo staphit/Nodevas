@@ -34,6 +34,11 @@ func WriteDenied(c *gin.Context, err error) bool {
 		Coded(c, typeDenied.Status, typeDenied.Code, typeDenied, map[string]any{"nodeType": typeDenied.Type})
 		return true
 	}
+	var roleDenied *store.ErrRoleDenied
+	if errors.As(err, &roleDenied) {
+		Coded(c, roleDenied.Status, roleDenied.Code, roleDenied, map[string]any{"role": roleDenied.Role})
+		return true
+	}
 	var restoreDenied *store.ErrAgentRestoreDenied
 	if errors.As(err, &restoreDenied) {
 		Coded(c, http.StatusForbidden, store.CodeAgentRestoreDenied, restoreDenied, nil)

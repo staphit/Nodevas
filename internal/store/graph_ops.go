@@ -31,7 +31,8 @@ const maxGraphOps = 2_000
 // GraphOp is one change to graph.yaml.
 type GraphOp struct {
 	// Kind is one of: move | node-size | node-metadata | add-edge |
-	// remove-edge | set-edge-style | timeline-order | add-ref | remove-ref.
+	// remove-edge | set-edge-style | timeline-order | add-ref | remove-ref |
+	// acceptance | workflow | node-workflow | agent-roles.
 	Kind string `json:"kind"`
 
 	NodeID string   `json:"nodeId,omitempty"`
@@ -61,6 +62,26 @@ type GraphOp struct {
 
 	// Ref is the target of add-ref/remove-ref: NodeID uses Ref as context.
 	Ref string `json:"ref,omitempty"`
+
+	// Acceptance is the acceptance op's new list (agent roles). Lock and
+	// attribution are the server's: a client's values are not trusted.
+	Acceptance *engine.Acceptance `json:"acceptance,omitempty"`
+	// Workflow is the workflow op's project stages, or the node-workflow
+	// op's Goal override; nil drops it.
+	Workflow *engine.Workflow `json:"workflow,omitempty"`
+	// AgentRoles is the agent-roles op's whole sparse role list.
+	AgentRoles []engine.AgentRoleDef `json:"agentRoles,omitempty"`
+}
+
+// createdByRunFunc reports whether the acting run created a node.
+type createdByRunFunc func(nodeID string) bool
+
+func (s *Store) createdByActorRunLocked(actor identity.Actor) createdByRunFunc {
+	if !actor.HasRole() || actor.RunID == "" {
+		return func(string) bool { return false }
+	}
+	file := s.loadCreatedByLocked()
+	return func(id string) bool { return file.Nodes[id].Run == actor.RunID }
 }
 
 // ApplyGraphOps applies a batch of commands atomically and returns the new
@@ -87,8 +108,9 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 		graph.UI = &engine.UIState{}
 	}
 	touched := map[string]bool{}
+	createdBy := s.createdByActorRunLocked(actor)
 	for _, op := range ops {
-		if err := applyGraphOp(actor, graph, op, touched); err != nil {
+		if err := applyGraphOp(actor, graph, op, touched, createdBy); err != nil {
 			return nil, "", err
 		}
 	}
@@ -123,7 +145,7 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 	return graph, Rev(data), nil
 }
 
-func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool) error {
+func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool, createdBy createdByRunFunc) error {
 	switch op.Kind {
 	// move, node-size and timeline-order stay ungated: they change how the
 	// board is drawn, not what the node says, so a restricted node can still
@@ -160,6 +182,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			return fmt.Errorf("node %q not found", op.NodeID)
 		}
 		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkRole(actor, graph, engine.CapMeta, node); err != nil {
 			return err
 		}
 		if op.WriteAccess != nil {
@@ -209,6 +234,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
 			return err
 		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
+			return err
+		}
 		if op.From == op.To {
 			return fmt.Errorf("a node cannot depend on itself")
 		}
@@ -245,6 +273,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			return fmt.Errorf("edge %s->%s names a node that does not exist", op.From, op.To)
 		}
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
+			return err
+		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
 			return err
 		}
 		if gateID := logicGateOwningEdge(graph, op.From, op.To); gateID != "" {
@@ -307,6 +338,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
 			return err
 		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
+			return err
+		}
 		nextRelation := selected.Relation
 		if op.Relation != nil {
 			nextRelation = *op.Relation
@@ -348,6 +382,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if err := checkNodeWrite(actor, node); err != nil {
 			return err
 		}
+		if err := checkRoleLink(actor, graph, node, true); err != nil {
+			return err
+		}
 		if graph.NodeByID(op.Ref) == nil {
 			return fmt.Errorf("reference target %q not found", op.Ref)
 		}
@@ -368,6 +405,9 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			return fmt.Errorf("node %q not found", op.NodeID)
 		}
 		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkRoleLink(actor, graph, node, true); err != nil {
 			return err
 		}
 		if !node.HasRef(op.Ref) {
@@ -393,6 +433,68 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			order = append(order, id)
 		}
 		graph.UI.TimelineOrder = order
+	case "acceptance":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return fmt.Errorf("node %q not found", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		before := node.Acceptance
+		after := normalizeAcceptance(actor, before, op.Acceptance)
+		if err := checkAcceptanceWrite(actor, graph, node, before, after, createdBy(node.ID)); err != nil {
+			return err
+		}
+		if actor.IsAgent() && after != nil {
+			if after.EqualItems(before) && before != nil {
+				after.By = before.By
+			} else {
+				after.By = acceptanceAttribution(actor)
+			}
+		}
+		node.Acceptance = after
+		if err := engine.ValidateNodeAcceptance(graph, node); err != nil {
+			return err
+		}
+	case "workflow":
+		if err := checkWorkflowEdit(actor, "", graph.Workflow, op.Workflow); err != nil {
+			return err
+		}
+		if err := engine.ValidateWorkflow(op.Workflow); err != nil {
+			return err
+		}
+		graph.Workflow = op.Workflow
+	case "node-workflow":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return fmt.Errorf("node %q not found", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkWorkflowEdit(actor, node.ID, node.Workflow, op.Workflow); err != nil {
+			return err
+		}
+		if op.Workflow != nil && graph.TypeOf(node).AgentMode != engine.AgentAutopilot {
+			return fmt.Errorf("node %q: only an Autopilot type (a Goal) can override workflow stages", node.ID)
+		}
+		if err := engine.ValidateWorkflow(op.Workflow); err != nil {
+			return err
+		}
+		node.Workflow = op.Workflow
+	case "agent-roles":
+		if err := checkAgentRolesEdit(actor, graph.AgentRoles, op.AgentRoles); err != nil {
+			return err
+		}
+		if err := engine.ValidateAgentRoleDefs(op.AgentRoles); err != nil {
+			return err
+		}
+		if len(op.AgentRoles) == 0 {
+			graph.AgentRoles = nil
+		} else {
+			graph.AgentRoles = op.AgentRoles
+		}
 	default:
 		return fmt.Errorf("unknown graph operation %q", strings.TrimSpace(op.Kind))
 	}

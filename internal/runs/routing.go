@@ -27,12 +27,13 @@ const (
 
 var jobKinds = map[string]bool{
 	runnerwire.JobImplement: true, runnerwire.JobReview: true, runnerwire.JobRevise: true,
-	runnerwire.JobPlan: true,
+	runnerwire.JobPlan: true, runnerwire.JobTest: true, runnerwire.JobVerify: true, runnerwire.JobJudge: true,
 }
 
 var routeMatches = map[string]bool{
 	runnerwire.RouteTag: true, runnerwire.RouteKind: true,
 	runnerwire.RouteProject: true, runnerwire.RouteDefault: true,
+	runnerwire.RouteRole: true,
 }
 
 // CleanFailureKind keeps a failure kind the contract knows; anything else is
@@ -49,7 +50,7 @@ func CleanFailureKind(kind string) string {
 // CleanVerdict keeps a known verdict and drops anything else.
 func CleanVerdict(verdict string) string {
 	switch verdict {
-	case runnerwire.VerdictApprove, runnerwire.VerdictChanges:
+	case runnerwire.VerdictApprove, runnerwire.VerdictChanges, runnerwire.VerdictPass, runnerwire.VerdictFail:
 		return verdict
 	}
 	return ""
@@ -113,6 +114,11 @@ func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 	if err := ValidateAgentModel(p.Implement, "pipeline implement", requireModel); err != nil {
 		return err
 	}
+	if (p.Tester != runnerwire.AgentModel{}) {
+		if err := ValidateAgentModel(p.Tester, "pipeline tester", requireModel); err != nil {
+			return err
+		}
+	}
 	if len(p.Reviewers) > runnerwire.MaxReviewers {
 		return invalidf("a pipeline has at most %d reviewers", runnerwire.MaxReviewers)
 	}
@@ -142,6 +148,13 @@ func ResolvePipeline(info *runnerwire.Info, p runnerwire.Pipeline, implementMode
 	out := runnerwire.Pipeline{
 		Implement: runnerwire.AgentModel{Agent: p.Implement.Agent, Model: implementModel},
 		MaxRounds: p.MaxRounds, Quorum: p.Quorum, Human: p.Human, HumanAnyEditor: p.HumanAnyEditor,
+	}
+	if p.Tester.Agent != "" {
+		model, err := ResolveAgentModel(info, p.Tester)
+		if err != nil {
+			return runnerwire.Pipeline{}, fmt.Errorf("tester: %w", err)
+		}
+		out.Tester = runnerwire.AgentModel{Agent: p.Tester.Agent, Model: model}
 	}
 	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
 		model, err := ResolveAgentModel(info, p.Review)
@@ -183,7 +196,7 @@ func ValidateRouting(rules []runnerwire.RouteRule) ([]runnerwire.RouteRule, erro
 		}
 		seen[rule.ID] = true
 		if !routeMatches[rule.Match] {
-			return nil, invalidf("%s: match must be tag, kind, project or default", at)
+			return nil, invalidf("%s: match must be tag, kind, role, project or default", at)
 		}
 		rule.Project = strings.TrimSpace(rule.Project)
 		if len(rule.Project) > maxRouteProject || !utf8.ValidString(rule.Project) || strings.ContainsAny(rule.Project, "\x00\r\n") {
@@ -194,6 +207,10 @@ func ValidateRouting(rules []runnerwire.RouteRule) ([]runnerwire.RouteRule, erro
 		case runnerwire.RouteTag, runnerwire.RouteKind:
 			if rule.Value == "" || !validName(rule.Value) {
 				return nil, invalidf("%s: a %s rule needs a value of at most %d characters", at, rule.Match, MaxRouteName)
+			}
+		case runnerwire.RouteRole:
+			if !engine.ValidRoleID(rule.Value) {
+				return nil, invalidf("%s: a role rule needs a role (planner, qa, tester, executor, reviewer, researcher or custom-role-<id>)", at)
 			}
 		case runnerwire.RouteProject:
 			if rule.Project == "" {
@@ -230,12 +247,30 @@ type RouteNode struct {
 	Project string
 	Kind    string
 	Tags    []string
+	// Role is the job's role ("" legacy, which routes like an executor but
+	// never matches a role rule).
+	Role string
+}
+
+// routeOrder is the match kinds tried for a job in role, in priority order.
+// An Executor (and a legacy job) is routed by the work first (tag, kind),
+// then by its role; every other role by its role only: tag and kind describe
+// the work, not who tests or reviews it.
+func routeOrder(role string) []string {
+	switch role {
+	case "":
+		return []string{runnerwire.RouteTag, runnerwire.RouteKind, runnerwire.RouteProject, runnerwire.RouteDefault}
+	case engine.RoleExecutor:
+		return []string{runnerwire.RouteTag, runnerwire.RouteKind, runnerwire.RouteRole, runnerwire.RouteProject, runnerwire.RouteDefault}
+	}
+	return []string{runnerwire.RouteRole, runnerwire.RouteProject, runnerwire.RouteDefault}
 }
 
 // Suggest picks the rule for a node. Match kinds are tried in priority order
-// (tag, kind, project, default); within one, rules for the node's project come
-// before rules for every project (Project ""), each in list order. The first
-// match wins; RuleID "" means none did.
+// (routeOrder: tag, kind, role, project, default for an executor or legacy
+// job); within one, rules for the node's project come before rules for every
+// project (Project ""), each in list order. The first match wins; RuleID ""
+// means none did.
 func Suggest(rules []runnerwire.RouteRule, node RouteNode) runnerwire.RouteSuggestion {
 	matches := func(rule runnerwire.RouteRule) bool {
 		switch rule.Match {
@@ -245,6 +280,8 @@ func Suggest(rules []runnerwire.RouteRule, node RouteNode) runnerwire.RouteSugge
 			})
 		case runnerwire.RouteKind:
 			return strings.EqualFold(nodeKind(node.Kind), nodeKind(rule.Value))
+		case runnerwire.RouteRole:
+			return node.Role != "" && rule.Value == node.Role
 		case runnerwire.RouteProject:
 			return rule.Project != "" && rule.Project == node.Project
 		case runnerwire.RouteDefault:
@@ -252,7 +289,7 @@ func Suggest(rules []runnerwire.RouteRule, node RouteNode) runnerwire.RouteSugge
 		}
 		return false
 	}
-	for _, match := range []string{runnerwire.RouteTag, runnerwire.RouteKind, runnerwire.RouteProject, runnerwire.RouteDefault} {
+	for _, match := range routeOrder(node.Role) {
 		for _, scoped := range []bool{true, false} {
 			for _, rule := range rules {
 				if rule.Match != match || (rule.Project != "") != scoped {
@@ -401,4 +438,19 @@ func (s *Store) Note(ctx context.Context, runID, text string) error {
 			runID, event.Seq, event.Type, event.At, string(payload))
 		return err
 	})
+}
+
+// NoteFirst records a hub-side log line on a run before its runner has sent
+// anything (a person's stage override), as event seq 0: the runner numbers
+// its own events from 1, so it never collides with them.
+func (s *Store) NoteFirst(ctx context.Context, runID, text string) error {
+	event := cleanEvent(runnerwire.RunEvent{Seq: 0, Type: runnerwire.EventLog, At: s.stamp(), Text: "hub: " + text})
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO run_events (run_id, seq, type, at, payload) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+		runID, event.Seq, event.Type, event.At, string(payload))
+	return err
 }

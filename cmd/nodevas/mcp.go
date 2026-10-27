@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"nodevas/internal/engine"
 	"nodevas/internal/mcp"
 )
 
@@ -26,6 +27,7 @@ func mcpServe(args []string) {
 	fs, f := newMCPFlags(flag.ExitOnError)
 	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
 	server, projectName, actor, agentRole, toolset := f.server, f.projectName, f.actor, f.agentRole, f.toolset
+	roleName, toolList := strings.TrimSpace(*f.role), splitToolList(*f.tools)
 	sessionName, model, chromaURL, ragPython := f.sessionName, f.model, f.chromaURL, f.ragPython
 
 	// Every diagnostic goes to stderr, without exception. stdout carries the
@@ -56,6 +58,13 @@ func mcpServe(args []string) {
 		os.Exit(2)
 	}
 
+	if roleName != "" && !engine.ValidRoleID(roleName) {
+		fmt.Fprintf(os.Stderr,
+			"nodevas mcp: --role %q is not a role: use planner, qa, tester, executor, reviewer, researcher or custom-role-<id>\n",
+			roleName)
+		os.Exit(2)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -74,6 +83,8 @@ func mcpServe(args []string) {
 		ChromaURL:       *chromaURL,
 		RAGPython:       *ragPython,
 		Toolset:         tools,
+		Role:            roleName,
+		Tools:           toolList,
 		Stderr:          os.Stderr,
 	})
 	if err != nil && ctx.Err() == nil && !clientWentAway(err) {
@@ -123,6 +134,18 @@ func runMCPArgs(value string) ([]string, bool) {
 // mcpFlags are `nodevas mcp`'s flags.
 type mcpFlags struct {
 	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython, toolset *string
+	role, tools                                                                              *string
+}
+
+// splitToolList reads --tools: comma-separated tool names, blanks dropped.
+func splitToolList(value string) []string {
+	var out []string
+	for _, name := range strings.Split(value, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
@@ -146,6 +169,13 @@ func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
 		// write; --toolset is which tools it is shown at all.
 		toolset: fs.String("toolset", mcp.ToolsetFull,
 			"which tools to serve: full (every tool) or run (the few a runner's run uses)"),
+		// The agent role this session acts in, declared on every request;
+		// the hub enforces it. --tools (comma-separated) narrows the tools
+		// served further; a runner passes the hub-resolved list.
+		role: fs.String("role", "",
+			"the agent role to act in: planner, qa, tester, executor, reviewer, researcher or custom-role-<id>; empty is a legacy session"),
+		tools: fs.String("tools", "",
+			"comma-separated tools to serve (overrides the role's defaults)"),
 	}
 }
 

@@ -43,7 +43,17 @@ type API struct {
 	// steppedUpAt reports the dispatcher's live step-up (W6); nil on a server
 	// without accounts, where the dispatcher vouches for everyone anyway.
 	steppedUpAt func(*http.Request) (time.Time, bool)
+	// autoRoute is agent analytics' auto routing (UseAutoRoute); nil keeps
+	// the rules' pick.
+	autoRoute AutoRoute
 }
+
+// AutoRoute decides the dispatch dialog's route: manual is what the
+// caller's rules picked; with auto routing on and no rule, its own pick.
+type AutoRoute func(r *http.Request, ownerID, project, nodeID, role string, manual runnerwire.RouteSuggestion) runnerwire.RouteSuggestion
+
+// UseAutoRoute sends GET /api/runs/route through auto routing.
+func (a *API) UseAutoRoute(fn AutoRoute) { a.autoRoute = fn }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
@@ -70,11 +80,16 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs/:id/terminal", a.terminal)
 	api.GET("/runs/budget", a.budget)
 	api.PUT("/runs/budget", a.setBudget)
+	api.GET("/runs/roles", a.roleSettings)
+	api.PUT("/runs/roles", a.setRoleSettings)
 	api.GET("/runs/routing", a.routing)
 	api.PUT("/runs/routing", a.setRouting)
 	api.GET("/runs/route", a.route)
 	api.GET("/runs/pipelines/:id", a.pipeline)
 	api.POST("/runs/pipelines/:id/review", a.review)
+	api.GET("/runs/:id/verdicts", a.verdicts)
+	// A review or QA run's structured verdict, through its runner's proxy.
+	api.POST("/verdicts", a.submitVerdict)
 }
 
 func notFound(c *gin.Context, what string) {
@@ -151,23 +166,20 @@ func (a *API) create(c *gin.Context) {
 			steppedUpAt = at.UTC().Format(time.RFC3339Nano)
 		}
 	}
+	graph, _, err := st.LoadGraph()
+	if err != nil {
+		httpx.Err(c, http.StatusInternalServerError, err)
+		return
+	}
 	record, err := a.d.Start(c.Request.Context(), runs.StartRequest{
 		Body: body, Project: projectName, ActorID: actor.ID, ActorName: actor.Name,
 		SteppedUpAt: steppedUpAt,
+		// The project's roles (tool allowlists, custom roles) and the
+		// hook that locks the node's criteria when an Executor starts.
+		Roles:          graph.ResolvedAgentRoles(),
+		LockAcceptance: func() error { return st.LockAcceptance(body.NodeID) },
 		LoadNode: func() (runs.NodeInfo, bool, error) {
-			node, nodeType, content, err := loadNode(st, body.NodeID)
-			if err != nil || node == nil {
-				return runs.NodeInfo{}, false, err
-			}
-			refs, truncated, err := loadReferences(st, body.NodeID)
-			if err != nil {
-				return runs.NodeInfo{}, false, err
-			}
-			return runs.NodeInfo{
-				Title: node.Title, Content: content,
-				Type: nodeType.ID, AgentMode: nodeType.AgentMode,
-				References: refs, ReferencesTruncated: truncated,
-			}, true, nil
+			return LoadNodeInfo(st, body.NodeID)
 		},
 	})
 	if err != nil {
@@ -189,7 +201,11 @@ func startFailed(c *gin.Context, err error) {
 	case runs.StartNotFound:
 		notFound(c, refused.What)
 	case runs.StartPrecondition:
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", errors.New(refused.Msg), nil)
+		code := "FAILED_PRECONDITION"
+		if refused.Reason != "" {
+			code = refused.Reason
+		}
+		httpx.Coded(c, http.StatusConflict, code, errors.New(refused.Msg), nil)
 	case runs.StartBudget:
 		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
 			errors.New(refused.Msg), map[string]any{"exceeded": refused.Budget.Exceeded})
@@ -199,6 +215,35 @@ func startFailed(c *gin.Context, err error) {
 	default:
 		invalid(c, "%s", refused.Msg)
 	}
+}
+
+// LoadNodeInfo is what a run needs to know about a node: its title, body,
+// type, references and, for agent roles, its acceptance criteria and its
+// effective workflow (its Goal's override, else the project's; nil legacy).
+// found is false when the graph has no such node.
+func LoadNodeInfo(st *store.Store, id string) (runs.NodeInfo, bool, error) {
+	node, nodeType, content, err := loadNode(st, id)
+	if err != nil || node == nil {
+		return runs.NodeInfo{}, false, err
+	}
+	refs, truncated, err := loadReferences(st, id)
+	if err != nil {
+		return runs.NodeInfo{}, false, err
+	}
+	graph, _, err := st.LoadGraph()
+	if err != nil {
+		return runs.NodeInfo{}, false, err
+	}
+	goal := graph.GoalOf(node)
+	if nodeType.AgentMode == engine.AgentAutopilot {
+		goal = node.ID
+	}
+	return runs.NodeInfo{
+		Title: node.Title, Content: content,
+		Type: nodeType.ID, AgentMode: nodeType.AgentMode,
+		References: refs, ReferencesTruncated: truncated,
+		Acceptance: node.Acceptance, Workflow: engine.EffectiveWorkflow(graph, goal),
+	}, true, nil
 }
 
 // loadNode returns the node, its resolved type and its body text, or a nil

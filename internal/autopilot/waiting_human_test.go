@@ -2,21 +2,17 @@ package autopilot
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"nodevas/internal/db"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/testpg"
 )
 
 // WaitingHuman finds, across projects, the live autopilots' tasks whose
 // review waits for a person.
 func TestWaitingHuman(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	store := NewStore(database)
 	create := func(project, goal string, tasks ...runnerwire.TaskInstance) Record {

@@ -72,13 +72,26 @@ func (a *API) route(c *gin.Context) {
 		notFound(c, "node")
 		return
 	}
-	rules, err := a.d.Store().Routing(c.Request.Context(), auth.ActorFrom(c.Request).ID)
+	role := strings.TrimSpace(c.Query("role"))
+	if role == "" {
+		role = engine.RoleExecutor
+	}
+	if !engine.ValidRoleID(role) {
+		invalid(c, "role is not a valid role id")
+		return
+	}
+	actor := auth.ActorFrom(c.Request)
+	rules, err := a.d.Store().Routing(c.Request.Context(), actor.ID)
 	if err != nil {
 		fail(c, err)
 		return
 	}
+	suggestion := runs.Suggest(rules, runs.RouteNode{Project: projectName, Kind: node.Kind, Tags: node.Tags})
+	if a.autoRoute != nil && !actor.IsAgent() {
+		suggestion = a.autoRoute(c.Request, actor.ID, projectName, nodeID, role, suggestion)
+	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, runs.Suggest(rules, runs.RouteNode{Project: projectName, Kind: node.Kind, Tags: node.Tags}))
+	c.JSON(http.StatusOK, suggestion)
 }
 
 // pipeline returns one pipeline, to whoever may see its runs, and to whoever

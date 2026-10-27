@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 )
 
 var (
@@ -42,6 +44,26 @@ func conflictf(format string, args ...any) error {
 type Record struct {
 	runnerwire.AutopilotRun
 	SteppedUpAt string
+	// Workflow is the goal's workflow stages, frozen when the autopilot
+	// started (nil: legacy, the policy's review mode decides); PlanRunID the
+	// planner run that breaks the goal down (goal phase plan).
+	Workflow  *engine.Workflow
+	PlanRunID string
+}
+
+// stagesColumn is autopilot_runs.stages: the frozen workflow and the
+// planner run.
+type stagesColumn struct {
+	Workflow  *engine.Workflow `json:"workflow"`
+	PlanRunID string           `json:"planRunId,omitempty"`
+}
+
+func encodeStages(r Record) (string, error) {
+	if r.Workflow == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(stagesColumn{Workflow: r.Workflow, PlanRunID: r.PlanRunID})
+	return string(raw), err
 }
 
 // Store keeps autopilot runs and their task instances.
@@ -81,18 +103,28 @@ func newID() (string, error) {
 }
 
 const runColumns = `id, project, goal_node_id, status, policy, reason, created_by, created_by_name,
-	stepped_up_at, created_at, updated_at, finished_at`
+	stepped_up_at, created_at, updated_at, finished_at, stages, goal_phase, qa_round, qa_run_id`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
-	var policy string
+	var policy, stages string
+	var qaRound int64
 	err := row.Scan(&r.ID, &r.Project, &r.GoalNodeID, &r.Status, &policy, &r.Reason, &r.CreatedBy,
-		&r.CreatedByName, &r.SteppedUpAt, &r.CreatedAt, &r.UpdatedAt, &r.FinishedAt)
+		&r.CreatedByName, &r.SteppedUpAt, &r.CreatedAt, &r.UpdatedAt, &r.FinishedAt,
+		&stages, &r.GoalPhase, &qaRound, &r.QARunID)
 	if err != nil {
 		return r, err
 	}
+	r.QARound = int(qaRound)
 	if policy != "" {
 		_ = json.Unmarshal([]byte(policy), &r.Policy)
+	}
+	if stages != "" {
+		var column stagesColumn
+		if json.Unmarshal([]byte(stages), &column) == nil && column.Workflow != nil {
+			r.Workflow, r.PlanRunID = column.Workflow, column.PlanRunID
+			r.Stages = runs.StagesSnapshot(column.Workflow)
+		}
 	}
 	return r, nil
 }
@@ -108,6 +140,11 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 	if err != nil {
 		return Record{}, err
 	}
+	stages, err := encodeStages(r)
+	if err != nil {
+		return Record{}, err
+	}
+	r.Stages = runs.StagesSnapshot(r.Workflow)
 	now := s.stamp()
 	r.ID, r.Status, r.CreatedAt, r.UpdatedAt, r.FinishedAt = id, runnerwire.AutopilotRunning, now, now, ""
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -124,9 +161,10 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 		return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO autopilot_runs (`+runColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Project, r.GoalNodeID, r.Status, string(policy), r.Reason, r.CreatedBy, r.CreatedByName,
-		r.SteppedUpAt, r.CreatedAt, r.UpdatedAt, r.FinishedAt); err != nil {
+		r.SteppedUpAt, r.CreatedAt, r.UpdatedAt, r.FinishedAt,
+		stages, r.GoalPhase, int64(r.QARound), r.QARunID); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
 		}
@@ -320,8 +358,14 @@ func (s *Store) Save(ctx context.Context, r Record, tasks []runnerwire.TaskInsta
 		return r, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE autopilot_runs SET status = ?, reason = ?, updated_at = ?, finished_at = ?
-		WHERE id = ?`, r.Status, r.Reason, r.UpdatedAt, r.FinishedAt, r.ID); err != nil {
+	stages, err := encodeStages(r)
+	if err != nil {
+		return r, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE autopilot_runs SET status = ?, reason = ?, updated_at = ?, finished_at = ?,
+		stages = ?, goal_phase = ?, qa_round = ?, qa_run_id = ?
+		WHERE id = ?`, r.Status, r.Reason, r.UpdatedAt, r.FinishedAt,
+		stages, r.GoalPhase, int64(r.QARound), r.QARunID, r.ID); err != nil {
 		return r, err
 	}
 	for _, t := range tasks {

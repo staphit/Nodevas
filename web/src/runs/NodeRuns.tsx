@@ -22,6 +22,7 @@ import { RunChangesSummary } from "./RunChanges";
 import { RunModeTabs } from "./RunModeTabs";
 import { useRuns } from "./runStore";
 import { useNodeType } from "../nodeTypeTheme";
+import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
 
 /** The hub's cap on GET /api/runs. */
 const RUN_LIST_CAP = 50;
@@ -87,15 +88,19 @@ export function failureLabel(t: (key: string) => string, kind: string): string {
   return KNOWN_FAILURES.has(kind) ? t(`runs.failure.${kind}`) : kind;
 }
 
+const SHOWN_KINDS = new Set(["review", "revise", "test", "verify", "judge"]);
+
 export function RunKindBadge({ kind }: { kind?: string }) {
   const { t } = useI18n();
-  if (kind !== "review" && kind !== "revise") return null;
+  if (!kind || !SHOWN_KINDS.has(kind)) return null;
   return <span className={`run-kind run-kind-${kind}`}>{t(`runs.kind.${kind}`)}</span>;
 }
 
+const SHOWN_VERDICTS = new Set(["approve", "changes", "pass", "fail"]);
+
 export function VerdictChip({ verdict }: { verdict?: string }) {
   const { t } = useI18n();
-  if (verdict !== "approve" && verdict !== "changes") return null;
+  if (!verdict || !SHOWN_VERDICTS.has(verdict)) return null;
   return (
     <span className={`run-verdict run-verdict-${verdict}`}>{t(`runs.verdict.${verdict}`)}</span>
   );
@@ -134,13 +139,14 @@ function RunTags({
 }) {
   const { t, language } = useI18n();
   const failure = run.status === "failed" && run.failureKind ? run.failureKind : "";
-  const kind = run.kind === "review" || run.kind === "revise";
-  const verdict = run.verdict === "approve" || run.verdict === "changes";
+  const kind = SHOWN_KINDS.has(run.kind ?? "");
+  const verdict = SHOWN_VERDICTS.has(run.verdict ?? "");
   const waiting = runWaitsForLimit(run);
   const handedTo = run.handoffBranch && next ? next : null;
-  if (!kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
+  if (!run.role && !kind && !verdict && !failure && !retry && !waiting && !handedTo) return null;
   return (
     <span className="run-row-tags">
+      <RoleBadge role={run.role} />
       <RunKindBadge kind={run.kind} />
       <VerdictChip verdict={run.verdict} />
       {failure && (
@@ -285,9 +291,12 @@ function RunRow({
           <RunStatusBadge status={run.status} />
           <strong className="run-row-agent">
             {number > 0 && (
-              <span className="run-row-number">{t("runs.number", { number })} </span>
+              <span className="run-row-number">
+                <span className="visually-hidden">{t("runs.runWord")} </span>
+                {t("runs.number", { number })}{" "}
+              </span>
             )}
-            {run.agent}
+            {run.agent || (run.kind === "verify" ? t("runs.testCommand") : "")}
             {run.model ? ` · ${run.model}` : ""}
           </strong>
           <time
@@ -305,6 +314,11 @@ function RunRow({
           <UsageText run={run} />
         </span>
       </button>
+      {run.verify && (
+        <span className="run-row-evidence">
+          <VerifyEvidence verify={run.verify} />
+        </span>
+      )}
       {hasSummary && summary}
     </li>
   );
@@ -558,6 +572,8 @@ export function RunDetail({
         )}
       </div>
       <MergeControl run={run} className="run-detail-merge" />
+      {run.override && <p className="run-override">{t("runs.override", { reason: run.override })}</p>}
+      {run.checks && run.checks.length > 0 && <JudgeChecks checks={run.checks} />}
       <RunHandoff
         run={run}
         prev={prev}
@@ -731,6 +747,11 @@ export function pipelineHeaderText(
   runs: Run[],
 ): string {
   const parts = [t("pipeline.title")];
+  // A staged pipeline: its preset and where it is.
+  if (state?.stages) {
+    parts.push(t(`stages.preset.${state.stages.preset}`));
+    if (state.phase) parts.push(t(`pipeline.phase.${state.phase}`));
+  }
   if (state && state.round > 0) {
     parts.push(
       t("pipeline.round", { round: state.round, max: state.pipeline?.maxRounds || state.round }),
@@ -770,6 +791,7 @@ function PipelineGroup({ id, children, runs }: { id: string; children: React.Rea
           error && <span className="run-pipeline-error" title={error}>{t("pipeline.unknown")}</span>
         )}
       </div>
+      {state?.guard && <GuardView guard={state.guard} />}
       <ul className="run-list run-pipeline-runs">{children}</ul>
     </li>
   );

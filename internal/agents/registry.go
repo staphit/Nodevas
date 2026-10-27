@@ -143,8 +143,11 @@ type Hub struct {
 	notify   EventFunc
 	now      func() time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*Session // key: project + "\x00" + sessionID
+	mu sync.Mutex
+	// actionsDB is the action log's database when the hub has none of its
+	// own (SetActionLog).
+	actionsDB *db.DB
+	sessions  map[string]*Session // key: project + "\x00" + sessionID
 
 	// In-memory fallback stores when database == nil (used in lightweight tests)
 	memMessages []Message
@@ -276,9 +279,9 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	// from outside (PresenceEvent), rather than only keeping it alive.
 	presence := !ok
 	var wasOnline bool
-	var wasState, wasNode string
+	var wasState, wasNode, wasDoing string
 	if ok {
-		wasOnline, wasState, wasNode = existing.Online, existing.State, existing.NodeID
+		wasOnline, wasState, wasNode, wasDoing = existing.Online, existing.State, existing.NodeID, existing.Doing
 	}
 	if !ok {
 		baseName := sanitizeToken(hb.Name)
@@ -390,6 +393,12 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	snapshot := *existing
 	h.mu.Unlock()
 
+	switch {
+	case !ok:
+		h.LogAction(project, sessionID, snapshot.RunID, ActionJoined, snapshot.NodeID, snapshot.Doing)
+	case (snapshot.Doing != wasDoing || snapshot.NodeID != wasNode) && (snapshot.Doing != "" || snapshot.NodeID != ""):
+		h.LogAction(project, sessionID, snapshot.RunID, ActionDoing, snapshot.NodeID, snapshot.Doing)
+	}
 	h.emit(project, "agents-changed", nil)
 	if presence {
 		h.emit(project, PresenceEvent, nil)
@@ -429,7 +438,9 @@ func (h *Hub) Leave(project, sessionID, actorID string) error {
 	s.Since = now
 	s.Doing = ""
 	s.NodeID = ""
+	runID := s.RunID
 	h.mu.Unlock()
+	h.LogAction(project, sessionID, runID, ActionLeft, "", "")
 
 	h.emit(project, "agents-changed", nil)
 	h.emit(project, PresenceEvent, nil)

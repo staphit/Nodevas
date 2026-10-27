@@ -8,14 +8,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/audit"
@@ -179,11 +182,13 @@ func serveArgValue(args []string, name string) (string, bool, error) {
 }
 
 // bootstrapWorkspace opens everything a workspace is made of: the projects on
-// disk, the database beside them, and the search index that spans both.
+// disk, the database, and the search index that spans both.
 //
 // The database is opened once here and shared with everything that follows:
-// SQLite admits one writer, so a second handle would be a second pool queueing
-// against this one for it rather than behind it in Go.
+// its single writer is what keeps the count-then-insert account rules
+// serialised, and a second handle would be a second writer. Without
+// NODEVAS_DATABASE_URL it is the workspace's embedded PostgreSQL, which this
+// starts before the hub and which every exit path below stops (atFatal).
 //
 // Failures end the process rather than travelling back as errors. There is no
 // caller above startup that could do anything else with them, and the wording
@@ -195,7 +200,7 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 	// .vised/history instead.
 	historyMode, err := store.ParseHistoryMode(os.Getenv("NODEVAS_HISTORY"))
 	if err != nil {
-		log.Fatalf("NODEVAS_HISTORY: %v", err)
+		fatalf("NODEVAS_HISTORY: %v", err)
 	}
 	store.SetDefaultHistoryMode(historyMode)
 	slog.Info("version history", slog.String("mode", string(historyMode)),
@@ -210,20 +215,37 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 			fmt.Fprintf(os.Stderr, "%v.\n", busy)
 			fmt.Fprintln(os.Stderr,
 				"Close the other Nodevas window or stop the running server, then start again.")
-			os.Exit(1)
+			exit(1)
 		}
-		log.Fatalf("workspace: %v", err)
+		fatalf("workspace: %v", err)
 	}
 
 	// The workspace database holds accounts, the audit trail, settings and the
 	// search index.
-	database, err := db.Open(root)
+	database, err := db.OpenRoot(root)
 	if err != nil {
-		log.Fatalf("workspace database: %v", err)
+		pm.Close()
+		fatalf("workspace database: %v", err)
 	}
-	slog.Info("workspace database ready",
-		slog.String("backend", string(database.Backend())),
-		slog.String("path", database.Path()))
+	atFatal = func() {
+		database.Close()
+		pm.Close()
+	}
+	ready := []any{
+		slog.String("event.code", "db.ready"),
+		slog.String("mode", database.Mode()),
+		slog.String("server", database.Path()),
+	}
+	if database.DataDir() != "" {
+		ready = append(ready, slog.String("data_dir", database.DataDir()), slog.Int("port", database.Port()))
+	}
+	slog.Info("workspace database ready", ready...)
+
+	// A workspace that kept its data in SQLite before this release brings it
+	// along once, before anything reads the new database.
+	if err := importLegacy(context.Background(), database, root); err != nil {
+		fatalf("workspace database: %v", err)
+	}
 
 	// The search index lives in the database now, so it outlives a restart.
 	pm.UseDatabase(database)
@@ -238,7 +260,7 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 func serve(args []string) {
 	projectDefault, projectSet, err := serveArgValue(args, "project")
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if !projectSet || strings.TrimSpace(projectDefault) == "" {
 		projectDefault = "."
@@ -246,7 +268,7 @@ func serve(args []string) {
 
 	configPath, configSet, err := serveArgValue(args, "config")
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if !configSet {
 		if envPath, ok := os.LookupEnv("NODEVAS_CONFIG"); ok && strings.TrimSpace(envPath) != "" {
@@ -260,10 +282,10 @@ func serve(args []string) {
 
 	serveConfig, err := config.LoadServeConfig(configPath, !configSet)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		fatalf("config: %v", err)
 	}
 	if err := config.ApplyEnvironment(&serveConfig, os.LookupEnv); err != nil {
-		log.Fatalf("config environment: %v", err)
+		fatalf("config environment: %v", err)
 	}
 
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
@@ -285,6 +307,9 @@ func serve(args []string) {
 		"serve a networked listener over plain HTTP (passwords and session cookies travel in the clear)")
 	maxActiveUsers := fs.Int("max-active-users", serveConfig.MaxActiveUsers,
 		"how many distinct accounts may be signed in at once; 0 means no limit. Counts people, not devices: one person on a phone and a laptop is one")
+	stopOnStdinClose := fs.Bool("stop-on-stdin-close", false,
+		"shut down gracefully when stdin reaches end of file: how the desktop app and nodevas-dev stop serve "+
+			"(Windows has no SIGTERM); the local runner then gets no terminal")
 	stepUpMinutes := fs.Int("step-up-minutes", stepUpMinutesDefault(),
 		"how long a step-up (a fresh passcode before remote dispatch) lasts, in minutes; env NODEVAS_STEP_UP_MINUTES")
 	smtpHost := fs.String("smtp-host", serveConfig.SMTP.Host, "SMTP host for one-time passcodes")
@@ -411,7 +436,7 @@ func serve(args []string) {
 	serveConfig.Abuse.MaxConcurrentDOCX = *abuseMaxConcurrentDOCX
 	serveConfig.Abuse.MaxConcurrentRemote = *abuseMaxConcurrentRemote
 	if err := serveConfig.Validate(); err != nil {
-		log.Fatalf("config: %v", err)
+		fatalf("config: %v", err)
 	}
 
 	// Logging is set up before anything else can fail, so a startup error is
@@ -427,7 +452,7 @@ func serve(args []string) {
 		Service: "nodevas",
 	})
 	if err != nil {
-		log.Fatalf("logging: %v", err)
+		fatalf("logging: %v", err)
 	}
 	if logs.path != "" {
 		log.Printf("serve log: %s", logs.path)
@@ -435,23 +460,23 @@ func serve(args []string) {
 
 	root, err := filepath.Abs(*projectFlag)
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if _, err := os.Stat(root); err != nil {
-		log.Fatalf("project dir: %v", err)
+		fatalf("project dir: %v", err)
 	}
 	hostNames := hostList(*hostname)
 	if err := validateServeFlags(
 		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext,
 	); err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	remote := isRemoteDeployment(*listen, *behindProxy)
 	useTLS := *certFile != ""
 	proxyOnlyTransport := *behindProxy && isLoopbackHost(*listen)
 	runnerMode, runnerNote, err := planLocalRunner(*withRunner, *noRunner, repos, remote, useTLS, serveConfig.Access.Enabled())
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if runnerNote != "" {
 		log.Print(runnerNote)
@@ -460,6 +485,11 @@ func serve(args []string) {
 	hub, pm, database := bootstrapWorkspace(root)
 	defer pm.Close()
 	defer database.Close()
+	// Refused even when --behind-proxy is off: a list that does not parse is
+	// a mistake in the command line or the config, whichever flag uses it.
+	if err := checkTrustedProxies(*trustedProxy); err != nil {
+		fatalf("trusted proxy: %v", err)
+	}
 
 	distFS, ok := web.Dist()
 	if !ok {
@@ -520,7 +550,7 @@ func serve(args []string) {
 			AUD:        serveConfig.Access.AUD,
 		})
 		if err != nil {
-			log.Fatalf("access: %v", err)
+			fatalf("access: %v", err)
 		}
 		srv.UseAccess(verifier, serveConfig.Access.Required)
 		slog.Info("cloudflare access",
@@ -532,7 +562,7 @@ func serve(args []string) {
 	srv.UseRunnersDB(database)
 	srv.UseMembersDB(database)
 	if *stepUpMinutes <= 0 || time.Duration(*stepUpMinutes)*time.Minute > auth.MaxStepUpWindow {
-		log.Fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
+		fatalf("--step-up-minutes must be between 1 and %d", int(auth.MaxStepUpWindow/time.Minute))
 	}
 	srv.SetStepUpWindow(time.Duration(*stepUpMinutes) * time.Minute)
 	// Model calls can run on each person's own runner, with a key only
@@ -544,7 +574,7 @@ func serve(args []string) {
 	copilotService, err := newCopilotService(serveConfig.Copilot, remote, pm, database, srv.BuiltHandler, runnerLLM,
 		copilotFollowups(srv, pm))
 	if err != nil {
-		log.Fatalf("copilot: %v", err)
+		fatalf("copilot: %v", err)
 	}
 	observeCopilotFollowups(srv, copilotService)
 	srv.UseCopilot(copilotapi.New(copilotService))
@@ -552,34 +582,34 @@ func serve(args []string) {
 	// deployment; this catches the rest, and keeps the guarantee in the server
 	// package rather than only in this one call site.
 	if err := srv.UseListenAddress(*listen, *port, hostNames); err != nil {
-		log.Fatalf("listen address: %v", err)
+		fatalf("listen address: %v", err)
 	}
 	// The header only means anything when a proxy in front of us rewrites it;
 	// believed by default it is a free HTTPS claim for any plaintext client.
 	if *behindProxy {
 		if err := auth.SetTrustedProxyCIDRs(strings.Split(*trustedProxy, ",")); err != nil {
-			log.Fatalf("trusted proxy: %v", err)
+			fatalf("trusted proxy: %v", err)
 		}
 	} else {
 		auth.TrustForwardedProto(false)
 	}
 
 	if remote {
-		// Share the handle rather than opening a second one: SQLite admits one
-		// writer, and two pools would queue against each other for it.
+		// Share the handle rather than opening a second one: a second handle
+		// is a second writer, and the account rules rely on there being one.
 		users := auth.NewUserStoreDB(database)
 		// Authenticator secrets are sealed with the same machine key as every
 		// other stored secret (NODEVAS_SECRET_KEY overrides it).
 		users.UseSecretKey(filepath.Join(pm.CatalogRoot(), "secrets", "master.key"))
 		if err := users.EnsureAdmin(); err != nil {
-			log.Fatalf("accounts: %v", err)
+			fatalf("accounts: %v", err)
 		}
 		// No request is behind startup or the `nodevas user` commands, so the
 		// account queries below get a background context: there is nobody who
 		// could disconnect and nothing that should cancel them.
 		accountCtx := context.Background()
 		if users.Count(accountCtx) == 0 {
-			log.Fatalf(
+			fatalf(
 				"refusing to serve %s with no accounts: create one first with "+
 					"`nodevas user add --project %q --user <name>`", *listen, root)
 		}
@@ -602,7 +632,7 @@ func serve(args []string) {
 			// in the process list of every other user on the machine.
 			smtpPassword, err := secretEnvironment("NODEVAS_SMTP_PASSWORD")
 			if err != nil {
-				log.Fatalf("smtp password: %v", err)
+				fatalf("smtp password: %v", err)
 			}
 			sender, err := mail.New(mail.Config{
 				Host:     *smtpHost,
@@ -613,7 +643,7 @@ func serve(args []string) {
 				Security: *smtpSecurity,
 			})
 			if err != nil {
-				log.Fatalf("smtp: %v", err)
+				fatalf("smtp: %v", err)
 			}
 			srv.UseMailer(sender)
 			log.Printf("passcode mail via %s:%d as %s", *smtpHost, *smtpPort, *smtpFrom)
@@ -630,7 +660,7 @@ func serve(args []string) {
 	localRunnerConfig := ""
 	runnerFailed := func(err error) {
 		if runnerMode == explicitLocalRunner {
-			log.Fatalf("local runner: %v", err)
+			fatalf("local runner: %v", err)
 		}
 		log.Printf("WARNING: local runner not started: %v; the hub serves without it "+
 			"(--no-runner silences this, --with-runner makes it fatal)", err)
@@ -680,11 +710,37 @@ func serve(args []string) {
 	confirmStop := standalone && isTerminal(os.Stdin)
 	ctx, stop := serveContext(confirmStop, os.Stderr)
 	defer stop()
+	runnerStdin := os.Stdin
+	if *stopOnStdinClose {
+		// The launcher holds the other end; closing it (or dying) is the stop.
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			log.Print("stdin closed; shutting down")
+			stop()
+		}()
+		if devNull, err := os.Open(os.DevNull); err == nil {
+			runnerStdin = devNull
+		}
+	}
+	// An embedded PostgreSQL that keeps dying past its restart budget ends
+	// serve: nothing works without it, and exiting lets a supervisor (the
+	// desktop app, a service manager) start everything again.
+	var databaseFailed atomic.Bool
+	if exited := database.Exited(); exited != nil {
+		go func() {
+			if err, ok := <-exited; ok {
+				slog.Error("the embedded PostgreSQL stopped and could not be restarted; shutting down",
+					slog.String("event.code", "db.embedded_gave_up"), logging.Err(err))
+				databaseFailed.Store(true)
+				stop()
+			}
+		}()
+	}
 	// Bound before serving, so a local runner started next finds the hub
 	// already listening.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("serve: %v", err)
+		fatalf("serve: %v", err)
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -696,7 +752,7 @@ func serve(args []string) {
 	}()
 	stopRunner := func() {}
 	if localRunnerConfig != "" {
-		if stop, err := startLocalRunner(localRunnerConfig, os.Stdin, os.Stderr); err != nil {
+		if stop, err := startLocalRunner(localRunnerConfig, runnerStdin, os.Stderr); err != nil {
 			runnerFailed(err)
 		} else {
 			stopRunner = stop
@@ -713,6 +769,7 @@ func serve(args []string) {
 	defer func() { restoreConsole() }()
 	fatal := func(format string, args ...any) {
 		restoreConsole()
+		runAtFatal()
 		logs.fatal(format, args...)
 	}
 	if standalone {
@@ -739,7 +796,28 @@ func serve(args []string) {
 			log.Printf("final backup: %v", err)
 		}
 		backupCancel()
+		if databaseFailed.Load() {
+			exit(1)
+		}
 	}
+}
+
+// checkTrustedProxies validates a --trusted-proxy list without applying it:
+// each entry an IP address or a CIDR prefix.
+func checkTrustedProxies(value string) error {
+	for _, entry := range strings.Split(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if _, err := netip.ParsePrefix(entry); err == nil {
+			continue
+		}
+		if _, err := netip.ParseAddr(entry); err != nil {
+			return fmt.Errorf("invalid trusted proxy address %q", entry)
+		}
+	}
+	return nil
 }
 
 // newCopilotService wires the voice copilot from its configuration.

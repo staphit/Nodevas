@@ -116,6 +116,10 @@ type Envelope struct {
 	// System One decisions; see decide.go.
 	Decide     *DecideRequest `json:"decide,omitempty"`
 	DecideDone *DecideDone    `json:"decideDone,omitempty"`
+
+	// Read-only repo browsing; see repobrowse.go.
+	Repo     *RepoRequest `json:"repo,omitempty"`
+	RepoDone *RepoDone    `json:"repoDone,omitempty"`
 }
 
 // Welcome tells a runner who the hub thinks it is.
@@ -188,6 +192,9 @@ type Repo struct {
 	Path string `json:"path,omitempty"`
 	// Remote is the origin URL, when there is one.
 	Remote string `json:"remote,omitempty"`
+	// Verify says the runner has a test command for this repo. The command
+	// itself stays on the runner.
+	Verify bool `json:"verify,omitempty"`
 }
 
 // Limits on what a hello may carry, enforced by the hub.

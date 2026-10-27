@@ -11,8 +11,8 @@ import (
 
 	"nodevas/internal/copilot/provider"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
+	"nodevas/internal/testpg"
 )
 
 var (
@@ -110,7 +110,7 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 	t.Helper()
 	h := &harness{t: t, model: &fakeProvider{t: t}, bridge: &fakeBridge{}}
 	opts := Options{
-		Database: dbtest.Open(t),
+		Database: testpg.New(t),
 		Defaults: Defaults{Enabled: true, Provider: "anthropic", Model: "claude-test", APIKey: "sk-test", AllowBypass: true},
 		NewProvider: func(cfg provider.Config) (provider.Provider, error) {
 			if cfg.APIKey != "sk-test" || cfg.Model != "claude-test" {

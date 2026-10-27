@@ -6,15 +6,14 @@ package searchindex
 import (
 	"sort"
 	"strings"
-	"unicode"
 )
 
 // ExcerptWidth is the excerpt length in runes.
 const ExcerptWidth = 120
 
 // Excerpt cuts the width runes of text that hold the most distinct query
-// tokens (rankTokens of the query), the earliest such window on a tie, with
-// "…" where it cuts. text is a search document (the metadata line, then the
+// tokens (rankTokens of the query, compared with the text folded the way
+// tokens are), the earliest such window on a tie, with "…" where it cuts. text is a search document (the metadata line, then the
 // markdown); the metadata line and the frontmatter are left out, and
 // whitespace is collapsed.
 func Excerpt(text string, tokens []string, width int) string {
@@ -27,7 +26,7 @@ func Excerpt(text string, tokens []string, width int) string {
 	}
 	lower := make([]rune, len(runes))
 	for i, r := range runes {
-		lower[i] = unicode.ToLower(r)
+		lower[i] = fold(r)
 	}
 	type hit struct{ at, token, end int }
 	var hits []hit

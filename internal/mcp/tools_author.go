@@ -94,6 +94,24 @@ type subgraphNodeInput struct {
 	WriteAccess string   `json:"writeAccess,omitempty"`
 	DependsOn   []string `json:"dependsOn,omitempty" jsonschema:"keys or node ids to finish first"`
 	Refs        []string `json:"refs,omitempty" jsonschema:"keys or node ids of Notes it uses as context"`
+	Acceptance  []string `json:"acceptance,omitempty" jsonschema:"checkable acceptance criteria, one line each"`
+}
+
+type acceptanceItemInput struct {
+	ID   string `json:"id,omitempty" jsonschema:"keep an existing criterion's id (a1...); omit for a new one"`
+	Text string `json:"text"`
+}
+
+type setAcceptanceInput struct {
+	ID      string                `json:"id" jsonschema:"the node id"`
+	Items   []acceptanceItemInput `json:"items" jsonschema:"the whole new list; one checkable line each"`
+	BaseRev string                `json:"baseRev,omitempty"`
+}
+
+type setAcceptanceOutput struct {
+	ID    string                  `json:"id"`
+	Items []engine.AcceptanceItem `json:"items"`
+	Note  string                  `json:"note"`
 }
 
 type subgraphEdgeInput struct {
@@ -307,6 +325,7 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 				Key: node.Key, Title: node.Title, Kind: node.Kind, Body: node.Body, Tags: node.Tags,
 				Priority: node.Priority, Assignee: node.Assignee, Deadline: node.Deadline,
 				WriteAccess: node.WriteAccess, DependsOn: node.DependsOn, Refs: node.Refs,
+				Acceptance: node.Acceptance,
 			})
 		}
 		for _, edge := range in.Edges {
@@ -322,6 +341,29 @@ func registerAuthoringTools(server *mcp.Server, client *Client) {
 			Note: fmt.Sprintf("Created %d nodes, %d dependencies and %d references.",
 				len(result.Created), result.Dependencies, result.References),
 		}, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "set_acceptance",
+		Description: "Replace a node's acceptance criteria: checkable one-line items, written before the work. Locked once an Executor starts.",
+		Annotations: &mcp.ToolAnnotations{Title: "Set acceptance criteria"},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setAcceptanceInput) (*mcp.CallToolResult, setAcceptanceOutput, error) {
+		if strings.TrimSpace(in.ID) == "" {
+			return nil, setAcceptanceOutput{}, &APIError{Code: CodeInvalidArgument, Message: "id is required"}
+		}
+		items := make([]engine.AcceptanceItem, 0, len(in.Items))
+		for _, item := range in.Items {
+			items = append(items, engine.AcceptanceItem{ID: strings.TrimSpace(item.ID), Text: strings.TrimSpace(item.Text)})
+		}
+		stored, err := client.SetAcceptance(ctx, in.ID, items, in.BaseRev)
+		if err != nil {
+			return nil, setAcceptanceOutput{}, guide(err)
+		}
+		out := setAcceptanceOutput{ID: in.ID, Note: "Saved."}
+		if stored != nil {
+			out.Items = stored.Items
+		}
+		return nil, out, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

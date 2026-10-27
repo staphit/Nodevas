@@ -133,11 +133,67 @@ export interface Run {
   /** While the run waits, queued, for its agent's usage limit to reset: when
    * it is offered again (RFC3339). Absent once released. */
   retryAt?: string;
+  /** Agent roles: the role the run acted in (absent: legacy), its verify
+   * result (red/green), a judge's checks, and a person's stage override. */
+  role?: string;
+  verify?: VerifyResult | null;
+  checks?: CheckResult[] | null;
+  override?: string;
+  /** Agent analytics: the run's cost (the CLI's own figure, or estimated
+   * from its tokens when costEstimated), and the node's type and acceptance
+   * size when it was dispatched. Absent from an older hub. */
+  costUsd?: number;
+  costEstimated?: boolean;
+  nodeType?: string;
+  acceptanceCount?: number;
   createdBy: string;
   createdByName: string;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+/** Mirrors runnerwire.RoleSettings: one owner's concurrency and budget for a
+ * role. Project "" applies in every project; 0 is no limit. */
+export interface RoleSettings {
+  role: string;
+  project: string;
+  maxConcurrent: number;
+  dailyCostUsd: number;
+  dailyTokens: number;
+  dailyRuns: number;
+}
+
+export interface RoleSettingsResponse {
+  roles: RoleSettings[] | null;
+}
+
+/** Mirrors runnerwire.VerifyResult: one run of the repo's test command. */
+export interface VerifyResult {
+  phase: "red" | "green" | "goal" | string;
+  head?: string;
+  exitCode: number;
+  /** Relative to the phase: red passes when the tests fail. */
+  passed: boolean;
+  durationMs: number;
+  output?: string;
+  noCommand?: boolean;
+}
+
+/** Mirrors runnerwire.CheckResult: a judge's verdict on one criterion. */
+export interface CheckResult {
+  id: string;
+  pass: boolean;
+  note?: string;
+}
+
+/** Mirrors runnerwire.GuardReport: the executor diff check. */
+export interface GuardReport {
+  testFiles?: string[];
+  touched?: string[];
+  sensitive?: string[];
+  approved?: boolean;
+  approvedBy?: string;
 }
 
 /** Mirrors the runnerwire Merge* statuses. */
@@ -258,6 +314,13 @@ export interface CreateRunRequest {
   /** W2.5: omitted for headless. "interactive" needs the runner's
    * "interactive" capability; the hub answers 409 otherwise. */
   mode?: RunMode;
+  /** Agent roles: the role the run acts in, and a person's reason for a
+   * plain run past enabled stages (at most 200 characters). */
+  role?: string;
+  override?: string;
+  /** The auto-routing pick this dispatch followed (RouteSuggestion.ruleId
+   * "auto:<id>" without the prefix), so the hub links it to the run. */
+  routePick?: string;
 }
 
 // ---- W5: routing, fallback and pipelines. Mirrors internal/runnerwire/routing.go.
@@ -270,8 +333,10 @@ export interface AgentModel {
 }
 
 /** Route match kinds, tried in this order by the hub. */
-export type RouteMatch = "tag" | "kind" | "project" | "default";
-export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "project", "default"];
+export type RouteMatch = "tag" | "kind" | "project" | "default" | "role";
+/** RouteSuggestion.match for an auto-routing pick; never a stored rule's. */
+export const ROUTE_AUTO = "auto";
+export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "role", "project", "default"];
 
 /** Mirrors runnerwire.RouteRule. Project "" applies in every project. */
 export interface RouteRule {
@@ -315,6 +380,8 @@ export interface RunPipeline {
   reviewers?: AgentModel[] | null;
   quorum?: number;
   human?: boolean;
+  /** Agent roles: who writes the failing tests of a staged pipeline. */
+  tester?: AgentModel;
 }
 
 export type PipelineStatus =
@@ -348,6 +415,12 @@ export interface PipelineState {
   /** W7: the votes so far and a person's decision in the current round. */
   votes?: PipelineVote[] | null;
   humanVerdict?: string;
+  /** Staged pipeline: the frozen stages, the phase, the Tester's files and
+   * the executor diff guard. Absent on a legacy pipeline. */
+  stages?: { preset: string; stages: Record<string, boolean>; judge?: string } | null;
+  phase?: string;
+  testFiles?: string[] | null;
+  guard?: GuardReport | null;
 }
 
 /** Whether a pipeline will not change any more. */
@@ -430,6 +503,10 @@ export const runsApi = {
   getRouting: () => req<RoutingConfig>("/api/runs/routing"),
   putRouting: (rules: RouteRule[]) =>
     req<RoutingConfig>("/api/runs/routing", { method: "PUT", body: JSON.stringify({ rules }) }),
+  /** Agent roles: the viewer's per-role concurrency and daily budget. */
+  getRoleSettings: () => req<RoleSettingsResponse>("/api/runs/roles"),
+  putRoleSettings: (roles: RoleSettings[]) =>
+    req<RoleSettingsResponse>("/api/runs/roles", { method: "PUT", body: JSON.stringify({ roles }) }),
   /** What the routing rules pick for a node; ruleId "" when none matched. */
   getRoute: (nodeId: string) =>
     req<RouteSuggestion>(`/api/runs/route?nodeId=${encodeURIComponent(nodeId)}`),

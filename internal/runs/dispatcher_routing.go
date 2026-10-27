@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
 )
 
@@ -103,6 +104,7 @@ func (d *Dispatcher) fallback(ctx context.Context, r Record) bool {
 			RetryOf: r.ID, PipelineID: r.PipelineID, Fallbacks: chain,
 			SteppedUpAt:      r.SteppedUpAt,
 			JobHandoffBranch: branch, JobHandoffNote: handoffNote, LimitWaits: r.LimitWaits,
+			Role: r.Role, JobRoles: r.JobRoles,
 		})
 		if err != nil {
 			d.note(ctx, r, "not falling back: "+err.Error())
@@ -136,11 +138,23 @@ func label(am runnerwire.AgentModel) string {
 // PRReported moves a pipeline whose implement run ended before its pull
 // request was reported. Called with the run as it stands after the report.
 func (d *Dispatcher) prReported(ctx context.Context, r Record) {
-	if r.PipelineID == "" || r.Kind != runnerwire.JobImplement || r.Status != runnerwire.RunSucceeded {
+	if r.PipelineID == "" || r.Status != runnerwire.RunSucceeded {
+		return
+	}
+	switch r.Kind {
+	case runnerwire.JobImplement, runnerwire.JobTest, runnerwire.JobRevise:
+	default:
 		return
 	}
 	unlock := lockPipeline(r.PipelineID)
 	defer unlock()
+	if r.Kind != runnerwire.JobImplement {
+		// Only a staged pipeline waits on a test or revise run's PR.
+		p, err := d.store.Pipeline(ctx, r.PipelineID)
+		if err != nil || p.Config == nil || !p.Config.Staged {
+			return
+		}
+	}
 	d.advance(ctx, r, false)
 }
 
@@ -153,6 +167,10 @@ func (d *Dispatcher) advance(ctx context.Context, r Record, notified bool) {
 		return
 	}
 	if p.Status != runnerwire.PipelineRunning {
+		return
+	}
+	if p.Config != nil && p.Config.Staged {
+		d.advanceStaged(ctx, p, r, notified)
 		return
 	}
 	end := func(status, reason string) { d.endPipeline(ctx, p, r, status, reason, notified) }
@@ -270,6 +288,7 @@ func (d *Dispatcher) retryReview(ctx context.Context, r Record) bool {
 		Kind: r.Kind, JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
 		RetryOf: r.ID, PipelineID: r.PipelineID,
 		SteppedUpAt: r.SteppedUpAt,
+		Role:        r.Role, JobRoles: r.JobRoles,
 	})
 	if err != nil {
 		d.note(ctx, r, "not retrying the review: "+err.Error())
@@ -538,6 +557,20 @@ func (d *Dispatcher) prepareStep(ctx context.Context, p PipelineRecord, from Rec
 		jobPrompt = RevisePrompt(p.JobPrompt, review)
 		fallbacks = p.Fallbacks
 	}
+	// A pipeline made under workflow stages (Light) carries roles on its
+	// runs: executor for the work, reviewer for the reviews.
+	role, jobRoles := "", JobRoles{}
+	if p.Config != nil {
+		role = engine.RoleExecutor
+		if kind == runnerwire.JobReview {
+			role = engine.RoleReviewer
+		}
+		jobRoles = JobRoles{Tools: p.Config.Tools[role], Acceptance: p.Config.Acceptance}
+		if status, err := d.store.RoleBudgetStatus(ctx, from.OwnerID, role); err == nil && status.Exceeded != "" {
+			fail(RoleBudgetMessage(role, status))
+			return Record{}, false
+		}
+	}
 	next, err := d.store.Create(ctx, New{
 		Project: from.Project, NodeID: from.NodeID, NodeTitle: from.NodeTitle,
 		RunnerID: from.RunnerID, RunnerName: runner.Name, OwnerID: from.OwnerID,
@@ -546,6 +579,7 @@ func (d *Dispatcher) prepareStep(ctx context.Context, p PipelineRecord, from Rec
 		Kind: kind, JobBranch: p.Branch, JobPRURL: p.PRURL, Review: review,
 		PipelineID: p.ID, Fallbacks: fallbacks,
 		SteppedUpAt: from.SteppedUpAt,
+		Role:        role, JobRoles: jobRoles,
 	})
 	if err != nil {
 		fail("cannot start the next step: " + err.Error())
@@ -581,6 +615,9 @@ func (d *Dispatcher) endPipeline(ctx context.Context, p PipelineRecord, r Record
 	}
 	d.note(ctx, r, "pipeline "+status+": "+reason)
 	p.Status, p.Reason = status, reason
+	if status == runnerwire.PipelineApproved && p.Config != nil && p.Config.Staged {
+		d.stagedApproved(ctx, p, r, reason)
+	}
 	d.observed(Update{Run: r, Pipeline: &p})
 	d.notifyChanged(r)
 	if !notified && status != runnerwire.PipelineCancelled {

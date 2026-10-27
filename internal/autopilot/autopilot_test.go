@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/testpg"
 )
 
 // ---- fakes ----
@@ -60,6 +59,7 @@ func (f *fakeRuns) Start(_ context.Context, req runs.StartRequest) (runs.Record,
 	r.Project, r.NodeID, r.RunnerID, r.RunnerName = req.Project, req.Body.NodeID, req.Body.RunnerID, "pc"
 	r.Agent, r.Model, r.Status, r.CreatedAt = req.Body.Agent, req.Body.Model, runnerwire.RunOffered, f.stamp()
 	r.CreatedBy = req.ActorID
+	r.Kind, r.Role = req.Body.Kind, req.Body.Role
 	if req.Body.Pipeline != nil {
 		p := &runs.PipelineRecord{}
 		p.ID = "pipe-" + r.ID
@@ -258,6 +258,8 @@ type fakeBoard struct {
 	bodies map[string]string
 	// refs are the reference notes a node's run is given.
 	refs map[string][]runs.Reference
+	// createdBy is the run that created a node (roles_test.go).
+	createdBy map[string]string
 }
 
 // newBoard builds a graph: nodes by id (kind after a colon: "x:gate"), and
@@ -350,10 +352,7 @@ type harness struct {
 
 func newHarness(t *testing.T, board *fakeBoard) *harness {
 	t.Helper()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	h := &harness{t: t, runs: newFakeRuns(), board: board, store: NewStore(database), ctx: context.Background(),
 		bea: identity.Actor{ID: "bea", Name: "Bea"}}

@@ -272,6 +272,11 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 		history: appendMessage(history, userMessage),
 	}
 	stop, usage, err := run.loop()
+	// The turn's tokens count toward the usage report, partial ones too.
+	if usage.InputTokens+usage.OutputTokens > 0 {
+		_ = s.store.RecordUsage(storeCtx, conversation.ID, req.Actor.ID, conversation.Project,
+			string(plan.provider), plan.model, int(usage.InputTokens), int(usage.OutputTokens))
+	}
 	if err != nil {
 		emit(Event{Type: EventError, Message: err.Error(), Code: "provider_error"})
 		return nil

@@ -12,7 +12,10 @@ const { spawn } = require("node:child_process");
 const metadata = require("./package.json");
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const STARTUP_TIMEOUT_MS = 20_000;
+// The first start of a new install creates the embedded PostgreSQL (initdb
+// takes several seconds on Windows with Defender scanning every file), so the
+// backend gets two minutes to answer.
+const STARTUP_TIMEOUT_MS = 120_000;
 const WORKSPACE_PICKER_MARKER = "workspace-picker-seen";
 const REMOTE_SERVER_ENV = "NODEVAS_SERVER_URL";
 const DEFAULT_REMOTE_SERVER_URL = metadata.defaultServerURL || "";
@@ -72,6 +75,39 @@ function backendExecutable() {
   const binaryName = process.platform === "win32" ? "nodevas.exe" : "nodevas";
   if (app.isPackaged) return path.join(process.resourcesPath, "bin", binaryName);
   return path.resolve(__dirname, "..", binaryName);
+}
+
+// The pinned PostgreSQL binaries the release bundles for this platform
+// (desktop/resources/pg/<platform>-<arch>, verified at release time by
+// scripts/verify-pg-bundle.mjs and again by the backend against the
+// manifest compiled into it). Unpackaged runs have none, and the backend
+// falls back to its verified first-run download.
+function bundledPostgres() {
+  if (!app.isPackaged) return undefined;
+  const dir = path.join(process.resourcesPath, "pg", `${process.platform}-${process.arch}`);
+  return fs.existsSync(dir) ? dir : undefined;
+}
+
+// A small window saying what the wait is for, shown only if the backend is
+// slow to answer (the first start creates the database).
+function showPreparingWindow() {
+  const window = new BrowserWindow({
+    width: 360,
+    height: 120,
+    frame: false,
+    resizable: false,
+    show: false,
+    webPreferences: { sandbox: true, contextIsolation: true, javascript: false },
+  });
+  const html =
+    "<!doctype html><meta charset=utf-8><body style=\"margin:0;display:flex;align-items:center;" +
+    "justify-content:center;height:100vh;font:15px system-ui,sans-serif;background:#1d1f24;color:#e6e6e6\">" +
+    "正在準備資料庫…</body>";
+  void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  window.once("ready-to-show", () => {
+    if (!window.isDestroyed()) window.show();
+  });
+  return window;
 }
 
 function configuredServerURL() {
@@ -186,18 +222,35 @@ async function startBackend() {
   backendURL = `http://127.0.0.1:${port}`;
   backendLaunch = { executable, workspace, port };
   spawnBackend();
-  await waitForBackend(backendURL);
+  let preparing = null;
+  const preparingTimer = setTimeout(() => {
+    preparing = showPreparingWindow();
+  }, 1500);
+  try {
+    await waitForBackend(backendURL);
+  } finally {
+    clearTimeout(preparingTimer);
+    if (preparing && !preparing.isDestroyed()) preparing.destroy();
+  }
 }
 
 function spawnBackend() {
   const { executable, workspace, port } = backendLaunch;
+  const env = { ...process.env };
+  const pgBinaries = bundledPostgres();
+  if (pgBinaries) env.NODEVAS_PG_BINARIES = pgBinaries;
+  // stdin is a pipe the backend watches (--stop-on-stdin-close): closing it
+  // is the graceful stop on every platform, Windows included, where kill()
+  // is TerminateProcess and would skip the database's shutdown. If this
+  // process dies, the pipe closes and the backend stops too.
   const child = spawn(
     executable,
-    ["serve", "-project", workspace, "-port", String(port)],
-    { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+    ["serve", "-project", workspace, "-port", String(port), "--stop-on-stdin-close"],
+    { windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env },
   );
   backend = child;
   backendStartedAt = Date.now();
+  child.stdin.on("error", () => {});
   child.stdout.on("data", (chunk) => log.info(String(chunk).trim()));
   child.stderr.on("data", (chunk) => log.info(String(chunk).trim()));
   let ended = false;
@@ -410,7 +463,10 @@ function stopBackend() {
       clearTimeout(forceTimer);
       resolve();
     });
-    processToStop.kill("SIGTERM");
+    // The backend shuts down when its stdin closes: the HTTP server, the
+    // final backup, then its embedded PostgreSQL, cleanly. SIGKILL above is
+    // the fallback for a backend that hangs.
+    processToStop.stdin?.end();
   }).finally(() => {
     backendStopPromise = null;
   });

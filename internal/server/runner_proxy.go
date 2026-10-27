@@ -15,10 +15,12 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/auth"
+	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 )
 
 // proxyRoute is one method and path pattern the proxy forwards. "*" in a
@@ -50,6 +52,8 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/nodes/*/claim"},
 	{http.MethodPost, "/api/nodes/*/release"},
 	{http.MethodPost, "/api/nodes/*/status"},
+	// set_acceptance; the store decides which role may write criteria.
+	{http.MethodPost, "/api/nodes/*/acceptance"},
 	{http.MethodPost, "/api/graph/ops"},
 	{http.MethodPost, "/api/graph/subgraph"},
 	{http.MethodGet, "/api/agents"},
@@ -65,6 +69,9 @@ var runnerProxyRoutes = []proxyRoute{
 	{http.MethodPost, "/api/agents/sessions/*/changes"},
 	// `nodevas hook` reporting an external session's token usage.
 	{http.MethodPost, "/api/agents/sessions/*/usage"},
+	// submit_verdict: a review or QA run's structured verdict; the hub takes
+	// the role from the run's record.
+	{http.MethodPost, "/api/verdicts"},
 	// Deliberately absent: holding a session's inbound mail and approving or
 	// rejecting held messages are a person's decisions about agents.
 }
@@ -112,10 +119,12 @@ type runnerProxyKey struct{}
 
 type runnerProxied struct {
 	actor identity.Actor
-	// runID is the run a heartbeat comes from, when the runner named one
-	// (runnerwire.RunIDHeader) and it is a run of that runner; "" otherwise,
-	// and for every other route.
+	// runID is the run the request comes from, when the runner named one
+	// (runnerwire.RunIDHeader) and it is a run of that runner; "" otherwise.
 	runID string
+	// runProject is that run's project ("" without a run): a roled run acts
+	// on its own project only (withRoleGuard).
+	runProject string
 	// still reports whether the runner's token is still good, for long-polls
 	// that outlive a revoke.
 	still func() bool
@@ -128,9 +137,14 @@ func runnerProxiedFrom(ctx context.Context) (runnerProxied, bool) {
 
 // runnerProxyActor is who a proxied request acts as: the runner's owner as
 // the server knows them now (their current role, not the one they had when
-// the runner was made), marked as the agent class the request declares.
-// Only worker and orchestrator exist for agents; nothing else is accepted.
-func (s *Server) runnerProxyActor(r *http.Request, runner runnerwire.Runner) (identity.Actor, error) {
+// the runner was made), marked as an agent.
+//
+// A request from a run (rec non-nil) acts in the run's role, at most at the
+// role's rank (a legacy run at a worker's): the header can only lower it, so
+// an agent cannot claim orchestrator through its sidecar's flags. A request
+// naming no run (owner tooling on a runner token) keeps the class its header
+// declares. Only worker and orchestrator exist for agents.
+func (s *Server) runnerProxyActor(r *http.Request, runner runnerwire.Runner, rec *runs.Record) (identity.Actor, error) {
 	class := identity.AgentClass(strings.TrimSpace(r.Header.Get(auth.AgentRoleHeaderName)))
 	switch class {
 	case identity.AgentHuman:
@@ -138,6 +152,15 @@ func (s *Server) runnerProxyActor(r *http.Request, runner runnerwire.Runner) (id
 	case identity.AgentWorker, identity.AgentOrchestrator:
 	default:
 		return identity.Actor{}, auth.ErrUnknownAgentRole
+	}
+	if rec != nil {
+		rank := identity.AgentWorker
+		if rec.Role != "" {
+			if roleRank := engine.RoleClass(nil, rec.Role); roleRank != "" {
+				rank = roleRank
+			}
+		}
+		class = identity.LowerClass(class, rank)
 	}
 	var actor identity.Actor
 	switch accounts, ok := s.auth.(*auth.SessionAuth); {
@@ -154,6 +177,9 @@ func (s *Server) runnerProxyActor(r *http.Request, runner runnerwire.Runner) (id
 		actor = identity.Actor{ID: runner.OwnerID, Name: runner.OwnerName}
 	}
 	actor.Agent = class
+	if rec != nil {
+		actor.AgentRole, actor.RunID, actor.RunNodeID = rec.Role, rec.ID, rec.NodeID
+	}
 	return actor, nil
 }
 
@@ -170,7 +196,14 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 			errors.New("this route is not available to agents on a runner"), nil)
 		return
 	}
-	actor, err := s.runnerProxyActor(r, runner)
+	// The run the request comes from decides its role (spec 2.1). A run that
+	// ended has no business on the board any more.
+	rec := s.proxiedRun(r, runner)
+	if rec != nil && runnerwire.RunFinal(rec.Status) {
+		httpx.Coded(c, http.StatusUnauthorized, "RUN_ENDED", errRunEnded, nil)
+		return
+	}
+	actor, err := s.runnerProxyActor(r, runner, rec)
 	if err != nil {
 		httpx.Err(c, http.StatusUnauthorized, err)
 		return
@@ -185,10 +218,8 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 		_, err := s.runners.Authenticate(context.Background(), token)
 		return err == nil
 	}}
-	// Only a heartbeat records the run (agents.Session.RunID); every other
-	// proxied call is spared the lookup.
-	if target == "/api/agents/heartbeat" {
-		proxied.runID = s.proxiedRunID(r, runner)
+	if rec != nil {
+		proxied.runID, proxied.runProject = rec.ID, rec.Project
 	}
 	inner := r.Clone(context.WithValue(r.Context(), runnerProxyKey{}, proxied))
 	inner.URL.Path = target
@@ -199,24 +230,26 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	inner.Header.Del("Authorization")
 	inner.Header.Del("Cookie")
 	inner.Header.Del(auth.AgentRoleHeaderName)
+	inner.Header.Del(auth.RoleHeaderName)
 	inner.Header.Del(runnerwire.RunIDHeader)
 	handler.ServeHTTP(c.Writer, inner)
 	c.Abort()
 }
 
-// proxiedRunID is the run a proxied request says it comes from, if that run
-// is the runner's own: a runner can only speak for its own runs, whatever ID
-// it sends. "" when it names none, or one it may not.
-func (s *Server) proxiedRunID(r *http.Request, runner runnerwire.Runner) string {
+// proxiedRun is the run a proxied request says it comes from, if that run is
+// the runner's own: a runner can only speak for its own runs, whatever ID it
+// sends. nil when it names none, or one it may not. Read on every request,
+// not cached: a run that ends is refused at once.
+func (s *Server) proxiedRun(r *http.Request, runner runnerwire.Runner) *runs.Record {
 	runID := strings.TrimSpace(r.Header.Get(runnerwire.RunIDHeader))
 	if runID == "" || s.runs == nil {
-		return ""
+		return nil
 	}
 	rec, err := s.runs.Store().Get(r.Context(), runID)
 	if err != nil || rec.RunnerID != runner.ID {
-		return ""
+		return nil
 	}
-	return rec.ID
+	return &rec
 }
 
 // proxiedRunIDFrom is the run a request came from through a runner's proxy,

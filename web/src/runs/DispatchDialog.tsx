@@ -6,6 +6,7 @@ import {
   MAX_RUN_PROMPT_CHARS,
   MAX_PIPELINE_ROUNDS,
   RequestError,
+  ROUTE_AUTO,
   type Actor,
   type AgentModel,
   type RouteSuggestion,
@@ -37,6 +38,13 @@ import { AutoAcceptNote } from "./AutoAcceptNote";
 import { StepUpDialog } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
 import { effectiveDispatchMode, RunModePicker, type DispatchMode } from "./RunModePicker";
+import { openNodeDetail } from "../components/drawer/openNodeDetail";
+import { requiresAcceptance, workflowForNode } from "../domain/graph/stages";
+import { FOCUS_ACCEPTANCE_EVENT } from "../roles/AcceptanceCriteria";
+import { StageChain, stagedNeedsTests } from "../roles/StageChain";
+
+/** Longest reason a person gives for skipping enabled stages. */
+export const MAX_OVERRIDE_CHARS = 200;
 
 const HEADLESS = "headless";
 
@@ -93,6 +101,14 @@ export function DispatchDialog({
   const nodeTitle = useApp(
     (s) => s.graph?.nodes?.find((node) => node.id === nodeId)?.title || nodeId,
   );
+  // Agent roles: the stages this node is worked under (null: legacy, the
+  // dialog as before) and whether it has the criteria they judge it by.
+  const workflow = useApp((s) => workflowForNode(s.graph, nodeId));
+  const hasCriteria = useApp(
+    (s) => (s.graph?.nodes?.find((node) => node.id === nodeId)?.acceptance?.items?.length ?? 0) > 0,
+  );
+  const [overrideOn, setOverrideOn] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
   const runners = useRunners((s) => s.runners);
   const runnersLoaded = useRunners((s) => s.loaded);
   const runnersLoading = useRunners((s) => s.loading);
@@ -220,7 +236,26 @@ export function DispatchDialog({
       : "";
 
   const fallbackInvalid = fallbacks.some((item) => agentModelProblem(item) !== "");
-  const reviewInvalid = pipelineOn && agentModelProblem(review) !== "";
+  // A staged project picks the pipeline from its stages; a person may skip
+  // them for one run, with a reason the hub records.
+  const staged = workflow !== null && !overrideOn;
+  const stagedPipeline = staged && Boolean(workflow?.stages.tester || workflow?.stages.reviewer);
+  const reviewOn = staged ? Boolean(workflow?.stages.reviewer) : workflow === null && pipelineOn;
+  // Staged review starts on another vendor where one exists, until changed.
+  const shownReview =
+    reviewOn && agent && agentModelProblem(review) !== ""
+      ? defaultPipeline({ agent: agent.kind, model }, catalog).review
+      : review;
+  const reviewInvalid = reviewOn && agentModelProblem(shownReview) !== "";
+  const missingCriteria = staged && requiresAcceptance(workflow) && !hasCriteria;
+  const repo = repos.find((item) => item.id === repoId);
+  const needsTests = staged && stagedNeedsTests(workflow);
+  const missingTestCommand = needsTests && Boolean(repo) && !repo?.verify;
+  const runnerCaps = runner?.info?.capabilities ?? [];
+  const oldRunner =
+    stagedPipeline && Boolean(runner) && !(runnerCaps.includes("roles") && runnerCaps.includes("verify"));
+  const overrideValue = overrideReason.trim();
+  const overrideInvalid = overrideOn && (!overrideValue || overrideValue.length > MAX_OVERRIDE_CHARS);
 
   const ready =
     Boolean(runner && agent && model && repoId) &&
@@ -228,6 +263,10 @@ export function DispatchDialog({
     !promptError &&
     !fallbackInvalid &&
     !reviewInvalid &&
+    !missingCriteria &&
+    !missingTestCommand &&
+    !oldRunner &&
+    !overrideInvalid &&
     !submitting;
 
   // "From rule: tag = review", and what of it this runner could not honour.
@@ -235,9 +274,22 @@ export function DispatchDialog({
     suggestion?.value ??
     routingRules?.find((rule) => rule.id === suggestion?.ruleId)?.value ??
     "";
+  // An auto-routing pick (analytics): no rule of the viewer's chose it.
+  const autoPick = suggestion?.match === ROUTE_AUTO;
   const ruleNote = suggestion
-    ? t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
+    ? autoPick
+      ? t("runs.route.auto")
+      : t("dispatch.fromRule", { rule: routeLabel(t, suggestion.match, ruleValue, kindLabel) })
     : "";
+  // The pick is linked to the run only when the run follows it.
+  const routePick =
+    autoPick &&
+    suggestion?.ruleId.startsWith(`${ROUTE_AUTO}:`) &&
+    agent?.kind === suggestion.target.agent &&
+    model === (suggestion.target.model ?? "") &&
+    (!suggestion.runnerId || runner?.id === suggestion.runnerId)
+      ? suggestion.ruleId.slice(ROUTE_AUTO.length + 1)
+      : "";
   const wanted = suggestion ? (suggestion.pipeline?.implement ?? suggestion.target) : undefined;
   const ruleMisses: string[] = [];
   if (suggestion && runner) {
@@ -272,16 +324,29 @@ export function DispatchDialog({
         ...(baseValue ? { base: baseValue } : {}),
         ...(promptValue ? { prompt: promptValue } : {}),
         ...(fallbacks.length > 0 ? { fallbacks: fallbacks.map(trimAgentModel) } : {}),
-        ...(pipelineOn
+        ...(stagedPipeline
           ? {
+              // The hub runs the frozen stages: the Tester and Executor here
+              // are who it starts with; roles' own routes pick the rest.
               pipeline: {
+                ...(workflow?.stages.tester ? { tester: { agent: agent.kind, model } } : {}),
                 implement: { agent: agent.kind, model },
-                review: trimAgentModel(review),
+                review: workflow?.stages.reviewer ? trimAgentModel(shownReview) : { agent: agent.kind, model },
                 maxRounds: rounds,
               },
             }
-          : {}),
+          : workflow === null && pipelineOn
+            ? {
+                pipeline: {
+                  implement: { agent: agent.kind, model },
+                  review: trimAgentModel(review),
+                  maxRounds: rounds,
+                },
+              }
+            : {}),
+        ...(overrideOn ? { override: overrideValue } : {}),
         ...(mode === "interactive" ? { mode } : {}),
+        ...(routePick ? { routePick } : {}),
       });
       onCreated(run);
     } catch (caught) {
@@ -305,6 +370,16 @@ export function DispatchDialog({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const writeCriteria = () => {
+    onClose();
+    openNodeDetail(nodeId, "content");
+    // The panel mounts its criteria a moment later.
+    window.setTimeout(
+      () => window.dispatchEvent(new CustomEvent(FOCUS_ACCEPTANCE_EVENT, { detail: nodeId })),
+      50,
+    );
   };
 
   const openRunners = () => {
@@ -377,6 +452,52 @@ export function DispatchDialog({
                 {t("budget.adjust")}
               </button>
             </p>
+          )}
+
+          {workflow && (
+            <div className="run-stages">
+              {!overrideOn && <StageChain workflow={workflow} />}
+              {missingCriteria && (
+                <div className="run-stage-block" role="alert">
+                  <span>{t("dispatch.needsCriteria")}</span>
+                  <button type="button" className="run-inline-link" onClick={writeCriteria}>
+                    {t("dispatch.writeCriteria")}
+                  </button>
+                </div>
+              )}
+              {missingTestCommand && (
+                <div className="run-stage-warning" role="status">
+                  <span>{t("dispatch.noTestCommand")}</span>
+                  <code>{`nodevas runner repo set ${repo?.name ?? "<repo>"} --test-command "go test ./..."`}</code>
+                </div>
+              )}
+              {oldRunner && (
+                <p className="run-stage-warning" role="status">
+                  {t("dispatch.oldRunner")}
+                </p>
+              )}
+              <label className="route-toggle">
+                <input
+                  type="checkbox"
+                  checked={overrideOn}
+                  onChange={(event) => setOverrideOn(event.target.checked)}
+                />
+                <span>{t("dispatch.override")}</span>
+              </label>
+              {overrideOn && (
+                <label className="run-field">
+                  <span>{t("dispatch.overrideReason")}</span>
+                  <input
+                    value={overrideReason}
+                    maxLength={MAX_OVERRIDE_CHARS}
+                    placeholder={t("dispatch.overridePlaceholder")}
+                    aria-invalid={overrideInvalid ? true : undefined}
+                    onChange={(event) => setOverrideReason(event.target.value)}
+                  />
+                </label>
+              )}
+              {overrideOn && <small className="run-hint">{t("dispatch.overrideHint")}</small>}
+            </div>
           )}
 
           {loadingRunners ? (
@@ -485,6 +606,7 @@ export function DispatchDialog({
                     />
                   </details>
 
+                  {workflow === null && (
                   <label className="route-toggle">
                     <input
                       type="checkbox"
@@ -502,9 +624,10 @@ export function DispatchDialog({
                     />
                     <span>{t("routing.pipelineToggle")}</span>
                   </label>
-                  {pipelineOn && agent && (
+                  )}
+                  {reviewOn && agent && (
                     <PipelineFields
-                      value={{ implement: { agent: agent.kind, model }, review, maxRounds: rounds }}
+                      value={{ implement: { agent: agent.kind, model }, review: shownReview, maxRounds: rounds }}
                       catalog={catalog}
                       implementNote={t("dispatch.implementIsAbove", {
                         value: agentModelText({ agent: agent.kind, model }),

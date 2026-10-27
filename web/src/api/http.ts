@@ -103,16 +103,12 @@ export function getProjectOverride(): string {
 }
 
 /**
- * `verify` is opt-in per endpoint. The Go structs and `types.ts` are hand-synced
- * with nothing that fails a build when they drift, so the responses the whole
- * app is built on are checked here rather than surfacing as an `undefined` deep
- * in a component with nothing pointing back at the rename that caused it.
+ * Sends one request the way req() does (project header, JSON content type,
+ * CSRF token, 30 s timeout, the 401 sign-in prompt) and hands back the raw
+ * response, for the few callers that read a refusal's body themselves (a
+ * 409 that carries a fresh suggestion, a code the Explorer explains).
  */
-export async function req<T>(
-  url: string,
-  init?: RequestInit,
-  verify?: Verifier<T>,
-): Promise<T> {
+export async function send(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (projectOverride && !headers.has("X-Nodevas-Project")) {
     headers.set("X-Nodevas-Project", projectOverride);
@@ -150,6 +146,21 @@ export async function req<T>(
     notifyUnauthorized();
     throw new UnauthorizedError();
   }
+  return res;
+}
+
+/**
+ * `verify` is opt-in per endpoint. The Go structs and `types.ts` are hand-synced
+ * with nothing that fails a build when they drift, so the responses the whole
+ * app is built on are checked here rather than surfacing as an `undefined` deep
+ * in a component with nothing pointing back at the rename that caused it.
+ */
+export async function req<T>(
+  url: string,
+  init?: RequestInit,
+  verify?: Verifier<T>,
+): Promise<T> {
+  const res = await send(url, init);
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
     throw new ConflictError(

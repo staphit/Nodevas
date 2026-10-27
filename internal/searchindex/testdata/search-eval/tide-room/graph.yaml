@@ -1,0 +1,557 @@
+version: 1
+type: story
+users:
+    - id: author
+      name: Author
+nodes:
+    - id: note-01
+      title: 角色卡：林曉
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-02
+      title: 角色卡：林小雨
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-03
+      title: 角色卡：周海生
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-04
+      title: 角色卡：陳默
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-05
+      title: 角色卡：黃金城
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+        - antagonist
+    - id: note-06
+      title: 角色卡：許玉蘭（許阿嬤）
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-07
+      title: 角色卡：蘇懷安
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - character
+    - id: note-08
+      title: 世界觀：白沙澳
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - world
+    - id: note-09
+      title: 時間線
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - timeline
+    - id: note-10
+      title: 道具清單
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - note
+        - props
+    - id: en-01
+      title: Penrose diary — 12 March 1932
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - research
+        - english
+    - id: en-02
+      title: Penrose diary — 3 September 1932
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - research
+        - english
+    - id: en-03
+      title: Synopsis for foreign rights agents
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - pitch
+        - english
+    - id: en-04
+      title: Research notes — tides at Baisha
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - research
+        - english
+    - id: s-01
+      title: 第一章・渡輪
+      kind: scene
+      priority: medium
+      assignee: author
+      tags:
+        - novel
+        - ch1
+    - id: s-02
+      title: 第一章・碼頭
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-01
+      tags:
+        - novel
+        - ch1
+    - id: s-03
+      title: 第一章・石厝
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-02
+      tags:
+        - novel
+        - ch1
+    - id: s-04
+      title: 第一章・雜貨店
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-03
+      tags:
+        - novel
+        - ch1
+    - id: s-05
+      title: 第一章・懸崖
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-04
+      tags:
+        - novel
+        - ch1
+    - id: s-06
+      title: 第二章・看守人
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-05
+      tags:
+        - novel
+        - ch2
+    - id: s-07
+      title: 第二章・颱風夜
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-06
+      tags:
+        - novel
+        - ch2
+    - id: s-08
+      title: 第二章・口琴
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-07
+      tags:
+        - novel
+        - ch2
+    - id: s-09
+      title: 第二章・鎮民大會
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-08
+      tags:
+        - novel
+        - ch2
+    - id: s-10
+      title: 第二章・夜語
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-09
+      tags:
+        - novel
+        - ch2
+    - id: s-11
+      title: 第三章・餅乾盒
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-10
+      tags:
+        - novel
+        - ch3
+    - id: s-12
+      title: 第三章・手電筒
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-11
+      tags:
+        - novel
+        - ch3
+    - id: s-13
+      title: 第三章・給姊姊
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-12
+      tags:
+        - novel
+        - ch3
+    - id: s-14
+      title: 第三章・拳頭
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-13
+      tags:
+        - novel
+        - ch3
+    - id: s-15
+      title: 第三章・消失的鑰匙
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-14
+      tags:
+        - novel
+        - ch3
+    - id: s-16
+      title: 第四章・英文日記
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-15
+      tags:
+        - novel
+        - ch4
+    - id: s-17
+      title: 第四章・潮汐表
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-16
+      tags:
+        - novel
+        - ch4
+    - id: s-18
+      title: 第四章・順安號
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-17
+      tags:
+        - novel
+        - ch4
+    - id: s-19
+      title: 第四章・烏魚子
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-18
+      tags:
+        - novel
+        - ch4
+    - id: s-20
+      title: 第四章・司機
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-19
+      tags:
+        - novel
+        - ch4
+    - id: s-21
+      title: 第五章・凌晨三點
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-20
+      tags:
+        - novel
+        - ch5
+    - id: s-22
+      title: 第五章・鑰匙
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-21
+      tags:
+        - novel
+        - ch5
+    - id: s-23
+      title: 第五章・石室
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-22
+      tags:
+        - novel
+        - ch5
+    - id: s-24
+      title: 第五章・漲潮
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-23
+      tags:
+        - novel
+        - ch5
+    - id: s-25
+      title: 第五章・天亮
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-24
+      tags:
+        - novel
+        - ch5
+    - id: s-26
+      title: 第六章・點燈的人
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-25
+      tags:
+        - novel
+        - ch6
+    - id: s-27
+      title: 第六章・母親
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-26
+      tags:
+        - novel
+        - ch6
+    - id: s-28
+      title: 第六章・輪椅
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-27
+      tags:
+        - novel
+        - ch6
+    - id: s-29
+      title: 第六章・總編
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-28
+      tags:
+        - novel
+        - ch6
+    - id: s-30
+      title: 第六章・鐵鍊
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-29
+      tags:
+        - novel
+        - ch6
+    - id: s-31
+      title: 第七章・停航
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-30
+      tags:
+        - novel
+        - ch7
+    - id: s-32
+      title: 第七章・跟蹤
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-31
+      tags:
+        - novel
+        - ch7
+    - id: s-33
+      title: 第七章・帳本
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-32
+      tags:
+        - novel
+        - ch7
+    - id: s-34
+      title: 第七章・點燈
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-33
+      tags:
+        - novel
+        - ch7
+    - id: s-35
+      title: 第七章・迴廊
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-34
+      tags:
+        - novel
+        - ch7
+    - id: s-36
+      title: 第八章・頭版
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-35
+      tags:
+        - novel
+        - ch8
+    - id: s-37
+      title: 第八章・來信
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-36
+      tags:
+        - novel
+        - ch8
+    - id: s-38
+      title: 第八章・航向澎湖
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-37
+      tags:
+        - novel
+        - ch8
+    - id: s-39
+      title: 第八章・畫室
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-38
+      tags:
+        - novel
+        - ch8
+    - id: s-40
+      title: 第八章・點燈的日子
+      kind: scene
+      priority: medium
+      assignee: author
+      requires: s-39
+      tags:
+        - novel
+        - ch8
+edges:
+    - from: s-01
+      to: s-02
+    - from: s-02
+      to: s-03
+    - from: s-03
+      to: s-04
+    - from: s-04
+      to: s-05
+    - from: s-05
+      to: s-06
+    - from: s-06
+      to: s-07
+    - from: s-07
+      to: s-08
+    - from: s-08
+      to: s-09
+    - from: s-09
+      to: s-10
+    - from: s-10
+      to: s-11
+    - from: s-11
+      to: s-12
+    - from: s-12
+      to: s-13
+    - from: s-13
+      to: s-14
+    - from: s-14
+      to: s-15
+    - from: s-15
+      to: s-16
+    - from: s-16
+      to: s-17
+    - from: s-17
+      to: s-18
+    - from: s-18
+      to: s-19
+    - from: s-19
+      to: s-20
+    - from: s-20
+      to: s-21
+    - from: s-21
+      to: s-22
+    - from: s-22
+      to: s-23
+    - from: s-23
+      to: s-24
+    - from: s-24
+      to: s-25
+    - from: s-25
+      to: s-26
+    - from: s-26
+      to: s-27
+    - from: s-27
+      to: s-28
+    - from: s-28
+      to: s-29
+    - from: s-29
+      to: s-30
+    - from: s-30
+      to: s-31
+    - from: s-31
+      to: s-32
+    - from: s-32
+      to: s-33
+    - from: s-33
+      to: s-34
+    - from: s-34
+      to: s-35
+    - from: s-35
+      to: s-36
+    - from: s-36
+      to: s-37
+    - from: s-37
+      to: s-38
+    - from: s-38
+      to: s-39
+    - from: s-39
+      to: s-40

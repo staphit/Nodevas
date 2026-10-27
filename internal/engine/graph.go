@@ -56,6 +56,10 @@ type Graph struct {
 	// NodeTypes is the project's sparse type list: every custom type, plus a
 	// built-in only when its shape or colour is overridden (nodetypes.go).
 	NodeTypes []NodeTypeDef `yaml:"node_types,omitempty" json:"nodeTypes,omitempty"`
+	// AgentRoles is the project's sparse role list (roles.go); Workflow its
+	// stages (workflow.go), nil for legacy.
+	AgentRoles []AgentRoleDef `yaml:"agent_roles,omitempty" json:"agentRoles,omitempty"`
+	Workflow   *Workflow      `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	// OfficeStyle is how the project's office looks in Station
 	// (officestyle.go). Empty means the default for the layout.
 	OfficeStyle string   `yaml:"office_style,omitempty" json:"officeStyle,omitempty"`
@@ -94,6 +98,10 @@ type Node struct {
 	// They never block: readiness, requires, cycles, the critical path and
 	// Problems all ignore them.
 	Refs []string `yaml:"refs,omitempty" json:"refs,omitempty"`
+	// Acceptance is the node's acceptance criteria (acceptance.go); Workflow
+	// a Goal's stage override (workflow.go).
+	Acceptance *Acceptance `yaml:"acceptance,omitempty" json:"acceptance,omitempty"`
+	Workflow   *Workflow   `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 }
 
 // NodeLinkRef is one named reference. Project empty means this node's own

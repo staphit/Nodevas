@@ -26,6 +26,8 @@ Open <http://127.0.0.1:5666>. There is no sign-in page: on a loopback server the
 
 `--project` points to a workspace, not a single project. Every directory below that workspace containing `graph.yaml` appears as a project. Nodevas creates the required workspace data when the path does not exist. The frontend is built into `web/dist` and embedded into the binary.
 
+Accounts, the audit trail, settings and the search index live in a PostgreSQL database that `serve` starts for you on `127.0.0.1` and stops with it. The first start downloads the pinned PostgreSQL build once (about 40–90 MB, checked against a SHA-256 compiled into the binary) and creates the database, which takes a few seconds; the desktop app ships the binaries and downloads nothing. Linux needs glibc 2.36 or newer (Debian 12, Ubuntu 23.04); elsewhere point `NODEVAS_DATABASE_URL` at a server. Back up with `nodevas db dump`. See [Operations: Database](./operations.md#database).
+
 ### Run coding agents too
 
 The same command starts a runner for this server on this machine. Name the repositories agents may work in:
@@ -38,9 +40,16 @@ The same command starts a runner for this server on this machine. Name the repos
 
 ### With Docker on Linux
 
+The image never starts a database of its own: give it a PostgreSQL 17 server with `NODEVAS_DATABASE_URL` (or `NODEVAS_DATABASE_URL_FILE`).
+
 ```bash
+docker run -d --name nodevas-db --network host \
+  -e POSTGRES_USER=nodevas -e POSTGRES_PASSWORD="$DB_PASSWORD" -e POSTGRES_DB=nodevas \
+  -e POSTGRES_HOST_AUTH_METHOD=scram-sha-256 -v nodevas-pg:/var/lib/postgresql/data \
+  postgres:17 -c listen_addresses=127.0.0.1
 docker run -d --name nodevas --network host \
   -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
+  -e NODEVAS_DATABASE_URL="postgres://nodevas:$DB_PASSWORD@127.0.0.1:5432/nodevas?sslmode=disable" \
   ghcr.io/staphit/nodevas:latest
 ```
 
@@ -74,7 +83,7 @@ The image is `ghcr.io/staphit/nodevas`. A hub other machines can reach needs:
 
 The server refuses to start on the network without a host name, TLS (or a proxy), and an account. [Operations: Allow network access](./operations.md#allow-network-access) explains each check.
 
-The image's default command serves `/data` on loopback only, which a port mapping cannot reach, so a hub sets its own `serve` flags or the matching `NODEVAS_SERVE_*` variables. Every container that uses the data volume needs `XDG_CONFIG_HOME=/data/.config`, because the container user (uid `568`) has no home directory.
+The image's default command serves `/data` on loopback only, which a port mapping cannot reach, so a hub sets its own `serve` flags or the matching `NODEVAS_SERVE_*` variables. Every container that uses the data volume needs `XDG_CONFIG_HOME=/data/.config`, because the container user (uid `568`) has no home directory, and a PostgreSQL 17 server named by `NODEVAS_DATABASE_URL_FILE` (or `NODEVAS_DATABASE_URL`): the image refuses to start without one (`NODEVAS_REQUIRE_DATABASE_URL=1`).
 
 #### Behind a reverse proxy, with Docker Compose
 
@@ -85,8 +94,12 @@ services:
   nodevas:
     image: ghcr.io/staphit/nodevas:latest
     restart: unless-stopped
+    depends_on:
+      - postgres
     environment:
       XDG_CONFIG_HOME: /data/.config
+      # postgres://nodevas:PASSWORD@postgres:5432/nodevas?sslmode=disable
+      NODEVAS_DATABASE_URL_FILE: /run/secrets/database_url
       NODEVAS_SERVE_LISTEN: 0.0.0.0
       NODEVAS_SERVE_HOSTNAME: nodevas.example.com
       NODEVAS_SERVE_BEHIND_PROXY: "true"
@@ -101,9 +114,24 @@ services:
       - nodevas-data:/data
     secrets:
       - smtp_password
+      - database_url
     networks:
       - nodevas
     # No "ports:": only the proxy reaches the hub, at http://nodevas:5666.
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nodevas
+      POSTGRES_DB: nodevas
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    volumes:
+      - nodevas-pg:/var/lib/postgresql/data
+    secrets:
+      - database_password
+    networks:
+      - nodevas
 
   # Add your HTTPS reverse proxy here, on the nodevas network.
 
@@ -115,13 +143,18 @@ networks:
 
 volumes:
   nodevas-data:
+  nodevas-pg:
 
 secrets:
   smtp_password:
     file: ./smtp-password
+  database_password:
+    file: ./database-password
+  database_url:
+    file: ./database-url
 ```
 
-1. Put the SMTP password in `smtp-password`, readable by uid `568`.
+1. Put the SMTP password in `smtp-password` and the database URL in `database-url`, both readable by uid `568`, and the database password in `database-password`.
 2. Create the admin account (the password is read from stdin):
 
    ```bash
@@ -141,6 +174,8 @@ secrets:
    ```bash
    printf '%s' "$ADMIN_PASSWORD" | docker run --rm -i \
      -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
+     -e NODEVAS_DATABASE_URL_FILE=/run/secrets/database-url \
+     -v /etc/nodevas/database-url:/run/secrets/database-url:ro \
      ghcr.io/staphit/nodevas:latest \
      user add --project /data --user admin --role admin \
      --email you@example.com --password-stdin
@@ -153,6 +188,8 @@ secrets:
      -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
      -v /etc/nodevas/tls:/tls:ro \
      -v /etc/nodevas/smtp-password:/run/secrets/smtp-password:ro \
+     -v /etc/nodevas/database-url:/run/secrets/database-url:ro \
+     -e NODEVAS_DATABASE_URL_FILE=/run/secrets/database-url \
      -e NODEVAS_SERVE_SMTP_HOST=smtp.example.com \
      -e NODEVAS_SERVE_SMTP_USER=nodevas@example.com \
      -e 'NODEVAS_SERVE_SMTP_FROM=Nodevas <nodevas@example.com>' \
@@ -162,7 +199,7 @@ secrets:
      --tls-cert /tls/cert.pem --tls-key /tls/key.pem
    ```
 
-   The image's health check probes plain HTTP, so it is turned off here; with TLS it would always report unhealthy.
+   `/etc/nodevas/database-url` holds the `postgres://` URL of a PostgreSQL 17 server. The image's health check probes plain HTTP, so it is turned off here; with TLS it would always report unhealthy.
 
 Without Docker, run the binary as a service and follow [Operations: Allow network access](./operations.md#allow-network-access).
 
@@ -200,5 +237,5 @@ Log format and audit events: [Operations: Logs and audit events](./operations.md
 - [Concepts](./concepts.md) — understand nodes, dependencies, and readiness.
 - [MCP integration](./mcp.md) — connect an AI agent.
 - [Install a runner](./install.md) — every option of the runner install script.
-- [Operations](./operations.md) — configuration, network access, and logs.
+- [Operations](./operations.md) — configuration, network access, the database, and logs.
 - [Storage and collaboration](./collaboration.md) — share a workspace safely.

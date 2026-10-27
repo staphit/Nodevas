@@ -62,6 +62,19 @@ func (c *Client) CreateSubgraph(ctx context.Context, spec store.SubgraphSpec) (*
 	return result, nil
 }
 
+// SetAcceptance replaces a node's acceptance criteria and returns what the
+// server stored (ids filled in, lock and attribution its own).
+func (c *Client) SetAcceptance(ctx context.Context, id string, items []engine.AcceptanceItem, baseRev string) (*engine.Acceptance, error) {
+	var response struct {
+		Acceptance *engine.Acceptance `json:"acceptance"`
+	}
+	body := map[string]any{"items": items, "baseRev": baseRev}
+	if err := c.post(ctx, "/api/nodes/"+url.PathEscape(id)+"/acceptance", nil, body, &response); err != nil {
+		return nil, err
+	}
+	return response.Acceptance, nil
+}
+
 // WriteNodeBody replaces a node's markdown, refusing if somebody changed it
 // since baseRev.
 func (c *Client) WriteNodeBody(ctx context.Context, id, content, baseRev string) (string, error) {

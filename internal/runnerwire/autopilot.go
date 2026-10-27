@@ -91,6 +91,12 @@ type AutopilotRun struct {
 	CreatedAt     string          `json:"createdAt"`
 	UpdatedAt     string          `json:"updatedAt"`
 	FinishedAt    string          `json:"finishedAt,omitempty"`
+	// Agent roles (roles.go): the workflow frozen at start (nil: legacy),
+	// the goal's phase (GoalPhase*), and the QA round and run.
+	Stages    *StagesSnapshot `json:"stages,omitempty"`
+	GoalPhase string          `json:"goalPhase,omitempty"`
+	QARound   int             `json:"qaRound,omitempty"`
+	QARunID   string          `json:"qaRunId,omitempty"`
 }
 
 // TaskCounts tallies an autopilot run's tasks by state.

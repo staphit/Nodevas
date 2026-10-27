@@ -51,9 +51,13 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		a.openForCaller(c, body.Name, body.Create, body.Template)
 		return
 	}
+	isNew := body.Create && !a.projectExists(body.Name)
 	if err := a.pm.Activate(body.Name, body.Create, body.Template); err != nil {
 		httpx.Err(c, 400, err)
 		return
+	}
+	if isNew {
+		a.defaultWorkflow(c, body.Name)
 	}
 	a.pm.Hub().Broadcast("project-changed", body.Name)
 	c.JSON(200, map[string]string{
@@ -69,6 +73,7 @@ func (a *API) openForCaller(c *gin.Context, name string, create bool, template s
 			httpx.Err(c, http.StatusBadRequest, err)
 			return
 		}
+		a.defaultWorkflow(c, name)
 		// A new project in everyone's tree; nobody else's current one moves.
 		a.pm.Hub().Broadcast("project-changed", name)
 	}
@@ -192,7 +197,7 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 			httpx.Err(c, http.StatusBadRequest, storeErr)
 			return
 		}
-		copied, err = st.ImportDocuments(&engine.Graph{Version: 1, Type: "workflow"}, docs)
+		copied, err = st.ImportDocuments(&engine.Graph{Version: 1, Type: "workflow", Workflow: engine.NewProjectWorkflow("workflow")}, docs)
 		if err != nil {
 			cleanupOnError()
 			httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("匯入失敗：%w", err))
@@ -538,4 +543,34 @@ func (a *API) PostProjectRemove(c *gin.Context) {
 		"active":       active,
 		"deletedFiles": body.Mode == "disk",
 	})
+}
+
+// projectExists reports whether name already has a graph.
+func (a *API) projectExists(name string) bool {
+	dir, err := a.pm.Resolve(strings.Trim(strings.TrimSpace(name), "/"))
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(dir, "graph.yaml"))
+	return err == nil
+}
+
+// defaultWorkflow gives a project a person just created the Standard
+// workflow stages (Tester, Executor, Reviewer; a story layout judges its
+// acceptance checklists instead of running tests). Existing projects keep
+// none (legacy) until a person picks a preset. Best effort: the project is
+// made either way.
+func (a *API) defaultWorkflow(c *gin.Context, name string) {
+	st, err := a.pm.StoreFor(strings.Trim(strings.TrimSpace(name), "/"))
+	if err != nil {
+		return
+	}
+	g, rev, err := st.LoadGraph()
+	if err != nil || g.Workflow != nil {
+		return
+	}
+	g.Workflow = engine.NewProjectWorkflow(g.Type)
+	if _, err := st.SaveGraph(auth.ActorFrom(c.Request), g, rev); err != nil {
+		log.Printf("new project %s: default workflow: %v", name, err)
+	}
 }

@@ -49,6 +49,8 @@ import { useAutosave } from "./drawer/useAutosave";
 import { useNodePages } from "./drawer/useNodePages";
 import { useTableEditing } from "./drawer/useTableEditing";
 import { useI18n } from "../i18n";
+import { AcceptanceCriteria } from "../roles/AcceptanceCriteria";
+import { GoalStagesOverride } from "../roles/GoalStagesOverride";
 
 /**
  * Right-hand slide-over panel. Hidden until a node is clicked; the file's
@@ -854,6 +856,9 @@ export function TabBody({
       )}
 
       <div className="node-content-view" hidden={drawerView !== "content"}>
+        {/* What the work must satisfy, above the work itself. */}
+        <AcceptanceCriteria id={id} />
+        <GoalStagesOverride id={id} />
         <div className="editor-file-row">
           <SubpageMenu pages={subpages} onPopout={popoutPage} />
           <nav className="editor-path" aria-label={t("drawer.fileLocation")}>

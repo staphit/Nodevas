@@ -358,3 +358,47 @@ describe("artPixel", () => {
     expect(artPixel(0)).toBe(3);
   });
 });
+
+// W-19: role badges and the red/green test dot on the war room's desks.
+describe("role badges", () => {
+  it("badges each built-in role with its short label, and a custom role", () => {
+    const roles = ["planner", "qa", "tester", "executor", "reviewer", "researcher", "security-auditor"];
+    const runs = roles.map((role, i) =>
+      makeRun({ id: `r${i}`, status: "running", role, nodeId: ["login", "schema", "docs"][i % 3] }),
+    );
+    const { container } = mount(building({ runners: [runner("rn1", "mac-mini", 8)], runs }));
+    const badges = Array.from(container.querySelectorAll(".px-badge.is-role")).map((el) => el.textContent);
+    expect(badges.sort()).toEqual(["EXE", "PLN", "QA", "RES", "REV", "ROLE", "TST"].sort());
+    expect(container.querySelector(".px-badge.is-role.role--tester")).not.toBeNull();
+    expect(container.querySelector(".px-badge.is-role.role--custom")).not.toBeNull();
+  });
+
+  it("shows the test state as a dot with a label, and no badge for a session", () => {
+    const tester = makeRun({ id: "t1", status: "running", role: "tester", kind: "test", pipelineId: "p1", createdAt: ago(60_000) });
+    const verify = makeRun({
+      id: "v1",
+      status: "succeeded",
+      kind: "verify",
+      pipelineId: "p1",
+      createdAt: ago(30_000),
+      finishedAt: ago(20_000),
+      verify: { phase: "green", exitCode: 0, passed: true, durationMs: 900 },
+    });
+    const { container } = mount(
+      building({ runs: [tester, verify], sessions: [makeSession({ id: "s1", name: "laptop", nodeId: "docs" })] }),
+    );
+    const dot = container.querySelector(".px-badge.is-test.is-green");
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute("aria-label", "Tests green");
+    expect(container.querySelectorAll(".px-badge.is-role")).toHaveLength(1);
+    expect(screen.getAllByText(/as Tester/).length).toBeGreaterThan(0);
+  });
+
+  it("redraws a desk when its role or test state changes", () => {
+    const runs = [makeRun({ id: "r1", status: "running", role: "executor" })];
+    const world = building({ runs });
+    const before = { actor: world.actors[0], scene: "desk" as const, style: "engineering" as const, label: "x", titleOf };
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, role: "tester" } })).toBe(false);
+    expect(PixelDesk.sameDesk(before, { ...before, actor: { ...before.actor, testState: "red" } })).toBe(false);
+  });
+});

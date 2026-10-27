@@ -192,13 +192,18 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // The peer id travels with the write so the server can tell the room
           // what changed without this browser being told about its own edit.
           const res = await api.graphOps(ops, get().selfPeerID);
-          set({
-            graph: normalizeGraph(res.graph),
-            graphRev: res.rev,
-            statuses: res.statuses,
-            issues: res.issues ?? [],
-            error: null,
-          });
+          // A reply without a graph (never from the hub) keeps what is shown.
+          set((state) =>
+            res?.graph
+              ? {
+                  graph: normalizeGraph(res.graph),
+                  graphRev: res.rev,
+                  statuses: res.statuses,
+                  issues: res.issues ?? [],
+                  error: null,
+                }
+              : { graph: state.graph, error: null },
+          );
           if (options.recordUndo !== false) {
             pushUndo({ kind: "graph", graph: structuredClone(previous), label });
           }

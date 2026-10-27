@@ -51,6 +51,9 @@ type SessionReport struct {
 	ActorName   string
 	Agent       string
 	Models      []ModelUsage
+	// RunID ties the session to the interactive run it is the agent of, so
+	// the report counts its tokens on the run, not twice.
+	RunID string
 }
 
 // Store keeps session usage and custom prices in the workspace database.
@@ -132,21 +135,43 @@ func (s *Store) RecordSession(ctx context.Context, r SessionReport) error {
 		for _, m := range r.Models {
 			if _, err := tx.ExecContext(ctx, `
 INSERT INTO agent_session_usage (project, session_id, model, actor_id, actor_name, session_name, agent,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd, first_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd, first_at, updated_at, run_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (project, session_id, model) DO UPDATE SET
+    run_id = CASE WHEN excluded.run_id <> '' THEN excluded.run_id ELSE agent_session_usage.run_id END,
     actor_id = excluded.actor_id, actor_name = excluded.actor_name,
     session_name = excluded.session_name, agent = excluded.agent,
     input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
     cache_read_tokens = excluded.cache_read_tokens, cache_write_tokens = excluded.cache_write_tokens,
     reported_cost_usd = excluded.reported_cost_usd, updated_at = excluded.updated_at`,
 				r.Project, r.SessionID, m.Model, r.ActorID, r.ActorName, r.SessionName, strings.ToLower(strings.TrimSpace(r.Agent)),
-				m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.CostUSD, now, now); err != nil {
+				m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.CostUSD, now, now, r.RunID); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// SessionModels is every model one session reported in project, its latest
+// totals each.
+func (s *Store) SessionModels(ctx context.Context, project, sessionID string) ([]ModelUsage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reported_cost_usd
+  FROM agent_session_usage WHERE project = ? AND session_id = ? ORDER BY model`, project, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ModelUsage
+	for rows.Next() {
+		var m ModelUsage
+		if err := rows.Scan(&m.Model, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // CustomPrices are the owner's own prices.

@@ -223,6 +223,9 @@ func (s *Store) RestoreHistory(actor identity.Actor, rel, version string) error 
 // frontmatter is rewritten from the graph, so a restored snapshot can never
 // make its kind or write_access disagree with graph.yaml. Caller holds s.mu.
 func (s *Store) checkAgentRestoreLocked(actor identity.Actor, rel string, data []byte) ([]byte, error) {
+	if actor.HasRole() {
+		return nil, &ErrAgentRestoreDenied{Path: rel, Msg: fmt.Sprintf("role %s may not restore history; ask a person", actor.AgentRole)}
+	}
 	if rel == "graph.yaml" {
 		return nil, &ErrAgentRestoreDenied{Path: rel, Msg: "agents may not restore graph.yaml; ask a person"}
 	}
