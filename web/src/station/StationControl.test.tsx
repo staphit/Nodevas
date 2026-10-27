@@ -11,6 +11,7 @@ import { useControl } from "./controlStore";
 import type { World } from "../game/world";
 import { useRunners } from "../runners/runnerStore";
 import { StationControl, StationControlReport, StationPauseButton } from "./StationControl";
+import { useSettingsRequest } from "../settings/openSettings";
 import { useStation } from "./stationStore";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
@@ -166,7 +167,8 @@ describe("StationControl", () => {
     // Each row keeps its actions behind one ⋯.
     expect(within(second).getAllByRole("button")).toHaveLength(1);
     const menu = menuOf(second);
-    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toBeInTheDocument();
+    // The first item takes focus once the panel is placed.
+    expect(within(menu).getByRole("menuitem", { name: "Open run" })).toHaveFocus();
     expect(within(menu).getByRole("menuitem", { name: "View changes" })).toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "Open goal “Ship login”" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Pause autopilot" })).toBeInTheDocument();
@@ -262,6 +264,26 @@ describe("StationControl", () => {
     await waitFor(() => expect(pauseAll).toHaveBeenCalledWith({ cancelRunning: false }));
   });
 
+  // The dialog claims its Escape, so the drawer beneath does not close too.
+  it("closes Pause everything on Escape without passing the key on", async () => {
+    vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing] });
+    vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+    mount();
+
+    await waitFor(() => expect(screen.getByTitle("1 active runs")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Pause everything" }));
+    await screen.findByRole("alertdialog", { name: "Pause everything?" });
+    const beneath = vi.fn();
+    window.addEventListener("keydown", beneath);
+    try {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", beneath);
+    }
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(beneath).not.toHaveBeenCalled();
+  });
+
   it("turns into Resume all once only paused autopilots are left, and asks first", async () => {
     vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [] });
     vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([makePilot({ status: "paused" })]);
@@ -347,6 +369,8 @@ describe("StationControl", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add a runner" }));
     expect(useApp.getState().preferences.settingsSection).toBe("runners");
     expect(useApp.getState().preferences.projectMode).toBe("settings");
+    // Straight to the add form, not just the runners list.
+    expect(useSettingsRequest.getState().add).toBe(true);
   });
 });
 

@@ -627,31 +627,6 @@ export function GraphCanvas({
               <span className="col-card-title">{n.title || n.id}</span>
               <RunCardBadge nodeId={n.id} />
               <AutopilotCardBadge nodeId={n.id} />
-              {/* The menu for a pointer that does not right-click: shown on
-                  hover, focus or selection, and stopped before the card can
-                  read its press as the start of a drag. */}
-              <button
-                type="button"
-                className="col-card-more"
-                aria-label={t("board.nodeMenu.more", { title: n.title || n.id })}
-                title={t("board.nodeMenu.more", { title: n.title || n.id })}
-                aria-haspopup="menu"
-                onPointerDown={(event) => event.stopPropagation()}
-                onKeyDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  selectNode(n.id);
-                  setContextMenu({
-                    kind: "node-actions",
-                    nodeId: n.id,
-                    x: rect.left,
-                    y: rect.bottom + 4,
-                  });
-                }}
-              >
-                ⋯
-              </button>
             </span>
             <span className="col-card-meta">
               <span
@@ -678,6 +653,37 @@ export function GraphCanvas({
               </span>
             )}
           </div>
+          {/* The menu for a pointer that does not right-click: a sibling laid
+              over the card's corner rather than a child, so no control sits
+              inside the card's own button. Shown on hover, focus or
+              selection (04-board.css), and stopped before the board can read
+              its press as the start of a pan or a marquee. */}
+          <button
+            type="button"
+            className="col-card-more"
+            style={{
+              left: centerX(c) + liveWidth / 2,
+              top: rowTop(c.row) + ROW_H / 2 - liveHeight / 2,
+            }}
+            aria-label={t("board.nodeMenu.more", { title: n.title || n.id })}
+            title={t("board.nodeMenu.more", { title: n.title || n.id })}
+            aria-haspopup="menu"
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              const rect = event.currentTarget.getBoundingClientRect();
+              selectNode(n.id);
+              setContextMenu({
+                kind: "node-actions",
+                nodeId: n.id,
+                x: rect.left,
+                y: rect.bottom + 4,
+              });
+            }}
+          >
+            ⋯
+          </button>
           {selectedGraphNodeIDs.has(n.id) && (
             // Sibling of the card: a clipped shape would otherwise clip
             // its own handles away.

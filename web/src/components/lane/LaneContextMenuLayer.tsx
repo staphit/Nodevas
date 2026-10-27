@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useFloatingPanel } from "../floatingPanel";
+import { useI18n } from "../../i18n";
 import type { Graph, LogicGate, PlanStatusDefinition } from "../../types";
 import type { useGraphWiring } from "../canvas/useGraphWiring";
 import type { useNodeConditions } from "../canvas/useNodeConditions";
@@ -33,13 +34,17 @@ export function useLaneContextMenu() {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      // Claimed in the capture phase, so the drawer and the board below do not
+      // also read it as theirs: one Escape closes one thing.
+      event.stopPropagation();
+      close();
     };
     window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [contextMenu]);
 
@@ -57,6 +62,7 @@ export interface LaneContextMenuLayerProps {
   selectNode: (id: string) => void;
   duplicateNode: NodeActionsMenuProps["duplicateNode"];
   deleteNode: NodeActionsMenuProps["deleteNode"];
+  createGroupFromSelection: NodeActionsMenuProps["createGroupFromSelection"];
   openNodeCreationMenu: GraphMenuProps["openNodeCreationMenu"];
   createCanvasGroup: GraphMenuProps["createCanvasGroup"];
   createCanvasAnnotation: GraphMenuProps["createCanvasAnnotation"];
@@ -78,6 +84,7 @@ export function LaneContextMenuLayer({
   selectNode,
   duplicateNode,
   deleteNode,
+  createGroupFromSelection,
   openNodeCreationMenu,
   createCanvasGroup,
   createCanvasAnnotation,
@@ -87,6 +94,7 @@ export function LaneContextMenuLayer({
   nodeCreation,
   planMenu,
 }: LaneContextMenuLayerProps) {
+  const { t } = useI18n();
   // Below the phone breakpoint there is no room to place a form beside where it
   // was opened from: the menu is nearly as wide as the screen and the tallest of
   // them is taller than it, so there is no placement that both fits and stays
@@ -110,6 +118,13 @@ export function LaneContextMenuLayer({
         contextMenu.kind === "logic-gate" ? " standalone-gate-menu" : ""
       }${dragging ? " dragging" : ""}`}
       role="menu"
+      // The node's menu is named after its node; the others carry their own
+      // heading, read as part of the menu.
+      aria-label={
+        contextMenu.kind === "node-actions"
+          ? t("board.nodeMenu.label", { title: nodeTitle(contextMenu.nodeId) })
+          : undefined
+      }
       style={placement}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -161,6 +176,7 @@ export function LaneContextMenuLayer({
           selectNode={selectNode}
           duplicateNode={duplicateNode}
           deleteNode={deleteNode}
+          createGroupFromSelection={createGroupFromSelection}
           setContextMenu={setContextMenu}
         />
       ) : contextMenu.kind === "node" ? (

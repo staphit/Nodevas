@@ -132,17 +132,13 @@
   justify-content: center;
 }
 /* Centred shapes keep the row's members together in the middle, where the
-   clip leaves room for them, instead of pushing ⋯ out to a cut-off corner. */
+   clip leaves room for them, instead of pushing them out to a cut-off corner. */
 .col-card.shape-ellipse .col-card-head .col-card-title,
 .col-card.shape-diamond .col-card-head .col-card-title,
 .col-card.shape-hexagon .col-card-head .col-card-title,
 .col-card.shape-pill .col-card-head .col-card-title {
   flex: 0 1 auto;
 }
-.col-card.shape-ellipse .col-card-more,
-.col-card.shape-diamond .col-card-more,
-.col-card.shape-hexagon .col-card-more,
-.col-card.shape-pill .col-card-more,
 .col-card.shape-ellipse .col-card-marker,
 .col-card.shape-hexagon .col-card-marker {
   margin-left: 0;

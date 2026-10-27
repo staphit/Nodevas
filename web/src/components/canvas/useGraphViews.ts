@@ -13,6 +13,7 @@ import { reportError } from "../../store";
 import type { CanvasCommand, NodeCommand } from "../../domain/commands";
 import type { CommandResult } from "../../state/operations";
 import type { GraphNode, SavedView, Status } from "../../types";
+import { EMPTY_VIEW_FILTER, type ViewFilter } from "../GraphToolsPanel";
 
 export function useGraphViews({
   statuses,
@@ -35,21 +36,7 @@ export function useGraphViews({
 }) {
   const { t } = useI18n();
   const [savedViewName, setSavedViewName] = useState("");
-  const [viewFilter, setViewFilter] = useState<{
-    query: string;
-    status: string;
-    assignee: string;
-    tag: string;
-    priority: string;
-    sort: "manual" | "title" | "priority" | "status" | "assignee";
-  }>({
-    query: "",
-    status: "",
-    assignee: "",
-    tag: "",
-    priority: "",
-    sort: "manual",
-  });
+  const [viewFilter, setViewFilter] = useState<ViewFilter>(EMPTY_VIEW_FILTER);
 
   const matchesViewFilter = (node: GraphNode) => {
     const query = viewFilter.query.trim().toLocaleLowerCase();
@@ -61,7 +48,12 @@ export function useGraphViews({
     ) {
       return false;
     }
-    if (viewFilter.status && (statuses[node.id] ?? "ready") !== viewFilter.status) return false;
+    if (
+      viewFilter.statuses.length &&
+      !viewFilter.statuses.includes(statuses[node.id] ?? "ready")
+    ) {
+      return false;
+    }
     if (viewFilter.assignee && (node.assignee || "__unassigned__") !== viewFilter.assignee) {
       return false;
     }
@@ -101,7 +93,7 @@ export function useGraphViews({
       view: {
         id: `view-${Date.now()}`,
         name,
-        statuses: viewFilter.status ? [viewFilter.status] : undefined,
+        statuses: viewFilter.statuses.length ? [...viewFilter.statuses] : undefined,
         assignees: viewFilter.assignee ? [viewFilter.assignee] : undefined,
         tags: viewFilter.tag ? [viewFilter.tag] : undefined,
         priorities: viewFilter.priority ? [viewFilter.priority] : undefined,
@@ -118,7 +110,7 @@ export function useGraphViews({
   const applySavedView = (view: SavedView) => {
     setViewFilter((current) => ({
       ...current,
-      status: view.statuses?.[0] ?? "",
+      statuses: view.statuses ?? [],
       assignee: view.assignees?.[0] ?? "",
       tag: view.tags?.[0] ?? "",
       priority: view.priorities?.[0] ?? "",

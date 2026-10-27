@@ -266,7 +266,7 @@ export function StationControl({ world }: { world?: World }) {
       ) : noRunner ? (
         <div className="station-cta" role="status">
           <p>{t("station.runner.none")}</p>
-          <button type="button" className="ap-btn is-primary" onClick={() => openSettings("runners")}>
+          <button type="button" className="ap-btn is-primary" onClick={() => openSettings("runners", { add: true })}>
             {t("station.runner.add")}
           </button>
         </div>
@@ -598,15 +598,17 @@ export function PauseAllDialog({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     keepRef.current?.focus();
+    // Captured on the document and claimed, so the drawer or board beneath
+    // does not also read this Escape as its own.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
     };
-    window.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
       previous?.focus?.();
     };
   }, [onClose]);

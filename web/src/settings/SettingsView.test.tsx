@@ -7,7 +7,7 @@ import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRouting } from "../runs/routingStore";
 import { useApp } from "../store";
-import { openSettings } from "./openSettings";
+import { openSettings, useSettingsRequest } from "./openSettings";
 import SettingsView from "./SettingsView";
 
 // A standalone install: no accounts, so nothing account-only is offered.
@@ -123,11 +123,39 @@ describe("Settings", () => {
     expect(search).toHaveValue("");
     expect(within(nav()).getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("region", { name: "Daily budget" })).toBeInTheDocument();
+    // Focus follows to the opened row's toggle.
+    expect(screen.getByRole("button", { name: /^Daily budget/ })).toHaveFocus();
 
     await user.type(search, "zzz");
     expect(within(nav()).getByText("Nothing found")).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(search).toHaveValue("");
+  });
+
+  it("moves focus to the section's heading for a hit without a row", async () => {
+    const user = userEvent.setup();
+    act(() => openSettings("project"));
+    render(<SettingsView />);
+
+    await user.type(within(nav()).getByRole("searchbox", { name: "Search settings" }), "language");
+    await user.click(within(nav()).getByRole("button", { name: /Language\s*General/ }));
+    expect(screen.getByRole("heading", { level: 2, name: "General" })).toHaveFocus();
+  });
+
+  // The palette's and Station's "Add a runner".
+  it("opens the add-runner form when asked from outside", async () => {
+    act(() => openSettings("runners", { add: true }));
+    render(<SettingsView />);
+    expect(await screen.findByLabelText("Runner name")).toBeInTheDocument();
+    // Taken once: a plain open later does not bring it back.
+    expect(useSettingsRequest.getState().add).toBe(false);
+  });
+
+  it("does not open the add form on a plain open", async () => {
+    act(() => openSettings("runners"));
+    render(<SettingsView />);
+    await screen.findByText(/No runners yet/);
+    expect(screen.queryByLabelText("Runner name")).not.toBeInTheDocument();
   });
 
   it("opens the add-runner form from search", async () => {

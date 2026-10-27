@@ -70,7 +70,7 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
 /**
  * Autopilot in Station: the goal a node's banner (or its menu, a party on the
  * boss map, a task waiting for you, a row of "In progress") opened, in full.
- * The goal and its tasks stay nodes of the Info graph: "Show in Info" goes
+ * The goal and its tasks stay nodes of the board: "Show on board" goes
  * back to it.
  */
 function StationGoal() {

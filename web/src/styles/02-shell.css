@@ -142,6 +142,11 @@ header.topbar {
 .topbar-menu-panel.align-end {
   right: 0;
 }
+/* A set of items under its heading: lays out as the panel does. */
+.topbar-menu-group {
+  display: flex;
+  flex-direction: column;
+}
 .topbar-menu-heading {
   padding: 6px 10px 2px;
   color: var(--text-2);
@@ -168,7 +173,7 @@ header.topbar {
   text-align: left;
   cursor: pointer;
 }
-.topbar-menu-item:hover:not(:disabled) {
+.topbar-menu-item:hover:not([aria-disabled="true"]) {
   background: var(--hover);
 }
 .topbar-menu-item:focus-visible {
@@ -176,7 +181,8 @@ header.topbar {
   outline-offset: -2px;
   background: var(--hover);
 }
-.topbar-menu-item:disabled {
+/* Disabled but focusable (aria-disabled): it still says why. */
+.topbar-menu-item[aria-disabled="true"] {
   color: var(--text-2);
   cursor: default;
 }
@@ -1229,9 +1235,12 @@ header.topbar {
     min-width: 44px;
     min-height: 44px;
   }
-  /* The project name takes the row's slack, so long names stay readable. */
+  /* The project name takes the row's slack, so long names stay readable. A
+     zero basis and no minimum let a long name shrink and truncate instead of
+     pushing the actions onto a third row: the bar stays two rows. */
   .topbar-project {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-width: 0;
   }
   .topbar-project-trigger {
     width: 100%;

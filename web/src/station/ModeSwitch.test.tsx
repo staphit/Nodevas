@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { AgentAsk, Run, RunBudgetStatus } from "../api";
 import { useAgents } from "../agents/agentStore";
 import { readPreferences } from "../preferences";
+import { useAutopilot, type WaitingTask } from "../autopilot/autopilotStore";
 import { useBudget } from "../runs/budgetStore";
+import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
 import { ModeSwitch } from "./ModeSwitch";
 import { useStation } from "./stationStore";
@@ -33,6 +35,8 @@ beforeEach(() => {
   useAgents.setState({ asks: [], held: [], viewer: { id: "ann", name: "ann", role: "member" } });
   useStation.setState({ runs: [], project: "", loaded: false });
   useBudget.setState({ status: null });
+  useAutopilot.setState({ waiting: [] });
+  useRuns.setState({ activeRuns: [] });
 });
 
 describe("ModeSwitch", () => {
@@ -79,5 +83,21 @@ describe("ModeSwitch", () => {
     render(<ModeSwitch />);
     const station = screen.getByRole("button", { name: "Station" });
     expect(station.querySelector(".mode-switch-badge")).toBeNull();
+  });
+
+  // The badge counts what the "Waiting on you" card lists, reviews and offers
+  // included.
+  it("counts autopilot reviews and offers no runner took yet", () => {
+    useAutopilot.setState({
+      waiting: [{ autopilotId: "ap", goalNodeId: "g", task: { nodeId: "t", title: "T" } } as unknown as WaitingTask],
+    });
+    useRuns.setState({
+      activeRuns: [
+        { id: "o1", nodeId: "n2", status: "offered" } as Run,
+        { id: "o2", nodeId: "n3", status: "running" } as Run,
+      ],
+    });
+    render(<ModeSwitch />);
+    expect(screen.getByRole("button", { name: "Station, 2 waiting on you" })).toBeTruthy();
   });
 });

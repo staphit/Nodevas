@@ -229,11 +229,15 @@ function StationNetwork() {
   const [open, setOpen] = useRememberedOpen("nodevas-station-network-open");
   const count = useAgents((s) => s.messages.length);
   const online = useAgents((s) => s.sessions.filter((session) => session.online).length);
-  // What opens the floating panel in Info (Ctrl+Shift+A, a toast, a loose
-  // session in the war room) unfolds this card in Station.
+  // What opens the floating panel on the board (Ctrl+Shift+A, a toast, a
+  // loose session in the war room) unfolds this card in Station. The request
+  // is consumed here: left set, the next Ctrl+Shift+A would only clear it,
+  // and the floating panel would pop up on the way back to the board.
   const asked = useAgents((s) => s.open);
   useEffect(() => {
-    if (asked) setOpen(true);
+    if (!asked) return;
+    setOpen(true);
+    useAgents.getState().setOpen(false);
   }, [asked, setOpen]);
   return (
     <section className={`station-panel station-network${open ? " is-open" : ""}`}>

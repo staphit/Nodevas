@@ -51,8 +51,6 @@ export function GraphBatchToolbar({
   onSelectedNodeChange,
 }: GraphBatchToolbarProps) {
   const { t } = useI18n();
-  const clipboard = useApp((state) => state.nodeClipboard);
-  const clearNodeClipboard = useApp((state) => state.clearNodeClipboard);
 
   const clearSelection = () => {
     setGraphSelection(null);
@@ -213,26 +211,42 @@ export function GraphBatchToolbar({
           },
         ]}
       />
-      {clipboard && (
-        <span className="graph-batch-clipboard">
-          {t("batch.clipboard", {
-            action: clipboard.mode === "cut" ? t("batch.cut") : t("batch.copied"),
-            count: String(clipboard.ids.length),
-            project: clipboard.project,
-          })}{" "}
-          <button
-            type="button"
-            title={t("batch.clearClipboard")}
-            onClick={() => clearNodeClipboard()}
-          >
-            {t("batch.clear")}
-          </button>
-        </span>
-      )}
+      <NodeClipboardNotice />
       <span className="graph-batch-spacer" aria-hidden />
       <button type="button" onClick={clearSelection}>
         {t("board.batch.clearSelection")}
       </button>
     </div>
   );
+}
+
+/**
+ * What Ctrl+C / Ctrl+X is holding, so a paste in another project is expected.
+ *
+ * Inline in the batch toolbar while two or more nodes are selected; on its
+ * own as a thin `strip` otherwise, because what was copied stays armed after
+ * the selection that copied it is gone.
+ */
+export function NodeClipboardNotice({ strip = false }: { strip?: boolean }) {
+  const { t } = useI18n();
+  const clipboard = useApp((state) => state.nodeClipboard);
+  const clearNodeClipboard = useApp((state) => state.clearNodeClipboard);
+  if (!clipboard) return null;
+  const notice = (
+    <span className="graph-batch-clipboard">
+      {t("batch.clipboard", {
+        action: clipboard.mode === "cut" ? t("batch.cut") : t("batch.copied"),
+        count: String(clipboard.ids.length),
+        project: clipboard.project,
+      })}{" "}
+      <button
+        type="button"
+        title={t("batch.clearClipboard")}
+        onClick={() => clearNodeClipboard()}
+      >
+        {t("batch.clear")}
+      </button>
+    </span>
+  );
+  return strip ? <div className="graph-clipboard-strip">{notice}</div> : notice;
 }

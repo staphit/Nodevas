@@ -184,7 +184,7 @@ export async function freshProject(page: Page, titles = ["設計稿", "實作"])
     const created = await page.request.post("/api/nodes", {
       data: { title, kind: "task", body: "" },
     });
-    expect(created.ok()).toBeTruthy();
+    expect(created.ok(), await created.text()).toBeTruthy();
   }
   // Wait for the server to actually be on the new project: opening one is a
   // filesystem operation, and loading the app before it lands races with it.

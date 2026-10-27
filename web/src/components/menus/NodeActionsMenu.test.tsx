@@ -22,6 +22,7 @@ function menu(overrides: Partial<NodeActionsMenuProps> = {}) {
     selectNode: vi.fn(),
     duplicateNode: vi.fn(async () => "a2"),
     deleteNode: vi.fn(async () => {}),
+    createGroupFromSelection: vi.fn(),
     setContextMenu: vi.fn(),
     ...overrides,
   };
@@ -41,10 +42,41 @@ describe("NodeActionsMenu", () => {
       "Open",
       "Add dependency…",
       "Duplicate",
+      "Create group background",
       "Move or copy to project▸",
       "Move to trash",
     ]);
     expect(screen.getByRole("menuitem", { name: "Open" })).toHaveFocus();
+  });
+
+  it("draws a group background around its one node", async () => {
+    const user = userEvent.setup();
+    const props = menu();
+    await user.click(screen.getByRole("menuitem", { name: "Create group background" }));
+    expect(props.setContextMenu).toHaveBeenCalledWith(null);
+    expect(props.selectNode).toHaveBeenCalledWith("a");
+    expect(props.createGroupFromSelection).toHaveBeenCalledWith(["a"]);
+  });
+
+  it("leaves the naming to the menu and keeps its heading out of it", () => {
+    const { container } = render(
+      <div role="menu" aria-label="Actions for Alpha">
+        <NodeActionsMenu
+          contextMenu={{ kind: "node-actions", nodeId: "a", x: 0, y: 0 }}
+          graph={null}
+          nodeTitle={() => "Alpha"}
+          openTab={vi.fn(async () => {})}
+          selectNode={vi.fn()}
+          duplicateNode={vi.fn(async () => "a2")}
+          deleteNode={vi.fn(async () => {})}
+          createGroupFromSelection={vi.fn()}
+          setContextMenu={vi.fn()}
+        />
+      </div>,
+    );
+    expect(container.querySelector(".node-actions")).not.toHaveAttribute("aria-label");
+    expect(container.querySelector(".node-actions-title")).toHaveAttribute("role", "presentation");
+    expect(screen.getByRole("separator")).toBeInTheDocument();
   });
 
   it("opens the node and closes", async () => {

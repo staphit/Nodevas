@@ -427,7 +427,7 @@ export function CommandPalette() {
           detail: t("topbar.cmd.addRunnerDetail"),
           keywords: "add new pair runner machine device 新增 配對 執行器 電腦",
           icon: <IconPlus size={15} />,
-          run: () => openSettings("runners"),
+          run: () => openSettings("runners", { add: true }),
         },
         {
           key: "usage",

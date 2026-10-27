@@ -9,7 +9,7 @@ import { IconChevronDown, IconGear } from "../../icons";
 import { useI18n } from "../../i18n";
 import { openSettings } from "../../settings/openSettings";
 import { reportError, useApp } from "../../store";
-import { TopbarMenu, type TopbarMenuEntry } from "./TopbarMenu";
+import { TopbarMenu, type TopbarMenuEntry, type TopbarMenuItem } from "./TopbarMenu";
 
 export function ProjectMenu() {
   const { t } = useI18n();
@@ -24,21 +24,27 @@ export function ProjectMenu() {
   const current = projects.find((p) => p.name === activeProject);
   const name = current?.label || activeProject || t("topbar.noProject");
 
+  // The projects, and further down the workspaces, are each one group named
+  // by its heading.
   const entries: TopbarMenuEntry[] = [
-    { kind: "heading", id: "projects-heading", label: t("topbar.projects") },
-    ...projects
-      .filter((p) => !p.isFolder)
-      .map<TopbarMenuEntry>((p) => ({
-        id: `project-${p.name}`,
-        label: p.label || p.name,
-        detail: String(p.nodes),
-        title: t("topbar.nodeCount", { count: p.nodes }),
-        depth: p.depth,
-        checked: p.name === activeProject,
-        onSelect: () => {
-          if (p.name !== activeProject) void switchProject(p.name).catch(reportError);
-        },
-      })),
+    {
+      kind: "group",
+      id: "projects",
+      label: t("topbar.projects"),
+      items: projects
+        .filter((p) => !p.isFolder)
+        .map<TopbarMenuItem>((p) => ({
+          id: `project-${p.name}`,
+          label: p.label || p.name,
+          detail: String(p.nodes),
+          title: t("topbar.nodeCount", { count: p.nodes }),
+          depth: p.depth,
+          checked: p.name === activeProject,
+          onSelect: () => {
+            if (p.name !== activeProject) void switchProject(p.name).catch(reportError);
+          },
+        })),
+    },
   ];
 
   // The layout is fixed when a project is created; nothing on the hub changes
@@ -70,9 +76,12 @@ export function ProjectMenu() {
       ? [{ path: workspace, label: "", active: true, projects: projects.length }]
       : [];
   if (roots.length > 0) {
-    entries.push({ kind: "heading", id: "workspaces-heading", label: t("topbar.workspace"), separatorBefore: true });
-    for (const root of roots) {
-      entries.push({
+    entries.push({
+      kind: "group",
+      id: "workspaces",
+      label: t("topbar.workspace"),
+      separatorBefore: true,
+      items: roots.map((root) => ({
         id: `workspace-${root.path}`,
         label: root.label || root.path,
         title: root.path,
@@ -81,8 +90,8 @@ export function ProjectMenu() {
         onSelect: () => {
           if (!root.active) void switchWorkspace(root.path).catch(reportError);
         },
-      });
-    }
+      })),
+    });
   }
 
   return (

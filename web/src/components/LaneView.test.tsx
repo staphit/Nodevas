@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { readPreferences } from "../preferences";
-import { useApp } from "../store";
+import { useApp, usePreference } from "../store";
 import type { Graph, RunState } from "../types";
 import { LaneView } from "./LaneView";
 
@@ -22,6 +22,8 @@ vi.mock("../api", async (importOriginal) => {
 });
 
 const EMPTY_RUN: RunState = { nodes: {}, history: [] };
+// Some tests stub it to see the command a gesture sends; the rest get it back.
+const realUpdateCanvasLayout = useApp.getState().updateCanvasLayout;
 
 function graph(nodes: Graph["nodes"]): Graph {
   return { version: 1, nodes, edges: [], ui: {} };
@@ -41,6 +43,8 @@ beforeEach(() => {
     error: null,
     tabs: [],
     activeTab: null,
+    nodeClipboard: null,
+    updateCanvasLayout: realUpdateCanvasLayout,
   });
   useApp.getState().updateUIPreference("language", "zh-TW");
 });
@@ -185,19 +189,52 @@ describe("LaneView", () => {
 
   it("filters from a popover and counts the filters that are on", async () => {
     const user = userEvent.setup();
+    const updateCanvasLayout = vi.fn(async () => ({ ok: true as const }));
+    useApp.setState({ updateCanvasLayout } as never);
     render(<LaneView variant="graph" {...paneProps} />);
 
     await user.click(screen.getByRole("button", { name: "篩選" }));
-    const panel = screen.getByRole("dialog", { name: "篩選" });
-    // The first field takes the keyboard.
-    expect(within(panel).getByRole("textbox", { name: /篩選 ID/ })).toHaveFocus();
-    await user.type(within(panel).getByRole("textbox", { name: /篩選 ID/ }), "設計");
+    let panel = screen.getByRole("dialog", { name: "篩選" });
+    // Status comes first, as checkboxes, and takes the keyboard.
+    const statusGroup = within(panel).getByRole("group", { name: "狀態篩選" });
+    const checkboxes = within(statusGroup).getAllByRole("checkbox");
+    expect(checkboxes.length).toBeGreaterThan(1);
+    expect(checkboxes[0]).toHaveFocus();
+    expect(within(panel).getByRole("button", { name: "清除篩選" })).toBeInTheDocument();
+    // The rest waits under More filters.
+    const more = within(panel).getByRole("button", { name: /更多篩選/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(within(panel).queryByRole("textbox", { name: /篩選 ID/ })).not.toBeInTheDocument();
+
+    await user.click(checkboxes[0]);
+    await user.click(checkboxes[1]);
     expect(screen.getByRole("button", { name: "篩選（1）" })).toBeInTheDocument();
-    // Saving a view is still part of it.
-    expect(within(panel).getByRole("button", { name: "儲存檢視" })).toBeInTheDocument();
+
+    await user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    await user.type(within(panel).getByRole("textbox", { name: /篩選 ID/ }), "設計");
+    expect(screen.getByRole("button", { name: "篩選（2）" })).toBeInTheDocument();
+    // Saving a view is still part of it, and keeps every checked status.
+    await user.type(within(panel).getByRole("textbox", { name: "檢視名稱" }), "Mine");
+    await user.click(within(panel).getByRole("button", { name: "儲存檢視" }));
+    const saved = updateCanvasLayout.mock.calls.at(-1) as unknown as [
+      { type: string; view: { name: string; statuses?: string[] } },
+    ];
+    expect(saved[0]).toMatchObject({ type: "canvas.saveView", view: { name: "Mine" } });
+    expect(saved[0].view.statuses).toHaveLength(2);
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: /篩選/ })).not.toBeInTheDocument();
+
+    // Reopened with a search on, the fold opens by itself to show it.
+    await user.click(screen.getByRole("button", { name: "篩選（2）" }));
+    panel = screen.getByRole("dialog", { name: "篩選（2）" });
+    expect(within(panel).getByRole("button", { name: /更多篩選/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await user.click(within(panel).getByRole("button", { name: "清除篩選" }));
+    expect(screen.getByRole("button", { name: "篩選" })).toBeInTheDocument();
   });
 
   it("gathers validation warnings and analysis in the Problems panel", async () => {
@@ -218,10 +255,38 @@ describe("LaneView", () => {
     // Beside the board, not on top of it.
     expect(container.querySelector(".lane-body > .problems-panel")).not.toBeNull();
 
+    // Picking a problem opens its node, and the drawer takes the side.
     await user.click(within(panel).getByRole("button", { name: /未知的節點/ }));
     expect(openTab).toHaveBeenCalledWith("a");
+    expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
+    expect(problems).toHaveAttribute("aria-expanded", "false");
+  });
 
-    await user.click(within(panel).getByRole("button", { name: "關閉問題面板" }));
+  it("keeps Problems and the node drawer from sharing the side", async () => {
+    const user = userEvent.setup();
+    useApp.setState({ activeTab: "a" });
+    render(<LaneView variant="graph" {...paneProps} />);
+
+    const problems = screen.getByRole("button", { name: /問題：/ });
+    await user.click(problems);
+    expect(useApp.getState().activeTab).toBeNull();
+
+    // Closed from inside, by × or by Escape, focus goes back to the button.
+    await user.click(screen.getByRole("button", { name: "關閉問題面板" }));
+    expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
+    expect(problems).toHaveFocus();
+
+    await user.click(problems);
+    expect(screen.getByRole("complementary", { name: "問題" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
+    expect(problems).toHaveFocus();
+
+    // A node opened some other way (Enter on a card, the palette) takes the
+    // side back from Problems.
+    await user.click(problems);
+    expect(screen.getByRole("complementary", { name: "問題" })).toBeInTheDocument();
+    act(() => useApp.setState({ activeTab: "a" }));
     expect(screen.queryByRole("complementary", { name: "問題" })).not.toBeInTheDocument();
   });
 
@@ -257,10 +322,45 @@ describe("LaneView", () => {
 
     await user.keyboard("{Escape}");
     expect(container.ownerDocument.querySelector(".lane-context-menu")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "節點選單：設計稿" }));
+    // The ⋯ lies over the card's corner as its sibling: nothing interactive
+    // is nested inside the card's own button.
+    const more = screen.getByRole("button", { name: "節點選單：設計稿" });
+    expect(card.querySelector("button, [role='button']")).toBeNull();
+    expect(card.nextElementSibling).toBe(more);
+    await user.click(more);
     expect(
       container.ownerDocument.querySelector(".lane-context-menu.node-actions-menu"),
     ).not.toBeNull();
+    expect(screen.getByRole("menu", { name: "「設計稿」的動作" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "建立群組底圖" })).toBeInTheDocument();
+  });
+
+  it("draws a group background around one node from its menu", async () => {
+    const user = userEvent.setup();
+    const updateCanvasLayout = vi.fn(async () => ({ ok: true as const }));
+    useApp.setState({ updateCanvasLayout } as never);
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    fireEvent.contextMenu(container.querySelector<HTMLElement>(".col-card")!);
+    await user.click(screen.getByRole("menuitem", { name: "建立群組底圖" }));
+    expect(updateCanvasLayout).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "canvas.upsertGroup" }),
+    );
+    expect(container.querySelector<HTMLElement>(".col-card")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("shows what the clipboard holds with no selection or one", () => {
+    useApp.setState({
+      nodeClipboard: { project: "main", ids: ["a"], labels: ["設計稿"], mode: "copy" },
+    });
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    expect(container.querySelector(".graph-clipboard-strip")).toHaveTextContent("main");
+    const card = container.querySelector<HTMLElement>(".col-card")!;
+    act(() => card.focus());
+    expect(card).toHaveAttribute("aria-selected", "true");
+    expect(container.querySelector(".graph-clipboard-strip")).toHaveTextContent("main");
   });
 
   it("keeps the batch toolbar for two or more nodes", () => {
@@ -279,6 +379,28 @@ describe("LaneView", () => {
     await user.click(screen.getByRole("button", { name: "展開專案總管" }));
     expect(useApp.getState().preferences.explorerCollapsed).toBe(false);
     expect(screen.queryByRole("button", { name: "展開專案總管" })).not.toBeInTheDocument();
+  });
+
+  // The » leaves once the explorer is back, so the keyboard goes to its «.
+  it("hands focus to the explorer's fold button once it is back", async () => {
+    const user = userEvent.setup();
+    act(() => useApp.getState().updateUIPreference("explorerCollapsed", true));
+    function Explorer() {
+      const collapsed = usePreference("explorerCollapsed");
+      return collapsed ? null : (
+        <button type="button" className="explorer-collapse">
+          «
+        </button>
+      );
+    }
+    render(
+      <>
+        <Explorer />
+        <LaneView variant="graph" {...paneProps} />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "展開專案總管" }));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "«" })).toHaveFocus());
   });
 
   it("keeps the display scale off the timeline, which sizes its own cells", () => {

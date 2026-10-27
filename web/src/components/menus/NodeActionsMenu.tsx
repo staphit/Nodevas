@@ -41,6 +41,8 @@ export interface NodeActionsMenuProps {
   selectNode: (id: string) => void;
   duplicateNode: (id: string) => Promise<string>;
   deleteNode: (id: string) => Promise<void>;
+  /** Draws a group background around these nodes (the selection's, by default). */
+  createGroupFromSelection: (ids?: readonly string[]) => void;
   setContextMenu: (menu: LaneContextMenu | null) => void;
 }
 
@@ -56,6 +58,7 @@ export function NodeActionsMenu({
   selectNode,
   duplicateNode,
   deleteNode,
+  createGroupFromSelection,
   setContextMenu,
 }: NodeActionsMenuProps) {
   const { t } = useI18n();
@@ -137,13 +140,9 @@ export function NodeActionsMenu({
   );
 
   return (
-    <div
-      ref={rootRef}
-      className="node-actions"
-      aria-label={t("board.nodeMenu.label", { title })}
-      onKeyDown={onKeyDown}
-    >
-      <div className="lane-context-title node-actions-title">
+    // The menu role and its name sit on LaneContextMenuLayer's panel.
+    <div ref={rootRef} className="node-actions" onKeyDown={onKeyDown}>
+      <div className="lane-context-title node-actions-title" role="presentation">
         <small>{title}</small>
       </div>
       <button
@@ -219,6 +218,20 @@ export function NodeActionsMenu({
         })}
       >
         <span>{t("nodeMenu.duplicate")}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="node-actions-item"
+        title={t("batch.groupBackgroundTitle")}
+        // The same background the batch toolbar draws, around this one card:
+        // it becomes the selection so what is grouped is what is shown.
+        onClick={run(() => {
+          selectNode(nodeId);
+          createGroupFromSelection([nodeId]);
+        })}
+      >
+        <span>{t("batch.groupBackground")}</span>
       </button>
       {submenuTrigger("transfer", t("board.batch.transfer"))}
       {submenu === "transfer" && (

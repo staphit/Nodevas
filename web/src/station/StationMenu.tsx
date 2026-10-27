@@ -50,7 +50,10 @@ export function StationMenu({
   triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [style, setStyle] = useState<CSSProperties>(UNPLACED);
+  // Undefined until the panel is placed: it shows hidden till then, and the
+  // first item takes focus only once it is visible (a hidden button cannot).
+  const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
+  const ready = open && style !== undefined;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -66,7 +69,7 @@ export function StationMenu({
   // Right-aligned under the trigger, kept on screen; placed before paint.
   useLayoutEffect(() => {
     if (!open) {
-      setStyle(UNPLACED);
+      setStyle(undefined);
       return;
     }
     const place = () => {
@@ -90,8 +93,11 @@ export function StationMenu({
   }, [open]);
 
   useEffect(() => {
+    if (ready) buttons()[0]?.focus();
+  }, [ready]);
+
+  useEffect(() => {
     if (!open) return;
-    buttons()[0]?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
@@ -149,7 +155,7 @@ export function StationMenu({
           className="station-menu-panel"
           role="menu"
           aria-label={label}
-          style={style}
+          style={style ?? UNPLACED}
           onKeyDown={onMenuKeyDown}
         >
           {items.map((item) => {

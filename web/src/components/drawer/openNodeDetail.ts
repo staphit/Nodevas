@@ -26,12 +26,27 @@ export const useNodeDetailView = create<{
   clearRequest: () => set({ request: null }),
 }));
 
+// A request belongs to the project it was made in: another project's node of
+// the same id must not open on that view later.
+useApp.subscribe((state, previous) => {
+  if (state.activeProject !== previous.activeProject) useNodeDetailView.getState().clearRequest();
+});
+
 /**
  * Opens a node's detail panel on one of its views — the board's
  * "Add dependency…" lands on Dependencies, a run notice on Activity. Without a
- * view it is the plain open, which shows the document.
+ * view it is the plain open, which shows the document. If the node does not
+ * open, the request goes with it, so it cannot fire on a later open.
  */
 export function openNodeDetail(nodeId: string, view: NodeDetailView = "content"): void {
   useNodeDetailView.getState().requestView(nodeId, view);
-  void useApp.getState().openTab(nodeId).catch(reportError);
+  const nonce = useNodeDetailView.getState().request?.nonce;
+  void useApp
+    .getState()
+    .openTab(nodeId)
+    .catch((error: unknown) => {
+      // Only this request: a newer one may have been made meanwhile.
+      if (useNodeDetailView.getState().request?.nonce === nonce) useNodeDetailView.getState().clearRequest();
+      reportError(error);
+    });
 }

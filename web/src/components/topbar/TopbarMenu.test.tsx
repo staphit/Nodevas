@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TopbarMenu, type TopbarMenuEntry } from "./TopbarMenu";
@@ -33,8 +33,53 @@ describe("TopbarMenu", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("menuitemradio", { name: "beta" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("menuitemradio", { name: "alpha" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("menuitem", { name: "版型：工作流程" })).toBeDisabled();
+    // Disabled, yet focusable: aria-disabled rather than the native attribute.
+    const layout = screen.getByRole("menuitem", { name: "版型：工作流程" });
+    expect(layout).toHaveAttribute("aria-disabled", "true");
+    expect(layout).not.toBeDisabled();
     expect(screen.getByRole("separator")).toBeInTheDocument();
+  });
+
+  it("ignores a press on a disabled entry and stays open", async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <TopbarMenu
+        label="m"
+        trigger={<span>m</span>}
+        entries={[{ id: "x", label: "Fixed", disabled: true, onSelect }]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "m" }));
+    await user.click(screen.getByRole("menuitem", { name: "Fixed" }));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("wraps a group's items in a group named by its heading", async () => {
+    const user = userEvent.setup();
+    render(
+      <TopbarMenu
+        label="m"
+        trigger={<span>m</span>}
+        entries={[
+          {
+            kind: "group",
+            id: "g",
+            label: "Projects",
+            items: [
+              { id: "a", label: "alpha", checked: true, onSelect: vi.fn() },
+              { id: "b", label: "beta", checked: false, onSelect: vi.fn() },
+            ],
+          },
+          { id: "s", label: "Settings", onSelect: vi.fn(), separatorBefore: true },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "m" }));
+    const group = screen.getByRole("group", { name: "Projects" });
+    expect(within(group).getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["✓alpha", "beta"]);
+    expect(within(group).queryByRole("menuitem", { name: "Settings" })).toBeNull();
   });
 
   // The current choice takes focus, so Enter on open keeps where you are.
@@ -44,7 +89,9 @@ describe("TopbarMenu", () => {
     expect(screen.getByRole("menuitemradio", { name: "beta" })).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
-    // The disabled layout line is skipped.
+    // The disabled layout line is reached too: it says why it cannot change.
+    expect(screen.getByRole("menuitem", { name: "版型：工作流程" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "專案設定" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemradio", { name: "alpha" })).toHaveFocus();

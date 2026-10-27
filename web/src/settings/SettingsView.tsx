@@ -12,7 +12,7 @@
 //
 // Loaded on demand (App's React.lazy).
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useTeamServer, useViewer } from "../components/SignIn";
 import { InlineDialogContext } from "../components/DialogFrame";
@@ -29,6 +29,7 @@ import {
   type SettingsPage,
   type SettingsRow,
   type SettingsSection,
+  useSettingsRequest,
 } from "./openSettings";
 import { searchSettings, type SettingsHit, type SettingsNeed } from "./settingsSearch";
 import { AccountSection, GeneralSection, ProjectSection } from "./SettingsSections";
@@ -53,6 +54,13 @@ export default function SettingsView() {
   const [query, setQuery] = useState("");
   const [addRequested, setAddRequested] = useState(false);
   const addOpened = useCallback(() => setAddRequested(false), []);
+  // "Add a runner" from the palette or Station: taken once, here.
+  const addAsked = useSettingsRequest((s) => s.add);
+  useEffect(() => {
+    if (!addAsked) return;
+    setAddRequested(true);
+    useSettingsRequest.getState().clearRequest();
+  }, [addAsked]);
 
   const place = SETTINGS_PLACES[section] ?? SETTINGS_PLACES.project;
   const page = place.page;
@@ -79,11 +87,34 @@ export default function SettingsView() {
   };
   const hits = searchSettings(query, t, offered);
   const searching = query.trim() !== "";
+  // The hit just picked, until focus has moved to it: the search box gives
+  // way to its hits' list, so focus follows the reader to what they asked for.
+  const [picked, setPicked] = useState<SettingsHit | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const pick = (hit: SettingsHit) => {
     go(hit.entry.page, hit.entry.row ?? null);
     if (hit.entry.add) setAddRequested(true);
     setQuery("");
+    setPicked(hit);
   };
+  // To the opened row's toggle, or else the section's heading. The add form
+  // takes focus itself (its name field).
+  useEffect(() => {
+    if (!picked) return;
+    setPicked(null);
+    if (picked.entry.add) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    const toggle = body.querySelector<HTMLElement>(".settings-disclosure.is-open > .settings-disclosure-toggle");
+    if (toggle) {
+      toggle.focus();
+      return;
+    }
+    const heading = body.querySelector<HTMLElement>("h2");
+    if (!heading) return;
+    heading.setAttribute("tabindex", "-1");
+    heading.focus();
+  }, [picked]);
 
   // A dialog's close, inline: a part that sends you to a node goes back to
   // the board. Escape does nothing here; the mode switch leaves the page.
@@ -146,7 +177,7 @@ export default function SettingsView() {
           </div>
         )}
       </nav>
-      <div className="settings-page-body">
+      <div className="settings-page-body" ref={bodyRef}>
         <InlineDialogContext.Provider value={true}>
           {page === "general" && <GeneralSection {...sectionProps} />}
           {page === "agents" && (

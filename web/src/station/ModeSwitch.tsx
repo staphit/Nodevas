@@ -7,35 +7,48 @@
 import { useMemo } from "react";
 
 import { canManageSession, useAgents } from "../agents/agentStore";
+import { useAutopilot } from "../autopilot/autopilotStore";
 import { setProjectMode } from "../game/stageSkin";
 import { useI18n } from "../i18n";
 import { IconCanvas, IconSpark } from "../icons";
 import { useBudget } from "../runs/budgetStore";
+import { useRuns } from "../runs/runStore";
 import { useApp, usePreference } from "../store";
 import { useStation } from "./stationStore";
-import { waitingRuns } from "./waiting";
+import { waitingOnYou } from "./waiting";
 
 /**
- * Everything waiting on the viewer: Station's badge. The questions and held
- * messages they may answer, plus what Station's "waiting on you" strip lists
- * (waiting.ts): runs stopped by a usage limit, PRs ready to merge, and an
- * exceeded daily budget. The runs count only once Station has loaded them
- * for the project on screen.
+ * Everything waiting on the viewer: Station's badge. The same list Station's
+ * "Waiting on you" card shows (waiting.ts), counted from the same stores:
+ * the questions and held messages they may answer, autopilot reviews, PRs to
+ * merge or fix, offers no runner took yet, usage limits and an exceeded daily
+ * budget. Station's recent runs count only once Station has loaded them for
+ * the project on screen.
  */
 export function useWaitingCount(): number {
   const asks = useAgents((s) => s.asks);
   const held = useAgents((s) => s.held);
   const viewer = useAgents((s) => s.viewer);
+  const reviews = useAutopilot((s) => s.waiting);
+  const active = useRuns((s) => s.activeRuns);
   const runs = useStation((s) => s.runs);
   const runsProject = useStation((s) => s.project);
   const activeProject = useApp((s) => s.activeProject);
-  const exceeded = useBudget((s) => Boolean(s.status?.exceeded));
-  const waiting = useMemo(
-    () => (runsProject === activeProject ? waitingRuns(runs, Date.now()).length : 0),
-    [runs, runsProject, activeProject],
+  const exceeded = useBudget((s) => s.status?.exceeded);
+  return useMemo(
+    () =>
+      waitingOnYou({
+        runs: runsProject === activeProject ? runs : [],
+        active,
+        asks,
+        held,
+        reviews,
+        budgetExceeded: exceeded,
+        canAnswer: (ask) => canManageSession(ask, viewer),
+        now: Date.now(),
+      }).length,
+    [runs, runsProject, activeProject, active, asks, held, reviews, exceeded, viewer],
   );
-  const pending = asks.filter((ask) => ask.status === "pending" && canManageSession(ask, viewer)).length;
-  return pending + held.length + waiting + (exceeded ? 1 : 0);
 }
 
 export function ModeSwitch() {

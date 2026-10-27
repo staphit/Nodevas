@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
-import { GraphBatchToolbar, type GraphBatchToolbarProps } from "./GraphBatchToolbar";
+import {
+  GraphBatchToolbar,
+  NodeClipboardNotice,
+  type GraphBatchToolbarProps,
+} from "./GraphBatchToolbar";
 
 beforeEach(() => {
   useApp.setState({
@@ -105,5 +109,35 @@ describe("GraphBatchToolbar", () => {
     await user.click(screen.getByRole("button", { name: "Clear selection" }));
     expect(props.setGraphSelection).toHaveBeenCalledWith(null);
     expect(props.onSelectedNodeChange).toHaveBeenCalledWith(null);
+  });
+
+  it("says what the clipboard holds, inline in the row", () => {
+    useApp.setState({
+      nodeClipboard: { project: "main", ids: ["a", "b"], labels: ["Alpha", "Beta"], mode: "copy" },
+    });
+    toolbar();
+    const row = screen.getByRole("toolbar", { name: "2 nodes" });
+    expect(row).toHaveTextContent("copied 2 nodes (main)");
+    expect(row.querySelector(".graph-clipboard-strip")).toBeNull();
+  });
+});
+
+describe("NodeClipboardNotice", () => {
+  it("is nothing while the clipboard is empty", () => {
+    const { container } = render(<NodeClipboardNotice strip />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("stands on its own as a strip and clears the clipboard", async () => {
+    const user = userEvent.setup();
+    useApp.setState({
+      nodeClipboard: { project: "main", ids: ["a"], labels: ["Alpha"], mode: "cut" },
+    });
+    const { container } = render(<NodeClipboardNotice strip />);
+    const strip = container.querySelector(".graph-clipboard-strip")!;
+    expect(strip).toHaveTextContent("cut 1 nodes (main)");
+    await user.click(within(strip as HTMLElement).getByRole("button", { name: "Clear" }));
+    expect(useApp.getState().nodeClipboard).toBeNull();
+    expect(container).toBeEmptyDOMElement();
   });
 });

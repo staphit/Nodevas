@@ -7,7 +7,7 @@
  * panel's header; the rest sits behind "More properties".
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NodeMetadataPatch } from "../../domain/graph/node";
 import { IconTrash } from "../../icons";
 import {
@@ -78,8 +78,16 @@ export function AssigneeField({ id }: { id: string }) {
   const assignedUserName = (users ?? []).find((user) => user.id === assigneeId)?.name ?? "";
   const [assignee, setAssignee] = useState(assignedUserName);
   useEffect(() => setAssignee(assignedUserName), [assignedUserName]);
+  // Escape blurs to leave the field, and the blur would commit what was
+  // typed: the reset to the saved name has not rendered yet. The flag tells
+  // that blur to drop it instead.
+  const cancelledRef = useRef(false);
 
   const commitAssignee = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      return;
+    }
     const name = assignee.trim();
     if (name === assignedUserName) return;
     reportCommand(updateNode({ type: "node.assignByName", nodeId: id, name }));
@@ -96,11 +104,15 @@ export function AssigneeField({ id }: { id: string }) {
         placeholder={t("drawer.assigneePlaceholder")}
         title={t("node.meta.assigneePlaceholder")}
         onChange={(event) => setAssignee(event.target.value)}
+        onFocus={() => {
+          cancelledRef.current = false;
+        }}
         onBlur={commitAssignee}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
           if (event.key === "Escape") {
             event.nativeEvent.stopImmediatePropagation();
+            cancelledRef.current = true;
             setAssignee(assignedUserName);
             event.currentTarget.blur();
           }

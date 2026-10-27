@@ -340,7 +340,14 @@ export function Sidebar() {
           <button
             type="button"
             className="explorer-collapse"
-            onClick={() => updateUIPreference("explorerCollapsed", true)}
+            onClick={() => {
+              updateUIPreference("explorerCollapsed", true);
+              // The explorer, this button with it, is about to unmount; the
+              // board header's » is the way back, so the keyboard waits there.
+              requestAnimationFrame(() =>
+                document.querySelector<HTMLElement>(".board-explorer-toggle")?.focus(),
+              );
+            }}
             title={t("board.collapseExplorer")}
             aria-label={t("board.collapseExplorer")}
             aria-expanded

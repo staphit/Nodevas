@@ -42,6 +42,22 @@ describe("waitingRuns", () => {
     expect(waitingRuns([red, fixed], NOW)).toEqual([{ kind: "merge", run: fixed }]);
   });
 
+  // The newest run decides: an older green PR waits while a newer run's CI
+  // is pending, it failed, or it is still running.
+  it("does not list an older run's green PR while the newest is pending or failed", () => {
+    const pr = { prUrl: "https://x/pull/1", prNumber: 1, prState: "open" } as const;
+    const green = run({ id: "green", ...pr, ciStatus: "success", finishedAt: min(20) });
+    const pending = run({ id: "pending", ...pr, ciStatus: "pending", finishedAt: min(2) });
+    expect(waitingRuns([green, pending], NOW)).toEqual([]);
+    const failed = run({ id: "failed", status: "failed", failureKind: "task", finishedAt: min(2) });
+    expect(waitingRuns([green, failed], NOW)).toEqual([]);
+    const running = run({ id: "running", status: "running", createdAt: min(5), finishedAt: undefined });
+    expect(waitingRuns([green, running], NOW)).toEqual([]);
+    // Another node's PR is its own.
+    const other = run({ id: "other", nodeId: "n2", ...pr, ciStatus: "success" });
+    expect(waitingRuns([green, pending, other], NOW)).toEqual([{ kind: "merge", run: other }]);
+  });
+
   it("forgets what is older than the window, and plain failures", () => {
     const stale = run({ status: "failed", failureKind: "quota", finishedAt: min(60 * 7) });
     const plain = run({ id: "p", status: "failed", failureKind: "task" });

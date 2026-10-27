@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../preferences";
+import { useSettingsRequest } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
 import { useApp } from "../store";
 import { CommandPalette } from "./CommandPalette";
@@ -71,6 +72,14 @@ describe("CommandPalette: what the top bar no longer shows", () => {
     const prefs = useApp.getState().preferences;
     expect(prefs.projectMode).toBe("settings");
     expect(prefs.settingsSection).toBe("budget");
+  });
+
+  it("asks Settings for the add-runner form from Add a runner", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Add a runner/ }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useSettingsRequest.getState().add).toBe(true);
   });
 
   it("switches project", async () => {

@@ -165,6 +165,9 @@ describe("RunnersPanel", () => {
     );
     await screen.findByText("desktop");
 
+    // Revoke waits inside the runner's details.
+    expect(screen.queryByRole("button", { name: "Revoke runner desktop" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
     fireEvent.click(screen.getByRole("button", { name: "Revoke runner desktop" }));
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(revoke).not.toHaveBeenCalled();

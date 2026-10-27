@@ -654,6 +654,17 @@
 .station-menu-item.is-danger {
   color: var(--st-failed-fg);
 }
+/* A finger's 44px on a touch screen and on a phone: the row's ⋯ is a glyph
+   with no label to widen it, and the menu's rows are 32px for a mouse. */
+@media (pointer: coarse), (max-width: 720px) {
+  .station-menu-trigger.is-icon {
+    width: 44px;
+    min-height: 44px;
+  }
+  .station-menu-item {
+    min-height: 44px;
+  }
+}
 .station-menu-check {
   width: 14px;
   color: var(--accent);

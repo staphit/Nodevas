@@ -29,7 +29,9 @@ function millis(value: string | undefined): number {
  *   run that took over named when there is one;
  * - merge: succeeded with an open PR whose CI passed and no merge under way;
  * - ci: succeeded with an open PR whose CI failed.
- * A node's PR is listed once, as its newest run has it.
+ * A node's PR is listed once, as its newest run has it: an older run's green
+ * PR is not "ready to merge" while a newer run is still going or came back
+ * without one (pending CI, a failure).
  */
 export function waitingRuns(runs: Run[], now: number, windowMs = WAITING_WINDOW_MS): WaitingRun[] {
   const byRetry = new Map<string, Run>();
@@ -40,6 +42,11 @@ export function waitingRuns(runs: Run[], now: number, windowMs = WAITING_WINDOW_
     (a, b) => (millis(b.finishedAt) || millis(b.createdAt)) - (millis(a.finishedAt) || millis(a.createdAt)),
   );
   for (const run of sorted) {
+    // The node's newest run claims its PR line before anything else is asked
+    // of it, whether or not it has a PR worth listing.
+    const prKey = `pr:${run.nodeId}`;
+    const newest = !seen.has(prKey);
+    seen.add(prKey);
     const finished = millis(run.finishedAt);
     if (!Number.isFinite(finished) || now - finished > windowMs) continue;
     if (run.status === "failed" && (run.failureKind === "rate_limit" || run.failureKind === "quota")) {
@@ -49,13 +56,10 @@ export function waitingRuns(runs: Run[], now: number, windowMs = WAITING_WINDOW_
       out.push({ kind: "limit", run, tookOver: byRetry.get(run.id) });
       continue;
     }
-    if (run.status !== "succeeded" || !run.prUrl || run.prState !== "open") continue;
+    if (!newest || run.status !== "succeeded" || !run.prUrl || run.prState !== "open") continue;
     const merging = run.merge && (run.merge.status === "pending" || run.merge.status === "merged");
     const kind = run.ciStatus === "success" && !merging ? "merge" : run.ciStatus === "failure" ? "ci" : null;
     if (!kind) continue;
-    const key = `pr:${run.nodeId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     out.push({ kind, run });
   }
   return out;

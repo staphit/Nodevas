@@ -125,5 +125,11 @@ describe("StationSide", () => {
     expect(screen.queryByRole("region", { name: "Agent Network" })).not.toBeInTheDocument();
     act(() => useAgents.getState().setOpen(true));
     expect(screen.getByRole("region", { name: "Agent Network" })).toBeInTheDocument();
+    // Consumed once: the next Ctrl+Shift+A asks again rather than clearing
+    // it, and no floating panel waits on the board.
+    expect(useAgents.getState().open).toBe(false);
+    act(() => useAgents.getState().toggleOpen());
+    expect(useAgents.getState().open).toBe(false);
+    expect(screen.getByRole("region", { name: "Agent Network" })).toBeInTheDocument();
   });
 });

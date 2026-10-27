@@ -271,16 +271,6 @@ function RunnerCard({ runner }: { runner: Runner }) {
         >
           {t("settingsPage.runnerDetails")}
         </button>
-        <button
-          type="button"
-          className="runner-revoke"
-          disabled={revoking}
-          onClick={() => void onRevoke()}
-          aria-label={t("runners.revokeTitle", { name: runner.name })}
-          title={t("runners.revoke")}
-        >
-          <IconTrash size={14} />
-        </button>
       </div>
 
       {open && (
@@ -337,6 +327,22 @@ function RunnerCard({ runner }: { runner: Runner }) {
               )}
             </div>
           )}
+
+          {/* Revoking is rare and final: it waits in the details, not on
+              every runner's line beside Details. */}
+          <div className="runner-details-actions">
+            <button
+              type="button"
+              className="runner-revoke"
+              disabled={revoking}
+              onClick={() => void onRevoke()}
+              aria-label={t("runners.revokeTitle", { name: runner.name })}
+              title={t("runners.revoke")}
+            >
+              <IconTrash size={14} />
+              <span>{t("runners.revoke")}</span>
+            </button>
+          </div>
         </div>
       )}
     </li>

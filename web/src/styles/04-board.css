@@ -298,15 +298,21 @@
   color: var(--accent);
 }
 /* The card's own menu button: out of the way until the card is pointed at,
-   focused or selected, and always there on a touch screen once selected. */
+   focused or selected, and always there on a touch screen once selected. It is
+   the card's next sibling, not its child — a control nested in the card's
+   role="button" is one no assistive technology can reach — so it is placed by
+   the card's top-right corner (GraphCanvas sets that corner as left/top) and
+   pulled back inside it here. */
 .col-card-more {
-  flex: none;
+  position: absolute;
+  z-index: 12;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: calc(18px * var(--card-font-scale, 1));
   height: calc(16px * var(--card-font-scale, 1));
-  margin-left: auto;
+  /* Inside the 3px top border and clear of the corner's resize grip. */
+  transform: translate(calc(-100% - 6px), 6px);
   padding: 0;
   border: 0;
   border-radius: 4px;
@@ -316,26 +322,33 @@
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 120ms var(--ease-out);
+  pointer-events: none;
+  transition: opacity 120ms var(--ease-out), left 200ms var(--ease-out),
+    top 200ms var(--ease-out);
 }
-.col-card:hover .col-card-more,
-.col-card:focus-within .col-card-more,
-.col-card.selected .col-card-more {
+.col-card:hover + .col-card-more,
+.col-card:focus-within + .col-card-more,
+.col-card.selected + .col-card-more,
+.col-card-more:hover,
+.col-card-more:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 .col-card-more:hover,
 .col-card-more:focus-visible {
   background: var(--hover);
   color: var(--text);
 }
+/* A lifted card moves by transform; its button would stay behind. */
+.col-card.lifting + .col-card-more {
+  display: none;
+}
 @media (hover: none) {
-  .col-card:hover:not(.selected) .col-card-more {
+  .col-card:hover:not(.selected) + .col-card-more {
     opacity: 0;
+    pointer-events: none;
   }
   /* A fingertip-sized hit area around a glyph that stays small. */
-  .col-card-more {
-    position: relative;
-  }
   .col-card-more::after {
     content: "";
     position: absolute;

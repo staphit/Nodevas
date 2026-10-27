@@ -14,7 +14,7 @@
  * timeline header keeps its direction up front for the same reason.
  */
 
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode, type Ref } from "react";
 
 import { IconAlignGuides, IconPlus, IconResizeHorizontal } from "../icons";
 import { InlineNotice } from "./InteractionPrimitives";
@@ -64,6 +64,8 @@ export interface BoardToolbarProps {
   problemCount: number;
   problemsOpen: boolean;
   setProblemsOpen: (update: (open: boolean) => boolean) => void;
+  /** The Problems button, where the keyboard returns when the panel closes. */
+  problemsButtonRef?: Ref<HTMLButtonElement>;
   fitGraph: (selectionOnly: boolean) => void;
   snapToGrid: boolean;
   setSnapToGrid: (value: boolean) => void;
@@ -123,6 +125,7 @@ export function BoardToolbar({
   problemCount,
   problemsOpen,
   setProblemsOpen,
+  problemsButtonRef,
   fitGraph,
   snapToGrid,
   setSnapToGrid,
@@ -317,7 +320,14 @@ export function BoardToolbar({
           <button
             type="button"
             className="board-explorer-toggle"
-            onClick={() => updateUIPreference("explorerCollapsed", false)}
+            onClick={() => {
+              updateUIPreference("explorerCollapsed", false);
+              // This button goes away with the fold; the explorer's « is
+              // where the keyboard lands once it has rendered.
+              requestAnimationFrame(() =>
+                document.querySelector<HTMLElement>(".explorer-collapse")?.focus(),
+              );
+            }}
             title={t("board.expandExplorer")}
             aria-label={t("board.expandExplorer")}
             aria-expanded={false}
@@ -511,6 +521,7 @@ export function BoardToolbar({
             {/* Always there, so where problems are found never moves: the count
                 is the badge, and it turns to the alert colour when non-zero. */}
             <button
+              ref={problemsButtonRef}
               type="button"
               className={`board-tool-button board-problems${problemsOpen ? " active" : ""}${
                 problemCount ? " has-problems" : ""

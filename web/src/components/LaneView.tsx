@@ -17,7 +17,7 @@ import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
-import { GraphBatchToolbar } from "./GraphBatchToolbar";
+import { GraphBatchToolbar, NodeClipboardNotice } from "./GraphBatchToolbar";
 import { GraphToolsPanel, activeFilterCount } from "./GraphToolsPanel";
 import { TimelineGrid } from "./timeline/TimelineGrid";
 import { TimelineCards } from "./timeline/TimelineCards";
@@ -206,6 +206,30 @@ export function LaneView({
   // The Problems side panel: the schedule analysis and the validation
   // warnings, beside the board instead of on top of it.
   const [problemsOpen, setProblemsOpen] = useState(false);
+  const problemsButtonRef = useRef<HTMLButtonElement>(null);
+  const closeDrawer = useApp((s) => s.closeDrawer);
+  // The panel and the node drawer answer different questions and both take
+  // the right-hand side, so one opening closes the other: Problems closes the
+  // drawer here, and picking a problem (which opens the drawer) closes
+  // Problems below.
+  const toggleProblems = (update: (open: boolean) => boolean) => {
+    const next = update(problemsOpen);
+    if (next && useApp.getState().activeTab !== null) closeDrawer();
+    setProblemsOpen(next);
+  };
+  // Closed from inside (× or Escape), the keyboard goes back to the button
+  // that opened it rather than to the top of the page.
+  const closeProblems = () => {
+    setProblemsOpen(false);
+    problemsButtonRef.current?.focus();
+  };
+  // And the other way: a node opened any other way (Enter or a double click
+  // on a card, the palette) takes the side back from Problems.
+  const lastActiveTab = useRef(activeTab);
+  useEffect(() => {
+    if (activeTab !== null && activeTab !== lastActiveTab.current) setProblemsOpen(false);
+    lastActiveTab.current = activeTab;
+  }, [activeTab]);
   // What a plain drag means, for a pointer with no modifier keys to hold. The
   // modifiers keep working in every mode, so this only ever adds a way in.
   const [gestureMode, setGestureMode] = useState<GraphGestureMode>("select");
@@ -1150,7 +1174,8 @@ export function LaneView({
         activeFilters={activeFilterCount(viewFilter)}
         problemCount={problemCount(analysis, issues)}
         problemsOpen={problemsOpen}
-        setProblemsOpen={setProblemsOpen}
+        setProblemsOpen={toggleProblems}
+        problemsButtonRef={problemsButtonRef}
         fitGraph={fitGraph}
         snapToGrid={snapToGrid}
         setSnapToGrid={setSnapToGrid}
@@ -1201,6 +1226,8 @@ export function LaneView({
           onSelectedNodeChange={onSelectedNodeChange}
         />
       )}
+      {/* The clipboard outlives the selection that filled it. */}
+      {isGraph && !collapsed && selectedIDs.length <= 1 && <NodeClipboardNotice strip />}
       {collapsed ? null : (
       <div className={`lane-body${isGraph && problemsOpen ? " problems-open" : ""}`}>
       <div
@@ -1410,10 +1437,11 @@ export function LaneView({
           issues={issues}
           nodeTitle={nodeTitle}
           onPick={(nodeId) => {
+            setProblemsOpen(false);
             selectNode(nodeId);
             void openTab(nodeId).catch(reportError);
           }}
-          onClose={() => setProblemsOpen(false)}
+          onClose={closeProblems}
         />
       )}
       </div>
@@ -1431,6 +1459,7 @@ export function LaneView({
           selectNode={selectNode}
           duplicateNode={duplicateNode}
           deleteNode={deleteNode}
+          createGroupFromSelection={createGroupFromSelection}
           openNodeCreationMenu={openNodeCreationMenu}
           createCanvasGroup={createCanvasGroup}
           createCanvasAnnotation={createCanvasAnnotation}

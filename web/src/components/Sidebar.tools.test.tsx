@@ -1,8 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { configurePreferenceStorage, readPreferences } from "../preferences";
-import { useApp } from "../store";
+import { useApp, usePreference } from "../store";
 import { Sidebar } from "./Sidebar";
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -80,6 +80,25 @@ describe("Sidebar tools", () => {
     render(<Sidebar />);
     await user.click(screen.getByRole("button", { name: "Collapse project explorer" }));
     expect(useApp.getState().preferences.explorerCollapsed).toBe(true);
+  });
+
+  // The « leaves with the explorer, so the keyboard goes to the board's ».
+  it("hands focus to the board's way back once folded", async () => {
+    const user = userEvent.setup();
+    useApp.getState().updateUIPreference("explorerCollapsed", false);
+    function Shell() {
+      const collapsed = usePreference("explorerCollapsed");
+      return collapsed ? (
+        <button type="button" className="board-explorer-toggle">
+          »
+        </button>
+      ) : (
+        <Sidebar />
+      );
+    }
+    render(<Shell />);
+    await user.click(screen.getByRole("button", { name: "Collapse project explorer" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "»" })).toHaveFocus());
   });
 
   // The workspace context menu clicks these inputs too, so they must exist

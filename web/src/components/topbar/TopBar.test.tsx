@@ -63,7 +63,9 @@ describe("ProjectMenu", () => {
     await user.click(trigger);
 
     const menu = screen.getByRole("menu");
-    expect(within(menu).getByRole("menuitemradio", { name: /Beta/ })).toHaveAttribute("aria-checked", "true");
+    // The projects are one group, named by their heading.
+    const projects = within(menu).getByRole("group", { name: "Projects" });
+    expect(within(projects).getByRole("menuitemradio", { name: /Beta/ })).toHaveAttribute("aria-checked", "true");
     // A folder is where projects live, not one to open.
     expect(within(menu).queryByRole("menuitemradio", { name: /Folder/ })).toBeNull();
     await user.click(within(menu).getByRole("menuitemradio", { name: /Alpha/ }));
@@ -75,7 +77,7 @@ describe("ProjectMenu", () => {
     const user = userEvent.setup();
     render(<ProjectMenu />);
     await user.click(screen.getByRole("button", { name: "Project: Beta" }));
-    expect(screen.getByRole("menuitem", { name: "Layout: Workflow" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Layout: Workflow" })).toHaveAttribute("aria-disabled", "true");
 
     await user.click(screen.getByRole("menuitem", { name: "Project settings" }));
     const prefs = useApp.getState().preferences;
@@ -87,7 +89,8 @@ describe("ProjectMenu", () => {
     const user = userEvent.setup();
     render(<ProjectMenu />);
     await user.click(screen.getByRole("button", { name: "Project: Beta" }));
-    expect(screen.getByRole("menuitemradio", { name: "One" })).toHaveAttribute("aria-checked", "true");
+    const workspaces = screen.getByRole("group", { name: "Workspace" });
+    expect(within(workspaces).getByRole("menuitemradio", { name: "One" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("menuitemradio", { name: "Two" }));
     expect(switchWorkspace).toHaveBeenCalledWith("/w/two");
   });

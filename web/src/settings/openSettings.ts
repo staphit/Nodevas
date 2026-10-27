@@ -1,3 +1,5 @@
+import { create } from "zustand";
+
 import { setProjectMode } from "../game/stageSkin";
 import { useApp } from "../store";
 
@@ -81,6 +83,25 @@ export function sectionFor(page: SettingsPage, row: SettingsRow | null): Setting
   return page === "general" ? "appearance" : page === "agents" ? "workstation" : page;
 }
 
+/** What to do once the part is open, beyond opening it. */
+export interface OpenSettingsOptions {
+  /** Open the add-runner form (the palette's and Station's "Add a runner"). */
+  add?: boolean;
+}
+
+/**
+ * A one-shot request for the Settings page, beside the part it opens on.
+ * Held here because the page loads on demand and may not exist yet: it
+ * consumes the request when it mounts, or straight away when it shows.
+ */
+export const useSettingsRequest = create<{
+  add: boolean;
+  clearRequest: () => void;
+}>((set) => ({
+  add: false,
+  clearRequest: () => set({ add: false }),
+}));
+
 /**
  * Opens the Settings view on one of its parts. Everything that used to open
  * a settings dialog (the palette, the backup banner, "adjust budget", the
@@ -88,9 +109,11 @@ export function sectionFor(page: SettingsPage, row: SettingsRow | null): Setting
  * section, and the row of it to open (budget, routing and usage open their
  * row of Agents › Advanced). A part of Agents asked for while the
  * workstation is off lands on the workstation switch instead, and opens once
- * it is on.
+ * it is on. `{ add: true }` also opens the add-runner form.
  */
-export function openSettings(section: SettingsSection): void {
+export function openSettings(section: SettingsSection, options: OpenSettingsOptions = {}): void {
+  // A plain open drops an add asked for earlier and not yet taken.
+  useSettingsRequest.setState({ add: Boolean(options.add) });
   useApp.getState().updateUIPreference("settingsSection", section);
   setProjectMode("settings");
 }
