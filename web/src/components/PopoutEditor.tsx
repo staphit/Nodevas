@@ -5,6 +5,7 @@ import { nodeById, useApp } from "../store";
 import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
+import { NodeTitleField } from "./inspector/NodeMetaForm";
 
 export function PopoutEditor() {
   const { t } = useI18n();
@@ -75,7 +76,8 @@ export function PopoutEditor() {
         <div className="popout-editor-title">
           <IconDoc size={16} />
           <div>
-            <strong>{title}</strong>
+            {/* The title is edited here: the popout has no node panel header. */}
+            {node ? <NodeTitleField id={nodeID} /> : <strong>{title}</strong>}
             <span>{pageID === "main" ? t("drawer.mainPage") : pageID}</span>
           </div>
         </div>

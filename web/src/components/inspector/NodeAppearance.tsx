@@ -49,7 +49,7 @@ export function NodeAppearance({ id }: { id: string }) {
   );
 
   return (
-    <div className="node-appearance" role="tabpanel" aria-label={t("drawer.appearance")}>
+    <div className="node-appearance" role="group" aria-label={t("drawer.appearance")}>
       <div className="section-head">
         <h3>{t("appearance.panelTitle")}</h3>
         <span className="section-hint">{t("appearance.panelHint")}</span>

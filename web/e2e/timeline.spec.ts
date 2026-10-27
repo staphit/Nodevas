@@ -103,7 +103,7 @@ test.describe("timeline", () => {
 
     await timeline(page).locator(".lane-head-cell").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByLabel("改為").selectOption("started");
+    await drawer.getByLabel("狀態", { exact: true }).selectOption("started");
     // The status is staged. Unlike the document, it is never written by the
     // auto-save timer — an append to the journal cannot be taken back — so an
     // explicit save is what writes it.

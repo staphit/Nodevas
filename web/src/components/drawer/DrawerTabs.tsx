@@ -15,13 +15,16 @@ import {
   IconCopy,
   IconDoc,
   IconFolderOpen,
+  IconMore,
   IconPin,
   IconPinOff,
+  IconSidebar,
 } from "../../icons";
-import { nodeById, reportError, useApp } from "../../store";
+import { nodeById, operationScope, reportError, useApp, useOperation } from "../../store";
 import { useI18n } from "../../i18n";
-import { AutopilotPill } from "../../autopilot/AutopilotPill";
-import { useWorkstationVisible } from "../../runners/workstation";
+import { OperationStatus } from "../InteractionPrimitives";
+import { NodeTitleField } from "../inspector/NodeMetaForm";
+import { DrawerMenu } from "./DrawerMenu";
 
 type TabContextMenuState = {
   id: string;
@@ -56,7 +59,13 @@ async function copyText(value: string): Promise<void> {
   }
 }
 
-/** The row of open node tabs, and the per-tab context menu it opens. */
+/**
+ * The panel's header: the node's title, editable in place, the panel's `⋯`
+ * menu and its close button. The strip of open nodes appears under it only
+ * once there is more than one to switch between, and each of those keeps the
+ * right-click menu it always had; the `⋯` menu holds the same actions for the
+ * node on screen, so none of them needs a right click or a second tab.
+ */
 export function DrawerTabs({
   activeTab,
   menuOpenRef,
@@ -69,7 +78,7 @@ export function DrawerTabs({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const workstation = useWorkstationVisible();
+  const metadataOperation = useOperation(operationScope.node(activeTab));
   const tabs = useApp((s) => s.tabs);
   const graph = useApp((s) => s.graph);
   const setActiveTab = useApp((s) => s.setActiveTab);
@@ -175,19 +184,113 @@ export function DrawerTabs({
     items[next]?.focus();
   };
 
+  // The same actions for the node on screen, for the header's `⋯` menu.
+  const current = tabs.find((tab) => tab.id === activeTab) ?? null;
+  const currentIndex = current ? tabs.indexOf(current) : -1;
+  const currentOtherIDs = tabs
+    .filter((tab) => tab.id !== activeTab && !tab.pinned)
+    .map((tab) => tab.id);
+  const currentRightIDs =
+    currentIndex >= 0
+      ? tabs.slice(currentIndex + 1).filter((tab) => !tab.pinned).map((tab) => tab.id)
+      : [];
+  const currentRelativePath = `nodes/${activeTab}.md`;
+  const currentFullPath = activeProjectPath
+    ? joinNativePath(activeProjectPath, "nodes", `${activeTab}.md`)
+    : "";
+  const severalTabs = tabs.length > 1;
+
   return (
     <>
       <div className="drawer-head">
+        <NodeTitleField key={activeTab} id={activeTab} />
+        {current?.dirty && (
+          <span className="dirty-dot" role="img" aria-label={t("drawer.tabs.unsaved")} />
+        )}
+        <OperationStatus
+          status={metadataOperation.status}
+          message={
+            metadataOperation.status === "error" || metadataOperation.status === "conflict"
+              ? metadataOperation.message
+              : undefined
+          }
+        />
+        <DrawerMenu
+          label={t("drawer.panelMenu")}
+          trigger={<IconMore size={15} />}
+          triggerClassName="drawer-head-button"
+          align="end"
+          items={[
+            {
+              id: "pin",
+              label: current?.pinned ? t("drawer.tabs.unpin") : t("drawer.tabs.pin"),
+              icon: <IconPin size={14} />,
+              onSelect: () => setTabPinned(activeTab, !current?.pinned),
+            },
+            {
+              id: "close-other",
+              label: t("drawer.tabs.closeOther"),
+              icon: <IconCloseOthers size={14} />,
+              disabled: currentOtherIDs.length === 0,
+              onSelect: () => void closeTabs(currentOtherIDs).catch(reportError),
+            },
+            {
+              id: "close-right",
+              label: t("drawer.tabs.closeRight"),
+              icon: <IconCloseRight size={14} />,
+              disabled: currentRightIDs.length === 0,
+              onSelect: () => void closeTabs(currentRightIDs).catch(reportError),
+            },
+            {
+              id: "close-unpinned",
+              label: t("drawer.tabs.closeUnpinned"),
+              icon: <IconPinOff size={14} />,
+              disabled: closeUnpinnedIDs.length === 0,
+              onSelect: () => void closeTabs(closeUnpinnedIDs).catch(reportError),
+            },
+            {
+              id: "copy-relative",
+              label: t("drawer.tabs.copyRelative"),
+              icon: <IconCopy size={14} />,
+              separatorBefore: true,
+              onSelect: () => void copyText(currentRelativePath).catch(reportError),
+            },
+            {
+              id: "copy-full",
+              label: t("drawer.tabs.copyFull"),
+              icon: <IconClipboard size={14} />,
+              disabled: !currentFullPath,
+              onSelect: () => void copyText(currentFullPath).catch(reportError),
+            },
+            {
+              id: "open-folder",
+              label: t("drawer.tabs.openFolder"),
+              icon: <IconFolderOpen size={14} />,
+              disabled: !contextFolderPath,
+              onSelect: () => void api.openFolder(contextFolderPath).catch(reportError),
+            },
+            {
+              id: "collapse",
+              label: t("drawer.tabs.collapse"),
+              title: t("drawer.tabs.collapseTitle"),
+              icon: <IconSidebar size={14} />,
+              separatorBefore: true,
+              onSelect: onToggleCollapsed,
+            },
+          ]}
+        />
         <button
           type="button"
-          className="drawer-collapse"
-          title={t("drawer.tabs.collapseTitle")}
-          aria-label={t("drawer.tabs.collapse")}
-          onClick={onToggleCollapsed}
+          className="drawer-close"
+          aria-label={t("drawer.tabs.closePanel")}
+          title={t("drawer.tabs.closePanel")}
+          onClick={onClose}
         >
-          »
+          <IconClose size={15} />
         </button>
-        <div className="tab-bar">
+      </div>
+      {severalTabs && (
+        <div className="tab-bar" role="group" aria-label={t("drawer.openNodes")}>
           {tabs.map((tab) => (
             <div
               key={tab.id}
@@ -216,14 +319,7 @@ export function DrawerTabs({
             </div>
           ))}
         </div>
-        {/* Autopilot directs agents toward this node as a goal: in the
-            panel's top row, above the node's own facets, and run from
-            Station (openAutopilot). It takes no height from the editor. */}
-        {workstation && activeTab && <AutopilotPill id={activeTab} />}
-        <button className="drawer-close" aria-label={t("drawer.tabs.closePanel")} onClick={onClose}>
-          <IconClose size={15} />
-        </button>
-      </div>
+      )}
       {tabContextMenu && contextTab && (
         <div
           ref={tabContextMenuRef}

@@ -25,17 +25,56 @@ const EXPORT_FORMATS: readonly (readonly [ExportChoice, string, string])[] = [
 // summary line — which names the actual page, node or project — is confirmed.
 // The old dropdown fired on the format click, so a scope that had not visibly
 // registered went out as whatever was selected before.
-export function ExportMenu({
-  nodeId,
-  pageId,
-  pageTitle,
-  content,
-}: {
+type ExportTarget = {
   nodeId: string;
   pageId: string;
   pageTitle?: string;
   content: string;
-}) {
+};
+
+/** A toolbar button that opens the export dialog. */
+export function ExportMenu(target: ExportTarget) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="tool-btn"
+        title={t("export.fileTitle")}
+        aria-label={t("export.fileLabel")}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+      >
+        <IconExport size={14} />
+      </button>
+      {open && (
+        <ExportDialog
+          {...target}
+          onClose={() => {
+            setOpen(false);
+            triggerRef.current?.focus();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The export dialog itself, for whatever opened it — the toolbar button
+ * above, or the node panel's "More formatting" menu. Mounted per opening, so
+ * every export starts from no format chosen.
+ */
+export function ExportDialog({
+  nodeId,
+  pageId,
+  pageTitle,
+  content,
+  onClose,
+}: ExportTarget & { onClose: () => void }) {
   const { t } = useI18n();
   const nodeTitle = useApp(
     (state) => state.graph?.nodes?.find((node) => node.id === nodeId)?.title,
@@ -46,32 +85,34 @@ export function ExportMenu({
       state.projects.find((project) => project.name === state.activeProject)?.label ||
       state.activeProject,
   );
-  const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<ExportScope>("page");
   const [choice, setChoice] = useState<ExportChoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
 
   const close = useCallback(() => {
     if (busy) return;
-    setOpen(false);
-    triggerRef.current?.focus();
-  }, [busy]);
+    onClose();
+  }, [busy, onClose]);
 
   useEffect(() => {
-    if (!open) return;
     dialogRef.current?.querySelector<HTMLElement>("input:checked")?.focus();
+  }, []);
+
+  useEffect(() => {
+    // Claimed before it reaches the window, where the node panel would read
+    // the same Escape as "close the panel" and take the dialog with it.
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         close();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, close]);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [close]);
 
   const pageName =
     pageId === "main" ? t("drawer.mainPage") : pageTitle?.trim() || pageId;
@@ -109,131 +150,112 @@ export function ExportMenu({
   };
 
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="tool-btn"
-        title={t("export.fileTitle")}
-        aria-label={t("export.fileLabel")}
-        aria-haspopup="dialog"
-        onClick={() => {
-          setResult(null);
-          setChoice(null);
-          setOpen(true);
-        }}
+    <div
+      className="confirm-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="confirm-dialog export-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
       >
-        <IconExport size={14} />
-      </button>
-      {open && (
-        <div
-          className="confirm-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) close();
-          }}
-        >
-          <section
-            ref={dialogRef}
-            className="confirm-dialog export-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="export-dialog-title"
+        <header>
+          <span className="confirm-dialog-icon">
+            <IconExport size={17} />
+          </span>
+          <div>
+            <h2 id="export-dialog-title">{t("export.fileLabel")}</h2>
+            <p>{t("export.dialogHint")}</p>
+          </div>
+          <button
+            type="button"
+            className="confirm-dialog-close"
+            onClick={close}
+            aria-label={t("common.close")}
           >
-            <header>
-              <span className="confirm-dialog-icon">
-                <IconExport size={17} />
-              </span>
-              <div>
-                <h2 id="export-dialog-title">{t("export.fileLabel")}</h2>
-                <p>{t("export.dialogHint")}</p>
-              </div>
-              <button
-                type="button"
-                className="confirm-dialog-close"
-                onClick={close}
-                aria-label={t("common.close")}
-              >
-                <IconClose size={15} />
-              </button>
-            </header>
-            <div className="export-dialog-body">
-              <fieldset>
-                <legend>{t("export.scopeTitle")}</legend>
-                {EXPORT_SCOPES.map((id) => (
-                  <label key={id} className={scope === id ? "selected" : ""}>
-                    <input
-                      type="radio"
-                      name="export-scope"
-                      checked={scope === id}
-                      onChange={() => {
-                        setScope(id);
-                        setResult(null);
-                      }}
-                    />
-                    <span>
-                      <b>{t(`export.scope.${id}`)}</b>
-                      <small>{scopeTarget[id]}</small>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset>
-                <legend>{t("export.format")}</legend>
-                {EXPORT_FORMATS.map(([id, label, extension]) => (
-                  <label key={id} className={choice === id ? "selected" : ""}>
-                    <input
-                      type="radio"
-                      name="export-format"
-                      checked={choice === id}
-                      onChange={() => {
-                        setChoice(id);
-                        setResult(null);
-                      }}
-                    />
-                    <span>
-                      <b>{t(label)}</b>
-                      <small className="mono">{extension}</small>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              <div className="export-dialog-summary" aria-live="polite">
-                {format
-                  ? t("export.summary", {
-                      target: scopeTarget[scope],
-                      scope: t(`export.scope.${scope}`),
-                      format: `${t(format[1])} (${format[2]})`,
-                    })
-                  : t("export.pickFormat")}
-                {choice === "pdf" && <small>{t("export.pdfHint")}</small>}
-              </div>
-              {result && (
-                <div
-                  className={`export-dialog-notice${result.ok ? "" : " error"}`}
-                  role={result.ok ? "status" : "alert"}
-                >
-                  {result.text}
-                </div>
-              )}
+            <IconClose size={15} />
+          </button>
+        </header>
+        <div className="export-dialog-body">
+          <fieldset>
+            <legend>{t("export.scopeTitle")}</legend>
+            {EXPORT_SCOPES.map((id) => (
+              <label key={id} className={scope === id ? "selected" : ""}>
+                <input
+                  type="radio"
+                  name="export-scope"
+                  checked={scope === id}
+                  onChange={() => {
+                    setScope(id);
+                    setResult(null);
+                  }}
+                />
+                <span>
+                  <b>{t(`export.scope.${id}`)}</b>
+                  <small>{scopeTarget[id]}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset>
+            <legend>{t("export.format")}</legend>
+            {EXPORT_FORMATS.map(([id, label, extension]) => (
+              <label key={id} className={choice === id ? "selected" : ""}>
+                <input
+                  type="radio"
+                  name="export-format"
+                  checked={choice === id}
+                  onChange={() => {
+                    setChoice(id);
+                    setResult(null);
+                  }}
+                />
+                <span>
+                  <b>{t(label)}</b>
+                  <small className="mono">{extension}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="export-dialog-summary" aria-live="polite">
+            {format
+              ? t("export.summary", {
+                  target: scopeTarget[scope],
+                  scope: t(`export.scope.${scope}`),
+                  format: `${t(format[1])} (${format[2]})`,
+                })
+              : t("export.pickFormat")}
+            {choice === "pdf" && <small>{t("export.pdfHint")}</small>}
+          </div>
+          {result && (
+            <div
+              className={`export-dialog-notice${result.ok ? "" : " error"}`}
+              role={result.ok ? "status" : "alert"}
+            >
+              {result.text}
             </div>
-            <footer>
-              <button type="button" onClick={close} disabled={busy}>
-                {result?.ok ? t("common.close") : t("common.cancel")}
-              </button>
-              {!result?.ok && (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busy || !choice}
-                  onClick={() => void runExport()}
-                >
-                  {busy ? t("export.exporting") : t("export.confirm")}
-                </button>
-              )}
-            </footer>
-          </section>
+          )}
         </div>
-      )}
-    </>
+        <footer>
+          <button type="button" onClick={close} disabled={busy}>
+            {result?.ok ? t("common.close") : t("common.cancel")}
+          </button>
+          {!result?.ok && (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !choice}
+              onClick={() => void runExport()}
+            >
+              {busy ? t("export.exporting") : t("export.confirm")}
+            </button>
+          )}
+        </footer>
+      </section>
+    </div>
   );
 }

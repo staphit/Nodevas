@@ -19,8 +19,11 @@ function NodeHistory({
   path,
   format,
   onRestored,
+  showStatusEvents = true,
 }: {
   id: string;
+  /** Off where the status changes are already listed beside it. */
+  showStatusEvents?: boolean;
   /** Project-relative file the versions belong to: the node's main document
    * or whichever subpage is open. */
   path: string;
@@ -44,11 +47,13 @@ function NodeHistory({
 
   const events = useMemo(
     () =>
-      (runState?.history ?? [])
-        .filter((event) => event.node === id && event.event === "status")
-        .slice()
-        .reverse(),
-    [runState, id],
+      showStatusEvents
+        ? (runState?.history ?? [])
+            .filter((event) => event.node === id && event.event === "status")
+            .slice()
+            .reverse()
+        : [],
+    [runState, id, showStatusEvents],
   );
 
   // Switching page switches the file: the previous file's versions and any

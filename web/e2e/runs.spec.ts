@@ -105,7 +105,7 @@ for (const [name, viewport] of Object.entries({
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     await expect(drawer.getByText("執行中").first()).toBeVisible();
     const timeline = drawer.getByRole("list", { name: "執行過程" });
@@ -220,7 +220,7 @@ for (const [name, viewport] of Object.entries({
     await page.getByText("設計稿").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     const list = drawer.getByRole("list", { name: "執行紀錄" });
     await expect(list.getByRole("link", { name: /PR #42/ })).toHaveAttribute(
@@ -335,7 +335,7 @@ for (const [name, viewport] of Object.entries({
     await page.getByText("設計稿").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     // The run's header offers the merge too.
     const detail = drawer.getByRole("region", { name: "執行詳情" });
@@ -503,7 +503,7 @@ for (const [name, viewport] of Object.entries({
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
     await drawer.getByRole("button", { name: "派給 agent…" }).click();
 
     const dialog = page.getByRole("dialog", { name: "派給 agent" });

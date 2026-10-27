@@ -147,7 +147,7 @@ export function NodeTimeline({ id }: { id: string }) {
   const doneAssessment = assessment("done");
 
   return (
-    <div className="node-timeline" role="tabpanel" aria-label={t("timeline.aria")}>
+    <section className="node-timeline" aria-label={t("timeline.aria")}>
       <div className="node-timeline-assessments">
         {[
           [t("timeline.assessment.start"), startAssessment],
@@ -303,6 +303,6 @@ export function NodeTimeline({ id }: { id: string }) {
       <div className="node-timeline-help">
         {t("timeline.help")}
       </div>
-    </div>
+    </section>
   );
 }
