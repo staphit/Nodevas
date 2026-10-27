@@ -92,8 +92,8 @@ func (s *Store) BudgetStatus(ctx context.Context, ownerID string) (runnerwire.Bu
 	now := s.clock().UTC()
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT usage FROM runs WHERE owner_id = ? AND created_at >= ? AND created_at < ?`,
-		ownerID, formatStamp(day), formatStamp(day.AddDate(0, 0, 1)))
+		`SELECT usage FROM runs WHERE owner_id = ? AND created_at >= ? AND created_at < ? AND kind <> ?`,
+		ownerID, formatStamp(day), formatStamp(day.AddDate(0, 0, 1)), runnerwire.JobVerify)
 	if err != nil {
 		return out, err
 	}

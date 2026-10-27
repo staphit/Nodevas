@@ -24,6 +24,9 @@ export interface RunnerRepo {
   name: string;
   path?: string;
   remote?: string;
+  /** Agent roles: the repo has a test command on its runner (the command
+   * itself never leaves the runner). */
+  verify?: boolean;
 }
 
 /** Mirrors runnerwire.AutoAcceptPolicy (W6): what the runner takes without

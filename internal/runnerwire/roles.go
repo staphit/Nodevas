@@ -1,5 +1,7 @@
 package runnerwire
 
+import "unicode/utf8"
+
 // Agent roles and workflow stages on the wire (spec section 4): a job's role
 // and toolset, the red/green verify job, judge checklists, and the evidence a
 // staged pipeline records. The test command itself never crosses the wire:
@@ -89,8 +91,7 @@ type GuardReport struct {
 }
 
 // Violation reports whether the executor touched protected files.
-// RED PHASE STUB: always false.
-func (g GuardReport) Violation() bool { return false }
+func (g GuardReport) Violation() bool { return len(g.Touched) > 0 || len(g.Sensitive) > 0 }
 
 // Staged pipeline phases (PipelineState.Phase).
 const (
@@ -149,5 +150,45 @@ type RoleSettingsResponse struct {
 // MaxCheckResults checks, MaxCheckNote bytes per note, MaxVerifyOutput bytes
 // of verify output (the tail is kept). The runner sends clamped; the hub
 // clamps again.
-// RED PHASE STUB: no-op.
-func (r *RunResult) ClampRoleFields() {}
+func (r *RunResult) ClampRoleFields() {
+	if r == nil {
+		return
+	}
+	if len(r.Checks) > MaxCheckResults {
+		r.Checks = r.Checks[:MaxCheckResults]
+	}
+	for i := range r.Checks {
+		r.Checks[i].ID = clampBytes(r.Checks[i].ID, 16)
+		r.Checks[i].Note = clampBytes(r.Checks[i].Note, MaxCheckNote)
+	}
+	if r.Verify != nil {
+		r.Verify.Output = tailBytes(r.Verify.Output, MaxVerifyOutput)
+		r.Verify.Head = clampBytes(r.Verify.Head, 64)
+		r.Verify.Phase = clampBytes(r.Verify.Phase, 16)
+	}
+}
+
+// clampBytes cuts s to at most n bytes on a rune boundary, keeping the head.
+func clampBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// tailBytes keeps the last n bytes of s on a rune boundary (a test run's
+// failure summary is at its end).
+func tailBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
+}

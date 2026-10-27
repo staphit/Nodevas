@@ -190,6 +190,16 @@ func guide(err error) error {
 		advice = "Use a type id from get_graph_outline nodeTypes."
 	case CodeAgentRestoreDenied:
 		advice = "Ask a person to restore it."
+	case "ROLE_DENIED":
+		advice = "ROLE_DENIED: your role may not do this. Do not retry; finish what your role may do and report."
+	case "STAGE_GATE_PENDING":
+		advice = "STAGE_GATE_PENDING: do not set it done; report your work and stop."
+	case "ACCEPTANCE_LOCKED":
+		advice = "ACCEPTANCE_LOCKED: an Executor is working against these criteria; ask a person to change them."
+	case "ACCEPTANCE_REQUIRED":
+		advice = "ACCEPTANCE_REQUIRED: write the acceptance criteria first."
+	case "UNKNOWN_ROLE":
+		advice = "UNKNOWN_ROLE: this project does not define the role this session declares."
 	default:
 		return err
 	}

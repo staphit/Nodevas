@@ -19,6 +19,8 @@ export type SettingsSection =
   | "usage"
   | "budget"
   | "routing"
+  | "roles"
+  | "stages"
   | "copilot"
   | "server"
   | "account"
@@ -37,6 +39,8 @@ export type SettingsRow =
   | "copilot"
   | "budget"
   | "routing"
+  | "roles"
+  | "stages"
   | "autoAccept"
   | "usage"
   | "accessToken"
@@ -48,7 +52,15 @@ export type SettingsRow =
   | "server"
   | "audit";
 
-export const ADVANCED_ROWS: readonly SettingsRow[] = ["budget", "routing", "autoAccept", "usage", "accessToken"];
+export const ADVANCED_ROWS: readonly SettingsRow[] = [
+  "budget",
+  "routing",
+  "roles",
+  "stages",
+  "autoAccept",
+  "usage",
+  "accessToken",
+];
 
 export interface SettingsPlace {
   page: SettingsPage;
@@ -64,6 +76,10 @@ export const SETTINGS_PLACES: Record<SettingsSection, SettingsPlace> = {
   runners: { page: "agents" },
   budget: { page: "agents", row: "budget" },
   routing: { page: "agents", row: "routing" },
+  roles: { page: "agents", row: "roles" },
+  // A project's workflow stages belong in "This project"; they sit under
+  // Agents › Advanced until that section is free to change.
+  stages: { page: "agents", row: "stages" },
   usage: { page: "agents", row: "usage" },
   project: { page: "project" },
   backup: { page: "project", row: "backup" },

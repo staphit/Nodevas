@@ -76,10 +76,11 @@ func checkNodeWrite(actor identity.Actor, n *engine.Node) error {
 	if n == nil || !actor.IsAgent() {
 		return nil
 	}
-	if agentRank(actor.Agent) >= writeAccessRank(n.WriteAccess) {
+	class := effectiveClass(actor)
+	if agentRank(class) >= writeAccessRank(n.WriteAccess) {
 		return nil
 	}
-	return &ErrNodeWriteDenied{NodeID: n.ID, Access: n.WriteAccess, Class: actor.Agent}
+	return &ErrNodeWriteDenied{NodeID: n.ID, Access: n.WriteAccess, Class: class}
 }
 
 // normalizeWriteAccess maps the spelled-out "all" a client may send onto the

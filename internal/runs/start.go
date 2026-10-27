@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode"
@@ -37,7 +38,7 @@ type StartRequest struct {
 	LoadNode func() (NodeInfo, bool, error)
 	// Agent roles: the project's resolved roles (tool allowlists for the
 	// job), and the hook that locks the node's acceptance when an Executor
-	// is dispatched (store.LockAcceptance). RED PHASE STUB: unused.
+	// is dispatched (store.LockAcceptance). Roles nil is the built-ins.
 	Roles          []engine.AgentRole
 	LockAcceptance func() error
 }
@@ -53,7 +54,7 @@ type NodeInfo struct {
 	References          []Reference
 	ReferencesTruncated bool
 	// Agent roles: the node's acceptance criteria and its effective workflow
-	// (nil: legacy). RED PHASE STUB: unused.
+	// (nil: legacy).
 	Acceptance *engine.Acceptance
 	Workflow   *engine.Workflow
 }
@@ -86,7 +87,7 @@ type StartError struct {
 	NodeType  string
 	AgentMode engine.AgentMode
 	// Reason is the shared error code for a role or stage refusal
-	// (ACCEPTANCE_REQUIRED). RED PHASE STUB: never set.
+	// (ACCEPTANCE_REQUIRED).
 	Reason string
 }
 
@@ -124,13 +125,36 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if !ValidMode(body.Mode) {
 		return Record{}, refuse(StartInvalid, `mode must be "" or "`+runnerwire.ModeInteractive+`"`)
 	}
-	// A dispatch is an implement run or (W7) a plan run, which breaks the node
-	// into tasks on the board; review and revise runs are a pipeline's steps.
-	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan {
-		return Record{}, refuse(StartInvalid, `kind must be "" or "`+runnerwire.JobPlan+`"`)
+	// A dispatch is an implement run, (W7) a plan run, which breaks the node
+	// into tasks on the board, or (agent roles) a judge run, which checks
+	// acceptance criteria; review, revise, test and verify runs are a
+	// pipeline's steps.
+	if body.Kind != runnerwire.JobImplement && body.Kind != runnerwire.JobPlan && body.Kind != runnerwire.JobJudge {
+		return Record{}, refuse(StartInvalid, `kind must be "", "`+runnerwire.JobPlan+`" or "`+runnerwire.JobJudge+`"`)
 	}
-	if body.Kind == runnerwire.JobPlan && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
-		return Record{}, refuse(StartInvalid, "a plan run is one headless run, not a pipeline")
+	if (body.Kind == runnerwire.JobPlan || body.Kind == runnerwire.JobJudge) && (body.Pipeline != nil || body.Mode != runnerwire.ModeHeadless) {
+		return Record{}, refuse(StartInvalid, "a "+body.Kind+" run is one headless run, not a pipeline")
+	}
+	body.Role = strings.TrimSpace(body.Role)
+	body.Override = strings.TrimSpace(body.Override)
+	if len(body.Override) > MaxOverrideBytes || !utf8.ValidString(body.Override) || strings.ContainsAny(body.Override, "\x00\r\n") {
+		return Record{}, refuse(StartInvalid, "override must be one line of at most 200 characters")
+	}
+	if body.Override != "" && (body.Role != "" || body.Kind != runnerwire.JobImplement || body.Pipeline != nil) {
+		return Record{}, refuse(StartInvalid, "override dispatches one plain implement run: no role, kind or pipeline")
+	}
+	roles := req.Roles
+	if len(roles) == 0 {
+		roles = engine.BuiltinAgentRoles()
+	}
+	var role *engine.AgentRole
+	if body.Role != "" {
+		if role = findRole(roles, body.Role); role == nil {
+			return Record{}, refuse(StartInvalid, fmt.Sprintf("role %q is not a role of this project", body.Role))
+		}
+	}
+	if body.Kind == runnerwire.JobJudge && role == nil {
+		return Record{}, refuse(StartInvalid, "a judge run needs a role (qa or reviewer)")
 	}
 	// A replan's revision (runnerwire.ReconcileStart) rides on a plan run
 	// only, and is offered to the runner as the job's Review.
@@ -205,6 +229,51 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 			Msg: "a " + typeName + " node cannot be dispatched to an agent",
 		}
 	}
+
+	// Agent roles and workflow stages (spec 2.6). wf is the node's effective
+	// workflow; nil is legacy, today's behavior exactly.
+	wf := node.Workflow.Normalized()
+	if body.Override != "" && !wf.Staged() {
+		return Record{}, refuse(StartInvalid, "override: this node's workflow has no stages to override")
+	}
+	story := wf != nil && wf.Judge == engine.JudgeChecklist && storyType(node.Type)
+	staged := wf.Staged() && body.Override == "" && body.Kind == runnerwire.JobImplement &&
+		body.Mode == runnerwire.ModeHeadless && (role == nil || role.Slot() == engine.RoleExecutor)
+	if role == nil && wf != nil && body.Override == "" {
+		switch body.Kind {
+		case runnerwire.JobImplement:
+			role = findRole(roles, engine.RoleExecutor)
+		case runnerwire.JobPlan:
+			role = findRole(roles, engine.RolePlanner)
+		}
+	}
+	slot := ""
+	if role != nil {
+		slot = role.Slot()
+	}
+	worker := slot == engine.RoleExecutor || slot == engine.RoleTester
+	if body.Override == "" && engine.RequiresAcceptance(wf) && node.Acceptance.Empty() && (staged || worker) {
+		return Record{}, &StartError{Code: StartPrecondition, Reason: CodeAcceptanceRequired,
+			Msg: "write the acceptance criteria first: this project's stages need them before a Tester or Executor runs"}
+	}
+	caps := runner.Info.Capabilities
+	if staged {
+		missing := !slices.Contains(caps, runnerwire.CapRoles) ||
+			(story && !slices.Contains(caps, runnerwire.CapJudge)) ||
+			(!story && wf.Stages.Tester && !slices.Contains(caps, runnerwire.CapVerify))
+		if missing {
+			return Record{}, refuse(StartPrecondition, "this runner cannot run staged pipelines (tests first, verify, review); update nodevas on it")
+		}
+		if !story && wf.Stages.Tester && !repo.Verify {
+			return Record{}, refuse(StartPrecondition, fmt.Sprintf(
+				"configure a test command for %s on the runner, so it can verify red and green: nodevas runner repo set %s --test-command \"go test ./...\"",
+				repo.Name, repo.Name))
+		}
+	}
+	if body.Kind == runnerwire.JobJudge && !slices.Contains(caps, runnerwire.CapJudge) {
+		return Record{}, refuse(StartPrecondition, "this runner cannot run judge jobs; update nodevas on it")
+	}
+
 	title, content := node.Title, node.Content
 	if title == "" {
 		title = body.NodeID
@@ -213,26 +282,86 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 	if name == "" {
 		name = req.ActorID
 	}
-	jobPrompt := BuildPrompt(title, content, ReferencesBlock(node.References, node.ReferencesTruncated), body.Prompt)
+	extra := body.Prompt
+	if role != nil && !role.Builtin && strings.TrimSpace(role.Instructions) != "" {
+		extra = strings.TrimSpace(extra + "\n\nProject policy for this role (" + role.Label + "):\n" + role.Instructions)
+	}
+	jobPrompt := BuildPrompt(title, content, ReferencesBlock(node.References, node.ReferencesTruncated), extra)
+	acceptance := acceptanceItems(node.Acceptance)
+	tools := roleTools(roles, node.Type)
+
+	// The first run's role: a staged pipeline starts with its Tester (or the
+	// writer, or a judge, for a story).
+	first := stagedFirst{kind: body.Kind, role: "", am: runnerwire.AgentModel{Agent: body.Agent, Model: model}}
+	if role != nil {
+		first.role = role.ID
+	}
+	if staged {
+		first = firstStagedStep(wf, story, content, pipeline, body.Agent, model)
+	}
+	if first.role != "" {
+		status, err := d.store.RoleBudgetStatus(ctx, runner.OwnerID, first.role)
+		if err != nil {
+			return Record{}, err
+		}
+		if status.Exceeded != "" {
+			return Record{}, &StartError{Code: StartBudget, Msg: RoleBudgetMessage(first.role, status), Budget: status}
+		}
+	}
+	// The criteria an Executor works against do not change under it.
+	if req.LockAcceptance != nil && body.Override == "" && body.Kind == runnerwire.JobImplement && (staged || worker) {
+		if err := req.LockAcceptance(); err != nil {
+			return Record{}, fmt.Errorf("lock the acceptance criteria: %w", err)
+		}
+	}
+
 	pipelineID := ""
+	var config *StagedConfig
+	if wf != nil && body.Override == "" && (staged || pipeline != nil) {
+		config = &StagedConfig{Workflow: wf, Staged: staged, Story: story, Tools: tools, Acceptance: acceptance}
+	}
+	if staged && pipeline == nil {
+		synthesized := runnerwire.Pipeline{Implement: runnerwire.AgentModel{Agent: body.Agent, Model: model}, MaxRounds: 2}
+		pipeline = &synthesized
+	}
+	if staged {
+		if pipeline.Tester.Agent == "" {
+			pipeline.Tester = pipeline.Implement
+		}
+		if wf.Stages.Reviewer && len(runnerwire.ReviewersOf(*pipeline)) == 0 {
+			pipeline.Reviewers = []runnerwire.AgentModel{pipeline.Implement}
+		}
+		first = firstStagedStep(wf, story, content, pipeline, body.Agent, model)
+	}
 	if pipeline != nil {
 		p, err := d.store.CreatePipeline(ctx, NewPipeline{
 			OwnerID: runner.OwnerID, CreatedBy: req.ActorID, Project: req.Project, NodeID: body.NodeID,
 			Pipeline: *pipeline, Fallbacks: body.Fallbacks, JobPrompt: jobPrompt, Prompt: body.Prompt,
+			Config: config, Phase: first.phase,
 		})
 		if err != nil {
 			return Record{}, err
 		}
 		pipelineID = p.ID
 	}
+	jobRoles := JobRoles{}
+	if first.role != "" {
+		jobRoles = JobRoles{Tools: tools[first.role], Acceptance: acceptance}
+	}
+	if body.Kind == runnerwire.JobJudge && slot == engine.RoleQA && (wf == nil || wf.Judge != engine.JudgeChecklist) && repo.Verify {
+		// Goal verification runs the repo's tests first (spec 3.3).
+		jobRoles.VerifySpec = &runnerwire.VerifySpec{Phase: runnerwire.VerifyGoal}
+	}
+	review := strings.TrimSpace(body.Revision)
 	record, err := d.store.Create(ctx, New{
 		Project: req.Project, NodeID: body.NodeID, NodeTitle: title,
 		RunnerID: runner.ID, RunnerName: runner.Name, OwnerID: runner.OwnerID,
-		Agent: body.Agent, Model: model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
+		Agent: first.am.Agent, Model: first.am.Model, RepoID: repo.ID, RepoName: repo.Name, Base: body.Base,
 		Prompt: body.Prompt, JobPrompt: jobPrompt,
 		CreatedBy: req.ActorID, CreatedByName: name,
 		PipelineID: pipelineID, Fallbacks: body.Fallbacks,
-		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: body.Kind, Review: strings.TrimSpace(body.Revision),
+		SteppedUpAt: req.SteppedUpAt, Mode: body.Mode, Kind: first.kind, Review: review,
+		Role: first.role, Override: body.Override, JobRoles: jobRoles,
 	})
 	if err != nil {
 		if pipelineID != "" {
@@ -240,7 +369,99 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 		}
 		return Record{}, err
 	}
+	if body.Override != "" {
+		if err := d.store.NoteFirst(ctx, record.ID, "stage override by "+name+": "+body.Override); err != nil {
+			return Record{}, err
+		}
+		d.record(AuditEntry{Project: req.Project, ActorID: req.ActorID, ActorName: name, Action: "run.override",
+			Target: record.ID, Detail: map[string]any{"node": body.NodeID, "reason": body.Override}})
+	}
 	return d.Submit(ctx, record), nil
+}
+
+// CodeAcceptanceRequired is StartError.Reason when the node needs acceptance
+// criteria first (shared with the web client and store.CodeAcceptanceRequired).
+const CodeAcceptanceRequired = "ACCEPTANCE_REQUIRED"
+
+// storyType reports whether a node type is a story's (its body is the work).
+func storyType(nodeType string) bool { return nodeType == "scene" || nodeType == "event" }
+
+// findRole is the role with id among roles, or nil.
+func findRole(roles []engine.AgentRole, id string) *engine.AgentRole {
+	for i := range roles {
+		if roles[i].ID == id {
+			role := roles[i]
+			return &role
+		}
+	}
+	return nil
+}
+
+// roleTools is each role's tools for a job on a node of nodeType: the
+// role's allowlist, plus update_node_body for an Executor whose node is a
+// scene or event (the prose is its work).
+func roleTools(roles []engine.AgentRole, nodeType string) map[string][]string {
+	out := make(map[string][]string, len(roles))
+	for _, role := range roles {
+		tools := slices.Clone(role.Tools)
+		if role.Slot() == engine.RoleExecutor && storyType(nodeType) && !slices.Contains(tools, "update_node_body") {
+			tools = append(tools, "update_node_body")
+		}
+		out[role.ID] = tools
+	}
+	return out
+}
+
+// acceptanceItems is a node's criteria as job data.
+func acceptanceItems(acc *engine.Acceptance) []runnerwire.AcceptanceItem {
+	if acc.Empty() {
+		return nil
+	}
+	out := make([]runnerwire.AcceptanceItem, 0, len(acc.Items))
+	for _, item := range acc.Items {
+		out = append(out, runnerwire.AcceptanceItem{ID: item.ID, Text: item.Text})
+	}
+	return out
+}
+
+// stagedFirst is the first run a dispatch records.
+type stagedFirst struct {
+	kind, role, phase string
+	am                runnerwire.AgentModel
+}
+
+// firstStagedStep is a staged pipeline's first run: the Tester, or for a
+// story the writer (an empty scene is red by definition) or a judge.
+func firstStagedStep(wf *engine.Workflow, story bool, content string, p *runnerwire.Pipeline, agent, model string) stagedFirst {
+	implement := runnerwire.AgentModel{Agent: agent, Model: model}
+	if p != nil {
+		implement = p.Implement
+	}
+	switch {
+	case story && strings.TrimSpace(content) == "":
+		return stagedFirst{kind: runnerwire.JobImplement, role: engine.RoleExecutor, phase: runnerwire.PhaseImplement, am: implement}
+	case story:
+		return stagedFirst{kind: runnerwire.JobJudge, role: engine.RoleReviewer, phase: runnerwire.PhaseJudge, am: judgeOf(p)}
+	case wf.Stages.Tester:
+		tester := implement
+		if p != nil && p.Tester.Agent != "" {
+			tester = p.Tester
+		}
+		return stagedFirst{kind: runnerwire.JobTest, role: engine.RoleTester, phase: runnerwire.PhaseTest, am: tester}
+	}
+	return stagedFirst{kind: runnerwire.JobImplement, role: engine.RoleExecutor, phase: runnerwire.PhaseImplement, am: implement}
+}
+
+// judgeOf is who judges a story's checklist: the first reviewer, else the
+// implementer.
+func judgeOf(p *runnerwire.Pipeline) runnerwire.AgentModel {
+	if p == nil {
+		return runnerwire.AgentModel{}
+	}
+	if reviewers := runnerwire.ReviewersOf(*p); len(reviewers) > 0 {
+		return reviewers[0]
+	}
+	return p.Implement
 }
 
 // AgentModeAllows is the node-type gate on a run: an implement run needs a
@@ -248,7 +469,7 @@ func (d *Dispatcher) Start(ctx context.Context, req StartRequest) (Record, error
 // accepts an Autopilot type such as Goal. An empty mode allows nothing, so a
 // caller that forgets to resolve the type fails closed.
 func AgentModeAllows(mode engine.AgentMode, kind string) bool {
-	if kind == runnerwire.JobPlan {
+	if kind == runnerwire.JobPlan || kind == runnerwire.JobJudge {
 		return mode == engine.AgentDispatch || mode == engine.AgentAutopilot
 	}
 	return mode == engine.AgentDispatch

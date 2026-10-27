@@ -485,3 +485,30 @@ func TestCreatedByRunRecordsTheRun(t *testing.T) {
 		t.Fatalf("a person's node CreatedByRun = %q", got)
 	}
 }
+
+// An external session without a role is the worker of before roles: on a
+// staged project it may not settle a task and so skip the stages. A run the
+// hub dispatched without a role (a person's override) and a person may.
+func TestLegacySessionCannotSettleStagedTask(t *testing.T) {
+	st := roleStore(t, standardWorkflow())
+	_, err := st.ReportStatus(agentActor(identity.AgentWorker), "work", engine.StatusDone, "agent", "", "", "")
+	wantRoleCode(t, err, CodeStageGatePending)
+	if _, err := st.ReportStatus(agentActor(identity.AgentWorker), "work", engine.StatusInProgress, "agent", "", "", ""); err != nil {
+		t.Fatalf("doing: %v", err)
+	}
+	// Notes are outside the stages.
+	if _, err := st.ReportStatus(agentActor(identity.AgentWorker), "lore", engine.StatusDone, "agent", "", "", ""); err != nil {
+		var typeDenied *ErrNodeTypeDenied
+		if !errors.As(err, &typeDenied) {
+			t.Fatalf("note: %v", err)
+		}
+	}
+	override := agentActor(identity.AgentWorker)
+	override.RunID, override.RunNodeID = "run-override", "other"
+	if _, err := st.ReportStatus(override, "other", engine.StatusDone, "run", "", "", ""); err != nil {
+		t.Fatalf("override run: %v", err)
+	}
+	if _, err := st.ReportStatus(identity.Local, "work", engine.StatusDone, "you", "", "", ""); err != nil {
+		t.Fatalf("person: %v", err)
+	}
+}

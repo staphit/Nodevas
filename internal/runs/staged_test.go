@@ -512,3 +512,17 @@ func TestReviseWaitsForLimitReset(t *testing.T) {
 		t.Fatalf("revise wait = %+v ok=%v", wait.Run, ok)
 	}
 }
+
+// A test file the Executor adds beside the Tester's (a TestMain that exits 0
+// would make the test command pass with nothing done) needs a sign-off too.
+func TestGuardFlagsExecutorAddedTestFiles(t *testing.T) {
+	f := newRoleFixture(t, true)
+	wf := &engine.Workflow{Preset: engine.PresetCustom, Stages: engine.Stages{Tester: true}, MaxGreenTries: 3, MaxTesterRounds: 2}
+	exec := f.throughRed(t, f.stagedStart(t, wf, nil))
+	verify := f.complete(t, exec, stepOutcome{files: []runnerwire.FileChange{codeFile("pkg/x.go", 3), testFile("pkg/main_test.go")}, head: head2})
+	f.complete(t, verify, stepOutcome{result: green(true)})
+	p := f.pipelineOf(t, exec)
+	if p.Status != runnerwire.PipelineWaitingHuman || p.Guard == nil || !slices.Contains(p.Guard.Sensitive, "pkg/main_test.go") {
+		t.Fatalf("pipeline = %s (%s) guard %+v", p.Status, p.Reason, p.Guard)
+	}
+}

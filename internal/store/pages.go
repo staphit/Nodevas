@@ -146,6 +146,9 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return zero, "", "", err
 	}
+	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
+		return zero, "", "", err
+	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
 		return zero, "", "", err
@@ -363,6 +366,9 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return "", err
 	}
+	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
+		return "", err
+	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
 	if err != nil {
 		return "", err
@@ -405,6 +411,9 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 		return nil, fmt.Errorf("node %q not found in graph", nodeID)
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
+	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return nil, err
 	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)
@@ -468,6 +477,9 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 	// checkNodeWrite passes a nil node, so a page orphaned by a removed node
 	// stays deletable.
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return zero, err
+	}
+	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return zero, err
 	}
 	manifest, err := s.LoadNodePagesManifest(nodeID)

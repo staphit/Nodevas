@@ -108,6 +108,25 @@ export function graphCommandToOps(
       return null;
     }
 
+    // Agent roles: the hub validates these and decides who may write them
+    // (agents never may), so the page waits for its answer.
+    case "node.setAcceptance": {
+      const node = resultingGraph?.nodes?.find((candidate) => candidate.id === command.nodeId);
+      return [
+        {
+          kind: "acceptance",
+          nodeId: command.nodeId,
+          acceptance: node?.acceptance ?? { ...command.acceptance, items: command.acceptance?.items ?? [] },
+        },
+      ];
+    }
+    case "node.setWorkflow":
+      return [{ kind: "node-workflow", nodeId: command.nodeId, workflow: command.workflow }];
+    case "workflow.setStages":
+      return [{ kind: "workflow", workflow: command.workflow }];
+    case "workflow.setAgentRoles":
+      return [{ kind: "agent-roles", agentRoles: command.agentRoles }];
+
     default:
       return null;
   }
@@ -120,7 +139,11 @@ export function graphOpsNeedServerGraph(ops: readonly GraphOp[] | null): boolean
       (op) =>
         op.kind === "add-edge" ||
         op.kind === "remove-edge" ||
-        op.kind === "set-edge-style",
+        op.kind === "set-edge-style" ||
+        op.kind === "acceptance" ||
+        op.kind === "node-workflow" ||
+        op.kind === "workflow" ||
+        op.kind === "agent-roles",
     ),
   );
 }

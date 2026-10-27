@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
 	"nodevas/internal/runnerwire"
 )
 
@@ -38,6 +39,9 @@ var (
 
 // MaxErrorBytes caps runs.error: a reason, not a log.
 const MaxErrorBytes = 4 << 10
+
+// MaxOverrideBytes caps a person's stage override reason.
+const MaxOverrideBytes = 200
 
 // maxShortField caps the event fields that are names rather than text.
 const maxShortField = 256
@@ -85,6 +89,46 @@ type Record struct {
 	JobHandoffNote   string
 	LimitWaits       int
 	ResetAt          string
+	// GuardAck is what a review's finish said about the Tester's files
+	// ("TESTS: approve-changes"); like ResetAt it is not stored: the staged
+	// pipeline records it on its guard at once.
+	GuardAck bool
+	// Agent roles: what the run's job is offered besides its prompt (the
+	// role's tools, the Tester's files an Executor must not change, the
+	// acceptance items and, for a verify or goal judge, what to verify).
+	// Role, Override, Verify and Checks are on the API's Run.
+	JobRoles
+}
+
+// JobRoles is a role job's offer fields, stored as runs.job_roles JSON.
+type JobRoles struct {
+	Tools      []string                    `json:"tools,omitempty"`
+	TestFiles  []string                    `json:"testFiles,omitempty"`
+	Acceptance []runnerwire.AcceptanceItem `json:"acceptance,omitempty"`
+	VerifySpec *runnerwire.VerifySpec      `json:"verifySpec,omitempty"`
+}
+
+func (j JobRoles) empty() bool {
+	return len(j.Tools) == 0 && len(j.TestFiles) == 0 && len(j.Acceptance) == 0 && j.VerifySpec == nil
+}
+
+func encodeJobRoles(j JobRoles) (string, error) {
+	if j.empty() {
+		return "", nil
+	}
+	if len(j.TestFiles) > runnerwire.MaxTestFiles {
+		j.TestFiles = j.TestFiles[:runnerwire.MaxTestFiles]
+	}
+	raw, err := json.Marshal(j)
+	return string(raw), err
+}
+
+func decodeJobRoles(raw string) JobRoles {
+	var out JobRoles
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
 }
 
 // Job is the offer for this run.
@@ -96,6 +140,7 @@ func (r Record) Job() runnerwire.Job {
 		Kind: r.Kind, Branch: r.JobBranch, PRURL: r.JobPRURL, Review: r.Review,
 		Mode:          r.Mode,
 		HandoffBranch: r.JobHandoffBranch, HandoffNote: r.JobHandoffNote,
+		Role: r.Role, Tools: r.Tools, TestFiles: r.TestFiles, Acceptance: r.Acceptance, Verify: r.VerifySpec,
 	}
 }
 
@@ -185,17 +230,33 @@ type New struct {
 	JobHandoffBranch, JobHandoffNote string
 	RetryAt                          string
 	LimitWaits                       int
-	// Agent roles: the role the run acts in ("" legacy) and a person's stage
-	// override reason. RED PHASE STUB: not stored yet.
+	// Agent roles: the role the run acts in ("" legacy), a person's stage
+	// override reason, and the job's role fields.
 	Role, Override string
+	JobRoles
 }
 
 // Create records a queued run.
 func (s *Store) Create(ctx context.Context, in New) (Record, error) {
-	for _, required := range []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.Agent, in.RepoID, in.CreatedBy} {
-		if strings.TrimSpace(required) == "" {
+	required := []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
+	// A verify run is the runner's test command: no agent runs it.
+	if in.Kind != runnerwire.JobVerify {
+		required = append(required, in.Agent)
+	}
+	for _, field := range required {
+		if strings.TrimSpace(field) == "" {
 			return Record{}, fmt.Errorf("%w: missing field", ErrInvalid)
 		}
+	}
+	if in.Role != "" && !engine.ValidRoleID(in.Role) {
+		return Record{}, fmt.Errorf("%w: role %q", ErrInvalid, in.Role)
+	}
+	if len(in.Override) > MaxOverrideBytes {
+		return Record{}, fmt.Errorf("%w: override over %d bytes", ErrInvalid, MaxOverrideBytes)
+	}
+	jobRoles, err := encodeJobRoles(in.JobRoles)
+	if err != nil {
+		return Record{}, err
 	}
 	if in.Mode != runnerwire.ModeHeadless && in.Mode != runnerwire.ModeInteractive {
 		return Record{}, fmt.Errorf("%w: unknown mode", ErrInvalid)
@@ -214,7 +275,7 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	// checks it is its own, the hub that it is one at all.
 	handoffBranch := ""
 	if in.JobHandoffBranch != "" {
-		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || in.Kind != runnerwire.JobImplement {
+		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || (in.Kind != runnerwire.JobImplement && in.Kind != runnerwire.JobTest) {
 			return Record{}, fmt.Errorf("%w: handoff branch %q", ErrInvalid, in.JobHandoffBranch)
 		}
 		handoffBranch = in.JobHandoffBranch
@@ -235,15 +296,17 @@ INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
-                  stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
+                  role, override, job_roles)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
 		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
 		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
-		Truncate(in.RetryAt, 64), int64(in.LimitWaits))
+		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
+		in.Role, in.Override, jobRoles)
 	if err != nil {
 		return Record{}, err
 	}
@@ -257,11 +320,11 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        pr_number, pr_state, pr_error, pr_head_sha,
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
-       retry_at, limit_waits`
+       retry_at, limit_waits, role, verify, checks, override, job_roles`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
-	var usage, fallbacks string
+	var usage, fallbacks, verify, checks, jobRoles string
 	var exit, files, additions, deletions, prNumber, limitWaits int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
@@ -270,7 +333,8 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA,
 		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
 		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
-		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits); err != nil {
+		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
+		&r.Role, &verify, &checks, &r.Override, &jobRoles); err != nil {
 		return Record{}, err
 	}
 	r.ExitCode = int(exit)
@@ -284,6 +348,19 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		}
 	}
 	r.Fallbacks = decodeChain(fallbacks)
+	r.JobRoles = decodeJobRoles(jobRoles)
+	if verify != "" {
+		var parsed runnerwire.VerifyResult
+		if json.Unmarshal([]byte(verify), &parsed) == nil {
+			r.Verify = &parsed
+		}
+	}
+	if checks != "" {
+		var parsed []runnerwire.CheckResult
+		if json.Unmarshal([]byte(checks), &parsed) == nil && len(parsed) > 0 {
+			r.Checks = parsed
+		}
+	}
 	// A plan run carrying a revision reconciles it (runnerwire.Run.Replan).
 	r.Replan = r.Kind == runnerwire.JobPlan && r.Review != ""
 	return r, nil
@@ -418,6 +495,9 @@ type Change struct {
 	// HandoffBranch and HandoffNote are a handoff a finish reports.
 	HandoffBranch string
 	HandoffNote   string
+	// Verify and Checks are a verify or judge run's result (agent roles).
+	Verify *runnerwire.VerifyResult
+	Checks []runnerwire.CheckResult
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -466,6 +546,20 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	}
 	if change.ExitCode != nil {
 		set("exit_code", int64(*change.ExitCode))
+	}
+	if change.Verify != nil {
+		raw, err := json.Marshal(change.Verify)
+		if err != nil {
+			return Record{}, err
+		}
+		set("verify", string(raw))
+	}
+	if len(change.Checks) > 0 {
+		raw, err := json.Marshal(change.Checks)
+		if err != nil {
+			return Record{}, err
+		}
+		set("checks", string(raw))
 	}
 	if change.Usage != nil {
 		raw, err := json.Marshal(change.Usage)
@@ -520,14 +614,20 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 		runnerwire.ValidHandoffBranch(result.HandoffBranch) {
 		handoffBranch, handoffNote = result.HandoffBranch, result.HandoffNote
 	}
+	// The runner clamps its role fields; the hub clamps again.
+	result.ClampRoleFields()
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
 		FailureKind: failureKind, Verdict: CleanVerdict(result.Verdict),
 		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
+		Verify: result.Verify, Checks: result.Checks,
 	})
 	if err == nil && result.Status == runnerwire.RunFailed {
 		r.ResetAt = Truncate(result.ResetAt, 64)
+	}
+	if err == nil {
+		r.GuardAck = result.GuardAck
 	}
 	return r, err
 }
@@ -612,8 +712,8 @@ func (s *Store) Events(ctx context.Context, runID string, after int64, limit int
 		limit = MaxEventPage
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT payload FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
-		runID, after, limit+1)
+		`SELECT payload FROM run_events WHERE run_id = ? AND (seq > ? OR (? = 0 AND seq = 0)) ORDER BY seq LIMIT ?`,
+		runID, after, after, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

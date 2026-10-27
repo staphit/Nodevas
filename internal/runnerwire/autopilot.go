@@ -93,7 +93,6 @@ type AutopilotRun struct {
 	FinishedAt    string          `json:"finishedAt,omitempty"`
 	// Agent roles (roles.go): the workflow frozen at start (nil: legacy),
 	// the goal's phase (GoalPhase*), and the QA round and run.
-	// RED PHASE STUB: never set.
 	Stages    *StagesSnapshot `json:"stages,omitempty"`
 	GoalPhase string          `json:"goalPhase,omitempty"`
 	QARound   int             `json:"qaRound,omitempty"`

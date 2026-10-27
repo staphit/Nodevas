@@ -208,6 +208,8 @@ export const PREFERENCE_SCHEMA = {
       "usage",
       "budget",
       "routing",
+      "roles",
+      "stages",
       "copilot",
       "server",
       "account",

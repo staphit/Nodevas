@@ -804,6 +804,39 @@ ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
 `,
 	},
+	{
+		name: "0025_agent_roles",
+		stmt: `
+ALTER TABLE runs ADD COLUMN role     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verify   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN checks   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN override TEXT NOT NULL DEFAULT '';
+-- What a role's job is offered besides the prompt (tools, the Tester's
+-- files, acceptance items, a verify spec), as JSON; '' for a legacy run.
+ALTER TABLE runs ADD COLUMN job_roles TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_owner_role ON runs (owner_id, role, status);
+ALTER TABLE run_pipelines ADD COLUMN stages     TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN phase      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN test_files TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN guard      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN tries      TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN stages     TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN goal_phase TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN qa_round   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE autopilot_runs ADD COLUMN qa_run_id  TEXT NOT NULL DEFAULT '';
+CREATE TABLE run_role_settings (
+    owner_id       TEXT COLLATE "C" NOT NULL,
+    project        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    role           TEXT COLLATE "C" NOT NULL,
+    max_concurrent INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+    daily_tokens   BIGINT NOT NULL DEFAULT 0,
+    daily_runs     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, project, role)
+);
+`,
+	},
 }
 
 // pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a

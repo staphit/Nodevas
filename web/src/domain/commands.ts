@@ -10,6 +10,8 @@
  */
 
 import type {
+  Acceptance,
+  AgentRoleDef,
   CanvasAnnotation,
   CanvasGroup,
   EdgeLine,
@@ -22,9 +24,11 @@ import type {
   NodeTypeDef,
   SavedView,
   StatusDefinition,
+  Workflow,
 } from "../types";
 import { CommandError } from "./errors";
 import type { CustomLifecycleStatus, MilestoneType } from "./glossary";
+import * as acceptance from "./graph/acceptance";
 import * as canvas from "./graph/canvas";
 import * as gates from "./graph/logicGate";
 import { applyImport, type ImportPayload } from "./graph/importer";
@@ -65,7 +69,9 @@ export type NodeCommand =
   /** `nodeId` uses `ref` as context (a Note); never blocks. */
   | { type: "node.addRef"; nodeId: string; ref: string }
   | { type: "node.removeRef"; nodeId: string; ref: string }
-  | { type: "node.setUserEmail"; userId: string; email?: string };
+  | { type: "node.setUserEmail"; userId: string; email?: string }
+  | { type: "node.setAcceptance"; nodeId: string; acceptance: Acceptance | null }
+  | { type: "node.setWorkflow"; nodeId: string; workflow: Workflow | null };
 
 export type PlanCommand =
   | { type: "plan.upsert"; nodeId: string; milestone: plan.PlanMilestoneInput }
@@ -107,7 +113,9 @@ export type WorkflowCommand =
       id: string;
       patch: Partial<Omit<NodeTypeDef, "id">>;
     }
-  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId };
+  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId }
+  | { type: "workflow.setStages"; workflow: Workflow | null }
+  | { type: "workflow.setAgentRoles"; agentRoles: AgentRoleDef[] };
 
 export type CanvasCommand =
   | {
@@ -220,6 +228,10 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return node.removeNodeRef(graph, command.nodeId, command.ref);
     case "node.setUserEmail":
       return node.setUserEmail(graph, command.userId, command.email);
+    case "node.setAcceptance":
+      return acceptance.setAcceptance(graph, command.nodeId, command.acceptance);
+    case "node.setWorkflow":
+      return acceptance.setNodeWorkflow(graph, command.nodeId, command.workflow);
 
     case "plan.upsert":
       return plan.upsertPlanMilestone(graph, command.nodeId, command.milestone);
@@ -264,6 +276,10 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return nodeTypes.updateNodeType(graph, command.id, command.patch);
     case "workflow.removeNodeType":
       return nodeTypes.removeNodeType(graph, command.id);
+    case "workflow.setStages":
+      return acceptance.setProjectWorkflow(graph, command.workflow);
+    case "workflow.setAgentRoles":
+      return acceptance.setAgentRoles(graph, command.agentRoles);
 
     case "canvas.moveNodes":
       if (command.shift) canvas.shiftBoard(graph, command.shift);
@@ -350,6 +366,8 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "node.addRef": "新增參考",
   "node.removeRef": "移除參考",
   "node.setUserEmail": "修改成員信箱",
+  "node.setAcceptance": "修改驗收條件",
+  "node.setWorkflow": "覆寫目標階段",
   "plan.upsert": "設定預期里程碑",
   "plan.move": "調整預期里程碑日期",
   "plan.remove": "刪除預期里程碑",
@@ -363,6 +381,8 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "workflow.addNodeType": "新增節點類型",
   "workflow.updateNodeType": "修改節點類型",
   "workflow.removeNodeType": "刪除節點類型",
+  "workflow.setStages": "修改工作流程階段",
+  "workflow.setAgentRoles": "修改代理角色",
   "canvas.moveNodes": "移動節點",
   "canvas.setTimelineOrder": "調整時間軸順序",
   "canvas.setGatePlacement": "移動條件閘",

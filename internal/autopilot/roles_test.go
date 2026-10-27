@@ -138,6 +138,15 @@ func TestWorkflowFrozenAtStart(t *testing.T) {
 	}
 	withWorkflow(board, &engine.Workflow{Preset: engine.PresetLight, Stages: engine.Stages{Planner: true}})
 	h.finishWithPR(task(v, "a").RunID)
+	// Under the frozen standard stages a's try is a staged pipeline
+	// (TestStagedTaskStagesDerived), which the fake dispatcher never moves on
+	// by itself: approve it, as the dispatcher would after red, green and
+	// review, so b becomes ready.
+	h.runs.mu.Lock()
+	if p := h.runs.pipelines[task(v, "a").PipelineID]; p != nil {
+		p.Status = runnerwire.PipelineApproved
+	}
+	h.runs.mu.Unlock()
 	v = h.view(v.Run.ID)
 	if v.Run.Stages == nil || v.Run.Stages.Preset != engine.PresetStandard {
 		t.Fatalf("stages after the project changed = %+v", v.Run.Stages)

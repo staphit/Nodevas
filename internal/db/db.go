@@ -1060,6 +1060,48 @@ ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
 `,
 	},
+	{
+		name: "0025_agent_roles",
+		stmt: `
+-- Agent roles and workflow stages. A run's role ('' legacy), the verify
+-- result (runnerwire.VerifyResult JSON) and judge checks
+-- ([]runnerwire.CheckResult JSON) it reported, and a person's stage override
+-- reason.
+ALTER TABLE runs ADD COLUMN role     TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verify   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN checks   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN override TEXT NOT NULL DEFAULT '';
+-- What a role's job is offered besides the prompt (tools, the Tester's
+-- files, acceptance items, a verify spec), as JSON; '' for a legacy run.
+ALTER TABLE runs ADD COLUMN job_roles TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_owner_role ON runs (owner_id, role, status);
+-- A staged pipeline: the workflow it froze when made (engine.Workflow JSON;
+-- '' is the legacy pipeline), its phase, the Tester's files (JSON), the
+-- executor diff guard (runnerwire.GuardReport JSON) and its retry counters.
+ALTER TABLE run_pipelines ADD COLUMN stages     TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN phase      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN test_files TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN guard      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN tries      TEXT NOT NULL DEFAULT '';
+-- An autopilot's frozen workflow, its goal phase, and the goal QA round.
+ALTER TABLE autopilot_runs ADD COLUMN stages     TEXT    NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN goal_phase TEXT    NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN qa_round   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE autopilot_runs ADD COLUMN qa_run_id  TEXT    NOT NULL DEFAULT '';
+-- Per owner (and project, '' for all) concurrency and daily budget per role.
+CREATE TABLE run_role_settings (
+    owner_id       TEXT NOT NULL,
+    project        TEXT NOT NULL DEFAULT '',
+    role           TEXT NOT NULL,
+    max_concurrent INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd REAL    NOT NULL DEFAULT 0,
+    daily_tokens   INTEGER NOT NULL DEFAULT 0,
+    daily_runs     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (owner_id, project, role)
+) STRICT;
+`,
+	},
 }
 
 // migrate applies the pending steps in one transaction each.

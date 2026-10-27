@@ -16,6 +16,9 @@ import { BudgetSettings } from "../runs/BudgetSettings";
 import { formatCompact, formatCount } from "../runs/runFormat";
 import { RoutingSettings } from "../runs/RoutingSettings";
 import { useRouting } from "../runs/routingStore";
+import { RolesSettings } from "../roles/RolesSettings";
+import { workflowSummary } from "../roles/stageLabels";
+import { WorkflowStagesSettings } from "../roles/WorkflowStagesSettings";
 import { useApp, usePreference } from "../store";
 import { UsageModal } from "../usage/UsageModal";
 import { formatTokens, formatUSD } from "../usage/usageFormat";
@@ -78,6 +81,8 @@ function Advanced({
   const rules = useRouting((s) => s.rules);
   const runners = useRunners((s) => s.runners);
   const usage = useUsage((s) => s.report);
+  const project = useApp((s) => s.activeProject);
+  const workflow = useApp((s) => s.graph?.workflow ?? null);
 
   // The values are fetched when they are shown, as the parts themselves do.
   useEffect(() => {
@@ -86,7 +91,7 @@ function Advanced({
     void useRouting.getState().load();
   }, [open]);
 
-  const items = admin ? 5 : 4;
+  const items = 5 + (project ? 1 : 0) + (admin ? 1 : 0);
   return (
     <section className="settings-page-pane settings-card settings-advanced" aria-label={t("settingsPage.advanced")}>
       <button
@@ -120,6 +125,23 @@ function Advanced({
           >
             <RoutingSettings />
           </SettingsDisclosure>
+          <SettingsDisclosure
+            label={t("roles.settings.title")}
+            open={row === "roles"}
+            onToggle={() => toggleRow("roles")}
+          >
+            <RolesSettings />
+          </SettingsDisclosure>
+          {project && (
+            <SettingsDisclosure
+              label={t("stages.rowLabel", { project })}
+              value={workflowSummary(workflow, t)}
+              open={row === "stages"}
+              onToggle={() => toggleRow("stages")}
+            >
+              <WorkflowStagesSettings />
+            </SettingsDisclosure>
+          )}
           {/* Read-only: a runner's policy is changed on that runner. */}
           <SettingsDisclosure
             label={t("runners.autoAccept")}

@@ -494,6 +494,9 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 	if err := checkNodeWrite(actor, g.NodeByID(target.Node)); err != nil {
 		return nil, err
 	}
+	if err := checkRole(actor, g, engine.CapStatus, g.NodeByID(target.Node)); err != nil {
+		return nil, err
+	}
 	for i := targetIndex - 1; i >= 0; i-- {
 		previous := rs.History[i]
 		if previous.Event != "status" || previous.Node != target.Node {

@@ -1,4 +1,4 @@
-import type { DSLCheckResult, Graph, Issue, Status } from "../types";
+import type { Acceptance, AgentRoleDef, DSLCheckResult, Graph, Issue, Status, Workflow } from "../types";
 import { req } from "./http";
 import { verifyGraphResponse } from "./verify";
 
@@ -25,7 +25,11 @@ export interface GraphOp {
     | "set-edge-style"
     | "timeline-order"
     | "add-ref"
-    | "remove-ref";
+    | "remove-ref"
+    | "acceptance"
+    | "node-workflow"
+    | "workflow"
+    | "agent-roles";
   nodeId?: string;
   x?: number;
   y?: number;
@@ -46,6 +50,12 @@ export interface GraphOp {
   order?: string[];
   /** add-ref / remove-ref: the node `nodeId` uses as context. */
   ref?: string;
+  /** acceptance: the node's whole new criteria list (lock and author as read). */
+  acceptance?: Acceptance;
+  /** workflow (project) / node-workflow (a Goal's override): null drops it. */
+  workflow?: Workflow | null;
+  /** agent-roles: the project's whole sparse role list. */
+  agentRoles?: AgentRoleDef[];
 }
 
 export interface GraphOpsResponse {

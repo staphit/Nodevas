@@ -28,7 +28,18 @@ import (
 // limit: headless implement runs only. A review or plan changes no files,
 // and a revise already works on its pull request's branch.
 func canHandOff(r Record) bool {
-	return r.Kind == runnerwire.JobImplement && r.Mode == runnerwire.ModeHeadless
+	return (r.Kind == runnerwire.JobImplement || r.Kind == runnerwire.JobTest) && r.Mode == runnerwire.ModeHeadless
+}
+
+// canWaitForReset reports whether a run stopped at a usage limit is queued
+// again for when the limit resets: headless implement, test and revise runs
+// (a revise starts again from its pull request's head).
+func canWaitForReset(r Record) bool {
+	switch r.Kind {
+	case runnerwire.JobImplement, runnerwire.JobTest, runnerwire.JobRevise:
+		return r.Mode == runnerwire.ModeHeadless
+	}
+	return false
 }
 
 // handoffOf is the handoff a follow-up of r continues from: the one r left,
@@ -68,7 +79,7 @@ func resetTime(r Record, now time.Time) time.Time {
 // offered once the usage limit resets, continuing from r's handoff. It
 // reports whether it did; if not, the reason is noted on the run.
 func (d *Dispatcher) waitForReset(ctx context.Context, r Record) bool {
-	if r.Status != runnerwire.RunFailed || !runnerwire.HandoffWorthy(r.FailureKind) || !canHandOff(r) {
+	if r.Status != runnerwire.RunFailed || !runnerwire.HandoffWorthy(r.FailureKind) || !canWaitForReset(r) {
 		return false
 	}
 	if r.PipelineID != "" {
@@ -103,9 +114,11 @@ func (d *Dispatcher) waitForReset(ctx context.Context, r Record) bool {
 		Agent: r.Agent, Model: r.Model, RepoID: r.RepoID, RepoName: r.RepoName, Base: r.Base,
 		Prompt: r.Prompt, JobPrompt: r.JobPrompt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
 		Kind: r.Kind, RetryOf: r.ID, PipelineID: r.PipelineID,
+		JobBranch: r.JobBranch, JobPRURL: r.JobPRURL, Review: r.Review,
 		SteppedUpAt:      r.SteppedUpAt,
 		JobHandoffBranch: branch, JobHandoffNote: handoffNote,
 		RetryAt: formatStamp(at), LimitWaits: r.LimitWaits + 1,
+		Role: r.Role, JobRoles: r.JobRoles,
 	})
 	if err != nil {
 		d.note(ctx, r, "not waiting for the usage limit: "+err.Error())

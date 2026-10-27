@@ -40,6 +40,11 @@ type Config struct {
 	// Repos are the repositories the owner allowed runs in, added with
 	// `nodevas runner repo add` on this machine and nowhere else.
 	Repos []runnerwire.Repo `json:"repos,omitempty"`
+	// repoTests are the repos' test commands and timeouts (verify.go),
+	// stored in each repo's runner.json entry and read once at start: an
+	// agent that rewrites runner.json mid-run changes nothing until the
+	// runner restarts. They never go into the hello.
+	repoTests map[string]repoTest
 	// Models replaces the built-in model list for an agent kind.
 	Models map[string][]runnerwire.Model `json:"models,omitempty"`
 

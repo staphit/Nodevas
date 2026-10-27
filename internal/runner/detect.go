@@ -342,6 +342,11 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		if len(repos) > runnerwire.MaxRepos {
 			repos = repos[:runnerwire.MaxRepos]
 		}
+		// Whether a repo has a test command, never the command itself.
+		for i := range repos {
+			command, _ := cfg.RepoTestCommand(repos[i].ID)
+			repos[i].Verify = len(command) > 0
+		}
 		maxConcurrent = cfg.MaxConcurrentRuns()
 	}
 	llm := copilotInfo(ctx, cfg)

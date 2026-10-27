@@ -54,6 +54,15 @@ type Board interface {
 	// References are the notes a node uses as context, summarized for its
 	// run prompt; the bool says more exist than were summarized.
 	References(project, nodeID string) ([]runs.Reference, bool, error)
+	// CreatedByRun is the run whose agent created a node, or ""
+	// (store.CreatedByRun): what QA's and the planner's runs made.
+	CreatedByRun(project, nodeID string) string
+}
+
+// acceptanceLocker is a Board that can lock a node's acceptance criteria
+// when an Executor starts on it (store.LockAcceptance).
+type acceptanceLocker interface {
+	LockAcceptance(project, nodeID string) error
 }
 
 // Options are the orchestrator's collaborators.
@@ -107,10 +116,11 @@ type Orchestrator struct {
 // stageRank orders stages first seen at the same moment: a task's pipeline
 // reaches them in this order (CI last before the merge, as it gates it).
 var stageRank = map[string]int{
-	runnerwire.StageQueued: 0, runnerwire.StageImplement: 1, runnerwire.StageCommit: 2,
-	runnerwire.StagePush: 3, runnerwire.StagePR: 4, runnerwire.StageReview: 5,
-	runnerwire.StageHuman: 6, runnerwire.StageRevise: 7, runnerwire.StageApproved: 8,
-	runnerwire.StageCI: 9, runnerwire.StageMerge: 10, runnerwire.StageDone: 11,
+	runnerwire.StageQueued: 0, runnerwire.StageTest: 1, runnerwire.StageVerifyRed: 2,
+	runnerwire.StageImplement: 3, runnerwire.StageCommit: 4, runnerwire.StagePush: 5, runnerwire.StagePR: 6,
+	runnerwire.StageVerifyGreen: 7, runnerwire.StageGuard: 8, runnerwire.StageJudge: 9,
+	runnerwire.StageReview: 10, runnerwire.StageHuman: 11, runnerwire.StageRevise: 12,
+	runnerwire.StageApproved: 13, runnerwire.StageCI: 14, runnerwire.StageMerge: 15, runnerwire.StageDone: 16,
 }
 
 // stamp is a pass's time: now, but strictly after the previous pass's, as the
@@ -307,6 +317,12 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 	o.syncMembers(w)
 	o.refresh(ctx, w)
 	o.propagateFailures(w)
+	if w.rec.Workflow != nil {
+		// Workflow stages (goalflow.go): QA's criteria, the breakdown, the
+		// tasks, QA's verification and a person's review of the goal.
+		o.goalFlow(ctx, w)
+		return o.save(ctx, w, before)
+	}
 	if w.rec.Status == runnerwire.AutopilotRunning {
 		o.schedule(ctx, w)
 	}
@@ -852,7 +868,11 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 		Prompt: runs.Truncate(extra, runs.MaxExtraPrompt), Fallbacks: choice.Implement[1:],
 		Pipeline: pipelineFor(pol, head),
 	}
-	record, err := o.opts.Runs.Start(ctx, runs.StartRequest{
+	var acceptance *engine.Acceptance
+	if n := w.graph.NodeByID(t.NodeID); n != nil {
+		acceptance = n.Acceptance
+	}
+	req := runs.StartRequest{
 		Body: body, Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName,
 		SteppedUpAt: rec.SteppedUpAt,
 		// The DAG only schedules dispatchable members, so the type gate in
@@ -866,9 +886,21 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 			return runs.NodeInfo{
 				Title: t.Title, Content: content, Type: nodeType.ID, AgentMode: nodeType.AgentMode,
 				References: refs, ReferencesTruncated: truncated,
+				// The workflow frozen when the autopilot started, not the
+				// project's as it is now.
+				Acceptance: acceptance, Workflow: rec.Workflow,
 			}, true, nil
 		},
-	})
+	}
+	if rec.Workflow != nil {
+		req.Roles = w.graph.ResolvedAgentRoles()
+		req.Body.Pipeline = o.stagedPipeline(ctx, w, req.Body.Pipeline, head)
+		if locker, ok := o.opts.Board.(acceptanceLocker); ok {
+			project, node := rec.Project, t.NodeID
+			req.LockAcceptance = func() error { return locker.LockAcceptance(project, node) }
+		}
+	}
+	record, err := o.opts.Runs.Start(ctx, req)
 	if err != nil {
 		var refused *runs.StartError
 		if errors.As(err, &refused) && (refused.Code == runs.StartBudget || refused.Code == runs.StartPrecondition) {
@@ -1017,7 +1049,15 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 		return runnerwire.AutopilotView{}, fmt.Errorf("%w: a %s node cannot be an Autopilot goal", ErrNodeType, goalType.Label)
 	}
 	d := buildDAG(g, in.GoalNodeID)
-	if len(d.order) == 0 {
+	// The goal's workflow stages are frozen here, as its task set is: a later
+	// change to the project's (or the goal's) stages does not reach a run
+	// already under way.
+	wf := engine.EffectiveWorkflow(g, in.GoalNodeID).Normalized()
+	goalPhase := ""
+	if wf != nil {
+		goalPhase = initialGoalPhase(wf, g.NodeByID(in.GoalNodeID), len(d.order))
+	}
+	if len(d.order) == 0 && (goalPhase == "" || goalPhase == runnerwire.GoalPhaseTasks) {
 		return runnerwire.AutopilotView{}, invalidf("the goal has no tasks yet: break it down first (a plan run, or tasks wired into it)")
 	}
 	todo := 0
@@ -1068,9 +1108,10 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 	rec, err := o.opts.Store.Create(ctx, Record{
 		AutopilotRun: runnerwire.AutopilotRun{
 			Project: in.Project, GoalNodeID: in.GoalNodeID, Policy: pol,
-			CreatedBy: in.Actor.ID, CreatedByName: name,
+			CreatedBy: in.Actor.ID, CreatedByName: name, GoalPhase: goalPhase,
 		},
 		SteppedUpAt: in.SteppedUpAt,
+		Workflow:    wf,
 	}, tasks)
 	if err != nil {
 		return runnerwire.AutopilotView{}, err
@@ -1537,4 +1578,45 @@ func (o *Orchestrator) taskAction(ctx context.Context, id, nodeID string, fn fun
 	}
 	o.Reconcile(ctx, id)
 	return nil
+}
+
+// stagedPipeline is a task's pipeline under the autopilot's frozen
+// workflow: when its stages gate tasks (Tester, Reviewer, CI, a checklist
+// judge), a pipeline with a Tester and, if the Reviewer stage is on, at
+// least one reviewer: the role's routing rule target, else the policy's
+// reviewers, else the implementer.
+func (o *Orchestrator) stagedPipeline(ctx context.Context, w *work, p *runnerwire.Pipeline, head runnerwire.AgentModel) *runnerwire.Pipeline {
+	wf := w.rec.Workflow.Normalized()
+	if !wf.Staged() {
+		return p
+	}
+	out := runnerwire.Pipeline{Implement: head, MaxRounds: 2}
+	if p != nil {
+		out = *p
+	}
+	if out.MaxRounds < 1 {
+		out.MaxRounds = 2
+	}
+	byRole := func(role string) (runnerwire.AgentModel, bool) {
+		rules, err := o.opts.Runs.Routing(ctx, w.rec.CreatedBy)
+		if err != nil {
+			return runnerwire.AgentModel{}, false
+		}
+		s := runs.Suggest(rules, runs.RouteNode{Project: w.rec.Project, Role: role})
+		return s.Target, s.RuleID != "" && s.Match == runnerwire.RouteRole
+	}
+	if out.Tester.Agent == "" {
+		out.Tester = head
+		if am, ok := byRole(engine.RoleTester); ok {
+			out.Tester = am
+		}
+	}
+	if wf.Stages.Reviewer && len(runnerwire.ReviewersOf(out)) == 0 {
+		reviewer := head
+		if am, ok := byRole(engine.RoleReviewer); ok {
+			reviewer = am
+		}
+		out.Reviewers = []runnerwire.AgentModel{reviewer}
+	}
+	return &out
 }

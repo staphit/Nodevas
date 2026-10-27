@@ -52,7 +52,7 @@ func listedTools(t *testing.T, session *sdk.ClientSession) ([]string, map[string
 var fullTools = []string{
 	"ask_user", "check_inbox", "claim_task", "create_node", "create_subgraph", "get_graph_outline", "get_node",
 	"get_ready_tasks", "link_nodes", "list_projects", "list_team", "release_task", "save_attachment",
-	"search_nodes", "send_message", "set_node_status", "update_node_body", "update_node_meta", "validate_graph",
+	"search_nodes", "send_message", "set_acceptance", "set_node_status", "update_node_body", "update_node_meta", "validate_graph",
 }
 
 func TestFullToolsetListsEveryTool(t *testing.T) {
@@ -60,7 +60,7 @@ func TestFullToolsetListsEveryTool(t *testing.T) {
 	for _, toolset := range []string{"", ToolsetFull} {
 		names, _ := listedTools(t, toolsetSession(t, url, toolset))
 		if !slices.Equal(names, fullTools) {
-			t.Errorf("toolset %q lists %d tools %q, want the 19 %q", toolset, len(names), names, fullTools)
+			t.Errorf("toolset %q lists %d tools %q, want the 20 %q", toolset, len(names), names, fullTools)
 		}
 	}
 }

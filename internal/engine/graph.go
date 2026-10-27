@@ -58,9 +58,8 @@ type Graph struct {
 	NodeTypes []NodeTypeDef `yaml:"node_types,omitempty" json:"nodeTypes,omitempty"`
 	// AgentRoles is the project's sparse role list (roles.go); Workflow its
 	// stages (workflow.go), nil for legacy.
-	// RED PHASE STUB: not serialized yet (yaml:"agent_roles" / "workflow").
-	AgentRoles []AgentRoleDef `yaml:"-" json:"-"`
-	Workflow   *Workflow      `yaml:"-" json:"-"`
+	AgentRoles []AgentRoleDef `yaml:"agent_roles,omitempty" json:"agentRoles,omitempty"`
+	Workflow   *Workflow      `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	UI         *UIState       `yaml:"ui,omitempty" json:"ui,omitempty"`
 }
 
@@ -98,9 +97,8 @@ type Node struct {
 	Refs []string `yaml:"refs,omitempty" json:"refs,omitempty"`
 	// Acceptance is the node's acceptance criteria (acceptance.go); Workflow
 	// a Goal's stage override (workflow.go).
-	// RED PHASE STUB: not serialized yet (yaml:"acceptance" / "workflow").
-	Acceptance *Acceptance `yaml:"-" json:"-"`
-	Workflow   *Workflow   `yaml:"-" json:"-"`
+	Acceptance *Acceptance `yaml:"acceptance,omitempty" json:"acceptance,omitempty"`
+	Workflow   *Workflow   `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 }
 
 // NodeLinkRef is one named reference. Project empty means this node's own

@@ -37,6 +37,26 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	if err := engine.ValidateNodeTypeDefs(g.NodeTypes); err != nil {
 		return err
 	}
+	if err := engine.ValidateAgentRoleDefs(g.AgentRoles); err != nil {
+		return err
+	}
+	if err := engine.ValidateGraphWorkflows(g); err != nil {
+		return err
+	}
+	for _, node := range g.Nodes {
+		if node == nil || node.Acceptance == nil {
+			continue
+		}
+		// A client may send new criteria without ids; they get the next free
+		// one, existing ids are kept.
+		node.Acceptance.Items = engine.AssignAcceptanceIDs(node.Acceptance.Items)
+		if node.Acceptance.Items == nil {
+			node.Acceptance.Items = []engine.AcceptanceItem{}
+		}
+		if err := engine.ValidateNodeAcceptance(g, node); err != nil {
+			return err
+		}
+	}
 	userIDs := make(map[string]struct{}, len(g.Users))
 	userNames := make(map[string]struct{}, len(g.Users))
 	for index, user := range g.Users {

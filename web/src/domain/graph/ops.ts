@@ -82,6 +82,29 @@ function applyOne(graph: Graph, op: GraphOp): boolean {
       ui(graph).timelineOrder = [...op.order];
       return true;
     }
+    // Agent roles: the server validated these, and each carries the whole
+    // new value, so replaying them is exact.
+    case "acceptance": {
+      if (!node) return false;
+      if (op.acceptance && (op.acceptance.items?.length || op.acceptance.locked)) {
+        node.acceptance = structuredClone(op.acceptance);
+      } else {
+        delete node.acceptance;
+      }
+      return true;
+    }
+    case "node-workflow": {
+      if (!node) return false;
+      if (op.workflow) node.workflow = structuredClone(op.workflow);
+      else delete node.workflow;
+      return true;
+    }
+    case "workflow":
+      graph.workflow = op.workflow ? structuredClone(op.workflow) : null;
+      return true;
+    case "agent-roles":
+      graph.agentRoles = structuredClone(op.agentRoles ?? []);
+      return true;
     default:
       return false;
   }

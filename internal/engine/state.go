@@ -90,6 +90,10 @@ type HistoryEvent struct {
 	Ref string `json:"ref,omitempty"`
 }
 
+// EventEvidence is a pipeline evidence journal event (agent roles): kept in
+// history, ignored for status.
+const EventEvidence = "evidence"
+
 // NewRunState returns an empty state stamped with now.
 func NewRunState(now time.Time) *RunState {
 	return &RunState{
@@ -193,6 +197,10 @@ func ResumeJournal(base *RunState, data []byte) (*RunState, error) {
 			replay.status(ev)
 		case ev.Event == "move" && ev.Ref != "":
 			replay.move(ev)
+		case ev.Event == EventEvidence && ev.Node != "":
+			// Pipeline evidence (red/green runs, diff guard, judge checks)
+			// is history only: it never changes a node's status.
+			replay.appendHistory(ev)
 		}
 	}
 	return rs, nil

@@ -146,6 +146,21 @@ export interface Run {
   finishedAt?: string;
 }
 
+/** Mirrors runnerwire.RoleSettings: one owner's concurrency and budget for a
+ * role. Project "" applies in every project; 0 is no limit. */
+export interface RoleSettings {
+  role: string;
+  project: string;
+  maxConcurrent: number;
+  dailyCostUsd: number;
+  dailyTokens: number;
+  dailyRuns: number;
+}
+
+export interface RoleSettingsResponse {
+  roles: RoleSettings[] | null;
+}
+
 /** Mirrors runnerwire.VerifyResult: one run of the repo's test command. */
 export interface VerifyResult {
   phase: "red" | "green" | "goal" | string;
@@ -309,7 +324,7 @@ export interface AgentModel {
 
 /** Route match kinds, tried in this order by the hub. */
 export type RouteMatch = "tag" | "kind" | "project" | "default" | "role";
-export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "project", "default"];
+export const ROUTE_MATCHES: readonly RouteMatch[] = ["tag", "kind", "role", "project", "default"];
 
 /** Mirrors runnerwire.RouteRule. Project "" applies in every project. */
 export interface RouteRule {
@@ -353,6 +368,8 @@ export interface RunPipeline {
   reviewers?: AgentModel[] | null;
   quorum?: number;
   human?: boolean;
+  /** Agent roles: who writes the failing tests of a staged pipeline. */
+  tester?: AgentModel;
 }
 
 export type PipelineStatus =
@@ -474,6 +491,10 @@ export const runsApi = {
   getRouting: () => req<RoutingConfig>("/api/runs/routing"),
   putRouting: (rules: RouteRule[]) =>
     req<RoutingConfig>("/api/runs/routing", { method: "PUT", body: JSON.stringify({ rules }) }),
+  /** Agent roles: the viewer's per-role concurrency and daily budget. */
+  getRoleSettings: () => req<RoleSettingsResponse>("/api/runs/roles"),
+  putRoleSettings: (roles: RoleSettings[]) =>
+    req<RoleSettingsResponse>("/api/runs/roles", { method: "PUT", body: JSON.stringify({ roles }) }),
   /** What the routing rules pick for a node; ruleId "" when none matched. */
   getRoute: (nodeId: string) =>
     req<RouteSuggestion>(`/api/runs/route?nodeId=${encodeURIComponent(nodeId)}`),

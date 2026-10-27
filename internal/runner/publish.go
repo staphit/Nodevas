@@ -105,8 +105,9 @@ func (j *jobs) openPR(ctx context.Context, r *run, wt Worktree, result runnerwir
 		Branch: wt.Branch,
 		Title:  prTitle(job, message),
 		Body:   redact.String(prBody(prInfo{job: job, result: result, runnerName: j.runnerName(), hub: cfg.Hub})),
-		// A failed run's PR is never ready for review.
-		Draft:  cfg.PRDraft || result.Status != runnerwire.RunSucceeded,
+		// A failed run's PR is never ready for review, nor a Tester's: its
+		// tests fail by design until the Executor's work lands.
+		Draft:  prDraft(cfg, job, result),
 		Labels: cfg.PRLabelsFor(job.Agent, job.Model),
 	}
 	prURL, err := gh.create(ctx, req, func(format string, args ...any) {

@@ -113,7 +113,6 @@ type Pipeline struct {
 	// owner's runner merge, the way a merge approval does (W4).
 	HumanAnyEditor bool `json:"humanAnyEditor,omitempty"`
 	// Tester writes the failing tests of a staged pipeline (agent roles).
-	// RED PHASE STUB: unused.
 	Tester AgentModel `json:"tester,omitempty"`
 }
 

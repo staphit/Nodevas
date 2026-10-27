@@ -40,6 +40,19 @@ func Validate(g *Graph) []Issue {
 	for _, problem := range NodeTypeDefProblems(g.NodeTypes) {
 		add("error", "", "node_types", -1, "%s", problem)
 	}
+	for _, problem := range AgentRoleDefProblems(g.AgentRoles) {
+		add("error", "", "agent_roles", -1, "%s", problem)
+	}
+	if err := ValidateGraphWorkflows(g); err != nil {
+		add("error", "", "workflow", -1, "%s", err)
+	}
+	for _, n := range g.Nodes {
+		if n != nil && n.Acceptance != nil {
+			if err := ValidateNodeAcceptance(g, n); err != nil {
+				add("error", n.ID, "acceptance", -1, "%s", err)
+			}
+		}
+	}
 
 	ids := map[string]bool{}
 	// Legacy free-text kinds ("bug", "伏筆") are summarized once per project

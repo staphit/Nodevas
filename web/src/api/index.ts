@@ -177,6 +177,11 @@ export type {
   RoutingConfig,
   RunKind,
   RunPipeline,
+  CheckResult,
+  GuardReport,
+  RoleSettings,
+  RoleSettingsResponse,
+  VerifyResult,
 } from "./runs";
 export {
   FAILURE_KINDS,

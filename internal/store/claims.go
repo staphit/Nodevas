@@ -241,6 +241,9 @@ func (s *Store) ClaimNode(actor identity.Actor, nodeID, owner string, lease time
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return nil, err
 	}
+	if err := checkRole(actor, g, engine.CapClaim, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
 	if nodeType := g.TypeOf(g.NodeByID(nodeID)); actor.IsAgent() && nodeType.AgentMode == engine.AgentNone {
 		return nil, &ErrNodeTypeDenied{
 			NodeID: nodeID, Type: nodeType.ID, Code: CodeNodeTypeForbidsAgent, Status: http.StatusForbidden,
@@ -412,6 +415,12 @@ func (s *Store) ReportStatus(
 		return nil, err
 	}
 	if err := checkStatusWrite(actor, g, g.NodeByID(nodeID), status); err != nil {
+		return nil, err
+	}
+	if err := checkRole(actor, g, engine.CapStatus, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
+	if err := checkStatusGate(actor, g, g.NodeByID(nodeID), status); err != nil {
 		return nil, err
 	}
 

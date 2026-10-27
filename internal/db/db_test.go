@@ -59,8 +59,8 @@ func TestOpenCreatesEverySchemaObject(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&steps); err != nil {
 		t.Fatal(err)
 	}
-	if steps != 24 || steps != len(migrations) {
-		t.Fatalf("schema_migrations has %d rows, want 24 (%d defined)", steps, len(migrations))
+	if steps != 25 || steps != len(migrations) {
+		t.Fatalf("schema_migrations has %d rows, want 25 (%d defined)", steps, len(migrations))
 	}
 }
 

@@ -44,14 +44,30 @@ type Actor struct {
 }
 
 // HasRole reports whether the actor is an agent acting in a role.
-// RED PHASE STUB: always false.
-func (a Actor) HasRole() bool { return false }
+func (a Actor) HasRole() bool { return a.IsAgent() && a.AgentRole != "" }
 
 // LowerClass is the lower-ranked of two agent classes (worker below
 // orchestrator); a role never raises what the request declared. Human ("")
 // ranks highest, so LowerClass("", c) is c.
-// RED PHASE STUB: returns a unchanged.
-func LowerClass(a, b AgentClass) AgentClass { return a }
+func LowerClass(a, b AgentClass) AgentClass {
+	if classRank(b) < classRank(a) {
+		return b
+	}
+	return a
+}
+
+// classRank orders classes: worker below orchestrator below human. An
+// unknown class ranks as a worker so it can never raise anything.
+func classRank(c AgentClass) int {
+	switch c {
+	case AgentHuman:
+		return 2
+	case AgentOrchestrator:
+		return 1
+	default:
+		return 0
+	}
+}
 
 // System is the hub acting on its own behalf (locking acceptance at Executor
 // dispatch). Only server code constructs it; no request can.

@@ -31,7 +31,6 @@ type AutoAcceptPolicy struct {
 	AllowRemoteTyping bool `json:"allowRemoteTyping,omitempty"`
 	// AllowVerify: auto-accept verify jobs (the repo's own test command, no
 	// agent) for the listed repos. Default false: asked at the terminal.
-	// RED PHASE STUB: not consulted yet.
 	AllowVerify bool `json:"allowVerify,omitempty"`
 }
 

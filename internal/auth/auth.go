@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"nodevas/internal/engine"
 	"nodevas/internal/identity"
 	"strings"
 	"sync"
@@ -53,7 +54,6 @@ const AgentRoleHeaderName = "X-Nodevas-Agent-Role"
 // executor, reviewer, researcher, custom-role-*) an external loopback session
 // acts in. Like AgentRoleHeaderName it is honored only by LocalOnly; a role
 // never raises the declared class.
-// RED PHASE STUB: not read yet.
 const RoleHeaderName = "X-Nodevas-Role"
 
 // ErrInvalidRole is returned for a RoleHeaderName value that is not a
@@ -68,16 +68,38 @@ func (LocalOnly) Authenticate(r *http.Request) (identity.Actor, error) {
 	if r == nil {
 		return identity.Local, nil
 	}
-	switch role := identity.AgentClass(r.Header.Get(AgentRoleHeaderName)); role {
-	case identity.AgentHuman:
-		return identity.Local, nil
-	case identity.AgentWorker, identity.AgentOrchestrator:
-		actor := identity.Local
-		actor.Agent = role
-		return actor, nil
+	class := identity.AgentClass(r.Header.Get(AgentRoleHeaderName))
+	switch class {
+	case identity.AgentHuman, identity.AgentWorker, identity.AgentOrchestrator:
 	default:
 		return identity.Actor{}, ErrUnknownAgentRole
 	}
+	agentRole, present := r.Header[http.CanonicalHeaderKey(RoleHeaderName)]
+	if !present {
+		if class == identity.AgentHuman {
+			return identity.Local, nil
+		}
+		actor := identity.Local
+		actor.Agent = class
+		return actor, nil
+	}
+	// An external session in a role: the role is syntax-checked here and
+	// resolved against the project by the role guard (UNKNOWN_ROLE there).
+	// A role alone acts as a worker, and a built-in role's rank can only
+	// lower the declared class.
+	if len(agentRole) != 1 || !engine.ValidRoleID(agentRole[0]) {
+		return identity.Actor{}, ErrInvalidRole
+	}
+	if class == identity.AgentHuman {
+		class = identity.AgentWorker
+	}
+	if rank := engine.RoleClass(nil, agentRole[0]); rank != "" {
+		class = identity.LowerClass(class, rank)
+	}
+	actor := identity.Local
+	actor.Agent = class
+	actor.AgentRole = agentRole[0]
+	return actor, nil
 }
 func (LocalOnly) NeedsCSRF() bool { return false }
 func (LocalOnly) Remote() bool    { return false }

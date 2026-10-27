@@ -85,6 +85,21 @@ async function mockRuns(page: Page) {
   await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [run] } }));
 }
 
+/**
+ * New projects start on the Standard stages (Tester → Executor → Reviewer),
+ * whose dispatch dialog is roles.spec.ts's. These tests are about the plain
+ * dispatch form, which a project without stages keeps: clear the stages and
+ * reload the board.
+ */
+async function withoutStages(page: Page) {
+  const cleared = await page.request.post("/api/graph/ops", {
+    data: { ops: [{ kind: "workflow", workflow: null }] },
+  });
+  expect(cleared.ok(), await cleared.text()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText("設計稿").first()).toBeVisible();
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(() => {
     const root = document.documentElement;
@@ -101,6 +116,7 @@ for (const [name, viewport] of Object.entries({
     await page.setViewportSize(viewport);
     await mockRuns(page);
     await freshProject(page, ["設計稿"]);
+    await withoutStages(page);
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
@@ -500,6 +516,7 @@ for (const [name, viewport] of Object.entries({
     await page.setViewportSize(viewport);
     await mockRouting(page);
     await freshProject(page, ["設計稿"]);
+    await withoutStages(page);
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });

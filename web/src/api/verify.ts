@@ -107,6 +107,13 @@ function checkGraph(check: Check, value: unknown, field: string): void {
       .forEach((ref, refIndex) =>
         check.string(ref, `${field}.nodes[${index}].refs[${refIndex}]`),
       );
+    checkAcceptance(check, node.acceptance, `${field}.nodes[${index}].acceptance`);
+    checkWorkflow(check, node.workflow, `${field}.nodes[${index}].workflow`);
+  });
+  checkWorkflow(check, graph.workflow, `${field}.workflow`);
+  check.nullableArray(graph.agentRoles, `${field}.agentRoles`).forEach((entry, index) => {
+    const role = check.object(entry, `${field}.agentRoles[${index}]`);
+    check.string(role.id, `${field}.agentRoles[${index}].id`);
   });
   const edges = check.nullableArray(graph.edges, `${field}.edges`);
   edges.forEach((entry, index) => {
@@ -117,6 +124,25 @@ function checkGraph(check: Check, value: unknown, field: string): void {
   if (graph.ui !== undefined && graph.ui !== null) {
     check.object(graph.ui, `${field}.ui`);
   }
+}
+
+/** A node's acceptance criteria: the panel indexes into items[].id/text. */
+function checkAcceptance(check: Check, value: unknown, field: string): void {
+  if (value === undefined || value === null) return;
+  const acceptance = check.object(value, field);
+  check.nullableArray(acceptance.items, `${field}.items`).forEach((entry, index) => {
+    const item = check.object(entry, `${field}.items[${index}]`);
+    check.string(item.id, `${field}.items[${index}].id`);
+    check.string(item.text, `${field}.items[${index}].text`);
+  });
+}
+
+/** A project's (or a Goal's) workflow stages; absent or null is legacy. */
+function checkWorkflow(check: Check, value: unknown, field: string): void {
+  if (value === undefined || value === null) return;
+  const workflow = check.object(value, field);
+  check.string(workflow.preset, `${field}.preset`);
+  check.object(workflow.stages, `${field}.stages`);
 }
 
 function checkIssues(check: Check, value: unknown, field: string): void {

@@ -90,6 +90,25 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 	if !g.KnownNodeKind(n.Kind) {
 		return "", unknownNodeTypeError(n.ID, n.Kind)
 	}
+	if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
+		return "", err
+	}
+	if n.Workflow != nil {
+		if err := checkWorkflowEdit(actor, n.ID, nil, n.Workflow); err != nil {
+			return "", err
+		}
+	}
+	if n.Acceptance != nil {
+		acceptance := normalizeAcceptance(actor, nil, n.Acceptance)
+		if acceptance != nil {
+			acceptance.Locked = false
+			acceptance.By = acceptanceAttribution(actor)
+		}
+		if err := checkAcceptanceWrite(actor, g, n, nil, acceptance, true); err != nil {
+			return "", err
+		}
+		n.Acceptance = acceptance
+	}
 	if n.ID == "" {
 		n.ID, err = s.nextNodeIDLocked(g)
 		if err != nil {
@@ -136,6 +155,9 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 	}); err != nil {
 		return "", err
 	}
+	if actor.RunID != "" {
+		s.recordCreatedByRunLocked(actor.RunID, []string{n.ID})
+	}
 	return n.ID, nil
 }
 
@@ -161,7 +183,22 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	if source == nil {
 		return "", fmt.Errorf("node %q not found", sourceID)
 	}
+	if err := checkRole(actor, g, engine.CapCreate, source); err != nil {
+		return "", err
+	}
 	duplicate := *source
+	// A copy has not been dispatched: its criteria start unlocked.
+	if source.Acceptance != nil {
+		acceptance := *source.Acceptance
+		acceptance.Items = append([]engine.AcceptanceItem(nil), source.Acceptance.Items...)
+		acceptance.Locked = false
+		duplicate.Acceptance = &acceptance
+	}
+	if source.Workflow != nil {
+		workflow := *source.Workflow
+		workflow.TestGlobs = append([]string(nil), source.Workflow.TestGlobs...)
+		duplicate.Workflow = &workflow
+	}
 	duplicate.ID, err = s.nextNodeIDLocked(g)
 	if err != nil {
 		return "", err
@@ -549,6 +586,9 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		return zero, err
 	}
 
+	if err := checkRoleDelete(actor, unique[0]); err != nil {
+		return zero, err
+	}
 	kept := g.Nodes[:0]
 	found := make(map[string]bool, len(removing))
 	for _, node := range g.Nodes {
