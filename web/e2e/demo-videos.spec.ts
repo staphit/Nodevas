@@ -1067,13 +1067,13 @@ test("agent-network", async ({ page }) => {
   });
 
   await openBoard(page);
-  await begin(page, "Agent network", "See the other agents at work, and what they tell each other.");
-  const fab = page.getByRole("button", { name: "Open Agent Network" });
+  await begin(page, "Agent chat", "See the other agents at work, and what they tell each other.");
+  const fab = page.getByRole("button", { name: /^Open Agent chat/ });
   say("Every agent session, in one place", "Claude Code, Codex and OpenCode on the same project.");
   await pause(page, 1400);
   await focus(page, fab, { pad: 160, minW: 720, hold: 400 });
   await glide(page, fab);
-  const panel = page.getByRole("dialog", { name: "Agent Network" });
+  const panel = page.getByRole("dialog", { name: "Agent chat" });
   await expect(panel).toBeVisible();
   await pause(page, 400);
   await hidePointer(page);

@@ -98,7 +98,7 @@ describe("copilot follow-up", () => {
   it("waits as unread with the panel closed; the mic button opens it", async () => {
     stubServer();
     render(<CopilotRoot />);
-    await screen.findByRole("button", { name: "Open copilot · New follow-up from the copilot" });
+    await screen.findByRole("button", { name: "Voice Copilot · Open copilot · New follow-up from the copilot" });
     // The push arrives too: still unread, nothing opens by itself.
     await act(async () => {
       await followupArrived("c1");
@@ -107,7 +107,7 @@ describe("copilot follow-up", () => {
     expect(useCopilot.getState().conversations[0].unread).toBe(true);
     expect(screen.getByTestId("copilot-unread")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open copilot · New follow-up from the copilot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Voice Copilot · Open copilot · New follow-up from the copilot" }));
     expect(await screen.findByRole("dialog", { name: "Copilot" })).toBeInTheDocument();
     await vi.waitFor(() => expect(useCopilot.getState().activeId).toBe("c1"));
     expect(await screen.findByText("Breakdown finished: 2 tasks")).toBeInTheDocument();

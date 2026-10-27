@@ -12,14 +12,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useAgents } from "../agents/agentStore";
 import { AutopilotPanel } from "../autopilot/AutopilotPanel";
-import { GameActionsProvider } from "../game/GameActions";
+import { GameActionsProvider, useGameActions } from "../game/GameActions";
 import { setProjectMode } from "./projectMode";
 import { useWorld } from "../game/useWorld";
 import { useI18n } from "../i18n";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
+import { useRuns } from "../runs/runStore";
 import { reportError, useApp } from "../store";
 import { buildActivity, type ActivityLane } from "./activity";
+import { useBuilding } from "./buildingStore";
 import { StationControlReport, StationPauseButton } from "./StationControl";
 import { StationSide } from "./StationSide";
 import { useStation } from "./stationStore";
@@ -34,15 +36,25 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
 
   useEffect(() => {
     setWatching(true);
-    return () => setWatching(false);
+    useBuilding.getState().setWatching(true);
+    return () => {
+      setWatching(false);
+      useBuilding.getState().setWatching(false);
+    };
   }, [setWatching]);
+  const firstProject = useRef(true);
   useEffect(() => {
     useStation.getState().openProject(activeProject);
     void useBudget.getState().load();
+    // The mount's load is setWatching's; a switch reloads (the current
+    // office leaves the building summary, the old one joins it).
+    if (firstProject.current) firstProject.current = false;
+    else void useBuilding.getState().load();
   }, [activeProject]);
 
   return (
     <GameActionsProvider>
+      <DeferredTarget />
       <div className="station" aria-label={t("mode.station")} role="main">
         <header className="station-head">
           <h2>{t("mode.station")}</h2>
@@ -64,6 +76,28 @@ export default function StationView({ drawer }: { drawer: ReactNode }) {
       {drawer}
     </GameActionsProvider>
   );
+}
+
+/** Something clicked in another project's office: once Station has
+ * switched there and what it needs has loaded, it is done (and forgotten). */
+function DeferredTarget() {
+  const { dispatch } = useGameActions();
+  const deferred = useStation((s) => s.deferred);
+  const activeProject = useApp((s) => s.activeProject);
+  const graph = useApp((s) => s.graph);
+  const runsLoaded = useRuns((s) => s.activeRunsLoaded);
+  const asks = useAgents((s) => s.asks);
+  const held = useAgents((s) => s.held);
+  useEffect(() => {
+    if (!deferred?.ready || deferred.project !== activeProject || !graph) return;
+    const target = deferred.target;
+    if (target.kind === "run" && !runsLoaded) return;
+    if (target.kind === "ask" && !asks.some((ask) => ask.id === target.askId)) return;
+    if (target.kind === "held-message" && !held.some((message) => message.id === target.messageId)) return;
+    useStation.getState().clearDeferred();
+    dispatch(target);
+  }, [deferred, activeProject, graph, runsLoaded, asks, held, dispatch]);
+  return null;
 }
 
 /**

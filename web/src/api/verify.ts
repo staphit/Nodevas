@@ -219,6 +219,9 @@ export interface ProjectsResponse {
     path: string;
     nodes: number;
     isFolder?: boolean;
+    layout?: string;
+    officeStyle?: string;
+    officeStyleSet?: boolean;
   }[];
 }
 

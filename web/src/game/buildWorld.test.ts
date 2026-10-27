@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Graph } from "../types";
-import { buildWorld, nodeTitles, type WorldInputs } from "./buildWorld";
+import type { BuildingInputs } from "./building";
+import { buildWorld, nodeTitles } from "./buildWorld";
 import { runActorId, sessionActorId } from "./office";
 import { makeRun, makeRunner, makeSession, NOW } from "./testFixtures";
 
@@ -13,8 +14,12 @@ const GRAPH: Graph = {
   edges: [{ from: "schema", to: "login" }],
 };
 
-function inputs(overrides: Partial<WorldInputs> = {}): WorldInputs {
+function inputs(overrides: Partial<BuildingInputs> = {}): BuildingInputs {
   return {
+    activeProject: "main",
+    projectLabel: "Main",
+    remote: null,
+    waitingItems: [],
     graph: GRAPH,
     runs: [],
     runners: [makeRunner()],
@@ -42,7 +47,7 @@ describe("buildWorld", () => {
       }),
     );
     expect(world.now).toBe(NOW);
-    expect(world.office.actors.map((a) => [a.id, a.pose, a.nodeTitle])).toEqual([
+    expect(world.building.actors.map((a) => [a.id, a.pose, a.nodeTitle])).toEqual([
       [runActorId(run.id), "working", "DB schema"],
       [sessionActorId("mine"), "working", "Login form"],
     ]);
@@ -55,7 +60,7 @@ describe("buildWorld", () => {
 
   it("ages sessions with the clock it is given", () => {
     const snapshot = inputs({ sessions: [makeSession({ lastSeen: NOW })] });
-    expect(buildWorld(snapshot).office.actors[0].pose).toBe("idle");
-    expect(buildWorld({ ...snapshot, now: NOW + 90_000 }).office.actors[0].pose).toBe("offline");
+    expect(buildWorld(snapshot).building.actors[0].pose).toBe("idle");
+    expect(buildWorld({ ...snapshot, now: NOW + 90_000 }).building.actors[0].pose).toBe("offline");
   });
 });

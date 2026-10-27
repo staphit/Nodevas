@@ -1,9 +1,15 @@
+// Agent chat on the board: the floating button (only while there is
+// something to see: an agent online, unread messages, a question or a held
+// message), the toasts above it and the floating panel. In Station it is the
+// side card instead (StationSide), and nothing floats.
+
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { useViewer } from "../components/SignIn";
 import { useI18n } from "../i18n";
-import { IconClose } from "../icons";
+import { IconChat, IconClose } from "../icons";
 import { useApp, usePreference } from "../store";
-import { useAgents } from "./agentStore";
+import { agentFabBadge, shouldShowAgentFab } from "./agentFab";
+import { unseenCount, useAgents } from "./agentStore";
 import { useWorkstationVisible } from "../runners/workstation";
 
 const AgentPanel = lazy(() =>
@@ -46,7 +52,7 @@ function AgentToasts() {
   );
 }
 
-export function AgentNetworkRoot() {
+export function AgentChatRoot() {
   const { t } = useI18n();
   const viewer = useViewer();
   const open = useAgents((s) => s.open);
@@ -54,11 +60,12 @@ export function AgentNetworkRoot() {
   const sessions = useAgents((s) => s.sessions);
   const asks = useAgents((s) => s.asks);
   const heldCount = useAgents((s) => s.held.length);
+  const unseen = useAgents((s) => unseenCount(s.messages, s.seenAt, s.viewer));
   const refreshAll = useAgents((s) => s.refreshAll);
   const setViewer = useAgents((s) => s.setViewer);
   const activeProject = useApp((s) => s.activeProject);
   // The floating button is a workstation surface; the store behind it keeps
-  // refreshing, and an agent joining the network is what turns it on.
+  // refreshing, and an agent joining Agent chat is what turns it on.
   const workstation = useWorkstationVisible();
   // Station docks the panel in its own column: nothing floats over it.
   const station = usePreference("projectMode") === "station";
@@ -67,12 +74,15 @@ export function AgentNetworkRoot() {
   const pendingAskCount = asks.filter((a) => a.status === "pending").length;
   const waitingCount = pendingAskCount + heldCount;
   const prevPendingRef = useRef(0);
+  const fab = { workstation, station, open, online: onlineCount, unseen, pendingAsks: pendingAskCount, held: heldCount };
+  const badge = agentFabBadge(fab);
 
   useEffect(() => {
     setViewer(viewer);
   }, [viewer, setViewer]);
 
   useEffect(() => {
+    useAgents.getState().loadSeen(activeProject);
     void refreshAll();
   }, [activeProject, refreshAll]);
 
@@ -104,26 +114,25 @@ export function AgentNetworkRoot() {
 
   return (
     <>
-      {!open && workstation && (
+      {shouldShowAgentFab(fab) && (
         <button
           type="button"
           className={`agent-fab${waitingCount > 0 ? " has-pending-ask" : ""}${
             onlineCount > 0 ? " has-online" : ""
           }`}
           onClick={() => setOpen(true)}
-          aria-label={t("agents.open")}
+          aria-label={
+            badge
+              ? `${t("agents.open")} · ${t(badge.tone === "waiting" ? "agents.fab.waiting" : "agents.fab.unread", { count: badge.count })}`
+              : t("agents.open")
+          }
           aria-expanded={false}
           aria-controls="agent-network-panel"
           title={`${t("agents.open")} (Ctrl+Shift+A)`}
         >
-          <span className="agent-fab-icon" aria-hidden>
-            ⇄
-          </span>
-          {(waitingCount > 0 || onlineCount > 0) && (
-            <span className="agent-fab-badge">
-              {waitingCount > 0 ? `!${waitingCount}` : onlineCount}
-            </span>
-          )}
+          <IconChat size={18} />
+          <span className="agent-fab-label">{t("agents.fab.label")}</span>
+          {badge && <span className={`agent-fab-badge is-${badge.tone}`}>{badge.count}</span>}
         </button>
       )}
       {!open && <AgentToasts />}

@@ -40,6 +40,12 @@ const (
 
 	// MaxModelLen bounds the model name a heartbeat reports.
 	MaxModelLen = 64
+
+	// PresenceEvent is emitted, besides "agents-changed", when a session's
+	// presence really changes: it appears, comes back online, changes state
+	// or node, or leaves. A plain heartbeat does not emit it, so it is quiet
+	// enough to drive views across projects (Station's building).
+	PresenceEvent = "agent-presence"
 )
 
 var (
@@ -266,6 +272,14 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	h.pruneExpiredLocked(now)
 	key := project + "\x00" + sessionID
 	existing, ok := h.sessions[key]
+	// presence: whether this heartbeat changes what the session looks like
+	// from outside (PresenceEvent), rather than only keeping it alive.
+	presence := !ok
+	var wasOnline bool
+	var wasState, wasNode string
+	if ok {
+		wasOnline, wasState, wasNode = existing.Online, existing.State, existing.NodeID
+	}
 	if !ok {
 		baseName := sanitizeToken(hb.Name)
 		if baseName == "" {
@@ -371,11 +385,15 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		}
 		existing.LastSeen = now
 		existing.Online = true
+		presence = !wasOnline || existing.State != wasState || existing.NodeID != wasNode
 	}
 	snapshot := *existing
 	h.mu.Unlock()
 
 	h.emit(project, "agents-changed", nil)
+	if presence {
+		h.emit(project, PresenceEvent, nil)
+	}
 	return snapshot, nil
 }
 
@@ -414,6 +432,7 @@ func (h *Hub) Leave(project, sessionID, actorID string) error {
 	h.mu.Unlock()
 
 	h.emit(project, "agents-changed", nil)
+	h.emit(project, PresenceEvent, nil)
 	return nil
 }
 

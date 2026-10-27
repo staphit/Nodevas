@@ -1,22 +1,20 @@
-// The war room: a room per runner, a character per run (and per agent
-// session with no run in view), meeting tables for review pipelines.
+// The current project's office: a character per run (and per agent session
+// with no run in view), each in the part of the office its state puts it
+// (areas.ts): at a desk, at the meeting-room table, at the door, or off to
+// the shared lounge. What waits on the viewer without an agent at it (a PR
+// to merge, a review, a held message) lies on the meeting-room table.
 
 import type { AgentAsk, AgentMessage, AgentSession } from "../api/agents";
 import type { Runner } from "../api/runners";
 import { runFinal, type PipelineState, type Run, type RunBudgetStatus } from "../api/runs";
+import { excerpt } from "../agents/agentStore";
+import type { WaitingItem } from "../station/waiting";
+import { areaOf } from "./areas";
 import { joinSessions } from "./joins";
+import { resolveOfficeStyle } from "./officeStyle";
 import { finishedRunStaysInRoom, runPose, sessionPose } from "./pose";
 import { bubbleVisible, sessionOnline } from "./presence";
-import {
-  TERMINAL_ROOM_ID,
-  type Actor,
-  type ClickTarget,
-  type Energy,
-  type Meeting,
-  type Office,
-  type Room,
-  type SwappedFrom,
-} from "./world";
+import type { Actor, ClickTarget, Energy, Meeting, MeetingItem, ProjectOffice, SwappedFrom } from "./world";
 
 /** Failure kinds a fallback run takes over from (runs/dispatcher_routing.go):
  * the previous agent or model could not run, not the task itself failed. */
@@ -54,8 +52,36 @@ export interface OfficeInputs {
   now: number;
 }
 
-export function runnerRoomId(runnerId: string): string {
-  return `runner:${runnerId}`;
+export interface CurrentOfficeInputs extends OfficeInputs {
+  project: string;
+  /** The project's name as the explorer shows it. */
+  label: string;
+  /** graph.yaml's type. */
+  layout: string;
+  /** The project's chosen style, if any (graph.officeStyle). */
+  officeStyle?: string;
+  /** What waits on the viewer (station/useWaitingItems): the table's
+   * merges, reviews and held messages come from here. */
+  waitingItems: WaitingItem[];
+  /** Runs offered to or running on each runner across every project in
+   * view (building.ts): what is left of its slots is the free desks. Absent:
+   * counted from this project's runs. */
+  runnerBusy?: ReadonlyMap<string, number>;
+}
+
+export interface CurrentOffice {
+  office: ProjectOffice;
+  actors: Actor[];
+  /** Actor ids that went to the shared lounge. */
+  loungeIds: string[];
+}
+
+/** How many free desks an office shows next to its occupied ones. */
+export const MAX_FREE_DESKS = 3;
+
+/** Runs that hold a runner's slot. */
+export function holdsSlot(status: string): boolean {
+  return status === "offered" || status === "running";
 }
 
 export function runActorId(runId: string): string {
@@ -90,7 +116,7 @@ function hasChanges(run: Run): boolean {
 }
 
 /** Only http(s) links leave the page: a PR URL is the runner's word. */
-function safePRUrl(url: string | undefined): string | undefined {
+export function safePRUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
@@ -184,25 +210,69 @@ function swappedFrom(run: Run, byId: Map<string, Run>): SwappedFrom | undefined 
   };
 }
 
-function roomFor(runner: Runner): Room {
-  return {
-    id: runnerRoomId(runner.id),
-    kind: "runner",
-    name: runner.name,
-    runnerId: runner.id,
-    ownerName: runner.ownerName,
-    hostname: runner.info?.hostname,
-    online: Boolean(runner.online),
-    agentKinds: (runner.info?.agents ?? [])
-      .filter((agent) => agent.installed)
-      .map((agent) => agent.kind),
-    slots: runner.info?.maxConcurrent || undefined,
-    actorIds: [],
-  };
+function runnerOnline(runner: Runner | undefined): boolean | null {
+  return runner ? Boolean(runner.online) : null;
 }
 
-export function buildOffice(inputs: OfficeInputs): Office {
-  const { now, titles } = inputs;
+/** Free slots on the online runners, at most MAX_FREE_DESKS. */
+function freeDesks(runners: Runner[], busy: ReadonlyMap<string, number>): number {
+  let free = 0;
+  for (const runner of runners) {
+    if (!runner.online) continue;
+    const slots = Math.max(1, runner.info?.maxConcurrent ?? 1);
+    free += Math.max(0, slots - (busy.get(runner.id) ?? 0));
+  }
+  return Math.max(0, Math.min(MAX_FREE_DESKS, free));
+}
+
+/** What waits on the viewer and has no agent at the table for it. */
+function meetingItems(
+  items: WaitingItem[],
+  titles: ReadonlyMap<string, string>,
+  attachedHeld: ReadonlySet<string>,
+): MeetingItem[] {
+  const out: MeetingItem[] = [];
+  for (const item of items) {
+    if (item.kind === "merge") {
+      const target: ClickTarget = { kind: "run", runId: item.run.id, nodeId: item.run.nodeId };
+      const actions: ClickTarget[] = [target, { kind: "node", nodeId: item.run.nodeId }];
+      const url = safePRUrl(item.run.prUrl);
+      if (url) actions.push({ kind: "pr", runId: item.run.id, url });
+      out.push({
+        id: `merge:${item.run.id}`,
+        kind: "merge",
+        nodeId: item.run.nodeId,
+        title: titles.get(item.run.nodeId) || (item.run.prNumber ? `#${item.run.prNumber}` : item.run.nodeId),
+        target,
+        actions,
+      });
+    } else if (item.kind === "review") {
+      const nodeId = item.task.task.nodeId;
+      const target: ClickTarget = { kind: "autopilot", goalNodeId: item.task.goalNodeId };
+      out.push({
+        id: `review:${item.task.autopilotId}:${nodeId}`,
+        kind: "review",
+        nodeId,
+        title: item.task.task.title || titles.get(nodeId) || nodeId,
+        target,
+        actions: [target, { kind: "node", nodeId }],
+      });
+    } else if (item.kind === "held" && !attachedHeld.has(item.message.id)) {
+      const target: ClickTarget = { kind: "held-message", messageId: item.message.id };
+      out.push({
+        id: `held:${item.message.id}`,
+        kind: "held",
+        title: excerpt(item.message.body, 60),
+        target,
+        actions: [target],
+      });
+    }
+  }
+  return out;
+}
+
+export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
+  const { now, titles, project } = inputs;
   const runs = dedupeRuns(inputs.runs);
   const byId = new Map(runs.map((run) => [run.id, run]));
   const seated = seatedRuns(runs, now).sort(
@@ -211,36 +281,14 @@ export function buildOffice(inputs: OfficeInputs): Office {
   const join = joinSessions(seated, inputs.sessions);
   const cap = inputs.budget?.budget.dailyTokens;
   const capOf = (used: number): Energy => (cap && cap > 0 ? { used, cap } : { used });
-
-  const rooms = new Map<string, Room>();
-  for (const runner of inputs.runners) rooms.set(runnerRoomId(runner.id), roomFor(runner));
-  const terminal: Room = {
-    id: TERMINAL_ROOM_ID,
-    kind: "terminal",
-    name: "",
-    online: null,
-    agentKinds: [],
-    actorIds: [],
-  };
+  const runners = new Map(inputs.runners.map((runner) => [runner.id, runner]));
 
   const actors: Actor[] = [];
   for (const run of seated) {
-    const roomId = runnerRoomId(run.runnerId);
-    let room = rooms.get(roomId);
-    if (!room) {
-      // A runner the caller cannot list: an administrator looking at
-      // someone else's. Its state is unknown, so it never reads offline.
-      room = {
-        id: roomId,
-        kind: "runner",
-        name: run.runnerName,
-        runnerId: run.runnerId,
-        online: null,
-        agentKinds: [],
-        actorIds: [],
-      };
-      rooms.set(roomId, room);
-    }
+    const runner = runners.get(run.runnerId);
+    // A runner the caller cannot list (an administrator looking at someone
+    // else's): its state is unknown, so it never reads offline.
+    const online = runnerOnline(runner);
     const session = join.byRun.get(run.id);
     const ask = pendingAskFor(inputs.asks, session?.id);
     const heldMail = heldFor(inputs.held, session);
@@ -251,13 +299,18 @@ export function buildOffice(inputs: OfficeInputs): Office {
     if (prUrl) actions.push({ kind: "pr", runId: run.id, url: prUrl });
     if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId });
     for (const message of heldMail) actions.push({ kind: "held-message", messageId: message.id });
-    const actor: Actor = {
+    const pose = runPose(run, { runnerOnline: online, asking: Boolean(ask) });
+    actors.push({
       id: runActorId(run.id),
       kind: "run",
       agent: run.agent,
       model: run.model,
-      roomId,
-      pose: runPose(run, { runnerOnline: room.online, asking: Boolean(ask) }),
+      project,
+      area: areaOf({ kind: "run", pose, nodeId: run.nodeId }, run),
+      runnerId: run.runnerId || undefined,
+      runnerName: runner?.name || run.runnerName || undefined,
+      runnerOnline: online,
+      pose,
       nodeId: run.nodeId,
       nodeTitle: titles.get(run.nodeId) ?? "",
       runId: run.id,
@@ -272,9 +325,7 @@ export function buildOffice(inputs: OfficeInputs): Office {
       pipelineId: run.pipelineId || undefined,
       target,
       actions,
-    };
-    actors.push(actor);
-    room.actorIds.push(actor.id);
+    });
   }
 
   const loose = [...join.unjoined].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
@@ -292,13 +343,16 @@ export function buildOffice(inputs: OfficeInputs): Office {
     if (nodeId) actions.push({ kind: "session-diff", sessionId: session.id, nodeId });
     if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId });
     for (const message of heldMail) actions.push({ kind: "held-message", messageId: message.id });
-    const actor: Actor = {
+    const pose = sessionPose(session, { now, asking: Boolean(ask) });
+    actors.push({
       id: sessionActorId(session.id),
       kind: "session",
       agent: session.agent,
       model: session.model ?? "",
-      roomId: TERMINAL_ROOM_ID,
-      pose: sessionPose(session, { now, asking: Boolean(ask) }),
+      project,
+      area: areaOf({ kind: "session", pose, nodeId }),
+      runnerOnline: null,
+      pose,
       nodeId,
       nodeTitle: nodeId ? (titles.get(nodeId) ?? "") : "",
       runId: session.runId || undefined,
@@ -310,20 +364,38 @@ export function buildOffice(inputs: OfficeInputs): Office {
       heldMail,
       target,
       actions,
-    };
-    actors.push(actor);
-    terminal.actorIds.push(actor.id);
+    });
   }
 
+  let busy = inputs.runnerBusy;
+  if (!busy) {
+    const counted = new Map<string, number>();
+    for (const run of runs) if (holdsSlot(run.status)) counted.set(run.runnerId, (counted.get(run.runnerId) ?? 0) + 1);
+    busy = counted;
+  }
+  const attachedHeld = new Set(actors.flatMap((actor) => actor.heldMail.map((message) => message.id)));
+  const ids = (area: Actor["area"]) => actors.filter((actor) => actor.area === area).map((actor) => actor.id);
+
   return {
-    rooms: [...rooms.values(), terminal],
+    office: {
+      project,
+      label: inputs.label || project,
+      layout: inputs.layout,
+      style: resolveOfficeStyle({ officeStyle: inputs.officeStyle, layout: inputs.layout }),
+      styleSet: Boolean(inputs.officeStyle),
+      work: ids("work"),
+      freeDesks: freeDesks(inputs.runners, busy),
+      meeting: ids("meeting"),
+      items: meetingItems(inputs.waitingItems, titles, attachedHeld),
+      entrance: ids("entrance"),
+      meetings: buildMeetings(actors, byId, inputs.pipelines ?? {}, titles),
+    },
     actors,
-    meetings: buildMeetings(actors, byId, inputs.pipelines ?? {}, titles),
-    energy: inputs.budget ? capOf(inputs.budget.used?.tokens ?? 0) : undefined,
+    loungeIds: ids("lounge"),
   };
 }
 
-/** One table per review pipeline with a reviewer in the room. */
+/** One table per review pipeline with a reviewer in the office. */
 function buildMeetings(
   actors: Actor[],
   runs: Map<string, Run>,
@@ -342,7 +414,7 @@ function buildMeetings(
         pipelineId: run.pipelineId,
         nodeId: run.nodeId,
         nodeTitle: titles.get(run.nodeId) ?? "",
-        roomId: actor.roomId,
+        project: actor.project,
         round,
         status: pipeline?.status ?? "",
         waitingHuman: pipeline?.status === "waiting_human",

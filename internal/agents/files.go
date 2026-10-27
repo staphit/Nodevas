@@ -210,6 +210,55 @@ func (h *Hub) ListHeld(ctx context.Context, project string, v Viewer) ([]Message
 	return out, nil
 }
 
+// HeldIn returns the held messages of several projects that v may decide,
+// oldest first, in one query. Project keys are store roots, as for
+// ListHeld. File details are not attached: the building only counts them.
+func (h *Hub) HeldIn(ctx context.Context, projects []string, v Viewer) ([]Message, error) {
+	projects = normalizeProjectKeys(projects)
+	out := []Message{}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	if h.database == nil {
+		want := make(map[string]bool, len(projects))
+		for _, p := range projects {
+			want[p] = true
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, m := range h.memMessages {
+			if want[m.Project] && m.Status == StatusHeld && v.mayDecide(m) {
+				out = append(out, m)
+			}
+		}
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+2)
+	for _, p := range projects {
+		args = append(args, p)
+	}
+	args = append(args, StatusHeld, maxBuildingRows)
+	rows, err := h.database.QueryContext(ctx, `
+		SELECT `+messageColumns+`
+		  FROM agent_messages
+		 WHERE project IN (?`+strings.Repeat(", ?", len(projects)-1)+`) AND status = ?
+		 ORDER BY created_at, id LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		if v.mayDecide(m) {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
+}
+
 // Decide approves (delivers) or rejects a held message. Only the recipient's
 // actor or an admin may; to anyone else the message does not exist. Deciding
 // a message that is no longer held is ErrNotHeld, so two people clicking at

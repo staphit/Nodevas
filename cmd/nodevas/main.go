@@ -102,7 +102,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr,
 		"       nodevas runner [start|login|logout|status|repo]  (connects this machine to a hub; nodevas runner help)")
 	fmt.Fprintln(os.Stderr,
-		"       nodevas agents who|send|listen|exclude  (the agent network from a terminal; nodevas agents help)")
+		"       nodevas agents who|send|listen|exclude  (Agent chat from a terminal; nodevas agents help)")
 	fmt.Fprintln(os.Stderr,
 		"                    (PostgreSQL: NODEVAS_DATABASE_URL; unreachable within NODEVAS_DATABASE_WAIT=30s falls back to SQLite)")
 }

@@ -132,6 +132,35 @@ describe("Settings", () => {
     expect(search).toHaveValue("");
   });
 
+  it("chooses the project's office style, shown as a row of This project and found by search", async () => {
+    const user = userEvent.setup();
+    const updateWorkflowDefinition = vi.fn().mockResolvedValue({ ok: true });
+    useApp.setState({
+      activeProject: "novel",
+      graph: { version: 1, type: "story", nodes: [] },
+      updateWorkflowDefinition,
+    } as never);
+    act(() => openSettings("appearance"));
+    render(<SettingsView />);
+
+    await user.type(within(nav()).getByRole("searchbox", { name: "Search settings" }), "office");
+    await user.click(within(nav()).getByRole("button", { name: /Office style\s*This project/ }));
+    const row = screen.getByRole("button", { name: /^Office style\s*Automatic \(Study\)/ });
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    const choices = screen.getByRole("radiogroup", { name: "Office style" });
+    expect(within(choices).getByRole("radio", { name: "Automatic (Study)" })).toHaveAttribute("aria-checked", "true");
+    // The arrows move the choice, as in any radio group.
+    within(choices).getByRole("radio", { name: "Automatic (Study)" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(updateWorkflowDefinition).toHaveBeenCalledWith({ type: "workflow.setOfficeStyle", style: "default" });
+    await user.click(within(choices).getByRole("radio", { name: "Café" }));
+    expect(updateWorkflowDefinition).toHaveBeenCalledWith({ type: "workflow.setOfficeStyle", style: "cafe" });
+
+    act(() => useApp.setState({ graph: { version: 1, type: "story", nodes: [], officeStyle: "cafe" } } as never));
+    expect(screen.getByRole("button", { name: /^Office style\s*Café/ })).toBeInTheDocument();
+    expect(within(choices).getByRole("radio", { name: "Café" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("moves focus to the section's heading for a hit without a row", async () => {
     const user = userEvent.setup();
     act(() => openSettings("project"));

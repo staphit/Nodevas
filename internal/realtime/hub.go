@@ -392,6 +392,26 @@ func (h *Hub) BroadcastRoom(room, evType, id string) {
 	})
 }
 
+// BroadcastReaders queues an event for every client that may read a project,
+// whatever room it watches: the room's own watchers, and anyone else the
+// access check lets watch it. It is for views that span projects (Station's
+// building), which must hear about a project they are not in, and only from
+// projects they may read. Keep the id free of anything about the project.
+func (h *Hub) BroadcastReaders(room, evType, id string) {
+	if h == nil {
+		return
+	}
+	if room == "" {
+		h.Broadcast(evType, id)
+		return
+	}
+	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.room == room || h.mayWatch(client.actor, room)
+	})
+}
+
 // relay passes one client's stream message to the rest of its room.
 //
 // The sender is left out rather than filtering on `From` in the browser: it

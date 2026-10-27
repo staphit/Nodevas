@@ -1,16 +1,19 @@
-/* The pixel war room. Loaded with its chunk only (Station imports the room
- * lazily). One art pixel is --px CSS pixels: 3 here, and a whole number of
- * device pixels as WarRoom.tsx sets it (artPixel), so every sprite is drawn
- * on the device's pixel grid and nothing is scaled by a fraction. Colours are
- * the --px-* tokens (pixel/palette.ts), redefined for [data-theme="dark"].
- * Every animated state has a still picture that says the same (frame 0),
- * and reduced motion, a background tab and a room with its lights off stop
- * all of it. */
+/* The pixel war room: the workspace as a building. Loaded with its chunk only
+ * (Station imports the room lazily, Settings with its style previews). One
+ * art pixel is --px CSS pixels: 3 here, and a whole number of device pixels
+ * as WarRoom.tsx sets it (artPixel), so every sprite is drawn on the
+ * device's pixel grid and nothing is scaled by a fraction. Colours are the
+ * --px-* tokens (pixel/palette.ts), redefined for [data-theme="dark"]; an
+ * office style (.px-style--<id>) redefines the furniture, wall and floor
+ * tokens only, never the characters' or the states'. Every animated state
+ * has a still picture that says the same (frame 0), and reduced motion, a
+ * background tab and a rack with its lights off stop all of it. */
 
 .px-office {
   --px: 3px;
   /* A desk's cell, and the floor's margin, in whole art pixels. */
   --px-cell: calc(40 * var(--px));
+  --px-seat: calc(32 * var(--px));
   --px-pad: calc(4 * var(--px));
 
   --px-outline: #2b2433;
@@ -18,8 +21,6 @@
   --px-hair: #5a3a28;
   --px-eye: #2b2433;
   --px-pants: #3d4a63;
-  --px-desk: #c58b52;
-  --px-desk-dark: #94623a;
   --px-monitor: #4a5060;
   --px-screen-off: #26303d;
   --px-screen-on: #173042;
@@ -28,12 +29,16 @@
   --px-fail: #d9463b;
   --px-ok: #2f9e52;
   --px-amber: #f2b632;
-  --px-chair: #5b6b80;
-  --px-chair-dark: #3f4b5c;
   --px-bubble: #ffffff;
   --px-bubble-ink: #2b2433;
   --px-ink: #2b2433;
   --px-glare: rgba(255, 255, 255, 0.4);
+
+  /* The default office's furniture, wall and floor: the lounge's too. */
+  --px-desk: #c58b52;
+  --px-desk-dark: #94623a;
+  --px-chair: #5b6b80;
+  --px-chair-dark: #3f4b5c;
   --px-wall: #ebe3d4;
   --px-wall-trim: #b9a689;
   --px-window: #a9dcf2;
@@ -42,6 +47,38 @@
   --px-doorway: #3a2d26;
   --px-floor: #dcc8a3;
   --px-floor-line: #d3bd95;
+  --px-table: #b07a48;
+  --px-table-dark: #7f5530;
+  --px-decor-a: #6c8ebf;
+  --px-decor-b: #e0b44c;
+  --px-decor-c: #c0504d;
+  --px-decor-d: #7fa36b;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #f2d16b;
+  --px-floor-image:
+    linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)),
+    linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  --px-floor-size: calc(20 * var(--px)) calc(10 * var(--px));
+  --px-floor-position: 0 0;
+  --px-wall-image: none;
+
+  /* The shared rooms. */
+  --px-sofa: #6b8fb3;
+  --px-sofa-dark: #4b6d8f;
+  --px-rack: #3a3f47;
+  --px-rack-dark: #24282e;
+  --px-led-on: #39d353;
+  --px-led-off: #59606b;
+  --px-paper: #fbf8ef;
+  --px-server-floor: #20242b;
+  --px-server-line: #2a2f38;
+  --px-server-ink: #d7dde6;
+
+  /* The door sign. */
+  --px-sign: #2f3a48;
+  --px-sign-ink: #f3efe4;
 
   --agent-claude: #d97757;
   --agent-codex: #10a37f;
@@ -57,8 +94,6 @@
   --px-hair: #47301f;
   --px-eye: #0b0d12;
   --px-pants: #2b3448;
-  --px-desk: #8f6443;
-  --px-desk-dark: #694830;
   --px-monitor: #353c4a;
   --px-screen-off: #141a23;
   --px-screen-on: #10263a;
@@ -67,12 +102,15 @@
   --px-fail: #e0574b;
   --px-ok: #3fae60;
   --px-amber: #f0b43a;
-  --px-chair: #4a5870;
-  --px-chair-dark: #323c4e;
   --px-bubble: #eef2f5;
   --px-bubble-ink: #1a1d24;
   --px-ink: #e7edf1;
   --px-glare: rgba(255, 255, 255, 0.22);
+
+  --px-desk: #8f6443;
+  --px-desk-dark: #694830;
+  --px-chair: #4a5870;
+  --px-chair-dark: #323c4e;
   --px-wall: #2b313d;
   --px-wall-trim: #404a5c;
   --px-window: #1d2f50;
@@ -81,18 +119,335 @@
   --px-doorway: #0b0d12;
   --px-floor: #252a35;
   --px-floor-line: #2d3340;
+  --px-table: #7a5538;
+  --px-table-dark: #57391f;
+  --px-decor-a: #4d6b96;
+  --px-decor-b: #b98d32;
+  --px-decor-c: #a03f3c;
+  --px-decor-d: #5f7e4f;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #d9b85a;
+
+  --px-sofa: #3f5a78;
+  --px-sofa-dark: #2c4058;
+  --px-rack: #1e2228;
+  --px-rack-dark: #121519;
+  --px-led-on: #39d353;
+  --px-led-off: #333840;
+  --px-paper: #d9d4c6;
+  --px-server-floor: #0e1116;
+  --px-server-line: #171b22;
+  --px-server-ink: #c7cfdb;
+
+  --px-sign: #d9cfb8;
+  --px-sign-ink: #1d232c;
+}
+
+/* ---------- office styles: furniture, wall and floor only ---------- */
+.px-style--default {
+  --px-desk: #c58b52;
+  --px-desk-dark: #94623a;
+  --px-chair: #5b6b80;
+  --px-chair-dark: #3f4b5c;
+  --px-wall: #ebe3d4;
+  --px-wall-trim: #b9a689;
+  --px-floor: #dcc8a3;
+  --px-floor-line: #d3bd95;
+  --px-window: #a9dcf2;
+  --px-door: #9a6b42;
+  --px-doorway: #3a2d26;
+  --px-table: #b07a48;
+  --px-table-dark: #7f5530;
+  --px-decor-a: #6c8ebf;
+  --px-decor-b: #e0b44c;
+  --px-decor-c: #c0504d;
+  --px-decor-d: #7fa36b;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #f2d16b;
+  --px-window-star: #a9dcf2;
+  --px-floor-image: linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)), linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  --px-floor-size: calc(20 * var(--px)) calc(10 * var(--px));
+  --px-floor-position: 0 0;
+  --px-wall-image: none;
+}
+
+.px-style--engineering {
+  --px-desk: #c9ced6;
+  --px-desk-dark: #9aa3b0;
+  --px-chair: #3b4a5e;
+  --px-chair-dark: #27323f;
+  --px-wall: #e4e9ef;
+  --px-wall-trim: #9fb0c3;
+  --px-floor: #b9c2cc;
+  --px-floor-line: #aab4bf;
+  --px-window: #b8e0f5;
+  --px-door: #6d7b8c;
+  --px-doorway: #2a313b;
+  --px-table: #d5dbe2;
+  --px-table-dark: #a3adb9;
+  --px-decor-a: #2f80ed;
+  --px-decor-b: #27ae60;
+  --px-decor-c: #eb5757;
+  --px-decor-d: #ffffff;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #f2d16b;
+  --px-window-star: #b8e0f5;
+  --px-floor-image: linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)), linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  --px-floor-size: calc(16 * var(--px)) calc(16 * var(--px));
+  --px-floor-position: 0 0;
+  --px-wall-image: none;
+}
+
+.px-style--study {
+  --px-desk: #7a4a2a;
+  --px-desk-dark: #5a3520;
+  --px-chair: #8b2f2f;
+  --px-chair-dark: #5f1f1f;
+  --px-wall: #e9dcc3;
+  --px-wall-trim: #6b4a2f;
+  --px-floor: #a8754a;
+  --px-floor-line: #96653e;
+  --px-window: #c9e3e8;
+  --px-door: #5a3520;
+  --px-doorway: #2b1d14;
+  --px-table: #6b3f24;
+  --px-table-dark: #4a2b18;
+  --px-decor-a: #8b2f2f;
+  --px-decor-b: #2f5d8b;
+  --px-decor-c: #c9a227;
+  --px-decor-d: #3f6b3a;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #e8c766;
+  --px-window-star: #c9e3e8;
+  --px-floor-image: linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)), conic-gradient(at var(--px) 50%, transparent 0 270deg, var(--px-floor-line) 270deg 360deg), conic-gradient(at var(--px) 50%, transparent 0 270deg, var(--px-floor-line) 270deg 360deg);
+  /* Floorboards 24 art long, their joints staggered row to row. */
+  --px-floor-size: calc(24 * var(--px)) calc(4 * var(--px)), calc(24 * var(--px)) calc(8 * var(--px)), calc(24 * var(--px)) calc(8 * var(--px));
+  --px-floor-position: 0 0, 0 0, calc(12 * var(--px)) calc(4 * var(--px));
+  --px-wall-image: none;
+}
+
+.px-style--studio {
+  --px-desk: #f2efe9;
+  --px-desk-dark: #cfc8bc;
+  --px-chair: #e2725b;
+  --px-chair-dark: #b4533f;
+  --px-wall: #fbfaf7;
+  --px-wall-trim: #d8d2c8;
+  --px-floor: #c9c6c1;
+  --px-floor-line: #bfbbb5;
+  --px-window: #cdeaf7;
+  --px-door: #e2725b;
+  --px-doorway: #3a3633;
+  --px-table: #ece6dc;
+  --px-table-dark: #c2b8a8;
+  --px-decor-a: #f2b632;
+  --px-decor-b: #4aa3a2;
+  --px-decor-c: #e2725b;
+  --px-decor-d: #6a5acd;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #f2d16b;
+  --px-window-star: #cdeaf7;
+  --px-floor-image: linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)), linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  --px-floor-size: calc(32 * var(--px)) calc(32 * var(--px));
+  --px-floor-position: 0 0;
+  --px-wall-image: none;
+}
+
+.px-style--cafe {
+  --px-desk: #3a2a22;
+  --px-desk-dark: #24190f;
+  --px-chair: #8a5a3b;
+  --px-chair-dark: #5e3b25;
+  --px-wall: #b5563f;
+  --px-wall-trim: #7c3a2a;
+  --px-floor: #efe6d8;
+  --px-floor-line: #2f2a26;
+  --px-window: #fbe3b0;
+  --px-door: #2f4a3a;
+  --px-doorway: #1b2a21;
+  --px-table: #5a3e2e;
+  --px-table-dark: #3b281c;
+  --px-decor-a: #2b2b2b;
+  --px-decor-b: #f4f1ea;
+  --px-decor-c: #e8a33d;
+  --px-decor-d: #4f7a5a;
+  --px-plant: #4f8f4a;
+  --px-plant-dark: #36663a;
+  --px-pot: #b5643c;
+  --px-lamp: #e8a33d;
+  --px-window-star: #fbe3b0;
+  --px-floor-image: conic-gradient(var(--px-floor) 25%, var(--px-floor-line) 0 50%, var(--px-floor) 0 75%, var(--px-floor-line) 0);
+  --px-floor-size: calc(16 * var(--px)) calc(16 * var(--px));
+  --px-floor-position: 0 0;
+  --px-wall-image: linear-gradient(var(--px-wall-trim) var(--px), transparent var(--px)), conic-gradient(at var(--px) 50%, transparent 0 270deg, var(--px-wall-trim) 270deg 360deg), conic-gradient(at var(--px) 50%, transparent 0 270deg, var(--px-wall-trim) 270deg 360deg);
+  --px-wall-size: calc(8 * var(--px)) calc(4 * var(--px)), calc(8 * var(--px)) calc(8 * var(--px)), calc(8 * var(--px)) calc(8 * var(--px));
+  --px-wall-position: 0 0, 0 0, calc(4 * var(--px)) calc(4 * var(--px));
+}
+
+[data-theme="dark"] .px-style--default {
+  --px-desk: #8f6443;
+  --px-desk-dark: #694830;
+  --px-chair: #4a5870;
+  --px-chair-dark: #323c4e;
+  --px-wall: #2b313d;
+  --px-wall-trim: #404a5c;
+  --px-floor: #252a35;
+  --px-floor-line: #2d3340;
+  --px-window: #1d2f50;
+  --px-door: #6f4c30;
+  --px-doorway: #0b0d12;
+  --px-table: #7a5538;
+  --px-table-dark: #57391f;
+  --px-decor-a: #4d6b96;
+  --px-decor-b: #b98d32;
+  --px-decor-c: #a03f3c;
+  --px-decor-d: #5f7e4f;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #d9b85a;
+  --px-window-star: #f3e7a8;
+}
+
+[data-theme="dark"] .px-style--engineering {
+  --px-desk: #5a6472;
+  --px-desk-dark: #414955;
+  --px-chair: #2a3442;
+  --px-chair-dark: #1c232d;
+  --px-wall: #222a35;
+  --px-wall-trim: #3a4757;
+  --px-floor: #1d242e;
+  --px-floor-line: #262f3b;
+  --px-window: #1a2c48;
+  --px-door: #3f4a58;
+  --px-doorway: #0b0d12;
+  --px-table: #4b5563;
+  --px-table-dark: #363d48;
+  --px-decor-a: #5b9cf0;
+  --px-decor-b: #3fbf78;
+  --px-decor-c: #f06b6b;
+  --px-decor-d: #d9dee5;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #d9b85a;
+  --px-window-star: #f3e7a8;
+}
+
+[data-theme="dark"] .px-style--study {
+  --px-desk: #5a3520;
+  --px-desk-dark: #3e2416;
+  --px-chair: #6e2525;
+  --px-chair-dark: #4a1818;
+  --px-wall: #2e2620;
+  --px-wall-trim: #4a3524;
+  --px-floor: #3a281b;
+  --px-floor-line: #44301f;
+  --px-window: #1e2a3f;
+  --px-door: #3e2416;
+  --px-doorway: #0e0a07;
+  --px-table: #4a2b18;
+  --px-table-dark: #33200f;
+  --px-decor-a: #a84444;
+  --px-decor-b: #44709e;
+  --px-decor-c: #d4b23f;
+  --px-decor-d: #4f7f4a;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #f3d77a;
+  --px-window-star: #f3e7a8;
+}
+
+[data-theme="dark"] .px-style--studio {
+  --px-desk: #4a4743;
+  --px-desk-dark: #36332f;
+  --px-chair: #b85a47;
+  --px-chair-dark: #8a4334;
+  --px-wall: #2a2a2c;
+  --px-wall-trim: #3d3c3f;
+  --px-floor: #2f2f31;
+  --px-floor-line: #38383b;
+  --px-window: #1e2c40;
+  --px-door: #b85a47;
+  --px-doorway: #0b0b0c;
+  --px-table: #45423e;
+  --px-table-dark: #33302c;
+  --px-decor-a: #d9a533;
+  --px-decor-b: #3f8d8c;
+  --px-decor-c: #c9624f;
+  --px-decor-d: #7b6dd6;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #d9b85a;
+  --px-window-star: #f3e7a8;
+}
+
+[data-theme="dark"] .px-style--cafe {
+  --px-desk: #2a1e18;
+  --px-desk-dark: #1a120c;
+  --px-chair: #6a442c;
+  --px-chair-dark: #472d1c;
+  --px-wall: #6e3326;
+  --px-wall-trim: #4a2219;
+  --px-floor: #2b2622;
+  --px-floor-line: #1c1916;
+  --px-window: #5a4520;
+  --px-door: #22382c;
+  --px-doorway: #0c120e;
+  --px-table: #3e2b20;
+  --px-table-dark: #2a1c14;
+  --px-decor-a: #1a1a1a;
+  --px-decor-b: #d9d4c8;
+  --px-decor-c: #d9922f;
+  --px-decor-d: #3f6449;
+  --px-plant: #3d7039;
+  --px-plant-dark: #2a4f2a;
+  --px-pot: #8a4a2c;
+  --px-lamp: #d9922f;
+  --px-window-star: #f3e7a8;
 }
 
 /* The agent's colour: its shirt, hat or headset. */
-.px-desk {
+.px-desk,
+.px-mini {
   --px-agent: var(--agent-other);
   --px-agent-dark: color-mix(in srgb, var(--px-agent) 68%, #000);
 }
-.px-desk.agent--claude { --px-agent: var(--agent-claude); }
-.px-desk.agent--codex { --px-agent: var(--agent-codex); }
-.px-desk.agent--gemini { --px-agent: var(--agent-gemini); }
-.px-desk.agent--opencode { --px-agent: var(--agent-opencode); }
-.px-desk.agent--antigravity { --px-agent: var(--agent-antigravity); }
+:is(.px-desk, .px-mini).agent--claude { --px-agent: var(--agent-claude); }
+:is(.px-desk, .px-mini).agent--codex { --px-agent: var(--agent-codex); }
+:is(.px-desk, .px-mini).agent--gemini { --px-agent: var(--agent-gemini); }
+:is(.px-desk, .px-mini).agent--opencode { --px-agent: var(--agent-opencode); }
+:is(.px-desk, .px-mini).agent--antigravity { --px-agent: var(--agent-antigravity); }
+
+/* Floors and walls: a style's pattern, in whole art pixels. */
+.px-floor,
+.px-compact-floor,
+.px-preview-floor {
+  background-color: var(--px-floor);
+  background-image: var(--px-floor-image);
+  background-size: var(--px-floor-size);
+  background-position: var(--px-floor-position);
+}
+.px-wall,
+.px-compact-wall,
+.px-preview-wall {
+  background-color: var(--px-wall);
+  background-image: var(--px-wall-image);
+  background-size: var(--px-wall-size, auto);
+  background-position: var(--px-wall-position, 0 0);
+}
 
 /* ---------- empty states, the day's tokens ---------- */
 .px-empty {
@@ -118,7 +473,6 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
   font-size: 12px;
   color: var(--text-2);
 }
@@ -150,80 +504,222 @@
   background: var(--st-failed-fg);
 }
 
-/* ---------- rooms ---------- */
-.px-rooms {
+/* ---------- the building ---------- */
+.px-building {
+  container-type: inline-size;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
-/* As wide as its desks (three to five a row), never wider than the page:
-   on a phone the rooms stack and their desks wrap. */
-.px-room {
-  flex: 0 1 auto;
-  width: calc(var(--px-cols, 3) * var(--px-cell) + 2 * var(--px-pad) + 4px);
+
+/* ---------- the current office ---------- */
+.px-office-room {
   max-width: 100%;
   border: 2px solid var(--border-strong);
   background: var(--surface);
 }
-.px-room-head {
+.px-office-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
   padding: 6px 10px;
   border-bottom: 2px solid var(--border-strong);
   font-size: 12px;
   line-height: 16px;
 }
-.px-room-name {
-  font-weight: 700;
-  overflow-wrap: anywhere;
+.px-sign-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
 }
-.px-room-meta {
+/* The door sign: an enamel plate, the project's name and its style. */
+.px-sign {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  padding: 2px 10px 3px;
+  border: 2px solid var(--px-outline);
+  background: var(--px-sign);
+  color: var(--px-sign-ink);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--px-sign-ink) 22%, transparent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.px-sign:hover,
+.px-sign[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--px-sign-ink) 55%, transparent);
+}
+.px-sign:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.px-sign-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.px-sign-style {
+  font-size: 10px;
+  line-height: 13px;
+  opacity: 0.85;
+}
+.px-office-chips {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.px-chip-count {
+  padding: 0 6px;
+  border: 2px solid var(--border-strong);
   color: var(--text-2);
   font-size: 11px;
-  overflow-wrap: anywhere;
-}
-.px-chip {
-  padding: 0 6px;
-  border: 2px solid currentColor;
-  font-size: 10px;
   font-weight: 700;
-  line-height: 14px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
-.px-chip.is-online {
-  color: var(--st-done-fg);
+.px-chip-count.is-attention {
+  border-color: var(--st-failed-fg);
+  color: var(--st-failed-fg);
 }
-.px-chip.is-offline {
+.px-office-free {
+  margin-left: auto;
   color: var(--text-2);
+  font-size: 11px;
+}
+
+/* The style picker under the sign. */
+.px-style-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: min(560px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 10px 28px var(--shadow);
+}
+.px-style-popover .settings-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.px-style-popover-error {
+  margin: 8px 0 0;
+  color: var(--st-failed-fg);
+  font-size: 12px;
 }
 
 .px-scene {
   position: relative;
 }
-/* The back wall: windows on a skirting board. It clips at a whole window. */
+/* The back wall: the style's decor on a skirting board, clipped at a whole
+   piece. */
 .px-wall {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 calc(12 * var(--px));
-  height: calc(18 * var(--px));
-  padding: calc(3 * var(--px)) calc(8 * var(--px)) 0;
+  align-items: flex-end;
+  align-content: flex-start;
+  gap: calc(20 * var(--px)) calc(10 * var(--px));
+  height: calc(20 * var(--px));
+  padding: 0 calc(8 * var(--px)) var(--px);
   overflow: hidden;
-  background: var(--px-wall);
   border-bottom: calc(2 * var(--px)) solid var(--px-wall-trim);
 }
-.px-floor {
+.px-wall-piece {
+  display: block;
+}
+.px-wall-piece.is-hanging {
+  align-self: flex-start;
+}
+
+/* The work area and the meeting room: side by side on a wide screen, the
+   meeting under the desks narrower, everything stacked on a phone. */
+.px-areas {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.px-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.px-area.is-meeting {
+  border-top: calc(2 * var(--px)) solid var(--px-wall-trim);
+}
+@container (min-width: 900px) {
+  .px-areas {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+  .px-area.is-meeting {
+    border-top: 0;
+    border-left: calc(2 * var(--px)) solid var(--px-wall-trim);
+  }
+}
+.px-area-name {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 14px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.px-desks,
+.px-meeting {
+  flex: 1 1 auto;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
-  padding: var(--px-pad);
-  background-color: var(--px-floor);
-  background-image:
-    linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)),
-    linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
-  background-size: calc(20 * var(--px)) calc(10 * var(--px));
-  background-position: var(--px-pad) var(--px-pad);
+  padding: calc(var(--px-pad) + 14px) var(--px-pad) var(--px-pad);
+}
+/* The meeting table: its seats side by side make one table. */
+.px-table {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: calc(6 * var(--px-seat));
+}
+@container (max-width: 559px) {
+  .px-table {
+    max-width: calc(3 * var(--px-seat));
+  }
+}
+
+/* The entrance: a strip of floor by the door, and the style's piece of
+   floor furniture in the far corner. */
+.px-entrance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 var(--px);
+  min-height: calc(30 * var(--px));
+  padding: var(--px) var(--px-pad) 0;
+  border-top: calc(2 * var(--px)) solid var(--px-wall-trim);
+}
+.px-doorway {
+  display: block;
+  padding: 0 calc(11 * var(--px));
+}
+.px-floor-decor {
+  display: block;
+  margin-left: auto;
+  padding-bottom: var(--px);
 }
 
 .px-sprite {
@@ -233,7 +729,7 @@
   overflow: visible;
 }
 
-/* ---------- desks ---------- */
+/* ---------- desks, seats, sofas ---------- */
 .px-cell {
   display: flex;
   flex-direction: column;
@@ -243,6 +739,16 @@
 }
 .px-cell.is-free {
   opacity: 0.8;
+}
+.px-cell.is-meeting,
+.px-cell.is-seat {
+  width: var(--px-seat);
+}
+.px-cell.is-seat.is-free {
+  opacity: 1;
+}
+.px-cell.is-sofa {
+  width: calc(24 * var(--px));
 }
 .px-desk {
   display: flex;
@@ -284,6 +790,16 @@
   line-height: 14px;
   text-align: center;
 }
+.px-cell.is-meeting .px-tag,
+.px-cell.is-seat .px-tag {
+  max-width: calc(var(--px-seat) - 2 * var(--px));
+}
+.px-cell.is-sofa .px-tag {
+  max-width: calc(26 * var(--px));
+  padding: 0 4px 1px;
+  font-size: 10px;
+  line-height: 13px;
+}
 .px-desk:hover .px-tag,
 .px-desk[aria-expanded="true"] .px-tag {
   border-color: var(--accent);
@@ -302,12 +818,18 @@
 .px-tag-tokens {
   color: var(--text-2);
 }
+.px-tag-project {
+  font-style: italic;
+}
 .px-tag-tokens {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 .px-tag .px-meter {
   margin: 2px 0 1px;
+}
+.px-desk.is-item .px-tag-who {
+  color: var(--st-failed-fg);
 }
 
 .px-badge {
@@ -349,24 +871,374 @@
   pointer-events: none;
 }
 
-/* Offline (a session that went away): grey and faded. */
+/* Offline (a session that went away, a runner that left): grey and faded. */
 .px-desk.pose-offline .px-sprite {
   filter: grayscale(1);
   opacity: 0.5;
 }
 
-/* A runner that is offline: its room with the lights off. The name tags
-   stay readable. */
-.px-room.is-lights-off .px-wall,
-.px-room.is-lights-off .px-sprite {
+/* ---------- the other offices ---------- */
+.px-others {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.px-compacts,
+.px-doors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.px-doors {
+  gap: 6px;
+}
+.px-compacts > li,
+.px-doors > li {
+  min-width: 0;
+  max-width: 100%;
+}
+.px-compact-button {
+  display: flex;
+  flex-direction: column;
+  width: calc(52 * var(--px) + 4px);
+  padding: 0;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.px-compact-button:hover,
+.px-compact-button[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.px-compact-button:focus-visible,
+.px-door-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.px-plate {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--px-sign);
+  color: var(--px-sign-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+}
+.px-plate-glyph {
+  flex: 0 0 auto;
+  font-weight: 400;
+}
+.px-plate-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.px-compact-wall {
+  display: block;
+  height: calc(4 * var(--px));
+  border-bottom: var(--px) solid var(--px-wall-trim);
+}
+.px-compact-floor {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: calc(20 * var(--px));
+  padding: calc(2 * var(--px));
+}
+.px-mini {
+  display: block;
+}
+.px-compact-more {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  padding: 0 3px;
+  border: 1px solid var(--px-outline);
+  background: var(--px-bubble);
+  color: var(--px-bubble-ink);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+}
+.px-compact-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 22px;
+  padding: 3px 5px;
+  font-size: 11px;
+}
+.px-badge-chip {
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  line-height: 15px;
+  white-space: nowrap;
+}
+.px-badge-chip.is-attention {
+  border-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-weight: 700;
+}
+.px-badge-chip.is-muted {
+  border-style: dashed;
+}
+/* A door sign alone. */
+.px-door-chip {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: min(240px, 100%);
+  padding: 0;
+  border: 2px solid var(--px-outline);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.px-door-chip:hover {
+  border-color: var(--accent);
+}
+.px-door-chip .px-compact-badges {
+  min-height: 0;
+  padding: 2px 4px;
+}
+.px-others-more {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* ---------- the ground floor: lounge and server room ---------- */
+.px-ground {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: stretch;
+}
+.px-lounge,
+.px-server-room {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+}
+.px-lounge {
+  flex: 3 1 330px;
+}
+.px-server-room {
+  flex: 2 1 220px;
+}
+.px-room-title {
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 2px solid var(--border-strong);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.px-room-note {
+  margin: 0;
+  padding: 2px 10px 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.px-lounge-floor {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: calc(2 * var(--px)) calc(6 * var(--px));
+  padding: var(--px-pad);
+  background-color: var(--px-floor);
+  /* A rug: the lounge is softer than the offices. */
+  background-image:
+    linear-gradient(var(--px-floor-line) var(--px), transparent var(--px)),
+    linear-gradient(90deg, var(--px-floor-line) var(--px), transparent var(--px));
+  background-size: calc(8 * var(--px)) calc(8 * var(--px));
+}
+.px-sofa {
+  position: relative;
+  display: flex;
+  width: calc(48 * var(--px));
+  min-height: calc(32 * var(--px));
+}
+.px-sofa-art {
+  position: absolute;
+  top: calc(12 * var(--px));
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.px-seat {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  width: calc(24 * var(--px));
+}
+.px-seat.is-left .px-art {
+  left: calc(2 * var(--px));
+}
+.px-seat.is-right .px-art {
+  left: calc(-2 * var(--px));
+}
+.px-lounge-plant {
+  display: block;
+  margin-left: auto;
+}
+
+.px-server-room {
+  background: var(--px-server-floor);
+}
+.px-server-room .px-room-title {
+  color: var(--text);
+  background: var(--surface);
+}
+.px-server-room .px-room-note {
+  color: var(--px-server-ink);
+  padding-top: 6px;
+}
+.px-racks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: calc(2 * var(--px)) calc(4 * var(--px));
+  padding: var(--px-pad);
+  background-image:
+    linear-gradient(var(--px-server-line) var(--px), transparent var(--px)),
+    linear-gradient(90deg, var(--px-server-line) var(--px), transparent var(--px));
+  background-size: calc(12 * var(--px)) calc(12 * var(--px));
+}
+.px-rack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: calc(24 * var(--px));
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--px-server-ink);
+  font: inherit;
+  cursor: pointer;
+}
+.px-rack:hover .px-art {
+  transform: translateY(calc(-1 * var(--px)));
+}
+.px-rack:focus-visible,
+.px-rack-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+.px-rack-name,
+.px-rack-load {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 13px;
+}
+.px-rack-name {
+  margin-top: 2px;
+  font-weight: 700;
+}
+.px-rack-load {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.px-rack.is-lights-off .px-sprite {
   filter: brightness(0.45) saturate(0.4);
 }
-.px-room.is-lights-off .px-floor {
-  background-color: #1b1f28;
-  background-image: none;
+.px-rack.is-lights-off :is(.px-rack-name, .px-rack-load) {
+  opacity: 0.6;
 }
-.px-room.is-lights-off .px-tag {
-  opacity: 0.85;
+.px-rack-more {
+  align-self: center;
+  padding: 2px 8px;
+  border: 2px solid var(--px-server-ink);
+  background: none;
+  color: var(--px-server-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ---------- the style picker (Settings, the door sign) ---------- */
+.office-style-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+}
+.office-style-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.office-style-option:hover {
+  border-color: var(--border-strong);
+}
+.office-style-option.is-on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.office-style-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.office-style-name {
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 15px;
+  text-align: center;
+}
+.office-style-option.is-on .office-style-name {
+  font-weight: 700;
+}
+.px-style-preview {
+  position: relative;
+  display: block;
+  width: calc(48 * var(--px));
+  height: calc(24 * var(--px));
+  overflow: hidden;
+  outline: 1px solid var(--border-strong);
+}
+.px-preview-wall {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(var(--px-preview-wall) * var(--px));
+  border-bottom: var(--px) solid var(--px-wall-trim);
+}
+.px-preview-floor {
+  position: absolute;
+  inset: calc((var(--px-preview-wall) + 1) * var(--px)) 0 0;
+}
+.px-style-preview .px-sprite {
+  position: relative;
 }
 
 /* ---------- animation: frames that take turns ---------- */
@@ -403,11 +1275,11 @@
   100% { opacity: 0; }
 }
 
-/* A page in the background holds still; a dark room does not move. */
+/* A page in the background holds still; a dark rack does not move. */
 .px-office[data-paused="true"] .px-f {
   animation-play-state: paused !important;
 }
-.px-room.is-lights-off .px-f {
+.is-lights-off .px-f {
   animation: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -415,7 +1287,8 @@
     animation: none !important;
   }
   .px-desk:hover .px-art,
-  .px-desk[aria-expanded="true"] .px-art {
+  .px-desk[aria-expanded="true"] .px-art,
+  .px-rack:hover .px-art {
     transform: none;
   }
 }

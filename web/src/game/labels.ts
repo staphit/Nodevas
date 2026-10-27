@@ -4,7 +4,7 @@
 // translated.
 
 import { excerpt } from "../agents/agentStore";
-import type { Actor, ClickTarget, Room } from "./world";
+import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -36,9 +36,52 @@ export function agentColorKey(agent: string): string {
   return AGENT_COLORS.includes(kind) ? kind : "other";
 }
 
-export function roomName(t: Translate, room: Pick<Room, "kind" | "name">): string {
-  if (room.kind === "terminal") return t("game.room.terminal");
-  return room.name || t("game.room.unnamed");
+/** Where a character works, for its sentence: its runner, or "Terminals"
+ * for an agent someone runs in their own terminal. */
+export function placeOf(t: Translate, actor: Pick<Actor, "runnerName">): string {
+  return actor.runnerName || t("game.room.terminal");
+}
+
+export function areaName(t: Translate, area: Area): string {
+  return t(`game.area.${area}`);
+}
+
+export function styleName(t: Translate, style: OfficeStyle): string {
+  return t(`office.style.${style}`);
+}
+
+/** The office's name with its style: "Office app (Engineering)". */
+export function officeLabel(t: Translate, office: Pick<ProjectOffice, "label" | "style">): string {
+  return `${t("game.office.label", { name: office.label })} (${styleName(t, office.style)})`;
+}
+
+/** What a glance through another office's door shows, in words. */
+export function compactSummary(t: Translate, c: Pick<CompactOffice, "counts">): string {
+  const parts: string[] = [];
+  if (c.counts.running) parts.push(t("game.compact.working", { count: c.counts.running }));
+  if (c.counts.waiting) parts.push(t("game.compact.waiting", { count: c.counts.waiting }));
+  if (c.counts.offered) parts.push(t("game.compact.offered", { count: c.counts.offered }));
+  if (c.counts.sleeping) parts.push(t("game.compact.sleeping", { count: c.counts.sleeping }));
+  if (c.counts.othersActive) parts.push(t("game.compact.others", { count: c.counts.othersActive }));
+  return parts.length ? parts.join(", ") : t("game.compact.idle");
+}
+
+/** "app: 2 working, 1 waiting on you, Engineering. Go to app". */
+export function compactLabel(t: Translate, c: Pick<CompactOffice, "counts" | "label" | "style">): string {
+  return t("game.compact.label", { name: c.label, summary: compactSummary(t, c), style: styleName(t, c.style) });
+}
+
+export function rackLabel(t: Translate, rack: Rack): string {
+  const state =
+    rack.online === null ? t("game.rack.unknown") : rack.online ? t("game.room.online") : t("game.room.offline");
+  const name = rack.name || t("game.room.unnamed");
+  return rack.slots
+    ? t("game.rack.label", { name, state, busy: rack.busy, slots: rack.slots })
+    : t("game.rack.labelNoSlots", { name, state, busy: rack.busy });
+}
+
+export function itemLabel(t: Translate, item: Pick<MeetingItem, "kind" | "title">): string {
+  return t(`game.item.${item.kind}`, { title: item.title });
 }
 
 export function poseLabel(t: Translate, pose: Actor["pose"]): string {
@@ -91,7 +134,10 @@ export function energyLabel(t: Translate, used: number, cap?: number): string {
 /** Node id → title, "" when unknown. */
 export type TitleOf = (nodeId: string) => string;
 
-export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf): string {
+/** Project name → its label, for "Go to …". */
+export type LabelOf = (project: string) => string;
+
+export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf, labelOf: LabelOf = (p) => p): string {
   switch (target.kind) {
     case "node":
       return t("game.action.node", { title: titleOf(target.nodeId) || target.nodeId });
@@ -109,5 +155,16 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf)
       return t("game.action.held");
     case "pr":
       return t("game.action.pr");
+    case "project":
+      return t("game.action.project", { name: labelOf(target.project) });
+    case "in-project":
+      return t("game.action.inProject", {
+        action: actionLabel(t, target.then, () => "", labelOf),
+        name: labelOf(target.project),
+      });
+    case "autopilot":
+      return t("game.action.autopilot");
+    case "runners":
+      return t("game.action.runners");
   }
 }

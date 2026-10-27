@@ -37,6 +37,9 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	if err := engine.ValidateNodeTypeDefs(g.NodeTypes); err != nil {
 		return err
 	}
+	if !engine.ValidOfficeStyle(g.OfficeStyle) {
+		return fmt.Errorf("office_style: unknown style %q", g.OfficeStyle)
+	}
 	if err := engine.ValidateAgentRoleDefs(g.AgentRoles); err != nil {
 		return err
 	}

@@ -22,6 +22,7 @@ import type {
   CustomNodeTypeId,
   NodeStyle,
   NodeTypeDef,
+  OfficeStyle,
   SavedView,
   StatusDefinition,
   Workflow,
@@ -115,7 +116,10 @@ export type WorkflowCommand =
     }
   | { type: "workflow.removeNodeType"; id: CustomNodeTypeId }
   | { type: "workflow.setStages"; workflow: Workflow | null }
-  | { type: "workflow.setAgentRoles"; agentRoles: AgentRoleDef[] };
+  | { type: "workflow.setAgentRoles"; agentRoles: AgentRoleDef[] }
+  /** The project's office look in Station; null goes back to the layout's
+   * default. */
+  | { type: "workflow.setOfficeStyle"; style: OfficeStyle | null };
 
 export type CanvasCommand =
   | {
@@ -280,6 +284,10 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return acceptance.setProjectWorkflow(graph, command.workflow);
     case "workflow.setAgentRoles":
       return acceptance.setAgentRoles(graph, command.agentRoles);
+    case "workflow.setOfficeStyle":
+      if (command.style) graph.officeStyle = command.style;
+      else delete graph.officeStyle;
+      return;
 
     case "canvas.moveNodes":
       if (command.shift) canvas.shiftBoard(graph, command.shift);
@@ -383,6 +391,7 @@ const COMMAND_LABELS: Record<GraphCommandType, string> = {
   "workflow.removeNodeType": "刪除節點類型",
   "workflow.setStages": "修改工作流程階段",
   "workflow.setAgentRoles": "修改代理角色",
+  "workflow.setOfficeStyle": "設定辦公室風格",
   "canvas.moveNodes": "移動節點",
   "canvas.setTimelineOrder": "調整時間軸順序",
   "canvas.setGatePlacement": "移動條件閘",

@@ -1,9 +1,9 @@
-// Station's war room section: the room itself, drawn straight away (one room
-// per runner, a character per run or agent), with what it does not draw in
-// tiles under it. A character's menu holds what the run can be asked to do:
-// open it, its changes, its node or goal, pause or resume its autopilot,
-// cancel it. With no runner and nothing under way, the section is one call
-// to add a runner.
+// Station's war room section: the building, drawn straight away (an office
+// per project, the current one in full, a lounge and a server room), with
+// what it does not draw in tiles under it. A character's menu holds what the
+// run can be asked to do: open it, its changes, its node or goal, pause or
+// resume its autopilot, cancel it. With no runner and nothing under way, a
+// call to add a runner comes first.
 
 import { lazy, Suspense, useMemo } from "react";
 
@@ -52,7 +52,7 @@ export function StationWarRoom({ world }: { world: World }) {
   const now = world.now;
   const { live, ended } = useMemo(() => controlRows(active, recent, views, now), [active, recent, views, now]);
   const pilots = useMemo(() => liveAutopilots(views), [views]);
-  const noRunner = useNoRunner(live.length + pilots.length + world.office.actors.length > 0);
+  const noRunner = useNoRunner(live.length + pilots.length + world.building.actors.length > 0);
   const count = t("station.control.activeCount", { count: live.length });
 
   return (
@@ -63,18 +63,17 @@ export function StationWarRoom({ world }: { world: World }) {
           {live.length}
         </span>
       </div>
-      {noRunner ? (
+      {noRunner && (
         <div className="station-cta" role="status">
           <p>{t("station.runner.none")}</p>
           <button type="button" className="ap-btn is-primary" onClick={() => openSettings("runners", { add: true })}>
             {t("station.runner.add")}
           </button>
         </div>
-      ) : (
-        <Suspense fallback={<div className="station-warroom-loading">{t("station.loading")}</div>}>
-          <WarRoom office={world.office} titleOf={titleOf} rowOf={rowOf} />
-        </Suspense>
       )}
+      <Suspense fallback={<div className="station-warroom-loading">{t("station.loading")}</div>}>
+        <WarRoom building={world.building} titleOf={titleOf} rowOf={rowOf} />
+      </Suspense>
       <WarRoomExtras live={live} ended={ended} pilots={pilots} now={now} titleOf={titleOf} />
     </section>
   );

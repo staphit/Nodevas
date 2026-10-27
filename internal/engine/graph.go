@@ -60,7 +60,10 @@ type Graph struct {
 	// stages (workflow.go), nil for legacy.
 	AgentRoles []AgentRoleDef `yaml:"agent_roles,omitempty" json:"agentRoles,omitempty"`
 	Workflow   *Workflow      `yaml:"workflow,omitempty" json:"workflow,omitempty"`
-	UI         *UIState       `yaml:"ui,omitempty" json:"ui,omitempty"`
+	// OfficeStyle is how the project's office looks in Station
+	// (officestyle.go). Empty means the default for the layout.
+	OfficeStyle string   `yaml:"office_style,omitempty" json:"officeStyle,omitempty"`
+	UI          *UIState `yaml:"ui,omitempty" json:"ui,omitempty"`
 }
 
 // User is a project-level assignable person. ID stays stable when the display

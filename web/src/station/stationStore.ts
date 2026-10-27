@@ -1,5 +1,18 @@
 import { create } from "zustand";
 import { api, type Run } from "../api";
+import type { ClickTarget } from "../game/world";
+
+/** Something clicked in another project's office, done once Station has
+ * switched there (StationView). */
+export interface DeferredTarget {
+  project: string;
+  target: ClickTarget;
+  /** The switch finished: the project's graph is the one loaded. */
+  ready: boolean;
+}
+
+/** How long a deferred target waits for its project before it is dropped. */
+export const DEFER_TIMEOUT_MS = 10_000;
 
 /**
  * The project's recent runs, for Station's timeline and its "waiting on you"
@@ -25,11 +38,18 @@ export interface StationStoreState {
   load: () => Promise<void>;
   onRunsChanged: () => void;
   reset: () => void;
+  deferred: DeferredTarget | null;
+  /** Do `target` in `project` once Station has switched to it. */
+  deferTarget: (project: string, target: ClickTarget) => void;
+  /** The switch to the deferred target's project finished. */
+  deferredReady: (project: string) => void;
+  clearDeferred: () => void;
 }
 
 const COALESCE_MS = 800;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
+let deferTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useStation = create<StationStoreState>((set, get) => ({
   runs: [],
@@ -40,6 +60,9 @@ export const useStation = create<StationStoreState>((set, get) => ({
   focusGoal: (goal, project = "") => set({ goal, goalProject: goal ? project : "" }),
   project: "",
   openProject: (project) => {
+    // A manual switch elsewhere drops what was waiting for another project.
+    const deferred = get().deferred;
+    if (deferred && deferred.project !== project) get().clearDeferred();
     if (get().project !== project) {
       if (timer) clearTimeout(timer);
       timer = null;
@@ -85,6 +108,26 @@ export const useStation = create<StationStoreState>((set, get) => ({
     if (timer) clearTimeout(timer);
     timer = null;
     inFlight = null;
+    get().clearDeferred();
     set({ runs: [], loaded: false, goal: null, goalProject: "", project: "" });
+  },
+
+  deferred: null,
+  deferTarget: (project, target) => {
+    if (deferTimer) clearTimeout(deferTimer);
+    deferTimer = setTimeout(() => {
+      deferTimer = null;
+      set({ deferred: null });
+    }, DEFER_TIMEOUT_MS);
+    set({ deferred: { project, target, ready: false } });
+  },
+  deferredReady: (project) => {
+    const deferred = get().deferred;
+    if (deferred && deferred.project === project && !deferred.ready) set({ deferred: { ...deferred, ready: true } });
+  },
+  clearDeferred: () => {
+    if (deferTimer) clearTimeout(deferTimer);
+    deferTimer = null;
+    if (get().deferred) set({ deferred: null });
   },
 }));

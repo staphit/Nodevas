@@ -325,6 +325,9 @@ export interface SavedView {
   sort?: "manual" | "title" | "priority" | "status" | "assignee";
 }
 
+/** Station's office looks (game/officeStyle.ts), in display order. */
+export type OfficeStyle = "default" | "engineering" | "study" | "studio" | "cafe";
+
 export interface Graph {
   version: number;
   type?: string;
@@ -338,6 +341,9 @@ export interface Graph {
   agentRoles?: AgentRoleDef[];
   /** Project workflow stages; absent or null is legacy. */
   workflow?: Workflow | null;
+  /** How the project's office looks in Station (graph.yaml office_style);
+   * absent: the layout's default (game/officeStyle.ts). */
+  officeStyle?: OfficeStyle;
   ui?: {
     positions?: Record<string, { x: number; y: number }>;
     /** Timeline-only node order. Graph positions never affect this sequence. */

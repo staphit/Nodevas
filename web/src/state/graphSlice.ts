@@ -10,6 +10,7 @@
 import { api, ConflictError, type GraphOp } from "../api";
 import { applyGraphCommand, commandTarget, describeGraphCommand } from "../domain";
 import { applyGraphOps } from "../domain/graph/ops";
+import { officeStyleErrorMessage } from "../nodeTypeErrors";
 import type { Graph } from "../types";
 import {
   commandFailed,
@@ -211,7 +212,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           });
           return commandFailed(name, scope, CONFLICT_MESSAGE, "conflict");
         }
-        const message = describeFailure(e, `${label}失敗`);
+        const message = officeStyleErrorMessage(e) ?? describeFailure(e, `${label}失敗`);
         set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
         get().settleOperation(scope, { status: "error", operation: name, message });
         return commandFailed(name, scope, message);

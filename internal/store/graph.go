@@ -67,6 +67,9 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 	if err := checkNodeTypesEdit(actor, currentGraph.NodeTypes, g.NodeTypes); err != nil {
 		return "", err
 	}
+	if err := checkOfficeStyleEdit(actor, currentGraph.OfficeStyle, g.OfficeStyle); err != nil {
+		return "", err
+	}
 	// Roles and stages decide what agents may do, so the same holds for them.
 	if err := checkAgentRolesEdit(actor, currentGraph.AgentRoles, g.AgentRoles); err != nil {
 		return "", err

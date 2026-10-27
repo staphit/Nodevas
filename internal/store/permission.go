@@ -105,11 +105,12 @@ func (e *ErrNodeTypeDenied) Error() string { return e.Msg }
 
 // Node-type error codes, shared with the web client.
 const (
-	CodeNodeTypeForbidsAgent = "NODE_TYPE_FORBIDS_AGENT" // 403/409
-	CodeNodeTypePeopleOnly   = "NODE_TYPE_PEOPLE_ONLY"   // 403
-	CodeNodeTypeNoStatus     = "NODE_TYPE_NO_STATUS"     // 400
-	CodeUnknownNodeType      = "UNKNOWN_NODE_TYPE"       // 400
-	CodeNodeTypesAgentEdit   = "NODE_TYPES_AGENT_DENIED" // 403
+	CodeNodeTypeForbidsAgent = "NODE_TYPE_FORBIDS_AGENT"   // 403/409
+	CodeNodeTypePeopleOnly   = "NODE_TYPE_PEOPLE_ONLY"     // 403
+	CodeNodeTypeNoStatus     = "NODE_TYPE_NO_STATUS"       // 400
+	CodeUnknownNodeType      = "UNKNOWN_NODE_TYPE"         // 400
+	CodeNodeTypesAgentEdit   = "NODE_TYPES_AGENT_DENIED"   // 403
+	CodeOfficeStyleAgentEdit = "OFFICE_STYLE_AGENT_DENIED" // 403
 )
 
 // typeName is how a denial names a type: its label, falling back to the id.
@@ -129,6 +130,18 @@ func checkNodeTypesEdit(actor identity.Actor, before, after []engine.NodeTypeDef
 	return &ErrNodeTypeDenied{
 		Code: CodeNodeTypesAgentEdit, Status: http.StatusForbidden,
 		Msg: "agents may not change the project's node types",
+	}
+}
+
+// checkOfficeStyleEdit refuses an agent that changes the project's office
+// style: like the type list, it is the people's to choose.
+func checkOfficeStyleEdit(actor identity.Actor, before, after string) error {
+	if !actor.IsAgent() || before == after {
+		return nil
+	}
+	return &ErrNodeTypeDenied{
+		Code: CodeOfficeStyleAgentEdit, Status: http.StatusForbidden,
+		Msg: "agents may not change the project's office style",
 	}
 }
 

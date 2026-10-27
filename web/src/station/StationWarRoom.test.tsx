@@ -142,7 +142,21 @@ function Harness() {
   const runs = useRuns((s) => s.activeRuns);
   const runners = useRunners((s) => s.runners);
   const world = useMemo(
-    () => buildWorld({ graph, runs, runners, sessions: [], asks: [], held: [], messages: [], now: Date.now() }),
+    () =>
+      buildWorld({
+        graph,
+        runs,
+        runners,
+        sessions: [],
+        asks: [],
+        held: [],
+        messages: [],
+        now: Date.now(),
+        activeProject: "p",
+        projectLabel: "p",
+        remote: null,
+        waitingItems: [],
+      }),
     [graph, runs, runners],
   );
   return <StationWarRoom world={world} />;

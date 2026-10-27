@@ -6,7 +6,7 @@ import type { AgentAsk, AgentMessage, AgentSession } from "../api/agents";
 import type { Runner } from "../api/runners";
 import type { PipelineState, Run, RunBudgetStatus } from "../api/runs";
 import type { Graph } from "../types";
-import { buildOffice } from "./office";
+import { buildBuilding, type BuildingInputs } from "./building";
 import type { World } from "./world";
 
 export interface WorldInputs {
@@ -29,21 +29,6 @@ export function nodeTitles(graph: Graph | null | undefined): Map<string, string>
   return new Map((graph?.nodes ?? []).map((node) => [node.id, node.title ?? ""]));
 }
 
-export function buildWorld(inputs: WorldInputs): World {
-  const titles = nodeTitles(inputs.graph);
-  return {
-    now: inputs.now,
-    office: buildOffice({
-      runs: inputs.runs,
-      runners: inputs.runners,
-      sessions: inputs.sessions,
-      asks: inputs.asks,
-      held: inputs.held,
-      messages: inputs.messages,
-      pipelines: inputs.pipelines,
-      budget: inputs.budget,
-      titles,
-      now: inputs.now,
-    }),
-  };
+export function buildWorld(inputs: BuildingInputs): World {
+  return { now: inputs.now, building: buildBuilding(inputs) };
 }

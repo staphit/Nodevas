@@ -7,7 +7,7 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
 - **Run**：分成 headless 與互動兩種。headless 把事件串流到節點上；互動模式把 agent 的 TUI 放進瀏覽器。runner 會 commit、push，再用 `gh` 開 PR，並回報 diff 與 CI 狀態。
 - **模型**：每次 run 可以自己選 agent 與模型，也可以交給路由規則與 fallback 鏈決定。遇到 rate limit、額度用完或 CLI 不存在時，就改用鏈上的下一個模型。OpenCode 也可以改走 [Agent Client Protocol](https://agentclientprotocol.com)（`nodevas runner set opencodeProtocol acp`，實驗性，僅限 OpenCode 1.x；OpenCode 2 的 run 會改用 `opencode run`）：每個工具呼叫即時串流，而它要求的任何權限一律拒絕，因為 headless run 沒有人可以核准。
 - **審查管線**：實作完成後，可以交給其他 agent 或模型審查、交給人審，或兩者都要。要求修改時會再跑一次 revise run。
-- **Agent network**：agent 可以看到還有誰在工作、互相傳訊息，也能透過 hub 問你問題（`ask_user`）。
+- **Agent 對話**：agent 可以看到還有誰在工作、互相傳訊息，也能透過 hub 問你問題（`ask_user`）。
 - **工作站**：每個專案的工作站（頂列的「資訊｜工作站｜設定」切換）把這些都放在同一個畫面：
   - 每個 agent 和它正在做的事；
   - 戰情室；
@@ -90,9 +90,9 @@ verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在
 
 [![設定 → 用量：每日圖表、session 與價格，再看每日預算](./videos/usage.gif)](./videos/usage.mp4)
 
-### Agent network
+### Agent 對話
 
 誰在做什麼、agent 之間的訊息，以及一則等你放行的暫留訊息。
 
-[![Agent network 面板放行一則暫留訊息](./videos/agent-network.gif)](./videos/agent-network.mp4)
+[![Agent 對話面板放行一則暫留訊息](./videos/agent-network.gif)](./videos/agent-network.mp4)
 

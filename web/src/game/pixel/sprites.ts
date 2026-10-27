@@ -8,7 +8,7 @@
 import { compileSprite, type Legend, type Sprite } from "./compile";
 import type { PixelToken } from "./palette";
 
-const LEGEND: Legend = {
+export const LEGEND: Legend = {
   o: "outline",
   k: "skin",
   h: "hair",
@@ -37,12 +37,29 @@ const LEGEND: Legend = {
   Y: "window-star",
   f: "door",
   v: "doorway",
+  b: "table",
+  B: "table-dark",
+  "1": "decor-a",
+  "2": "decor-b",
+  "3": "decor-c",
+  "4": "decor-d",
+  G: "plant",
+  H: "plant-dark",
+  P: "pot",
+  L: "lamp",
+  s: "sofa",
+  S: "sofa-dark",
+  r: "rack",
+  R: "rack-dark",
+  j: "led-on",
+  J: "led-off",
+  u: "paper",
 };
 
-const sprite = (grid: string) => compileSprite(grid, LEGEND);
+export const sprite = (grid: string) => compileSprite(grid, LEGEND);
 
 /** A plain rectangle of one token. */
-function solid(w: number, h: number, token: PixelToken): Sprite {
+export function solid(w: number, h: number, token: PixelToken): Sprite {
   const d = Array.from({ length: h }, (_, y) => `M0 ${y}h${w}v1h-${w}z`).join("");
   return { w, h, layers: [{ token, d }] };
 }
@@ -55,8 +72,10 @@ export const SCREEN = { x: 8, y: 2, w: 16, h: 10 };
 
 // ---------- furniture ----------
 
-/** Monitor (its screen left open), stand, desk top and front, legs. */
-export const DESK = sprite(`
+/** The monitor (its screen left open) and its stand: the same in every
+ * office style, so a screen's state reads the same everywhere. Rows 0–14 of
+ * the desk frame. */
+export const MONITOR = sprite(`
   ................................
   ......oooooooooooooooooooo......
   ......om................mo......
@@ -72,6 +91,14 @@ export const DESK = sprite(`
   ......ommmmmmmmmmmmmmmmmmo......
   ......oooooooooooooooooooo......
   ..............ommo..............
+`);
+
+/** Where a desk top goes in the desk frame: under the monitor. */
+export const DESK_TOP_Y = 15;
+
+/** The default office's desk: top and front, legs. 32×14, like every desk
+ * top (pixel/styleSprites.ts has the others). */
+export const DESK_TOP_DEFAULT = sprite(`
   oooooooooooooooooooooooooooooooo
   oDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDo
   oDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDo
@@ -500,5 +527,247 @@ export const ENVELOPE = sprite(`
   oiwwwio
   owiwiwo
   owwiwwo
+  ooooooo
+`);
+
+// ---------- the meeting room (shared by every style) ----------
+
+/** The table's ends, over the first or last segment: a leg each. */
+export const TABLE_CAP_L = sprite(`
+  .ooo
+  obbb
+  obbb
+  oBBB
+  oBBB
+  oooo
+  .oBo
+  .oBo
+  .oBo
+  .oBo
+  .oBo
+  .oBo
+  .oBo
+  .ooo
+`);
+export const TABLE_CAP_R = sprite(`
+  ooo.
+  bbbo
+  bbbo
+  BBBo
+  BBBo
+  oooo
+  oBo.
+  oBo.
+  oBo.
+  oBo.
+  oBo.
+  oBo.
+  oBo.
+  ooo.
+`);
+
+/** A pull request ready to merge: a folder with a green tab. */
+export const PR_FOLDER = sprite(`
+  .oooo.......
+  oKKKKoooooo.
+  oyyyyyyyyyyo
+  oyuuuuuuuuyo
+  oyuzzzzzuuyo
+  oyuuuuuuuuyo
+  oyuzzzzuuuyo
+  oyuuuuuuuuyo
+  oyyyyyyyyyyo
+  oooooooooooo
+`);
+
+/** A review waiting for a person: a clipboard. */
+export const CLIPBOARD = sprite(`
+  ...oooo...
+  .oomyymoo.
+  oddmmmmddo
+  oduuuuuudo
+  oduzzzuudo
+  oduuuuuudo
+  oduzzzzudo
+  oduuuuuudo
+  oduzzuuudo
+  oduuuuuudo
+  oddddddddo
+  oooooooooo
+`);
+
+// ---------- the lounge and the server room ----------
+
+/** A two-seat sofa, seen from the front; the seats' middles are at x 13
+ * and 33 (Lounge places its sitters there). */
+export const SOFA = sprite(`
+  ....oooooooooooooooooooooooooooooooooooooooo....
+  ...osssssssssssssssssssssssssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  ...osssssssssssssssssssoossssssssssssssssssso...
+  oooooSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSooooo
+  osssoSSSSSSSSSSSSSSSSSSooSSSSSSSSSSSSSSSSSSossso
+  osssossssssssssssssssssoossssssssssssssssssossso
+  osssossssssssssssssssssoossssssssssssssssssossso
+  osssossssssssssssssssssoossssssssssssssssssossso
+  oSSSooooooooooooooooooooooooooooooooooooooooSSSo
+  oSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSo
+  oSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSo
+  oooooooooooooooooooooooooooooooooooooooooooooooo
+  .oSo........................................oSo.
+  .ooo........................................ooo.
+`);
+
+/** A plant in a pot, for a corner. */
+export const PLANT = sprite(`
+  ....oo......
+  ...oGGo.oo..
+  .oo.oGGoGGo.
+  oGGooHGGGo..
+  oGHGGoHGoGo.
+  .oGGHGGHGGo.
+  ..oHGGHGHo..
+  .oGGoHGGGGo.
+  .oGo.oHo.oo.
+  ..o..oHo....
+  .oooooooooo.
+  .oPPPPPPPPo.
+  ..oPPPPPPo..
+  ..oPPPPPPo..
+  ..oPPPPPPo..
+  ...oooooo...
+`);
+
+/** A server rack, a runner: six units with vents and a light each, feet. */
+export const RACK = sprite(`
+  oooooooooooooooo
+  oRRRRRRRRRRRRRRo
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  orRJRJRJRrrrrrro
+  orRRRRRRRrrrrrro
+  oRRRRRRRRRRRRRRo
+  orrrrrrrrrrrrrro
+  oooooooooooooooo
+  .oRo........oRo.
+  .oRo........oRo.
+  .ooo........ooo.
+`);
+
+/** Where a rack's lights go: power at the top, a slot light per unit. */
+export const RACK_POWER_AT = { x: 12, y: 1 };
+export const RACK_SLOT_AT = (unit: number) => ({ x: 11, y: 4 + 4 * unit });
+
+/** A rack's light: power on, a slot at work, or off. */
+export const LED = solid(2, 1, "led-on");
+export const LED_BUSY = solid(2, 1, "ok");
+export const LED_OFF = solid(2, 1, "led-off");
+
+/** A sleeping face, from the front: eyes shut. */
+export const HEAD_FRONT_SLEEP = sprite(`
+  ..oooooo..
+  .ohhhhhho.
+  ohhhhhhhho
+  ohhkkkkhho
+  okookkooko
+  okkkkkkkko
+  .okkkkkko.
+  ..oooooo..
+  ...okko...
+`);
+
+/** Knees and shoes of someone sitting on the sofa. */
+export const LEGS_SEATED = sprite(`
+  .oppppppppo.
+  .oppooooppo.
+  .ooo....ooo.
+`);
+
+// ---------- a glance into another office (compact) ----------
+
+/** A small desk with a small monitor, 16×16. */
+export const MINI_DESK = sprite(`
+  ................
+  ...oooooooooo...
+  ...o........o...
+  ...o........o...
+  ...o........o...
+  ...oooooooooo...
+  .......oo.......
+  oooooooooooooooo
+  oDDDDDDDDDDDDDDo
+  oooooooooooooooo
+  .od..........do.
+  .od..........do.
+  .od..........do.
+  .od..........do.
+  .od..........do.
+  .oo..........oo.
+`);
+
+/** The small monitor's screen, at MINI_SCREEN_AT. */
+export const MINI_SCREEN_AT = { x: 4, y: 2 };
+export const MINI_SCREEN_ON = solid(8, 3, "screen-on");
+export const MINI_SCREEN_OFF = solid(8, 3, "screen-off");
+export const MINI_CODE = sprite(`
+  .cc.CCc.
+  ..Cccc..
+`);
+
+/** An agent from behind, small; the shirt in its kind's colour. */
+export const MINI_AGENT = sprite(`
+  .oooo.
+  ohhhho
+  ohhhho
+  .oaao.
+  oaaaao
+  oaaaao
+`);
+
+/** A hand up over the small agent: it asked you something. */
+export const MINI_HAND = sprite(`
+  yy
+  oo
+  ko
+  ao
+  ao
+`);
+
+/** zz over a small agent asleep on a usage limit. */
+export const MINI_Z = sprite(`
+  iii
+  .i.
+  iii
+`);
+
+/** … over a small agent waiting to be let in. */
+export const MINI_WAIT = sprite(`
+  ooooooo
+  owiwiwo
   ooooooo
 `);

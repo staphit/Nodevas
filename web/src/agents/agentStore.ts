@@ -48,6 +48,45 @@ function sentByViewer(message: AgentMessage, viewer: Actor | null): boolean {
   return !viewer || message.senderActor === viewer.id;
 }
 
+/** Where this browser remembers, per project, how far Agent chat was read. */
+export function seenKey(project: string): string {
+  return `nodevas-agent-chat-seen:${project}`;
+}
+
+function readSeen(project: string): number | null {
+  try {
+    const value = Number(localStorage.getItem(seenKey(project)));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSeen(project: string, at: number): void {
+  try {
+    localStorage.setItem(seenKey(project), String(at));
+  } catch {
+    /* this visit only */
+  }
+}
+
+/** A message's time in ms (an older hub sent seconds). */
+function messageTime(message: Pick<AgentMessage, "createdAt">): number {
+  const at = message.createdAt || 0;
+  return at < 1e12 ? at * 1000 : at;
+}
+
+/** Messages delivered after `seenAt` that the viewer did not write: what
+ * Agent chat has unread. */
+export function unseenCount(messages: AgentMessage[], seenAt: number, viewer: Actor | null): number {
+  let count = 0;
+  for (const message of messages) {
+    if (message.status && message.status !== "delivered") continue;
+    if (messageTime(message) > seenAt && !sentByViewer(message, viewer)) count++;
+  }
+  return count;
+}
+
 // Message ids already announced, so a repeated event never toasts twice.
 const announced = new Set<string>();
 let toastSeq = 0;
@@ -71,6 +110,10 @@ export interface AgentStoreState {
   viewer: Actor | null;
   sending: boolean;
   error: string | null;
+  /** Agent chat was read up to here (a message's createdAt), in this
+   * browser, for `seenProject`. */
+  seenAt: number;
+  seenProject: string;
 
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
@@ -80,6 +123,11 @@ export interface AgentStoreState {
   setFilterNodeId: (nodeId: string) => void;
   setError: (error: string | null) => void;
   setViewer: (viewer: Actor | null) => void;
+  /** Reads how far this browser read the project's Agent chat; the first
+   * visit starts from now, so old messages do not count as unread. */
+  loadSeen: (project: string) => void;
+  /** Everything in the list now counts as read. */
+  markSeen: () => void;
   refreshAll: () => Promise<void>;
   refreshHeld: () => Promise<void>;
   /** Messages bound to one board node; empty when they cannot be read. */
@@ -139,6 +187,8 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
   viewer: null,
   sending: false,
   error: null,
+  seenAt: 0,
+  seenProject: "",
 
   setOpen: (open) => set({ open }),
   toggleOpen: () => set((s) => ({ open: !s.open })),
@@ -154,6 +204,24 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
   },
   setError: (error) => set({ error }),
   setViewer: (viewer) => set({ viewer }),
+
+  loadSeen: (project) => {
+    let seenAt = readSeen(project);
+    if (seenAt === null) {
+      seenAt = Date.now();
+      writeSeen(project, seenAt);
+    }
+    set({ seenAt, seenProject: project });
+  },
+
+  markSeen: () => {
+    const { messages, seenAt, seenProject } = get();
+    let newest = seenAt;
+    for (const message of messages) newest = Math.max(newest, messageTime(message));
+    if (newest <= seenAt) return;
+    set({ seenAt: newest });
+    if (seenProject) writeSeen(seenProject, newest);
+  },
 
   refreshAll: async () => {
     const { showOffline, filterNodeId } = get();

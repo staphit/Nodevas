@@ -6,7 +6,8 @@
 
 import type { Sprite } from "../pixel/compile";
 import * as S from "../pixel/sprites";
-import type { Pose } from "../world";
+import { chairOf, deskTopOf, tableSegOf } from "../pixel/styleSprites";
+import type { OfficeStyle, Pose } from "../world";
 
 /** A sprite at a place in the 32×32 desk frame. With `frame`, it is one of
  * `of` frames that take turns (CSS steps), frame 0 the one shown still. */
@@ -152,15 +153,155 @@ function extras(pose: Pose, mail: boolean): Placed[] {
 export interface DeskOptions {
   /** A held message waits for approval. */
   mail?: boolean;
+  /** The office's style: its desk top, chair and table. */
+  style?: OfficeStyle;
+}
+
+/** The chair, its bottom where the default chair's is whatever its height. */
+function chair(style: OfficeStyle): Placed {
+  const sprite = chairOf(style);
+  return at("chair", sprite, CHAIR_AT.x, CHAIR_AT.y + S.CHAIR.h - sprite.h);
 }
 
 /** A desk with its agent (agent kind as agentColorKey gives it), or a free
- * desk. An agent waiting to be let in stands at the door instead (doorScene). */
+ * desk. An agent waiting to be let in stands at the door instead (doorScene).
+ * The style changes the desk top and the chair, nothing the agent does. */
 export function deskScene(pose: Pose | "empty", kind: string, options: DeskOptions = {}): Placed[] {
-  const parts: Placed[] = [at("desk", S.DESK, 0, 0), ...screen(pose)];
+  const style = options.style ?? "default";
+  const parts: Placed[] = [
+    at("monitor", S.MONITOR, 0, 0),
+    at("desk", deskTopOf(style), 0, S.DESK_TOP_Y),
+    ...screen(pose),
+  ];
   if (pose !== "empty") parts.push(...agent(pose, kind));
-  parts.push(at("chair", S.CHAIR, CHAIR_AT.x, CHAIR_AT.y));
+  parts.push(chair(style));
   if (pose !== "empty") parts.push(...extras(pose, Boolean(options.mail)));
+  return parts;
+}
+
+export interface MeetingOptions extends DeskOptions {
+  /** Where the seat is along the table: its left end, the middle, the right
+   * end (or "s", a table of one seat). The ends get a leg. */
+  edge?: "l" | "m" | "r" | "s";
+}
+
+function tableParts(style: OfficeStyle, edge: MeetingOptions["edge"]): Placed[] {
+  const parts = [at("table", tableSegOf(style), 0, S.DESK_TOP_Y)];
+  if (edge === "l" || edge === "s") parts.push(at("table.cap.l", S.TABLE_CAP_L, 0, S.DESK_TOP_Y));
+  if (edge === "r" || edge === "s") {
+    parts.push(at("table.cap.r", S.TABLE_CAP_R, S.CELL - S.TABLE_CAP_R.w, S.DESK_TOP_Y));
+  }
+  return parts;
+}
+
+/** A seat at the meeting-room table: the seats side by side make one table.
+ * The agent and its monitor (the screen it presents) are as at a desk; an
+ * empty seat is the table and a chair. */
+export function meetingScene(pose: Pose | "empty", kind: string, options: MeetingOptions = {}): Placed[] {
+  const style = options.style ?? "default";
+  const parts: Placed[] = [];
+  if (pose !== "empty") parts.push(at("monitor", S.MONITOR, 0, 0));
+  parts.push(...tableParts(style, options.edge));
+  if (pose === "empty") return [...parts, chair(style)];
+  parts.push(...screen(pose), ...agent(pose, kind), chair(style), ...extras(pose, Boolean(options.mail)));
+  return parts;
+}
+
+export type ItemKind = "merge" | "review" | "held";
+
+/** Where an item lying on the table ends, in the desk frame. */
+const ITEM_BOTTOM = 22;
+
+/** Something on the meeting-room table that waits on the viewer, no agent at
+ * it: a PR folder (ready to merge), a clipboard (a review), an envelope (a
+ * held message). Its screen says the same with a glyph. */
+export function itemScene(
+  kind: ItemKind,
+  style: OfficeStyle = "default",
+  edge: MeetingOptions["edge"] = "m",
+): Placed[] {
+  const item = kind === "merge" ? S.PR_FOLDER : kind === "review" ? S.CLIPBOARD : S.ENVELOPE;
+  const glyph =
+    kind === "merge"
+      ? [onScreen("screen.ok", S.SCREEN_OK, 0, 0), onScreen("screen.ok.glyph", S.CHECK, 3, 1)]
+      : kind === "review"
+        ? [onScreen("screen.review", S.SCREEN_ON, 0, 0), onScreen("screen.review.glyph", S.QUESTION, 5, 1)]
+        : [onScreen("screen.mail", S.SCREEN_ON, 0, 0), onScreen("screen.mail.glyph", S.ENVELOPE, 4, 2)];
+  return [
+    at("monitor", S.MONITOR, 0, 0),
+    ...tableParts(style, edge),
+    ...glyph,
+    at(`item.${kind}`, item, Math.floor((S.CELL - item.w) / 2), ITEM_BOTTOM - item.h),
+  ];
+}
+
+/** A lounge seat's frame: 24 art wide, 32 tall, the sofa's cushion at y 22. */
+export const SEAT_W = 24;
+
+/** An agent on a sofa seat, facing the room: sitting, asleep on a usage limit
+ * (head down over folded arms, zzz) or offline (greyed by the stylesheet).
+ * The sofa itself is drawn once under each pair of seats (Lounge). */
+export function sofaScene(pose: Pose, kind: string): Placed[] {
+  const asleep = pose === "limit";
+  const headAt = asleep ? { x: 5, y: 9 } : { x: 7, y: 6 };
+  const head: Placed[] = [
+    at(asleep ? "head.sleep" : "head.front", asleep ? S.HEAD_FRONT_SLEEP : S.HEAD_FRONT, headAt.x, headAt.y),
+  ];
+  const wear = S.headwearOf(kind, "front");
+  if (wear) head.push(at(`headwear.${kind}`, wear.sprite, headAt.x + wear.dx, headAt.y + wear.dy));
+  const parts: Placed[] = [at("legs.seated", S.LEGS_SEATED, 6, 24), at("body.seated", S.BODY_SEATED, 4, 16)];
+  if (!asleep) {
+    parts.push(...head, at("arm.left", S.ARM, 2, 18), at("arm.right", S.ARM, 19, 18));
+    return parts;
+  }
+  parts.push(at("arms.folded", S.ARMS_FOLDED, 4, 18), ...head);
+  // zzz as at a desk: all three letters while still, one at a time moving.
+  const z2 = at("bubble.z2", S.Z, 16, 2);
+  parts.push(
+    at("bubble.sleep", S.BUBBLE_SLEEP, 10, 0),
+    at("bubble.z1", S.Z, 12, 3),
+    framed(z2, 0, 3),
+    framed(at("bubble.z3", S.Z, 20, 1), 0, 3),
+    framed({ ...z2, name: "bubble.z2.again" }, 2, 3),
+  );
+  return parts;
+}
+
+/** A desk in another project's office, small (16×16): a busy screen, or a
+ * hand up, zz or … over the agent. Its colour comes from the agent--<kind>
+ * class around it. */
+export function miniDesk(pose: Pose): Placed[] {
+  const busy = pose === "working" || pose === "reviewing";
+  const screenAt = S.MINI_SCREEN_AT;
+  const parts: Placed[] = [
+    at("mini.desk", S.MINI_DESK, 0, 0),
+    at(busy ? "mini.screen.on" : "mini.screen.off", busy ? S.MINI_SCREEN_ON : S.MINI_SCREEN_OFF, screenAt.x, screenAt.y),
+  ];
+  if (busy) parts.push(at("mini.code", S.MINI_CODE, screenAt.x, screenAt.y + 1));
+  parts.push(at("mini.agent", S.MINI_AGENT, 5, 9));
+  if (pose === "asking-user") parts.push(at("mini.hand", S.MINI_HAND, 11, 5));
+  else if (pose === "limit") parts.push(at("mini.z", S.MINI_Z, 12, 6));
+  else if (pose === "awaiting-accept") parts.push(at("mini.wait", S.MINI_WAIT, 9, 6));
+  return parts;
+}
+
+/** Slot lights a rack shows at most. */
+export const RACK_LIGHTS = 4;
+
+/** A runner as a rack: a power light while it is online, a light per slot
+ * (at most four), lit for each run it holds. Offline, every light is off. */
+export function rackScene(online: boolean | null, busy: number, slots: number | undefined): Placed[] {
+  const on = online !== false;
+  const parts: Placed[] = [
+    at("rack", S.RACK, 0, 0),
+    at(on ? "led.power" : "led.power.off", on ? S.LED : S.LED_OFF, S.RACK_POWER_AT.x, S.RACK_POWER_AT.y),
+  ];
+  const lights = Math.min(Math.max(slots ?? 1, 1), RACK_LIGHTS);
+  for (let unit = 0; unit < lights; unit++) {
+    const lit = on && unit < busy;
+    const spot = S.RACK_SLOT_AT(unit);
+    parts.push(at(lit ? `led.slot.${unit}.busy` : `led.slot.${unit}`, lit ? S.LED_BUSY : S.LED_OFF, spot.x, spot.y));
+  }
   return parts;
 }
 

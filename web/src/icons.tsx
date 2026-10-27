@@ -60,6 +60,14 @@ export const IconClose = (p: P) => (
   </svg>
 );
 
+/** Agent chat: a speech bubble with a tail. */
+export const IconChat = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 4.5h14a2 2 0 0 1 2 2V15a2 2 0 0 1-2 2h-7.5L7 20.5V17H5a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2Z" />
+    <path d="M7.5 9h9M7.5 12.5h6" />
+  </svg>
+);
+
 export const IconPin = (p: P) => (
   <svg {...base(p)}>
     <path d="m9 3 6 6M8 8l8-4 4 4-4 8-3-3-5 5" />
