@@ -29,8 +29,8 @@ test.describe("responsive", () => {
       await page.setViewportSize(viewport);
       await openApp(page);
 
-      await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "設定", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: "帳號與設定", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: /新增節點/ }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
@@ -61,7 +61,9 @@ test.describe("theme", () => {
 
     const root = page.locator("html");
     const initial = await root.getAttribute("data-theme");
-    const toggle = page.getByRole("button", {
+    // The theme lives in the account menu.
+    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
+    const toggle = page.getByRole("menuitem", {
       name: initial === "dark" ? /切換淺色模式/ : /切換深色模式/,
     });
     await toggle.click();
@@ -81,7 +83,8 @@ test.describe("theme", () => {
     await page.keyboard.press("Shift+ArrowRight");
     await expect(handle).not.toHaveAttribute("aria-valuenow", "304");
 
-    await page.getByRole("button", { name: "設定", exact: true }).click();
+    await page.getByRole("button", { name: "帳號與設定", exact: true }).click();
+    await page.getByRole("menuitem", { name: "設定", exact: true }).click();
     await page.getByRole("button", { name: "外觀與語言" }).click();
     const dialog = page.getByRole("region", { name: "專案設定" });
     await dialog.getByRole("button", { name: "重設全部本機偏好" }).click();
@@ -94,7 +97,7 @@ test.describe("theme", () => {
     const resetDialog = page.getByRole("region", { name: "Project settings" });
     await expect(resetDialog.getByText("已重設全部本機偏好")).toBeVisible();
     // Still in Settings: the reset does not throw you out of it.
-    await page.getByRole("button", { name: "Info", exact: true }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(page.getByRole("separator", { name: "Resize project explorer" })).toHaveAttribute(
       "aria-valuenow",
       "304",

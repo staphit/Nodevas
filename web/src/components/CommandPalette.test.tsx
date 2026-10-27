@@ -1,0 +1,112 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readPreferences } from "../preferences";
+import { useControl } from "../station/controlStore";
+import { useApp } from "../store";
+import { CommandPalette } from "./CommandPalette";
+import { openCommandPalette } from "./topbar/actions";
+
+const confirm = vi.hoisted(() => ({ answer: true }));
+vi.mock("./ConfirmDialog", () => ({
+  confirmAction: vi.fn(async () => confirm.answer),
+}));
+
+const switchProject = vi.fn(async () => {});
+const pauseAll = vi.fn(async () => true);
+
+beforeEach(() => {
+  confirm.answer = true;
+  switchProject.mockClear();
+  pauseAll.mockClear();
+  useApp.setState({
+    preferences: { ...readPreferences(), language: "en", projectMode: "info", agentWorkstation: true },
+    activeProject: "beta",
+    projects: [
+      { name: "alpha", label: "Alpha", depth: 0, path: "alpha", nodes: 3 },
+      { name: "beta", label: "Beta", depth: 0, path: "beta", nodes: 7 },
+    ],
+    workspaces: [],
+    switchProject,
+  });
+  useControl.setState({ pauseAll });
+});
+
+function open(view?: "help") {
+  render(<CommandPalette />);
+  act(() => openCommandPalette(view));
+}
+
+function search(text: string) {
+  fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: text } });
+}
+
+describe("CommandPalette: what the top bar no longer shows", () => {
+  it("finds every relocated control by name", () => {
+    open();
+    for (const name of [
+      "Open settings",
+      "Open Station",
+      "Pause all agents",
+      "Add a runner",
+      "Daily budget",
+      "Routing rules",
+      "Usage",
+      "Replay tour",
+      "Switch to light mode",
+      "Settings: Appearance and language",
+      "Settings: Backup and history",
+      "Switch to Alpha",
+    ]) {
+      expect(screen.getByRole("option", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
+    }
+    // The project on screen is not offered as a switch.
+    expect(screen.queryByRole("option", { name: /^Switch to Beta/ })).toBeNull();
+  });
+
+  it("opens a part of Settings", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Daily budget/ }));
+    const prefs = useApp.getState().preferences;
+    expect(prefs.projectMode).toBe("settings");
+    expect(prefs.settingsSection).toBe("budget");
+  });
+
+  it("switches project", async () => {
+    const user = userEvent.setup();
+    open();
+    search("alpha");
+    await user.click(screen.getByRole("option", { name: /^Switch to Alpha/ }));
+    expect(switchProject).toHaveBeenCalledWith("alpha");
+  });
+
+  it("pauses all agents once confirmed, leaving running runs, and opens Station", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Pause all agents/ }));
+    expect(pauseAll).toHaveBeenCalledWith(false);
+    expect(useApp.getState().preferences.projectMode).toBe("station");
+  });
+
+  it("does nothing when the pause is declined", async () => {
+    confirm.answer = false;
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Pause all agents/ }));
+    expect(pauseAll).not.toHaveBeenCalled();
+  });
+
+  it("hides the agent commands while the workstation is hidden", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, agentWorkstation: false } });
+    open();
+    expect(screen.queryByRole("option", { name: /^Pause all agents/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /^Daily budget/ })).toBeNull();
+  });
+
+  it("opens straight on the help view when asked", () => {
+    open("help");
+    expect(screen.getByText("Keyboard shortcuts and help")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Search" })).toBeNull();
+  });
+});

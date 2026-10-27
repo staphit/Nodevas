@@ -39,56 +39,199 @@
 .explorer-toggle span {
   font: 700 12px/1 var(--mono);
 }
-.file-ops {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 12px;
-  padding-left: 12px;
-  border-left: 1px solid var(--border);
+/* Above a phone the bar is one row: it has few enough controls now that a
+   wrap would only ever be a mistake. header.topbar outranks the plain .topbar
+   wrap rule in 03-explorer.css, which imports after this file. */
+header.topbar {
+  flex-wrap: nowrap;
 }
-/* Breadcrumb: say where we are before offering to move somewhere else. */
-.project-breadcrumb .crumb-workspace {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-2);
-}
-.project-breadcrumb .crumb-separator {
-  color: var(--text-3, var(--text-2));
-  font-size: 11px;
-}
-.project-breadcrumb .crumb-label {
-  font-size: 11px;
-  color: var(--text-2);
-}
-.project-select {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  font-family: var(--mono);
-  max-width: 180px;
-}
-.project-type {
-  font-size: 11px;
-  font-family: var(--mono);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 8px;
-  background: var(--surface-2);
+.topbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .topbar-actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+/* Two halves fit at every width; 25-station.css hid the names when the
+   switch had a third. */
+.topbar .mode-switch button span:not(.mode-switch-badge) {
+  display: inline;
+}
+
+/* The project and account menus: a button and the panel hanging off it. */
+.topbar-menu {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.topbar-project-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.topbar-project-trigger:hover {
+  background: var(--surface-2);
+}
+.topbar-project-trigger svg {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+.topbar-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.topbar-avatar:hover {
+  background: var(--hover);
+}
+.topbar-project-trigger[aria-expanded="true"],
+.topbar-avatar[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.topbar-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: var(--z-popover, 60);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 24px));
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.topbar-menu-panel.align-start {
+  left: 0;
+}
+.topbar-menu-panel.align-end {
+  right: 0;
+}
+.topbar-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.topbar-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.topbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.topbar-menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.topbar-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--hover);
+}
+.topbar-menu-item:disabled {
+  color: var(--text-2);
+  cursor: default;
+}
+.topbar-menu-item.checked {
+  font-weight: 600;
+}
+.topbar-menu-item svg {
+  flex: 0 0 auto;
+  color: var(--text-2);
+}
+.topbar-menu-check {
+  flex: 0 0 14px;
+  width: 14px;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+.topbar-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-menu-detail {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* Runners and today's spend; the dot is the runners dialog's (17-runners.css). */
+.topbar-runner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar-runner-pill:hover {
+  background: var(--surface-2);
+}
+/* A laptop-width bar: the shortcut hint yields before anything wraps. */
+@media (max-width: 1000px) {
+  .topbar .command-trigger kbd {
+    display: none;
+  }
 }
 .language-control {
   display: inline-flex;
@@ -1044,17 +1187,20 @@
   font-size: 11px;
 }
 
+
 /* ---------- top bar on a phone ---------- */
 
-/* Everything above assumes a bar wide enough to name what it shows. At 393px
-   it wraps to three rows and takes a third of the screen, so here the bar
-   keeps only what is used constantly — the explorer toggle, the brand, the
-   project switch, search — and the rest either loses its label or moves behind
-   one overflow button. Scoped to width, not pointer: a narrow desktop window
-   has the same problem. */
+/* Everything above assumes a bar wide enough to name what it shows. On a
+   393px screen the first row keeps the project menu, search, the runner dot
+   and the account menu, and Board | Station takes a row of its own under it
+   (25-station.css), two halves rather than squeezing the project name to
+   nothing. Scoped to width, not pointer: a narrow desktop window has the same
+   problem. */
 @media (max-width: 720px) {
-  .topbar {
-    flex-wrap: nowrap;
+  /* header.topbar outranks the plain .topbar wrap and nowrap rules in
+     03-explorer.css and 14-touch.css, which import after this file. */
+  header.topbar {
+    flex-wrap: wrap;
     gap: 6px;
     padding-inline: 12px;
   }
@@ -1072,43 +1218,28 @@
     white-space: nowrap;
     border: 0;
   }
-  .explorer-toggle {
-    flex: 0 0 auto;
-  }
-  /* Purely decorative, and it draws the same tree glyph as the explorer toggle
-     sitting immediately beside it — at this width the pair reads as two of the
-     same control rather than as a logo. The brand is already named by the h1
-     for anything that reads the page, so dropping the mark loses nothing and
-     buys the project switch another 32px of a row that has none. */
+  /* Decorative, and the brand is already named by the h1 for anything that
+     reads the page: the project menu gets its 32px. */
   .brand-mark {
     display: none;
   }
   /* 44px is the smallest target Apple's own controls use. */
   .explorer-toggle {
+    flex: 0 0 auto;
     min-width: 44px;
     min-height: 44px;
   }
-  /* The breadcrumb says where we are, which the screen title already does on a
-     phone; what is left is the control that moves somewhere else, and it takes
-     the row's slack so long project names stay readable. */
-  .topbar .project-breadcrumb {
-    min-width: 0;
+  /* The project name takes the row's slack, so long names stay readable. */
+  .topbar-project {
     flex: 1 1 auto;
-    margin-left: 0;
-    padding-left: 0;
-    border-left: 0;
   }
-  .topbar .crumb-workspace,
-  .topbar .crumb-separator,
-  .topbar .crumb-label,
-  .topbar .project-type {
-    display: none;
-  }
-  .topbar .project-select {
+  .topbar-project-trigger {
     width: 100%;
-    min-width: 0;
     max-width: none;
     min-height: 44px;
+  }
+  .topbar-spacer {
+    display: none;
   }
   /* Transient, and never worth a second row: it truncates instead of pushing
      the actions off the end. */
@@ -1135,53 +1266,22 @@
   .topbar .command-trigger kbd {
     display: none;
   }
-  /* The five actions live in the overflow menu here; leaving them in the row
-     is what wrapped it in the first place. */
-  .topbar-actions .icon-btn:not(.topbar-overflow-trigger) {
-    display: none;
-  }
-  .topbar-overflow {
-    position: relative;
-    flex: 0 0 auto;
-  }
-  .topbar-overflow-trigger {
+  /* The dot alone; its label still says how many and what today cost, and
+     Station is one row down. */
+  .topbar-runner-pill {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
+    padding: 0 12px;
   }
-  /* Anchored to the trigger, not the viewport, so it stays pointing at the
-     button it belongs to when the bar insets itself under the notch. */
-  .topbar-overflow-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: var(--z-popover, 60);
-    display: flex;
-    min-width: 200px;
-    flex-direction: column;
-    padding: 4px;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    background: var(--surface);
-    box-shadow: 0 16px 40px var(--shadow);
+  .topbar-runner-pill-text {
+    display: none;
   }
-  .topbar-overflow-item {
-    display: flex;
+  .topbar-avatar {
+    width: 44px;
+    height: 44px;
+  }
+  .topbar-menu-item {
     min-height: 44px;
-    align-items: center;
-    gap: 10px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 6px;
-    color: var(--text);
-    background: transparent;
-    cursor: pointer;
-    font-size: 13px;
-    text-align: left;
-    white-space: nowrap;
-  }
-  .topbar-overflow-item:hover,
-  .topbar-overflow-item:focus-visible {
-    background: var(--hover);
   }
 }

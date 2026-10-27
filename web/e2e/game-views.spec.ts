@@ -443,7 +443,7 @@ test("station: the roster, what waits on you and who worked on what", async ({ p
   await expect(page.getByRole("heading", { name: "Who worked on what · last hour" })).toBeVisible();
 
   // Info is the board as it was: the cards, the explorer toggle back.
-  await page.getByRole("button", { name: "Info", exact: true }).click();
+  await page.getByRole("button", { name: "Board", exact: true }).click();
   await expect(page.locator(".lane-wrap.graph .board-inner")).toBeVisible();
   await expect(page.getByRole("region", { name: "War room" })).toHaveCount(0);
 });
