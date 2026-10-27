@@ -26,6 +26,25 @@ let workspacePickerBusy = false;
 let backendStopPromise = null;
 let updateTimer = null;
 let manualUpdateCheck = false;
+// The local backend's spawn arguments, kept so it can be started again on the
+// same port (the page's origin, and with it its stored preferences, stays).
+let backendLaunch = null;
+let respawnTimer = null;
+let respawnAttempts = 0;
+let backendStartedAt = 0;
+let unresponsivePrompt = false;
+let rendererCrashes = [];
+
+const RESPAWN_MIN_DELAY_MS = 1_000;
+const RESPAWN_MAX_DELAY_MS = 30_000;
+// A backend that stayed up this long counts as healthy again: its next exit
+// starts the backoff over.
+const RESPAWN_HEALTHY_MS = 60_000;
+// Consecutive failed starts after which the app gives up and says so.
+const RESPAWN_MAX_ATTEMPTS = 6;
+// Renderer crashes within this window that are reloaded before giving up.
+const RENDERER_CRASH_WINDOW_MS = 60_000;
+const RENDERER_CRASH_LIMIT = 3;
 
 log.initialize();
 autoUpdater.logger = log;
@@ -99,18 +118,44 @@ function requestModule(url) {
   return new URL(url).protocol === "https:" ? https : http;
 }
 
-function waitForBackend(url) {
+// waitForBackend resolves once url answers. Given the child that is to
+// answer, it rejects as soon as that child exits or fails to start: a wait
+// must not outlive its process and be answered, or timed out, by the next one.
+function waitForBackend(url, child = null) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error) => {
+      if (settled) return;
+      settled = true;
+      if (child) {
+        child.removeListener("exit", onExit);
+        child.removeListener("error", onError);
+      }
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = (code, signal) =>
+      settle(new Error(`後端服務在回應前結束 (exit=${code ?? "unknown"}, signal=${signal ?? "none"})`));
+    const onError = (error) => settle(error);
+    if (child) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        onExit(child.exitCode, child.signalCode);
+        return;
+      }
+      child.once("exit", onExit);
+      child.once("error", onError);
+    }
     const probe = () => {
+      if (settled) return;
       if (Date.now() >= deadline) {
-        reject(new Error("後端服務啟動逾時"));
+        settle(new Error("後端服務啟動逾時"));
         return;
       }
       const request = requestModule(url).get(url, (response) => {
         response.resume();
         if (response.statusCode && response.statusCode < 500) {
-          resolve();
+          settle();
           return;
         }
         setTimeout(probe, 180);
@@ -139,26 +184,78 @@ async function startBackend() {
 
   const port = await reservePort();
   backendURL = `http://127.0.0.1:${port}`;
-  backend = spawn(
+  backendLaunch = { executable, workspace, port };
+  spawnBackend();
+  await waitForBackend(backendURL);
+}
+
+function spawnBackend() {
+  const { executable, workspace, port } = backendLaunch;
+  const child = spawn(
     executable,
     ["serve", "-project", workspace, "-port", String(port)],
     { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
   );
-  backend.stdout.on("data", (chunk) => log.info(String(chunk).trim()));
-  backend.stderr.on("data", (chunk) => log.info(String(chunk).trim()));
-  backend.once("exit", (code, signal) => {
-    backend = null;
-    if (!quitting) {
-      log.error("Nodevas backend stopped", { code, signal });
-      void dialog.showMessageBox({
-        type: "error",
-        title: "Nodevas 已停止",
-        message: "本機服務意外結束，請重新開啟應用程式。",
-        detail: `exit=${code ?? "unknown"}, signal=${signal ?? "none"}`,
-      });
-    }
+  backend = child;
+  backendStartedAt = Date.now();
+  child.stdout.on("data", (chunk) => log.info(String(chunk).trim()));
+  child.stderr.on("data", (chunk) => log.info(String(chunk).trim()));
+  let ended = false;
+  const onEnd = (code, signal) => {
+    if (ended) return;
+    ended = true;
+    if (backend === child) backend = null;
+    if (quitting) return;
+    log.error("Nodevas backend stopped", { code, signal });
+    scheduleBackendRespawn({ code, signal });
+  };
+  child.once("error", (error) => {
+    log.error("Nodevas backend could not start", error);
+    // A process that never started sends no exit; end it here instead.
+    if (child.pid === undefined) onEnd(null, null);
   });
-  await waitForBackend(backendURL);
+  child.once("exit", onEnd);
+  return child;
+}
+
+// The local service ended on its own (a crash, a fatal error): start it again
+// on the same port with a growing delay, and bring the page back once it
+// answers. Only after several starts in a row fail does the app give up and
+// say so, as it used to on the first exit.
+function scheduleBackendRespawn(exit) {
+  if (!backendLaunch || respawnTimer || quitting) return;
+  if (Date.now() - backendStartedAt > RESPAWN_HEALTHY_MS) respawnAttempts = 0;
+  respawnAttempts += 1;
+  if (respawnAttempts > RESPAWN_MAX_ATTEMPTS) {
+    void dialog.showMessageBox({
+      type: "error",
+      title: "Nodevas 已停止",
+      message: "本機服務意外結束，重新啟動也未成功，請重新開啟應用程式。",
+      detail: `exit=${exit.code ?? "unknown"}, signal=${exit.signal ?? "none"}`,
+    });
+    return;
+  }
+  const delay = Math.min(RESPAWN_MIN_DELAY_MS * 2 ** (respawnAttempts - 1), RESPAWN_MAX_DELAY_MS);
+  log.info("Restarting the Nodevas backend", { attempt: respawnAttempts, delay });
+  respawnTimer = setTimeout(async () => {
+    respawnTimer = null;
+    if (quitting) return;
+    let child = null;
+    try {
+      child = spawnBackend();
+      await waitForBackend(backendURL, child);
+      log.info("Nodevas backend is back");
+      if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(backendURL);
+    } catch (error) {
+      if (quitting) return;
+      // A child that exited (or never started) has already scheduled the
+      // next try from its exit handler; one still running that never
+      // answered is stopped, and its exit does the same. Anything else is
+      // not this attempt's to stop.
+      log.error("Nodevas backend did not come back", error);
+      if (child && backend === child) void stopBackend();
+    }
+  }, delay);
 }
 
 function backendRequest(method, pathname, body) {
@@ -293,6 +390,10 @@ async function promptForInitialWorkspace() {
 }
 
 function stopBackend() {
+  if (respawnTimer) {
+    clearTimeout(respawnTimer);
+    respawnTimer = null;
+  }
   if (backendStopPromise) return backendStopPromise;
   if (!backend) return Promise.resolve();
   const processToStop = backend;
@@ -343,7 +444,79 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+  watchRenderer(mainWindow);
   void mainWindow.loadURL(backendURL);
+}
+
+// The page itself can fail too: the renderer process crashing or being
+// killed, a page stuck in a loop, or the backend not answering a load. Each
+// gets a way back instead of a blank or frozen window.
+function watchRenderer(window) {
+  const contents = window.webContents;
+  contents.on("render-process-gone", (_event, details) => {
+    log.error("Renderer process gone", details);
+    if (quitting || window.isDestroyed() || details.reason === "clean-exit") return;
+    const now = Date.now();
+    rendererCrashes = rendererCrashes.filter((at) => now - at < RENDERER_CRASH_WINDOW_MS);
+    rendererCrashes.push(now);
+    if (rendererCrashes.length > RENDERER_CRASH_LIMIT) {
+      void dialog.showMessageBox(window, {
+        type: "error",
+        title: "Nodevas 畫面異常",
+        message: "畫面短時間內多次結束，已停止自動重新載入。",
+        detail: `reason=${details.reason}, exitCode=${details.exitCode}`,
+      });
+      return;
+    }
+    contents.reload();
+  });
+  contents.on("unresponsive", async () => {
+    log.warn("Renderer unresponsive");
+    if (unresponsivePrompt || window.isDestroyed()) return;
+    unresponsivePrompt = true;
+    try {
+      const answer = await dialog.showMessageBox(window, {
+        type: "warning",
+        buttons: ["重新載入", "繼續等待"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "Nodevas 沒有回應",
+        message: "畫面目前沒有回應。要重新載入嗎？",
+      });
+      if (answer.response === 0 && !window.isDestroyed()) contents.reload();
+    } finally {
+      unresponsivePrompt = false;
+    }
+  });
+  contents.on("responsive", () => log.info("Renderer responsive again"));
+  contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // -3 is ERR_ABORTED: a navigation replaced by another, not a failure.
+    if (!isMainFrame || errorCode === -3 || window.isDestroyed()) return;
+    log.warn("Page failed to load", { errorCode, errorDescription, url: validatedURL });
+    void contents.loadURL(retryPageURL(errorDescription));
+  });
+}
+
+function escapeHTML(text) {
+  return String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+// A minimal local page for a load that failed: it says so and tries the
+// backend again every few seconds, or at once on the link.
+function retryPageURL(reason) {
+  const target = escapeHTML(backendURL);
+  const html = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="5;url=${target}">
+<title>Nodevas</title>
+<style>body{margin:0;display:grid;place-items:center;height:100vh;background:#10171c;color:#d8e1e8;
+font:14px system-ui,sans-serif}main{max-width:420px;padding:24px;text-align:center}
+h1{font-size:18px}a{color:#7cc4d4}small{color:#8a97a3}</style></head><body><main>
+<h1>正在連線到 Nodevas…</h1>
+<p>本機服務暫時沒有回應，每 5 秒會自動重試。</p>
+<p><a href="${target}">立即重試</a></p>
+<small>${escapeHTML(reason || "")}</small>
+</main></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 // The renderer only shows the configured Nodevas backend; it has no need for camera,

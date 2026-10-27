@@ -14,6 +14,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 // Step-up (W6): a signed-in person re-proves, with a fresh mailed passcode,
@@ -132,7 +133,7 @@ func (a *API) postStepUpRequest(c *gin.Context) {
 	// Like a sign-in passcode's: the row now, the line once the relay has
 	// answered.
 	sent := a.recordAuthLater(c, requested)
-	go a.deliverStepUp(challenge, sent)
+	safego.Go("step-up mail", func() { a.deliverStepUp(challenge, sent) })
 	c.JSON(http.StatusAccepted, map[string]any{"ok": true, "method": auth.StepUpMethodEmail})
 }
 

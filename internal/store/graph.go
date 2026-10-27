@@ -47,6 +47,7 @@ func (s *Store) loadGraphLocked() (*engine.Graph, string, error) {
 func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	engine.NormalizeLogicGates(g)
 	if err := ValidateGraphForStorage(g); err != nil {
 		return "", err
 	}

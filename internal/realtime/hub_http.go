@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"nodevas/internal/auth"
+	"nodevas/internal/safego"
 	"strings"
 	"time"
 
@@ -65,7 +66,17 @@ func (h *Hub) Handle(c *gin.Context) {
 	h.conns[client] = struct{}{}
 	h.mu.Unlock()
 	reserved = false // remove now owns and releases the reserved capacity.
-	go h.writeLoop(client)
+	go func() {
+		// A writer that panicked leaves nothing draining the client's queue:
+		// drop the client, and the browser reconnects.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				safego.LogPanic("websocket writer", recovered)
+				h.remove(client)
+			}
+		}()
+		h.writeLoop(client)
+	}()
 
 	h.sendTo(client, Event{Type: "hello", SelfID: client.id, Actor: &client.actor})
 

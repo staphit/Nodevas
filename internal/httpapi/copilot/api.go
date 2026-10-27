@@ -14,6 +14,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -201,6 +202,9 @@ func (a *API) postTurn(c *gin.Context) {
 	}
 	stream := newEventStream(c)
 	stopHeartbeat := stream.heartbeat(heartbeatEvery)
+	// Deferred as well as called below: a Turn that panics (recovered by the
+	// router) must not leave the ticker writing into a finished response.
+	defer stopHeartbeat()
 	err := a.service.Turn(c.Request.Context(), copilot.TurnRequest{
 		Actor:          auth.ActorFrom(c.Request),
 		ConversationID: c.Param("id"),
@@ -239,11 +243,20 @@ func newEventStream(c *gin.Context) *eventStream {
 
 // heartbeat pings the stream until the returned func is called. It only
 // writes once the turn has started, so turn_started stays the first line.
+// The returned func may be called more than once.
 func (s *eventStream) heartbeat(every time.Duration) func() {
 	done := make(chan struct{})
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
+		// A panic here would take the whole server down with it: nothing
+		// above a bare goroutine recovers. Losing the pings is the lesser harm.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				slog.Error("copilot heartbeat panicked",
+					slog.Any("panic", recovered), slog.String("stack", string(debug.Stack())))
+			}
+		}()
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
@@ -260,9 +273,12 @@ func (s *eventStream) heartbeat(every time.Duration) func() {
 			}
 		}
 	}()
+	var once sync.Once
 	return func() {
-		close(done)
-		<-finished
+		once.Do(func() {
+			close(done)
+			<-finished
+		})
 	}
 }
 

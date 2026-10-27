@@ -118,6 +118,18 @@ describe("switchProject", () => {
     expect(useApp.getState().tabs[0].content).toBe("newer text");
   });
 
+  it("reads null project and workspace lists as empty", async () => {
+    vi.mocked(api.getProjects).mockResolvedValue({
+      workspace: "/tmp",
+      workspaces: null,
+      active: "",
+      projects: null,
+    } as unknown as Awaited<ReturnType<typeof api.getProjects>>);
+    await useApp.getState().refreshProjects();
+    expect(useApp.getState().projects).toEqual([]);
+    expect(useApp.getState().workspaces).toEqual([]);
+  });
+
   it("keeps a member's selection when the catalog reports the shared project", async () => {
     vi.mocked(api.openProject).mockRejectedValue(new AuthError(403, "admin required"));
     vi.mocked(api.getProjects).mockResolvedValue({ workspace: "/tmp", workspaces: [], active: "p1", projects: [] });

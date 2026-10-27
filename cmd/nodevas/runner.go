@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"nodevas/internal/agenthook"
@@ -19,6 +17,8 @@ import (
 	"nodevas/internal/runner"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
+
+	"golang.org/x/term"
 )
 
 // runnerCommands is how `nodevas runner` looks at this machine; tests swap it.
@@ -217,7 +217,7 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if cfg.Hub == "" || cfg.Token == "" {
 		return fmt.Errorf("not logged in (%s): run nodevas runner login --hub <url> first", path)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := runnerStopContext()
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
@@ -742,7 +742,10 @@ func stdinIsTerminal(r io.Reader) bool {
 	return ok && isTerminal(f)
 }
 
+// isTerminal reports whether f is a terminal (a console on Windows). A
+// character device is not enough: NUL and /dev/null are character devices,
+// and they are what Electron's ignored stdio and systemd's StandardInput=null
+// hand serve, which must then stop on the first Ctrl+C.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return f != nil && term.IsTerminal(int(f.Fd()))
 }

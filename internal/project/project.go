@@ -117,12 +117,21 @@ type ProjectManager struct {
 	remote bool
 }
 
-func NewProjectManager(workspace string, hub *realtime.Hub) (*ProjectManager, error) {
+// DefaultCatalogRoot is where NewProjectManager keeps the workspace catalog,
+// secrets and the serve log: nodevas under the user config directory.
+func DefaultCatalogRoot() (string, error) {
 	configRoot, err := os.UserConfigDir()
 	if err != nil {
-		return nil, fmt.Errorf("user config directory: %w", err)
+		return "", fmt.Errorf("user config directory: %w", err)
 	}
-	catalogRoot := filepath.Join(configRoot, "nodevas")
+	return filepath.Join(configRoot, "nodevas"), nil
+}
+
+func NewProjectManager(workspace string, hub *realtime.Hub) (*ProjectManager, error) {
+	catalogRoot, err := DefaultCatalogRoot()
+	if err != nil {
+		return nil, err
+	}
 	return NewManagerAt(
 		workspace,
 		hub,

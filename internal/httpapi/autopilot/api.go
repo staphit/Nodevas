@@ -140,11 +140,19 @@ func (a *API) latest(c *gin.Context) {
 		return
 	}
 	view, err := a.o.Latest(c.Request.Context(), name, goal)
+	c.Header("Cache-Control", "no-store")
+	// A goal that never had an autopilot is the ordinary answer, not a
+	// missing resource: null, so the browser does not log a failed request
+	// for every goal it looks at. An unknown id under /api/autopilot/:id is
+	// still a 404.
+	if errors.Is(err, ap.ErrNotFound) {
+		c.JSON(http.StatusOK, nil)
+		return
+	}
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, view)
 }
 

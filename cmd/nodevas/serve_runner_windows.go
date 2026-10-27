@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"unsafe"
 
@@ -42,3 +43,7 @@ func tieToServe(cmd *exec.Cmd) {
 	}
 	// The job handle is never closed: it lives exactly as long as serve.
 }
+
+// watchServeParent: the job object (tieToServe) already ends the runner with
+// serve.
+func watchServeParent(context.Context, context.CancelFunc) {}

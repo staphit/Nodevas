@@ -35,6 +35,7 @@ import (
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 // Terminal socket timings and input limits. Variables so tests can shorten
@@ -160,8 +161,8 @@ func (a *API) terminal(c *gin.Context) {
 	var typed int64
 	defer func() { audit("run.terminal.detach", map[string]any{"canType": canType, "inputBytes": typed}) }()
 
-	go a.termWriter(ctx, cancel, conn, viewer)
-	go termRecheckLoop(ctx, c.Request, conn)
+	safego.Go("terminal writer", func() { a.termWriter(ctx, cancel, conn, viewer) })
+	safego.Go("terminal recheck", func() { termRecheckLoop(ctx, c.Request, conn) })
 
 	input := newBucket(termInputRate, termInputBurst)
 	for {

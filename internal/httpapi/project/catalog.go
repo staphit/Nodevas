@@ -180,7 +180,8 @@ func (a *API) GetProjects(c *gin.Context) {
 	if perAccount {
 		current = a.currentName(c.Request)
 	}
-	visible := projects[:0]
+	// A fresh slice, never nil: "projects" is always a JSON array.
+	visible := make([]project.ProjectInfo, 0, len(projects))
 	for _, p := range projects {
 		// A project the caller may not read is not listed at all; its
 		// folder still is, as a plain directory in the tree.
@@ -197,6 +198,9 @@ func (a *API) GetProjects(c *gin.Context) {
 	if err != nil {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
+	}
+	if workspaces == nil {
+		workspaces = []project.WorkspaceInfo{}
 	}
 	// Host paths are implementation details, not workspace identifiers. A
 	// remote account is scoped to the active workspace and must not learn what

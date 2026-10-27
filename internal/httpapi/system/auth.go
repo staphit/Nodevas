@@ -11,6 +11,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/logging"
+	"nodevas/internal/safego"
 	"strings"
 	"time"
 
@@ -232,7 +233,7 @@ func (a *API) postRequestOTP(c *gin.Context) {
 		// registered it, however the person at the door chose to type it.
 		// The row is written now; the line once the relay has answered.
 		sent := a.recordAuthLater(c, requested)
-		go a.deliverPasscode(challenge, sent)
+		safego.Go("passcode mail", func() { a.deliverPasscode(challenge, sent) })
 	}
 	// Unknown address, malformed address, or a passcode that could not be
 	// generated: none of these are the client's business, and a delivered one

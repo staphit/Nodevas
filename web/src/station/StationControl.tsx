@@ -5,7 +5,7 @@
 // is and keeps its actions in one ⋯ menu; the header's view menu swaps the
 // list for the war room or the boss map.
 
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { runCancellable, runFinal, type AutopilotView, type Run } from "../api";
 import { AutopilotStatusChip } from "../autopilot/AutopilotPanel";
@@ -34,6 +34,7 @@ import { openNodeRuns } from "../runs/openRuns";
 import { formatCompact, formatCost, totalTokens } from "../runs/runFormat";
 import { useRuns } from "../runs/runStore";
 import { openSettings } from "../settings/openSettings";
+import { lazyWithRetry } from "../lazyWithRetry";
 import { reportError, useApp } from "../store";
 import {
   canSteer,
@@ -50,7 +51,7 @@ import { useControl } from "./controlStore";
 import { StationMenu, type StationMenuItem } from "./StationMenu";
 import { useStation } from "./stationStore";
 
-const GameStage = lazy(() => import("../game/GameStage"));
+const GameStage = lazyWithRetry(() => import("../game/GameStage"));
 
 /** Now, again every `ms` while mounted: the elapsed column counts up. */
 function useNow(ms: number): number {

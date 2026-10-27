@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -17,3 +18,6 @@ func endWithServe(cmd *exec.Cmd) {
 }
 
 func tieToServe(*exec.Cmd) {}
+
+// watchServeParent: Pdeathsig (endWithServe) already ends the runner with serve.
+func watchServeParent(context.Context, context.CancelFunc) {}

@@ -605,7 +605,7 @@ func WriteMetaFile(path string, data []byte) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameWithRetry(func() error { return os.Rename(tmp, path) }); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

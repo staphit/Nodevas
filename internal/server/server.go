@@ -23,6 +23,7 @@ import (
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 	"nodevas/internal/store"
 	"nodevas/internal/usage"
 	"path/filepath"
@@ -189,11 +190,13 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		}
 		s.hub.BroadcastRoom(projectRoot, "agents-changed", "")
 	})
-	go s.notifier.Run(s.stop)
+	// Background loops are restarted after a panic rather than taking the
+	// server down with them (internal/safego).
+	safego.LoopUntil(s.stop, "notifier", func() { s.notifier.Run(s.stop) })
 	// The backup loop touches the workspace immediately at startup, so it only
 	// runs with a real project manager (a static-only server passes nil).
 	if pm != nil {
-		go s.remotes.RunBackupLoop(s.stop)
+		safego.LoopUntil(s.stop, "backup loop", func() { s.remotes.RunBackupLoop(s.stop) })
 	}
 	if hub != nil && pm != nil {
 		// Change events go to the clients watching that project, not to every
@@ -303,7 +306,7 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		<-s.stop
 		stopRetries()
 	}()
-	go s.runs.RunRetries(retries, runs.RetryInterval)
+	safego.Loop(retries, "run retries", func(ctx context.Context) { s.runs.RunRetries(ctx, runs.RetryInterval) })
 	s.llm = runners.NewLLMRelay(s.runners)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through

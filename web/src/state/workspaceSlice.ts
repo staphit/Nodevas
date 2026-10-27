@@ -62,11 +62,13 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
   refreshProjects: () =>
     coalesceRequest("projects", async () => {
       const p = await api.getProjects();
+      // An older server, or one with nothing to list, sent null for the
+      // lists; the explorer and the top bar iterate them unchecked.
       set({
         workspace: p.workspace,
-        workspaces: p.workspaces,
+        workspaces: p.workspaces ?? [],
         activeProject: getProjectOverride() || p.active,
-        projects: p.projects,
+        projects: p.projects ?? [],
       });
       // The manual order belongs to the workspace the list just came from, so it
       // is refreshed with the list rather than on its own schedule. A workspace

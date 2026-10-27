@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/safego"
 )
 
 // Watch monitors the project directory and broadcasts change events for
@@ -56,7 +57,10 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 	// Debounce: editors fire several events per save.
 	pending := map[string]time.Time{}
 
-	go func() {
+	// A panic in an event's handling is logged and the loop starts again
+	// (safego); it ends for good when Close closes the watcher's channels.
+	// There is no stop channel of its own, hence nil.
+	safego.LoopUntil(nil, "file watcher "+root, func() {
 		ticker := time.NewTicker(150 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -101,7 +105,7 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 				}
 			}
 		}
-	}()
+	})
 	return w.Close, nil
 }
 

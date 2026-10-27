@@ -105,7 +105,10 @@ describe("dependency blocking", () => {
     expect(analyze(graph, { a: IDEA.id }).overdue.has("a")).toBe(false);
     const blocking = chain([IDEA]);
     blocking.ui!.plans = { a: [{ status: "done", date: "2025-01-01" }] };
-    expect(analyze(blocking, { a: IDEA.id }).overdue.has("a")).toBe(true);
+    // As data: the panel words it in the reader's language.
+    expect(analyze(blocking, { a: IDEA.id }).overdue.get("a")).toEqual([
+      { kind: "deadline", date: "2025-01-01" },
+    ]);
   });
 
   it.each(gateTruthTable.cases)(
@@ -175,7 +178,7 @@ describe("dependency blocking", () => {
       target: "in_progress",
     });
     expect(analysis.blocked.get("target")).toEqual(["a", "b"]);
-    expect(analysis.violations[0]?.message).toContain("XOR 條件不成立");
+    expect(analysis.violations[0]?.reason).toEqual({ kind: "gate-false", operator: "xor" });
   });
 
   it("blocks an unwired gate without inventing a node id", () => {
@@ -201,7 +204,7 @@ describe("dependency blocking", () => {
     expect(analysis.blocked.get("target")).toEqual([]);
     expect(analysis.blocking.size).toBe(0);
     expect(analysis.violations[0]?.sourceIds).toEqual([]);
-    expect(analysis.violations[0]?.message).toContain("AND 尚未接妥");
+    expect(analysis.violations[0]?.reason).toEqual({ kind: "gate-incomplete", operator: "and" });
   });
 
   it.each(requiresTruthTable.cases)(

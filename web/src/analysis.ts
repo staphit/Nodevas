@@ -18,11 +18,30 @@ export interface DependencyViolation {
   nodeId: string;
   sourceIds: string[];
   kind: "actual" | "schedule";
-  message: string;
+  /** Why, as data: the panel words it in the reader's language. */
+  reason: ViolationReason;
+}
+
+/**
+ * Why a started node breaks its dependencies. The unmet nodes are the
+ * violation's sourceIds.
+ */
+export type ViolationReason =
+  | { kind: "gate-incomplete"; operator: string }
+  | { kind: "gate-false"; operator: string }
+  | { kind: "requires-invalid" }
+  | { kind: "requires-false" }
+  | { kind: "requires-pending" }
+  | { kind: "schedule"; date: string };
+
+/** A plan milestone that has passed: the planned start, progress or deadline. */
+export interface OverdueReason {
+  kind: "start" | "progress" | "deadline";
+  date: string;
 }
 
 export interface GraphAnalysis {
-  overdue: Map<string, string[]>;
+  overdue: Map<string, OverdueReason[]>;
   violations: DependencyViolation[];
   blocked: Map<string, string[]>;
   blocking: Map<string, string[]>;
@@ -245,24 +264,24 @@ export function analyzeGraph(
   for (const node of nodes) {
     const status = statuses[node.id] ?? "ready";
     const plans = graph.ui?.plans?.[node.id];
-    const messages: string[] = [];
+    const reasons: OverdueReason[] = [];
     const start = milestone(plans, "started");
     const progress = milestone(plans, "in_progress");
     const finish = milestone(plans, "done");
     if (start && start < today && (status === "ready" || status === "locked")) {
-      messages.push(`開始日 ${start}，目前仍未開始`);
+      reasons.push({ kind: "start", date: start });
     }
     if (
       progress &&
       progress < today &&
       !(new Set<Status>(["in_progress", "failed"]).has(status) || settled(status))
     ) {
-      messages.push(`預計 ${progress} 進行，目前尚未進入進行中`);
+      reasons.push({ kind: "progress", date: progress });
     }
     if (finish && finish < today && !settled(status)) {
-      messages.push(`死線 ${finish}，目前尚未完成`);
+      reasons.push({ kind: "deadline", date: finish });
     }
-    if (messages.length) result.overdue.set(node.id, messages);
+    if (reasons.length) result.overdue.set(node.id, reasons);
   }
 
   // A relation gate states what its edges mean, not when its output may run,
@@ -305,19 +324,15 @@ export function analyzeGraph(
         nodeId: node.id,
         sourceIds: unsatisfied,
         kind: "actual",
-        message: gateIncomplete
-          ? `已開始，但邏輯閘 ${gate!.operator.toUpperCase()} 尚未接妥`
+        reason: gateIncomplete
+          ? { kind: "gate-incomplete", operator: gate!.operator }
           : gateConditionFalse
-            ? `已開始，但邏輯閘 ${gate!.operator.toUpperCase()} 條件不成立：${unsatisfied
-                .map((id) => byId.get(id)?.title || id)
-                .join("、")}`
+            ? { kind: "gate-false", operator: gate!.operator }
             : !condition.ok
-              ? "已開始，但前置條件語法無法解析"
+              ? { kind: "requires-invalid" }
               : unsatisfied.length === 0
-                ? "已開始，但前置條件不成立"
-                : `已開始，但前置條件尚未完成：${unsatisfied
-                    .map((id) => byId.get(id)?.title || id)
-                    .join("、")}`,
+                ? { kind: "requires-false" }
+                : { kind: "requires-pending" },
       });
     }
 
@@ -335,7 +350,7 @@ export function analyzeGraph(
         nodeId: node.id,
         sourceIds: lateParents,
         kind: "schedule",
-        message: `預計開始日 ${targetStart} 早於必要前置節點的預計完成日`,
+        reason: { kind: "schedule", date: targetStart },
       });
     }
   }

@@ -1294,3 +1294,68 @@ header.topbar {
     min-height: 44px;
   }
 }
+
+/* A view that crashed or whose chunk failed to load (ViewErrorBoundary). */
+.view-error {
+  flex: 1;
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 24px;
+  color: var(--text);
+}
+.view-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.view-error p {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.view-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.view-error-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.view-error details {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.view-error pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A floating panel or dialog that crashed (ViewErrorBoundary compact): a
+   small notice in the corner, not a page-sized panel. */
+.view-error-compact {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 4px 16px var(--shadow);
+}
+.view-error-compact span {
+  flex: 1;
+}
+.view-error-compact .view-error-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+}

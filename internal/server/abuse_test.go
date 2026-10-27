@@ -849,3 +849,62 @@ func BenchmarkAbuseLimiterAllowRouteParallel(b *testing.B) {
 		}
 	})
 }
+
+// The local user of a standalone hub, straight from this machine, is not held
+// to the per-actor read limit; writes, proxied requests and a hub with
+// accounts still are.
+func TestDirectLoopbackLocalActorSkipsReadActorLimit(t *testing.T) {
+	t.Parallel()
+
+	newRouter := func(authn auth.Authenticator) *gin.Engine {
+		guard := newAbuseGuardWithOptions(AbuseGuardOptions{
+			ReadGlobalRate: 1000, ReadGlobalBurst: 1000,
+			ReadIPRate: 1000, ReadIPBurst: 1000,
+			ReadActorRate: 0.001, ReadActorBurst: 2,
+			WriteGlobalRate: 1000, WriteGlobalBurst: 1000,
+			WriteIPRate: 1000, WriteIPBurst: 1000,
+			WriteActorRate: 0.001, WriteActorBurst: 2,
+		})
+		srv := &Server{abuse: guard, auth: authn}
+		gin.SetMode(gin.ReleaseMode)
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Request = c.Request.WithContext(auth.WithActor(c.Request.Context(), identity.Local))
+			c.Next()
+		})
+		router.Use(srv.withAbuseLimits)
+		router.GET("/api/state", func(c *gin.Context) { c.Status(http.StatusOK) })
+		router.POST("/api/state", func(c *gin.Context) { c.Status(http.StatusOK) })
+		return router
+	}
+	count429 := func(router *gin.Engine, method string, proxied bool) int {
+		rejected := 0
+		for range 5 {
+			request := httptest.NewRequest(method, "/api/state", nil)
+			request.RemoteAddr = "127.0.0.1:50000"
+			if proxied {
+				request.Header.Set("X-Forwarded-For", "203.0.113.9")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code == http.StatusTooManyRequests {
+				rejected++
+			}
+		}
+		return rejected
+	}
+
+	local := newRouter(auth.LocalOnly{})
+	if got := count429(local, http.MethodGet, false); got != 0 {
+		t.Fatalf("direct loopback reads rejected %d times, want 0", got)
+	}
+	if got := count429(newRouter(auth.LocalOnly{}), http.MethodPost, false); got == 0 {
+		t.Fatal("direct loopback writes were not held to the per-actor limit")
+	}
+	if got := count429(newRouter(auth.LocalOnly{}), http.MethodGet, true); got == 0 {
+		t.Fatal("proxied reads were not held to the per-actor limit")
+	}
+	if got := count429(newRouter(auth.NewSessionAuth(nil)), http.MethodGet, false); got == 0 {
+		t.Fatal("a hub with accounts skipped the per-actor read limit")
+	}
+}
