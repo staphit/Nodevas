@@ -107,6 +107,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   tabs: [],
   activeTab: null,
   pageDocs: {},
+  nodeDiskChanges: {},
 
   setPageDoc: (key, next) => {
     set((state) => {
@@ -418,6 +419,11 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   // Dirty tab: flag it — never clobber unsaved edits. The event names the node,
   // not the file, so the subpage open on it (if any) is checked the same way.
   notifyDiskChange: async (id) => {
+    // The subpage list is not one of the files compared below: a page added,
+    // renamed or removed elsewhere only shows up when the list is read again.
+    set((state) => ({
+      nodeDiskChanges: { ...state.nodeDiskChanges, [id]: (state.nodeDiskChanges[id] ?? 0) + 1 },
+    }));
     // The hub broadcasts before it answers the PUT, so our own echo usually
     // arrives mid-save. Judged then, it looks foreign (the revision it wrote
     // is not known yet), and the revision remembered afterwards is never

@@ -220,6 +220,12 @@ export interface DocumentSlice {
   activeTab: string | null; // null = drawer closed
   /** Retained subpage buffers, keyed by node within the current project. */
   pageDocs: Record<string, PageDoc>;
+  /**
+   * Counts the outside changes announced for each node (its document, its
+   * subpages or their list), so a view that read something once — the
+   * subpage tabs — knows to read it again.
+   */
+  nodeDiskChanges: Record<string, number>;
   setPageDoc: (
     key: string,
     next: PageDoc | null | ((current: PageDoc | null) => PageDoc | null),
