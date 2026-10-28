@@ -8,12 +8,17 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"nodevas/internal/store"
 )
 
 // ErrUnknownExample is returned for an example name the binary does not carry.
 var ErrUnknownExample = errors.New("unknown example")
+
+// exampleNow is the clock an example's dates are moved to. A var so tests can
+// pin today.
+var exampleNow = time.Now
 
 // maxExampleNameTries bounds the "-2", "-3", … search for a free name, so a
 // workspace full of copies fails with a message instead of looping.
