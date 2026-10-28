@@ -555,6 +555,38 @@ describe("LaneView", () => {
       expect(inner.style.zoom).toBe("1.3");
     });
 
+    it("opens an empty board on its empty-state hint", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(1280, 800);
+      useApp.setState({ graph: graph([]) });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      const board = container.querySelector<HTMLElement>(".board")!;
+      const inner = container.querySelector<HTMLElement>(".board-inner")!;
+      const zoom = Number(inner.style.zoom);
+      // What the opening scroll shows, in the board's own units.
+      const view = {
+        left: board.scrollLeft / zoom,
+        top: board.scrollTop / zoom,
+        right: (board.scrollLeft + 1280) / zoom,
+        bottom: (board.scrollTop + 800) / zoom,
+      };
+      expect(view.left).toBeGreaterThan(0);
+
+      const hint = screen.getByText("尚無節點").closest<HTMLElement>(".ui-empty-state")!;
+      // jsdom has no layout, so the hint's place is read off the inline
+      // offsets of everything between it and the board surface.
+      let left = 0;
+      let top = 0;
+      for (let el: HTMLElement | null = hint; el && el !== inner; el = el.parentElement) {
+        left += parseFloat(el.style.left || "0");
+        top += parseFloat(el.style.top || "0");
+      }
+      expect(left).toBeGreaterThanOrEqual(view.left);
+      expect(left).toBeLessThan(view.right);
+      expect(top).toBeGreaterThanOrEqual(view.top);
+      expect(top).toBeLessThan(view.bottom);
+    });
+
     it("leaves the opening zoom alone on a desktop", () => {
       mockNarrowViewport(false);
       mockBoardSize(1280, 800);
