@@ -5457,7 +5457,7 @@ const messages: Record<Language, MessageCatalog> = {
     "agents.emptyMessages": "尚無 Agent 訊息。",
     "agents.reply": "回覆",
     "agents.to": "收件者",
-    "agents.broadcastAll": "所有 Agent (*)",
+    "agents.broadcastAll": "所有 Agent（*）",
     "agents.placeholder": "傳送訊息給 Agent…（Enter 送出）",
     "agents.send": "送出訊息",
     "agents.ask.section": "等待人工確認",
