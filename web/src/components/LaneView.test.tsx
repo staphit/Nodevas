@@ -626,6 +626,49 @@ describe("LaneView", () => {
       expect(board.scrollTop).toBe(900);
     });
 
+    // The project menu swaps the project under a board that stays mounted, so
+    // the per-project memory has to apply on the switch too, not only on mount.
+    it("switches the zoom with the project when the board stays mounted", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(1280, 800);
+      const project = useApp.getState().activeProject;
+      act(() => useApp.setState({ activeProject: "in-place-first" }));
+      try {
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        const board = container.querySelector<HTMLElement>(".board")!;
+        const inner = () => container.querySelector<HTMLElement>(".board-inner")!.style.zoom;
+        const opening = { left: board.scrollLeft, top: board.scrollTop };
+        fireEvent.wheel(board, { altKey: true, deltaY: 100 });
+        const firstZoom = inner();
+        expect(firstZoom).not.toBe("1");
+        board.scrollLeft = 1700;
+        board.scrollTop = 900;
+        fireEvent.scroll(board);
+
+        // A project this session has not shown opens at 100% on the opening scroll.
+        act(() => useApp.setState({ activeProject: "in-place-second" }));
+        expect(inner()).toBe("1");
+        expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual(opening);
+        fireEvent.wheel(board, { altKey: true, deltaY: -100 });
+        const secondZoom = inner();
+        expect(secondZoom).not.toBe("1");
+        expect(secondZoom).not.toBe(firstZoom);
+
+        // Back to the first: its own zoom and the scroll it was left at.
+        act(() => useApp.setState({ activeProject: "in-place-first" }));
+        expect(inner()).toBe(firstZoom);
+        expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual({
+          left: 1700,
+          top: 900,
+        });
+
+        act(() => useApp.setState({ activeProject: "in-place-second" }));
+        expect(inner()).toBe(secondZoom);
+      } finally {
+        act(() => useApp.setState({ activeProject: project }));
+      }
+    });
+
     it("does not refit a phone's board it has already fitted", () => {
       mockNarrowViewport(true);
       mockBoardSize(390, 700);
