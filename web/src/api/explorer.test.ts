@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExplorerError, explorerApi, repoUrl } from "./explorer";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  explorerApi.forgetRepoReads();
+  vi.restoreAllMocks();
+});
 
 function mockFetch(body: unknown, status = 200) {
   return vi

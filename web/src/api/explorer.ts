@@ -231,6 +231,8 @@ export const explorerApi = {
     ),
   repoDiff: (runnerId: string, repoId: string, ref: string): Promise<RepoDiff> =>
     get<RepoDiff>(repoUrl(runnerId, repoId, `git/diff?ref=${q(ref)}`)),
+  /** Drops remembered repo reads (stub: the green phase fills this in). */
+  forgetRepoReads: (): void => {},
   agents: (): Promise<AgentsResponse> =>
     get<AgentsResponse>("/api/explorer/agents").then((r) => ({
       live: arr(r.live),

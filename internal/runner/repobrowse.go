@@ -40,7 +40,14 @@ var repoLimiter = struct {
 	recent []time.Time
 }{}
 
-func acquireRepoSlot() bool {
+func acquireRepoSlot(context.Context) error {
+	if !tryRepoSlot() {
+		return refuseRepo(runnerwire.RepoErrBusy, "too many repo requests; try again shortly")
+	}
+	return nil
+}
+
+func tryRepoSlot() bool {
 	repoLimiter.Lock()
 	defer repoLimiter.Unlock()
 	now := time.Now()
@@ -95,8 +102,8 @@ func BrowseRepo(ctx context.Context, cfg *Config, ownerID string, req runnerwire
 	if err != nil {
 		return fail(err)
 	}
-	if !acquireRepoSlot() {
-		return fail(refuseRepo(runnerwire.RepoErrBusy, "too many repo requests; try again shortly"))
+	if err := acquireRepoSlot(ctx); err != nil {
+		return fail(err)
 	}
 	defer releaseRepoSlot()
 	switch req.Op {

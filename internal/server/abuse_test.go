@@ -183,7 +183,6 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodPost, "/api/remote/sync/flush", ClassHeavy, 2.0},
 
 		// Expensive routes
-		{http.MethodGet, "/api/search", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/validate", ClassExpensive, 2.0},
 		{http.MethodPost, "/api/dsl/check", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/history/version", ClassExpensive, 2.0},
@@ -194,6 +193,14 @@ func TestRouteClassificationCompleteness(t *testing.T) {
 		{http.MethodGet, "/api/audit", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/audit/health", ClassExpensive, 2.0},
 		{http.MethodGet, "/api/remote/list", ClassExpensive, 2.0},
+
+		// Reads a person does by clicking and typing: the read class, never
+		// the expensive one an export or a restore shares.
+		{http.MethodGet, "/api/search", ClassRead, 1.0},
+		{http.MethodGet, "/api/explorer/repos/runner-1/r1/tree", ClassRead, 1.0},
+		{http.MethodGet, "/api/explorer/repos/runner-1/r1/file", ClassRead, 1.0},
+		{http.MethodGet, "/api/explorer/repos/runner-1/r1/git/status", ClassRead, 1.0},
+		{http.MethodGet, "/api/explorer/repos/runner-1/r1/git/diff", ClassRead, 1.0},
 
 		// Regular writes
 		{http.MethodPut, "/api/graph", ClassWrite, 1.0},
