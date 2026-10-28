@@ -831,3 +831,24 @@ func TestAnEmptySessionSurvivesAReloadAndNotAnAbandonment(t *testing.T) {
 		t.Fatalf("an abandoned session was kept: %d remain", remaining)
 	}
 }
+
+// ConnectionCount is the live sockets /api/metrics reports.
+func TestConnectionCountFollowsTheSockets(t *testing.T) {
+	var none *Hub
+	if got := none.ConnectionCount(); got != 0 {
+		t.Fatalf("a nil hub counts %d connections", got)
+	}
+	hub := NewHub()
+	if got := hub.ConnectionCount(); got != 0 {
+		t.Fatalf("a new hub counts %d connections", got)
+	}
+	first := docClient(hub, "aaa", identity.RoleMember)
+	docClient(hub, "bbb", identity.RoleMember)
+	if got := hub.ConnectionCount(); got != 2 {
+		t.Fatalf("two clients counted as %d", got)
+	}
+	hub.remove(first)
+	if got := hub.ConnectionCount(); got != 1 {
+		t.Fatalf("after one left, %d connections", got)
+	}
+}

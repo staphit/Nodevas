@@ -110,10 +110,18 @@ func TestMetricsAreForAdminsOrLoopback(t *testing.T) {
 		Limiter struct {
 			RejectedByClass map[string]int64 `json:"rejected_by_class"`
 		} `json:"limiter"`
-		Runs map[string]int64 `json:"runs"`
+		Runs     map[string]int64 `json:"runs"`
+		Realtime *struct {
+			Connections *int `json:"connections"`
+		} `json:"realtime"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &metrics); err != nil {
 		t.Fatalf("metrics body %s: %v", response.Body, err)
+	}
+	// The live websockets are the number an operator watches for a leak
+	// or a reconnect storm.
+	if metrics.Realtime == nil || metrics.Realtime.Connections == nil || *metrics.Realtime.Connections != 0 {
+		t.Fatalf("metrics = %s, want realtime.connections = 0 on a hub nobody is connected to", response.Body)
 	}
 	for _, pool := range []string{"write", "read"} {
 		if stats, ok := metrics.DB[pool]; !ok || stats.Open == nil || stats.MaxOpen == nil {
