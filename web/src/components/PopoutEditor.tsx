@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { IconClose, IconDoc } from "../icons";
-import { nodeById, useApp } from "../store";
+import { nodeById, useApp, usePreference } from "../store";
+import { applyTextScale } from "../preferences/textScale";
 import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
@@ -29,6 +30,9 @@ export function PopoutEditor() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  const textScale = usePreference("textScale");
+  useEffect(() => applyTextScale(textScale), [textScale]);
 
   useEffect(() => {
     if (!nodeID) {

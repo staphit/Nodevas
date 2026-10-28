@@ -226,7 +226,7 @@
 }
 .card-size-value {
   min-width: 30px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   text-align: right;
 }
@@ -313,7 +313,7 @@
   border-radius: 0 5px 5px 0;
   background: none;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -342,7 +342,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 6px 10px 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   min-width: 0;
 }

@@ -33,7 +33,7 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-menu-run-actions button:hover {
   background: var(--hover);
@@ -59,7 +59,7 @@
   gap: 10px;
   padding: 0 18px 16px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-field {
   display: flex;
@@ -74,7 +74,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 .run-field select,
@@ -89,7 +89,7 @@
   color: var(--text);
   background: var(--surface-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-field textarea {
   min-height: 84px;
@@ -101,7 +101,7 @@
 }
 .run-field-error {
   color: var(--st-failed-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-field select:disabled {
   opacity: 0.65;
@@ -112,7 +112,7 @@
 }
 .run-count {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
@@ -120,7 +120,7 @@
 .run-hint {
   margin: 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .run-note {
@@ -140,7 +140,7 @@
   border: 1px dashed var(--border);
   border-radius: 6px;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: center;
 }
 .run-empty p {
@@ -157,7 +157,7 @@
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .run-link-button {
@@ -167,7 +167,7 @@
   color: var(--accent);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-link-button:hover {
   background: var(--hover);
@@ -183,7 +183,7 @@
   padding: 14px;
   overflow: auto;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .node-runs-head {
   display: flex;
@@ -197,14 +197,14 @@
   gap: 6px;
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .node-runs-count {
   padding: 0 6px;
   border-radius: 999px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 500;
 }
 .run-dispatch-button {
@@ -219,7 +219,7 @@
   color: var(--accent-text);
   background: var(--accent);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-list {
   display: flex;
@@ -264,14 +264,14 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .run-row-top time {
   flex: 0 0 auto;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-row-meta {
   display: flex;
@@ -279,7 +279,7 @@
   flex-wrap: wrap;
   gap: 2px 10px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-row-meta > span {
   min-width: 0;
@@ -302,7 +302,7 @@
   border-radius: 999px;
   color: var(--st-locked-fg);
   background: var(--st-locked-bg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -385,7 +385,7 @@
 }
 .run-detail-title span {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-cancel {
   min-height: 28px;
@@ -396,7 +396,7 @@
   color: var(--st-failed-fg);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-cancel:hover:not(:disabled) {
   background: var(--st-failed-bg);
@@ -416,7 +416,7 @@
 }
 .run-meta dt {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -428,7 +428,7 @@
 .run-prompt summary {
   color: var(--text-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-prompt p {
   margin: 5px 0 0;
@@ -493,7 +493,7 @@
   border-radius: 5px;
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -512,7 +512,7 @@
 .run-ev-fold > summary::before {
   flex: 0 0 auto;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   content: "▸";
 }
 .run-ev-fold[open] > summary::before {
@@ -520,19 +520,19 @@
 }
 .run-ev-fold > summary b {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-ev-preview {
   min-width: 0;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .run-ev-none {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-ev-thinking {
   color: var(--text-2);
@@ -565,7 +565,7 @@
 .run-ev-log,
 .run-ev-empty {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-ev-usage {
   font-variant-numeric: tabular-nums;
@@ -591,7 +591,7 @@
   background: var(--surface);
   box-shadow: 0 4px 14px var(--shadow);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   transform: translateX(-50%);
 }
 
@@ -614,7 +614,7 @@
   .run-field input,
   .run-field textarea {
     /* 16px keeps iOS from zooming the page on focus. */
-    font-size: 16px;
+    font-size: calc(16px * var(--font-scale, 1));
   }
   .node-runs {
     padding: 14px 16px;
@@ -678,7 +678,7 @@
   min-width: 0;
   flex-direction: column;
   gap: 2px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-changes-line {
   display: flex;
@@ -777,7 +777,7 @@
 }
 .run-detail-changes .run-changes {
   flex: 1 1 200px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 /* ---- graph card: the node's latest run ---- */
@@ -863,7 +863,7 @@
   color: var(--text);
   background: var(--surface);
   box-shadow: 0 18px 48px var(--shadow);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-diff-head {
   display: flex;
@@ -878,14 +878,14 @@
 }
 .run-diff-heading h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .run-diff-heading p {
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -903,7 +903,7 @@
   color: var(--text-2);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-diff-layout button + button {
   border-left: 1px solid var(--border);
@@ -918,7 +918,7 @@
   border-bottom: 1px solid var(--border);
 }
 .run-diff-summary .run-changes {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-diff-note {
   margin: 0;
@@ -976,7 +976,7 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: left;
 }
 .run-diff-file-button:hover {
@@ -994,7 +994,7 @@
 .run-diff-file-button .run-lines,
 .run-diff-bin {
   flex: 0 0 auto;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-diff-bin {
   color: var(--text-2);
@@ -1011,7 +1011,7 @@
   color: var(--st-locked-fg);
   background: var(--st-locked-bg);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 700;
 }
 .run-diff-status-added {
@@ -1047,7 +1047,7 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .run-diff-file-head {
   display: flex;
@@ -1085,7 +1085,7 @@
   min-width: 100%;
   border-collapse: collapse;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .run-diff-table.is-split {
@@ -1169,7 +1169,7 @@
 .run-diff-nonl {
   color: var(--text-2);
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-style: italic;
   user-select: none;
 }
@@ -1182,7 +1182,7 @@
   color: var(--accent);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 @media (max-width: 640px) {
@@ -1206,7 +1206,7 @@
     min-height: 40px;
   }
   .run-diff-table {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
   }
 }
 
@@ -1231,7 +1231,7 @@
   flex: 1 1 180px;
   flex-direction: column;
   gap: 2px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .run-merge-status {
   display: inline-flex;
@@ -1286,7 +1286,7 @@
   color: var(--accent-text);
   background: var(--accent);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
 }
 .run-merge-button:disabled {
@@ -1309,7 +1309,7 @@
   gap: 5px 12px;
   margin: 0;
   padding: 0 18px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-merge-facts > div {
   display: contents;
@@ -1324,7 +1324,7 @@
 }
 .run-merge-facts .mono {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .confirm-dialog .run-merge-method {
   margin: 0 18px 14px;
@@ -1333,7 +1333,7 @@
   border-radius: 2px 6px 6px 2px;
   color: var(--text);
   background: var(--st-ready-bg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-merge-dialog footer button:disabled {
   cursor: progress;
@@ -1357,7 +1357,7 @@
   border-radius: 2px 6px 6px 2px;
   color: var(--st-failed-fg);
   background: var(--st-failed-bg);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .run-inline-link {
@@ -1392,7 +1392,7 @@
 .budget-settings .run-hint {
   margin: 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .budget-usage {
@@ -1401,7 +1401,7 @@
   gap: 8px;
 }
 .budget-usage-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .budget-meter {
   display: flex;
@@ -1412,7 +1412,7 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .budget-meter-value {
   color: var(--text-2);
@@ -1457,7 +1457,7 @@
   color: var(--accent-text);
   background: var(--accent);
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .budget-actions button:disabled {
   cursor: not-allowed;
@@ -1465,7 +1465,7 @@
 }
 .budget-saved {
   color: var(--st-done-fg);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .run-notify-settings {
   display: flex;
@@ -1481,7 +1481,7 @@
   min-width: 0;
   flex: 1 1 220px;
   margin: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.5;
 }
 
@@ -1533,7 +1533,7 @@
   background: none;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: left;
 }
 .run-toast-body:hover {
@@ -1571,7 +1571,7 @@
 }
 .run-toast-text span {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-toast-close {
   display: inline-flex;
@@ -1593,12 +1593,12 @@
   .run-merge-button {
     min-height: 44px;
     flex: 1 1 100%;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
   }
   .run-merge-dialog footer button {
     min-height: 44px;
     flex: 1;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
   }
   .run-merge-backdrop {
     align-items: end;

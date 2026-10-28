@@ -36,20 +36,17 @@ async function toggleOutline(drawer: Locator) {
   await menu.getByRole("menuitemcheckbox", { name: "文件目錄" }).click();
 }
 
-/** Pages and the page actions are behind the page switcher above the toolbar. */
-async function pageMenu(drawer: Locator) {
-  await drawer.getByRole("button", { name: "內容頁面" }).click();
-  return drawer.getByRole("menu", { name: "內容頁面" });
+/** A node's pages are tabs above the toolbar, with "+" beside them. */
+function pageTabs(drawer: Locator) {
+  return drawer.getByRole("tablist", { name: "內容頁面" });
 }
 
 async function addSubpage(drawer: Locator) {
-  const menu = await pageMenu(drawer);
-  await menu.getByRole("menuitem", { name: "新增子頁" }).click();
+  await drawer.getByRole("button", { name: "新增子頁" }).click();
 }
 
 async function openPage(drawer: Locator, title: RegExp) {
-  const menu = await pageMenu(drawer);
-  await menu.getByRole("menuitemradio", { name: title }).click();
+  await pageTabs(drawer).getByRole("tab", { name: title }).click();
 }
 
 /** File versions are on the Activity tab. */
@@ -672,10 +669,9 @@ test.describe("page formats", () => {
     await drawer.getByRole("button", { name: "建立頁面" }).click();
 
     // The page list says what the file is, and the path shows the extension.
-    await expect(drawer.getByRole("button", { name: "內容頁面" })).toContainText("備忘");
-    const pages = await pageMenu(drawer);
-    await expect(pages.getByRole("menuitemradio", { name: /備忘/ })).toContainText("純文字");
-    await page.keyboard.press("Escape");
+    const memo = pageTabs(drawer).getByRole("tab", { name: /備忘/ });
+    await expect(memo).toHaveAttribute("aria-selected", "true");
+    await expect(memo).toHaveAttribute("title", /純文字/);
     await expect(drawer.getByLabel("檔案位置")).toContainText(".txt");
     // Markdown-only tools are gone: plain text has no headings.
     await expect(drawer.getByRole("button", { name: "粗體" })).toBeHidden();
@@ -738,9 +734,7 @@ test.describe("page formats", () => {
     await drawer.getByLabel("子頁檔案格式").selectOption("html");
     await page.getByRole("button", { name: "轉換這一頁的檔案格式" }).click();
 
-    const pages = await pageMenu(drawer);
-    await expect(pages.getByRole("menuitemradio", { name: /轉檔/ })).toContainText("網頁");
-    await page.keyboard.press("Escape");
+    await expect(pageTabs(drawer).getByRole("tab", { name: /轉檔/ })).toHaveAttribute("title", /網頁/);
     await expect(drawer.getByLabel("檔案位置")).toContainText(".html");
     // Mod-End in CodeMirror: Command on macOS, Control elsewhere.
     await editorText(page).press("ControlOrMeta+End");

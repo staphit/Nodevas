@@ -14,7 +14,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .settings-search:focus-visible {
   outline: 2px solid var(--accent);
@@ -27,7 +27,7 @@
 }
 .settings-page-nav .settings-page-group button small {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -36,7 +36,7 @@
 }
 .settings-search-empty {
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* A section: one card, its name on top. */
@@ -44,19 +44,19 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .settings-card > h2,
 .settings-card-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 .settings-card > h2 small {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 500;
   font-family: var(--mono);
   color: var(--text-2);
@@ -80,7 +80,7 @@
 }
 .settings-subsection > h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 
@@ -89,7 +89,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .settings-switch input {
@@ -148,7 +148,7 @@
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -167,7 +167,7 @@
   min-width: 0;
   max-width: 55%;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -247,7 +247,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* Agents: a line per runner, and its one primary button. */
@@ -269,7 +269,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .runners-actions button.primary {
   border-color: var(--accent);
@@ -313,7 +313,7 @@
 .node-type-row .col-card-type {
   flex: none;
   max-width: 120px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 16px;
 }
 .node-type-name {
@@ -338,7 +338,7 @@
 .node-type-behaviour {
   flex-basis: 100%;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-type-behaviour-fields {
   display: flex;
@@ -349,4 +349,15 @@
 }
 .node-type-behaviour-fields .danger {
   margin-left: auto;
+}
+
+/* General › text size: the slider, its percentage, and a reset. */
+.settings-text-size {
+  width: min(220px, 50vw);
+  accent-color: var(--accent);
+}
+.settings-text-size-value {
+  min-width: 3.5em;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }

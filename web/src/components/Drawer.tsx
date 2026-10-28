@@ -953,7 +953,7 @@ export function TabBody({
             key={`${activePageID ?? "main"}:${activeFormat}${liveEditing ? ":live" : ""}`}
             ref={cmRef}
             className="editor"
-            style={{ fontSize }}
+            style={{ fontSize: `calc(${fontSize}px * var(--font-scale, 1))` }}
             value={liveEditing ? (liveMountText.current ?? "") : editorBody}
             height="100%"
             theme={theme}

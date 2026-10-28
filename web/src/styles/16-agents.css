@@ -20,7 +20,7 @@
   color: var(--text);
   box-shadow: 0 6px 20px var(--shadow), 0 1px 3px var(--shadow);
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
 }
 .agent-fab:hover {
@@ -40,11 +40,11 @@
   background: var(--accent);
   color: var(--accent-text);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 18px;
 }
 .agent-fab-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .agent-fab-badge.is-unread {
@@ -75,7 +75,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 2px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.45;
   color: var(--text-2);
 }
@@ -102,7 +102,7 @@
   background: var(--surface-2, var(--hover));
   color: var(--text);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   /* The whole command in view, broken anywhere: it is copied, not read
      from the wrap. */
   white-space: pre-wrap;
@@ -115,7 +115,7 @@
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .agent-chat-copy:hover {
@@ -138,7 +138,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   cursor: pointer;
   user-select: none;
@@ -155,7 +155,7 @@
 .agent-ask-not-yours {
   margin: 6px 0 0;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .agent-ask-note {
   width: 100%;
@@ -166,7 +166,7 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .agent-roster-section {
@@ -177,7 +177,7 @@
   background: var(--surface);
 }
 .agent-roster-empty {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .agent-roster-list {
@@ -193,7 +193,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .agent-session-card.is-selected {
   border-color: var(--accent);
@@ -243,7 +243,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .agent-session-repo {
@@ -264,7 +264,7 @@
   background: var(--surface);
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 .agent-node-chip.is-active {
@@ -280,7 +280,7 @@
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .agent-section-label {
@@ -299,7 +299,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   opacity: 0.9;
 }
 .agent-msg-route {
@@ -316,7 +316,7 @@
   border-radius: 4px;
   background: transparent;
   color: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   cursor: pointer;
   opacity: 0.8;
 }
@@ -328,7 +328,7 @@
   overflow-wrap: anywhere;
 }
 .agent-msg-time {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   opacity: 0.7;
   align-self: flex-end;
 }
@@ -348,7 +348,7 @@
   align-items: center;
   gap: 6px;
   flex: 1;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .agent-to-label select {
@@ -370,7 +370,7 @@
   background: var(--st-progress-bg);
   color: var(--st-progress-fg);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
   max-width: 100%;
   overflow: hidden;
@@ -386,7 +386,7 @@
 .node-timeline-agent-body {
   margin: 2px 0 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -401,7 +401,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .agent-notify-enable {
   flex: 1;
@@ -437,7 +437,7 @@
 }
 .agent-held-heading {
   margin: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--st-ready-fg);
 }
 .agent-held-card {
@@ -450,13 +450,13 @@
   border-left: 3px solid var(--st-ready-fg);
   border-radius: 8px;
   background: var(--surface);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .agent-held-route {
   min-width: 0;
   overflow-wrap: anywhere;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .agent-held-route strong {
@@ -496,7 +496,7 @@
   border-radius: 999px;
   background: var(--surface);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 .agent-inbound-toggle:hover:not(:disabled) {
@@ -555,7 +555,7 @@
   background: var(--surface);
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 20px;
   text-decoration: none;
 }
@@ -581,7 +581,7 @@ a.agent-file-chip:hover {
   border: none;
   background: none;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1;
   cursor: pointer;
 }
@@ -598,7 +598,7 @@ a.agent-file-chip:hover {
   margin: 0;
   padding: 0 0 0 16px;
   color: var(--st-failed-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 
@@ -635,7 +635,7 @@ a.agent-file-chip:hover {
   background: none;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -672,7 +672,7 @@ a.agent-file-chip:hover {
     flex: 1;
     justify-content: center;
     min-height: 40px;
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
   }
   .agent-inbound-toggle {
     min-height: 28px;

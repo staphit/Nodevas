@@ -200,7 +200,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
     // Parked before the server moves: once it has switched, a draft put for
     // the old project would land in the new one.
     await parkDirtyTabs(get);
-    const result = await api.openExample(example);
+    const result = await api.openExample(example, get().preferences.language);
     // The server has switched already; this does the browser's half — tabs,
     // undo and badges cleared, everything reloaded — as any switch does.
     await get().switchProject(result.name);

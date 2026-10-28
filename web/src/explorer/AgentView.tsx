@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { explorerApi, type AgentItem, type RepoSummary, type SessionAction } from "../api/explorer";
 import type { Run, RunEvent } from "../api/runs";
-import { openNodeDetail } from "../components/drawer/openNodeDetail";
+import { openNodeOnBoard } from "./openNodeOnBoard";
 import { useI18n } from "../i18n";
 import { formatTokens } from "../usage/usageFormat";
 import { clockText, costText, durationText, roleText, stateText } from "./explorerFormat";
@@ -138,7 +138,7 @@ export default function AgentView({ id }: AgentViewProps) {
         {item.kind === "run" && item.role && <span className="ex-chip role">{roleText(item.role, t)}</span>}
         <span className={`ex-chip${stateCls}`}>{stateText(item.state, t)}</span>
         {item.nodeId && (
-          <button type="button" className="ex-btn" onClick={() => openNodeDetail(item.nodeId)}>
+          <button type="button" className="ex-btn" onClick={() => openNodeOnBoard(item.nodeId)}>
             {t("explorer.agent.openNode")}
           </button>
         )}

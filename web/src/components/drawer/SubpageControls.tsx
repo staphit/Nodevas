@@ -1,23 +1,15 @@
+import { useRef, type KeyboardEvent } from "react";
 import type { PageFormat } from "../../api";
-import {
-  IconChevronDown,
-  IconDoc,
-  IconImport,
-  IconPages,
-  IconPlus,
-  IconPopout,
-  IconTrash,
-} from "../../icons";
-import { DrawerMenu } from "./DrawerMenu";
+import { IconImport, IconPages, IconPlus, IconPopout, IconTrash } from "../../icons";
 import { PAGE_FORMATS } from "./pageFormats";
 import type { NodePages } from "./useNodePages";
 import { useI18n } from "../../i18n";
 
 /**
- * Which page of the node the editor shows, as one compact button: the page's
- * name, opening a menu of the node's pages and the page actions — add a
- * subpage, import a file as one, pop the page out into its own window. A node
- * with no subpages, which is most of them, pays one button for all of it.
+ * A node's pages as tabs in plain sight — the main page, then each subpage —
+ * with adding a subpage and popping the page out as buttons beside them.
+ * Nothing hides behind a menu; importing a file is offered in the
+ * new-subpage form.
  */
 export function SubpageMenu({
   pages: subpages,
@@ -27,73 +19,79 @@ export function SubpageMenu({
   onPopout: () => void;
 }) {
   const { t } = useI18n();
-  const {
-    pages,
-    pagesLoading,
-    activePageID,
-    pageBusy,
-    pageImportInputRef,
-    setPageCreateOpen,
-    selectPage,
-    importPage,
-  } = subpages;
-  const current = pages.find((page) => page.id === activePageID);
-  const currentTitle = current?.title ?? t("subpage.main");
+  const { pages, pagesLoading, activePageID, setPageCreateOpen, selectPage, pageImportInputRef, importPage } =
+    subpages;
+  const listRef = useRef<HTMLDivElement>(null);
+  const tabs: { id: string | null; title: string; hint?: string }[] = [
+    { id: null, title: t("subpage.main") },
+    ...pages.map((page) => ({
+      id: page.id,
+      title: page.title,
+      hint: (page.format ?? "md") !== "md" ? t(`format.${page.format ?? "md"}`) : undefined,
+    })),
+  ];
+
+  // Arrow keys move between tabs, Home and End to the ends.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const all = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+    const at = all.indexOf(document.activeElement as HTMLButtonElement);
+    if (at < 0) return;
+    const next =
+      event.key === "ArrowRight" ? (at + 1) % all.length
+      : event.key === "ArrowLeft" ? (at - 1 + all.length) % all.length
+      : event.key === "Home" ? 0
+      : event.key === "End" ? all.length - 1
+      : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    all[next]?.focus();
+  };
 
   return (
-    <>
-      <DrawerMenu
-        label={t("subpage.tabs")}
-        triggerTitle={t("drawer.pages.switch", { page: currentTitle })}
-        trigger={
-          <>
-            {activePageID ? <IconPages size={13} /> : <IconDoc size={13} />}
-            <span className="content-page-current">{currentTitle}</span>
-            {pages.length > 0 && <span className="content-page-count">{pages.length + 1}</span>}
-            <IconChevronDown size={12} />
-          </>
-        }
-        triggerClassName="content-page-trigger"
-        items={[
-          {
-            id: "main",
-            label: t("subpage.main"),
-            checked: activePageID === null,
-            onSelect: () => void selectPage(null),
-          },
-          ...pages.map((page) => ({
-            id: `page-${page.id}`,
-            label: page.title,
-            hint:
-              (page.format ?? "md") !== "md" ? t(`format.${page.format ?? "md"}`) : undefined,
-            checked: activePageID === page.id,
-            onSelect: () => void selectPage(page.id),
-          })),
-          {
-            id: "add",
-            separatorBefore: true,
-            label: t("subpage.add"),
-            hint: pagesLoading ? t("subpage.loading") : undefined,
-            icon: <IconPlus size={14} />,
-            onSelect: () => setPageCreateOpen(true),
-          },
-          {
-            id: "import",
-            label: t("subpage.import"),
-            title: t("subpage.importTitle"),
-            icon: <IconImport size={14} />,
-            disabled: pageBusy,
-            onSelect: () => pageImportInputRef.current?.click(),
-          },
-          {
-            id: "popout",
-            label: t("subpage.popout"),
-            title: t("subpage.popoutTitle"),
-            icon: <IconPopout size={14} />,
-            onSelect: onPopout,
-          },
-        ]}
-      />
+    <div className="content-page-bar">
+      <div
+        ref={listRef}
+        className="content-page-tabs"
+        role="tablist"
+        aria-label={t("subpage.tabs")}
+        onKeyDown={onKeyDown}
+      >
+        {tabs.map((tab) => {
+          const selected = activePageID === tab.id;
+          return (
+            <button
+              key={tab.id ?? "main"}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              tabIndex={selected ? 0 : -1}
+              className={`content-page-tab${selected ? " active" : ""}`}
+              title={tab.hint ? `${tab.title} (${tab.hint})` : tab.title}
+              onClick={() => void selectPage(tab.id)}
+            >
+              <span className="content-page-current">{tab.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className="icon-btn content-page-action"
+        aria-label={t("subpage.add")}
+        title={pagesLoading ? t("subpage.loading") : t("subpage.add")}
+        onClick={() => setPageCreateOpen(true)}
+      >
+        <IconPlus size={14} />
+      </button>
+      <button
+        type="button"
+        className="icon-btn content-page-action"
+        aria-label={t("subpage.popout")}
+        title={t("subpage.popoutTitle")}
+        onClick={onPopout}
+      >
+        <IconPopout size={14} />
+      </button>
       <input
         ref={pageImportInputRef}
         type="file"
@@ -101,7 +99,7 @@ export function SubpageMenu({
         accept=".md,.markdown,.txt,.html,.htm,.docx"
         onChange={(event) => void importPage(event.target.files)}
       />
-    </>
+    </div>
   );
 }
 
@@ -128,6 +126,7 @@ export function SubpageControls({ pages: subpages }: { pages: NodePages }) {
     pageBusy,
     pageRename,
     setPageRename,
+    pageImportInputRef,
     createPage,
     convertPage,
     renamePage,
@@ -231,6 +230,16 @@ export function SubpageControls({ pages: subpages }: { pages: NodePages }) {
           </select>
           <button type="submit" disabled={!pageTitle.trim() || pageBusy}>
             {pageBusy ? t("subpage.creating") : t("subpage.create")}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            aria-label={t("subpage.import")}
+            title={t("subpage.importTitle")}
+            disabled={pageBusy}
+            onClick={() => pageImportInputRef.current?.click()}
+          >
+            <IconImport size={13} /> {t("subpage.importShort")}
           </button>
           <button
             type="button"

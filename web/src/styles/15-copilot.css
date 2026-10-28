@@ -36,7 +36,7 @@
   outline-offset: 3px;
 }
 .copilot-fab-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -136,7 +136,7 @@
 }
 .copilot-heading {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -147,7 +147,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-icon-btn {
@@ -184,7 +184,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-conversations {
   flex: 1;
@@ -193,7 +193,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-mode-hint {
@@ -201,7 +201,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-mode-bypassPermissions {
@@ -219,7 +219,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--st-ready-bg);
   color: var(--st-ready-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-banner span {
   flex: 1;
@@ -248,14 +248,14 @@
 .copilot-empty {
   margin: auto 8px;
   text-align: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-bubble {
   max-width: 92%;
   padding: 8px 12px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -277,7 +277,7 @@
 }
 .copilot-voice-mark {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-style: normal;
 }
 .copilot-bubble-assistant {
@@ -306,7 +306,7 @@
 }
 .copilot-markdown code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--surface-2);
@@ -326,7 +326,7 @@
 }
 .copilot-markdown table {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-markdown th,
 .copilot-markdown td {
@@ -356,7 +356,7 @@
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: center;
 }
 .copilot-notice.is-error {
@@ -375,7 +375,7 @@
   border-left-width: 3px;
   border-radius: 8px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-tool.is-running,
 .copilot-tool.is-awaiting {
@@ -410,14 +410,14 @@
   display: block;
   margin-top: 2px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .copilot-badge {
   flex-shrink: 0;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 18px;
   background: var(--surface-2);
   color: var(--text-2);
@@ -457,7 +457,7 @@
 .copilot-tool-detail summary {
   cursor: pointer;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .copilot-tool-detail pre {
   max-height: 220px;
@@ -467,7 +467,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -489,7 +489,7 @@
 }
 .copilot-permission-summary {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   white-space: pre-wrap;
 }
 .copilot-permission-actions {
@@ -507,7 +507,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .copilot-permission-actions button:hover:not(:disabled) {
@@ -533,7 +533,7 @@
 }
 .copilot-permission-hint {
   margin: 6px 0 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 
@@ -558,7 +558,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.45;
   resize: vertical;
 }
@@ -634,7 +634,7 @@
     display: none;
   }
   .copilot-input {
-    font-size: 16px; /* below 16px iOS zooms the page on focus */
+    font-size: calc(16px * var(--font-scale, 1)); /* below 16px iOS zooms the page on focus */
   }
 }
 
@@ -684,7 +684,7 @@
   gap: 10px;
   padding: 14px;
   overflow: auto;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .copilot-runner-body p {
@@ -706,13 +706,13 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow-wrap: anywhere;
   user-select: all;
 }
 .copilot-runner-note {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-free-options {
   list-style: disc;
@@ -727,7 +727,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
@@ -743,7 +743,7 @@
   border-radius: 6px;
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .copilot-runner-steps code {
   font-family: var(--mono);

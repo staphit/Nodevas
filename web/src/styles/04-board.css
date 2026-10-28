@@ -70,7 +70,7 @@
   background: var(--surface-2);
   border-right: 1px solid var(--border);
   z-index: 8;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   letter-spacing: 0.05em;
   color: var(--text-2);
 }
@@ -425,7 +425,7 @@
 
 .op-chip {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.06em;
   border-radius: 3px;
@@ -469,7 +469,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   background: var(--surface-2);
   border-right: 1px solid var(--border);
@@ -521,7 +521,7 @@
   display: flex;
   align-items: center;
   padding-left: 12px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--text-2);
   border-bottom: 1px dashed var(--border);
   opacity: 0.8;
@@ -533,7 +533,7 @@
 .lanes-empty {
   padding: 40px;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .ui-empty-state {
   display: grid;
@@ -561,14 +561,14 @@
 }
 .ui-empty-state b {
   display: block;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 650;
 }
 .ui-empty-state p {
   max-width: 48ch;
   margin: 3px 0 0;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.45;
 }
 .ui-empty-state-action button {
@@ -582,7 +582,7 @@
   color: var(--accent-text);
   background: var(--accent);
   cursor: pointer;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .ui-empty-state-action button:hover {

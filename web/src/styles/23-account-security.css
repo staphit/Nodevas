@@ -2,12 +2,12 @@
 
 .twofactor h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .twofactor-status {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
 }
 .twofactor-status small {
@@ -31,7 +31,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .twofactor-actions button.primary {
   border-color: var(--accent, var(--border-strong));
@@ -62,13 +62,13 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .twofactor-key code {
   color: var(--text);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   letter-spacing: 0.06em;
   overflow-wrap: anywhere;
   user-select: all;
@@ -78,7 +78,7 @@
   flex-direction: column;
   gap: 4px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 .twofactor-field input {
@@ -90,7 +90,7 @@
   color: var(--text);
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   letter-spacing: 0.2em;
 }
 .twofactor-field input[aria-invalid="true"] {
@@ -108,11 +108,11 @@
 }
 .twofactor-codes code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   user-select: all;
 }
 .twofactor-error {
   margin: 0;
   color: var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }

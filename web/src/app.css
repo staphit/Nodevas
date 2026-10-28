@@ -77,7 +77,7 @@
 }
 .signin-form h1 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
 }
 .signin-language {
   display: flex;
@@ -85,7 +85,7 @@
   justify-content: space-between;
   gap: 12px;
   color: var(--text-dim, #888);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .signin-language select {
   min-height: 36px;
@@ -100,7 +100,7 @@
 .signin-form input {
   min-height: 44px;
   padding: 8px 10px;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
 }
 .signin-form button {
   min-height: 44px;
@@ -152,7 +152,7 @@
 .signin-warning {
   margin: 4px 0 0;
   color: var(--text-dim, #888);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .signin-warning {
@@ -161,7 +161,7 @@
 .signin-error {
   margin: 4px 0 0;
   color: var(--danger, #d05a5a);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 
 @media (max-width: 720px) {
@@ -195,7 +195,7 @@
   padding: 6px 10px;
   background: var(--warn-bg, #4a3a1a);
   color: var(--warn-text, #f0d9a0);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .editor-lock-banner button {
   padding: 2px 10px;
@@ -215,6 +215,6 @@
      the board pointer and on their caret. The server assigns it per account. */
   background: var(--peer-color, var(--accent, #3a6ea5));
   color: #fff;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-transform: uppercase;
 }

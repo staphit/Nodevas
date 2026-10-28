@@ -1,9 +1,10 @@
 import { useMemo, type ReactNode } from "react";
 import { ExplorerError, explorerApi } from "../api/explorer";
-import { openNodeDetail } from "../components/drawer/openNodeDetail";
 import { useI18n } from "../i18n";
 import { renderMarkdown } from "../markdown";
 import { baseName, isMarkdown, sizeText } from "./explorerFormat";
+import { splitFrontMatter } from "./frontMatter";
+import { openNodeOnBoard } from "./openNodeOnBoard";
 import type { ExplorerView } from "./explorerStore";
 import { useLoad } from "./useExplorerData";
 
@@ -21,6 +22,9 @@ interface Shown {
   nodeId?: string;
   url?: string;
 }
+
+/** Front matter fields with a name in the interface language. */
+const KNOWN_FIELDS = new Set(["assignee", "priority", "requires", "tags", "title", "kind", "id", "status", "due", "start", "external"]);
 
 /** The cap the hub and the runner put on a file's text. */
 const TEXT_CAP = 512 << 10;
@@ -70,10 +74,11 @@ export default function FileView({ view }: FileViewProps) {
   const { t } = useI18n();
   const file = useLoad(() => load(view), JSON.stringify(view));
   const shown = file.data;
-  const html = useMemo(
-    () => (shown && shown.kind === "text" && isMarkdown(shown.path) ? renderMarkdown(shown.content) : null),
-    [shown],
-  );
+  const markdown = useMemo(() => {
+    if (!shown || shown.kind !== "text" || !isMarkdown(shown.path)) return null;
+    const { fields, body } = splitFrontMatter(shown.content);
+    return { fields, html: renderMarkdown(body) };
+  }, [shown]);
 
   let body: ReactNode = null;
   if (file.error) {
@@ -96,8 +101,20 @@ export default function FileView({ view }: FileViewProps) {
           {shown.truncated && (
             <p className="ex-note">{t("explorer.file.truncatedFile", { size: sizeText(TEXT_CAP) })}</p>
           )}
-          {html !== null ? (
-            <div className="ex-md" dangerouslySetInnerHTML={{ __html: html }} />
+          {markdown !== null ? (
+            <>
+              {markdown.fields && markdown.fields.length > 0 && (
+                <dl className="ex-fields">
+                  {markdown.fields.map((field) => (
+                    <div key={field.key} className="ex-field">
+                      <dt>{KNOWN_FIELDS.has(field.key) ? t(`explorer.frontMatter.${field.key}`) : field.key}</dt>
+                      <dd>{field.value || "—"}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="ex-md" dangerouslySetInnerHTML={{ __html: markdown.html }} />
+            </>
           ) : (
             <CodeLines text={shown.content} />
           )}
@@ -116,7 +133,7 @@ export default function FileView({ view }: FileViewProps) {
           <span className="ex-chip">{t("explorer.file.readOnly", { runner: view.runnerName })}</span>
         )}
         {view.source === "workspace" && nodeId && (
-          <button type="button" className="ex-btn primary" onClick={() => openNodeDetail(nodeId)}>
+          <button type="button" className="ex-btn primary" onClick={() => openNodeOnBoard(nodeId)}>
             {t("explorer.file.openNode")}
           </button>
         )}

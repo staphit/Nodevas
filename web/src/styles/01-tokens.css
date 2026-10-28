@@ -120,7 +120,7 @@ select:focus-visible {
 }
 kbd {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
@@ -136,7 +136,7 @@ kbd {
   color: var(--text);
   border-radius: 6px;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .icon-btn:hover {

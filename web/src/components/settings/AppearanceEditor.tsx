@@ -1,6 +1,6 @@
 import { useApp, usePreference } from "../../store";
 import { LANGUAGE_OPTIONS, useI18n } from "../../i18n";
-import { EDITOR_FONT_SIZE, EDITOR_MODES } from "../../preferences/schema";
+import { EDITOR_FONT_SIZE, EDITOR_MODES, TEXT_SCALE } from "../../preferences/schema";
 import { confirmAction } from "../ConfirmDialog";
 import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
@@ -12,6 +12,9 @@ export function AppearanceEditor() {
   const { language, setLanguage, t } = useI18n();
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
+  const updateUIPreference = useApp((s) => s.updateUIPreference);
+  const textScale = usePreference("textScale");
+  const percent = `${Math.round(textScale * 100)}%`;
 
   return (
     <section className="settings-section">
@@ -37,6 +40,28 @@ export function AppearanceEditor() {
             </option>
           ))}
         </select>
+      </div>
+      <div className="settings-row">
+        <span>{t("appearance.textSize")}</span>
+        <input
+          type="range"
+          className="settings-text-size"
+          min={TEXT_SCALE.min}
+          max={TEXT_SCALE.max}
+          step={0.05}
+          value={textScale}
+          aria-label={t("appearance.textSize")}
+          aria-valuetext={percent}
+          onChange={(event) => updateUIPreference("textScale", Number(event.target.value))}
+        />
+        <output className="settings-text-size-value">{percent}</output>
+        <button
+          type="button"
+          disabled={textScale === TEXT_SCALE.fallback}
+          onClick={() => updateUIPreference("textScale", TEXT_SCALE.fallback)}
+        >
+          {t("appearance.resetTextSize")}
+        </button>
       </div>
       <div className="settings-row">
         <span>{t("appearance.tour")}</span>

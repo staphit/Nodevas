@@ -51,7 +51,7 @@ describe("node panel views", () => {
   it("has three views, and folds the rarely used properties away", async () => {
     const user = userEvent.setup();
     render(<TabBody id="design" />);
-    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    const tabs = screen.getAllByRole("tab").filter((tab) => !tab.closest(".content-page-tabs")).map((tab) => tab.textContent);
     expect(tabs).toEqual(["內容", "相依1", "活動"]);
     const more = screen.getByText("更多屬性").closest("details")!;
     expect(more).not.toHaveAttribute("open");

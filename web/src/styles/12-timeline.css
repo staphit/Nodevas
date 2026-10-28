@@ -85,7 +85,7 @@
   border-radius: 3px;
   background: var(--peer-color);
   color: #fff;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -132,7 +132,7 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow: hidden;
 }
 .lane-head-cell.order-dragging {
@@ -161,7 +161,7 @@
   border-radius: 3px;
   color: var(--accent-text);
   background: var(--st-progress-fg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 14px;
 }
@@ -187,7 +187,7 @@
 }
 .lane-head-assignee {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,7 +246,7 @@
   border-right: 2px solid var(--border);
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .horizontal-date-label {
@@ -259,7 +259,7 @@
   border-right: 1px solid var(--border);
   color: var(--text-2);
   background: var(--surface);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .timeline-column-resize {
   position: absolute;
@@ -363,11 +363,11 @@
 }
 .horizontal-date-label b {
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .horizontal-date-label small {
   color: var(--st-progress-fg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
 }
 .horizontal-date-label.today {
   background: color-mix(in srgb, var(--st-progress-bg) 60%, var(--surface));
@@ -508,7 +508,7 @@
   min-width: 0;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .snap-card-head b {
   min-width: 0;
@@ -517,12 +517,12 @@
   white-space: nowrap;
 }
 .snap-time {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   color: var(--text-2);
   margin-left: auto;
 }
 .snap-card-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -596,19 +596,19 @@
   border: 1px solid var(--accent);
   border-radius: 50%;
   color: var(--accent);
-  font-size: 8px;
+  font-size: calc(8px * var(--font-scale, 1));
   font-weight: 800;
   line-height: 1;
 }
 .plan-card b {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   color: var(--text);
 }
 .record-kind {
   flex: 0 0 auto;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 15px;
   letter-spacing: 0.08em;
@@ -627,7 +627,7 @@
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.25;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -672,7 +672,7 @@
   padding: 5px 8px 7px;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -684,14 +684,14 @@
 .lane-context-group-label {
   padding: 6px 8px 2px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.06em;
 }
 .lane-context-menu button > small {
   display: block;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 400;
 }
 .condition-menu-title {
@@ -702,13 +702,13 @@
 }
 .condition-menu-title span {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 650;
 }
 .condition-menu-title small {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -720,7 +720,7 @@
   border-radius: 2px 5px 5px 2px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -743,12 +743,12 @@
 .logic-gate-create-grid > button > b {
   color: var(--text);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .logic-gate-create-grid > button > span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -778,12 +778,12 @@
 }
 .node-create-heading b {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   letter-spacing: 0.02em;
 }
 .node-create-heading small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-icon {
   display: grid;
@@ -796,7 +796,7 @@
   color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 78%, var(--surface));
   box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 500;
 }
 .node-create-field {
@@ -807,7 +807,7 @@
 .node-create-field input {
   padding: 9px 10px;
   border-color: var(--border-strong);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   outline: none;
 }
 .node-create-field input:focus {
@@ -823,7 +823,7 @@
   border-radius: 6px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .node-create-id-hint > span {
@@ -852,11 +852,11 @@
 }
 .node-create-section-head b {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-create-section-head small {
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .node-create-section-head > button {
   flex: 0 0 auto;
@@ -866,7 +866,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-section-head > button:hover:not(:disabled) {
   border-color: var(--st-progress-fg);
@@ -890,7 +890,7 @@
 .node-create-plan-row > span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -903,7 +903,7 @@
   color: var(--text);
   background: var(--surface);
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   outline: none;
 }
 .node-create-plan-row input:focus,
@@ -957,17 +957,17 @@
   gap: 1px;
 }
 .node-create-disclosure b {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .node-create-disclosure small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-disclosure-mark {
   width: 12px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .node-create-advanced-body {
   display: flex;
@@ -984,7 +984,7 @@
   border-radius: 5px;
   color: var(--text);
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-create-status-preview {
   display: flex;
@@ -992,7 +992,7 @@
   gap: 6px;
   padding: 0 8px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -1035,7 +1035,7 @@
   gap: 4px;
   padding: 5px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .lane-context-label {
   color: var(--text);
@@ -1052,7 +1052,7 @@
 }
 .lane-context-field-help {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .standalone-gate-state {
@@ -1067,12 +1067,12 @@
 }
 .standalone-gate-state b {
   align-self: center;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .standalone-gate-state span,
 .standalone-gate-state small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .standalone-gate-state.complete {
   border-color: color-mix(in srgb, var(--st-done-fg) 48%, var(--border));
@@ -1121,7 +1121,7 @@
 .standalone-gate-inputs small {
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .lane-context-menu > .standalone-gate-delete {
   margin: 2px 0 0;
@@ -1148,7 +1148,7 @@
 .assign-existing-gate small,
 .controlled-by-standalone-gate small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .assign-existing-gate select,
@@ -1172,13 +1172,13 @@
 .controlled-by-standalone-gate span {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .lane-context-summary,
 .lane-context-help {
   padding: 5px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .lane-context-summary {
@@ -1193,7 +1193,7 @@
 .lane-context-summary > p {
   margin: -1px 0 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-relation {
@@ -1218,7 +1218,7 @@
   gap: 8px;
   padding: 7px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   border-radius: 5px;
   cursor: pointer;
 }
@@ -1238,13 +1238,13 @@
 }
 .lane-context-check small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-error {
   padding: 5px 8px;
   color: var(--st-failed-fg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-menu > button {
@@ -1309,19 +1309,19 @@
   min-width: 0;
 }
 .condition-primary-copy b {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .condition-primary-copy small {
   overflow: hidden;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   opacity: 0.82;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .condition-primary-arrow {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 
 /* ---------- split panes: graph + timeline stacked, each collapsible ---------- */
@@ -1400,7 +1400,7 @@ body.pane-resizing * {
   background: none;
   cursor: pointer;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 0 4px;
 }
 .pane-toggle:hover {
@@ -1451,7 +1451,7 @@ body.pane-resizing * {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1466,7 +1466,7 @@ body.pane-resizing * {
   gap: 6px;
   padding: 6px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   cursor: pointer;
   list-style: none;
@@ -1476,7 +1476,7 @@ body.pane-resizing * {
 }
 .dependency-advanced > summary::before {
   content: "▸";
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   transition: transform 120ms ease;
 }
 .dependency-advanced[open] > summary::before {
@@ -1486,7 +1486,7 @@ body.pane-resizing * {
   margin-left: auto;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1528,7 +1528,7 @@ body.pane-resizing * {
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 @media (prefers-reduced-motion: reduce) {
