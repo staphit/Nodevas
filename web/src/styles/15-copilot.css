@@ -57,6 +57,42 @@
     white-space: nowrap;
   }
 }
+/* Room the button takes at the bottom right: the rows that end there (the
+   open document's footer, the collapsed timeline's header) pad their right
+   edge by it, so nothing they hold sits under the button. The pill is its
+   icon, padding and a label of about six ems; round, it is 48px. Both with
+   the 18px inset and a little air. */
+.app:has(> .copilot-fab) {
+  --copilot-fab-clearance: calc(82px + 78px * var(--font-scale, 1));
+}
+.app:has(> .copilot-fab) .drawer .tab-footer,
+.app:has(> .copilot-fab) .drawer .drawer-more-props > summary,
+.app:has(> .copilot-fab) .lane-wrap.timeline.pane-collapsed > .board-title {
+  padding-right: var(--copilot-fab-clearance);
+}
+/* A document open: the button goes round, as on a phone, so its footer
+   gives up 74px rather than the pill's width. */
+.app:has(.drawer:not(.collapsed-rail)) {
+  --copilot-fab-clearance: 74px;
+}
+.app:has(.drawer:not(.collapsed-rail)) > .copilot-fab {
+  width: 48px;
+  padding: 0;
+  justify-content: center;
+}
+.app:has(.drawer:not(.collapsed-rail)) > .copilot-fab .copilot-fab-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+@media (max-width: 480px) {
+  .app:has(> .copilot-fab) {
+    --copilot-fab-clearance: 74px;
+  }
+}
 /* A follow-up (a plan run ended) waits unread. */
 .copilot-fab-badge {
   position: absolute;

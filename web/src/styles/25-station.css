@@ -825,6 +825,11 @@
   .app.mode-station .copilot-fab {
     right: calc(min(380px, 30vw) + 36px);
   }
+  /* An open document covers that column; the button goes back to the corner
+     its footer keeps clear (15-copilot.css). */
+  .app.mode-station:has(.drawer:not(.collapsed-rail)) .copilot-fab {
+    right: max(18px, env(safe-area-inset-right, 0px));
+  }
 }
 
 /* Narrower: one column, the side cards under the main ones. */
