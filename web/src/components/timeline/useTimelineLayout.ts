@@ -15,7 +15,8 @@ import type { TimelineRowItem } from "./TimelineGrid";
 /** Gap rows stand in for a run of empty days, at a fixed small height. */
 export const GAP_H = 20;
 const HORIZONTAL_HEADER_H = 48;
-const HORIZONTAL_GAP_W = 56;
+/** A collapsed run of empty days on the horizontal timeline. */
+export const HORIZONTAL_GAP_W = 56;
 
 export function useTimelineLayout({
   days,

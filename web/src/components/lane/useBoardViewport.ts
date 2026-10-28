@@ -1,8 +1,9 @@
 /**
  * What the board can currently see: the size of the scrolling element. Both
- * panes measure themselves the same way; only the graph gets an opening scroll
- * position — or, when this session has shown the project before, the scroll it
- * was left at (boardViewMemory). How far it has scrolled is read by whatever
+ * panes measure themselves the same way and both get an opening scroll: the
+ * graph frames its content — or, when this session has shown the project
+ * before, comes back to the scroll it was left at (boardViewMemory) — and the
+ * timeline opens on today (timelineOpeningScroll). How far it has scrolled is read by whatever
  * follows it (useViewWindow, the minimap), so a pan does not render the board.
  */
 
@@ -24,6 +25,8 @@ export function useBoardViewport({
   zoom,
   userZoom = zoom,
   openingCards,
+  timelineOpening,
+  timelineOrientation,
   contentReady = true,
 }: {
   boardRef: RefObject<HTMLDivElement | null>;
@@ -40,6 +43,10 @@ export function useBoardViewport({
    * the opening needs them: it calls it after the render that set it.
    */
   openingCards?: RefObject<() => Rect[]>;
+  /** The timeline's opening scroll, read the same way as openingCards. */
+  timelineOpening?: RefObject<() => { left: number; top: number }>;
+  /** A new orientation is a new layout, so it opens afresh too. */
+  timelineOrientation?: "vertical" | "horizontal";
   /**
    * False while the board still holds another project's graph, or none yet:
    * the opening scroll frames cards, so it waits for the right ones.
@@ -97,6 +104,37 @@ export function useBoardViewport({
     contentReady,
     isGraph,
     zoom,
+  ]);
+
+  // The timeline's range starts two weeks back, so left at 0 it opened on a
+  // fortnight of empty days. It opens where timelineOpening says — once per
+  // project and orientation, and again whenever the pane is reopened, since a
+  // collapsed pane drops its scrolling element.
+  const timelineViewportKeyRef = useRef("");
+  useLayoutEffect(() => {
+    if (isGraph) return;
+    if (collapsed) {
+      timelineViewportKeyRef.current = "";
+      return;
+    }
+    const board = boardRef.current;
+    if (!board || boardViewport.width <= 0 || boardViewport.height <= 0) return;
+    if (!contentReady || !timelineOpening?.current) return;
+    const viewportKey = `${activeProject ?? ""}
+${timelineOrientation ?? ""}`;
+    if (timelineViewportKeyRef.current === viewportKey) return;
+    const scroll = timelineOpening.current();
+    board.scrollLeft = scroll.left;
+    board.scrollTop = scroll.top;
+    timelineViewportKeyRef.current = viewportKey;
+  }, [
+    activeProject,
+    boardViewport.height,
+    boardViewport.width,
+    collapsed,
+    contentReady,
+    isGraph,
+    timelineOrientation,
   ]);
 
   // Written as the board scrolls and as the zoom changes, so whatever unmounts

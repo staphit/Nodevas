@@ -7,6 +7,7 @@
  */
 
 import type { LogicGate } from "../../types";
+import type { TimelineRowItem } from "../timeline/TimelineGrid";
 import { LOGIC_GATE_H, LOGIC_GATE_W } from "../canvas/LogicGate";
 import { MAX_COL, MAX_ROW } from "../canvas/useBoardColumns";
 import {
@@ -18,6 +19,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
   ROW_H,
+  dayKey,
   type Col,
   type Rect,
 } from "../canvas/geometry";
@@ -143,6 +145,67 @@ export function openingScroll(
     left: axis(bounds.left, bounds.right, anchor.left, viewport.width),
     top: axis(bounds.top, bounds.bottom, anchor.top, viewport.height),
   };
+}
+
+/**
+ * Where the timeline opens. Its range starts two weeks before today (further
+ * back for older records), so scroll 0 is a fortnight of empty days. It opens
+ * on today instead — or, when nothing recorded or planned is in view from
+ * there, on the first such day after today, else on the latest one before it.
+ *
+ * Positions run along the date axis from where the days start: the lane
+ * headers above (vertical) or beside (horizontal) them are sticky, so a day
+ * scrolled to offset 0 sits just past them. `daySize` is a day's length along
+ * that axis and `gapSize` a collapsed run of empty days'; both before the zoom.
+ */
+export function timelineOpeningScroll({
+  days,
+  rowItems,
+  todayKey,
+  contentDays,
+  orientation,
+  daySize,
+  gapSize,
+  viewport,
+  zoom,
+}: {
+  days: readonly Date[];
+  rowItems: readonly TimelineRowItem[];
+  todayKey: string;
+  /** Days that carry a record or a plan. */
+  contentDays: ReadonlySet<string>;
+  orientation: "vertical" | "horizontal";
+  daySize: number;
+  gapSize: number;
+  viewport: { width: number; height: number };
+  zoom: number;
+}): { left: number; top: number } {
+  // Every day's start, a collapsed one at its gap's; the same walk as dayY.
+  const starts: number[] = new Array(days.length).fill(0);
+  let position = 0;
+  let next = 0;
+  for (const item of rowItems) {
+    if (item.kind === "day") {
+      starts[item.dayIndex] = position;
+      next = item.dayIndex + 1;
+      position += daySize;
+    } else {
+      for (let k = 0; k < item.count; k++) starts[next + k] = position;
+      next += item.count;
+      position += gapSize;
+    }
+  }
+  const keys = days.map(dayKey);
+  const todayIndex = keys.indexOf(todayKey);
+  let target = todayIndex >= 0 ? starts[todayIndex] : 0;
+  const marked = keys.flatMap((key, index) => (contentDays.has(key) ? [starts[index]] : []));
+  const span = (orientation === "vertical" ? viewport.height : viewport.width) / zoom;
+  const inView = (start: number) => start >= target && start + daySize <= target + span;
+  if (marked.length > 0 && !marked.some(inView)) {
+    target = marked.find((start) => start > target) ?? marked[marked.length - 1];
+  }
+  const scroll = Math.max(0, target * zoom);
+  return orientation === "vertical" ? { left: 0, top: scroll } : { left: scroll, top: 0 };
 }
 
 /** The grid cell a board-space point falls in, clamped to the legal range. */

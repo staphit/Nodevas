@@ -22,7 +22,7 @@ import { GraphBatchToolbar, NodeClipboardNotice } from "./GraphBatchToolbar";
 import { GraphToolsPanel, activeFilterCount } from "./GraphToolsPanel";
 import { TimelineGrid } from "./timeline/TimelineGrid";
 import { TimelineCards } from "./timeline/TimelineCards";
-import { useTimelineLayout } from "./timeline/useTimelineLayout";
+import { GAP_H, HORIZONTAL_GAP_W, useTimelineLayout } from "./timeline/useTimelineLayout";
 import { useTimelineDays } from "./timeline/useTimelineDays";
 import { useTimelineCellSize } from "./timeline/useTimelineCellSize";
 import { useMilestoneDrag } from "./timeline/useMilestoneDrag";
@@ -79,6 +79,7 @@ import {
   graphObstacleRects,
   GRAPH_PAN_BUFFER_X,
   GRAPH_PAN_BUFFER_Y,
+  timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
 import {
@@ -358,6 +359,7 @@ export function LaneView({
     (graph !== shownProject.staleGraph || graphProject === activeProject);
   // Set once the cards are laid out below; the opening scroll reads it.
   const openingCardsRef = useRef<() => Rect[]>(() => []);
+  const timelineOpeningRef = useRef(() => ({ left: 0, top: 0 }));
   const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
@@ -366,6 +368,8 @@ export function LaneView({
     zoom: viewScale,
     userZoom: zoom,
     openingCards: openingCardsRef,
+    timelineOpening: timelineOpeningRef,
+    timelineOrientation,
     contentReady: graphReady,
   });
 
@@ -854,6 +858,24 @@ export function LaneView({
 
   openingCardsRef.current = () =>
     isGraph ? cols.map((column) => cardRect(column, centerX, rowTop)) : [];
+  timelineOpeningRef.current = () => {
+    const contentDays = new Set<string>();
+    for (const byDay of [...byNodeDay.values(), ...plansByNodeDay.values()]) {
+      for (const [day, items] of byDay) if (items.length > 0) contentDays.add(day);
+    }
+    const horizontal = timelineOrientation === "horizontal";
+    return timelineOpeningScroll({
+      days,
+      rowItems,
+      todayKey,
+      contentDays,
+      orientation: timelineOrientation,
+      daySize: horizontal ? timelineCellWidth : timelineCellHeight,
+      gapSize: horizontal ? HORIZONTAL_GAP_W : GAP_H,
+      viewport: boardViewport,
+      zoom: viewScale,
+    });
+  };
 
   useBoardReveal({
     isGraph,
