@@ -470,6 +470,11 @@ func Import(ctx context.Context, target *db.DB, source string) (Result, error) {
 			_ = tx.Rollback()
 		}
 	}()
+	// The whole file is copied in this one transaction: a large NAS import
+	// outlasts the writer's per-request timeouts.
+	if _, err := tx.ExecContext(ctx, db.NoTimeouts+`; SET LOCAL idle_in_transaction_session_timeout = 0`); err != nil {
+		return result, err
+	}
 	empty, err := targetEmpty(ctx, tx)
 	if err != nil {
 		return result, err
