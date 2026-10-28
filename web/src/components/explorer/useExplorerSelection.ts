@@ -6,7 +6,7 @@
  * written out twice in the sidebar.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProjectEntry } from "../../state/types";
 import type { GraphNode } from "../../types";
 
@@ -57,6 +57,7 @@ export function useExplorerSelection(
   projects: ProjectEntry[],
   visibleNodes: GraphNode[],
   visibleProjects: ProjectEntry[],
+  activeNodeId: string | null = null,
 ) {
   // Ctrl/⌘ click builds a selection in the tree; a plain click collapses it.
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<string[]>([]);
@@ -74,6 +75,28 @@ export function useExplorerSelection(
       return next.length === current.length ? current : next;
     });
   }, [nodes]);
+
+  // The node selection follows the current node. Picking one on the board (or
+  // anywhere outside the tree) must not leave the row clicked earlier outlined:
+  // drag-to-folder and Ctrl/Shift-click act on this selection. A selection
+  // that already holds the current node was built in the tree, and is kept.
+  const currentNode =
+    activeNodeId && (nodes ?? []).some((node) => node.id === activeNodeId)
+      ? activeNodeId
+      : null;
+  const selectionRef = useRef(selectedNodeIDs);
+  selectionRef.current = selectedNodeIDs;
+  useEffect(() => {
+    const current = selectionRef.current;
+    if (!currentNode) {
+      if (current.length > 0) setSelectedNodeIDs([]);
+      setNodeAnchor(null);
+      return;
+    }
+    if (current.includes(currentNode)) return;
+    setSelectedNodeIDs([currentNode]);
+    setNodeAnchor(currentNode);
+  }, [currentNode]);
 
   useEffect(() => {
     const live = new Set(projects.map((project) => project.name));

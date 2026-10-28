@@ -183,6 +183,7 @@ export function Sidebar() {
     projects,
     visibleNodes,
     visibleProjects,
+    activeTab,
   );
 
   const transfer = useProjectTransfer({
