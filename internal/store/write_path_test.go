@@ -253,3 +253,39 @@ func TestQueuedGraphOpsFailAlone(t *testing.T) {
 		t.Error("the valid half of a failed call was written")
 	}
 }
+
+func TestNodeDocumentReadsNeverCatchAWriteInProgress(t *testing.T) {
+	st := benchPagesStore(t, 2, 0)
+	actor := identity.Actor{ID: "writer", Name: "Writer"}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for r := range 150 {
+			title := fmt.Sprintf("Title %d", r)
+			if _, _, err := st.ApplyGraphOps(actor, []GraphOp{{Kind: "node-metadata", NodeID: "n00001", Title: &title}}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	reads := 0
+	var readErr error
+	for readErr == nil {
+		select {
+		case <-done:
+			if reads == 0 {
+				t.Fatal("no reads overlapped the writes")
+			}
+			return
+		default:
+		}
+		// The store replaces the document atomically; a reader gets the old
+		// version or the new one, never an error for having raced it.
+		if _, _, err := st.LoadNodeContent("n00001"); err != nil {
+			readErr = err
+		}
+		reads++
+	}
+	<-done
+	t.Fatalf("read %d during writes: %v", reads, readErr)
+}
