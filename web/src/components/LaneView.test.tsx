@@ -1492,6 +1492,87 @@ describe("LaneView", () => {
     });
   });
 
+  // A menu is placed on screen when it opens. Its content can grow after
+  // that — an error under the form, the plan menu's message — and the part
+  // that grew went below the window: at 150% text, the New node form's error
+  // put Create and Cancel off screen. A menu that grows is placed again.
+  describe("a menu that grows after it opens", () => {
+    const observers: { callback: ResizeObserverCallback }[] = [];
+    const realInnerHeight = window.innerHeight;
+    const realInnerWidth = window.innerWidth;
+    beforeEach(() => {
+      observers.length = 0;
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          callback: ResizeObserverCallback;
+          constructor(callback: ResizeObserverCallback) {
+            this.callback = callback;
+            observers.push(this);
+          }
+          observe() {}
+          unobserve() {}
+          disconnect() {
+            observers.splice(observers.indexOf(this), 1);
+          }
+        },
+      );
+      Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+      Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+      // 300px tall, 440px once an error shows.
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get(this: HTMLElement) {
+          if (!this.classList.contains("lane-context-menu")) return 0;
+          return this.querySelector(".lane-context-error") ? 440 : 300;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.classList.contains("lane-context-menu") ? 380 : 0;
+        },
+      });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+      Object.defineProperty(window, "innerHeight", { value: realInnerHeight, configurable: true });
+      Object.defineProperty(window, "innerWidth", { value: realInnerWidth, configurable: true });
+    });
+
+    it("moves up to keep the New node form's error and buttons on screen", async () => {
+      const realCreateNode = useApp.getState().createNode;
+      useApp.setState({
+        createNode: vi.fn(async () => {
+          throw new Error("死線不可早於開始日期。");
+        }),
+      });
+      try {
+        const user = userEvent.setup();
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        fireEvent.contextMenu(container.querySelector(".board-inner")!, {
+          clientX: 300,
+          clientY: 420,
+        });
+        await user.click(screen.getByRole("menuitem", { name: /新增節點/ }));
+        const form = () => document.querySelector<HTMLElement>(".node-create-menu")!;
+        // 300 tall at 420 fits in 800.
+        expect(parseFloat(form().style.top)).toBe(420);
+
+        await user.type(screen.getByLabelText(/節點標題/), "新卡片{Enter}");
+        expect(form().querySelector(".lane-context-error")).not.toBeNull();
+        act(() => {
+          for (const observer of [...observers]) observer.callback([], observer as never);
+        });
+        expect(parseFloat(form().style.top) + 440).toBeLessThanOrEqual(800 - 8);
+      } finally {
+        useApp.setState({ createNode: realCreateNode });
+      }
+    });
+  });
+
   describe("leaving the board and coming back", () => {
     afterEach(() => {
       vi.unstubAllGlobals();
