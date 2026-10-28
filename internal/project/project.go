@@ -105,6 +105,10 @@ type ProjectManager struct {
 	storesMu sync.Mutex
 	stores   map[string]*store.Store
 
+	// lookups is what StoreFor remembers about project names; see
+	// lookup_cache.go.
+	lookups projectLookups
+
 	// lock is the OS-level advisory lock on the *active* workspace, held for
 	// as long as this manager serves it. It is an outer layer over the
 	// mutexes above, not a replacement: those serialise goroutines, this one
@@ -468,6 +472,10 @@ func (pm *ProjectManager) watchStore(st *store.Store) (func() error, error) {
 		case "node-changed", "graph-changed":
 			pm.invalidateSearch(st.Root(), id)
 		}
+		if kind == "graph-changed" {
+			// Possibly gone: the next lookup looks again.
+			pm.lookups.forget(st.Root())
+		}
 	})
 }
 
@@ -637,8 +645,11 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 		return store.LoadWorkspaceStatuses(pm.workspaceRoot())
 	})
 	// The store's own writes are invisible to the watcher by design; this is
-	// how they reach the search index.
-	st.SetOnChange(func(path string) { pm.noteSearchChange(dir, path) })
+	// how they reach the search index and the project lookup cache.
+	st.SetOnChange(func(path string) {
+		pm.noteSearchChange(dir, path)
+		pm.noteStoreChange(dir, path)
+	})
 	pm.stores[key] = st
 	return st
 }
@@ -646,7 +657,14 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 // StoreFor returns the store for a named project without changing the active
 // one. The project must already exist: this is a read/write path for existing
 // content, not a creation path.
+//
+// A project found once is remembered (lookup_cache.go), so the requests that
+// follow do not stat the disk.
 func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
+	workspace := pm.workspaceRoot()
+	if dir, ok := pm.lookups.get(workspace, name); ok {
+		return pm.cachedStore(dir), nil
+	}
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return nil, err
@@ -661,6 +679,7 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 	if !graphInfo.Mode().IsRegular() {
 		return nil, fmt.Errorf("project %q has no regular graph.yaml", name)
 	}
+	pm.lookups.remember(workspace, name, dir)
 	return pm.cachedStore(dir), nil
 }
 
@@ -704,6 +723,7 @@ func (pm *ProjectManager) EvictStores(dir string) {
 	// A watcher holds directory handles (Windows refuses the rename while it
 	// does) and would outlive the path it watches.
 	pm.stopExtraWatches(under)
+	pm.lookups.forget(dir)
 	pm.storesMu.Lock()
 	var evicted []*store.Store
 	for key, st := range pm.stores {

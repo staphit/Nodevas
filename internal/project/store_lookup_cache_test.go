@@ -132,6 +132,10 @@ func TestTheWatcherDropsALookupWhoseGraphWentAway(t *testing.T) {
 	if _, err := pm.StoreFor("alpha"); err != nil {
 		t.Fatal(err)
 	}
+	// The watcher takes anything at a path the store wrote in the last two
+	// seconds for the store's own echo (Store.WasSelfWrite), and Create just
+	// wrote graph.yaml: only a removal after that is an outside one.
+	time.Sleep(2100 * time.Millisecond)
 	if err := os.Remove(filepath.Join(dir, "graph.yaml")); err != nil {
 		t.Fatal(err)
 	}
@@ -144,5 +148,34 @@ func TestTheWatcherDropsALookupWhoseGraphWentAway(t *testing.T) {
 			t.Fatal("the watcher saw graph.yaml removed but the lookup was kept")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// BenchmarkStoreFor is the per-request project lookup, remembered and (with
+// the cache off, as every request was before it) looked up on disk.
+func BenchmarkStoreFor(b *testing.B) {
+	for _, bench := range []struct {
+		name string
+		ttl  time.Duration
+	}{{"disk", 0}, {"remembered", time.Hour}} {
+		b.Run(bench.name, func(b *testing.B) {
+			previous := projectLookupTTL
+			projectLookupTTL = bench.ttl
+			b.Cleanup(func() { projectLookupTTL = previous })
+			pm, err := NewManagerAt(b.TempDir(), realtime.NewHub(), b.TempDir())
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(pm.Close)
+			if err := pm.Create("alpha", ""); err != nil {
+				b.Fatal(err)
+			}
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := pm.StoreFor("alpha"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
