@@ -35,6 +35,10 @@ class FakeSocket {
 }
 
 let hubUp = false;
+/** What a down hub looks like from here; a proxy in front answers for it. */
+let whileDown: () => Response = () => {
+  throw new TypeError("Failed to fetch");
+};
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -44,11 +48,14 @@ beforeEach(() => {
   FakeSocket.refuse = true;
   FakeSocket.onRefuse = null;
   hubUp = false;
+  whileDown = () => {
+    throw new TypeError("Failed to fetch");
+  };
   vi.spyOn(Math, "random").mockReturnValue(0.5);
   vi.stubGlobal("WebSocket", FakeSocket);
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     if (!String(input).endsWith("/api/healthz")) throw new Error(`unexpected fetch ${String(input)}`);
-    if (!hubUp) throw new TypeError("Failed to fetch");
+    if (!hubUp) return whileDown();
     return new Response(JSON.stringify({ status: "ok", database: "ok" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -93,6 +100,29 @@ describe("reconnecting after the hub restarts", () => {
     expect(next.at - backAt).toBeLessThanOrEqual(2_000);
     next.onopen?.();
     expect(useConnectivity.getState().offline).toBe(false);
+    live.close();
+  });
+
+  it.each([
+    ["a dev server's proxy", 500, "text/plain"],
+    ["a reverse proxy", 502, "text/html"],
+  ])("keeps asking while %s answers %i for the hub", async (_, status, contentType) => {
+    whileDown = () => new Response("", { status, headers: { "Content-Type": contentType } });
+    const live = connectWS(() => {});
+    await failUntilBackoffIsCapped();
+    let backAt = -1;
+    let attemptsWhenBack = 0;
+    FakeSocket.onRefuse = () => {
+      if (backAt >= 0) return;
+      hubUp = true;
+      FakeSocket.refuse = false;
+      backAt = Date.now();
+      attemptsWhenBack = FakeSocket.all.length;
+    };
+    await vi.advanceTimersByTimeAsync(12_500);
+    const next = FakeSocket.all[attemptsWhenBack];
+    expect(next).toBeDefined();
+    expect(next.at - backAt).toBeLessThanOrEqual(2_000);
     live.close();
   });
 
