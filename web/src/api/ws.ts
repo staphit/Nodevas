@@ -171,11 +171,29 @@ export function documentKey(nodeId: string, pageId?: string): string {
   return pageId ? `${nodeId}/${pageId}` : nodeId;
 }
 
-/** Opens the live-update socket; reconnects with backoff. */
+/** How often the hub's health is asked while the socket is down. */
+export const HEALTH_PROBE_MS = 1000;
+const HEALTH_PATH = "/api/healthz";
+
+/**
+ * Opens the live-update socket; reconnects with backoff.
+ *
+ * The backoff grows to 10 s while the hub is down, which alone kept a page
+ * offline for up to ~12 s after a restart. So while the socket is down the
+ * hub's health is asked about once a second, and the moment it answers after
+ * having not, the socket reconnects without waiting the backoff out. If the
+ * hub answered all along — the socket fails while the server is up — the
+ * probe stops and the backoff stands, so a broken /ws is not hammered.
+ */
 export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 500;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
+  let probing = false;
+  /** Whether this round of probing has seen the hub not answer. */
+  let probeSawDown = false;
   // What this client asked for, replayed after a reconnect: a dropped socket
   // otherwise leaves the browser in no room and holding no lock, silently.
   let project = "";
@@ -188,6 +206,44 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
 
   const post = (message: Record<string, unknown>) => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+  };
+
+  const stopProbe = () => {
+    probing = false;
+    clearTimeout(probeTimer);
+  };
+
+  const probe = async () => {
+    if (!probing || closed) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HEALTH_PROBE_MS * 3);
+    let up = false;
+    try {
+      const res = await fetch(HEALTH_PATH, { cache: "no-store", signal: controller.signal });
+      up = res.ok;
+    } catch {
+      up = false;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!probing || closed) return;
+    if (!up) {
+      probeSawDown = true;
+      probeTimer = setTimeout(() => void probe(), HEALTH_PROBE_MS);
+      return;
+    }
+    stopProbe();
+    if (!probeSawDown) return;
+    // Back after being down: reconnect now rather than when the backoff says.
+    clearTimeout(reconnectTimer);
+    open();
+  };
+
+  const startProbe = () => {
+    if (probing || closed) return;
+    probing = true;
+    probeSawDown = false;
+    probeTimer = setTimeout(() => void probe(), HEALTH_PROBE_MS);
   };
 
   const open = () => {
@@ -203,6 +259,7 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
     };
     ws.onopen = () => {
       retry = 500;
+      stopProbe();
       markServerReachable();
       if (project) post({ type: "subscribe", project });
       if (presenceState) post({ type: "presence", ...presenceState });
@@ -226,7 +283,9 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
         retry = Math.min(retry * 1.5, 10000);
         const jitter = 0.8 + Math.random() * 0.4;
         const delay = Math.round(retry * jitter);
-        setTimeout(open, delay);
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(open, delay);
+        startProbe();
       }
     };
   };
@@ -234,6 +293,8 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
   return {
     close: () => {
       closed = true;
+      clearTimeout(reconnectTimer);
+      stopProbe();
       ws?.close();
     },
     subscribe: (next: string) => {

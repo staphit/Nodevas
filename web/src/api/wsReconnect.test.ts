@@ -16,6 +16,8 @@ class FakeSocket {
   /** Called with each refused socket, before its close is delivered. */
   static onRefuse: ((socket: FakeSocket) => void) | null = null;
   readyState = 0;
+  /** When it was made, on the fake clock. */
+  at = Date.now();
   onopen: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
@@ -74,19 +76,22 @@ describe("reconnecting after the hub restarts", () => {
     // The hub comes back right after a refused attempt, so the backoff has
     // its full 10 s still to run.
     let backAt = -1;
+    let attemptsWhenBack = 0;
     FakeSocket.onRefuse = () => {
       if (backAt >= 0) return;
       hubUp = true;
       FakeSocket.refuse = false;
-      backAt = FakeSocket.all.length;
+      backAt = Date.now();
+      attemptsWhenBack = FakeSocket.all.length;
     };
     await vi.advanceTimersByTimeAsync(10_500);
     expect(backAt).toBeGreaterThan(0);
-    const attemptsWhenBack = FakeSocket.all.length;
-
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(FakeSocket.all.length).toBeGreaterThan(attemptsWhenBack);
-    FakeSocket.all.at(-1)!.onopen?.();
+
+    const next = FakeSocket.all[attemptsWhenBack];
+    expect(next).toBeDefined();
+    expect(next.at - backAt).toBeLessThanOrEqual(2_000);
+    next.onopen?.();
     expect(useConnectivity.getState().offline).toBe(false);
     live.close();
   });
