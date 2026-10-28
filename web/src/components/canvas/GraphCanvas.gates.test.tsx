@@ -204,4 +204,21 @@ describe("gates on a culled board", () => {
     expect(afterPans.has("n45")).toBe(true);
     expect(afterPans.has("n91")).toBe(true);
   });
+
+  // A box that cannot sit clear of every card still has to read: it is drawn
+  // in a layer over the cards, not under them with the wires.
+  it("draws the gate boxes over the cards", () => {
+    const { container } = renderBoard();
+    const cards = container.querySelectorAll(".col-card");
+    const boxes = container.querySelectorAll(".gate-node");
+    expect(cards.length).toBeGreaterThan(0);
+    expect(boxes.length).toBeGreaterThan(10);
+    const lastCard = cards[cards.length - 1];
+    for (const box of boxes) {
+      expect(box.closest("svg")?.classList.contains("board-gate-badges")).toBe(true);
+      expect(
+        lastCard.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
 });
