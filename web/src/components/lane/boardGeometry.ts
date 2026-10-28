@@ -95,6 +95,56 @@ export function boardMetrics({
   return { boardW, graphOffsetX, graphCanvasH, graphOffsetY };
 }
 
+/** Room the opening scroll leaves between the view's edge and the first card. */
+const OPENING_PADDING = 72;
+
+/**
+ * Where a board this session has not shown opens. With no cards it is the
+ * buffer origin, where logical (0,0) is. With cards it frames them: centred
+ * along an axis they fit in, else starting, with a little room, at the card
+ * nearest their top-left corner, which is then always in view. Saved
+ * positions need not start at the origin, and opening on the origin showed
+ * nothing but margin when they did not.
+ *
+ * `cards` are in board pixels before the zoom.
+ */
+export function openingScroll(
+  cards: readonly Rect[],
+  zoom: number,
+  viewport: { width: number; height: number },
+): { left: number; top: number } {
+  if (cards.length === 0) {
+    return { left: GRAPH_PAN_BUFFER_X * zoom, top: GRAPH_PAN_BUFFER_Y * zoom };
+  }
+  const bounds = {
+    left: Math.min(...cards.map((card) => card.left)),
+    right: Math.max(...cards.map((card) => card.right)),
+    top: Math.min(...cards.map((card) => card.top)),
+    bottom: Math.max(...cards.map((card) => card.bottom)),
+  };
+  let anchor = cards[0];
+  let nearest = Infinity;
+  for (const card of cards) {
+    const distance = Math.hypot(card.left - bounds.left, card.top - bounds.top);
+    if (distance < nearest) {
+      nearest = distance;
+      anchor = card;
+    }
+  }
+  const axis = (start: number, end: number, from: number, size: number) => {
+    const padding = Math.min(OPENING_PADDING, size / 8);
+    const scroll =
+      (end - start) * zoom + padding * 2 <= size
+        ? ((start + end) / 2) * zoom - size / 2
+        : from * zoom - padding;
+    return Math.max(0, scroll);
+  };
+  return {
+    left: axis(bounds.left, bounds.right, anchor.left, viewport.width),
+    top: axis(bounds.top, bounds.bottom, anchor.top, viewport.height),
+  };
+}
+
 /** The grid cell a board-space point falls in, clamped to the legal range. */
 export function graphCellAt(
   contentX: number,

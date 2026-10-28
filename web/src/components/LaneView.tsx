@@ -69,6 +69,7 @@ import {
   ROW_H,
   type Col,
   type Point,
+  type Rect,
 } from "./canvas/geometry";
 import {
   boardMetrics,
@@ -173,6 +174,7 @@ export function LaneView({
   const moveStamp = useApp((s) => s.moveStamp);
   const activeTab = useApp((s) => s.activeTab);
   const activeProject = useApp((s) => s.activeProject);
+  const graphProject = useApp((s) => s.graphProject);
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
@@ -328,15 +330,32 @@ export function LaneView({
   // being re-centred from the old one.
   // Whether the project on show had been shown before it came up, which is
   // also what spares a phone's board a second first-sight fit below.
+  // `staleGraph` is the graph the store held when the project changed under
+  // a mounted board: the old project's, kept until the new one loads.
   const [shownProject, setShownProject] = useState(() => ({
     project: activeProject,
     remembered: rememberedView !== undefined,
+    staleGraph: null as typeof graph,
   }));
   if (shownProject.project !== activeProject) {
     const remembered = isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined;
-    setShownProject({ project: activeProject, remembered: remembered !== undefined });
+    setShownProject({
+      project: activeProject,
+      remembered: remembered !== undefined,
+      staleGraph: graph,
+    });
     if (isGraph) setZoomDirect(remembered?.zoom ?? 1);
   }
+  // Whether the graph on show is this project's, so anything framing its
+  // cards can wait for them: a different graph has arrived since the switch,
+  // or the load says whose it is. (graphProject alone cannot say: the first
+  // load can land before the workspace names the active project.)
+  const graphReady =
+    graph !== null &&
+    shownProject.project === activeProject &&
+    (graph !== shownProject.staleGraph || graphProject === activeProject);
+  // Set once the cards are laid out below; the opening scroll reads it.
+  const openingCardsRef = useRef<() => Rect[]>(() => []);
   const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
@@ -344,6 +363,8 @@ export function LaneView({
     activeProject,
     zoom: viewScale,
     userZoom: zoom,
+    openingCards: openingCardsRef,
+    contentReady: graphReady,
   });
 
   const userNames = useMemo(
@@ -829,6 +850,9 @@ export function LaneView({
       dayCount: days.length,
     });
 
+  openingCardsRef.current = () =>
+    isGraph ? cols.map((column) => cardRect(column, centerX, rowTop)) : [];
+
   useBoardReveal({
     isGraph,
     collapsed,
@@ -1098,28 +1122,39 @@ export function LaneView({
     // and the scroll has to be written in terms of the two together.
     const nextZoom = clampZoom(view.zoom / graphNodeScale);
     const nextViewScale = nextZoom * graphNodeScale;
-    setZoomDirect(nextZoom);
-    requestAnimationFrame(() => {
-      board.scrollLeft = view.focusX * nextViewScale - board.clientWidth / 2;
-      board.scrollTop = view.focusY * nextViewScale - board.clientHeight / 2;
+    // A graph narrower than the view is drawn centred in it, and how much
+    // room that leaves depends on the zoom: the focus moves with the origin,
+    // so it is placed against the origin the new zoom draws at.
+    const next = boardMetrics({
+      isGraph,
+      maxCol,
+      maxRow,
+      timelineColumnCount: timelineCols.length,
+      timelineCellWidth,
+      boardViewport,
+      zoom: nextViewScale,
+    });
+    canvasPan.zoomOnto(nextZoom, {
+      x: view.focusX - graphOffsetX + next.graphOffsetX,
+      y: view.focusY - graphOffsetY + next.graphOffsetY,
     });
   };
 
   // A phone at 100% shows about two cards of a 164px-grid board, so the first
   // sight of a project is the whole of it. Once per project, not per mount or
   // per resize: after that first fit the zoom is the user's own. Desktop keeps
-  // its opening behaviour — small boards already centre themselves and the
+  // its opening behaviour — the opening scroll frames the cards and the
   // toolbar's 全部置中 does this on demand. Waiting for a real measurement
   // matters because the effect runs before useBoardViewport has one; fitGraph
-  // writes its scroll in a requestAnimationFrame, so it lands after the
-  // remembered opening scroll rather than under it.
+  // writes its scroll with the commit that draws its zoom (or at once when
+  // the zoom stays), so it lands after the opening scroll rather than under it.
   const narrow = useNarrowViewport();
   // A board this session already showed has been through its first sight:
   // coming back from Station or Settings, or to it from another project in
   // the project menu, keeps the user's zoom, not a refit.
   const autoFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isGraph || collapsed || !narrow) return;
+    if (!isGraph || collapsed || !narrow || !graphReady) return;
     if (boardViewport.width <= 0 || boardViewport.height <= 0) return;
     if (cols.length === 0) return;
     const key = boardViewKey(activeProject);
@@ -1137,6 +1172,7 @@ export function LaneView({
     boardViewport.height,
     cols.length,
     activeProject,
+    graphReady,
   ]);
 
   // How far out the board is drawn decides how much a card can say. Below these

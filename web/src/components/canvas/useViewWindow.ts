@@ -23,6 +23,10 @@ export function useViewWindow({
   viewport: { width: number; height: number };
 }): ViewWindow {
   const [view, setView] = useState<ViewWindow>("measuring");
+  // Compared here, not in a setView updater: an updater that hands back the
+  // same window still renders the board once whenever React cannot bail out
+  // early, as right after the window last moved.
+  const viewRef = useRef<ViewWindow>("measuring");
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
@@ -36,7 +40,9 @@ export function useViewWindow({
         { width: board.clientWidth, height: board.clientHeight },
         zoomRef.current,
       );
-      setView((current) => (sameViewWindow(current, next) ? current : next));
+      if (sameViewWindow(viewRef.current, next)) return;
+      viewRef.current = next;
+      setView(next);
     };
     read();
     let frame = 0;

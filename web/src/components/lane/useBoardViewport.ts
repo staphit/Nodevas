@@ -13,7 +13,8 @@ import {
   rememberBoardView,
   restoredScroll,
 } from "../canvas/boardViewMemory";
-import { GRAPH_PAN_BUFFER_X, GRAPH_PAN_BUFFER_Y } from "./boardGeometry";
+import type { Rect } from "../canvas/geometry";
+import { openingScroll } from "./boardGeometry";
 
 export function useBoardViewport({
   boardRef,
@@ -22,6 +23,8 @@ export function useBoardViewport({
   activeProject,
   zoom,
   userZoom = zoom,
+  openingCards,
+  contentReady = true,
 }: {
   boardRef: RefObject<HTMLDivElement | null>;
   collapsed?: boolean;
@@ -31,6 +34,17 @@ export function useBoardViewport({
   zoom: number;
   /** The user's own zoom, which is what a later mount starts from. */
   userZoom?: number;
+  /**
+   * The cards, in board pixels before the zoom. A ref to a getter because the
+   * board's origin depends on the viewport measured here, and because only
+   * the opening needs them: it calls it after the render that set it.
+   */
+  openingCards?: RefObject<() => Rect[]>;
+  /**
+   * False while the board still holds another project's graph, or none yet:
+   * the opening scroll frames cards, so it waits for the right ones.
+   */
+  contentReady?: boolean;
 }) {
   const [boardViewport, setBoardViewport] = useState({ width: 0, height: 0 });
   const graphViewportKeyRef = useRef("");
@@ -51,11 +65,12 @@ export function useBoardViewport({
     return () => observer.disconnect();
   }, [collapsed]);
 
-  // The graph lives inside a larger virtual surface. A project that fits the
-  // viewport opens centred in it, so a fresh project's single node sits in the
-  // middle with room on every side instead of pinned to the top-left corner;
-  // anything larger opens at the buffer origin, where logical (0,0) is. A
-  // project this session has already shown comes back where it was left.
+  // The graph lives inside a larger virtual surface. A project opens framing
+  // its cards (openingScroll): centred when they fit, so a fresh project's
+  // single node sits in the middle with room on every side, else from their
+  // top-left edge; a board without cards opens at the buffer origin, where
+  // logical (0,0) is. A project this session has already shown comes back
+  // where it was left.
   useLayoutEffect(() => {
     if (!isGraph) return;
     if (collapsed) {
@@ -67,9 +82,10 @@ export function useBoardViewport({
     const viewportKey = boardViewKey(activeProject);
     if (graphViewportKeyRef.current === viewportKey) return;
     const remembered = recallBoardView(viewportKey);
+    if (!remembered && !contentReady) return;
     const scroll = remembered
       ? restoredScroll(remembered, zoom, boardViewport)
-      : { left: GRAPH_PAN_BUFFER_X * zoom, top: GRAPH_PAN_BUFFER_Y * zoom };
+      : openingScroll(openingCards?.current?.() ?? [], zoom, boardViewport);
     board.scrollLeft = scroll.left;
     board.scrollTop = scroll.top;
     graphViewportKeyRef.current = viewportKey;
@@ -78,6 +94,7 @@ export function useBoardViewport({
     boardViewport.height,
     boardViewport.width,
     collapsed,
+    contentReady,
     isGraph,
     zoom,
   ]);

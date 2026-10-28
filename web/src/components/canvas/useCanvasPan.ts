@@ -128,6 +128,28 @@ export function useCanvasPan({
     setZoom(clampZoom(nextZoom));
   };
 
+  /**
+   * Zoom so that `point` — board pixels as the new zoom lays the board out,
+   * before scaling — sits in the middle of the view. The scroll is written in
+   * the commit that draws the new zoom, not in a later frame: a frame can run
+   * before that commit, and the zoom's own re-centring would then move it.
+   */
+  const zoomOnto = (nextZoom: number, point: { x: number; y: number }) => {
+    const board = boardRef.current;
+    if (!board) return;
+    const next = clampZoom(nextZoom);
+    const viewportX = board.clientWidth / 2;
+    const viewportY = board.clientHeight / 2;
+    if (next === zoomRef.current) {
+      zoomAnchorRef.current = null;
+      board.scrollLeft = point.x * viewScaleRef.current - viewportX;
+      board.scrollTop = point.y * viewScaleRef.current - viewportY;
+      return;
+    }
+    zoomAnchorRef.current = { viewportX, viewportY, contentX: point.x, contentY: point.y };
+    setZoom(next);
+  };
+
   useEffect(() => {
     const board = boardRef.current;
     if (!board || collapsed) return;
@@ -272,6 +294,7 @@ export function useCanvasPan({
       cancel,
     },
     zoomAt,
+    zoomOnto,
     setZoom: setZoomDirect,
     pointFromClient,
   };
