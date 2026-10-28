@@ -106,6 +106,29 @@ describe("revealing a node on the board", () => {
     expect(target.top).toBe(CARD_ROW_TOP + ROW_H / 2 - 150);
   });
 
+  it("measures a drawer that is still sliding in where it will come to rest", () => {
+    // The drawer opens with a 40px slide; the reveal runs while it moves.
+    vi.stubGlobal(
+      "DOMMatrixReadOnly",
+      class {
+        e: number;
+        f = 0;
+        constructor(transform: string) {
+          this.e = Number(/translateX\((-?[\d.]+)px\)/.exec(transform)?.[1] ?? 0);
+        }
+      },
+    );
+    try {
+      const board = makeBoard();
+      const drawer = overlay("drawer", { left: 540, top: 50, right: 1140, bottom: 650 });
+      drawer.style.transform = "translateX(40px)";
+      const target = reveal(board);
+      expect(target.left).toBe(CARD_X - 200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("leaves out the collapsed drawer's rail and any panel marked as covering the board", () => {
     const board = makeBoard();
     overlay("drawer collapsed-rail", { left: 1070, top: 50, right: 1100, bottom: 650 });
