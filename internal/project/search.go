@@ -207,10 +207,6 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 // can pin it.
 var coldSearchWait = 50 * time.Millisecond
 
-// coldDirectScanNodes is the largest project searchWhileIndexing reads in
-// full; a larger one is answered from its titles alone.
-const coldDirectScanNodes = 64
-
 func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
 	index := pm.getSearchIndex()
 	if index.indexes().Warming(project.Path, coldSearchWait) {
@@ -228,13 +224,14 @@ func (pm *ProjectManager) AwaitSearchIndex(projectPath string, within time.Durat
 }
 
 // searchWhileIndexing answers a search of a project whose first index build
-// is still running, which takes seconds for a large one. A small project is
-// scanned directly, which is complete and cheap at its size; a large one is
-// matched on what the cached graph holds (titles, kinds, tags, assignees),
-// with no file read. Body text becomes searchable once the build is in.
+// is still running, which takes seconds for a large one: it matches what the
+// cached graph holds (titles, kinds, tags, assignees) and reads no file. Body
+// text becomes searchable once the build is in. Not the direct scan: that
+// reads every node's files and pages, which on a project of a few nodes with
+// a thousand pages is seconds per search, competing with the build itself.
 func (pm *ProjectManager) searchWhileIndexing(project ProjectInfo, normalized string) []SearchResult {
 	graph, _, err := pm.cachedStore(project.Path).LoadGraph()
-	if err != nil || len(graph.Nodes) <= coldDirectScanNodes {
+	if err != nil {
 		return SearchProjectNodesDirect(project, normalized)
 	}
 	userNames := make(map[string]string, len(graph.Users))
