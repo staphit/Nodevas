@@ -5,6 +5,7 @@ import { api } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp, usePreference } from "../store";
 import type { Graph, RunState } from "../types";
+import { installPointerShims } from "./canvas/boardTestKit";
 import { LaneView } from "./LaneView";
 
 vi.mock("../api", async (importOriginal) => {
@@ -936,6 +937,115 @@ describe("LaneView", () => {
   // The board unmounts whenever the app shows Station or Settings instead, so
   // coming back must not land on the opening scroll: the pan and the zoom are
   // where the user left them, like the open drawer is.
+  // Opening a node lays its drawer over the board's right side. A card that
+  // ended up under it was opened and then hidden by its own document; the
+  // card is brought into the part of the board still showing, as Ctrl+K does.
+  describe("opening a node keeps its card in sight", () => {
+    let drawerLeft = 0;
+    beforeEach(() => {
+      installPointerShims();
+      mockNarrowViewport(false);
+      mockBoardSize(1200, 800);
+      const realRect = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        if (this.classList.contains("board")) return new DOMRect(0, 0, 1215, 815);
+        if (this.classList.contains("drawer")) return new DOMRect(drawerLeft, 0, 1200 - drawerLeft, 800);
+        if (this.classList.contains("col-card")) {
+          const board = this.closest<HTMLElement>(".board")!;
+          const zoom = Number(board.querySelector<HTMLElement>(".board-inner")!.style.zoom || "1");
+          return new DOMRect(
+            parseFloat(this.style.left) * zoom - board.scrollLeft,
+            parseFloat(this.style.top) * zoom - board.scrollTop,
+            parseFloat(this.style.width) * zoom,
+            parseFloat(this.style.height) * zoom,
+          );
+        }
+        return realRect.call(this);
+      });
+      // The drawer is the app's, not the board's: it opens with the node.
+      useApp.setState({
+        openTab: vi.fn(async () => {
+          if (!document.querySelector(".drawer")) {
+            const drawer = document.createElement("aside");
+            drawer.className = "drawer";
+            document.body.appendChild(drawer);
+          }
+        }),
+        issues: [{ severity: "error", nodeId: "a", field: "requires", msg: "未知的節點" }],
+      });
+    });
+    afterEach(() => {
+      document.querySelector(".drawer")?.remove();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      useApp.setState({ revealRequest: null });
+    });
+
+    function mount() {
+      const view = render(<LaneView variant="graph" {...paneProps} />);
+      const board = view.container.querySelector<HTMLElement>(".board")!;
+      const scrollTo = vi.fn((options: ScrollToOptions) => {
+        board.scrollLeft = options.left ?? board.scrollLeft;
+        board.scrollTop = options.top ?? board.scrollTop;
+      });
+      board.scrollTo = scrollTo as unknown as typeof board.scrollTo;
+      const card = () => view.container.querySelector<HTMLElement>('.col-card[data-node-id="a"]')!;
+      return { ...view, board, card, scrollTo };
+    }
+
+    function openCard(card: HTMLElement) {
+      act(() => {
+        fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+        fireEvent.pointerUp(card, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      });
+    }
+
+    /** Where the card lands once the board has scrolled, in the viewport. */
+    function landed(card: HTMLElement) {
+      return card.getBoundingClientRect();
+    }
+
+    it("brings a card opened from the board out from under the drawer", async () => {
+      // The card opens centred, about x 525–675; the drawer covers from 560.
+      drawerLeft = 560;
+      const { card, scrollTo } = mount();
+      openCard(card());
+      await act(async () => undefined);
+      expect(scrollTo).toHaveBeenCalled();
+      const rect = landed(card());
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(560);
+    });
+
+    it("brings a card picked in Problems out from under the drawer", async () => {
+      drawerLeft = 560;
+      const user = userEvent.setup();
+      const { card, scrollTo } = mount();
+      await user.click(screen.getByRole("button", { name: /問題：/ }));
+      const panel = screen.getByRole("complementary", { name: "問題" });
+      await user.click(within(panel).getByRole("button", { name: /未知的節點/ }));
+      await act(async () => undefined);
+      expect(scrollTo).toHaveBeenCalled();
+      const rect = landed(card());
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(560);
+    });
+
+    it("leaves the board where it is when the card is clear of the drawer", async () => {
+      drawerLeft = 900;
+      const { board, card, scrollTo } = mount();
+      const before = { left: board.scrollLeft, top: board.scrollTop };
+      openCard(card());
+      await act(async () => undefined);
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual(before);
+    });
+  });
+
   describe("leaving the board and coming back", () => {
     afterEach(() => {
       vi.unstubAllGlobals();
