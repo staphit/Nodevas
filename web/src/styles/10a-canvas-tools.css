@@ -57,6 +57,13 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+/* A ⋯ menu's panel sits inside its control (fixed to the window) and would
+   inherit that nowrap: its hints ran past its width and it scrolled sideways.
+   Out of the strip it is a menu again; its items keep their own nowrap. The
+   phone strip sets the same nowrap, so this is not tied to the drawer. */
+.board-title-controls .board-overflow-panel {
+  white-space: normal;
+}
 /* The pane name and the followed node's title can lose characters without
    losing a control, so they shrink first. */
 .lane-wrap[data-drawer-cover] .board-title-controls > .board-title-main {
