@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"nodevas/internal/db"
@@ -29,6 +30,17 @@ const qaContradictionWindow = 14 * 24 * time.Hour
 //
 // A QA fail is never contradicted.
 func Contradicted(ctx context.Context, database *db.DB, verdictRunIDs []string) (map[string]bool, error) {
+	return contradictedOn(ctx, database, verdictRunIDs)
+}
+
+// querier is the part of *db.DB Contradicted reads with, so a test can
+// count what it asks.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func contradictedOn(ctx context.Context, database querier, verdictRunIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(verdictRunIDs) == 0 {
 		return out, nil
@@ -72,7 +84,7 @@ SELECT run_id, project, node_id, pipeline_id, role, round, outcome, created_at
 	return out, nil
 }
 
-func contradicted(ctx context.Context, database *db.DB, v verdictRow) (bool, error) {
+func contradicted(ctx context.Context, database querier, v verdictRow) (bool, error) {
 	exists := func(query string, args ...any) (bool, error) {
 		var n int
 		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+` LIMIT 1) hit`, args...).Scan(&n); err != nil {

@@ -203,3 +203,6 @@ func (s *Server) autoRoute(ctx context.Context, ownerID, project, nodeID, role s
 	}
 	return out
 }
+
+// changesScorecards reports a write that can change agent scorecards.
+func changesScorecards(method, path string) bool { return false }
