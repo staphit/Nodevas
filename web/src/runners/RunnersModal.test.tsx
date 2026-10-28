@@ -104,6 +104,50 @@ describe("RunnersPanel", () => {
     expect(screen.getByRole("button", { name: /本機/ })).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("shows a runner's details in zh-TW without the runner's English", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    const blocked: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        agents: [
+          ...(desktop.info!.agents ?? []),
+          {
+            kind: "antigravity",
+            installed: false,
+            version: "",
+            models: [{ id: "default", label: "CLI default", default: true }],
+            error:
+              'antigravity: runs need "mcp(nodevas/*)" in permissions.allow of ~/.gemini/antigravity-cli/settings.json; ' +
+              "run `nodevas setup-agent --runs-only --agents antigravity`",
+          },
+          {
+            kind: "opencode",
+            installed: false,
+            models: [],
+            error: "opencode: version 3 is not supported yet; runs need OpenCode 1.x or 2.x",
+          },
+        ],
+      },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [blocked] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: /desktop/ }));
+
+    const details = document.querySelector(".runner-details") as HTMLElement;
+    const text = details.textContent ?? "";
+    for (const english of ["CLI default", "runs need", "is not supported yet", "Not installed", "Installed"]) {
+      expect(text).not.toContain(english);
+    }
+    expect(screen.getByText("CLI 預設 ★")).toBeInTheDocument();
+    // The fix is still there to copy: the rule and the command stay as they are.
+    expect(text).toContain("mcp(nodevas/*)");
+    expect(text).toContain("nodevas setup-agent --runs-only --agents antigravity");
+    expect(text).toContain("OpenCode 1.x");
+  });
+
   it("opens the add form when asked from outside, once", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
     const opened = vi.fn();
