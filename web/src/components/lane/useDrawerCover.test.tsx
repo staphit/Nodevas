@@ -131,4 +131,16 @@ describe("toolbar beside an open drawer", () => {
     expect(strip![1]).toMatch(/overflow-x:\s*auto/);
     expect(strip![1]).toMatch(/overflow-y:\s*hidden/);
   });
+
+  // The strip keeps its controls on one line with white-space: nowrap on each.
+  // A ⋯ menu's panel sits inside its control, fixed to the window, and
+  // inherited that nowrap: beside the drawer the graph ⋯ grew to 320px in a
+  // 268px panel and the timeline ⋯ to 338px, so both scrolled sideways and cut
+  // off the Display scale hint, Reset, Auto-size and the size values. Out of
+  // the strip the panel is a menu again and wraps its sentences.
+  it("lets a menu opened from the strip wrap its text again", () => {
+    const panel = /\.board-title-controls\s+\.board-overflow-panel\s*\{([^}]*)\}/.exec(css);
+    expect(panel).not.toBeNull();
+    expect(panel![1]).toMatch(/white-space:\s*normal/);
+  });
 });
