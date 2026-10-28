@@ -105,6 +105,23 @@ describe("RunnersPanel", () => {
     );
   });
 
+  // A repo's path was cut with "…" and no tooltip: whole on hover, and it
+  // wraps rather than cuts, so the full path can be read and selected.
+  it("shows a repo's whole path, wrapped and with a tooltip", async () => {
+    const path = "D:/work/clients/a-very-long-customer-name/monorepo/packages/server";
+    const local: Runner = {
+      ...desktop,
+      info: { ...desktop.info!, repos: [{ id: "repo2", name: "server", path }] },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [local] });
+    render(<RunnersPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Details for desktop" }));
+    const shown = screen.getByText(path);
+    expect(shown).toHaveAttribute("title", path);
+    expect(shown).toHaveClass("runner-repo-path");
+    expect(screen.getByText("desktop")).toHaveAttribute("title", "desktop");
+  });
+
   it("names the hub's own runner in the reader's language", async () => {
     useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...desktop, name: "this machine" }] });
