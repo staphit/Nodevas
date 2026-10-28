@@ -608,7 +608,7 @@ export function WorkspaceTree({
                                   y: event.clientY,
                                 });
                               }}
-                              title={`${node.title || node.id} (${t("explorer.nodeSelectionTitle")})`}
+                              title={t("explorer.nodeSelectionTitle", { title: node.title || node.id })}
                             >
                               <span className="tree-indent" />
                               <IconDoc size={13} />
