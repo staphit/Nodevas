@@ -717,6 +717,10 @@ describe("LaneView", () => {
       mockNarrowViewport(false);
       mockBoardSize(1280, 800);
       const project = useApp.getState().activeProject;
+      // Each switch lands with its project's graph loaded, as the store's load
+      // would; the board waits for that before framing the cards.
+      const show = (name: string) =>
+        act(() => useApp.setState({ activeProject: name, graphProject: name }));
       act(() => useApp.setState({ activeProject: "in-place-first" }));
       try {
         const { container } = render(<LaneView variant="graph" {...paneProps} />);
@@ -731,7 +735,7 @@ describe("LaneView", () => {
         fireEvent.scroll(board);
 
         // A project this session has not shown opens at 100% on the opening scroll.
-        act(() => useApp.setState({ activeProject: "in-place-second" }));
+        show("in-place-second");
         expect(inner()).toBe("1");
         expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual(opening);
         fireEvent.wheel(board, { altKey: true, deltaY: -100 });
@@ -740,17 +744,51 @@ describe("LaneView", () => {
         expect(secondZoom).not.toBe(firstZoom);
 
         // Back to the first: its own zoom and the scroll it was left at.
-        act(() => useApp.setState({ activeProject: "in-place-first" }));
+        show("in-place-first");
         expect(inner()).toBe(firstZoom);
         expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual({
           left: 1700,
           top: 900,
         });
 
-        act(() => useApp.setState({ activeProject: "in-place-second" }));
+        show("in-place-second");
         expect(inner()).toBe(secondZoom);
       } finally {
-        act(() => useApp.setState({ activeProject: project }));
+        act(() => useApp.setState({ activeProject: project, graphProject: "" }));
+      }
+    });
+
+    // The project menu changes the project first and loads its graph after;
+    // in between the store still holds the old project's graph, which the
+    // opening must not frame and then keep.
+    it("frames the new project's cards, not the old project's, on an in-place switch", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      const project = useApp.getState().activeProject;
+      const far = (id: string, x: number, y: number): Graph => ({
+        version: 1,
+        nodes: [{ id, title: id }],
+        edges: [],
+        ui: { positions: { [id]: { x, y } } },
+      });
+      act(() =>
+        useApp.setState({
+          activeProject: "switch-old",
+          graph: far("old-card", 40, 2),
+          graphProject: "",
+        }),
+      );
+      try {
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        expect(cardsInView(container, 948, 680)).toHaveLength(1);
+
+        act(() => useApp.setState({ activeProject: "switch-new" }));
+        act(() =>
+          useApp.setState({ graph: far("new-card", 2, 40), graphProject: "switch-new" }),
+        );
+        expect(cardsInView(container, 948, 680)).toHaveLength(1);
+      } finally {
+        act(() => useApp.setState({ activeProject: project, graphProject: "" }));
       }
     });
 
