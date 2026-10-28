@@ -115,7 +115,18 @@ func (r *Repo) CommitChanges(ctx context.Context, changes []Change, message Mess
 	if _, err := r.run(ctx, info.Bytes(), env, "update-index", "-z", "--index-info"); err != nil {
 		return "", err
 	}
-	return r.commitIndex(ctx, env, message, author, at)
+	commit, err := r.commitIndex(ctx, env, message, author, at)
+	if err != nil || commit == "" {
+		return commit, err
+	}
+	// The work tree's own index follows HEAD to these files, or `git status`
+	// reports a file this commit added as deleted (and the same file on disk
+	// as untracked) until the next CommitTracked. The entries carry no stat
+	// data, so status compares their content with the work tree. Only status
+	// reads the index between commits; a failure here costs it a wrong line
+	// until then, not the commit.
+	_, _ = r.run(ctx, info.Bytes(), nil, "update-index", "-z", "--index-info")
+	return commit, nil
 }
 
 // commitIndex commits the index env points at (the repository's own when env
