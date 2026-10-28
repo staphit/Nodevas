@@ -177,6 +177,9 @@ function revert(
         else pushRedo(entry);
         return false;
       }
+      // The board moved on: an error the top bar shows about the step before
+      // no longer describes what is on screen.
+      set((state) => (state.lastOperation?.status === "error" ? { lastOperation: null } : {}));
       if (!inverse) {
         // The step landed but cannot describe its own reverse. Everything on
         // the opposite stack assumed that reverse, so it goes too.
