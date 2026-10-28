@@ -155,11 +155,13 @@ export type GraphSelection =
   | null;
 
 /**
- * The empty-state hint over a board that has groups but no cards: its card
- * plus the room left between it and the groups' tops, and the margin
- * .ui-empty-state keeps above it, in board pixels.
+ * The empty-state hint over a board that has groups but no cards, in board
+ * pixels: the room left between its card and the groups' tops, the card's
+ * height until it has been measured (it grows with the text size), and the
+ * margin .ui-empty-state keeps around it.
  */
-const EMPTY_HINT_ROOM = 96;
+const EMPTY_HINT_GAP = 20;
+const EMPTY_HINT_CARD_H = 76;
 const EMPTY_HINT_MARGIN = 48;
 
 /** Props both panes take. `variant` is supplied by GraphPane / TimelinePane. */
@@ -334,6 +336,7 @@ export function LaneView({
   // The node drawer lies over the pane's right side; the toolbar keeps its
   // right-hand controls clear of it.
   const paneRef = useRef<HTMLElement>(null);
+  const emptyHintRef = useRef<HTMLDivElement>(null);
   const drawerCover = useDrawerCover(paneRef);
   // So does the vertical timeline's date ruler, sticky at the board's right.
   const boardDrawerCover = useBoardDrawerCover(paneRef);
@@ -947,23 +950,31 @@ export function LaneView({
         bottom: item.y + graphOffsetY + item.height,
       }))
     : [];
-  const emptyHintRect: Rect | null =
-    cols.length === 0 && decorationRects.length > 0
-      ? {
-          left: Math.min(...decorationRects.map((rect) => rect.left)),
-          right: Math.max(...decorationRects.map((rect) => rect.right)),
-          top: Math.min(...decorationRects.map((rect) => rect.top)) - EMPTY_HINT_ROOM,
-          bottom: Math.min(...decorationRects.map((rect) => rect.top)),
-        }
-      : null;
-  const openingContent = (): Rect[] =>
-    isGraph
-      ? [
-          ...cols.map((column) => cardRect(column, centerX, rowTop)),
-          ...decorationRects,
-          ...(emptyHintRect ? [emptyHintRect] : []),
-        ]
-      : [];
+  // The hint over a board with groups but no cards ends just above them; the
+  // opening frames it at its measured height.
+  const hasEmptyHint = cols.length === 0 && decorationRects.length > 0;
+  const groupsTop = hasEmptyHint ? Math.min(...decorationRects.map((rect) => rect.top)) : 0;
+  const emptyHintRect = (): Rect | null => {
+    if (!hasEmptyHint) return null;
+    const card =
+      emptyHintRef.current?.querySelector<HTMLElement>(".ui-empty-state")?.offsetHeight ||
+      EMPTY_HINT_CARD_H;
+    return {
+      left: Math.min(...decorationRects.map((rect) => rect.left)),
+      right: Math.max(...decorationRects.map((rect) => rect.right)),
+      top: groupsTop - EMPTY_HINT_GAP - card,
+      bottom: groupsTop,
+    };
+  };
+  const openingContent = (): Rect[] => {
+    if (!isGraph) return [];
+    const hint = emptyHintRect();
+    return [
+      ...cols.map((column) => cardRect(column, centerX, rowTop)),
+      ...decorationRects,
+      ...(hint ? [hint] : []),
+    ];
+  };
   openingCardsRef.current = openingContent;
   // The timeline comes back where this project's was left — its scroll is a
   // place in this project's calendar, never another's — and a project it has
@@ -1464,19 +1475,26 @@ export function LaneView({
     // opens on today, far down or across its calendar: the hint comes
     // ahead of the calendar, stuck to the pane's top-left and taking
     // no room, so it is in the pane wherever the calendar is scrolled.
+    // Either way the box is as wide as the pane and only its card takes the
+    // pointer: around it are the groups' title bars and buttons.
     <div
+      ref={emptyHintRef}
       className="board-empty"
       style={
         isGraph
           ? {
               position: "absolute",
-              // Over decorations: across the opening view, just above them.
-              left: emptyHintRect
+              pointerEvents: "none",
+              // Over decorations: across the opening view, just above them —
+              // placed by its bottom edge, so a card grown taller with the
+              // text size grows upward, clear of them.
+              left: hasEmptyHint
                 ? openingScroll(openingContent(), viewScale, boardViewport).left / viewScale
                 : GRAPH_PAN_BUFFER_X,
-              top: emptyHintRect
-                ? emptyHintRect.top - EMPTY_HINT_MARGIN
+              top: hasEmptyHint
+                ? groupsTop - EMPTY_HINT_GAP + EMPTY_HINT_MARGIN
                 : GRAPH_PAN_BUFFER_Y,
+              transform: hasEmptyHint ? "translateY(-100%)" : undefined,
               width:
                 boardViewport.width > 0
                   ? boardViewport.width / viewScale
@@ -1484,6 +1502,7 @@ export function LaneView({
             }
           : {
               position: "sticky",
+              pointerEvents: "none",
               top: 0,
               left: 0,
               height: 0,
@@ -1499,27 +1518,29 @@ export function LaneView({
             }
       }
     >
-      <EmptyState
-        title={t("lane.emptyTitle")}
-        description={t("lane.emptyDescription")}
-        action={
-          <button
-            type="button"
-            onClick={(event) =>
-              openNodeCreationMenu({
-                kind: "graph",
-                x: event.clientX || 24,
-                y: event.clientY || 88,
-                col: 0,
-                row: 0,
-              })
-            }
-          >
-            <IconPlus size={13} />
-            {t("nodeCreate.create")}
-          </button>
-        }
-      />
+      <div style={{ display: "contents", pointerEvents: "auto" }}>
+        <EmptyState
+          title={t("lane.emptyTitle")}
+          description={t("lane.emptyDescription")}
+          action={
+            <button
+              type="button"
+              onClick={(event) =>
+                openNodeCreationMenu({
+                  kind: "graph",
+                  x: event.clientX || 24,
+                  y: event.clientY || 88,
+                  col: 0,
+                  row: 0,
+                })
+              }
+            >
+              <IconPlus size={13} />
+              {t("nodeCreate.create")}
+            </button>
+          }
+        />
+      </div>
     </div>
   );
 

@@ -962,8 +962,10 @@ describe("LaneView", () => {
       const groupsTop = Math.min(...groups.map((group) => parseFloat(group.style.top)));
       expect(hintLeft).toBeGreaterThanOrEqual(view.left);
       expect(hintLeft).toBeLessThan(view.right);
+      // Placed by its bottom edge: that, less the card's 48px margin, is
+      // above the groups.
       expect(hintTop).toBeGreaterThan(view.top);
-      expect(hintTop).toBeLessThanOrEqual(groupsTop);
+      expect(hintTop - 48).toBeLessThanOrEqual(groupsTop);
     });
 
     // The hint was placed by a fixed allowance for its card above the groups:
