@@ -792,6 +792,23 @@ describe("LaneView", () => {
       }
     });
 
+    // On a reload the graph can load before the workspace names the active
+    // project; that graph is the named project's, not a stale one to wait out.
+    it("fits a phone's board when the workspace names the project after its graph loaded", () => {
+      mockNarrowViewport(true);
+      mockBoardSize(390, 700);
+      const project = useApp.getState().activeProject;
+      act(() => useApp.setState({ activeProject: "", graphProject: "" }));
+      try {
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        act(() => useApp.setState({ activeProject: "named-after-load" }));
+        expect(container.querySelector<HTMLElement>(".board-inner")!.style.zoom).toBe("1.3");
+        expect(cardsInView(container, 390, 700)).toHaveLength(1);
+      } finally {
+        act(() => useApp.setState({ activeProject: project, graphProject: "" }));
+      }
+    });
+
     it("does not refit a phone's board it has already fitted on a project switch", () => {
       mockNarrowViewport(true);
       mockBoardSize(390, 700);
