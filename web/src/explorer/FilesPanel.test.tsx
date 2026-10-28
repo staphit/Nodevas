@@ -46,6 +46,18 @@ describe("FilesPanel", () => {
     expect(screen.getByText("No repos: add one on your runner with nodevas runner repo add.")).toBeInTheDocument();
   });
 
+  // A .txt file is prose, not code: it showed the {} icon (UX sweep).
+  it("gives plain text its own icon, apart from code, Markdown and images", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
+    render(<FilesPanel />);
+    const workspace = await screen.findByRole("region", { name: /^Workspace/ });
+    const icon = (name: string) =>
+      within(workspace).getByText(name).closest("button")!.querySelector(".ex-ico")!.textContent;
+    expect(icon("notes.txt")).toBe("≡");
+    expect(icon("graph.yaml")).toBe("{}");
+    expect(icon("login.md")).toBe("¶");
+  });
+
   it("browses an online repo read-only and says what is hidden", async () => {
     vi.spyOn(explorerApi, "repos").mockResolvedValue([repo()]);
     render(<FilesPanel />);
