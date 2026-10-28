@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nodevas/internal/identity"
 )
 
 // fastestListing is the quickest of a few ListNodePages calls: the floor of
@@ -53,5 +55,34 @@ func TestListNodePagesStillRefusesBrokenAndAllowsMissingPages(t *testing.T) {
 	// The other pages of an unbroken node are unaffected.
 	if _, err := st.ListNodePages("n00000"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPageListingIsServedFromTheLastCheckUntilTheManifestChanges(t *testing.T) {
+	st := benchPagesStore(t, 2, 3)
+	actor := identity.Actor{ID: "writer", Name: "Writer"}
+	if _, err := st.ListNodePages("n00001"); err != nil {
+		t.Fatal(err)
+	}
+	// Listing a directory of a few hundred pages costs milliseconds on
+	// Windows, and the board asks for every node it opens: a repeat
+	// listing of the same manifest reuses the last check of its files.
+	// What the store itself writes there is always a regular file, so only
+	// a change from outside can make that check stale, and the file watcher
+	// reports those (realtime).
+	breakPage(t, st, "n00001", "page-0003")
+	pages, err := st.ListNodePages("n00001")
+	if err != nil {
+		t.Fatalf("a repeat listing re-read the pages directory: %v", err)
+	}
+	if len(pages) != 3 {
+		t.Fatalf("cached listing has %d pages, want 3", len(pages))
+	}
+	// A new manifest is a new listing, checked from scratch.
+	if _, _, _, err := st.CreateNodePage(actor, "n00001", "Fourth", PageFormatMarkdown); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ListNodePages("n00001"); err == nil || !strings.Contains(err.Error(), "page-0003") {
+		t.Fatalf("listing after the manifest changed = %v, want the broken page reported", err)
 	}
 }
