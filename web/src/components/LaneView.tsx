@@ -69,6 +69,7 @@ import {
   boardMetrics,
   fitViewToCards,
   graphCellAt,
+  nearestFreeGraphCell,
   graphObstacleRects,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
@@ -1001,7 +1002,9 @@ export function LaneView({
       kind: "graph",
       x,
       y,
-      ...graphCellAt(contentX, contentY),
+      // Off any card already there: pressing the button twice without
+      // touching the board must not put the second card on the first.
+      ...nearestFreeGraphCell(graphCellAt(contentX, contentY), cols),
     };
   };
 

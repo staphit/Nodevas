@@ -10,6 +10,10 @@ import type { LogicGate } from "../../types";
 import { LOGIC_GATE_H, LOGIC_GATE_W } from "../canvas/LogicGate";
 import { MAX_COL, MAX_ROW } from "../canvas/useBoardColumns";
 import {
+  CARD_GAP_X,
+  CARD_GAP_Y,
+  CARD_H,
+  CARD_W,
   COL_W,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -100,6 +104,52 @@ export function graphCellAt(
     col: Math.max(0, Math.min(MAX_COL, Math.floor(contentX / COL_W))),
     row: Math.max(0, Math.min(MAX_ROW, Math.floor(contentY / ROW_H))),
   };
+}
+
+/**
+ * The free grid cell nearest to anchor for a new card of the default size:
+ * the anchor itself when nothing overlaps it, else the closest cell ring by
+ * ring (right, below, left, above first). Without it every card made from the
+ * toolbar landed on the middle of the view, exactly on top of the last one.
+ */
+export function nearestFreeGraphCell(
+  anchor: { col: number; row: number },
+  cols: readonly Col[],
+): { col: number; row: number } {
+  const overlaps = (col: number, row: number) =>
+    cols.some(
+      (card) =>
+        Math.abs((col - card.index) * COL_W) < (CARD_W + card.width) / 2 + CARD_GAP_X &&
+        Math.abs((row - card.row) * ROW_H) < (CARD_H + card.height) / 2 + CARD_GAP_Y,
+    );
+  const inBoard = (col: number, row: number) =>
+    col >= 0 && col <= MAX_COL && row >= 0 && row <= MAX_ROW;
+  const maxRing = 24;
+  for (let ring = 0; ring <= maxRing; ring++) {
+    const candidates: { col: number; row: number }[] = [];
+    for (let dc = -ring; dc <= ring; dc++) {
+      for (let dr = -ring; dr <= ring; dr++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+        candidates.push({ col: anchor.col + dc, row: anchor.row + dr });
+      }
+    }
+    // Nearest first by grid distance; the four direct neighbours win ties,
+    // right and below before left and above.
+    const order = (c: { col: number; row: number }) => {
+      const dc = c.col - anchor.col;
+      const dr = c.row - anchor.row;
+      const manhattan = Math.abs(dc) + Math.abs(dr);
+      const side = dc > 0 ? 0 : dr > 0 ? 1 : dc < 0 ? 2 : 3;
+      return manhattan * 4 + side;
+    };
+    candidates.sort((a, b) => order(a) - order(b));
+    for (const candidate of candidates) {
+      if (inBoard(candidate.col, candidate.row) && !overlaps(candidate.col, candidate.row)) {
+        return candidate;
+      }
+    }
+  }
+  return anchor;
 }
 
 /** Everything a wire has to route around: the cards and the logic gates. */
