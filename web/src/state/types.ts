@@ -309,6 +309,10 @@ export interface GraphSlice {
   error: string | null;
   clearError: () => void;
   graph: Graph | null;
+  /** The project `graph` was loaded for. During a switch `activeProject`
+   * moves first and the old graph stays on screen until the new one lands, so
+   * anything that reads the graph as the active project's checks this. */
+  graphProject: string;
   graphRev: string;
   issues: Issue[];
   loadAll: () => Promise<void>;

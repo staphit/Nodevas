@@ -119,6 +119,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   error: null,
   clearError: () => set({ error: null }),
   graph: null,
+  graphProject: "",
   graphRev: "",
   issues: [],
 
@@ -135,6 +136,9 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         if (generation !== generations.load) return;
         set({
           graph: normalizeGraph(g.graph),
+          // The generation check above means no switch happened in flight, so
+          // the read was answered for the project that is active now.
+          graphProject: get().activeProject,
           graphRev: g.rev,
           issues: g.issues ?? [],
           error: null,
