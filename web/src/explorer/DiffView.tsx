@@ -149,7 +149,7 @@ export default function DiffView({ view }: DiffViewProps) {
       <div className="ex-mhead">
         <h1>{title}</h1>
         {shown?.chip && <span className={`ex-chip ${shown.chip.cls}`}>{t(shown.chip.text)}</span>}
-        {shown && <span className="ex-chip">{t("explorer.git.stat", stat)}</span>}
+        {shown && <span className="ex-chip">{t(stat.files === 1 ? "explorer.git.statOne" : "explorer.git.statMany", stat)}</span>}
         {shown?.at && <span className="ex-crumb">{clockText(shown.at)}</span>}
         {shown && view.source !== "repo" && (
           <button type="button" className="ex-btn" onClick={() => void whichAgent()}>

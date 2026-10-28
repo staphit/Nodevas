@@ -26,6 +26,12 @@ interface TimelineEntry {
 const EXCERPT = 240;
 const excerpt = (text: string) => (text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text);
 
+/** An external session's action as a message key; a count of one file is singular. */
+const actionKey = (action: string, detail: string) =>
+  action === "changes"
+    ? `explorer.action.${Number(detail) === 1 ? "changesOne" : "changesMany"}`
+    : `explorer.action.${action}`;
+
 function findItem(data: { live: AgentItem[]; external: AgentItem[]; recent: AgentItem[] } | null, id: string) {
   if (!data) return undefined;
   return [...data.live, ...data.external, ...data.recent].find((item) => item.id === id);
@@ -96,7 +102,7 @@ export default function AgentView({ id }: AgentViewProps) {
           key: `a${i}`,
           at: action.at,
           dot: action.action === "doing" || action.action === "changes" ? "tool" : "txt",
-          text: t(`explorer.action.${action.action}`, {
+          text: t(actionKey(action.action, action.detail), {
             doing: action.detail,
             to: action.detail,
             question: action.detail,
