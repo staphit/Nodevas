@@ -9,7 +9,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -154,6 +158,11 @@ func MiddlewareWithOptions(opts Options) func(http.Handler) http.Handler {
 		return opts.Quiet != nil && status < http.StatusBadRequest &&
 			(r.Method == http.MethodGet || r.Method == http.MethodHead) && opts.Quiet(r)
 	}
+	clock := opts.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	sampler := &clientErrorSampler{perSecond: clientErrorLinesPerSecond, now: clock}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +183,13 @@ func MiddlewareWithOptions(opts Options) func(http.Handler) http.Handler {
 				if panicked {
 					status = http.StatusInternalServerError
 				}
+				// A summary of the client errors left out last second goes
+				// first, so the log reads in order.
+				sampler.flush(r.Context(), logger)
 				if quiet(r, status) {
+					return
+				}
+				if sampledStatus(status) && !sampler.admit(status) {
 					return
 				}
 				userID, userName, userEmail := info.user()
@@ -199,6 +214,92 @@ func MiddlewareWithOptions(opts Options) func(http.Handler) http.Handler {
 			panicked = false
 		})
 	}
+}
+
+// clientErrorLinesPerSecond is how many client-error lines (see
+// sampledStatus) are written per second; the rest are counted, and the count
+// is one line in the next second that has a request.
+const clientErrorLinesPerSecond = 5
+
+// sampledStatus reports a status whose lines are sampled: a 4xx the client
+// caused, which a client can cause as fast as it can send — a limiter's 429
+// above all. A refused credential (401, 403) is what an operator looks for
+// after an incident, and a 5xx is the server's own failure; both are always
+// written, as is every success.
+func sampledStatus(status int) bool {
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError &&
+		status != http.StatusUnauthorized && status != http.StatusForbidden
+}
+
+// clientErrorSampler lets perSecond client-error lines through per second
+// and counts the rest by status.
+type clientErrorSampler struct {
+	perSecond int
+	now       func() time.Time
+
+	mu         sync.Mutex
+	window     time.Time // the second being counted
+	written    int
+	suppressed map[int]int64
+	pending    atomic.Bool // suppressed is not empty
+}
+
+// admit reports whether a line for status may be written now, and counts it
+// as left out when it may not.
+func (s *clientErrorSampler) admit(status int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	second := s.now().Truncate(time.Second)
+	if !second.Equal(s.window) {
+		s.window, s.written = second, 0
+	}
+	if s.written < s.perSecond {
+		s.written++
+		return true
+	}
+	if s.suppressed == nil {
+		s.suppressed = map[int]int64{}
+	}
+	s.suppressed[status]++
+	s.pending.Store(true)
+	return false
+}
+
+// flush writes one line counting what admit left out, once the second it
+// was counted in has passed. The common case — nothing left out — is one
+// atomic load.
+func (s *clientErrorSampler) flush(ctx context.Context, logger *slog.Logger) {
+	if !s.pending.Load() {
+		return
+	}
+	s.mu.Lock()
+	if s.now().Truncate(time.Second).Equal(s.window) || len(s.suppressed) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	counts := s.suppressed
+	since := s.window
+	s.suppressed = nil
+	s.pending.Store(false)
+	s.mu.Unlock()
+
+	statuses := make([]int, 0, len(counts))
+	var total int64
+	for status, n := range counts {
+		statuses = append(statuses, status)
+		total += n
+	}
+	sort.Ints(statuses)
+	parts := make([]string, len(statuses))
+	for i, status := range statuses {
+		parts[i] = strconv.Itoa(status) + ":" + strconv.FormatInt(counts[status], 10)
+	}
+	logger.LogAttrs(ctx, slog.LevelWarn, "http requests not logged",
+		Event(CategoryWeb, "http.request.suppressed", ""),
+		slog.Int64("nodevas.suppressed_count", total),
+		slog.String("nodevas.suppressed_statuses", strings.Join(parts, ",")),
+		slog.String("nodevas.suppressed_since", since.UTC().Format(time.RFC3339)),
+	)
 }
 
 func levelForStatus(status int) slog.Level {

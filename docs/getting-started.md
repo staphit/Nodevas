@@ -118,6 +118,12 @@ services:
     networks:
       - nodevas
     # No "ports:": only the proxy reaches the hub, at http://nodevas:5666.
+    # Docker keeps container logs without limit unless told otherwise.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   postgres:
     image: postgres:17
@@ -132,6 +138,11 @@ services:
       - database_password
     networks:
       - nodevas
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # Add your HTTPS reverse proxy here, on the nodevas network.
 
