@@ -101,3 +101,33 @@ func TestDuplicateNamesTheCopyInTheReadersLanguage(t *testing.T) {
 		})
 	}
 }
+
+func TestTransferWarningsSpeakTheReadersLanguage(t *testing.T) {
+	for _, language := range []string{"en-US,en;q=0.9", "zh-TW,zh;q=0.9"} {
+		t.Run(language, func(t *testing.T) {
+			server, _ := readerLanguageFixture(t)
+			// Bravo requires Alpha, which stays behind.
+			response := askIn(t, server, language, http.MethodPost, "/api/nodes/transfer",
+				`{"target":"other","ids":["bravo"],"mode":"copy"}`)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+			var result struct {
+				Warnings []string `json:"warnings"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Warnings) != 1 {
+				t.Fatalf("warnings = %q, want the dropped dependency", result.Warnings)
+			}
+			warning := result.Warnings[0]
+			if !strings.Contains(warning, "Bravo") {
+				t.Fatalf("warning %q does not name the node", warning)
+			}
+			if chinese := strings.HasPrefix(language, "zh"); hasCJK(warning) != chinese {
+				t.Fatalf("warning for %s reads %q", language, warning)
+			}
+		})
+	}
+}
