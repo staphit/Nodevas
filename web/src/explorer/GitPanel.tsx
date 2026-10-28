@@ -3,6 +3,7 @@ import { explorerApi, type RepoSummary } from "../api/explorer";
 import type { Run } from "../api/runs";
 import { useI18n } from "../i18n";
 import { useApp } from "../store";
+import { commitSubjectText } from "./commitSubject";
 import { clockText, baseName } from "./explorerFormat";
 import { useExplorer, type ExplorerView } from "./explorerStore";
 import { useLoad } from "./useExplorerData";
@@ -24,6 +25,17 @@ function verdictChip(verdict: string | undefined): { key: string; cls: string } 
 }
 
 const same = (a: ExplorerView | null, b: ExplorerView) => JSON.stringify(a) === JSON.stringify(b);
+
+/** The marks the hub gives a pending change, in the order the legend names them. */
+const MARKS = ["M", "A", "D", "R"];
+
+/** Names each mark the pending list shows, and only those. */
+function marksLegend(pending: { mark: string }[], t: (key: string) => string): string {
+  const shown = new Set(pending.map((change) => change.mark));
+  return MARKS.filter((mark) => shown.has(mark))
+    .map((mark) => t(`explorer.git.mark.${mark}`))
+    .join(t("explorer.git.markSeparator"));
+}
 
 /** A repo's uncommitted changes, from its runner. */
 function RepoChanges({ repo }: { repo: RepoSummary }) {
@@ -69,7 +81,7 @@ function RepoChanges({ repo }: { repo: RepoSummary }) {
 
 /** Workspace changes, agent branches, commits. */
 export default function GitPanel() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
   // Both belong to the open project, so a switch from the header loads the
@@ -123,7 +135,7 @@ export default function GitPanel() {
                 );
               })
             )}
-            {ws.pending.length > 0 && <p className="ex-hint">{t("explorer.files.marks")}</p>}
+            {ws.pending.length > 0 && <p className="ex-hint">{marksLegend(ws.pending, t)}</p>}
           </section>
         )}
         {git.error != null && <p className="ex-note">{(git.error as Error).message ?? String(git.error)}</p>}
@@ -183,7 +195,7 @@ export default function GitPanel() {
                     <span className="ex-ico" aria-hidden="true">
                       ○
                     </span>
-                    <span className="ex-name">{commit.subject}</span>
+                    <span className="ex-name">{commitSubjectText(commit.subject, language)}</span>
                     <span className="ex-meta">{clockText(commit.at)}</span>
                   </button>
                 );

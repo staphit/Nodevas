@@ -5,6 +5,7 @@ import type { Run } from "../api/runs";
 import { useI18n } from "../i18n";
 import { DiffTable, readDiffLayout } from "../runs/DiffViewer";
 import { parsePatch } from "../runs/patch";
+import { commitSubjectText } from "./commitSubject";
 import { clockText } from "./explorerFormat";
 import { useExplorer, type ExplorerView } from "./explorerStore";
 import { useLoad } from "./useExplorerData";
@@ -25,6 +26,8 @@ interface Shown {
   /** A commit's author and time, to find the agent that made it. */
   author?: string;
   at?: string;
+  /** A workspace commit's subject, worded in the reader's language when shown. */
+  subject?: string;
   /** The stat the hub counted, when it did (a run's). */
   stat?: { files: number; add: number; del: number };
 }
@@ -68,6 +71,7 @@ async function load(view: DiffViewProps["view"]): Promise<Shown> {
     const commit = await explorerApi.workspaceCommit(view.sha);
     return {
       title: commit.subject,
+      subject: commit.subject,
       sub: `${commit.sha.slice(0, 8)} · ${commit.author}`,
       patch: commit.patch,
       truncated: commit.truncated,
@@ -108,7 +112,7 @@ function agentFor(items: AgentItem[], shown: Shown, paths: string[]): AgentItem 
 
 /** A run's, a workspace commit's or a repo's patch. */
 export default function DiffView({ view }: DiffViewProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const open = useExplorer((s) => s.open);
   const [note, setNote] = useState<string | null>(null);
   const loaded = useLoad(() => load(view), JSON.stringify(view));
@@ -142,7 +146,9 @@ export default function DiffView({ view }: DiffViewProps) {
   const title =
     view.source === "repo" && !view.ref
       ? t("explorer.git.uncommitted", { repo: view.repoName || view.repoId })
-      : shown?.title ?? "";
+      : shown?.subject !== undefined
+        ? commitSubjectText(shown.subject, language)
+        : shown?.title ?? "";
 
   return (
     <div className="ex-view">
