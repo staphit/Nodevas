@@ -28,7 +28,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -135,10 +134,10 @@ func (s *Store) currentGraphLocked() (*cachedGraph, error) {
 	}
 	g, err := engine.ParseGraph(data)
 	if err != nil {
-		return nil, err
+		return nil, graphUnreadable(err)
 	}
 	if err := ValidateGraphForStorage(g); err != nil {
-		return nil, fmt.Errorf("graph.yaml: %w", err)
+		return nil, graphUnreadable(err)
 	}
 	mergeSharedStatuses(g, shared)
 	entry := &cachedGraph{
