@@ -21,7 +21,7 @@
 }
 .acceptance-head h3 {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-2);
@@ -30,20 +30,20 @@
 .acceptance-lock {
   padding: 0 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--st-locked-fg);
   background: var(--st-locked-bg);
 }
 .acceptance-by {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .acceptance-required {
   margin: 0 0 6px;
   padding: 6px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--st-ready-fg);
   background: var(--st-ready-bg);
 }
@@ -63,7 +63,7 @@
 .acceptance-id {
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .acceptance-text,
 .acceptance-add input {
@@ -77,7 +77,7 @@
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .acceptance-text:hover {
   border-color: var(--border);
@@ -121,7 +121,7 @@
 .acceptance-error {
   margin: 6px 0 0;
   color: var(--st-failed-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* A goal's stage override, under its criteria. */
@@ -134,7 +134,7 @@
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .goal-stages-summary {
   color: var(--text-2);
@@ -155,12 +155,12 @@
   margin: 0;
   padding: 8px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--st-ready-fg);
   background: var(--st-ready-bg);
 }
 .stages-group-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text-2);
 }
@@ -179,7 +179,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
   transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out);
 }
@@ -202,12 +202,12 @@
   content: attr(data-cost);
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .stages-preset-what {
   grid-column: 2 / -1;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .stages-toggles {
   display: grid;
@@ -220,12 +220,12 @@
 }
 .stages-toggles legend {
   padding: 0 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .stages-cost {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .stages-levers {
@@ -240,7 +240,7 @@
   width: 100%;
   box-sizing: border-box;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* ---- Roles (Settings) ---- */
@@ -268,19 +268,19 @@
 }
 .role-based {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 400;
 }
 .role-job {
   margin: 0 2px 8px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .role-vendor {
   margin: 0 2px 8px;
   padding: 5px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--st-ready-fg);
   background: var(--st-ready-bg);
 }
@@ -291,7 +291,7 @@
 }
 .role-body h4 {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
 }
 .role-who,
@@ -311,12 +311,12 @@
 }
 .role-tools legend {
   padding: 0 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .role-tool span {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .role-add {
   display: grid;
@@ -343,7 +343,7 @@
 .stage-step {
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
@@ -371,7 +371,7 @@
   margin: 0;
   padding: 8px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-stage-block {
   color: var(--st-failed-fg);
@@ -386,7 +386,7 @@
 }
 .run-stage-warning code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 
@@ -423,7 +423,7 @@
   border: 0;
   border-radius: 999px;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   cursor: pointer;
 }
@@ -457,7 +457,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-evidence-output {
   max-height: 220px;
@@ -467,7 +467,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: pre-wrap;
 }
 .run-guard {
@@ -477,13 +477,13 @@
   padding: 6px 10px;
   border-radius: 7px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-guard.is-violation {
   background: var(--st-ready-bg);
 }
 .run-guard-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-guard-state,
 .run-guard-sub {
@@ -498,7 +498,7 @@
 }
 .run-guard-files code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-guard-files .is-touched code {
   color: var(--st-ready-fg);
@@ -513,7 +513,7 @@
   margin: 6px 0;
   padding: 0;
   list-style: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-checks .is-pass code {
   color: var(--st-done-fg);
@@ -523,14 +523,14 @@
 }
 .run-override {
   margin: 4px 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--st-ready-fg);
 }
 
 /* ---- Autopilot: a staged goal's phase ---- */
 .ap-goal-phase {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
 }
 .ap-goal-phase.is-human {

@@ -21,7 +21,7 @@
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -43,7 +43,7 @@
   border-radius: 9px;
   background: var(--st-ready-bg);
   color: var(--st-ready-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
@@ -87,14 +87,14 @@
 .station-head h2 {
   flex: 1;
   margin: 0;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text);
 }
 .station-head-stop {
   min-height: 32px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
 }
 .station-center,
@@ -127,12 +127,12 @@
 }
 .station-panel-head h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text);
 }
 .station-panel-meta {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .station-count {
@@ -141,14 +141,14 @@
   border-radius: 10px;
   background: var(--st-failed-bg);
   color: var(--st-failed-fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
 }
 .station-empty {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text-2);
   line-height: 1.5;
 }
@@ -193,7 +193,7 @@
   justify-content: center;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   border: 2px solid var(--border);
 }
@@ -238,12 +238,12 @@
   min-width: 0;
 }
 .station-actor-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
 }
 .station-actor-line,
 .station-actor-room {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -265,7 +265,7 @@
   list-style: none;
   margin: 0 0 0 auto;
   padding: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
 }
 .station-legend li {
@@ -318,7 +318,7 @@
   border-top: 1px solid var(--border);
 }
 .station-lane-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
@@ -339,7 +339,7 @@
   border-radius: 4px;
   color: #fff;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   line-height: 16px;
   text-align: left;
@@ -372,7 +372,7 @@
 .station-axis-ticks {
   display: flex;
   justify-content: space-between;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--text-2);
   font-family: var(--mono);
 }
@@ -428,7 +428,7 @@
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -438,7 +438,7 @@
 .station-fold.is-heading {
   margin: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
 }
 .station-head-end {
@@ -452,7 +452,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .station-warroom-extras {
   display: flex;
@@ -490,7 +490,7 @@
   border-top: 3px solid var(--st-progress-fg);
   border-radius: 7px;
   background: var(--surface);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-tile.dot-queued,
@@ -517,7 +517,7 @@
   min-height: 28px;
 }
 .station-tile-title {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .station-tile-title.is-link {
   padding: 0;
@@ -540,7 +540,7 @@
   max-width: 100%;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -580,7 +580,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px 0 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-cta p {
@@ -603,7 +603,7 @@
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .station-menu-trigger.is-icon {
@@ -644,11 +644,11 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px 8px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .station-menu-head span {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .station-menu-item {
@@ -662,7 +662,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -696,11 +696,11 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px 8px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .station-menu-head span {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .station-menu-item {
@@ -722,7 +722,7 @@
 /* Side column: today, runners, agent messages. */
 .station-today-spend {
   margin: 0 0 6px;
-  font-size: 26px;
+  font-size: calc(26px * var(--font-scale, 1));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -746,7 +746,7 @@
   align-items: center;
   gap: 8px;
   min-height: 28px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .station-runner-name {
   flex: 1;
@@ -771,7 +771,7 @@
 }
 .station-network-name {
   flex: 1;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
 }
 .station-network.is-open {
@@ -874,7 +874,7 @@
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -926,7 +926,7 @@
 .settings-page-group h2 {
   margin: 0 0 4px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -952,7 +952,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
 }
 .settings-page-nav button:hover {
@@ -983,7 +983,7 @@
 }
 .settings-page-pane > h3 {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 /* Budget and routing pad themselves for a section of a dialog; as parts of
    their own the pane's padding is enough. */
@@ -993,7 +993,7 @@
 }
 /* A pane of the page's own reads like the dialogs beside it (.settings-body). */
 .settings-page-pane > .settings-section {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 /* A dialog drawn inline keeps its own look (.confirm-dialog) and padding. */
 .settings-page-pane.confirm-dialog {
@@ -1033,7 +1033,7 @@
   border-radius: 10px;
   background: var(--st-progress-bg, var(--surface-2));
   color: var(--st-progress-fg, var(--text));
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 18px;
   text-align: center;
@@ -1047,7 +1047,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-control-result .run-link-button {
@@ -1055,7 +1055,7 @@
 }
 .station-control-dialog-body {
   padding: 0 18px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text);
 }
 .station-control-dialog-body ul {
@@ -1093,18 +1093,18 @@
 }
 .game-dialog-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 .game-dialog-close {
   border: 0;
   background: none;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   cursor: pointer;
   color: var(--text-2);
 }
 .game-held-route {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .game-held-body {
   margin: 8px 0;
@@ -1112,7 +1112,7 @@
   border-left: 3px solid var(--accent);
   background: var(--surface-2);
   white-space: pre-wrap;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .game-dialog-actions {
   display: flex;

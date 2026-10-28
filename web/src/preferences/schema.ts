@@ -130,11 +130,19 @@ export const EDITOR_FONT_SIZE = { min: 11, max: 22, fallback: 14 } as const;
 /** The interface's text size, as a multiple of the design size. */
 export const TEXT_SCALE = { min: 0.9, max: 1.5, fallback: 1, decimals: 2 } as const;
 
+/** Traditional Chinese for a browser that prefers Chinese, else English. */
+function browserLanguage(): "en" | "zh-TW" {
+  const preferred = typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]);
+  const first = preferred.find((tag) => /^(zh|en)(-|_|$)/i.test(tag ?? ""));
+  return first && /^zh/i.test(first) ? "zh-TW" : "en";
+}
+
 export const PREFERENCE_SCHEMA = {
   // appearance
   // Dark until the viewer picks light, whatever the OS prefers.
   theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, () => "dark" as const),
-  language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, () => "en" as const),
+  // The browser's language until the viewer picks one.
+  language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, browserLanguage),
   textScale: numberPref("vised-text-scale", "appearance", TEXT_SCALE),
 
   // layout (main window panes)

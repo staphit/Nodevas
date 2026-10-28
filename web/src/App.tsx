@@ -10,6 +10,7 @@ import { connectWS } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
 import { reportError, useApp, usePreference } from "./store";
+import { applyTextScale } from "./preferences/textScale";
 import { SidebarBackdrop } from "./components/Sidebar";
 import ExplorerShell from "./explorer/ExplorerShell";
 import { useExplorer } from "./explorer/explorerStore";
@@ -106,6 +107,9 @@ function MainApp() {
   useEffect(() => {
     document.documentElement.lang = language === "zh-TW" ? "zh-Hant-TW" : "en";
   }, [language]);
+
+  const textScale = usePreference("textScale");
+  useEffect(() => applyTextScale(textScale), [textScale]);
 
   // Ctrl/⌘+Z steps back, Shift+Z (and Ctrl+Y, which Windows users reach for)
   // steps forward again. Text fields keep their own history, so anything

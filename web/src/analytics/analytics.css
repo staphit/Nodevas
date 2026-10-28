@@ -5,7 +5,7 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .an-panel button {
   min-height: 28px;
@@ -14,7 +14,7 @@
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .an-panel button.primary,
@@ -37,13 +37,13 @@
 .an-window {
   margin: 0;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .an-empty {
   margin: 8px 0;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .an-note {
   margin: 0;
@@ -51,7 +51,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .an-note.is-ok {
@@ -104,10 +104,10 @@
 }
 .an-tile-label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .an-tile-value {
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 
@@ -120,7 +120,7 @@
 .an-section h4 {
   margin: 4px 0 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -153,14 +153,14 @@
 .an-pick-reason {
   flex: none;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .an-panel .num {
   font-variant-numeric: tabular-nums;
 }
 .an-mono {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .an-table-wrap {
@@ -170,7 +170,7 @@
 .an-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .an-table th,
 .an-table td {
@@ -196,7 +196,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 17px;
 }
 .an-chip.tier--senior {
@@ -245,7 +245,7 @@
 }
 .an-confirm h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 .an-confirm .an-change {
   margin: 0;
@@ -283,7 +283,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .an-switch-track {
   position: relative;
@@ -323,7 +323,7 @@
   flex-direction: column;
   gap: 3px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .an-field select,
 .an-field input,
@@ -372,5 +372,5 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }

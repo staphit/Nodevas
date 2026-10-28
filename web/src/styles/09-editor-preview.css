@@ -38,7 +38,7 @@
   margin-bottom: 8px;
 }
 .editor-tool-more-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   min-width: 32px;
 }
@@ -52,7 +52,7 @@
 }
 .editor-tool-more-hint {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .tool-number {
@@ -63,7 +63,7 @@
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .tool-btn.danger:hover {
   background: var(--st-failed-bg);
@@ -89,14 +89,14 @@
 .editor-table-where {
   margin-right: 6px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .editor-table-toolbar .tool-btn {
   min-width: 24px;
   height: 24px;
   padding: 0 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 /* ---------- export dialog ---------- */
@@ -123,7 +123,7 @@
   margin-bottom: 6px;
   padding: 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 700;
 }
 .export-dialog fieldset label {
@@ -157,12 +157,12 @@
 }
 .export-dialog fieldset b {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .export-dialog fieldset small {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -174,17 +174,17 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .export-dialog-summary small {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .export-dialog-notice {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -239,7 +239,7 @@
 }
 .markdown-help-title {
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
 }
 .markdown-help-grid {
@@ -261,22 +261,22 @@
   overflow-wrap: anywhere;
   color: var(--st-progress-fg);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .markdown-help-row span {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .markdown-help-note {
   margin-top: 9px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.45;
 }
 .tool-fs {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   min-width: 18px;
   text-align: center;
@@ -291,7 +291,7 @@
   border-radius: 5px;
   cursor: pointer;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   border-bottom: 3px solid var(--st-failed-fg);
 }
 .tool-color:hover {
@@ -385,7 +385,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
@@ -403,7 +403,7 @@
   white-space: nowrap;
 }
 .tab-footer button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 2px 8px;
 }
 
@@ -444,7 +444,7 @@
 }
 .popout-editor-title strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -452,7 +452,7 @@
 .popout-editor-actions > span {
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .popout-editor-actions > span.unsaved {
   color: var(--st-ready-fg);
@@ -498,7 +498,7 @@
   margin: 0 auto;
   padding: 26px 34px 60vh;
   line-height: 1.7;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .popout-editor .cm-activeLine {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
@@ -510,7 +510,7 @@
   width: min(920px, calc(100% - 48px));
   margin: 0 auto;
   padding: 30px 8px 120px;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   line-height: 1.75;
 }
 .popout-editor .cm-gutters {

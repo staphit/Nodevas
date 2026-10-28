@@ -34,13 +34,13 @@
   display: contents;
 }
 .board-title-main {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
 .board-title-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   line-height: 1.5;
   flex: 1;
@@ -50,7 +50,7 @@
   max-width: 320px;
   padding: 3px 7px;
   border-radius: 4px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .board-title-message.ok {
@@ -75,7 +75,7 @@
   padding: 3px 7px;
   border: 1px solid transparent;
   border-radius: 5px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .inline-notice.success,
@@ -153,7 +153,7 @@
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 .command-palette kbd {
   padding: 1px 6px;
@@ -189,7 +189,7 @@
 .command-palette-group {
   padding: 8px 10px 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -207,7 +207,7 @@
   border-radius: 7px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .command-palette-help {
   max-height: min(58vh, 500px);
@@ -217,7 +217,7 @@
 .command-palette-help h3 {
   margin: 12px 0 6px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   letter-spacing: 0.06em;
 }
 .command-palette-help section:first-child h3 {
@@ -239,7 +239,7 @@
 .command-palette-help li {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.6;
 }
 .command-palette-help ol {
@@ -256,7 +256,7 @@
 .command-palette-results small,
 .command-palette-empty {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .command-palette-empty {
   padding: 24px;
@@ -268,7 +268,7 @@
   padding: 7px 14px;
   border-top: 1px solid var(--border);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 
 /* ---------- graph productivity tools ---------- */
@@ -282,7 +282,7 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
   color: var(--accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -318,7 +318,7 @@
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .board-tool-button.active {
   border-color: var(--accent);
@@ -351,7 +351,7 @@
   align-items: center;
   gap: 9px;
   padding: 6px 14px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .graph-batch-toolbar label {
   display: inline-flex;
@@ -369,7 +369,7 @@
   border-radius: 5px;
   background: var(--surface);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 /* What Ctrl+C / Ctrl+X is holding, so a paste in another project is expected. */
 .graph-batch-clipboard {
@@ -394,14 +394,14 @@
   padding: 4px 14px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-2) 92%, var(--accent) 8%);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .graph-clipboard-strip button {
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--surface);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 /* The destructive action reads as destructive. Clear selection is the one
@@ -452,7 +452,7 @@
   border-radius: 5px;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -482,7 +482,7 @@
 }
 .node-actions-chevron {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .node-actions-submenu {
   display: flex;
@@ -535,7 +535,7 @@
   flex: 1;
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .problems-count {
   margin-left: 4px;
@@ -563,12 +563,12 @@
 .problems-empty {
   margin: 0;
   color: var(--st-done-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .problems-section h4 {
   margin: 0 0 6px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -588,7 +588,7 @@
   padding: 7px 9px;
   border: 0;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.4;
   text-align: left;
 }
@@ -609,7 +609,7 @@ button.problems-issue:focus-visible {
 }
 .problems-issue small {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .problems-issue.issue-error {
   background: var(--st-failed-bg);
@@ -632,7 +632,7 @@ button.problems-issue:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 .problems-panel .analysis-path {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   line-height: 1.6;
 }
 @media (max-width: 720px) {
@@ -693,14 +693,14 @@ button.problems-issue:focus-visible {
   margin-bottom: 4px;
   padding: 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .graph-tools-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-height: 24px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .graph-tools-panel .graph-tools-status input {
@@ -781,7 +781,7 @@ button.problems-issue:focus-visible {
   flex-wrap: wrap;
   gap: 7px 14px;
   align-items: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .analysis-summary span {
   color: var(--text-2);
@@ -792,7 +792,7 @@ button.problems-issue:focus-visible {
 .analysis-path {
   margin-top: 6px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .analysis-path button {
   border: 0;

@@ -13,7 +13,7 @@
 }
 .audit-pane-head h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 .audit-btn {
   display: inline-flex;
@@ -26,7 +26,7 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .audit-btn:hover:not(:disabled) {
@@ -49,7 +49,7 @@
   border-radius: 6px;
   color: var(--text-2);
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* Health */
@@ -59,12 +59,12 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .audit-status {
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   background: var(--st-done-bg);
   color: var(--st-done-fg);
@@ -95,18 +95,18 @@
 }
 .audit-facts dt {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .audit-facts dd {
   margin: 2px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 .audit-facts code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 400;
   white-space: pre-wrap;
 }
@@ -131,7 +131,7 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .audit-filters select {
   max-width: 100%;
@@ -143,7 +143,7 @@
 .audit-count {
   margin: 0;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .audit-table-wrap {
   min-width: 0;
@@ -155,7 +155,7 @@
 .audit-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .audit-table th,
 .audit-table td {
@@ -181,7 +181,7 @@
 .audit-table td small {
   display: block;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 .audit-time {
@@ -191,17 +191,17 @@
 .audit-op {
   display: block;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 .audit-kind {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .audit-failed {
   margin-left: 6px;
   color: var(--st-failed-fg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
 }
 .audit-actor {

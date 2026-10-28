@@ -10,7 +10,7 @@
   border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   flex-shrink: 0;
   background: var(--surface);
 }
@@ -18,7 +18,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text-2);
   letter-spacing: 0.05em;
@@ -68,7 +68,7 @@
 }
 .node-list-assignee {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -86,7 +86,7 @@
   margin-bottom: 4px;
   cursor: pointer;
   line-height: 1.4;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .issue-list li svg {
   flex-shrink: 0;
@@ -105,7 +105,7 @@
   align-items: center;
   gap: 5px;
   color: var(--st-done-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .trash-list li {
   display: flex;
@@ -115,7 +115,7 @@
   padding: 3px 6px;
 }
 .trash-id {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -128,7 +128,7 @@
   background: var(--surface);
   border-radius: 4px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .trash-list button:hover {
@@ -169,7 +169,7 @@
   border-radius: 5px;
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
 }
 .explorer-collapse:hover,
@@ -187,7 +187,7 @@
 .explorer-heading h3 {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   letter-spacing: 0;
   text-transform: none;
 }
@@ -198,13 +198,13 @@
   overflow: hidden;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .explorer-project-count {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .explorer-create-actions {
   display: grid;
@@ -224,7 +224,7 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -245,7 +245,7 @@
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .explorer-create-actions .workspace-connect-action {
   grid-column: 1 / -1;
@@ -267,7 +267,7 @@
   border-radius: 6px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .explorer-transfer-actions > div {
   display: flex;
@@ -280,7 +280,7 @@
   color: var(--text-2);
   background: transparent;
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .explorer-transfer-actions button:hover:not(:disabled) {
   color: var(--text);
@@ -298,7 +298,7 @@
   border-radius: 4px;
   color: var(--text-2);
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   list-style: none;
   white-space: nowrap;
 }
@@ -345,12 +345,12 @@
 }
 .transfer-menu-panel b {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 650;
 }
 .transfer-menu-panel small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .transfer-menu-separator {
@@ -361,7 +361,7 @@
 .transfer-menu-label {
   padding: 2px 7px 4px;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   letter-spacing: 0.04em;
 }
 .explorer-project-actions {
@@ -371,7 +371,7 @@
 }
 .explorer-project-actions > span {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .explorer-project-actions > button {
   padding: 3px 6px;
@@ -380,7 +380,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .explorer-project-actions > button:hover:not(:disabled) {
   color: var(--text);
@@ -399,7 +399,7 @@
   border-radius: 5px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -443,12 +443,12 @@
   line-height: 1.35;
 }
 .project-create-heading strong {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .project-create-heading span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -472,7 +472,7 @@
   display: block;
   margin-bottom: 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
 }
 .project-create-panel > input,
@@ -483,7 +483,7 @@
   border-radius: 6px;
   color: var(--text);
   background: var(--surface);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .project-create-panel > select {
   margin-top: 2px;
@@ -495,7 +495,7 @@
 .project-create-error {
   margin: 5px 0 0;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .project-create-error {
@@ -525,7 +525,7 @@
   border-radius: 5px;
   color: var(--text);
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   outline: none;
 }
 .explorer-search:focus {
@@ -554,11 +554,11 @@
   border-radius: 4px;
   color: var(--text);
   background: transparent;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: left;
 }
 .workspace-root {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .workspace-root-group {
@@ -589,7 +589,7 @@
 /* Says why an expanded project shows nothing: its nodes are not loaded. */
 .tree-empty-row {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .tree-empty-row:disabled {
   cursor: wait;
@@ -721,7 +721,7 @@ div.tree-empty-row {
 }
 .project-context-heading b {
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -730,7 +730,7 @@ div.tree-empty-row {
   overflow: hidden;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -761,12 +761,12 @@ div.tree-empty-row {
   opacity: 0.45;
 }
 .project-context-menu > button b {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 .project-context-menu > button small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .project-context-icon {
@@ -791,7 +791,7 @@ div.tree-empty-row {
   justify-content: center;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   line-height: 1;
   transition: transform 120ms var(--ease-out);
 }
@@ -814,7 +814,7 @@ div.tree-empty-row {
   color: var(--text-2);
   background: var(--bg);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-align: center;
 }
 .current-project-tag {
@@ -823,7 +823,7 @@ div.tree-empty-row {
   border-radius: 3px;
   color: var(--st-progress-fg);
   background: var(--st-progress-bg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
 }
 .tree-loading {
   color: var(--st-progress-fg);
@@ -878,7 +878,7 @@ div.tree-empty-row {
 .tree-empty {
   padding: 7px 8px 7px 27px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-style: italic;
 }
 .project-empty {
@@ -907,7 +907,7 @@ div.tree-empty-row {
 }
 .tree-special-folder .issue-list li {
   margin: 2px 0;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .tree-special-folder .trash-list li {
   min-width: 0;
@@ -915,7 +915,7 @@ div.tree-empty-row {
 }
 .tree-special-folder .trash-list button {
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .tree-ok-msg {
   display: flex;
@@ -923,7 +923,7 @@ div.tree-empty-row {
   gap: 4px;
   padding: 4px 6px;
   color: var(--st-done-fg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .sidebar-legend {
   flex: 0 0 auto;
@@ -933,7 +933,7 @@ div.tree-empty-row {
   border-top: 1px solid var(--border);
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .sidebar-legend > summary {
   cursor: pointer;
@@ -946,7 +946,7 @@ div.tree-empty-row {
 }
 .sidebar-legend .legend li {
   padding: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-add {
   display: inline-flex;
@@ -959,7 +959,7 @@ div.tree-empty-row {
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-add:hover {
   border-color: var(--accent);
@@ -979,7 +979,7 @@ div.tree-empty-row {
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .custom-status-create > input:focus {
   border-color: var(--accent);
@@ -1012,7 +1012,7 @@ div.tree-empty-row {
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-options button {
   cursor: pointer;
@@ -1029,7 +1029,7 @@ div.tree-empty-row {
 .custom-status-create p {
   margin: 0;
   color: var(--danger);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 
 /* Node folders [B-06]. They group files in the explorer and nothing else, so
@@ -1049,7 +1049,7 @@ div.tree-empty-row {
   border-radius: 4px;
   color: var(--text-2);
   background: transparent;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   cursor: pointer;
 }
 .node-folder-create:hover {
@@ -1221,7 +1221,7 @@ div.tree-empty-row {
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .explorer-primary-actions button.primary {
   flex: 1;
