@@ -221,6 +221,17 @@ func (h *Hub) ConnectionLimits() ConnectionLimits {
 	return h.limits
 }
 
+// ConnectionCount is the number of live websocket connections, for
+// /api/metrics. A nil hub has none.
+func (h *Hub) ConnectionCount() int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.conns)
+}
+
 const (
 	// Default connection caps (ConnectionLimits); serve can change them.
 	maxWSConnections         = 512
