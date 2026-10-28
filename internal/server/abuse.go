@@ -664,9 +664,22 @@ func (g *abuseGuard) logRateLimit(ctx context.Context, class RouteClass, path, r
 	}
 }
 
+// preAuthDeferredKey marks a request preAuthAbuseLimits let through
+// uncharged because it claims an identity; withAuth charges it if the claim
+// is refused (chargeRefusedCredential).
+const preAuthDeferredKey = "nodevas.preauth.deferred"
+
 // preAuthAbuseLimits is installed before authentication to reject volumetric unauthenticated
 // traffic on /api/* and /ws without invoking session checks. Static assets are untouched.
+//
+// The bucket is for traffic without an identity. A request that claims one
+// (a session cookie, or the person at a standalone hub's keyboard) is not
+// charged here: once signed in it is held to the per-actor classes in
+// withAbuseLimits, so people who share an address do not share this bucket.
+// A claim that authentication refuses is charged then, so a made-up cookie
+// is no way around it; checking one costs a map lookup.
 func (s *Server) preAuthAbuseLimits(c *gin.Context) {
+	s.forwardingNotes().observe(c.Request)
 	if s.abuse == nil {
 		c.Next()
 		return
@@ -681,17 +694,67 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 		c.Next()
 		return
 	}
+	if s.claimsIdentity(c.Request) {
+		c.Set(preAuthDeferredKey, true)
+		c.Next()
+		return
+	}
+	if !s.chargePreAuth(c) {
+		return
+	}
+	c.Next()
+}
 
+// chargePreAuth takes one token from the pre-auth buckets for c's address,
+// and answers 429 when there is none.
+func (s *Server) chargePreAuth(c *gin.Context) bool {
 	ip := auth.ClientIP(c.Request)
-	now := time.Now()
-	if ok, retrySec := s.abuse.AllowPreAuth(ip, now); !ok {
+	if ok, retrySec := s.abuse.AllowPreAuth(ip, time.Now()); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
 		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
 		c.Abort()
-		return
+		return false
 	}
-	c.Next()
+	return true
+}
+
+// chargeRefusedCredential charges a request preAuthAbuseLimits deferred,
+// now that authentication refused it. It reports whether it answered (429).
+func (s *Server) chargeRefusedCredential(c *gin.Context) bool {
+	if s.abuse == nil || !c.GetBool(preAuthDeferredKey) {
+		return false
+	}
+	return !s.chargePreAuth(c)
+}
+
+// claimsIdentity reports a request that will be signed in by withAuth if
+// its claim holds: a session cookie on a guarded route, or a direct
+// loopback request to a standalone hub. Sign-in routes never qualify: the
+// pre-auth bucket is their only limit.
+func (s *Server) claimsIdentity(r *http.Request) bool {
+	path := r.URL.Path
+	if auth.PublicPaths[path] || path == runnerwire.LinkPath || strings.HasPrefix(path, runnerPathPrefix) {
+		return false
+	}
+	if class, _ := ClassifyRoute(r.Method, path); class == ClassPublicAuth {
+		return false
+	}
+	if _, local := s.auth.(auth.LocalOnly); local && auth.DirectLoopback(r) {
+		return true
+	}
+	cookie, err := r.Cookie(auth.SessionCookieName)
+	return err == nil && cookie.Value != ""
+}
+
+// forwardingNotes is the server's untrusted-forwarder warning (forwarding.go).
+func (s *Server) forwardingNotes() *forwardingNotes {
+	s.forwardingOnce.Do(func() {
+		if s.forwarding == nil {
+			s.forwarding = newForwardingNotes(nil)
+		}
+	})
+	return s.forwarding
 }
 
 // withAbuseLimits bounds operations by route class, cost, actor, IP, and global buckets.

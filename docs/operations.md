@@ -63,7 +63,9 @@ Then start the server, for example behind a reverse proxy on the same host that 
   -listen 127.0.0.1 -hostname nodevas.example.com -behind-proxy
 ```
 
-Configure `trusted_proxy` to match the proxy addresses that are allowed to forward client information.
+Configure `trusted_proxy` to match the proxy addresses that are allowed to forward client information. Get it right: with the proxy's network missing, every user has the proxy's address and shares its rate-limit buckets and WebSocket allowance. The server warns once per peer (`event.code: http.untrusted_forwarder`) when a request carries `X-Forwarded-For` from a peer that is not a trusted proxy; behind Cloudflare Tunnel, that peer is the `cloudflared` container, so include its network.
+
+Rate limits: requests without a signed-in identity share a per-address pre-auth bucket (40 a second, bursts of 80). Signed-in requests skip it and are held to per-account limits by kind of route instead; a session cookie that does not sign in is charged to the pre-auth bucket.
 
 For the container image, see [Getting started: Run the hub with Docker](./getting-started.md#run-the-hub-with-docker).
 

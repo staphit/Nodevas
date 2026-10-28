@@ -173,6 +173,11 @@ func (s *Server) withAuth(c *gin.Context) {
 	}
 	actor, email, err := s.authenticate(r)
 	if err != nil {
+		// A claimed identity that did not hold is unauthenticated traffic,
+		// charged to the pre-auth bucket it skipped.
+		if s.chargeRefusedCredential(c) {
+			return
+		}
 		httpx.Err(c, http.StatusUnauthorized, err)
 		return
 	}
