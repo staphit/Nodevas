@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"nodevas/internal/identity"
 	"sync"
 	"sync/atomic"
@@ -528,9 +529,7 @@ func (h *Hub) releaseSnapshotBlobLocked(blob *docSnapshotBlob) {
 	blob.refs--
 	if blob.refs == 0 {
 		h.snapshotBytes -= len(blob.payload)
-		if h.snapshotBytes < 0 {
-			panic("realtime snapshot accounting underflow")
-		}
+		h.clampSnapshotBytesLocked("snapshot blob release")
 	}
 }
 
@@ -540,15 +539,27 @@ func (h *Hub) releaseSnapshotJobLocked(snapshot *docOutboundSnapshot) {
 	}
 	h.releaseSnapshotBlobLocked(snapshot.blob)
 	h.snapshotBytes -= snapshot.tailBytes
-	if h.snapshotBytes < 0 {
-		panic("realtime snapshot accounting underflow")
+	h.clampSnapshotBytesLocked("snapshot job release")
+}
+
+// clampSnapshotBytesLocked repairs a negative snapshot byte count. Releasing
+// more than was charged is a bug, but not one worth the hub: it used to panic
+// here, with h.mu held, and the writer's recover then deadlocked on h.mu in
+// remove. Logging and clamping keeps the cap working (a count too low lets
+// through at most one cap's worth more) and every other client connected.
+func (h *Hub) clampSnapshotBytesLocked(where string) {
+	if h.snapshotBytes >= 0 {
+		return
 	}
+	slog.Error("realtime snapshot accounting underflow; clamping to zero",
+		slog.String("where", where), slog.Int("bytes", h.snapshotBytes))
+	h.snapshotBytes = 0
 }
 
 func (h *Hub) releaseSnapshotJob(snapshot *docOutboundSnapshot) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.releaseSnapshotJobLocked(snapshot)
-	h.mu.Unlock()
 }
 
 // queueSnapshotLocked enqueues one logical snapshot job. It must be called

@@ -120,9 +120,7 @@ func (h *Hub) clearCompactionLocked(session *docSession) {
 	}
 	if compaction.assembly != nil {
 		h.snapshotBytes -= compaction.assembly.size
-		if h.snapshotBytes < 0 {
-			panic("realtime snapshot accounting underflow")
-		}
+		h.clampSnapshotBytesLocked("compaction clear")
 	}
 	if compaction.client != nil && compaction.client.snapshotActive == compaction.token {
 		compaction.client.snapshotActive = ""
