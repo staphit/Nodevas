@@ -47,7 +47,10 @@ type Server struct {
 	auth     auth.Authenticator
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
-	agents   *agents.Hub
+	// auditQueue writes the middleware's audit rows off the request path;
+	// made by UseAudit, drained by Shutdown.
+	auditQueue *audit.Queue
+	agents     *agents.Hub
 	// runners serves /api/runners and /api/runner/*; nil until UseRunnersDB.
 	runners *runners.Registry
 	// runs serves /api/runs and the run traffic on the runner socket; nil
