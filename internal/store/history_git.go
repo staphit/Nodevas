@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -63,6 +64,9 @@ type gitHistory struct {
 
 	gitMu sync.Mutex
 	repo  *gitrepo.Repo
+	// opened is repo once it is ready, for readers: they only read the
+	// repository, so they never wait on gitMu behind a commit.
+	opened atomic.Pointer[gitrepo.Repo]
 }
 
 // gitPending is what the next commit records: who saved, and any earlier
@@ -432,7 +436,21 @@ func (g *gitHistory) requeue(batch *gitPending) {
 }
 
 // ready is the repository with the old copies imported.
+//
+// Once it is open, ready does not take gitMu: its callers only read the
+// repository (log, show, a status that takes no lock), which git allows while
+// a commit runs, and a history panel must not wait out every commit a stream
+// of saves keeps starting.
 func (g *gitHistory) ready(ctx context.Context) (*gitrepo.Repo, error) {
+	if repo := g.opened.Load(); repo != nil {
+		if _, err := g.s.statPath(g.s.GraphPath()); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, errProjectGone
+			}
+			return nil, err
+		}
+		return repo, nil
+	}
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
 	return g.readyLocked(ctx)
@@ -460,6 +478,7 @@ func (g *gitHistory) readyLocked(ctx context.Context) (*gitrepo.Repo, error) {
 		return nil, fmt.Errorf("import .vised/history: %w", err)
 	}
 	g.repo = repo
+	g.opened.Store(repo)
 	return repo, nil
 }
 

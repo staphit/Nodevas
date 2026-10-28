@@ -85,7 +85,9 @@ func (s *Store) HistoryGit(ctx context.Context) (WorkspaceGit, error) {
 		out.Commits = append(out.Commits, WorkspaceCommit{SHA: c.SHA, At: c.At.UTC().Format(time.RFC3339),
 			Author: c.Author, Subject: c.Subject})
 	}
-	raw, err := repo.Run(ctx, nil, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal")
+	// No optional locks: status would otherwise refresh the index under
+	// index.lock, and a commit starting meanwhile would fail on it.
+	raw, err := repo.Run(ctx, []string{"GIT_OPTIONAL_LOCKS=0"}, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal")
 	if err != nil {
 		return out, err
 	}
