@@ -669,6 +669,27 @@ describe("LaneView", () => {
       }
     });
 
+    it("does not refit a phone's board it has already fitted on a project switch", () => {
+      mockNarrowViewport(true);
+      mockBoardSize(390, 700);
+      const project = useApp.getState().activeProject;
+      act(() => useApp.setState({ activeProject: "phone-first" }));
+      try {
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        const board = container.querySelector<HTMLElement>(".board")!;
+        const inner = () => container.querySelector<HTMLElement>(".board-inner")!.style.zoom;
+        fireEvent.wheel(board, { altKey: true, deltaY: 100 });
+        fireEvent.wheel(board, { altKey: true, deltaY: 100 });
+        const zoomed = inner();
+
+        act(() => useApp.setState({ activeProject: "phone-second" }));
+        act(() => useApp.setState({ activeProject: "phone-first" }));
+        expect(inner()).toBe(zoomed);
+      } finally {
+        act(() => useApp.setState({ activeProject: project }));
+      }
+    });
+
     it("does not refit a phone's board it has already fitted", () => {
       mockNarrowViewport(true);
       mockBoardSize(390, 700);
