@@ -687,13 +687,20 @@ a.agent-file-chip:hover {
 }
 
 /* The recipient list is as wide as its longest session name; let it shrink so
-   the notify and attach buttons stay on the same line. */
+   the notify and attach buttons stay on the same line, but never below the
+   "all agents" choice with its arrow (at 150% text it was cut to "所有 Agent (").
+   Below that the buttons go to the next line. The label's own word stays
+   whole: CJK breaks between any two characters, which would let the line
+   break see a narrower label than it is. */
 .agent-composer .agent-to-label {
   flex: 1 1 10em;
-  min-width: 0;
+}
+.agent-composer .agent-to-label > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .agent-composer .agent-to-label select {
-  min-width: 0;
+  min-width: 9em;
   width: 100%;
 }
 .agent-composer-tools {
