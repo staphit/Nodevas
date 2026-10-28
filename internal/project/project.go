@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/lockfile"
 	"nodevas/internal/realtime"
 	"nodevas/internal/store"
@@ -338,13 +339,7 @@ var eisenhowerTitles = map[string][4]string{
 // Accept-Language list...) to one the templates are written in: Chinese
 // for any zh tag, English for everything else.
 func TemplateLanguage(tag string) string {
-	first, _, _ := strings.Cut(tag, ",")
-	first, _, _ = strings.Cut(first, ";")
-	first = strings.ToLower(strings.TrimSpace(first))
-	if first == "zh" || strings.HasPrefix(first, "zh-") {
-		return "zh-TW"
-	}
-	return "en"
+	return string(locale.FromTag(tag))
 }
 
 func templateGraph(template, language string) *engine.Graph {

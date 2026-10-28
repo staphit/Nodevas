@@ -11,6 +11,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // refStore has two notes, a scene anyone may write and a human-only scene.
@@ -127,7 +128,7 @@ func TestDuplicateCopiesReferences(t *testing.T) {
 	if err := addRef(st, identity.Local, "s-01", "note-01"); err != nil {
 		t.Fatal(err)
 	}
-	id, err := st.DuplicateNode(identity.Local, "s-01")
+	id, err := st.DuplicateNode(identity.Local, "s-01", locale.English)
 	if err != nil {
 		t.Fatal(err)
 	}

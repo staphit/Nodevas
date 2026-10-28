@@ -3,10 +3,17 @@ package httpx
 import (
 	"context"
 	"net/http"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/store"
 	"strings"
 )
+
+// Language is the interface language the request's reader uses. The browser
+// sends it as Accept-Language; a caller that sends none reads English.
+func Language(r *http.Request) locale.Language {
+	return locale.FromTag(r.Header.Get("Accept-Language"))
+}
 
 // ProjectHeader names the target project for clients that cannot add a query
 // string to the request.

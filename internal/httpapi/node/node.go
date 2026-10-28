@@ -100,7 +100,8 @@ func (a *API) postNode(c *gin.Context) {
 }
 
 func (a *API) postNodeDuplicate(c *gin.Context) {
-	id, err := httpx.StoreFor(c.Request, a.pm).DuplicateNode(auth.ActorFrom(c.Request), c.Param("id"))
+	id, err := httpx.StoreFor(c.Request, a.pm).DuplicateNode(
+		auth.ActorFrom(c.Request), c.Param("id"), httpx.Language(c.Request))
 	if err != nil {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return

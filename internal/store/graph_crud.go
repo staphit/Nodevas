@@ -15,6 +15,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
@@ -163,8 +164,9 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 
 // DuplicateNode creates an independent copy of a node, its document, subpages,
 // attachments, expected plans, and visual style. Outgoing dependencies are
-// intentionally not copied.
-func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, error) {
+// intentionally not copied. The copy's title says it is one in language, the
+// language of whoever asked for it.
+func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language locale.Language) (string, error) {
 	if !engine.ValidNodeID(sourceID) {
 		return "", fmt.Errorf("invalid node id")
 	}
@@ -207,7 +209,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	if duplicate.Title == "" {
 		duplicate.Title = sourceID
 	}
-	duplicate.Title += "（副本）"
+	duplicate.Title = locale.CopyTitle(duplicate.Title, language)
 	duplicate.Tags = append([]string(nil), source.Tags...)
 	duplicate.Refs = append([]string(nil), source.Refs...)
 	duplicate.Effects = append([]engine.Effect(nil), source.Effects...)
