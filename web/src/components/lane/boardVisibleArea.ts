@@ -57,6 +57,25 @@ export function visibleArea(board: Area, overlays: readonly Area[]): Area {
 }
 
 /**
+ * An element's rect without its current translation. The drawer slides in
+ * (and a phone's sheet slides up) while a jump is being answered, and the
+ * card should be centred against where it comes to rest.
+ */
+function restingRect(element: HTMLElement): Area {
+  const rect = element.getBoundingClientRect();
+  const transform = getComputedStyle(element).transform;
+  if (!transform || transform === "none" || typeof DOMMatrixReadOnly === "undefined") {
+    return rect;
+  }
+  try {
+    const { e, f } = new DOMMatrixReadOnly(transform);
+    return { left: rect.left - e, right: rect.right - e, top: rect.top - f, bottom: rect.bottom - f };
+  } catch {
+    return rect;
+  }
+}
+
+/**
  * Where, in the board's own client coordinates, a card should be centred so
  * it lands in the middle of what is showing.
  */
@@ -73,7 +92,7 @@ export function visibleBoardCentre(board: HTMLElement): { x: number; y: number }
     board.ownerDocument.querySelectorAll<HTMLElement>(BOARD_OVERLAY_SELECTOR),
   )
     .filter((element) => !board.contains(element))
-    .map((element) => element.getBoundingClientRect());
+    .map(restingRect);
   const visible = visibleArea(area, overlays);
   return {
     x: (visible.left + visible.right) / 2 - rect.left,
