@@ -145,6 +145,73 @@ describe("GitPanel", () => {
     expect(await screen.findByText("M = modified, D = deleted")).toBeInTheDocument();
   });
 
+  // The tab loaded once per project: a node added on the board, a page saved,
+  // or a change from elsewhere never showed until the tab was left and reopened.
+  describe("keeps up with the workspace while open", () => {
+    type Git = Awaited<ReturnType<typeof explorerApi.workspaceGit>>;
+    const clean: Git = { backend: "git", branch: "main", pending: [], commits: [] };
+    const edited: Git = {
+      backend: "git",
+      branch: "main",
+      pending: [
+        { path: "graph.yaml", mark: "M" },
+        { path: "nodes/node-0007.md", mark: "A" },
+      ],
+      commits: [],
+    };
+
+    it("shows the pending changes a board save leaves", async () => {
+      useApp.setState({ graphRev: "rev-1" });
+      const workspaceGit = vi.mocked(explorerApi.workspaceGit).mockResolvedValue({ ...clean, pending: [] });
+      render(<GitPanel />);
+      expect(await screen.findByText("No pending changes")).toBeInTheDocument();
+      workspaceGit.mockResolvedValue(edited);
+      act(() => useApp.setState({ graphRev: "rev-2" }));
+      expect(await screen.findByText("node-0007.md")).toBeInTheDocument();
+      expect(screen.getByText("graph.yaml")).toBeInTheDocument();
+    });
+
+    it("shows the pending change a page save leaves", async () => {
+      const workspaceGit = vi.mocked(explorerApi.workspaceGit).mockResolvedValue({ ...clean, pending: [] });
+      render(<GitPanel />);
+      expect(await screen.findByText("No pending changes")).toBeInTheDocument();
+      workspaceGit.mockResolvedValue({ ...clean, pending: [{ path: "nodes/node-0007.md", mark: "M" }] });
+      act(() => {
+        useApp.getState().beginOperation("document:node-0007", "document.save");
+        useApp.getState().settleOperation("document:node-0007", { status: "saved", operation: "document.save" });
+      });
+      expect(await screen.findByText("node-0007.md")).toBeInTheDocument();
+    });
+
+    it("asks again when the window comes back into focus", async () => {
+      const workspaceGit = vi.mocked(explorerApi.workspaceGit).mockResolvedValue({ ...clean, pending: [] });
+      render(<GitPanel />);
+      expect(await screen.findByText("No pending changes")).toBeInTheDocument();
+      workspaceGit.mockResolvedValue({
+        ...clean,
+        commits: [{ sha: "f".repeat(40), at: "2026-10-29T09:00:00Z", author: "run:codex", subject: "agent: merged" }],
+      });
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(await screen.findByText("agent: merged")).toBeInTheDocument();
+    });
+
+    it("folds a burst of saves into one read", async () => {
+      useApp.setState({ graphRev: "rev-1" });
+      const workspaceGit = vi.mocked(explorerApi.workspaceGit).mockResolvedValue({ ...clean, pending: [] });
+      render(<GitPanel />);
+      expect(await screen.findByText("No pending changes")).toBeInTheDocument();
+      const before = workspaceGit.mock.calls.length;
+      workspaceGit.mockResolvedValue(edited);
+      act(() => {
+        for (let i = 2; i < 8; i++) useApp.setState({ graphRev: `rev-${i}` });
+      });
+      expect(await screen.findByText("node-0007.md")).toBeInTheDocument();
+      expect(workspaceGit.mock.calls.length - before).toBe(1);
+    });
+  });
+
   it("explains the marks in zh-TW", async () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
     render(<GitPanel />);
