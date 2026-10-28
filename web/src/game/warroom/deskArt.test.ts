@@ -69,6 +69,10 @@ describe("deskScene", () => {
     expect(names(deskScene("working", "claude", { mail: true }))).toContain("mail");
   });
 
+  it("draws a spare desk, padding with no runner slot behind it, as bare furniture", () => {
+    expect(names(deskScene("empty", "other", { spare: true }))).toEqual(["desk", "chair"]);
+  });
+
   it("keeps every part on the desk's grid", () => {
     for (const pose of [...POSES, "empty" as const]) {
       for (const part of deskScene(pose, "codex", { mail: true })) {

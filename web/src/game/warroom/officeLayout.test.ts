@@ -18,11 +18,17 @@ describe("layoutOffice", () => {
     expect(layout.desks).toEqual(["a", "b", "c", null, null]);
   });
 
-  it("keeps at least two desks, padding only an office with fewer", () => {
-    expect(layoutOffice(office(), byId()).desks).toEqual([null, null]);
-    expect(layoutOffice(office({ work: ["a"] }), byId("a")).desks).toEqual(["a", null]);
-    expect(layoutOffice(office({ work: ["a"], freeDesks: 1 }), byId("a")).desks).toEqual(["a", null]);
-    expect(layoutOffice(office({ work: ["a"], freeDesks: 2 }), byId("a")).desks).toEqual(["a", null, null]);
+  it("keeps at least two desks, padding only an office with fewer with spare desks", () => {
+    const desks = (over: Partial<Parameters<typeof layoutOffice>[0]>, ...ids: string[]) => {
+      const layout = layoutOffice(office(over), byId(...ids));
+      return { desks: layout.desks, spare: layout.spareDesks };
+    };
+    expect(desks({})).toEqual({ desks: [], spare: 2 });
+    expect(desks({ work: ["a"] }, "a")).toEqual({ desks: ["a"], spare: 1 });
+    expect(desks({ work: ["a"], freeDesks: 1 }, "a")).toEqual({ desks: ["a", null], spare: 0 });
+    expect(desks({ work: ["a"], freeDesks: 2 }, "a")).toEqual({ desks: ["a", null, null], spare: 0 });
+    // One free slot: one free desk, as the header says, and a spare one.
+    expect(desks({ freeDesks: 1 })).toEqual({ desks: [null], spare: 1 });
   });
 
   it("seats the meeting before what lies on the table, and always shows a table", () => {

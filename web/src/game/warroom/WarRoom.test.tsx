@@ -267,6 +267,17 @@ describe("the building", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("says one free desk in the singular and draws just that one as free", () => {
+    mount(building({ runners: [runner("rn1", "mac-mini", 1)] }));
+    const office = screen.getByRole("region", { name: "Office Main" });
+    expect(within(office).getByText("1 free desk")).toBeInTheDocument();
+    expect(within(screen.getByTestId("war-room-text")).getByText("1 free desk.")).toBeInTheDocument();
+    const work = within(office).getByRole("group", { name: "Work area" });
+    // The header's one free desk, and a spare desk padding the floor to two.
+    expect(work.querySelectorAll(".px-cell.is-free")).toHaveLength(1);
+    expect(work.querySelectorAll(".px-cell.is-spare")).toHaveLength(1);
+  });
+
   it("opens the runners from a rack in the server room", () => {
     mount(building({ runners: [runner("rn1", "mac-mini", 2), runner("rn2", "old-box", 1, false)], runs: [makeRun()] }));
     const room = screen.getByRole("region", { name: "Server room" });
@@ -302,8 +313,8 @@ describe("the building", () => {
       "Server room",
     ]);
     expect(within(text).getByText(/in mac-mini: working, on “Login form”\./)).toBeInTheDocument();
-    // Two desks at least, plus the two the runner has room for.
-    expect(within(text).getByText("2 free desk(s).")).toBeInTheDocument();
+    // The two slots the runner has left, in a real plural.
+    expect(within(text).getByText("2 free desks.")).toBeInTheDocument();
     expect(within(text).getByText("Pull request ready to merge: “Login form”.")).toBeInTheDocument();
     expect(within(text).getByText(/^app: nobody in, Café\. Go to app$/)).toBeInTheDocument();
     expect(within(text).getByText(/Codex in Terminals: idle\./)).toBeInTheDocument();
