@@ -346,15 +346,29 @@
   color: var(--text-2);
   min-width: 0;
 }
+/* One line however narrow the drawer: a long project name ends in an
+   ellipsis rather than wrapping, and gives up width before the file does. */
 .editor-path-project {
+  flex: 0 10 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--accent);
 }
+.editor-path-sep {
+  flex-shrink: 0;
+}
 .editor-path-file {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .editor-path-dirty {
+  flex-shrink: 0;
   margin-left: auto;
+  white-space: nowrap;
   color: var(--st-progress-fg, var(--accent));
 }

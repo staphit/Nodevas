@@ -864,7 +864,9 @@ export function TabBody({
           <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
             {activeProject && (
               <>
-                <span className="editor-path-project">{activeProject}</span>
+                <span className="editor-path-project" title={activeProject}>
+                  {activeProject}
+                </span>
                 <span className="editor-path-sep" aria-hidden>
                   /
                 </span>

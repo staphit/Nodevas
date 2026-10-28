@@ -93,6 +93,21 @@
     --copilot-fab-clearance: 74px;
   }
 }
+/* The editor leaves room below its last line, so it can always be scrolled
+   clear of the button. */
+.app:has(> .copilot-fab) .drawer .cm-content {
+  padding-bottom: calc(48px + 18px);
+}
+/* On a phone the document fills the screen and the keyboard lifts the
+   lines being typed to where the button floats: while a document is being
+   edited the button steps aside, and comes back when the editor lets go. */
+@media (max-width: 640px) {
+  .app:has(.drawer :is(.cm-editor.cm-focused, textarea:focus, input:focus)) > .copilot-fab {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
 /* A follow-up (a plan run ended) waits unread. */
 .copilot-fab-badge {
   position: absolute;
