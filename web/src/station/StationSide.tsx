@@ -3,7 +3,7 @@
 // view one step away (Settings → Usage, Settings → Runners, the docked agent
 // panel) instead of spreading it open.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import { AgentPanel } from "../agents/AgentPanel";
 import { unseenCount, useAgents } from "../agents/agentStore";
@@ -83,9 +83,50 @@ function useRememberedOpen(key: string): [boolean, (open: boolean) => void] {
   return [open, set];
 }
 
+/**
+ * Whether the side column is taller than Station's content box. Pinned and
+ * capped to that height, such a column scrolls on its own right beside
+ * Station's scrollbar; the class lets it go so Station scrolls it with the
+ * rest. Its scrollHeight is its content's in both states (the pinned column
+ * only stretches the open chat to fill), so the answer does not flip-flop.
+ */
+function useTallerThanStation(ref: RefObject<HTMLElement>): boolean {
+  const [taller, setTaller] = useState(false);
+  useLayoutEffect(() => {
+    const column = ref.current;
+    const station = column?.closest<HTMLElement>(".station");
+    if (!column || !station) return;
+    const check = () => {
+      const style = getComputedStyle(station);
+      const room =
+        station.clientHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
+      setTaller(column.scrollHeight > room + 1);
+    };
+    const resized = new ResizeObserver(check);
+    const watchCards = () => {
+      for (const card of Array.from(column.children)) resized.observe(card);
+    };
+    resized.observe(station);
+    watchCards();
+    const cards = new MutationObserver(() => {
+      watchCards();
+      check();
+    });
+    cards.observe(column, { childList: true });
+    check();
+    return () => {
+      resized.disconnect();
+      cards.disconnect();
+    };
+  }, [ref]);
+  return taller;
+}
+
 export function StationSide({ world }: { world: World }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const taller = useTallerThanStation(ref);
   return (
-    <div className="station-side">
+    <div ref={ref} className={taller ? "station-side is-overflowing" : "station-side"}>
       <StationToday world={world} />
       <StationRunners />
       <StationNetwork />

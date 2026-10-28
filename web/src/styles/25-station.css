@@ -140,6 +140,16 @@
 .station-side > .station-network.is-open > .agent-panel.is-docked {
   flex: 1 0 auto;
 }
+/* Taller than Station even so (StationSide measures it): pinned, the column
+   would scroll on its own right beside Station's scrollbar. It lets go
+   instead and scrolls with the rest, so Station keeps the one scrollbar. */
+.station-side.is-overflowing,
+.station-side.is-overflowing:has(> .station-network.is-open) {
+  position: static;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
 .agent-panel.is-docked > * {
   flex-shrink: 0;
 }
