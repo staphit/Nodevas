@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"nodevas/internal/runner"
+	"nodevas/internal/runnerwire"
 )
 
 // A standalone `serve` (loopback --listen, no proxy, no TLS, no Cloudflare
@@ -42,8 +43,9 @@ func (r *repoFlags) Set(value string) error {
 	return nil
 }
 
-// localRunnerName is the local runner's name on the Runners page.
-const localRunnerName = "this machine"
+// localRunnerName is the local runner's name on the hub: a fixed id the web
+// translates, never shown as stored.
+const localRunnerName = runnerwire.LocalRunnerName
 
 // localRunnerMode is whether serve starts a runner beside its hub, and how
 // much a failure to start it matters.

@@ -205,6 +205,13 @@ const (
 	MaxRepos      = 256
 )
 
+// LocalRunnerName is the name `nodevas serve` registers its own local runner
+// under. It is a fixed id, not display text: clients show it in the viewer's
+// language ("this machine", 本機), and runs copy it into their runnerName, so
+// it never changes, or every existing local runner and its runs would show
+// untranslated.
+const LocalRunnerName = "this machine"
+
 // Runner is a runner as the HTTP API (GET /api/runners) returns it.
 type Runner struct {
 	ID        string `json:"id"`
