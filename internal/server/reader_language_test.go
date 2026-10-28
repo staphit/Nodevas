@@ -131,3 +131,36 @@ func TestTransferWarningsSpeakTheReadersLanguage(t *testing.T) {
 		})
 	}
 }
+
+// Dragging an actual record before the stamp it follows is refused, and the
+// refusal is in the reader's language.
+func TestServerRefusalsSpeakTheReadersLanguage(t *testing.T) {
+	for _, language := range []string{"en-US,en;q=0.9", "zh-TW,zh;q=0.9"} {
+		t.Run(language, func(t *testing.T) {
+			server, pm := readerLanguageFixture(t)
+			st := pm.Store()
+			if _, err := st.SetStatus("alpha", engine.StatusInProgress, "tester", ""); err != nil {
+				t.Fatal(err)
+			}
+			state, err := st.SetStatus("alpha", engine.StatusDone, "tester", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := state.History[len(state.History)-1]
+			response := askIn(t, server, language, http.MethodPost, "/api/events/move",
+				`{"id":"`+done.ID+`","t":"2001-01-01T00:00:00Z"}`)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+			var refusal struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+				t.Fatal(err)
+			}
+			if chinese := strings.HasPrefix(language, "zh"); hasCJK(refusal.Error) != chinese {
+				t.Fatalf("refusal for %s reads %q", language, refusal.Error)
+			}
+		})
+	}
+}
