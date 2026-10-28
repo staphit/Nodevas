@@ -28,6 +28,11 @@ describe("validation", () => {
     expect(readPreference("explorerWidth")).toBe(520);
   });
 
+  it("raises an explorer narrower than it can be read (200px wrapped its own heading)", () => {
+    configurePreferenceStorage(fakeStorage({ "vised-explorer-width": "200" }));
+    expect(readPreference("explorerWidth")).toBe(260);
+  });
+
   it("falls back when the stored value is unusable", () => {
     configurePreferenceStorage(
       fakeStorage({
