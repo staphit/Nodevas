@@ -58,8 +58,9 @@
   }
 }
 /* Room the button takes at the bottom right: the rows that end there (the
-   open document's footer, the collapsed timeline's header) pad their right
-   edge by it, so nothing they hold sits under the button. The pill is its
+   open document's footer, the "More properties" bar and, opened, its Delete
+   node row, the collapsed timeline's header) pad their right edge by it, so
+   nothing they hold sits under the button. The pill is its
    icon, padding and a label of about six ems; round, it is 48px. Both with
    the 18px inset and a little air. */
 .app:has(> .copilot-fab) {
@@ -67,6 +68,7 @@
 }
 .app:has(> .copilot-fab) .drawer .tab-footer,
 .app:has(> .copilot-fab) .drawer .drawer-more-props > summary,
+.app:has(> .copilot-fab) .drawer .meta-actions,
 .app:has(> .copilot-fab) .lane-wrap.timeline.pane-collapsed > .board-title {
   padding-right: var(--copilot-fab-clearance);
 }
