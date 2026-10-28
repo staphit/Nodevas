@@ -52,6 +52,24 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("AcceptanceCriteria", () => {
+  // The drawer's input is about 320px on a phone; at 150% text the example
+  // placeholder needed 380 and read "…e.g. “GET /x retu". The placeholder is
+  // the short ask in both languages; the example is said on hover.
+  it("keeps the new criterion's placeholder short and its example on hover", () => {
+    setGraph(twoItems);
+    const { unmount } = render(<AcceptanceCriteria id="t" />);
+    const input = screen.getByRole("textbox", { name: "New criterion" });
+    expect(input).toHaveAttribute("placeholder", "One checkable line");
+    expect(input).toHaveAttribute("title", "One checkable line, e.g. “GET /x returns 200”");
+    unmount();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    render(<AcceptanceCriteria id="t" />);
+    const zh = screen.getByRole("textbox", { name: "新條件" });
+    expect(zh).toHaveAttribute("placeholder", "一行可驗證的條件");
+    expect(zh).toHaveAttribute("title", "一行可驗證的條件，例如「GET /x 回傳 200」");
+  });
+
   it("shows on the types agents work, and nowhere else", () => {
     setGraph(twoItems);
     const { unmount } = render(<AcceptanceCriteria id="t" />);
