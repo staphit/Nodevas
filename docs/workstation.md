@@ -68,7 +68,7 @@ Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent
 
 Pick a runner, agent and model; accept it at the runner; watch OpenCode work over ACP; read the diff; merge the PR.
 
-[![Dispatch a node to OpenCode, watch the run, read the diff and merge](./videos/agent-run.gif)](./videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 ### Autopilot
 
@@ -76,23 +76,23 @@ The goal's **Autopilot** pill in the node panel opens it in Station. The goal is
 
 The requirement can change mid-way. Tell the voice copilot how it changes: it pauses the goal's autopilot, records the change on the goal under **Revisions**, and a replan run re-evaluates the tasks — done ones stay, obsolete ones are skipped (kept with their history), ones in progress are only flagged, new ones are added. While it runs the pill reads **Revising…**. When it ends, the copilot tells you what was kept, changed, skipped and added, and asks whether to resume; nothing resumes until you say yes. See [COPILOT.md](../COPILOT.md#revising-a-goal-mid-way-internalcopilotrevisego).
 
-[![Autopilot moving tasks through implement, review and human review](./videos/autopilot.gif)](./videos/autopilot.mp4)
+https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
 
 ### Two-factor authentication and device links
 
 In **Settings → Your account**, turn on an authenticator app and save the recovery codes. Then link a new PC from **Settings → Runners**: step-up asks the app, and the hub hands back a one-time link.
 
-[![Setting up two-factor authentication, then creating a device link](./videos/two-factor-and-device-link.gif)](./videos/two-factor-and-device-link.mp4)
+https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
 
 ### Token usage
 
 Tokens and API-equivalent cost by day, agent, model and session, in **Settings → Usage**; the daily budget is a part of its own.
 
-[![Settings → Usage: daily chart, sessions and prices, then the daily budget](./videos/usage.gif)](./videos/usage.mp4)
+https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
 ### Agent chat
 
 Who is working on what, messages between agents, and a held message waiting for your approval.
 
-[![The Agent chat panel approving a held message](./videos/agent-network.gif)](./videos/agent-network.mp4)
+https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 

@@ -45,7 +45,7 @@ npm ci --prefix web && npm run build --prefix web && go build -o nodevas ./cmd/n
 
 ## 在自己電腦上跑 agent
 
-[![把節點派給 agent，看 run 進行並合併 PR](./docs/videos/agent-run.gif)](./docs/videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 server 只負責顯示看板；你電腦上的小程式 **runner** 用你自己的登入執行 agent，程式碼不會離開你的電腦。設定、安全、自動推進與更多示範影片：[Agent 工作站](./docs/workstation.zh-TW.md)。
 

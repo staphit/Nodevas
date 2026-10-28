@@ -7,7 +7,7 @@ const PORT = Number(process.env.VISED_E2E_PORT ?? 5702);
  *
  * Not a test run: e2e/demo-videos.spec.ts drives the real app through one
  * feature per test while it records the page, and e2e/demo-encode.mjs turns
- * the recordings into the GIF and MP4 files under docs/videos/. The
+ * the recordings into the MP4 files under docs/videos/. The
  * hub's runner, run, autopilot, usage and agent routes are answered by the
  * spec, so no runner or agent has to exist. Run it with:
  *
