@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/engine"
 	projectdomain "nodevas/internal/project"
@@ -52,6 +53,11 @@ func searchTestWorkspace(t *testing.T, count int) *projectdomain.ProjectManager 
 	// The index lives in the workspace database, as serve wires it; without
 	// one every search is the direct scan and nothing is ranked.
 	pm.UseDatabase(testpg.New(t))
+	// Until its first build is in, a search answers from titles alone; these
+	// tests are about the index.
+	if !pm.AwaitSearchIndex(root, 30*time.Second) {
+		t.Fatal("the project's search index was not built")
+	}
 	return pm
 }
 

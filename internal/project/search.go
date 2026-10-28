@@ -15,8 +15,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
@@ -150,11 +152,21 @@ func readSearchTextDirect(root, path string) string {
 // Call it before the first search. Without it there is no index: every search
 // falls back to the direct scan, which is correct but reads every file and
 // ranks nothing — the path for an embedder that has no database.
+//
+// A hub opens its workspace, and so its last project, before the database is
+// up, and the index that opening asked to warm had nowhere to go. So this
+// warms every open project again.
 func (pm *ProjectManager) UseDatabase(database *db.DB) {
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-	pm.searchIndex = &searchIndex{manager: searchindex.NewManagerWithDB(database)}
-	pm.searchLive.Store(pm.searchIndex)
+	index := &searchIndex{manager: searchindex.NewManagerWithDB(database)}
+	pm.searchIndex = index
+	pm.searchLive.Store(index)
+	pm.mu.Unlock()
+	for _, st := range pm.cachedStores() {
+		if pm.Watching(st.Root()) {
+			index.indexes().Warm(st.Root())
+		}
+	}
 }
 
 // PruneSearchIndex drops index rows for projects that are no longer in the
@@ -190,16 +202,100 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 	return pm.searchIndex
 }
 
+// coldSearchWait is how long a search waits for a project's first index
+// build before it answers from searchWhileIndexing instead. A var so tests
+// can pin it.
+var coldSearchWait = 50 * time.Millisecond
+
+// coldDirectScanNodes is the largest project searchWhileIndexing reads in
+// full; a larger one is answered from its titles alone.
+const coldDirectScanNodes = 64
+
 func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
-	return pm.getSearchIndex().search(project, normalized)
+	index := pm.getSearchIndex()
+	if index.indexes().Warming(project.Path, coldSearchWait) {
+		return pm.searchWhileIndexing(project, normalized), nil
+	}
+	return index.search(project, normalized)
+}
+
+// AwaitSearchIndex reports whether the index of the project at projectPath is
+// built within the given time, starting the build if nothing is on it. A
+// workspace without a database has no index and reports true: its searches
+// scan the files.
+func (pm *ProjectManager) AwaitSearchIndex(projectPath string, within time.Duration) bool {
+	return !pm.getSearchIndex().indexes().Warming(projectPath, within)
+}
+
+// searchWhileIndexing answers a search of a project whose first index build
+// is still running, which takes seconds for a large one. A small project is
+// scanned directly, which is complete and cheap at its size; a large one is
+// matched on what the cached graph holds (titles, kinds, tags, assignees),
+// with no file read. Body text becomes searchable once the build is in.
+func (pm *ProjectManager) searchWhileIndexing(project ProjectInfo, normalized string) []SearchResult {
+	graph, _, err := pm.cachedStore(project.Path).LoadGraph()
+	if err != nil || len(graph.Nodes) <= coldDirectScanNodes {
+		return SearchProjectNodesDirect(project, normalized)
+	}
+	userNames := make(map[string]string, len(graph.Users))
+	for _, user := range graph.Users {
+		userNames[user.ID] = user.Name
+	}
+	results := make([]SearchResult, 0)
+	for _, node := range graph.Nodes {
+		if node == nil {
+			continue
+		}
+		metadata := nodeSearchMetadata(node, userNames)
+		if strings.Contains(strings.ToLower(metadata), normalized) {
+			results = append(results, SearchResult{
+				Project: project.Name,
+				NodeID:  node.ID,
+				Title:   node.Title,
+				Snippet: searchSnippet(metadata, normalized),
+				Kind:    "node",
+			})
+		}
+	}
+	return results
+}
+
+// nodeSearchMetadata is the line of a node's graph fields a search matches
+// besides its files.
+func nodeSearchMetadata(node *engine.Node, userNames map[string]string) string {
+	return strings.Join([]string{
+		node.ID, node.Title, node.Kind, node.Priority,
+		userNames[node.Assignee], strings.Join(node.Tags, " "), node.Requires,
+	}, " ")
 }
 
 // RankProjectNodes is the ranked search over one project: its best limit
 // nodes for keywords or a whole sentence, each with the excerpt that matched.
 // A project the index cannot open falls back to the direct scan, whose hits
 // all contain the query as a phrase.
+//
+// While the project's first index build runs, it answers from
+// searchWhileIndexing: hits whose title holds the query first.
 func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit int) ([]SearchResult, error) {
-	results, err := pm.getSearchIndex().rank(info, query, limit)
+	index := pm.getSearchIndex()
+	if index.indexes().Warming(info.Path, coldSearchWait) {
+		normalized := strings.ToLower(strings.TrimSpace(query))
+		results := pm.searchWhileIndexing(info, normalized)
+		for i := range results {
+			results[i].Match = searchindex.MatchPhrase
+			if strings.Contains(strings.ToLower(results[i].Title), normalized) {
+				results[i].Match = searchindex.MatchTitle
+			}
+		}
+		sort.SliceStable(results, func(i, j int) bool {
+			return results[i].Match == searchindex.MatchTitle && results[j].Match != searchindex.MatchTitle
+		})
+		if limit > 0 && len(results) > limit {
+			results = results[:limit]
+		}
+		return results, nil
+	}
+	results, err := index.rank(info, query, limit)
 	if err == nil {
 		return results, nil
 	}
@@ -264,10 +360,7 @@ func SearchProjectNodesDirect(project ProjectInfo, normalized string) []SearchRe
 		if node == nil {
 			continue
 		}
-		metadata := strings.Join([]string{
-			node.ID, node.Title, node.Kind, node.Priority,
-			userNames[node.Assignee], strings.Join(node.Tags, " "), node.Requires,
-		}, " ")
+		metadata := nodeSearchMetadata(node, userNames)
 		content := readSearchTextDirect(project.Path, store.NodeDocPath(project.Path, node.ID))
 		var pageContent strings.Builder
 		pageDir := store.NodePagesPath(project.Path, node.ID)

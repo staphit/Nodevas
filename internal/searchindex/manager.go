@@ -8,7 +8,8 @@
 // build side publishes through an atomic pointer. Neither takes a lock, so a
 // query against a project that is reindexing answers from the last committed
 // index instead of queueing behind it. The only query that waits is the first
-// one for a project with no index at all.
+// one for a project with no index at all; a caller that would rather not can
+// ask Warming first and answer from a fallback while the build runs.
 //
 // Keeping the index current is background work: the store reports its own
 // writes (Notify), the watcher reports outside edits (NotifyNode), opening a
@@ -352,6 +353,34 @@ func (m *Manager) Warm(root string) {
 		return
 	}
 	m.schedule(e, 0, func(e *entry) { e.pendWalk = true })
+}
+
+// coldPoll is how often Warming looks for the first build's view.
+const coldPoll = 5 * time.Millisecond
+
+// Warming reports whether root's index is still being built: the project has
+// no index to read yet, and none was published within wait. It starts that
+// build in the background (Warm) if nothing is on it, so a caller can answer
+// from a fallback instead of waiting seconds for a large project's first
+// build, which is what a query does otherwise. Without a database it reports
+// false: there is no index to wait for, and a search answers ErrNoIndex.
+func (m *Manager) Warming(root string, wait time.Duration) bool {
+	if m.database == nil {
+		return false
+	}
+	e := m.entryFor(root)
+	if e.view.Load() != nil {
+		return false
+	}
+	m.schedule(e, 0, func(e *entry) { e.pendWalk = true })
+	deadline := time.Now().Add(wait)
+	for e.view.Load() == nil {
+		if !time.Now().Before(deadline) {
+			return true
+		}
+		time.Sleep(coldPoll)
+	}
+	return false
 }
 
 // classifyPath says what a change to path means for the index: one node's
