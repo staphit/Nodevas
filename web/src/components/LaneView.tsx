@@ -331,7 +331,9 @@ export function LaneView({
   // Whether the project on show had been shown before it came up, which is
   // also what spares a phone's board a second first-sight fit below.
   // `staleGraph` is the graph the store held when the project changed under
-  // a mounted board: the old project's, kept until the new one loads.
+  // a mounted board: the old project's, kept until the new one loads. Not
+  // when the board came up before the workspace named any project: what was
+  // loaded then is the server's active project, the one now being named.
   const [shownProject, setShownProject] = useState(() => ({
     project: activeProject,
     remembered: rememberedView !== undefined,
@@ -342,7 +344,7 @@ export function LaneView({
     setShownProject({
       project: activeProject,
       remembered: remembered !== undefined,
-      staleGraph: graph,
+      staleGraph: shownProject.project ? graph : null,
     });
     if (isGraph) setZoomDirect(remembered?.zoom ?? 1);
   }
