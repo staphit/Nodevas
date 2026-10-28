@@ -82,4 +82,14 @@ describe("voice copilot button clearance", () => {
       /padding-bottom:\s*calc\(48px \+ 18px/,
     );
   });
+
+  // The vertical timeline's date ruler is sticky at its right edge: rows
+  // scroll, the ruler never does, so a button over it hides a date for good.
+  // While such a timeline is open the button stands left of the ruler.
+  it("stands left of an open timeline's date ruler", () => {
+    const moved = rules(
+      ".app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)) > .copilot-fab",
+    );
+    expect(moved).toMatch(/right:\s*calc\(max\(18px, env\(safe-area-inset-right, 0px\)\)\s*\+\s*56px\s*\+/);
+  });
 });
