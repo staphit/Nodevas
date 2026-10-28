@@ -39,8 +39,28 @@ describe("DiffView", () => {
     } as never);
     vi.spyOn(api, "getRun").mockResolvedValue(makeRun({ id: "r1" }));
     render(<DiffView view={{ kind: "diff", source: "run", runId: "r1" }} />);
-    expect(await screen.findByText("1 files · +2 −1")).toBeInTheDocument();
+    expect(await screen.findByText("1 file · +2 −1")).toBeInTheDocument();
     expect(screen.getByRole("table")).toHaveTextContent("export const sub");
+  });
+
+  it("counts more than one file in the plural", async () => {
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: {
+        commit: sha,
+        base: "main",
+        files: [
+          { path: "src/math.js", status: "modified", additions: 2, deletions: 1 },
+          { path: "src/sub.js", status: "added", additions: 1, deletions: 0 },
+        ],
+        additions: 3,
+        deletions: 1,
+      },
+      patch: PATCH,
+      patchTruncated: false,
+    } as never);
+    vi.spyOn(api, "getRun").mockResolvedValue(makeRun({ id: "r1" }));
+    render(<DiffView view={{ kind: "diff", source: "run", runId: "r1" }} />);
+    expect(await screen.findByText("2 files · +3 −1")).toBeInTheDocument();
   });
 
   it("renders a workspace commit and finds the agent that made it", async () => {

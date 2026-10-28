@@ -93,12 +93,16 @@ describe("AgentView", () => {
       { at: "2026-10-28T09:00:00Z", action: "joined", nodeId: "", detail: "" },
       { at: "2026-10-28T09:01:00Z", action: "doing", nodeId: "login", detail: "writing tests" },
       { at: "2026-10-28T09:02:00Z", action: "message", nodeId: "", detail: "other-claude" },
+      { at: "2026-10-28T09:03:00Z", action: "changes", nodeId: "login", detail: "1" },
+      { at: "2026-10-28T09:04:00Z", action: "changes", nodeId: "login", detail: "3" },
     ]);
     render(<AgentView id="session:s1" />);
     const timeline = await screen.findByRole("region", { name: "Event log" });
     expect(within(timeline).getByText("Joined")).toBeInTheDocument();
     expect(within(timeline).getByText("Now: writing tests")).toBeInTheDocument();
     expect(within(timeline).getByText("Sent a message to other-claude")).toBeInTheDocument();
+    expect(within(timeline).getByText("Reported changes to 1 file")).toBeInTheDocument();
+    expect(within(timeline).getByText("Reported changes to 3 files")).toBeInTheDocument();
     expect(api.getRunEvents).not.toHaveBeenCalled();
   });
 });
