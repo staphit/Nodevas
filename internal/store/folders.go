@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // Node folders [B-06].
@@ -515,7 +516,7 @@ func (s *Store) DeleteNodeFolder(rel string) error {
 		from := filepath.Join(source, entry.Name())
 		to := filepath.Join(s.folderAbs(parent), entry.Name())
 		if _, statErr := s.statPath(to); statErr == nil {
-			return fmt.Errorf("上層已有同名項目 %q，請先改名", entry.Name())
+			return locale.Errorf("the parent already has an item named %q; rename it first", "上層已有同名項目 %q，請先改名", entry.Name())
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
@@ -570,7 +571,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 			}
 			target := filepath.Join(targetDir, name)
 			if _, err := s.statPath(target); err == nil {
-				return fmt.Errorf("目標資料夾已有 %q", name)
+				return locale.Errorf("the target folder already has %q", "目標資料夾已有 %q", name)
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}

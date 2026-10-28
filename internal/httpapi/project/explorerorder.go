@@ -8,7 +8,6 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -43,21 +43,21 @@ func (a *API) PutProjectOrder(c *gin.Context) {
 		return
 	}
 	if len(body.ProjectOrder) > store.MaxExplorerOrderEntries {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf(
-			"排序項目過多（上限 %d）", store.MaxExplorerOrderEntries))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf(
+			"too many entries in the order (at most %d)", "排序項目過多（上限 %d）", store.MaxExplorerOrderEntries))
 		return
 	}
 	seen := make(map[string]bool, len(body.ProjectOrder))
 	for _, name := range body.ProjectOrder {
 		if !engine.ValidProjectRef(name) {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("專案路徑無效：%q", name))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid project path: %q", "專案路徑無效：%q", name))
 			return
 		}
 		// Case matters nowhere else in the tree, so two entries differing only
 		// in case would be one project listed twice.
 		lowered := strings.ToLower(name)
 		if seen[lowered] {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("重複的專案路徑：%q", name))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("duplicate project path: %q", "重複的專案路徑：%q", name))
 			return
 		}
 		seen[lowered] = true

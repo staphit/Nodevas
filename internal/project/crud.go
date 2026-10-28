@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"os"
 	"path/filepath"
@@ -18,10 +19,10 @@ const MaxImportPathFiles = 20000
 // The two ways an import source overlaps the workspace. Both are refusals, but
 // they mean different things to whoever picked the folder, so they stay apart.
 var (
-	ErrSourceContainsWorkspace = errors.New("來源資料夾包含目前工作區，不能匯入自身")
-	ErrSourceInsideWorkspace   = errors.New("該資料夾已在工作區內")
-	ErrPathTaken               = errors.New("路徑已存在")
-	ErrInvalidName             = errors.New("名稱無效")
+	ErrSourceContainsWorkspace = locale.Errorf("the source folder contains the current workspace, which cannot import itself", "來源資料夾包含目前工作區，不能匯入自身")
+	ErrSourceInsideWorkspace   = locale.Errorf("that folder is already inside the workspace", "該資料夾已在工作區內")
+	ErrPathTaken               = locale.Errorf("the path already exists", "路徑已存在")
+	ErrInvalidName             = locale.Errorf("invalid name", "名稱無效")
 )
 
 // CheckImportSource refuses a source directory that overlaps the workspace:
@@ -91,7 +92,7 @@ func (pm *ProjectManager) NewProjectStore(name string) (*store.Store, error) {
 		return nil, err
 	}
 	if _, err := store.StatProjectPath(pm.workspace, filepath.Join(dir, "graph.yaml")); err == nil {
-		return nil, fmt.Errorf("%w：%q 已經是專案", ErrPathTaken, name)
+		return nil, locale.Errorf("%w: %q is already a project", "%w：%q 已經是專案", ErrPathTaken, name)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func CollectMarkdownImport(src string) ([]store.ImportDocument, error) {
 			return nil
 		}
 		if len(docs) >= MaxImportPathFiles {
-			return fmt.Errorf("Markdown 檔超過 %d 個", MaxImportPathFiles)
+			return locale.Errorf("more than %d Markdown files", "Markdown 檔超過 %d 個", MaxImportPathFiles)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -178,7 +179,7 @@ func copyDirTree(srcRoot, dstRoot, src, dst string, copied *int) error {
 		}
 		*copied++
 		if *copied > MaxImportPathFiles {
-			return fmt.Errorf("來源檔案超過 %d 個，請縮小範圍", MaxImportPathFiles)
+			return locale.Errorf("more than %d source files; choose a smaller folder", "來源檔案超過 %d 個，請縮小範圍", MaxImportPathFiles)
 		}
 		data, err := store.ReadProjectFile(srcRoot, from)
 		if err != nil {

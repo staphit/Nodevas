@@ -18,6 +18,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/workspace"
 )
 
@@ -640,8 +641,8 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		}
 		previousAt, parseErr := time.Parse(time.RFC3339, previous.T)
 		if parseErr == nil && movedAt.Before(previousAt) {
-			return nil, fmt.Errorf(
-				"實際紀錄不可早於上一個生命週期事件（%s）",
+			return nil, locale.Errorf(
+				"an actual record cannot be earlier than the lifecycle event before it (%s)", "實際紀錄不可早於上一個生命週期事件（%s）",
 				previousAt.Local().Format("2006-01-02 15:04"),
 			)
 		}
@@ -656,8 +657,8 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		isLatestStatus = false
 		nextAt, parseErr := time.Parse(time.RFC3339, next.T)
 		if parseErr == nil && movedAt.After(nextAt) {
-			return nil, fmt.Errorf(
-				"實際紀錄不可晚於下一個生命週期事件（%s）",
+			return nil, locale.Errorf(
+				"an actual record cannot be later than the lifecycle event after it (%s)", "實際紀錄不可晚於下一個生命週期事件（%s）",
 				nextAt.Local().Format("2006-01-02 15:04"),
 			)
 		}

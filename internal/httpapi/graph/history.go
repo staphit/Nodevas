@@ -6,6 +6,7 @@ import (
 	"errors"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"strings"
 	"unicode/utf8"
@@ -43,7 +44,7 @@ func (a *API) getHistoryVersion(c *gin.Context) {
 	// A .docx snapshot is a zip: there is nothing readable to send, and the
 	// bytes would not survive JSON encoding intact.
 	if !utf8.Valid(data) {
-		httpx.Err(c, 400, errors.New("此格式的版本無法預覽，請直接還原"))
+		httpx.Err(c, 400, locale.Errorf("a version in this format cannot be previewed; restore it instead", "此格式的版本無法預覽，請直接還原"))
 		return
 	}
 	// A version is finished the moment it is written and is never rewritten.

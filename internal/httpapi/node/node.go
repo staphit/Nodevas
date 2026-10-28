@@ -319,7 +319,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 	}
 	if source == target {
 		httpx.Err(c, http.StatusBadRequest,
-			errors.New("來源與目標是同一個專案；請用「建立副本」"))
+			locale.Errorf("the source and target are the same project; use Duplicate instead", "來源與目標是同一個專案；請用「建立副本」"))
 		return
 	}
 
@@ -362,8 +362,9 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 			// lie that leads the user to retry and copy everything twice.
 			log.Printf("node transfer: copied but source cleanup failed: %v", err)
 			c.JSON(http.StatusConflict, map[string]any{
-				"error": fmt.Sprintf(
-					"節點已複製到目標專案，但來源專案的刪除失敗：%v。請手動刪除來源節點。", err),
+				"error": locale.Say(
+					"The nodes were copied to the target project, but removing them from the source failed: %v. Delete the source nodes by hand.",
+					"節點已複製到目標專案，但來源專案的刪除失敗：%v。請手動刪除來源節點。", err).In(language),
 				"ids":      result.IDs,
 				"order":    result.Order,
 				"warnings": locale.RenderAll(result.Warnings, language),

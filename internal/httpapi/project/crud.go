@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/store"
 )
@@ -141,16 +142,16 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 	}
 	src, err := filepath.Abs(strings.TrimSpace(body.Path))
 	if err != nil || strings.TrimSpace(body.Path) == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("請提供資料夾路徑"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("give a folder path", "請提供資料夾路徑"))
 		return
 	}
 	info, err := os.Stat(src)
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("找不到路徑 %q", src))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("path %q not found", "找不到路徑 %q", src))
 		return
 	}
 	if !info.IsDir() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("%q 不是資料夾", src))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("%q is not a folder", "%q 不是資料夾", src))
 		return
 	}
 	if err := project.CheckImportSource(src, a.pm.Workspace()); err != nil {
@@ -164,7 +165,7 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 	}
 	if !project.ProjectNamePattern.MatchString(name) || name == "." || name == ".." {
 		httpx.Err(c, http.StatusBadRequest,
-			fmt.Errorf("專案名稱 %q 無效，請在表單指定名稱", name))
+			locale.Errorf("project name %q is invalid; give a name in the form", "專案名稱 %q 無效，請在表單指定名稱", name))
 		return
 	}
 	defer a.pm.LockImport()()
@@ -174,7 +175,7 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 		return
 	}
 	if _, err := store.StatProjectPath(a.pm.Workspace(), dest); err == nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("工作區已有 %q", name))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the workspace already has %q", "工作區已有 %q", name))
 		return
 	}
 
@@ -189,7 +190,7 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 	if _, err := os.Stat(filepath.Join(src, "graph.yaml")); err == nil {
 		if err := project.CopyDirTree(src, dest, &copied); err != nil {
 			cleanupOnError()
-			httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("複製失敗：%w", err))
+			httpx.Err(c, http.StatusInternalServerError, locale.Errorf("copy failed: %w", "複製失敗：%w", err))
 			return
 		}
 	} else {
@@ -207,14 +208,14 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 		copied, err = st.ImportDocuments(&engine.Graph{Version: 1, Type: "workflow", Workflow: engine.NewProjectWorkflow("workflow")}, docs)
 		if err != nil {
 			cleanupOnError()
-			httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("匯入失敗：%w", err))
+			httpx.Err(c, http.StatusInternalServerError, locale.Errorf("import failed: %w", "匯入失敗：%w", err))
 			return
 		}
 	}
 
 	if err := a.pm.OpenForCaller(name); err != nil {
 		cleanupOnError()
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("匯入後開啟失敗：%w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("imported, but opening it failed: %w", "匯入後開啟失敗：%w", err))
 		return
 	}
 	a.follow(c.Request, name)
@@ -237,13 +238,13 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 	}
 	name := strings.Trim(strings.TrimSpace(body.Name), "/")
 	if name == "" || name == "." || !project.ValidProjectPath(name) {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("來源專案名稱無效"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the source project name is invalid", "來源專案名稱無效"))
 		return
 	}
 	newBase := strings.TrimSpace(body.NewName)
 	if newBase == "" || newBase == "." || strings.Contains(newBase, "/") ||
 		!project.ValidProjectPath(newBase) {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("新名稱 %q 無效", body.NewName))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("new name %q is invalid", "新名稱 %q 無效", body.NewName))
 		return
 	}
 	parent := strings.Trim(strings.TrimSpace(body.NewParent), "/")
@@ -251,7 +252,7 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 		parent = ""
 	}
 	if parent != "" && !project.ValidProjectPath(parent) {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("目標父層 %q 無效", parent))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("target parent %q is invalid", "目標父層 %q 無效", parent))
 		return
 	}
 
@@ -263,11 +264,11 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 		return
 	}
 	if info, statErr := store.StatProjectPath(a.pm.Workspace(), src); statErr != nil || !info.IsDir() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("專案 %q 不存在", name))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("project %q does not exist", "專案 %q 不存在", name))
 		return
 	}
 	if info, statErr := store.StatProjectPath(src, filepath.Join(src, "graph.yaml")); statErr != nil || !info.Mode().IsRegular() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("%q 不是專案（沒有 graph.yaml）", name))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("%q is not a project (it has no graph.yaml)", "%q 不是專案（沒有 graph.yaml）", name))
 		return
 	}
 
@@ -277,7 +278,7 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 	}
 	// A copy into its own subtree would recurse forever.
 	if newName == name || strings.HasPrefix(newName+"/", name+"/") {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("不能複製到自己的子層"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("a project cannot be copied into itself", "不能複製到自己的子層"))
 		return
 	}
 	parentDir := a.pm.Workspace()
@@ -288,13 +289,13 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 			return
 		}
 		if info, statErr := store.StatProjectPath(a.pm.Workspace(), parentDir); statErr != nil || !info.IsDir() {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("目標父層 %q 不存在", parent))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("target parent %q does not exist", "目標父層 %q 不存在", parent))
 			return
 		}
 	}
 	dest := filepath.Join(parentDir, newBase)
 	if _, statErr := store.StatProjectPath(a.pm.Workspace(), dest); statErr == nil {
-		httpx.Err(c, http.StatusConflict, fmt.Errorf("工作區已有 %q", newName))
+		httpx.Err(c, http.StatusConflict, locale.Errorf("the workspace already has %q", "工作區已有 %q", newName))
 		return
 	} else if !os.IsNotExist(statErr) {
 		httpx.Err(c, http.StatusInternalServerError, statErr)
@@ -304,7 +305,7 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 	copied := 0
 	if err := project.CopyDirTree(src, dest, &copied); err != nil {
 		_ = store.RemoveAllProjectPath(a.pm.Workspace(), dest)
-		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("複製失敗：%w", err))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("copy failed: %w", "複製失敗：%w", err))
 		return
 	}
 	if a.membership != nil {
@@ -316,7 +317,7 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 	if body.Open {
 		if err := a.pm.OpenForCaller(newName); err != nil {
 			httpx.Err(c, http.StatusInternalServerError,
-				fmt.Errorf("已複製，但開啟失敗：%w", err))
+				locale.Errorf("copied, but opening the copy failed: %w", "已複製，但開啟失敗：%w", err))
 			return
 		}
 		a.follow(c.Request, newName)
@@ -343,7 +344,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 	}
 	name := strings.Trim(strings.TrimSpace(body.Name), "/")
 	if name == "" || name == "." {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("無法搬移工作區根目錄"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the workspace root cannot be moved", "無法搬移工作區根目錄"))
 		return
 	}
 	parent := strings.Trim(strings.TrimSpace(body.NewParent), "/")
@@ -377,14 +378,14 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		}
 		if !known {
 			httpx.Err(c, http.StatusNotFound,
-				fmt.Errorf("目標工作區尚未加入：%q", targetWorkspace))
+				locale.Errorf("target workspace not added: %q", "目標工作區尚未加入：%q", targetWorkspace))
 			return
 		}
 	}
 	changesWorkspace := !project.WorkspacePathEqual(targetWorkspace, a.pm.Workspace())
 	if changesWorkspace && parent != "" {
 		httpx.Err(c, http.StatusBadRequest,
-			fmt.Errorf("跨工作區搬移目前只接受工作區根目錄"))
+			locale.Errorf("a move to another workspace can only go to its top level", "跨工作區搬移目前只接受工作區根目錄"))
 		return
 	}
 	base := name
@@ -396,7 +397,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		newBase = base
 	}
 	if newBase == "." || !project.ValidProjectPath(newBase) || strings.Contains(newBase, "/") {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("新名稱 %q 無效", newBase))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("new name %q is invalid", "新名稱 %q 無效", newBase))
 		return
 	}
 	newName := newBase
@@ -410,7 +411,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		return
 	}
 	if parent == name || strings.HasPrefix(parent+"/", name+"/") {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("不能把專案搬進自己的子層"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("a project cannot be moved into itself", "不能把專案搬進自己的子層"))
 		return
 	}
 	src, err := a.pm.Resolve(name)
@@ -419,7 +420,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		return
 	}
 	if info, statErr := store.StatProjectPath(a.pm.Workspace(), src); statErr != nil || !info.IsDir() {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("專案或資料夾 %q 不存在", name))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("project or folder %q does not exist", "專案或資料夾 %q 不存在", name))
 		return
 	}
 	parentDir := targetWorkspace
@@ -430,13 +431,13 @@ func (a *API) PostProjectMove(c *gin.Context) {
 			return
 		}
 		if info, statErr := store.StatProjectPath(targetWorkspace, parentDir); statErr != nil || !info.IsDir() {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("目標父層 %q 不存在", parent))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("target parent %q does not exist", "目標父層 %q 不存在", parent))
 			return
 		}
 	}
 	dst := filepath.Join(parentDir, newBase)
 	if _, err := store.StatProjectPath(targetWorkspace, dst); err == nil {
-		httpx.Err(c, http.StatusConflict, fmt.Errorf("目標位置已有同名資料夾 %q", newBase))
+		httpx.Err(c, http.StatusConflict, locale.Errorf("the target already has a folder named %q", "目標位置已有同名資料夾 %q", newBase))
 		return
 	} else if !os.IsNotExist(err) {
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -459,7 +460,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		if stopsWatcher && activeErr == nil {
 			_ = a.pm.Activate(active.Name, false, "", "")
 		}
-		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("搬移失敗：%w", err))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("move failed: %w", "搬移失敗：%w", err))
 		return
 	}
 	if a.membership != nil {
@@ -486,7 +487,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		}
 		if openErr != nil {
 			httpx.Err(c, http.StatusInternalServerError,
-				fmt.Errorf("已搬移，但開啟目標工作區失敗：%w", openErr))
+				locale.Errorf("moved, but opening the target workspace failed: %w", "已搬移，但開啟目標工作區失敗：%w", openErr))
 			return
 		}
 		if err := a.pm.SaveActiveWorkspace(); err != nil {
@@ -496,7 +497,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		newActive = newName + strings.TrimPrefix(active.Name, name)
 		if err := a.pm.Activate(newActive, false, "", ""); err != nil {
 			httpx.Err(c, http.StatusInternalServerError,
-				fmt.Errorf("已搬移，但重新開啟失敗：%w", err))
+				locale.Errorf("moved, but reopening failed: %w", "已搬移，但重新開啟失敗：%w", err))
 			return
 		}
 	}

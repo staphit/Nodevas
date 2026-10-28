@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/lockfile"
 )
 
@@ -129,7 +130,7 @@ func (pm *ProjectManager) lockCatalogFile() (func(), error) {
 	lock, err := lockfile.AcquireWait(pm.catalogLockFile(), catalogFileLockTimeout)
 	if err != nil {
 		if errors.Is(err, lockfile.ErrLocked) {
-			return nil, fmt.Errorf("工作區清單正由其他 Nodevas 程序修改，請稍後再試")
+			return nil, locale.Errorf("another Nodevas process is changing the workspace list; try again shortly", "工作區清單正由其他 Nodevas 程序修改，請稍後再試")
 		}
 		return nil, err
 	}
@@ -139,15 +140,15 @@ func (pm *ProjectManager) lockCatalogFile() (func(), error) {
 func (pm *ProjectManager) NormalizeWorkspaceRoot(path string) (string, error) {
 	abs, err := filepath.Abs(strings.TrimSpace(path))
 	if err != nil || strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("請提供工作區資料夾路徑")
+		return "", locale.Errorf("give a workspace folder path", "請提供工作區資料夾路徑")
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("找不到工作區 %q", abs)
+		return "", locale.Errorf("workspace %q not found", "找不到工作區 %q", abs)
 	}
 	info, err := os.Stat(real)
 	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf("%q 不是資料夾", real)
+		return "", locale.Errorf("%q is not a folder", "%q 不是資料夾", real)
 	}
 	return real, nil
 }
@@ -163,7 +164,7 @@ func (pm *ProjectManager) loadWorkspaceRootsFile(path string) ([]string, error) 
 	}
 	var saved []string
 	if err := json.Unmarshal(data, &saved); err != nil {
-		return nil, fmt.Errorf("讀取工作區清單失敗：%w", err)
+		return nil, locale.Errorf("reading the workspace list failed: %w", "讀取工作區清單失敗：%w", err)
 	}
 	roots := make([]string, 0, len(saved))
 	for _, savedPath := range saved {

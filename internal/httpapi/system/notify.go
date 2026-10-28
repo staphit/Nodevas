@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/notify"
 	"strings"
 
@@ -59,15 +60,15 @@ func (a *API) putNotifySettings(c *gin.Context) {
 		return
 	}
 	if settings.LeadMinutes <= 0 || settings.LeadMinutes > 60*24*60 {
-		httpx.Err(c, http.StatusBadRequest, errors.New("提前時間需介於 1 分鐘到 60 天之間"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the lead time must be between 1 minute and 60 days", "提前時間需介於 1 分鐘到 60 天之間"))
 		return
 	}
 	if settings.SMTPPort <= 0 || settings.SMTPPort > 65535 {
-		httpx.Err(c, http.StatusBadRequest, errors.New("SMTP 連接埠無效"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid SMTP port", "SMTP 連接埠無效"))
 		return
 	}
 	if settings.Enabled && (settings.SMTPHost == "" || settings.From == "") {
-		httpx.Err(c, http.StatusBadRequest, errors.New("啟用通知需要 SMTP 主機與寄件人"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("notifications need an SMTP host and a sender", "啟用通知需要 SMTP 主機與寄件人"))
 		return
 	}
 	err := a.notifier.SaveSettings(settings)
@@ -99,16 +100,19 @@ func (a *API) postNotifyTest(c *gin.Context) {
 		to = strings.TrimSpace(settings.DefaultTo)
 	}
 	if to == "" {
-		httpx.Err(c, http.StatusBadRequest, errors.New("缺少收件人"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("a recipient is required", "缺少收件人"))
 		return
 	}
 	if settings.SMTPHost == "" || settings.From == "" {
-		httpx.Err(c, http.StatusBadRequest, errors.New("請先設定 SMTP 主機與寄件人"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("set the SMTP host and sender first", "請先設定 SMTP 主機與寄件人"))
 		return
 	}
+	// The test goes to whoever pressed the button, so it is in their language.
+	language := httpx.Language(c.Request)
 	if err := a.notifier.SendTestMail(actor.ID, to,
-		"[Nodevas] 測試信",
-		"SMTP 設定正確,截止提醒將寄到此信箱。\r\n"); err != nil {
+		locale.Say("[Nodevas] Test mail", "[Nodevas] 測試信").In(language),
+		locale.Say("SMTP is set up correctly; deadline reminders will be sent to this address.\r\n",
+			"SMTP 設定正確，截止提醒將寄到此信箱。\r\n").In(language)); err != nil {
 		if errors.Is(err, notify.ErrMailRateLimited) || errors.Is(err, notify.ErrMailBusy) {
 			httpx.Err(c, http.StatusTooManyRequests, err)
 			return

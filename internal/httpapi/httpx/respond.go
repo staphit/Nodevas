@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 
 	"github.com/gin-gonic/gin"
@@ -31,8 +32,11 @@ const MaxRequestBody = 16 << 20
 // writeErr is the one place an error becomes a response body, so the shape
 // {"error": "..."} is the same everywhere. A 5xx is logged and its detail
 // withheld: the caller gets the status text, the operator gets the cause.
+//
+// The message is in the reader's language (Language): the hub's own
+// sentences in err are worded in both (locale.Errorf).
 func Err(c *gin.Context, status int, err error) {
-	message := err.Error()
+	message := locale.Render(err, Language(c.Request))
 	if status >= 500 {
 		log.Printf("request failed: %v", err)
 		message = http.StatusText(status)
@@ -49,7 +53,7 @@ func Err(c *gin.Context, status int, err error) {
 // caller's next move differs completely between them. The prose is for a person
 // or a model to read; the code is for a program to branch on.
 func Coded(c *gin.Context, status int, code string, err error, extras map[string]any) {
-	message := err.Error()
+	message := locale.Render(err, Language(c.Request))
 	if status >= 500 {
 		log.Printf("request failed: %v", err)
 		message = http.StatusText(status)
