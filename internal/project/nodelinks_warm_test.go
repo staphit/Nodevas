@@ -194,3 +194,50 @@ func TestCloseStopsALinkWarmUp(t *testing.T) {
 		t.Fatal("warm-up kept reading after Close returned")
 	}
 }
+
+// Saving one page of a 2,000-document project changed the project's stamp,
+// and the next drawer read all 2,000 documents again (300 ms and more). Only
+// the documents that changed are read; the rest keep their links.
+func TestScanAfterOneEditReadsOnlyTheEditedDocument(t *testing.T) {
+	info := linkProject(t, t.TempDir(), "P", 6)
+	if links := ScanNodeLinks([]ProjectInfo{info}); len(links) != 6 {
+		t.Fatalf("first scan found %d links, want 6", len(links))
+	}
+	writeDocument(t, info.Path, "n3", "see [[n1]] and [[Other/x9]]")
+
+	reads := countLinkReads(t, nil)
+	got := scannedLinks(t, info)
+	want := []string{"n1->P/n2", "n2->P/n3", "n3->Other/x9", "n3->P/n1", "n4->P/n5", "n5->P/n6", "n6->P/n1"}
+	if len(got) != len(want) {
+		t.Fatalf("scan after the edit = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("scan after the edit = %v, want %v", got, want)
+		}
+	}
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("scan after one document changed read %d documents, want 1", n)
+	}
+}
+
+// A retitled node keeps its document, so its links are not read again, but
+// they name it by its new title.
+func TestScanAfterARetitleNamesTheNewTitle(t *testing.T) {
+	info := linkProject(t, t.TempDir(), "P", 2)
+	ScanNodeLinks([]ProjectInfo{info})
+	writeGraph(t, info.Path, "version: 1\nnodes:\n  - id: n1\n    title: Renamed\n  - id: n2\n    title: Node 2\n")
+	future := time.Now().Add(2 * time.Minute)
+	if err := os.Chtimes(filepath.Join(info.Path, "graph.yaml"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	reads := countLinkReads(t, nil)
+	for _, link := range ScanNodeLinks([]ProjectInfo{info}) {
+		if link.FromNode == "n1" && link.FromTitle != "Renamed" {
+			t.Fatalf("link from n1 has title %q, want Renamed", link.FromTitle)
+		}
+	}
+	if n := reads.Load(); n != 0 {
+		t.Fatalf("a retitle read %d documents, want 0", n)
+	}
+}
