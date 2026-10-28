@@ -84,7 +84,17 @@ function Row({
   );
 }
 
-const fileIcon = (name: string) => (/\.(png|jpe?g|gif|webp|svg)$/i.test(name) ? "▣" : /\.md$/i.test(name) ? "¶" : "{}");
+/** Prose that is not Markdown: notes, logs, a licence. */
+const PLAIN_TEXT = /(\.(txt|text|log)|(^|\/)(LICEN[CS]E|COPYING|NOTICE|AUTHORS))$/i;
+
+const fileIcon = (name: string) =>
+  /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
+    ? "▣"
+    : /\.md$/i.test(name)
+      ? "¶"
+      : PLAIN_TEXT.test(name)
+        ? "≡"
+        : "{}";
 
 function sameView(a: ExplorerView | null, b: ExplorerView): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
