@@ -195,7 +195,13 @@ export function TimelineGrid({
     <>
         {timelineOrientation === "vertical" && (
           <>
-            <div className="lane-head-row" style={{ width: boardW }}>
+            {/* As wide as what it heads: the board keeps one lane's room
+                with no lanes, which here would be an empty strip beside the
+                ruler's corner with its bottom rule stopping short. */}
+            <div
+              className="lane-head-row"
+              style={{ width: timelineCols.length ? boardW : RULER_W }}
+            >
               {columnSlots.map((slot) => {
                 if (slot.kind === "skip") {
                   return (
