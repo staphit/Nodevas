@@ -8,6 +8,7 @@ import {
 import { useViewer } from "../components/SignIn";
 import { IconPlus } from "../icons";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import {
@@ -404,7 +405,7 @@ function RuleEditor({
             <option value="">{t("routing.anyRunner")}</option>
             {runners.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.online ? item.name : `${item.name} — ${t("runs.runnerOffline")}`}
+                {item.online ? runnerDisplayName(t, item.name) : `${runnerDisplayName(t, item.name)} — ${t("runs.runnerOffline")}`}
               </option>
             ))}
             {rule.runnerId && !runner && (

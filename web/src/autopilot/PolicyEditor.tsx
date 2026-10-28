@@ -13,6 +13,7 @@ import {
 } from "../api";
 import { IconPlus } from "../icons";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import {
   AgentModelPicker,
   agentModelProblem,
@@ -401,7 +402,7 @@ export function PolicyEditor({
             <option value="">{t("autopilot.anyRunner")}</option>
             {runners.map((runner) => (
               <option key={runner.id} value={runner.id}>
-                {runner.name}
+                {runnerDisplayName(t, runner.name)}
                 {runner.online ? "" : ` (${t("autopilot.offline")})`}
               </option>
             ))}

@@ -4,6 +4,7 @@ import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
 import { formatLocalizedDateTime, formatLocalizedTime, useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { relativeTime } from "../runners/RunnersModal";
 import {
   formatCompact,
@@ -308,7 +309,7 @@ function RunRow({
         </span>
         <RunTags run={run} retry={retry} next={next} />
         <span className="run-row-meta">
-          <span>{run.runnerName || run.runnerId}</span>
+          <span>{runnerDisplayName(t, run.runnerName) || run.runnerId}</span>
           <span>{run.repoName || run.repoId}</span>
           {branch && <span className="mono">{branch}</span>}
           <UsageText run={run} />
@@ -599,7 +600,7 @@ export function RunDetail({
       <dl className="run-meta">
         <div>
           <dt>{t("runs.runner")}</dt>
-          <dd>{run.runnerName || run.runnerId}</dd>
+          <dd>{runnerDisplayName(t, run.runnerName) || run.runnerId}</dd>
         </div>
         <div>
           <dt>{t("runs.repo")}</dt>

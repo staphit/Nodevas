@@ -17,6 +17,7 @@ import {
 import { useViewer } from "../components/SignIn";
 import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import {
@@ -294,7 +295,7 @@ export function DispatchDialog({
   const ruleMisses: string[] = [];
   if (suggestion && runner) {
     if (suggestion.runnerId && !touched.current.runner && runner.id !== suggestion.runnerId) {
-      ruleMisses.push(t("dispatch.ruleRunnerMissing", { runner: runner.name }));
+      ruleMisses.push(t("dispatch.ruleRunnerMissing", { runner: runnerDisplayName(t, runner.name) }));
     }
     if (
       wanted?.agent &&
@@ -390,9 +391,10 @@ export function DispatchDialog({
   const runnerLabel = (item: Runner) => {
     const reason = runnerUnavailableReason(item);
     const host = item.info?.hostname && item.info.hostname !== item.name ? ` (${item.info.hostname})` : "";
+    const name = runnerDisplayName(t, item.name);
     return reason
-      ? `${item.name}${host} — ${t(reason === "offline" ? "runs.runnerOffline" : "runs.runnerNoHeadless")}`
-      : `${item.name}${host}`;
+      ? `${name}${host} — ${t(reason === "offline" ? "runs.runnerOffline" : "runs.runnerNoHeadless")}`
+      : `${name}${host}`;
   };
 
   const loadingRunners = !runnersLoaded || (runnersLoading && runners.length === 0);

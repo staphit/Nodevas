@@ -10,6 +10,7 @@ import { unseenCount, useAgents } from "../agents/agentStore";
 import { agentColorKey, agentWho, areaName, poseLabel } from "../game/labels";
 import type { Actor, World } from "../game/world";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useRunners } from "../runners/runnerStore";
 import { useBudget } from "../runs/budgetStore";
 import { openNodeRuns } from "../runs/openRuns";
@@ -148,7 +149,7 @@ function StationToday({ world }: { world: World }) {
   const { actors } = world.building;
   const working = actors.filter((actor) => actor.pose === "working" || actor.pose === "reviewing").length;
   const placeName = (actor: Actor) =>
-    `${areaName(t, actor.area)} · ${actor.runnerName || t("station.roster.terminal")}`;
+    `${areaName(t, actor.area)} · ${runnerDisplayName(t, actor.runnerName) || t("station.roster.terminal")}`;
 
   useEffect(() => {
     if (!useUsage.getState().loaded) void useUsage.getState().refresh();
@@ -252,7 +253,7 @@ function StationRunners() {
         {shown.map((runner) => (
           <li key={runner.id}>
             <span className={`station-dot ${runner.online ? "status-running" : "is-off"}`} aria-hidden="true" />
-            <span className="station-runner-name">{runner.name}</span>
+            <span className="station-runner-name">{runnerDisplayName(t, runner.name)}</span>
             <span className="station-panel-meta">
               {runner.online ? t("game.room.online") : t("game.room.offline")}
             </span>

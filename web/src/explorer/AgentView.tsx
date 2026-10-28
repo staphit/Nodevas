@@ -4,6 +4,7 @@ import { explorerApi, type AgentItem, type RepoSummary, type SessionAction } fro
 import type { Run, RunEvent } from "../api/runs";
 import { openNodeOnBoard } from "./openNodeOnBoard";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { formatTokens } from "../usage/usageFormat";
 import { clockText, costText, durationText, roleText, stateText } from "./explorerFormat";
 import { useExplorer } from "./explorerStore";
@@ -168,7 +169,7 @@ export default function AgentView({ id }: AgentViewProps) {
           <div className="ex-card">
             <span className="ex-lbl">{t("explorer.agent.time")}</span>
             <span className="ex-big">{durationText(item.startedAt, item.finishedAt) || "—"}</span>
-            {item.runnerName && <span className="ex-lbl">{item.runnerName}</span>}
+            {item.runnerName && <span className="ex-lbl">{runnerDisplayName(t, item.runnerName)}</span>}
           </div>
           {verdict && (
             <div className="ex-card">

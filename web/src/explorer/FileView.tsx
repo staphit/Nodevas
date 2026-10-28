@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { ExplorerError, explorerApi } from "../api/explorer";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { renderMarkdown } from "../markdown";
 import { baseName, isMarkdown, sizeText } from "./explorerFormat";
 import { splitFrontMatter } from "./frontMatter";
@@ -86,7 +87,7 @@ export default function FileView({ view }: FileViewProps) {
     if (error instanceof ExplorerError && error.code === "HIDDEN_FILE") {
       body = <p className="ex-note">{t("explorer.file.hidden")}</p>;
     } else if (error instanceof ExplorerError && error.code === "RUNNER_OFFLINE" && view.source === "repo") {
-      body = <p className="ex-note">{t("explorer.files.offlineNote", { runner: view.runnerName })}</p>;
+      body = <p className="ex-note">{t("explorer.files.offlineNote", { runner: runnerDisplayName(t, view.runnerName) })}</p>;
     } else {
       body = <p className="ex-note">{error instanceof Error ? error.message : String(error)}</p>;
     }
@@ -130,7 +131,7 @@ export default function FileView({ view }: FileViewProps) {
         <h1>{baseName(view.path)}</h1>
         <span className="ex-crumb">{view.path}</span>
         {view.source === "repo" && (
-          <span className="ex-chip">{t("explorer.file.readOnly", { runner: view.runnerName })}</span>
+          <span className="ex-chip">{t("explorer.file.readOnly", { runner: runnerDisplayName(t, view.runnerName) })}</span>
         )}
         {view.source === "workspace" && nodeId && (
           <button type="button" className="ex-btn primary" onClick={() => openNodeOnBoard(nodeId)}>

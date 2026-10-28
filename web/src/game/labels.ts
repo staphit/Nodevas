@@ -5,6 +5,7 @@
 
 import { excerpt } from "../agents/agentStore";
 import { formatList } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -40,7 +41,7 @@ export function agentColorKey(agent: string): string {
 /** Where a character works, for its sentence: its runner, or "Terminals"
  * for an agent someone runs in their own terminal. */
 export function placeOf(t: Translate, actor: Pick<Actor, "runnerName">): string {
-  return actor.runnerName || t("game.room.terminal");
+  return runnerDisplayName(t, actor.runnerName) || t("game.room.terminal");
 }
 
 export function areaName(t: Translate, area: Area): string {
@@ -75,7 +76,7 @@ export function compactLabel(t: Translate, c: Pick<CompactOffice, "counts" | "la
 export function rackLabel(t: Translate, rack: Rack): string {
   const state =
     rack.online === null ? t("game.rack.unknown") : rack.online ? t("game.room.online") : t("game.room.offline");
-  const name = rack.name || t("game.room.unnamed");
+  const name = runnerDisplayName(t, rack.name) || t("game.room.unnamed");
   return rack.slots
     ? t("game.rack.label", { name, state, busy: rack.busy, slots: rack.slots })
     : t("game.rack.labelNoSlots", { name, state, busy: rack.busy });

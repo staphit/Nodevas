@@ -23,6 +23,7 @@ import {
   toolTokenLabel,
 } from "../domain/graph/roles";
 import { formatList, useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { nodeTypeLabel } from "../nodeTypeTheme";
 import { useRunners } from "../runners/runnerStore";
 import { agentCatalog, agentModelProblem, agentModelText, catalogDefaultModel, FallbackChainEditor, trimAgentModel } from "../runs/AgentModelFields";
@@ -284,7 +285,7 @@ function WhoRunsIt({ role, project }: { role: AgentRole; project: string }) {
             <option value="">{t("routing.anyRunner")}</option>
             {runners.map((runner) => (
               <option key={runner.id} value={runner.id}>
-                {runner.name}
+                {runnerDisplayName(t, runner.name)}
               </option>
             ))}
           </select>

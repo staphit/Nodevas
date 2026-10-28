@@ -6,6 +6,7 @@
 import { memo, useMemo } from "react";
 
 import { useI18n } from "../../i18n";
+import { runnerDisplayName } from "../../runners/runnerName";
 import { useGameActions } from "../GameActions";
 import { rackLabel } from "../labels";
 import { PixelSprite } from "../pixel/PixelSprite";
@@ -32,7 +33,7 @@ const RackButton = memo(function RackButton({ rack }: { rack: Rack }) {
       <span className="px-art">
         <PixelSprite parts={parts} width={RACK.w} height={RACK.h} />
       </span>
-      <span className="px-rack-name">{rack.name || t("game.room.unnamed")}</span>
+      <span className="px-rack-name">{runnerDisplayName(t, rack.name) || t("game.room.unnamed")}</span>
       <span className="px-rack-load">{rack.slots ? `${rack.busy}/${rack.slots}` : `▶ ${rack.busy}`}</span>
     </button>
   );

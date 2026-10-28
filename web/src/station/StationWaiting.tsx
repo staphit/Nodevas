@@ -11,6 +11,7 @@ import { openAutopilot } from "../autopilot/openAutopilot";
 import { useGameActions } from "../game/GameActions";
 import { agentWho } from "../game/labels";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { confirmCancelRun } from "../runs/confirmCancelRun";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
@@ -104,7 +105,7 @@ export function StationWaiting() {
         };
       case "offer":
         return {
-          text: t("station.waiting.offer", { runner: item.run.runnerName || "—", name: titleOf(item.run.nodeId) }),
+          text: t("station.waiting.offer", { runner: runnerDisplayName(t, item.run.runnerName) || "—", name: titleOf(item.run.nodeId) }),
           sub: `${agentWho(item.run.agent, item.run.model)} · ${t("station.waiting.offerHint")}`,
           nodeId: item.run.nodeId,
           primary: openRun(item.run),

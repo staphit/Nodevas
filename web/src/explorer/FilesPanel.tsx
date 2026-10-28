@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { explorerApi, type RepoEntry, type RepoSummary, type WorkspaceEntry } from "../api/explorer";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { useApp } from "../store";
 import { baseName } from "./explorerFormat";
 import { useExplorer, type ExplorerView } from "./explorerStore";
@@ -268,7 +269,7 @@ function RepoSection({ repo, query }: { repo: RepoSummary; query: string }) {
   const label = t("explorer.files.repo", { name: repo.name });
   let body: ReactElement;
   if (!repo.online) {
-    body = <p className="ex-note">{t("explorer.files.offlineNote", { runner: repo.runnerName })}</p>;
+    body = <p className="ex-note">{t("explorer.files.offlineNote", { runner: runnerDisplayName(t, repo.runnerName) })}</p>;
   } else if (!repo.browsable) {
     body = (
       <p className="ex-note">
@@ -283,7 +284,7 @@ function RepoSection({ repo, query }: { repo: RepoSummary; query: string }) {
       <div className="ex-sec">
         <span className="ex-sec-title">{label}</span>
         <span className={`ex-chip${repo.online ? "" : " bad"}`}>
-          {repo.online ? repo.runnerName : t("explorer.files.offline")}
+          {repo.online ? runnerDisplayName(t, repo.runnerName) : t("explorer.files.offline")}
         </span>
       </div>
       {body}

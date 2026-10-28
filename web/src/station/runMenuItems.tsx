@@ -12,6 +12,7 @@ import { useViewer } from "../components/SignIn";
 import { useGameActions } from "../game/GameActions";
 import { agentWho } from "../game/labels";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { confirmCancelRun } from "../runs/confirmCancelRun";
 import { openNodeRuns } from "../runs/openRuns";
 import { formatCompact, formatCost, totalTokens } from "../runs/runFormat";
@@ -37,7 +38,7 @@ export function runMeta(t: Translate, run: Run, now: number, goal: string): stri
   const parts = [
     t(`station.control.kind.${controlRunKind(run)}`),
     agentWho(run.agent, run.model),
-    run.runnerName,
+    runnerDisplayName(t, run.runnerName),
     formatElapsed(elapsedMs(run, now)),
     tokens > 0 ? t("station.control.tokens", { tokens: formatCompact(tokens) }) : "",
     formatCost(run.usage?.costUsd),

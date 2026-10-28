@@ -1,5 +1,6 @@
 import type { Runner } from "../api";
 import { useI18n } from "../i18n";
+import { runnerDisplayName } from "../runners/runnerName";
 import { formatClock } from "../stepup/StepUpDialog";
 import { useStepUp } from "../stepup/stepUpStore";
 import { autoAcceptOutcome } from "./autoAccept";
@@ -27,7 +28,7 @@ export function AutoAcceptNote({
   const policy = runner.info?.autoAccept;
   const outcome = autoAcceptOutcome(policy, stepUp, { repoId, agent, mode });
   const repo = runner.info?.repos?.find((item) => item.id === repoId)?.name || repoId;
-  const values = { runner: runner.name, repo, agent };
+  const values = { runner: runnerDisplayName(t, runner.name), repo, agent };
 
   if (outcome.kind === "auto") {
     const text =

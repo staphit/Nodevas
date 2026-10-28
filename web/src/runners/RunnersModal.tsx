@@ -9,6 +9,7 @@ import { formatList, languageLocale, useI18n } from "../i18n";
 import { CopyButton, LinkDeviceDialog } from "./LinkDevice";
 import { useTeamServer } from "../components/SignIn";
 import { useRunners } from "./runnerStore";
+import { runnerDisplayName } from "./runnerName";
 
 /** "3 minutes ago" in the reader's language, or "" for an unparseable time. */
 export function relativeTime(iso: string, now = Date.now()): string {
@@ -189,7 +190,7 @@ export function AutoAcceptSettings() {
         <ul className="runner-list">
           {runners.map((runner) => (
             <li key={runner.id} className="runner-card">
-              <strong>{runner.name}</strong>
+              <strong>{runnerDisplayName(t, runner.name)}</strong>
               <AutoAcceptPolicyView runner={runner} />
             </li>
           ))}
@@ -239,7 +240,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
 
   const onRevoke = async () => {
     const ok = await confirmAction({
-      title: t("runners.revokeTitle", { name: runner.name }),
+      title: t("runners.revokeTitle", { name: runnerDisplayName(t, runner.name) }),
       description: t("runners.revokeDescription"),
       confirmLabel: t("runners.revoke"),
       tone: "danger",
@@ -258,7 +259,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
       <div className="runner-card-head">
         <span className={`runner-dot${runner.online ? " online" : ""}`} aria-hidden="true" />
         <div className="runner-card-title">
-          <strong>{runner.name}</strong>
+          <strong>{runnerDisplayName(t, runner.name)}</strong>
           <span>{runnerSummary(runner, t)}</span>
         </div>
         <button
@@ -266,7 +267,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
           className="runner-copy"
           aria-expanded={open}
           aria-controls={open ? detailsId : undefined}
-          aria-label={t("settingsPage.runnerDetailsFor", { name: runner.name })}
+          aria-label={t("settingsPage.runnerDetailsFor", { name: runnerDisplayName(t, runner.name) })}
           onClick={() => setOpen((value) => !value)}
         >
           {t("settingsPage.runnerDetails")}
@@ -336,7 +337,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
               className="runner-revoke"
               disabled={revoking}
               onClick={() => void onRevoke()}
-              aria-label={t("runners.revokeTitle", { name: runner.name })}
+              aria-label={t("runners.revokeTitle", { name: runnerDisplayName(t, runner.name) })}
               title={t("runners.revoke")}
             >
               <IconTrash size={14} />
