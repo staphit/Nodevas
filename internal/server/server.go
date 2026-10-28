@@ -262,6 +262,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		hubErr = s.hub.Close()
 	}
 	s.stopOnce.Do(func() { close(s.stop) })
+	// The background loops have been asked to stop; they finish before the
+	// database (closed by the caller after this returns) goes away.
+	bgErr := s.waitBackground(ctx)
+	hubErr = errors.Join(hubErr, bgErr)
 	if s.pm == nil || s.remotes == nil {
 		return hubErr
 	}
@@ -345,11 +349,17 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	// when it has (internal/runs/handoff.go); the waits are stored, so this
 	// picks up those a restart interrupted.
 	retries, stopRetries := context.WithCancel(context.Background())
-	go func() {
-		<-s.stop
-		stopRetries()
-	}()
-	safego.Loop(retries, "run retries", func(ctx context.Context) { s.runs.RunRetries(ctx, runs.RetryInterval) })
+	s.goBackground("run retries", func() {
+		defer stopRetries()
+		go func() {
+			select {
+			case <-s.stop:
+				stopRetries()
+			case <-retries.Done():
+			}
+		}()
+		safego.RunLoop(retries, "run retries", func(ctx context.Context) { s.runs.RunRetries(ctx, runs.RetryInterval) })
+	})
 	s.llm = runners.NewLLMRelay(s.runners)
 	s.repo = runners.NewRepoRelay(s.runners)
 	s.analyticsDB = database

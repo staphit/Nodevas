@@ -19,6 +19,7 @@ import (
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 // Agent analytics on the server: background cost settlement and raw-history
@@ -36,11 +37,15 @@ func (s *Server) startAnalytics(database *db.DB) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-s.stop
-		cancel()
-	}()
-	go func() {
+	s.goBackground("analytics", func() {
+		defer cancel()
+		go func() {
+			select {
+			case <-s.stop:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 		if n, err := s.runs.Store().BackfillCosts(ctx); err != nil && ctx.Err() == nil {
 			slog.Warn("analytics: settle legacy run costs", slog.Any("error", err))
 		} else if n > 0 {
@@ -49,14 +54,15 @@ func (s *Server) startAnalytics(database *db.DB) {
 		ticker := time.NewTicker(retentionInterval)
 		defer ticker.Stop()
 		for {
-			s.pruneHistory(ctx, database)
+			// One bad pass (a panic) is logged and the loop carries on.
+			safego.Call("analytics retention", func() { s.pruneHistory(ctx, database) })
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 			}
 		}
-	}()
+	})
 }
 
 // pruneHistory applies the retention setting once, and notes what it
