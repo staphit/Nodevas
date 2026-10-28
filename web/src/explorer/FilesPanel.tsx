@@ -79,8 +79,15 @@ function Row({
       <span className="ex-ico" aria-hidden="true">
         {icon}
       </span>
-      <span className="ex-name">{name}</span>
-      {meta && <span className="ex-meta">{meta}</span>}
+      {/* Cut with an ellipsis where the panel is narrow; whole on hover. */}
+      <span className="ex-name" title={name}>
+        {name}
+      </span>
+      {meta && (
+        <span className="ex-meta" title={meta}>
+          {meta}
+        </span>
+      )}
     </button>
   );
 }
@@ -173,7 +180,9 @@ function WorkspaceFiles({ query }: { query: string }) {
   return (
     <section className="ex-root" aria-label={t("explorer.files.workspace", { project })}>
       <div className="ex-sec">
-        <span className="ex-sec-title">{t("explorer.files.workspace", { project })}</span>
+        <span className="ex-sec-title" title={t("explorer.files.workspace", { project })}>
+          {t("explorer.files.workspace", { project })}
+        </span>
         <span className="ex-chip">{t("explorer.files.hub")}</span>
       </div>
       {rows}
@@ -282,7 +291,9 @@ function RepoSection({ repo, query }: { repo: RepoSummary; query: string }) {
   return (
     <section className="ex-root" aria-label={label}>
       <div className="ex-sec">
-        <span className="ex-sec-title">{label}</span>
+        <span className="ex-sec-title" title={label}>
+          {label}
+        </span>
         <span className={`ex-chip${repo.online ? "" : " bad"}`}>
           {repo.online ? runnerDisplayName(t, repo.runnerName) : t("explorer.files.offline")}
         </span>

@@ -171,8 +171,12 @@
 .ex-who {
   color: var(--text-2);
 }
+/* The name is what tells rows apart (node-0001.md, node-0002.md…), so when
+   a row is short of room its title gives way first; both say the rest on
+   hover. */
 .ex-meta {
-  flex: none;
+  flex: 0 1000 auto;
+  min-width: 0;
   max-width: 50%;
   overflow: hidden;
   color: var(--text-2);
