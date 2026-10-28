@@ -897,6 +897,14 @@ div.tree-empty-row {
 .tree-node-list.node-list li > button > .status-shape {
   color: inherit;
 }
+/* A long node list is windowed (NodeRows): one box as tall as every row,
+   holding only the rows in view. The box itself is not a row — no hover. */
+.node-list .node-rows-window,
+.node-list .node-rows-window:hover {
+  padding: 0;
+  background: none;
+  cursor: default;
+}
 .tree-indent {
   flex: 0 0 8px;
   width: 8px;

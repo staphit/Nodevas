@@ -548,10 +548,11 @@ export function WorkspaceTree({
                       deleteFolder={deleteNodeFolder}
                       moveFolder={moveNodeFolder}
                       moveNodes={moveNodesToFolder}
-                      renderNode={(node) => {
+                      activeNodeId={activeTab}
+                      renderNode={(node, row) => {
                         const status = statuses[node.id] ?? "ready";
                         return (
-                          <li key={node.id}>
+                          <li key={node.id} {...row}>
                             <button
                               type="button"
                               className={`${activeTab === node.id ? "active" : ""}${
