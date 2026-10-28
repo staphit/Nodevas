@@ -370,19 +370,32 @@ export function TimelineGrid({
               ["--timeline-resize-span" as string]: `${horizontalTimelineH}px`,
             }}
           >
+            {/* The corner stands outside the date header: the header is a
+                stacking context, and its day grips run the full height, so
+                only a corner of its own can cover them where the node column
+                sits (the node heads outrank the header for the same reason).
+                It overlaps the header's lead by a negative margin. */}
+            <div
+              className="horizontal-corner"
+              style={{
+                width: timelineCellWidth,
+                height: HORIZONTAL_HEADER_H,
+                ...(timelineDateAxis === "bottom"
+                  ? { marginTop: -HORIZONTAL_HEADER_H }
+                  : { marginBottom: -HORIZONTAL_HEADER_H }),
+              }}
+            >
+              {t("timeline.corner")}
+            </div>
             <div
               className="horizontal-date-head"
               style={{ height: HORIZONTAL_HEADER_H }}
             >
               <div
-                className="horizontal-corner"
-                style={{
-                  width: timelineCellWidth,
-                  height: HORIZONTAL_HEADER_H,
-                }}
-              >
-                {t("timeline.corner")}
-              </div>
+                className="horizontal-date-lead"
+                style={{ width: timelineCellWidth }}
+                aria-hidden="true"
+              />
               {rowItems.map((item, index) => {
                 if (item.kind === "gap") {
                   return (

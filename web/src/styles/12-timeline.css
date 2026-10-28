@@ -238,13 +238,26 @@
   border-bottom: 0;
   border-top: 2px solid var(--border);
 }
-.horizontal-timeline.node-axis-right .horizontal-corner,
+.horizontal-timeline.date-axis-bottom .horizontal-corner {
+  order: 3;
+  top: auto;
+  bottom: 0;
+  border-bottom: 0;
+  border-top: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-date-lead,
 .horizontal-timeline.node-axis-right .horizontal-node-head {
   order: 99;
+}
+.horizontal-timeline.node-axis-right .horizontal-corner,
+.horizontal-timeline.node-axis-right .horizontal-node-head {
   left: auto;
   right: 0;
   border-right: 0;
   border-left: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-corner {
+  align-self: flex-end;
 }
 .horizontal-timeline.node-axis-right .horizontal-node-head.active,
 .horizontal-timeline.node-axis-right .horizontal-node-head.node-selected {
@@ -260,19 +273,29 @@
   border-bottom: 2px solid var(--border);
   background: var(--surface);
 }
+/* Stacking, bottom to top: day cells; the date header with its full-height
+   day grips (8); the node heads (9), which cover the grips' lines where the
+   node column sits; the corner (11), over the header and the node heads alike.
+   The node heads only reach the header's band under the corner. */
 .horizontal-corner {
   position: sticky;
+  top: 0;
   left: 0;
-  z-index: 10;
+  z-index: 11;
   display: flex;
   flex: 0 0 auto;
+  align-self: flex-start;
   align-items: center;
   padding: 0 10px;
   border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
   color: var(--text-2);
   background: var(--surface-2);
   font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
+}
+.horizontal-date-lead {
+  flex: 0 0 auto;
 }
 .horizontal-date-label {
   position: relative;
@@ -425,7 +448,7 @@
 }
 .horizontal-node-row.order-dragging {
   position: relative;
-  z-index: 8;
+  z-index: 10;
   opacity: 0.9;
   box-shadow: 0 8px 22px var(--shadow);
 }
@@ -435,7 +458,7 @@
 .horizontal-node-head {
   position: sticky;
   left: 0;
-  z-index: 7;
+  z-index: 9;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
