@@ -29,7 +29,7 @@
 //	                    PostgreSQL on 127.0.0.1 (binaries: NODEVAS_PG_BINARIES,
 //	                    or a verified download into NODEVAS_PG_HOME)
 //
-// A subcommand per file: serve.go, user.go, account.go, db.go, runner.go, agents.go. This one is the
+// A subcommand per file: serve.go, user.go, account.go, db.go, runner.go, agents.go, healthcheck.go. This one is the
 // dispatch and the usage text, so what the binary accepts can be read without
 // reading what any of it does.
 package main
@@ -63,6 +63,8 @@ func main() {
 		os.Exit(agentsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "account":
 		os.Exit(accountCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "healthcheck":
+		healthcheck(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -98,6 +100,10 @@ func usage() {
 		"       nodevas mcp [--project <name>] [--actor <name>] [--agent-role worker|orchestrator] [--toolset full|run] [--model m] [--server http://127.0.0.1:5666]")
 	fmt.Fprintln(os.Stderr,
 		"                    (serves the board to an MCP client over stdin/stdout; needs a running `nodevas serve`)")
+	fmt.Fprintln(os.Stderr,
+		"       nodevas healthcheck [--project <dir>] [--config f] [--port n] [--listen addr]  (exit 0 if this machine's hub answers /api/healthz;")
+	fmt.Fprintln(os.Stderr,
+		"                    finds the port as serve does: flags, NODEVAS_SERVE_PORT/LISTEN/TLS_CERT, nodevas.yaml)")
 	fmt.Fprintln(os.Stderr,
 		"       nodevas db status|detach [--project <dir>]  (where the data lives; give a copied workspace its own database)")
 	fmt.Fprintln(os.Stderr,

@@ -49,10 +49,14 @@ ENV NODEVAS_REQUIRE_DATABASE_URL=1
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 5666
-# /api/healthz answers 503 when the database does not, which wget treats as
-# a failure; the probe's successes are left out of the request log.
+# /api/healthz answers 503 when the database does not, which the probe
+# treats as a failure; its successes are left out of the request log. The
+# probe finds the port, listen address and scheme the way serve does
+# (NODEVAS_SERVE_PORT and friends, then /data/nodevas.yaml), so a hub moved
+# off the default port that way stays healthy. A --port given only on the
+# command line is invisible to it: set NODEVAS_SERVE_PORT instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -T 4 -O /dev/null http://127.0.0.1:5666/api/healthz || exit 1
+    CMD ["/usr/local/bin/nodevas", "healthcheck", "--project", "/data"]
 ENTRYPOINT ["/usr/local/bin/nodevas"]
 # --no-runner: the image has no coding agents, so a runner in it could take
 # no run. Runners belong on the machines that have them.
