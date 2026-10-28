@@ -175,3 +175,39 @@ describe("reconnecting after the hub restarts", () => {
     expect(fetchMock.mock.calls.length).toBe(asked);
   });
 });
+
+describe("a policy close from the hub", () => {
+  it.each(["message rate limit exceeded", "invalid message", ""])(
+    "reconnects with backoff after a 1008 that is not an auth failure (%s)",
+    async (reason) => {
+      hubUp = true;
+      FakeSocket.refuse = false;
+      const live = connectWS(() => {});
+      FakeSocket.all[0].onopen?.();
+      FakeSocket.all[0].onclose?.({ code: 1008, reason });
+      // Not straight away: the hub just told this client off.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(FakeSocket.all.length).toBe(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(FakeSocket.all.length).toBe(2);
+      // A second policy close backs off further, not in a tight loop.
+      FakeSocket.all[1].onclose?.({ code: 1008, reason });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(FakeSocket.all.length).toBe(2);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(FakeSocket.all.length).toBe(3);
+      live.close();
+    },
+  );
+
+  it("stops for good when authorization expired", async () => {
+    hubUp = true;
+    FakeSocket.refuse = false;
+    const live = connectWS(() => {});
+    FakeSocket.all[0].onopen?.();
+    FakeSocket.all[0].onclose?.({ code: 1008, reason: "authorization expired" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSocket.all.length).toBe(1);
+    live.close();
+  });
+});
