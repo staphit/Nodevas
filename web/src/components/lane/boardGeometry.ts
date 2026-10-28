@@ -32,6 +32,35 @@ const GRAPH_PAN_BUFFER_ROWS = 8;
 export const GRAPH_PAN_BUFFER_X = GRAPH_PAN_BUFFER_COLS * COL_W;
 export const GRAPH_PAN_BUFFER_Y = GRAPH_PAN_BUFFER_ROWS * ROW_H;
 
+/** The narrowest a horizontal timeline's node column gets beside a drawer. */
+export const TIMELINE_NODE_COLUMN_MIN_W = 112;
+
+/**
+ * How wide a horizontal timeline's sticky node column is, in board pixels.
+ * On its own it is a whole date cell (200–360px). An open node drawer leaves
+ * the board some 360px at 1280px, and a cell-wide column took nearly all of
+ * it: beside the drawer it is a third of what the drawer leaves uncovered
+ * (never under 112px), names cut short and in full on hover, so the dates
+ * beside it stay in view.
+ */
+export function timelineNodeColumnWidth({
+  cellWidth,
+  viewportWidth,
+  cover,
+  zoom,
+}: {
+  cellWidth: number;
+  /** The board's scrollport width, in screen pixels. */
+  viewportWidth: number;
+  /** How far an open drawer reaches into that scrollport, in screen pixels. */
+  cover: number;
+  zoom: number;
+}): number {
+  if (cover <= 0 || viewportWidth <= 0 || zoom <= 0) return cellWidth;
+  const uncovered = Math.max(0, viewportWidth - cover) / zoom;
+  return Math.round(Math.min(cellWidth, Math.max(TIMELINE_NODE_COLUMN_MIN_W, uncovered / 3)));
+}
+
 export interface BoardMetrics {
   boardW: number;
   graphOffsetX: number;

@@ -294,6 +294,12 @@
   font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
 }
+.horizontal-corner-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .horizontal-date-lead {
   flex: 0 0 auto;
 }
@@ -483,6 +489,20 @@
 .horizontal-node-head.node-selected {
   background: color-mix(in srgb, var(--st-progress-bg) 72%, var(--surface));
   box-shadow: inset 3px 0 0 var(--st-progress-fg);
+}
+/* Beside an open node drawer the column is narrowed (timelineNodeColumnWidth)
+   so the dates keep the room: names are cut short, in full in the head's
+   tooltip, and the selection shows by its tint alone. */
+.horizontal-timeline.node-column-compact .horizontal-node-head {
+  gap: 4px;
+  padding: 6px 6px;
+  overflow: hidden;
+}
+.horizontal-timeline.node-column-compact .horizontal-corner {
+  padding: 0 6px;
+}
+.horizontal-timeline.node-column-compact .horizontal-node-head .lane-selected-tag {
+  display: none;
 }
 .horizontal-date-cell {
   flex: 0 0 auto;

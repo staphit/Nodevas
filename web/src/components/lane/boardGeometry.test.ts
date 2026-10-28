@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { addLocalDays, CARD_H, CARD_W, type Col } from "../canvas/geometry";
 import type { TimelineRowItem } from "../timeline/TimelineGrid";
 import type { GraphNode } from "../../types";
-import { nearestFreeGraphCell, openingScroll, timelineOpeningScroll } from "./boardGeometry";
+import {
+  nearestFreeGraphCell,
+  openingScroll,
+  timelineNodeColumnWidth,
+  timelineOpeningScroll,
+} from "./boardGeometry";
 
 function card(id: string, index: number, row: number): Col {
   return { node: { id, title: id } as GraphNode, index, row, width: CARD_W, height: CARD_H };
@@ -268,5 +273,21 @@ describe("openingScroll", () => {
         expect(card.right).toBeLessThanOrEqual(tight.width);
       }
     });
+  });
+});
+
+describe("timelineNodeColumnWidth", () => {
+  it("is a date cell wide with no drawer over the board", () => {
+    expect(timelineNodeColumnWidth({ cellWidth: 320, viewportWidth: 930, cover: 0, zoom: 1 })).toBe(320);
+  });
+
+  it("is a third of what an open drawer leaves, in board pixels", () => {
+    expect(timelineNodeColumnWidth({ cellWidth: 320, viewportWidth: 930, cover: 570, zoom: 1 })).toBe(120);
+    expect(timelineNodeColumnWidth({ cellWidth: 320, viewportWidth: 930, cover: 570, zoom: 0.75 })).toBe(160);
+  });
+
+  it("never narrows under 112px nor widens past a cell", () => {
+    expect(timelineNodeColumnWidth({ cellWidth: 320, viewportWidth: 930, cover: 900, zoom: 1 })).toBe(112);
+    expect(timelineNodeColumnWidth({ cellWidth: 200, viewportWidth: 1900, cover: 580, zoom: 1 })).toBe(200);
   });
 });

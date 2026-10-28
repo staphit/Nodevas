@@ -89,6 +89,7 @@ import {
   GRAPH_PAN_BUFFER_Y,
   openingScroll,
   RULER_W,
+  timelineNodeColumnWidth,
   timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
@@ -903,6 +904,17 @@ export function LaneView({
 
 
 
+  // The horizontal timeline's sticky node column, narrowed beside a drawer.
+  const timelineNodeColumnW =
+    timelineOrientation === "horizontal"
+      ? timelineNodeColumnWidth({
+          cellWidth: timelineCellWidth,
+          viewportWidth: boardViewport.width,
+          cover: boardDrawerCover,
+          zoom: viewScale,
+        })
+      : timelineCellWidth;
+
   const {
     byNodeDay,
     plansByNodeDay,
@@ -920,6 +932,7 @@ export function LaneView({
     timelineCols,
     timelineCellWidth,
     timelineCellHeight,
+    nodeColumnWidth: timelineNodeColumnW,
     boardViewport,
     zoom: viewScale,
     todayKey,
@@ -1717,6 +1730,7 @@ export function LaneView({
               rulerInset={boardDrawerCover / viewScale}
               viewWindow={viewWindow}
               timelineCellWidth={timelineCellWidth}
+              nodeColumnWidth={timelineNodeColumnW}
               timelineCellHeight={timelineCellHeight}
               setTimelineCellSize={setTimelineCellSize}
               useAutoTimelineCellSize={useAutoTimelineCellSize}

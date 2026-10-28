@@ -56,6 +56,12 @@ export interface TimelineGridProps {
    */
   rulerInset?: number;
   /**
+   * A horizontal timeline's sticky node column, in board pixels: a date cell
+   * wide on its own, narrower beside an open node drawer
+   * (timelineNodeColumnWidth). A right-hand one sticks `rulerInset` in.
+   */
+  nodeColumnWidth?: number;
+  /**
    * What part of the board is in view, when the timeline is large enough to
    * mount only the lanes near it (timelineCulling); null draws every lane.
    */
@@ -123,6 +129,7 @@ export function TimelineGrid({
   rulerInset = 0,
   viewWindow = null,
   timelineCellWidth,
+  nodeColumnWidth = timelineCellWidth,
   timelineCellHeight,
   setTimelineCellSize,
   useAutoTimelineCellSize,
@@ -189,6 +196,9 @@ export function TimelineGrid({
     timelineVDateAxis !== "left" && rulerInset > 0
       ? { width: RULER_W, right: rulerInset }
       : { width: RULER_W };
+  // A right-hand node column sticks beside an open drawer the same way.
+  const nodeColumnRight =
+    timelineNodeAxis === "right" && rulerInset > 0 ? { right: rulerInset } : {};
   const columnSlots = timelineOrientation === "vertical" ? laneSlotsFor(true) : [];
   const rowSlots = timelineOrientation === "horizontal" ? laneSlotsFor(false) : [];
   return (
@@ -398,7 +408,9 @@ export function TimelineGrid({
           <div
             className={`horizontal-timeline${
               timelineDateAxis === "bottom" ? " date-axis-bottom" : ""
-            }${timelineNodeAxis === "right" ? " node-axis-right" : ""}`}
+            }${timelineNodeAxis === "right" ? " node-axis-right" : ""}${
+              nodeColumnWidth < timelineCellWidth ? " node-column-compact" : ""
+            }`}
             style={{
               width: horizontalTimelineW,
               minHeight: horizontalTimelineH,
@@ -413,14 +425,15 @@ export function TimelineGrid({
             <div
               className="horizontal-corner"
               style={{
-                width: timelineCellWidth,
+                width: nodeColumnWidth,
                 height: HORIZONTAL_HEADER_H,
+                ...nodeColumnRight,
                 ...(timelineDateAxis === "bottom"
                   ? { marginTop: -HORIZONTAL_HEADER_H }
                   : { marginBottom: -HORIZONTAL_HEADER_H }),
               }}
             >
-              {t("timeline.corner")}
+              <span className="horizontal-corner-label">{t("timeline.corner")}</span>
             </div>
             <div
               className="horizontal-date-head"
@@ -428,7 +441,7 @@ export function TimelineGrid({
             >
               <div
                 className="horizontal-date-lead"
-                style={{ width: timelineCellWidth }}
+                style={{ width: nodeColumnWidth }}
                 aria-hidden="true"
               />
               {rowItems.map((item, index) => {
@@ -571,8 +584,9 @@ export function TimelineGrid({
                           : ""
                       }`}
                       style={{
-                        width: timelineCellWidth,
+                        width: nodeColumnWidth,
                         height: timelineCellHeight,
+                        ...nodeColumnRight,
                       }}
                       onPointerDown={(event) =>
                         startTimelineOrderDrag(event, column.node.id)
@@ -684,7 +698,7 @@ export function TimelineGrid({
                 style={{
                   left:
                     horizontalNowX -
-                    (timelineNodeAxis === "right" ? timelineCellWidth : 0),
+                    (timelineNodeAxis === "right" ? nodeColumnWidth : 0),
                   top: timelineDateAxis === "bottom" ? 0 : HORIZONTAL_HEADER_H,
                   height:
                     Math.max(timelineCols.length, 1) *
