@@ -47,7 +47,12 @@ describe("board header strip slack", () => {
   const trigger = phoneRules(".board-title-controls > .board-overflow:last-child .board-overflow-trigger");
 
   it("lets the last ⋯ menu shrink a little before the strip scrolls", () => {
-    expect(menu).toMatch(/flex-shrink:\s*1/);
+    // A token weight: the pane name (flex-shrink 1, ~250px) takes the whole
+    // squeeze until its floor. With an equal weight the flex algorithm froze
+    // both at their minimum, and ⋯ sat at 28px whenever the name was cut.
+    const shrink = Number(/flex-shrink:\s*([\d.]+)/.exec(menu)?.[1] ?? NaN);
+    expect(shrink).toBeGreaterThan(0);
+    expect(shrink).toBeLessThanOrEqual(0.01);
     // Still a fingertip-sized target: no narrower than the ? toggle (28px).
     expect(px(menu, "min-width")).toBeGreaterThanOrEqual(28);
     expect(px(menu, "min-width")).toBeLessThanOrEqual(36 - 2);
