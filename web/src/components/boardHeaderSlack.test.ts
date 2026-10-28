@@ -53,6 +53,8 @@ describe("board header strip slack", () => {
     const shrink = Number(/flex-shrink:\s*([\d.]+)/.exec(menu)?.[1] ?? NaN);
     expect(shrink).toBeGreaterThan(0);
     expect(shrink).toBeLessThanOrEqual(0.01);
+    // Its full width whenever it fits, not the narrower floor.
+    expect(px(menu, "flex-basis")).toBe(36);
     // Still a fingertip-sized target: no narrower than the ? toggle (28px).
     expect(px(menu, "min-width")).toBeGreaterThanOrEqual(28);
     expect(px(menu, "min-width")).toBeLessThanOrEqual(36 - 2);

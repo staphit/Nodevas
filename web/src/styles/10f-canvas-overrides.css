@@ -407,9 +407,15 @@
   /* Slack before the strip scrolls. Once the pane name is at its floor the
      strip can come up a pixel or two short (1.45px at 500px and 150% text in
      English) and drew a whole scrollbar for it. The ⋯ menu, always last, gives
-     up to 8px of its width first: no narrower than the ? toggle beside it. */
+     up to 8px of its width first: no narrower than the ? toggle beside it.
+     Its weight is a token so the pane name takes the whole squeeze until its
+     floor; an equal weight froze both at their minimum (⋯ at 28px whenever
+     the name was cut at all). */
   .board-title-controls > .board-overflow:last-child {
-    flex-shrink: 1;
+    /* Its full 36px when it fits: the button's width: 100% has no size of
+       its own to give an auto basis. */
+    flex-basis: 36px;
+    flex-shrink: 0.01;
     min-width: 28px;
   }
   .board-title-controls > .board-overflow:last-child .board-overflow-trigger {
