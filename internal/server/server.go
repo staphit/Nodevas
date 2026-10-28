@@ -269,6 +269,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// database (closed by the caller after this returns) goes away.
 	bgErr := s.waitBackground(ctx)
 	hubErr = errors.Join(hubErr, bgErr)
+	// Queued audit rows are written before the database goes away.
+	if s.auditQueue != nil {
+		hubErr = errors.Join(hubErr, s.auditQueue.Close(ctx))
+	}
 	if s.pm == nil || s.remotes == nil {
 		return hubErr
 	}
@@ -313,6 +317,9 @@ func (s *Server) UseAccess(verifier *auth.AccessVerifier, required bool) {
 // accounts should configure it before building their handler.
 func (s *Server) UseAudit(store *audit.Store) {
 	s.audit = store
+	if store != nil && s.auditQueue == nil {
+		s.auditQueue = audit.NewQueue(store, audit.DefaultQueueSize)
+	}
 }
 
 // UseAgentsDB attaches the workspace database to the agent collaboration hub so

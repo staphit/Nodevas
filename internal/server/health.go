@@ -102,7 +102,7 @@ type connectionCounter interface {
 }
 
 // metrics is GET /api/metrics: database pools, realtime connections,
-// rate-limiter refusals by class, and runs by state.
+// rate-limiter refusals by class, runs by state, and the audit queue.
 func (s *Server) metrics(c *gin.Context) {
 	r := c.Request
 	if !auth.DirectLoopback(r) {
@@ -134,6 +134,9 @@ func (s *Server) metrics(c *gin.Context) {
 
 	if counter, ok := any(s.hub).(connectionCounter); ok && s.hub != nil {
 		out["realtime"] = gin.H{"connections": counter.ConnectionCount()}
+	}
+	if s.auditQueue != nil {
+		out["audit_queue"] = s.auditQueue.Stats()
 	}
 	if s.abuse != nil {
 		out["limiter"] = s.abuse.Stats()

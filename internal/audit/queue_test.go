@@ -78,6 +78,7 @@ func TestQueueCloseDrainsEveryQueuedWrite(t *testing.T) {
 func TestQueueOverflowFallsBackToASynchronousWrite(t *testing.T) {
 	s := newStore(t)
 	q := NewQueue(s, 1)
+	q.overflowWait = 100 * time.Millisecond
 	release := make(chan struct{})
 	writing := make(chan struct{}, 8)
 	q.beforeWrite = func() {
@@ -93,8 +94,8 @@ func TestQueueOverflowFallsBackToASynchronousWrite(t *testing.T) {
 	q.RecordOrLog(context.Background(), Event{At: time.Now(), ActorID: "u1", Action: "second"}) // fills the queue
 	q.RecordOrLog(context.Background(), Event{At: time.Now(), ActorID: "u1", Action: "third"})  // overflows
 
-	// "third" is in the table already, written by the caller, while the
-	// writer is still stuck on "first".
+	// "third" is in the table already, written by the caller once it had
+	// waited its turn long enough, while the writer is still stuck on "first".
 	rows, err := s.db.QueryContext(context.Background(), `SELECT action FROM audit_events`)
 	if err != nil {
 		t.Fatal(err)

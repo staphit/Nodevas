@@ -335,7 +335,13 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 				project = st.Root()
 			}
 		}
-		s.audit.RecordOrLog(r.Context(), audit.Event{
+		// Off the request path: the queue writes the row, in order, and the
+		// caller writes it itself when the queue is full (audit.Queue).
+		record := s.audit.RecordOrLog
+		if s.auditQueue != nil {
+			record = s.auditQueue.RecordOrLog
+		}
+		record(r.Context(), audit.Event{
 			At:        time.Now(),
 			Project:   project,
 			ActorID:   actor.ID,

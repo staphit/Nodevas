@@ -173,6 +173,11 @@ type Health struct {
 type Store struct {
 	db *db.DB
 
+	// queue, when a Queue writes for this store, is waited for by Query
+	// and Health so a read sees the writes made before it.
+	queueMu sync.Mutex
+	queue   *Queue
+
 	healthMu                   sync.RWMutex
 	writesDegraded             bool
 	fallbackEvents             uint64
@@ -189,6 +194,7 @@ func (s *Store) Health() Health {
 	if s == nil || s.db == nil {
 		return Health{Status: HealthUnconfigured, WriteStatus: HealthUnconfigured}
 	}
+	s.flushQueue(context.Background(), queuedReadWait)
 	s.healthMu.RLock()
 	health := s.healthLocked()
 	s.healthMu.RUnlock()
@@ -370,6 +376,12 @@ func (s *Store) recordOrFallBack(ctx context.Context, event Event) {
 		}
 		return
 	}
+	s.recordFailed(ctx, event, err)
+}
+
+// recordFailed is the fallback for a row that could not be written: the
+// whole event at error level in the process log, and degraded health.
+func (s *Store) recordFailed(ctx context.Context, event Event, err error) {
 	failureAt := time.Now().UTC()
 	health := s.markFallback(failureAt, err)
 	detail, _ := encodeDetail(event.Detail)
@@ -397,6 +409,7 @@ func (s *Store) Query(ctx context.Context, filter Filter) ([]Event, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("audit store is not configured")
 	}
+	s.flushQueue(ctx, queuedReadWait)
 	if err := checkFilterBounds(filter); err != nil {
 		return nil, err
 	}
