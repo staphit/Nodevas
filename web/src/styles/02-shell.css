@@ -1305,7 +1305,7 @@ header.topbar {
 }
 .view-error h2 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
 }
 .view-error p {
   margin: 0 0 16px;
@@ -1323,7 +1323,7 @@ header.topbar {
 }
 .view-error details {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .view-error pre {
   white-space: pre-wrap;
@@ -1346,7 +1346,7 @@ header.topbar {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   box-shadow: 0 4px 16px var(--shadow);
 }
 .view-error-compact span {
@@ -1356,6 +1356,6 @@ header.topbar {
   background: none;
   border: none;
   color: var(--text-2);
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
   line-height: 1;
 }
