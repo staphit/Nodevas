@@ -923,6 +923,12 @@ div.tree-empty-row {
   font-size: calc(10.5px * var(--font-scale, 1));
   font-style: italic;
 }
+/* In a node list the row rule above (li: padding 0) outranks .tree-empty and
+   left the line at the list's edge, left of the folder it belongs to. It lines
+   up with node titles: row padding 5, indent mark 8, icon 13, gaps 10. */
+.tree-node-list.node-list li.tree-empty {
+  padding: 7px 8px 7px 36px;
+}
 .project-empty {
   padding-left: 8px;
 }

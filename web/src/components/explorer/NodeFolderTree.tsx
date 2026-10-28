@@ -284,7 +284,11 @@ export function NodeFolderTree({
             {subfolders.map((child) => renderFolder(child, depth + 1))}
             <NodeRows nodes={contents} renderNode={renderNode} activeNodeId={activeNodeId} />
             {contents.length === 0 && subfolders.length === 0 && creatingIn !== path && (
-              <li className="tree-empty">{t("explorer.emptyFolderShort")}</li>
+              // One folder step in from the folder's own row, so the line
+              // reads as this folder's content.
+              <li className="tree-empty" style={{ paddingInlineStart: `${36 + (depth + 1) * 12}px` }}>
+                {t("explorer.emptyFolderShort")}
+              </li>
             )}
           </ul>
         )}
