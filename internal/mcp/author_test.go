@@ -273,7 +273,8 @@ func TestACycleIsReportedAsAProblemToFix(t *testing.T) {
 }
 
 func TestSearchFindsANodeByItsText(t *testing.T) {
-	url, _ := liveServer(t)
+	url, pm := liveServer(t)
+	awaitSearchIndex(t, pm)
 	session := mcpSession(t, url, "")
 
 	var found searchOutput
