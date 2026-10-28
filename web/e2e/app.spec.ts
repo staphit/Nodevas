@@ -203,7 +203,7 @@ test.describe("keyboard and persistence", () => {
 
     // Double click resets to the default width.
     await restored.dblclick();
-    await expect(restored).toHaveAttribute("aria-valuenow", "304");
+    await expect(restored).toHaveAttribute("aria-valuenow", "320");
   });
 
   test("undo names what it would revert", async ({ page }) => {

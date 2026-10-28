@@ -86,7 +86,7 @@ test.describe("theme", () => {
     const handle = page.getByRole("separator", { name: "調整專案總管寬度" });
     await handle.focus();
     await page.keyboard.press("Shift+ArrowRight");
-    await expect(handle).not.toHaveAttribute("aria-valuenow", "304");
+    await expect(handle).not.toHaveAttribute("aria-valuenow", "320");
 
     await page.getByRole("button", { name: "設定", exact: true }).click();
     await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
@@ -105,7 +105,7 @@ test.describe("theme", () => {
     await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(page.getByRole("separator", { name: "Resize project explorer" })).toHaveAttribute(
       "aria-valuenow",
-      "304",
+      "320",
     );
   });
 });
