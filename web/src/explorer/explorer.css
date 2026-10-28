@@ -8,9 +8,12 @@
   min-height: 0;
   background: var(--surface);
 }
+/* The tabs label their icon, and the label follows the text size: the tabs,
+   and the rail with them, widen with it (never below their 100% width), so
+   "Nodes" at 150% stays inside its tab. explorerWidth.ts counts the same. */
 .ex-rail {
   display: flex;
-  flex: 0 0 52px;
+  flex: 0 0 calc(12px + 40px * max(1, var(--font-scale, 1)));
   flex-direction: column;
   gap: 4px;
   padding: 8px 6px;
@@ -19,7 +22,7 @@
 }
 .ex-rail button {
   display: flex;
-  width: 40px;
+  width: calc(40px * max(1, var(--font-scale, 1)));
   height: 44px;
   flex-direction: column;
   align-items: center;
