@@ -937,6 +937,98 @@ describe("LaneView", () => {
   // The board unmounts whenever the app shows Station or Settings instead, so
   // coming back must not land on the opening scroll: the pan and the zoom are
   // where the user left them, like the open drawer is.
+  // The timeline's scroll is a place in one project's calendar. A project
+  // switch kept the last project's pixels — or opened on a calendar built from
+  // the last project's records, which arrive after the graph — so today was
+  // off-screen in the next one.
+  describe("timeline scroll per project", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    });
+
+    const dayOffset = (offset: number) => {
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() + offset);
+      return date;
+    };
+    const keyOf = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+    /** Today's row start, as the board scrolls to it. */
+    function todayScroll(container: HTMLElement) {
+      const inner = container.querySelector<HTMLElement>(".board-inner")!;
+      const step = parseFloat(inner.style.getPropertyValue("--step"));
+      const zoom = Number(inner.style.zoom || "1");
+      const rows = [...container.querySelectorAll<HTMLElement>(".board-rows > .board-row")];
+      const index = rows.findIndex((row) => row.dataset.date === keyOf(dayOffset(0)));
+      expect(index).toBeGreaterThan(0);
+      return index * step * zoom;
+    }
+
+    // With no lanes a row was only as tall as its date label, about a fifth
+    // of the day the opening scrolls by, so it opened far past today.
+    it("draws an empty project's days as tall as a day", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      useApp.setState({ graph: graph([]) });
+      const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+      const step = container
+        .querySelector<HTMLElement>(".board-inner")!
+        .style.getPropertyValue("--step");
+      const rows = [...container.querySelectorAll<HTMLElement>(".board-rows > .board-row")];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(row.style.minHeight, row.dataset.date).toBe(step);
+    });
+
+    it("opens the next project on today, and comes back to where each was left", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      const project = useApp.getState().activeProject;
+      // The first project has a record forty days back, so its calendar starts
+      // there; the second has nothing and starts a fortnight back.
+      const firstRun: RunState = {
+        nodes: {},
+        history: [
+          { t: dayOffset(-40).toISOString(), event: "status", node: "a", to: "running" },
+        ],
+      };
+      const firstGraph = graph([{ id: "a", title: "設計稿" }]);
+      act(() =>
+        useApp.setState({
+          activeProject: "timeline-first",
+          graphProject: "timeline-first",
+          graph: firstGraph,
+          runState: firstRun,
+        }),
+      );
+      try {
+        const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+        const board = container.querySelector<HTMLElement>(".board")!;
+        board.scrollTop = 900;
+        fireEvent.scroll(board);
+
+        // The switch: the graph arrives before the run state does.
+        act(() => useApp.setState({ activeProject: "timeline-second" }));
+        act(() => useApp.setState({ graph: graph([]), graphProject: "timeline-second" }));
+        act(() => useApp.setState({ runState: EMPTY_RUN }));
+        expect(board.scrollTop).toBe(todayScroll(container));
+
+        // Back: the first project's calendar where it was left.
+        act(() => useApp.setState({ activeProject: "timeline-first" }));
+        act(() => useApp.setState({ graph: firstGraph, graphProject: "timeline-first" }));
+        act(() => useApp.setState({ runState: firstRun }));
+        expect(board.scrollTop).toBe(900);
+      } finally {
+        act(() => useApp.setState({ activeProject: project, runState: EMPTY_RUN }));
+      }
+    });
+  });
+
   // Opening a node lays its drawer over the board's right side. A card that
   // ended up under it was opened and then hidden by its own document; the
   // card is brought into the part of the board still showing, as Ctrl+K does.
