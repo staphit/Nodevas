@@ -101,14 +101,15 @@ export function boardMetrics({
 const OPENING_PADDING = 72;
 
 /**
- * Where a board this session has not shown opens. With no cards it is the
- * buffer origin, where logical (0,0) is. With cards it frames them: centred
+ * Where a board this session has not shown opens. With no content it is the
+ * buffer origin, where logical (0,0) is. With content — cards, groups and
+ * annotations — it frames it: centred
  * along an axis they fit in, else starting, with a little room, at the card
  * nearest their top-left corner, which is then always in view. Saved
  * positions need not start at the origin, and opening on the origin showed
  * nothing but margin when they did not.
  *
- * `cards` are in board pixels before the zoom.
+ * `cards` are the content's rectangles, in board pixels before the zoom.
  */
 export function openingScroll(
   cards: readonly Rect[],
@@ -133,10 +134,13 @@ export function openingScroll(
       anchor = card;
     }
   }
+  // Content that fits is centred even when that leaves less than the usual
+  // room around it: a four-quadrant template 20px narrower than the view
+  // otherwise opened from its left edge with its right-hand quadrants cut.
   const axis = (start: number, end: number, from: number, size: number) => {
     const padding = Math.min(OPENING_PADDING, size / 8);
     const scroll =
-      (end - start) * zoom + padding * 2 <= size
+      (end - start) * zoom <= size
         ? ((start + end) / 2) * zoom - size / 2
         : from * zoom - padding;
     return Math.max(0, scroll);

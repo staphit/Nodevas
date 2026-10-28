@@ -38,7 +38,9 @@ export function useBoardViewport({
   /** The user's own zoom, which is what a later mount starts from. */
   userZoom?: number;
   /**
-   * The cards, in board pixels before the zoom. A ref to a getter because the
+   * What the opening frames — the cards, the groups and annotations, and the
+   * empty-state hint over a board that has no cards — in board pixels before
+   * the zoom. A ref to a getter because the
    * board's origin depends on the viewport measured here, and because only
    * the opening needs them: it calls it after the render that set it.
    */
@@ -73,9 +75,9 @@ export function useBoardViewport({
   }, [collapsed]);
 
   // The graph lives inside a larger virtual surface. A project opens framing
-  // its cards (openingScroll): centred when they fit, so a fresh project's
+  // its content (openingScroll): centred when they fit, so a fresh project's
   // single node sits in the middle with room on every side, else from their
-  // top-left edge; a board without cards opens at the buffer origin, where
+  // top-left edge; a board without content opens at the buffer origin, where
   // logical (0,0) is. A project this session has already shown comes back
   // where it was left.
   useLayoutEffect(() => {

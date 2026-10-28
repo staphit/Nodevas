@@ -79,6 +79,7 @@ import {
   graphObstacleRects,
   GRAPH_PAN_BUFFER_X,
   GRAPH_PAN_BUFFER_Y,
+  openingScroll,
   timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
@@ -133,6 +134,14 @@ export type GraphSelection =
   | { kind: "edges"; edges: { from: string; to: string }[] }
   | { kind: "vertex"; wireKey: string; index: number }
   | null;
+
+/**
+ * The empty-state hint over a board that has groups but no cards: its card
+ * plus the room left between it and the groups' tops, and the margin
+ * .ui-empty-state keeps above it, in board pixels.
+ */
+const EMPTY_HINT_ROOM = 96;
+const EMPTY_HINT_MARGIN = 48;
 
 /** Props both panes take. `variant` is supplied by GraphPane / TimelinePane. */
 export interface PaneProps {
@@ -856,8 +865,36 @@ export function LaneView({
       dayCount: days.length,
     });
 
-  openingCardsRef.current = () =>
-    isGraph ? cols.map((column) => cardRect(column, centerX, rowTop)) : [];
+  // Groups and annotations are content too: a template that is nothing but
+  // four quadrant groups opened on a corner of the first one. Over a board
+  // with no cards the empty-state hint is part of what the opening frames,
+  // set just above the decorations so it does not cover their titles.
+  const decorationRects: Rect[] = isGraph
+    ? [...(graph?.ui?.groups ?? []), ...(graph?.ui?.annotations ?? [])].map((item) => ({
+        left: item.x + graphOffsetX,
+        top: item.y + graphOffsetY,
+        right: item.x + graphOffsetX + item.width,
+        bottom: item.y + graphOffsetY + item.height,
+      }))
+    : [];
+  const emptyHintRect: Rect | null =
+    cols.length === 0 && decorationRects.length > 0
+      ? {
+          left: Math.min(...decorationRects.map((rect) => rect.left)),
+          right: Math.max(...decorationRects.map((rect) => rect.right)),
+          top: Math.min(...decorationRects.map((rect) => rect.top)) - EMPTY_HINT_ROOM,
+          bottom: Math.min(...decorationRects.map((rect) => rect.top)),
+        }
+      : null;
+  const openingContent = (): Rect[] =>
+    isGraph
+      ? [
+          ...cols.map((column) => cardRect(column, centerX, rowTop)),
+          ...decorationRects,
+          ...(emptyHintRect ? [emptyHintRect] : []),
+        ]
+      : [];
+  openingCardsRef.current = openingContent;
   timelineOpeningRef.current = () => {
     const contentDays = new Set<string>();
     for (const byDay of [...byNodeDay.values(), ...plansByNodeDay.values()]) {
@@ -1515,8 +1552,13 @@ export function LaneView({
                 isGraph
                   ? {
                       position: "absolute",
-                      left: GRAPH_PAN_BUFFER_X,
-                      top: GRAPH_PAN_BUFFER_Y,
+                      // Over decorations: across the opening view, just above them.
+                      left: emptyHintRect
+                        ? openingScroll(openingContent(), viewScale, boardViewport).left / viewScale
+                        : GRAPH_PAN_BUFFER_X,
+                      top: emptyHintRect
+                        ? emptyHintRect.top - EMPTY_HINT_MARGIN
+                        : GRAPH_PAN_BUFFER_Y,
                       width:
                         boardViewport.width > 0
                           ? boardViewport.width / viewScale
