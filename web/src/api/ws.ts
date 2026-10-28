@@ -1,5 +1,5 @@
 import { markServerReachable, markServerUnreachable } from "./connectivity";
-import { isGatewayFailure, notifyUnauthorized } from "./http";
+import { notifyUnauthorized } from "./http";
 import type { Actor } from "./auth";
 import type { GraphOp } from "./graph";
 
@@ -220,8 +220,9 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
     let up = false;
     try {
       const res = await fetch(HEALTH_PATH, { cache: "no-store", signal: controller.signal });
-      // Any answer from the hub itself; a proxy's 502 for it is not one.
-      up = !(await isGatewayFailure(res));
+      // Healthy is a 2xx. Whatever stands in front of a down hub answers
+      // something else — a reverse proxy's 502, a dev server's 500.
+      up = res.ok;
     } catch {
       up = false;
     } finally {
