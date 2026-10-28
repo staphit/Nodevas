@@ -247,6 +247,16 @@ func remoteAddress(r *http.Request) (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
+// PeerIsTrustedProxy reports r's immediate peer and whether it is a proxy
+// trusted to set forwarding headers. An unparseable peer is "" and untrusted.
+func PeerIsTrustedProxy(r *http.Request) (peer string, trusted bool) {
+	address, ok := remoteAddress(r)
+	if !ok {
+		return "", false
+	}
+	return address.String(), isTrustedProxy(address)
+}
+
 func isTrustedProxy(address netip.Addr) bool {
 	trustedProxies.RLock()
 	defer trustedProxies.RUnlock()

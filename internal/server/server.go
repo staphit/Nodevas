@@ -84,6 +84,10 @@ type Server struct {
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
 	abuse          *abuseGuard
+	// forwarding warns about forwarding headers from untrusted peers
+	// (forwarding.go); made on first use unless a test set it first.
+	forwarding     *forwardingNotes
+	forwardingOnce sync.Once
 	stop           chan struct{}
 	stopOnce       sync.Once
 	// allowedHosts are the Host header names this server answers on, lowercased
