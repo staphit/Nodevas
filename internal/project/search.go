@@ -38,33 +38,12 @@ type SearchResult struct {
 	Match string  `json:"match,omitempty"`
 }
 
+// searchSnippet cuts the part of a search document (the metadata line, then
+// the file) around query. It is the ranked search's excerpt: whole
+// characters, frontmatter left out. Cutting bytes here put half a Chinese
+// character at the front of every snippet the palette showed.
 func searchSnippet(content, query string) string {
-	compact := strings.Join(strings.Fields(content), " ")
-	lower := strings.ToLower(compact)
-	index := strings.Index(lower, query)
-	if index < 0 {
-		if len(compact) > 140 {
-			return compact[:140] + "…"
-		}
-		return compact
-	}
-	start := index - 50
-	if start < 0 {
-		start = 0
-	}
-	end := index + len(query) + 90
-	if end > len(compact) {
-		end = len(compact)
-	}
-	prefix := ""
-	suffix := ""
-	if start > 0 {
-		prefix = "…"
-	}
-	if end < len(compact) {
-		suffix = "…"
-	}
-	return prefix + compact[start:end] + suffix
+	return searchindex.Excerpt(content, []string{query}, searchindex.ExcerptWidth)
 }
 
 // searchPageContentLimit bounds what the direct scan reads from one file. The
