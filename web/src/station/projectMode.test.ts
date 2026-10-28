@@ -34,4 +34,21 @@ describe("setProjectMode", () => {
     expect(useApp.getState().preferences.projectMode).toBe("info");
     expect(useApp.getState().preferences.agentWorkstation).toBe(true);
   });
+
+  it("closes the node panel the board had open on the way into Station, keeping its tab", () => {
+    // The panel is an overlay in Station: carried over from the board it
+    // covered the emergency stop and the side column (UX sweep round 3).
+    useApp.getState().updateUIPreference("projectMode", "info");
+    useApp.setState({ activeTab: "n1" });
+    setProjectMode("station");
+    expect(useApp.getState().activeTab).toBeNull();
+  });
+
+  it("keeps a node panel opened inside Station while Station stays shown", () => {
+    useApp.getState().updateUIPreference("projectMode", "station");
+    useApp.setState({ activeTab: "n1" });
+    setProjectMode("station");
+    expect(useApp.getState().activeTab).toBe("n1");
+    useApp.setState({ activeTab: null });
+  });
 });
