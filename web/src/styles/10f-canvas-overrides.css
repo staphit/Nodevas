@@ -64,8 +64,10 @@
 .board-future .board-cell {
   opacity: 0.75;
 }
+/* The label is sticky and the lanes scroll under it, so it is the text that
+   fades, not the label: an `opacity` here let a passing card show through. */
 .board-date-r.future {
-  opacity: 0.55;
+  color: color-mix(in srgb, var(--text-2) 55%, var(--surface-2));
   font-style: italic;
 }
 
