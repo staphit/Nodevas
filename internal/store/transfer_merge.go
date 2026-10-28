@@ -15,7 +15,7 @@ import (
 // mergeUsers makes the selection's assignees exist in this project and returns
 // the source-id -> target-id mapping. An id that is unmapped means the
 // assignee could not be carried and must be cleared.
-func mergeUsers(g *engine.Graph, users []engine.User, warn func(string, ...any)) map[string]string {
+func mergeUsers(g *engine.Graph, users []engine.User, warn func(english, chinese string, args ...any)) map[string]string {
 	mapping := make(map[string]string, len(users))
 	byID := make(map[string]engine.User, len(g.Users))
 	byName := make(map[string]engine.User, len(g.Users))
@@ -36,7 +36,8 @@ func mergeUsers(g *engine.Graph, users []engine.User, warn func(string, ...any))
 			continue
 		}
 		if _, taken := byID[user.ID]; taken {
-			warn("成員「%s」的識別碼在目標專案已被他人使用，相關指派已清除", user.Name)
+			warn("Member “%s” has an id someone else uses in the target project; their assignments were cleared",
+				"成員「%s」的識別碼在目標專案已被他人使用，相關指派已清除", user.Name)
 			continue
 		}
 		g.Users = append(g.Users, user)
@@ -52,7 +53,7 @@ func mergeUsers(g *engine.Graph, users []engine.User, warn func(string, ...any))
 func mergePlanStatuses(
 	g *engine.Graph,
 	statuses []engine.PlanStatusDefinition,
-	warn func(string, ...any),
+	warn func(english, chinese string, args ...any),
 ) map[engine.Status]engine.Status {
 	mapping := map[engine.Status]engine.Status{}
 	byID := map[string]engine.PlanStatusDefinition{}
@@ -65,7 +66,8 @@ func mergePlanStatuses(
 		label := strings.ToLower(strings.TrimSpace(definition.Label))
 		if existing, ok := byID[definition.ID]; ok {
 			if !strings.EqualFold(existing.Label, definition.Label) {
-				warn("預計狀態「%s」在目標專案已存在但名稱不同（%s），沿用目標專案的定義",
+				warn("Expected status “%s” already exists in the target project as “%s”; the target's definition is kept",
+					"預計狀態「%s」在目標專案已存在但名稱不同（%s），沿用目標專案的定義",
 					definition.Label, existing.Label)
 			}
 			continue
@@ -104,7 +106,7 @@ func importLogicGates(
 	gates []engine.LogicGate,
 	selection map[string]bool,
 	rename func(string) string,
-	warn func(string, ...any),
+	warn func(english, chinese string, args ...any),
 ) {
 	if len(gates) == 0 {
 		return
@@ -136,11 +138,13 @@ func importLogicGates(
 				kept = append(kept, renamed)
 			}
 			if len(kept) == 0 {
-				warn("邏輯閘「%s」的輸出節點在目標專案已由其他邏輯閘驅動，未帶入", gate.ID)
+				warn("Logic gate “%s” was left behind: another gate already drives its outputs in the target project",
+					"邏輯閘「%s」的輸出節點在目標專案已由其他邏輯閘驅動，未帶入", gate.ID)
 				continue
 			}
 			if len(kept) < len(original) {
-				warn("邏輯閘「%s」的部分輸出節點已由其他邏輯閘驅動，未帶入", gate.ID)
+				warn("Logic gate “%s” came without some outputs: another gate already drives them in the target project",
+					"邏輯閘「%s」的部分輸出節點已由其他邏輯閘驅動，未帶入", gate.ID)
 			}
 			if len(gate.Outputs) > 0 {
 				copied.Output = ""
@@ -186,7 +190,7 @@ func mergeNodeTypes(
 	g *engine.Graph,
 	definitions []engine.NodeTypeDef,
 	canAdd bool,
-	warn func(string, ...any),
+	warn func(english, chinese string, args ...any),
 ) map[string]string {
 	mapping := map[string]string{}
 	byID := map[string]engine.NodeTypeDef{}
@@ -212,17 +216,20 @@ func mergeNodeTypes(
 				mapping[definition.ID] = existing.ID
 			}
 			if !reflect.DeepEqual(existing, renamedAs(definition, existing)) {
-				warn("節點類型「%s」在目標專案已存在但設定不同，沿用目標專案的設定", definition.Label)
+				warn("Node type “%s” already exists in the target project with other settings; the target's settings are kept",
+					"節點類型「%s」在目標專案已存在但設定不同，沿用目標專案的設定", definition.Label)
 			}
 			continue
 		}
 		if !canAdd {
-			warn("節點類型「%s」不在目標專案，agent 不能新增類型，相關節點改為任務", definition.Label)
+			warn("Node type “%s” is not in the target project and an agent cannot add types; its nodes became tasks",
+				"節點類型「%s」不在目標專案，agent 不能新增類型，相關節點改為任務", definition.Label)
 			mapping[definition.ID] = engine.NodeKindTask
 			continue
 		}
 		if customs >= engine.MaxCustomNodeTypes {
-			warn("節點類型「%s」超過目標專案的類型上限，相關節點改為任務", definition.Label)
+			warn("Node type “%s” would pass the target project's type limit; its nodes became tasks",
+				"節點類型「%s」超過目標專案的類型上限，相關節點改為任務", definition.Label)
 			mapping[definition.ID] = engine.NodeKindTask
 			continue
 		}

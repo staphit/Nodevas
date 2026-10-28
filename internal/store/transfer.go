@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // maxTransferNodes bounds one transfer. The whole selection is held in memory
@@ -80,7 +81,9 @@ type nodeTransferResult struct {
 	Order []string `json:"order"`
 	// Warnings name what could not come along. They are not failures: the
 	// transfer happened, but something was dropped and the user should know.
-	Warnings []string `json:"warnings,omitempty"`
+	// Each is worded in both languages; the handler renders them for its
+	// reader.
+	Warnings []*locale.Message `json:"warnings,omitempty"`
 }
 
 // uniqueNodeIDs validates a selection and drops repeats, keeping order.

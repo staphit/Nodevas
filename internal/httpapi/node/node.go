@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"os"
 	"strings"
@@ -338,6 +339,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		payload.SetSourceProject(sourceName)
 	}
 	result, err := target.ImportNodes(auth.ActorFrom(c.Request), payload)
+	language := httpx.Language(c.Request)
 	if err != nil {
 		var conflict *store.ErrConflict
 		if errors.As(err, &conflict) {
@@ -364,7 +366,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 					"節點已複製到目標專案，但來源專案的刪除失敗：%v。請手動刪除來源節點。", err),
 				"ids":      result.IDs,
 				"order":    result.Order,
-				"warnings": result.Warnings,
+				"warnings": locale.RenderAll(result.Warnings, language),
 				"copied":   true,
 			})
 			return
@@ -378,7 +380,7 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		"mode":           mode,
 		"ids":            result.IDs,
 		"order":          result.Order,
-		"warnings":       result.Warnings,
+		"warnings":       locale.RenderAll(result.Warnings, language),
 		"trashFiles":     trashFiles,
 		"cleanupPending": cleanupPending,
 	})

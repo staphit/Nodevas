@@ -10,6 +10,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // ImportNodes recreates a payload in this project under fresh node ids.
@@ -33,8 +34,8 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	}
 
 	result := &nodeTransferResult{IDs: make(map[string]string, len(payload.nodes))}
-	warn := func(format string, args ...any) {
-		result.Warnings = append(result.Warnings, fmt.Sprintf(format, args...))
+	warn := func(english, chinese string, args ...any) {
+		result.Warnings = append(result.Warnings, locale.Say(english, chinese, args...))
 	}
 
 	// Ids first: everything else is expressed in terms of the mapping.
@@ -82,7 +83,8 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		}
 		requires, ok := rewriteRequires(source.Requires, payload.selection, rename)
 		if !ok {
-			warn("節點「%s」的前置條件指向未一併帶走的節點，已清除", transferNodeLabel(source))
+			warn("“%s” required nodes that did not come along; its requirement was cleared",
+				"節點「%s」的前置條件指向未一併帶走的節點，已清除", transferNodeLabel(source))
 		}
 		node.Requires = requires
 		node.Refs = rewriteRefs(source.Refs, payload.selection, rename)
@@ -223,7 +225,8 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	// an audit trail, not structure: failing the transfer over it would
 	// discard work that is already correctly on disk.
 	if err := s.appendTransferJournal(payload.journal, result.IDs); err != nil {
-		warn("節點已複製，但生命週期紀錄未能一併寫入：%v", err)
+		warn("The nodes were copied, but their lifecycle history could not be written: %v",
+			"節點已複製，但生命週期紀錄未能一併寫入：%v", err)
 	}
 	return result, nil
 }
