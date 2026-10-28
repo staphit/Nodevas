@@ -1,5 +1,5 @@
 /**
- * Onboarding tour chapters [zh-TW].
+ * Onboarding tour chapters. Titles and bodies are i18n keys (tour.step.*).
  *
  * The tour is no longer one long linear walk: each chapter is a short 2-4
  * step spotlight sequence that plays the first time the user actually enters
@@ -12,8 +12,8 @@ export interface TourStep {
   id: string;
   /** CSS selector of the element to spotlight. Omit for a centered card. */
   target?: string;
-  title: string;
-  body: string;
+  titleKey: string;
+  bodyKey: string;
   placement?: "top" | "bottom" | "left" | "right" | "center";
 }
 
@@ -37,22 +37,22 @@ export const TOUR_CHAPTERS: TourChapter[] = [
       {
         id: "shell-explorer",
         target: "#project-explorer",
-        title: "專案總管",
-        body: "在這裡切換工作區、建立專案，也能匯入或匯出資料。",
+        titleKey: "tour.step.shell-explorer.title",
+        bodyKey: "tour.step.shell-explorer.body",
         placement: "right",
       },
       {
         id: "shell-command",
         target: ".command-trigger",
-        title: "指令面板",
-        body: "按 Ctrl/⌘ K 開啟，所有操作都搜得到。",
+        titleKey: "tour.step.shell-command.title",
+        bodyKey: "tour.step.shell-command.body",
         placement: "bottom",
       },
       {
         id: "shell-replay",
         target: '[data-tour="tour-replay"]',
-        title: "隨時重看",
-        body: "右上角的「設定」一按就開，在「一般」裡隨時可以重播導覽或查看說明與快捷鍵；旁邊的小圖示切換深淺色主題。接下來點進各區塊，會有對應的簡短教學。",
+        titleKey: "tour.step.shell-replay.title",
+        bodyKey: "tour.step.shell-replay.body",
         placement: "bottom",
       },
     ],
@@ -64,29 +64,29 @@ export const TOUR_CHAPTERS: TourChapter[] = [
       {
         id: "graph-create",
         target: ".board-primary-action",
-        title: "建立節點",
-        body: "點這顆「新增節點」，或在畫布空白處按右鍵。",
+        titleKey: "tour.step.graph-create.title",
+        bodyKey: "tour.step.graph-create.body",
         placement: "bottom",
       },
       {
         id: "graph-card",
         target: ".lane-wrap.graph",
-        title: "節點卡片",
-        body: "點一下開啟編輯，按住拖曳移動位置；選取後按 Enter 也能開啟。",
+        titleKey: "tour.step.graph-card.title",
+        bodyKey: "tour.step.graph-card.body",
         placement: "bottom",
       },
       {
         id: "graph-link",
         target: ".lane-wrap.graph",
-        title: "建立依賴",
-        body: "按住 Alt 從一張卡片拖到另一張，放開即連線；卡片右鍵選單也能加入前置節點。",
+        titleKey: "tour.step.graph-link.title",
+        bodyKey: "tour.step.graph-link.body",
         placement: "bottom",
       },
       {
         id: "graph-batch",
         target: ".lane-wrap.graph",
-        title: "批次操作",
-        body: "Ctrl/⌘＋拖曳可框選多個節點，Del 刪除、Ctrl/⌘ C/X/V 複製剪貼。空白處按右鍵，還能加入 AND/OR 邏輯閘。",
+        titleKey: "tour.step.graph-batch.title",
+        bodyKey: "tour.step.graph-batch.body",
         placement: "bottom",
       },
     ],
@@ -100,22 +100,22 @@ export const TOUR_CHAPTERS: TourChapter[] = [
       {
         id: "timeline-cells",
         target: ".lane-wrap.timeline",
-        title: "時間軸",
-        body: "每一列是一個日期。在儲存格上按右鍵，設定開始、死線或自訂里程碑。",
+        titleKey: "tour.step.timeline-cells.title",
+        bodyKey: "tour.step.timeline-cells.body",
         placement: "top",
       },
       {
         id: "timeline-drag",
         target: ".lane-wrap.timeline",
-        title: "直接改期",
-        body: "預期與實際的卡片都能直接拖曳到別的日期。",
+        titleKey: "tour.step.timeline-drag.title",
+        bodyKey: "tour.step.timeline-drag.body",
         placement: "top",
       },
       {
         id: "timeline-orientation",
         target: ".timeline-orientation",
-        title: "檢視切換",
-        body: "這裡切換直式或橫式；格子大小也能在工具列調整。",
+        titleKey: "tour.step.timeline-orientation.title",
+        bodyKey: "tour.step.timeline-orientation.body",
         placement: "bottom",
       },
     ],
@@ -127,22 +127,22 @@ export const TOUR_CHAPTERS: TourChapter[] = [
       {
         id: "drawer-panel",
         target: ".drawer",
-        title: "節點編輯面板",
-        body: "上方是文件分頁，可以釘選，也能拖曳調整面板寬度。",
+        titleKey: "tour.step.drawer-panel.title",
+        bodyKey: "tour.step.drawer-panel.body",
         placement: "left",
       },
       {
         id: "drawer-views",
         target: ".node-view-tabs",
-        title: "四種檢視",
-        body: "內容(Markdown 編輯)、關係圖、時間軸、外觀(卡片形狀與顏色)。",
+        titleKey: "tour.step.drawer-views.title",
+        bodyKey: "tour.step.drawer-views.body",
         placement: "left",
       },
       {
         id: "drawer-save",
         target: ".drawer",
-        title: "狀態與儲存",
-        body: "狀態與筆記在上方的生命週期區塊調整，Ctrl/⌘ S 儲存全部變更。",
+        titleKey: "tour.step.drawer-save.title",
+        bodyKey: "tour.step.drawer-save.body",
         placement: "left",
       },
     ],
@@ -154,15 +154,15 @@ export const TOUR_CHAPTERS: TourChapter[] = [
       {
         id: "explorer-tree",
         target: "#project-explorer",
-        title: "專案樹",
-        body: "點專案即可切換；「新專案」與子專案都從上方的按鈕建立。",
+        titleKey: "tour.step.explorer-tree.title",
+        bodyKey: "tour.step.explorer-tree.body",
         placement: "right",
       },
       {
         id: "explorer-transfer",
         target: "#project-explorer",
-        title: "匯入與匯出",
-        body: "專案封裝、Markdown 都能匯入；儲存、另存新檔與匯出也都在這裡。",
+        titleKey: "tour.step.explorer-transfer.title",
+        bodyKey: "tour.step.explorer-transfer.body",
         placement: "right",
       },
     ],

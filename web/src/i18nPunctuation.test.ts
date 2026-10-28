@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { TOUR_CHAPTERS } from "./components/tour/chapters";
-
 // Traditional Chinese text takes full-width punctuation (，；？！：) between
 // CJK words. Half-width ,;?! next to a CJK character reads as a typo; code,
 // placeholders like {n}, URLs and ASCII-only terms keep theirs, and so does a
@@ -49,24 +47,6 @@ describe("zh-TW punctuation", () => {
 
   it("uses full-width ，；？！ between CJK text in i18n.ts", () => {
     expect(offenders(zhValues())).toEqual([]);
-  });
-
-  it("uses full-width punctuation in the onboarding tour", () => {
-    const steps = TOUR_CHAPTERS.flatMap((chapter) =>
-      chapter.steps.flatMap((step): Array<[string, string]> => [
-        [`${step.id}.title`, step.title],
-        [`${step.id}.body`, step.body],
-      ]),
-    );
-    expect(offenders(steps)).toEqual([]);
-  });
-
-  it("uses full-width punctuation in the tour's welcome card", () => {
-    const lines = source("components/tour/OnboardingTour.tsx")
-      .split("\n")
-      .map((line, i): [string, string] => [`OnboardingTour.tsx:${i + 1}`, line])
-      .filter(([, line]) => !/^\s*(\/\/|\/?\*|\{\/\*)/.test(line));
-    expect(offenders(lines)).toEqual([]);
   });
 
   it("leaves ASCII punctuation outside CJK alone", () => {

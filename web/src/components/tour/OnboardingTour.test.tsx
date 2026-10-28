@@ -50,11 +50,12 @@ function addGraphLane(): HTMLElement {
 
 beforeEach(() => {
   updateUIPreference.mockReset();
-  useApp.setState({
+  useApp.setState((state) => ({
+    preferences: { ...state.preferences, language: "zh-TW" },
     activeTab: null,
     updateUIPreference:
       updateUIPreference as unknown as AppState["updateUIPreference"],
-  });
+  }));
 });
 
 afterEach(() => {

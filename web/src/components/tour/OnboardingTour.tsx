@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useI18n } from "../../i18n";
 import { useApp, usePreference } from "../../store";
 import { TOUR_CHAPTERS, type TourChapter, type TourStep } from "./chapters";
 import { useStartScreenVisible } from "../StartScreen";
@@ -84,6 +85,7 @@ function boxesEqual(a: Box | null, b: Box | null): boolean {
 }
 
 export function OnboardingTour() {
+  const { t } = useI18n();
   const tourPrompt = usePreference("tourPrompt");
   const chaptersDoneRaw = usePreference("tourChaptersDone");
   const updateUIPreference = useApp((s) => s.updateUIPreference);
@@ -366,7 +368,7 @@ export function OnboardingTour() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [chapter, finishChapter, next, back]);
 
-  // Welcome dialog keyboard: Esc counts as「先不用」.
+  // Welcome dialog keyboard: Esc counts as "Not now".
   useEffect(() => {
     if (!welcomeOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -449,20 +451,18 @@ export function OnboardingTour() {
           className="tour-welcome"
           role="dialog"
           aria-modal="true"
-          aria-label="歡迎使用 Nodevas"
+          aria-label={t("tour.welcome.title")}
           tabIndex={-1}
         >
-          <strong className="tour-title">歡迎使用 Nodevas</strong>
-          <p className="tour-body">
-            要花 30 秒認識一下介面嗎？之後點到各區塊時，會在第一次使用時給你簡短提示。
-          </p>
+          <strong className="tour-title">{t("tour.welcome.title")}</strong>
+          <p className="tour-body">{t("tour.welcome.body")}</p>
           <div className="tour-actions">
             <button type="button" className="tour-btn tour-btn--ghost" onClick={declineTour}>
-              先不用
+              {t("tour.welcome.decline")}
             </button>
             <span className="tour-actions-spacer" />
             <button type="button" className="tour-btn tour-btn--primary" onClick={acceptTour}>
-              開始導覽
+              {t("tour.welcome.accept")}
             </button>
           </div>
         </div>
@@ -500,11 +500,11 @@ export function OnboardingTour() {
         style={{ top: popoverPos.top, left: popoverPos.left }}
         role="dialog"
         aria-modal="true"
-        aria-label={step.title}
+        aria-label={t(step.titleKey)}
         tabIndex={-1}
       >
-        <strong className="tour-title">{step.title}</strong>
-        <p className="tour-body">{step.body}</p>
+        <strong className="tour-title">{t(step.titleKey)}</strong>
+        <p className="tour-body">{t(step.bodyKey)}</p>
         <div className="tour-dots" aria-hidden="true">
           {chapter.steps.map((s, index) => (
             <span
@@ -515,26 +515,26 @@ export function OnboardingTour() {
         </div>
         <div className="tour-actions">
           <button type="button" className="tour-btn tour-btn--ghost" onClick={finishChapter}>
-            略過
+            {t("tour.skip")}
           </button>
-          {/* 略過 only ends this chapter; someone who wants none of it should
+          {/* Skip only ends this chapter; someone who wants none of it should
             * not have to dismiss four more. */}
           <button
             type="button"
             className="tour-btn tour-btn--ghost"
             onClick={skipEverything}
-            title="不再顯示任何導覽提示"
+            title={t("tour.skipAllTitle")}
           >
-            全部略過
+            {t("tour.skipAll")}
           </button>
           <span className="tour-actions-spacer" />
           {hasPrev && (
             <button type="button" className="tour-btn" onClick={back}>
-              上一步
+              {t("tour.back")}
             </button>
           )}
           <button type="button" className="tour-btn tour-btn--primary" onClick={next}>
-            {isLast ? "完成" : "下一步"}
+            {isLast ? t("tour.done") : t("tour.next")}
           </button>
         </div>
       </div>
