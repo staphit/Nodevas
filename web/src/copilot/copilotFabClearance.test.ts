@@ -59,4 +59,27 @@ describe("voice copilot button clearance", () => {
       /padding-bottom:\s*calc\(48px/,
     );
   });
+
+  // The button floats over the stage's bottom-right corner, which is where
+  // the graph's minimap sits while the timeline below it is folded, and where
+  // the timeline's date ruler ends: it covered the minimap's lower edge and
+  // the last dates' labels.
+  it("lifts the graph's minimap clear of the button unless an open timeline sits below it", () => {
+    const lifted = rules(
+      ".app:has(> .copilot-fab) .lane-wrap.graph:not(:has(~ .lane-wrap.timeline:not(.pane-collapsed))) .graph-minimap",
+    );
+    const bottom = /bottom:\s*calc\((\d+)px\s*\+\s*(\d+)px\s*\+\s*(\d+)px\)/.exec(lifted);
+    expect(bottom).not.toBeNull();
+    // The button's height and its inset, with room between.
+    const [, height, inset, air] = bottom!.map(Number);
+    expect(height).toBe(48);
+    expect(inset).toBe(18);
+    expect(air).toBeGreaterThan(0);
+  });
+
+  it("gives the timeline room to scroll its last dates out from under the button", () => {
+    expect(rules(".app:has(> .copilot-fab) .lane-wrap.timeline .board")).toMatch(
+      /padding-bottom:\s*calc\(48px \+ 18px/,
+    );
+  });
 });
