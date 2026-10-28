@@ -81,6 +81,7 @@ import {
   GRAPH_PAN_BUFFER_X,
   GRAPH_PAN_BUFFER_Y,
   openingScroll,
+  RULER_W,
   timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
@@ -94,6 +95,9 @@ import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
 import { useTimelineOrderDrag } from "./lane/useTimelineOrderDrag";
+
+/** A horizontal timeline's sticky date header (TimelineGrid's HORIZONTAL_HEADER_H). */
+const TIMELINE_DATE_HEADER_H = 48;
 
 export type LaneContextMenu =
   | { kind: "plan"; x: number; y: number; nodeId: string; date: string }
@@ -922,6 +926,16 @@ export function LaneView({
     for (const byDay of [...byNodeDay.values(), ...plansByNodeDay.values()]) {
       for (const [day, items] of byDay) if (items.length > 0) contentDays.add(day);
     }
+    // Each lane's days with a record or a plan, in lane order, so the lane
+    // axis opens on the ones with something on the opening day.
+    const lanes = timelineCols.map(
+      (column) =>
+        new Set(
+          [byNodeDay.get(column.node.id), plansByNodeDay.get(column.node.id)].flatMap((byDay) =>
+            byDay ? [...byDay].flatMap(([day, items]) => (items.length > 0 ? [day] : [])) : [],
+          ),
+        ),
+    );
     const horizontal = timelineOrientation === "horizontal";
     return timelineOpeningScroll({
       days,
@@ -933,6 +947,11 @@ export function LaneView({
       gapSize: horizontal ? HORIZONTAL_GAP_W : GAP_H,
       viewport: boardViewport,
       zoom: viewScale,
+      lanes,
+      laneSize: horizontal ? timelineCellHeight : timelineCellWidth,
+      // The sticky date ruler beside the lanes (vertical) or the date header
+      // above or below them (horizontal: TimelineGrid's 48px).
+      laneInset: horizontal ? TIMELINE_DATE_HEADER_H : RULER_W,
     });
   };
 

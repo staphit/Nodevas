@@ -236,6 +236,14 @@ export function openingScroll(
  * headers above (vertical) or beside (horizontal) them are sticky, so a day
  * scrolled to offset 0 sits just past them. `daySize` is a day's length along
  * that axis and `gapSize` a collapsed run of empty days'; both before the zoom.
+ *
+ * Across the lanes it opens on the ones with something on the opening day
+ * (else on any day in view): all of them when they fit, scrolled no further
+ * than that takes, else starting at the first. Opening on today's row alone
+ * left today's plans in lanes behind the date ruler, the lanes in view empty.
+ * `lanes` holds each lane's days with a record or a plan, in lane order;
+ * `laneSize` is a lane's size across and `laneInset` what the sticky date
+ * ruler (vertical) or header (horizontal) takes of the view across them.
  */
 export function timelineOpeningScroll({
   days,
@@ -247,6 +255,9 @@ export function timelineOpeningScroll({
   gapSize,
   viewport,
   zoom,
+  lanes = [],
+  laneSize = 0,
+  laneInset = 0,
 }: {
   days: readonly Date[];
   rowItems: readonly TimelineRowItem[];
@@ -258,6 +269,9 @@ export function timelineOpeningScroll({
   gapSize: number;
   viewport: { width: number; height: number };
   zoom: number;
+  lanes?: readonly ReadonlySet<string>[];
+  laneSize?: number;
+  laneInset?: number;
 }): { left: number; top: number } {
   // Every day's start, a collapsed one at its gap's; the same walk as dayY.
   const starts: number[] = new Array(days.length).fill(0);
@@ -284,7 +298,28 @@ export function timelineOpeningScroll({
     target = marked.find((start) => start > target) ?? marked[marked.length - 1];
   }
   const scroll = Math.max(0, target * zoom);
-  return orientation === "vertical" ? { left: 0, top: scroll } : { left: scroll, top: 0 };
+
+  let laneScroll = 0;
+  if (laneSize > 0) {
+    const openingDay = keys.filter((_, index) => starts[index] === target);
+    const inViewDays = keys.filter((_, index) => inView(starts[index]));
+    const lanesWith = (dayKeys: string[]) =>
+      lanes.flatMap((laneDays, index) =>
+        dayKeys.some((key) => laneDays.has(key)) ? [index] : [],
+      );
+    let shown = lanesWith(openingDay);
+    if (shown.length === 0) shown = lanesWith(inViewDays);
+    if (shown.length > 0) {
+      const across = (orientation === "vertical" ? viewport.width : viewport.height) / zoom;
+      const room = across - laneInset;
+      const first = shown[0] * laneSize;
+      const end = (shown[shown.length - 1] + 1) * laneSize;
+      laneScroll = Math.max(0, end - first <= room ? end - room : first) * zoom;
+    }
+  }
+  return orientation === "vertical"
+    ? { left: laneScroll, top: scroll }
+    : { left: scroll, top: laneScroll };
 }
 
 /** The grid cell a board-space point falls in, clamped to the legal range. */
