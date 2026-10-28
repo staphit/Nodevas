@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { translate } from "./i18n";
 
-// Traditional Chinese text takes full-width punctuation (，；？！：) between
-// CJK words. Half-width ,;?! next to a CJK character reads as a typo; code,
+// Traditional Chinese text takes full-width punctuation (，；？！：（）) between
+// CJK words. Half-width ,;?!() next to a CJK character reads as a typo; code,
 // placeholders like {n}, URLs and ASCII-only terms keep theirs, and so does a
 // key name standing alone between spaces (「按 ? 鍵」).
 const CJK = /[　-〿㐀-鿿＀-￯]/u;
@@ -11,7 +12,7 @@ const CJK = /[　-〿㐀-鿿＀-￯]/u;
 function halfWidthNextToCJK(text: string): boolean {
   const at = (i: number) => text[i] ?? "";
   for (let i = 0; i < text.length; i += 1) {
-    if (!",;?!".includes(text[i])) continue;
+    if (!",;?!()".includes(text[i])) continue;
     const spaceBefore = at(i - 1) === " ";
     const spaceAfter = at(i + 1) === " ";
     if (spaceBefore && spaceAfter) continue;
@@ -45,7 +46,7 @@ describe("zh-TW punctuation", () => {
     expect(zhValues().length).toBeGreaterThan(2000);
   });
 
-  it("uses full-width ，；？！ between CJK text in i18n.ts", () => {
+  it("uses full-width ，；？！（） between CJK text in i18n.ts", () => {
     expect(offenders(zhValues())).toEqual([]);
   });
 
@@ -56,4 +57,60 @@ describe("zh-TW punctuation", () => {
     expect(halfWidthNextToCJK("前端, 發布")).toBe(true);
     expect(halfWidthNextToCJK("（? 看說明）")).toBe(true);
   });
+
+  it("catches half-width parentheses next to CJK text", () => {
+    expect(halfWidthNextToCJK("搜尋或命令 (Ctrl/⌘ K)")).toBe(true);
+    expect(halfWidthNextToCJK("內容(Markdown 編輯)")).toBe(true);
+    expect(halfWidthNextToCJK("(beta)版本")).toBe(true);
+    expect(halfWidthNextToCJK("搜尋或命令（Ctrl/⌘ K）")).toBe(false);
+    expect(halfWidthNextToCJK("Search (Ctrl/⌘ K)")).toBe(false);
+    expect(halfWidthNextToCJK("{label} ({hint})")).toBe(false);
+  });
+
+  it("uses full-width （） for string literals with CJK text in the app's code", () => {
+    const hits = sourceFiles().flatMap(({ path, text }) =>
+      [...text.matchAll(/"([^"\n]*)"|`([^`]*)`|'([^'\n]*)'/g)]
+        .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
+        .filter((value) => CJK.test(value) && halfWidthNextToCJK(value))
+        .map((value) => `${path}: ${value}`),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  // `${t("x")} (Ctrl K)` reads 「搜尋 (Ctrl K)」 in zh-TW: a hint is put
+  // beside translated text through common.withHint, which picks （） there.
+  it("never puts half-width () beside translated text composed in code", () => {
+    const composed = [
+      /\$?\{(?:t|translate)\((?:[^()]|\([^()]*\))*\)\}\s?\(/,
+      /\)\s?\$\{(?:t|translate)\(/,
+    ];
+    const hits = sourceFiles().flatMap(({ path, text }) =>
+      text
+        .split("\n")
+        .map((line, index) => ({ line, at: `${path}:${index + 1}` }))
+        .filter(({ line }) => composed.some((pattern) => pattern.test(line)))
+        .map(({ at, line }) => `${at}: ${line.trim()}`),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("puts a hint beside a label with the reader's parentheses", () => {
+    expect(translate("common.withHint", "en", { label: "Search", hint: "Ctrl/⌘ K" })).toBe("Search (Ctrl/⌘ K)");
+    expect(translate("common.withHint", "zh-TW", { label: "搜尋", hint: "Ctrl/⌘ K" })).toBe("搜尋（Ctrl/⌘ K）");
+  });
 });
+
+/** The app's own source, without tests and the message catalog itself. */
+function sourceFiles(): Array<{ path: string; text: string }> {
+  const root = resolve(process.cwd(), "src");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) return walk(path);
+      return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+    });
+  return walk(root)
+    .map((path) => relative(root, path).replaceAll("\\", "/"))
+    .filter((path) => path !== "i18n.ts")
+    .map((path) => ({ path, text: readFileSync(join(root, path), "utf8") }));
+}
