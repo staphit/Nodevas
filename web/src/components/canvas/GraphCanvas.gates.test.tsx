@@ -136,7 +136,7 @@ function renderBoard() {
         (line) => line.getAttribute("data-edge-key")!,
       );
       const target = keys[0]?.split("->")[1];
-      const box = group.querySelector(".gate-node")!;
+      const box = view.container.querySelector(`[data-gate-for="${target}"] .gate-node`)!;
       const points = [...group.querySelectorAll("polyline")].map((line) =>
         line.getAttribute("points"),
       );

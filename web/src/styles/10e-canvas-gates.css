@@ -152,12 +152,18 @@
   dominant-baseline: central;
   pointer-events: none;
 }
-.gate.gate-invalid .gate-node {
+/* Gate boxes are drawn over the cards (7), under a selected or lifted one. */
+.board-edges.board-gate-badges {
+  z-index: 8;
+}
+.gate.gate-invalid .gate-node,
+.gate-badge.gate-invalid .gate-node {
   stroke: var(--st-failed-fg) !important;
   stroke-width: 2.4;
   fill: color-mix(in srgb, var(--st-failed-bg) 60%, var(--surface));
 }
-.gate.gate-invalid .gate-label {
+.gate.gate-invalid .gate-label,
+.gate-badge.gate-invalid .gate-label {
   fill: var(--st-failed-fg);
 }
 .gate-and .gate-node { stroke: var(--st-done-fg); }

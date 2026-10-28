@@ -241,6 +241,8 @@ export function GraphCanvas({
   // The card holding keyboard focus. A culled board keeps it, and the cards
   // either side of it in tab order, mounted wherever the view goes.
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  // The layer over the cards that condition gates draw their boxes into.
+  const [gateBadgeLayer, setGateBadgeLayer] = useState<SVGGElement | null>(null);
   const cardEvents = useMemo<CardEvents>(
     () => ({
       pointerDown: (event, id) => latest.current.onCardPointerDown(event, id),
@@ -800,6 +802,7 @@ export function GraphCanvas({
             obstacles={boardObstacles}
             onEditGate={gateEvents.editGate}
             onDeleteGate={gateEvents.deleteGate}
+            badgeLayer={gateBadgeLayer}
           />
         ))}
       </svg>
@@ -882,6 +885,11 @@ export function GraphCanvas({
           />
         );
       })}
+      {/* Over the cards: a gate box between two neighbouring columns has no
+          room clear of them, and under them it could not be read. */}
+      <svg className="board-edges board-gate-badges" width={boardW} height={svgH} aria-hidden>
+        <g ref={setGateBadgeLayer} />
+      </svg>
       <SnapGuides
         guides={snapGuides}
         offsetX={graphOffsetX}
