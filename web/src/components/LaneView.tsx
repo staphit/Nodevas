@@ -73,6 +73,8 @@ import {
   graphCellAt,
   nearestFreeGraphCell,
   graphObstacleRects,
+  GRAPH_PAN_BUFFER_X,
+  GRAPH_PAN_BUFFER_Y,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
 import {
@@ -1410,27 +1412,47 @@ export function LaneView({
             />
           )}
           {cols.length === 0 && (
-            <EmptyState
-              title={t("lane.emptyTitle")}
-              description={t("lane.emptyDescription")}
-              action={
-                <button
-                  type="button"
-                  onClick={(event) =>
-                    openNodeCreationMenu({
-                      kind: "graph",
-                      x: event.clientX || 24,
-                      y: event.clientY || 88,
-                      col: 0,
-                      row: 0,
-                    })
-                  }
-                >
-                  <IconPlus size={13} />
-                  {t("nodeCreate.create")}
-                </button>
+            // The graph opens scrolled to its pan buffer (useBoardViewport), so
+            // the hint is placed in that opening view rather than at the
+            // surface's top-left corner, which is off screen.
+            <div
+              className="board-empty"
+              style={
+                isGraph
+                  ? {
+                      position: "absolute",
+                      left: GRAPH_PAN_BUFFER_X,
+                      top: GRAPH_PAN_BUFFER_Y,
+                      width:
+                        boardViewport.width > 0
+                          ? boardViewport.width / viewScale
+                          : undefined,
+                    }
+                  : undefined
               }
-            />
+            >
+              <EmptyState
+                title={t("lane.emptyTitle")}
+                description={t("lane.emptyDescription")}
+                action={
+                  <button
+                    type="button"
+                    onClick={(event) =>
+                      openNodeCreationMenu({
+                        kind: "graph",
+                        x: event.clientX || 24,
+                        y: event.clientY || 88,
+                        col: 0,
+                        row: 0,
+                      })
+                    }
+                  >
+                    <IconPlus size={13} />
+                    {t("nodeCreate.create")}
+                  </button>
+                }
+              />
+            </div>
           )}
         </div>
       </div>
