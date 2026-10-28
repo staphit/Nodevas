@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"nodevas/demo"
@@ -80,7 +81,12 @@ func TestPostProjectExampleCopiesAndOpens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read copied graph: %v", err)
 	}
-	if !bytes.Equal(got, want) {
+	// The copy's plan dates move to today (internal/project/example.go);
+	// apart from them it is the example.
+	undated := func(data []byte) []byte {
+		return regexp.MustCompile(`[0-9]{4}-[0-9]{2}-[0-9]{2}`).ReplaceAll(data, []byte("DATE"))
+	}
+	if !bytes.Equal(undated(got), undated(want)) {
 		t.Fatal("copied graph.yaml differs from the example")
 	}
 	if pm.Store().Root() != root {
