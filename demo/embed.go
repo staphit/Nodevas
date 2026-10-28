@@ -36,3 +36,9 @@ func Names() []string {
 	sort.Strings(names)
 	return names
 }
+
+// ExamplesFor returns the examples in language lang (stub: the English
+// originals for every language until the localized copies are wired).
+func ExamplesFor(lang string) fs.FS {
+	return files
+}
