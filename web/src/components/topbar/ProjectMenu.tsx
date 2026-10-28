@@ -6,15 +6,25 @@
  */
 
 import { IconChevronDown, IconGear } from "../../icons";
+import { useMemo } from "react";
 import { useI18n } from "../../i18n";
 import { openSettings } from "../../settings/openSettings";
+import { withLiveNodeCount } from "../../state/liveProjects";
 import { reportError, useApp } from "../../store";
 import { TopbarMenu, type TopbarMenuEntry, type TopbarMenuItem } from "./TopbarMenu";
 
 export function ProjectMenu() {
   const { t } = useI18n();
-  const projects = useApp((s) => s.projects);
+  const listed = useApp((s) => s.projects);
   const activeProject = useApp((s) => s.activeProject);
+  const graphProject = useApp((s) => s.graphProject);
+  const nodeCount = useApp((s) => s.graph?.nodes?.length);
+  const refreshProjects = useApp((s) => s.refreshProjects);
+  // The open project's count follows graph edits, as the explorer's does.
+  const projects = useMemo(
+    () => withLiveNodeCount(listed, activeProject, graphProject, nodeCount),
+    [listed, activeProject, graphProject, nodeCount],
+  );
   const switchProject = useApp((s) => s.switchProject);
   const workspaces = useApp((s) => s.workspaces);
   const workspace = useApp((s) => s.workspace);
@@ -107,6 +117,10 @@ export function ProjectMenu() {
         </>
       }
       entries={entries}
+      // Projects added on disk, and other projects' counts, are only in a
+      // fresh list; one coalesced read per open keeps them current. A failed
+      // read leaves the list as it was rather than toasting over the menu.
+      onOpen={() => void refreshProjects().catch(() => undefined)}
     />
   );
 }

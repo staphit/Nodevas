@@ -11,6 +11,7 @@ import type { ProjectEntry } from "../../state/types";
 import type { Graph } from "../../types";
 import { useApp, usePreference } from "../../store";
 import { sortProjectTree } from "./sortProjects";
+import { withLiveNodeCount } from "../../state/liveProjects";
 
 export function useExplorerFilter(
   graph: Graph | null,
@@ -47,21 +48,12 @@ export function useExplorerFilter(
   const projectSort = usePreference("explorerProjectSort");
   const projectOrder = useApp((state) => state.projectOrder);
   const graphProject = useApp((state) => state.graphProject);
-  // The project list is fetched on open and switch, not on every node create
-  // or delete (nor on a peer's), so the open project's count is read off the
-  // graph on screen — once that graph is the active project's — which is
-  // exactly what the server counts (len(graph.nodes)).
+  // The open project's count follows the graph on screen; see liveProjects.
   const nodeCount = graph?.nodes?.length;
-  const liveProjects = useMemo(() => {
-    if (nodeCount === undefined || !activeProject || graphProject !== activeProject) {
-      return projects;
-    }
-    return projects.map((project) =>
-      project.name === activeProject && project.nodes !== nodeCount
-        ? { ...project, nodes: nodeCount }
-        : project,
-    );
-  }, [activeProject, graphProject, nodeCount, projects]);
+  const liveProjects = useMemo(
+    () => withLiveNodeCount(projects, activeProject, graphProject, nodeCount),
+    [activeProject, graphProject, nodeCount, projects],
+  );
   // Sorting happens on the tree, not on the flat list, so a child never ends
   // up before its parent; see explorer/sortProjects.
   const sortedProjects = useMemo(

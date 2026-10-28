@@ -71,6 +71,8 @@ export interface TopbarMenuProps {
   align?: "start" | "end";
   /** Passed through to the trigger, for the tour's anchors. */
   dataTour?: string;
+  /** Called each time the menu opens, to refresh what it lists. */
+  onOpen?: () => void;
 }
 
 // Disabled items included: they are aria-disabled, and still reached.
@@ -85,6 +87,7 @@ export function TopbarMenu({
   triggerClassName = "",
   align = "start",
   dataTour,
+  onOpen,
 }: TopbarMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -190,7 +193,10 @@ export function TopbarMenu({
         type="button"
         ref={triggerRef}
         className={`topbar-menu-trigger ${triggerClassName}`.trim()}
-        onClick={() => setOpen((was) => !was)}
+        onClick={() => {
+          if (!open) onOpen?.();
+          setOpen(!open);
+        }}
         title={title ?? label}
         aria-label={label}
         aria-haspopup="menu"
