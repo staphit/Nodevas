@@ -537,7 +537,7 @@
     }
   }
   button:active {
-    transform: none;
+    scale: none;
   }
   .lane-card:active {
     transform: none;

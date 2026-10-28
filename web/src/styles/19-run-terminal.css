@@ -209,7 +209,6 @@
 }
 .run-term-keys button:active:not(:disabled) {
   background: var(--hover);
-  transform: scale(0.97);
 }
 .run-term-keys button:disabled {
   opacity: 0.45;

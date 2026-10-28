@@ -1284,7 +1284,8 @@
   transform: translateY(-1px);
 }
 .lane-context-menu > .condition-primary-action:active {
-  transform: translateY(0) scale(0.985);
+  transform: translateY(0);
+  scale: 0.985;
 }
 .lane-context-menu > .condition-primary-action:disabled {
   border-color: var(--border);
