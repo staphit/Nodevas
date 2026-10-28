@@ -150,4 +150,52 @@ describe("openingScroll", () => {
     expect(scroll.left).toBeLessThanOrEqual(1697);
     expect(scroll.left + 1280).toBeGreaterThanOrEqual(2957);
   });
+
+  // The minimap floats over the view's bottom-right corner. Daily work
+  // schedule in a 773x665 pane (explorer 480) opened centred with 'Weekly
+  // review' under it, though the cards left room to sit clear of it.
+  describe("with the minimap's corner to keep clear", () => {
+    const viewport = { width: 773, height: 665 };
+    const corner = { width: 126, height: 145 };
+    // The six cards' layout at 100%, in board pixels.
+    const cards = [
+      rect(2000, 1000, 152, 68),
+      rect(2103, 1225, 152, 68),
+      rect(2255, 1093, 152, 68),
+      rect(2273, 1394, 152, 68),
+      rect(2514, 1231, 152, 68),
+      rect(2578, 1450, 152, 68),
+    ];
+    const onScreen = (scroll: { left: number; top: number }, zoom = 1) =>
+      cards.map((card) => ({
+        left: card.left * zoom - scroll.left,
+        right: card.right * zoom - scroll.left,
+        top: card.top * zoom - scroll.top,
+        bottom: card.bottom * zoom - scroll.top,
+      }));
+
+    it("moves content that fits off the corner, keeping all of it in view", () => {
+      const scroll = openingScroll(cards, 1, viewport, corner);
+      for (const card of onScreen(scroll)) {
+        expect(card.left).toBeGreaterThanOrEqual(0);
+        expect(card.top).toBeGreaterThanOrEqual(0);
+        expect(card.right).toBeLessThanOrEqual(viewport.width);
+        expect(card.bottom).toBeLessThanOrEqual(viewport.height);
+        const underCorner =
+          card.right > viewport.width - corner.width &&
+          card.bottom > viewport.height - corner.height;
+        expect(underCorner).toBe(false);
+      }
+    });
+
+    it("stays centred when the content is clear of the corner already", () => {
+      const clear = openingScroll(cards, 1, viewport, { width: 20, height: 20 });
+      expect(clear).toEqual(openingScroll(cards, 1, viewport));
+    });
+
+    it("stays centred when no room in the view keeps the content clear", () => {
+      const big = { width: 400, height: 400 };
+      expect(openingScroll(cards, 1, viewport, big)).toEqual(openingScroll(cards, 1, viewport));
+    });
+  });
 });

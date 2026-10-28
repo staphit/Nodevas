@@ -774,6 +774,67 @@ describe("LaneView", () => {
       expect(board.scrollTop).toBe(todayRow * step * zoom);
     });
 
+    // The minimap floats over the board's bottom-right corner. Daily work
+    // schedule in a 773x665 pane (explorer 480) opened centred with 'Weekly
+    // review' under it, though its cards had room to sit clear of the map.
+    it("opens with the cards clear of the minimap when they have room to be", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(773, 665);
+      // jsdom has no layout: the board fills the pane from 0,0 and the map
+      // sits where the stylesheet puts it, 14px in and 76px up (the Copilot
+      // button is below it), at whatever size it draws itself.
+      const realRect = HTMLElement.prototype.getBoundingClientRect;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        if (this.classList.contains("board")) return new DOMRect(0, 0, 773, 665);
+        if (this.classList.contains("graph-minimap")) {
+          const width = parseFloat(this.style.width) || 170;
+          const height = parseFloat(this.style.height) || 108;
+          return new DOMRect(773 - 14 - width, 665 - 76 - height, width, height);
+        }
+        return realRect.call(this);
+      });
+      const at = (x: number, y: number) => ({ x, y });
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: ["inbox", "focus", "sync", "docs", "client", "review"].map((id) => ({
+            id,
+            title: id,
+          })),
+          edges: [],
+          ui: {
+            positions: {
+              inbox: at(0, 0),
+              focus: at(0.63, 2.8),
+              sync: at(1.55, 1.15),
+              docs: at(1.66, 4.9),
+              client: at(3.13, 2.88),
+              review: at(3.52, 5.62),
+            },
+          },
+        },
+      });
+      try {
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        const board = container.querySelector<HTMLElement>(".board")!;
+        const map = container.querySelector<HTMLElement>(".graph-minimap")!.getBoundingClientRect();
+        expect(cardsInView(container, 773, 665)).toHaveLength(6);
+        for (const card of container.querySelectorAll<HTMLElement>(".col-card")) {
+          const left = parseFloat(card.style.left) - board.scrollLeft;
+          const top = parseFloat(card.style.top) - board.scrollTop;
+          const right = left + parseFloat(card.style.width);
+          const bottom = top + parseFloat(card.style.height);
+          const covered =
+            right > map.left && left < map.right && bottom > map.top && top < map.bottom;
+          expect(covered, card.dataset.nodeId).toBe(false);
+        }
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
     // A template with no cards, only its four quadrants, opened on a corner
     // of the first one: the opening framed cards and ignored the groups.
     it("frames a board's groups when it has no cards, with its hint above them", () => {

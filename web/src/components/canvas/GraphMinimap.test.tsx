@@ -45,4 +45,27 @@ describe("GraphMinimap", () => {
     rerender(<GraphMinimap {...moved} />);
     expect(moved.centerX).toHaveBeenCalled();
   });
+
+  // 170x108 is a corner of a full-width board, but a third of the graph pane
+  // when the timeline is open below it (about 315px tall) or the explorer is
+  // wide: there it covered the cards it was meant to help find.
+  it("shrinks in a short or narrow pane", () => {
+    const size = (width: number, height: number) => {
+      const { container, unmount } = render(
+        <GraphMinimap {...props({ boardViewport: { width, height } })} />,
+      );
+      const map = container.querySelector<HTMLElement>(".graph-minimap")!;
+      const result = { width: parseFloat(map.style.width), height: parseFloat(map.style.height) };
+      unmount();
+      return result;
+    };
+    expect(size(1265, 700)).toEqual({ width: 170, height: 108 });
+    const short = size(773, 315);
+    expect(short.height).toBeLessThanOrEqual(315 / 4);
+    expect(short.width / short.height).toBeCloseTo(170 / 108, 1);
+    const narrow = size(773, 665);
+    expect(narrow.width).toBeLessThan(170);
+    // Never so small that it stops being a map.
+    expect(size(300, 200).width).toBeGreaterThanOrEqual(100);
+  });
 });
