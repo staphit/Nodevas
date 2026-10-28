@@ -17,9 +17,7 @@ const PARSE_FAILURE =
 beforeEach(() => {
   vi.clearAllMocks();
   setProjectOverride("");
-  vi.mocked(api.openProject).mockRejectedValue(
-    new RequestError(400, PARSE_FAILURE),
-  );
+  vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, PARSE_FAILURE));
   useApp.setState({
     preferences: { ...readPreferences(), language: "zh-TW" },
     activeProject: "Alpha",
@@ -53,9 +51,7 @@ async function switchFailure(): Promise<Error> {
 describe("switching to a project whose graph.yaml does not parse", () => {
   it("explains it once, in the reader's language, with the line to fix", async () => {
     const error = await switchFailure();
-    expect(error.message).not.toMatch(
-      /unmarshal|not found in type|load project/,
-    );
+    expect(error.message).not.toMatch(/unmarshal|not found in type|load project/);
     expect(error.message).toMatch(/[一-鿿]/);
     expect(error.message).toContain("Disk project");
     expect(error.message).toContain("graph.yaml");
@@ -66,9 +62,7 @@ describe("switching to a project whose graph.yaml does not parse", () => {
     await switchFailure();
     const last = useApp.getState().lastOperation;
     expect(last?.status).toBe("error");
-    expect(last?.message).toBe(
-      translate("workspace.error.switchFailed", "zh-TW"),
-    );
+    expect(last?.message).toBe(translate("workspace.error.switchFailed", "zh-TW"));
   });
 
   it("says so in English too, without the parser's words", async () => {
@@ -80,9 +74,7 @@ describe("switching to a project whose graph.yaml does not parse", () => {
   });
 
   it("still reports any other refusal as the hub worded it", async () => {
-    vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(400, "disk full"),
-    );
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, "disk full"));
     const error = await switchFailure();
     expect(error.message).toBe("disk full");
     expect(useApp.getState().lastOperation?.message).toBe("disk full");
@@ -92,16 +84,13 @@ describe("switching to a project whose graph.yaml does not parse", () => {
 // graph.yaml parses but the hub's validation refuses it (store/graph_cache.go
 // wraps ValidateGraphForStorage's reason in "graph.yaml: ..."). The file is
 // readable; what the reader needs is which node and field to fix.
-const INVALID_PRIORITY =
-  'load project "Disk project": graph.yaml: node "c" has invalid priority "zzz"';
+const INVALID_PRIORITY = 'load project "Disk project": graph.yaml: node "c" has invalid priority "zzz"';
 const NOTE_ACCEPTANCE =
   'load project "Disk project": graph.yaml: node "c": type "note" cannot carry acceptance criteria';
 
 describe("switching to a project whose graph.yaml fails validation", () => {
   it("names the node and the field to fix, in the reader's language", async () => {
-    vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(400, INVALID_PRIORITY),
-    );
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, INVALID_PRIORITY));
     const error = await switchFailure();
     expect(error.message).not.toContain(
       translate("workspace.error.graphUnreadable", "zh-TW", {
@@ -115,9 +104,7 @@ describe("switching to a project whose graph.yaml fails validation", () => {
   });
 
   it("says why a note cannot be opened with acceptance criteria", async () => {
-    vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(400, NOTE_ACCEPTANCE),
-    );
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, NOTE_ACCEPTANCE));
     const error = await switchFailure();
     expect(error.message).not.toMatch(/無法讀取|cannot carry|load project/);
     expect(error.message).toContain("節點「c」");
@@ -126,9 +113,7 @@ describe("switching to a project whose graph.yaml fails validation", () => {
 
   it("keeps the hub's reason in English, without calling the file unreadable", async () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
-    vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(400, INVALID_PRIORITY),
-    );
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, INVALID_PRIORITY));
     const error = await switchFailure();
     expect(error.message).not.toMatch(/can't be read|load project/);
     expect(error.message).toContain('node "c" has invalid priority "zzz"');
@@ -137,10 +122,7 @@ describe("switching to a project whose graph.yaml fails validation", () => {
 
   it("keeps a reason it has no words for as the hub wrote it", async () => {
     vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(
-        400,
-        'load project "Disk project": graph.yaml: node "c" has too many plan milestones',
-      ),
+      new RequestError(400, 'load project "Disk project": graph.yaml: node "c" has too many plan milestones'),
     );
     const error = await switchFailure();
     expect(error.message).not.toMatch(/無法讀取/);
@@ -148,12 +130,8 @@ describe("switching to a project whose graph.yaml fails validation", () => {
   });
 
   it("keeps the badge to the short status", async () => {
-    vi.mocked(api.openProject).mockRejectedValue(
-      new RequestError(400, INVALID_PRIORITY),
-    );
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(400, INVALID_PRIORITY));
     await switchFailure();
-    expect(useApp.getState().lastOperation?.message).toBe(
-      translate("workspace.error.switchFailed", "zh-TW"),
-    );
+    expect(useApp.getState().lastOperation?.message).toBe(translate("workspace.error.switchFailed", "zh-TW"));
   });
 });

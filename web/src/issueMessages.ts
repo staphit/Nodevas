@@ -90,6 +90,7 @@ const RULES: Rule[] = [
   ),
   rule("dependency cycle: (.*)", "cycle", "cycle"),
   rule("node is not connected to anything", "disconnected"),
+  rule(`type ${Q} cannot carry acceptance criteria`, "acceptanceNotAllowed", "type"),
 ];
 
 /** What a Go %q wrote, unquoted; the raw text when it is not valid JSON. */
@@ -129,6 +130,24 @@ export function localizeIssueMessage(msg: string, language: Language): string {
     return translate(key, language, values);
   }
   return msg;
+}
+
+/** `node "c" has invalid priority "zzz"`, `node "c": type "note" cannot ...`. */
+const ON_NODE = new RegExp(`^node ${Q}(?:: | has )(.+)$`);
+
+/**
+ * A reason the hub refused a whole graph (store/graph_validate.go,
+ * engine/acceptance.go) in language. Those name the node first, then a
+ * finding this list may know; a reason it does not know stays as written.
+ */
+export function localizeGraphRefusal(msg: string, language: Language): string {
+  const whole = localizeIssueMessage(msg, language);
+  if (whole !== msg) return whole;
+  const match = ON_NODE.exec(msg);
+  if (!match) return msg;
+  const finding = localizeIssueMessage(match[2], language);
+  if (finding === match[2]) return msg;
+  return translate("issue.onNode", language, { id: unquote(match[1]), msg: finding });
 }
 
 /** issue with its message in language. */

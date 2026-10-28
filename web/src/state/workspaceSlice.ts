@@ -9,6 +9,7 @@
 
 import { api, AuthError, getProjectOverride, RequestError, setProjectOverride } from "../api";
 import { translate } from "../i18n";
+import { localizeGraphRefusal } from "../issueMessages";
 import type { Language } from "../preferences";
 import { coalesceRequest } from "./coalesce";
 import { describeFailure, operationScope } from "./operations";
@@ -279,14 +280,24 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
  * The hub refuses to open a project whose graph.yaml does not parse, and says
  * so in the YAML parser's English ('load project "x": graph.yaml: yaml:
  * unmarshal errors: line 16: ...'). The reader gets that in their language,
- * keeping the line to fix; null for any other failure.
+ * keeping the line to fix. A file that parses but fails validation ('graph.yaml:
+ * node "c" has invalid priority "zzz"') is readable: the reader gets the
+ * reason, which names the node and field to fix. Null for any other failure.
  */
 function unreadableGraphMessage(error: unknown, label: string, language: Language): string | null {
-  if (!(error instanceof RequestError) || !/(^|: )graph\.yaml: /.test(error.message)) return null;
-  const line = /\bline (\d+)\b/.exec(error.message)?.[1];
-  return line
-    ? translate("workspace.error.graphUnreadableLine", language, { name: label, line })
-    : translate("workspace.error.graphUnreadable", language, { name: label });
+  if (!(error instanceof RequestError)) return null;
+  const reason = /(?:^|: )graph\.yaml: ([\s\S]*)$/.exec(error.message)?.[1].trim();
+  if (reason === undefined) return null;
+  // engine.ParseGraph: the decoder's own "yaml: ..." and its one other refusal.
+  if (!reason || /^yaml: |^multiple YAML documents/.test(reason)) {
+    const line = /\bline (\d+)\b/.exec(reason)?.[1];
+    return line
+      ? translate("workspace.error.graphUnreadableLine", language, { name: label, line })
+      : translate("workspace.error.graphUnreadable", language, { name: label });
+  }
+  // The frame ends the sentence itself; a localized finding brings its own 。
+  const localized = localizeGraphRefusal(reason, language).replace(/[。.]$/, "");
+  return translate("workspace.error.graphInvalid", language, { name: label, reason: localized });
 }
 
 function sameJSON(left: unknown, right: unknown): boolean {
