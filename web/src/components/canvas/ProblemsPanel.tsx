@@ -92,7 +92,7 @@ export function ProblemsPanel({
                 <>
                   <IconWarning size={12} />
                   <span>
-                    <b>{issue.nodeId ? nodeTitle(issue.nodeId) : "graph"}</b>
+                    <b>{issue.nodeId ? nodeTitle(issue.nodeId) : t("board.problemsWholeGraph")}</b>
                     {issue.field ? ` · ${issue.field}` : ""}
                     <small>{issue.msg}</small>
                   </span>
