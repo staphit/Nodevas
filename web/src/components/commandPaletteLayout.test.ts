@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(resolve(process.cwd(), "src/styles/10a-canvas-tools.css"), "utf8");
 
 function rule(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\>]/g, "\$&").replace(/\s+/g, "\s*");
-  const match = new RegExp(`(^|\})\s*${escaped}\s*\{([^}]*)\}`, "m").exec(css);
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\>]/g, "\\$&").replace(/\s+/g, "\\s*");
+  const match = new RegExp(`(^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`, "m").exec(css);
   return match ? match[2] : "";
 }
 
