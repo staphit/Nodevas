@@ -98,7 +98,7 @@ import {
 } from "./lane/LaneContextMenuLayer";
 import { useBoardReveal } from "./lane/useBoardReveal";
 import { useBoardViewport } from "./lane/useBoardViewport";
-import { useDrawerCover } from "./lane/useDrawerCover";
+import { useBoardDrawerCover, useDrawerCover } from "./lane/useDrawerCover";
 import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
@@ -335,6 +335,8 @@ export function LaneView({
   // right-hand controls clear of it.
   const paneRef = useRef<HTMLElement>(null);
   const drawerCover = useDrawerCover(paneRef);
+  // So does the vertical timeline's date ruler, sticky at the board's right.
+  const boardDrawerCover = useBoardDrawerCover(paneRef);
   // Every way the board opens a node — a card, Enter, its menu, a row in
   // Problems — keeps the card out from under the drawer that opens with it.
   const { openTab, revealIfHidden } = useRevealOpenedCard({
@@ -1691,6 +1693,7 @@ export function LaneView({
               timelineDateAxis={timelineDateAxis}
               timelineNodeAxis={timelineNodeAxis}
               timelineVDateAxis={timelineVDateAxis}
+              rulerInset={boardDrawerCover / viewScale}
               viewWindow={viewWindow}
               timelineCellWidth={timelineCellWidth}
               timelineCellHeight={timelineCellHeight}

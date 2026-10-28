@@ -5,10 +5,11 @@
  * a pane's toolbar keeps Problems, the timeline orientation switch, ? and ⋯ at
  * its right end — exactly under a 580px drawer at 1280px. The pane pads its
  * toolbar by this much (10a-canvas-tools.css) so those stay clickable while a
- * node is open.
+ * node is open. The vertical timeline's date ruler, sticky at the board's
+ * right edge, sticks beside the drawer the same way (useBoardDrawerCover).
  */
 
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { restingRect, type Area } from "./boardVisibleArea";
 
 /**
@@ -34,7 +35,35 @@ export function drawerCover(bar: Area, drawers: readonly Area[]): number {
  * collapsed to its rail.
  */
 export function useDrawerCover(paneRef: RefObject<HTMLElement | null>): number {
+  return useCover(
+    paneRef,
+    (pane) => pane.querySelector<HTMLElement>(":scope > .board-title")?.getBoundingClientRect() ?? null,
+  );
+}
+
+/**
+ * How far the drawer reaches into the board's scrollport — inside its
+ * scrollbar, where its sticky edges sit. The vertical timeline's date ruler
+ * sticks to the right edge, all of which a 580px drawer covers at 1280px: it
+ * sticks this far in instead, beside the drawer.
+ */
+export function useBoardDrawerCover(paneRef: RefObject<HTMLElement | null>): number {
+  return useCover(paneRef, (pane) => {
+    const board = pane.querySelector<HTMLElement>(".board");
+    if (!board) return null;
+    const rect = board.getBoundingClientRect();
+    const left = rect.left + board.clientLeft;
+    return { left, top: rect.top, right: left + board.clientWidth, bottom: rect.bottom };
+  });
+}
+
+function useCover(
+  paneRef: RefObject<HTMLElement | null>,
+  area: (pane: HTMLElement) => Area | null,
+): number {
   const [cover, setCover] = useState(0);
+  const areaRef = useRef(area);
+  areaRef.current = area;
   useLayoutEffect(() => {
     const pane = paneRef.current;
     const stage = pane?.parentElement;
@@ -44,8 +73,8 @@ export function useDrawerCover(paneRef: RefObject<HTMLElement | null>): number {
         (child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains("drawer"),
       );
     const measure = () => {
-      const bar = pane.querySelector<HTMLElement>(":scope > .board-title");
-      setCover(bar ? drawerCover(bar.getBoundingClientRect(), drawers().map(restingRect)) : 0);
+      const covered = areaRef.current(pane);
+      setCover(covered ? drawerCover(covered, drawers().map(restingRect)) : 0);
     };
     const sizes = new ResizeObserver(measure);
     const watch = () => {

@@ -51,6 +51,11 @@ export interface TimelineGridProps {
   /** Where a vertical timeline's date ruler sits: on the left it comes first. */
   timelineVDateAxis?: "left" | "right";
   /**
+   * How far in from the board's right edge a vertical timeline's date ruler
+   * sticks, in board pixels: an open node drawer lies over that edge.
+   */
+  rulerInset?: number;
+  /**
    * What part of the board is in view, when the timeline is large enough to
    * mount only the lanes near it (timelineCulling); null draws every lane.
    */
@@ -115,6 +120,7 @@ export function TimelineGrid({
   timelineDateAxis,
   timelineNodeAxis,
   timelineVDateAxis = "right",
+  rulerInset = 0,
   viewWindow = null,
   timelineCellWidth,
   timelineCellHeight,
@@ -178,6 +184,11 @@ export function TimelineGrid({
       vertical ? timelineCellWidth : timelineCellHeight,
       pinned,
     );
+  // The ruler on the right sticks beside an open drawer rather than under it.
+  const rulerStyle =
+    timelineVDateAxis !== "left" && rulerInset > 0
+      ? { width: RULER_W, right: rulerInset }
+      : { width: RULER_W };
   const columnSlots = timelineOrientation === "vertical" ? laneSlotsFor(true) : [];
   const rowSlots = timelineOrientation === "horizontal" ? laneSlotsFor(false) : [];
   return (
@@ -264,7 +275,7 @@ export function TimelineGrid({
                   the opening scroll puts today's right under it: a header
                   that grew afterwards slid today's row under itself, as the
                   browser's scroll anchoring held the rows still. */}
-              <div className="lane-head-cell ruler" style={{ width: RULER_W }}>
+              <div className="lane-head-cell ruler" style={rulerStyle}>
                 {/* A lane head is a button, whose line height is the font's
                     own rather than the page's. */}
                 <span
@@ -289,7 +300,7 @@ export function TimelineGrid({
                       onClick={() => setCollapse(false)}
                     >
                       <div className="board-gap-label">{t("timeline.gapLabel", { count: String(item.count) })}</div>
-                      <div className="board-date-r mono" style={{ width: RULER_W }}>
+                      <div className="board-date-r mono" style={rulerStyle}>
                         ⋯
                       </div>
                     </div>
@@ -360,7 +371,7 @@ export function TimelineGrid({
                     )}
                     <div
                       className={`board-date-r mono${isToday ? " today" : ""}${isFuture ? " future" : ""}`}
-                      style={{ width: RULER_W }}
+                      style={rulerStyle}
                     >
                       {formatLocalizedMonthDay(d, language)}
                       {isToday && (
