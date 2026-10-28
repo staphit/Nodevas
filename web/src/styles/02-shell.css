@@ -214,6 +214,27 @@ header.topbar {
   font-size: calc(11px * var(--font-scale, 1));
 }
 
+/* Opens the command palette. Without this it was a user-agent button: grey,
+   with an outset border, on the dark bar too. */
+.topbar .command-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar .command-trigger:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
 /* Runners and today's spend; the dot is the runners dialog's (17-runners.css). */
 .topbar-runner-pill {
   display: inline-flex;
@@ -709,6 +730,29 @@ header.topbar {
   min-width: 56px;
   color: var(--text-2);
   font-size: calc(11px * var(--font-scale, 1));
+}
+/* A row's plain controls (Settings › General: 切換為淺色, 重新播放導覽, 語系 …).
+   Buttons with a class of their own (.danger) keep it. */
+.settings-row > button:not([class]),
+.settings-row > select {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.settings-row > button:not([class]) {
+  cursor: pointer;
+}
+.settings-row > button:not([class]):hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.settings-row > button:not([class]):disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .settings-section {
   display: flex;
