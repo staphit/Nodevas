@@ -45,11 +45,32 @@ async function addNode(request: APIRequestContext, title: string, body: string) 
   expect(created.ok(), await created.text()).toBeTruthy();
 }
 
+/**
+ * Waits until a ranked search names every title in want. Writes reach the
+ * index in the background (about a tenth of a second after they return), so a
+ * query sent the moment a node is created can rightly miss it; what is under
+ * test is the ranking once it is there.
+ */
+async function indexed(
+  request: APIRequestContext,
+  query: string,
+  want: string[],
+  project?: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await ranked(request, query, project)).map((r) => r.title).sort(), {
+      timeout: 5_000,
+    })
+    .toEqual(expect.arrayContaining(want));
+}
+
 async function storyProject(page: Parameters<typeof freshProject>[0]): Promise<string> {
   const project = await freshProject(page, ["港口"]);
   await addNode(page.request, "家", "林雨的妹妹叫林曉，她從小就怕水。姐妹兩人住在老街。");
   await addNode(page.request, "市場", "市場裡人很多，有人在叫賣魚。");
   await addNode(page.request, "林曉", "角色卡。");
+  await indexed(page.request, "林曉", ["家", "林曉"], project);
+  await indexed(page.request, "市場", ["市場"], project);
   return project;
 }
 
@@ -100,6 +121,7 @@ test("ranked results survive a server restart", async ({}, workerInfo) => {
       baseURL: server.baseURL,
     });
     await addNode(request, "家", "林雨的妹妹叫林曉，她從小就怕水。");
+    await indexed(request, "林曉", ["家"]);
     const before = await ranked(request, "林雨的妹妹叫什麼名字？");
     expect(before[0]?.title).toBe("家");
     await request.dispose();
