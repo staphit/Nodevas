@@ -144,7 +144,9 @@ func validClientMessage(message clientMessage) bool {
 		// this.
 		return message.Payload != "" && len(message.Payload) <= maxAwarenessBytes
 	case "graph-drag":
-		if len(message.IDs) == 0 || len(message.IDs) > maxDragIDs {
+		// An ended gesture names nothing: it only tells peers to drop the
+		// ghost. A live one must say what is being dragged.
+		if (message.Active && len(message.IDs) == 0) || len(message.IDs) > maxDragIDs {
 			return false
 		}
 		for _, id := range message.IDs {
