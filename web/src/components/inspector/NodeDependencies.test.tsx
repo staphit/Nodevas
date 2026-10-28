@@ -82,9 +82,10 @@ describe("NodeDependencies", () => {
     const user = userEvent.setup();
     render(<NodeDependencies id="design" />);
     const picker = screen.getByLabelText("選擇前置節點");
-    // Neither the node itself nor a node it already waits for is offered.
+    // Neither the node itself, a node it already waits for, nor one that
+    // waits on it (上線) is offered.
     const offered = within(picker).getAllByRole("option").map((option) => option.textContent);
-    expect(offered).toEqual(["審查", "上線"]);
+    expect(offered).toEqual(["審查"]);
 
     await user.selectOptions(picker, "review");
     await user.click(screen.getByRole("button", { name: "新增" }));
@@ -104,19 +105,24 @@ describe("NodeDependencies", () => {
   it("stops offering a prerequisite the moment it is added", async () => {
     const user = userEvent.setup();
     updateNode.mockImplementationOnce(() => new Promise(() => {}));
+    const g = graph();
+    g.nodes!.push({ id: "docs", title: "文件" });
+    useApp.setState({ graph: g });
     render(<NodeDependencies id="design" />);
     const picker = screen.getByLabelText("選擇前置節點");
     await user.selectOptions(picker, "review");
     await user.click(screen.getByRole("button", { name: "新增" }));
     const offered = within(screen.getByLabelText("選擇前置節點")).getAllByRole("option").map((option) => option.textContent);
-    expect(offered).toEqual(["上線"]);
+    expect(offered).toEqual(["文件"]);
   });
 
   it("does not offer a prerequisite the expression already names", () => {
-    useApp.setState({ graph: graph("plan and review") });
+    const g = graph("plan and review");
+    g.nodes!.push({ id: "docs", title: "文件" });
+    useApp.setState({ graph: g });
     render(<NodeDependencies id="design" />);
     const offered = within(screen.getByLabelText("選擇前置節點")).getAllByRole("option").map((option) => option.textContent);
-    expect(offered).toEqual(["上線"]);
+    expect(offered).toEqual(["文件"]);
   });
 
   it("keeps advanced conditions folded unless the node already uses one", () => {
