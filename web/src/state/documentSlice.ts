@@ -558,22 +558,35 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         }),
       }));
     } else {
-      // overwrite disk with mine (disk version is snapshotted in history)
+      // overwrite disk with mine (disk version is snapshotted in history).
+      // A write like any save: queued with them, so an echo that beats the
+      // answer waits for it, and its rev remembered, so the echo costs no GET.
       const submitted = tab.content;
-      const res = await api.putNode(id, submitted, tab.conflict.diskRev);
-      set((st) => ({
-        tabs: st.tabs.map((current) =>
-          current.id !== id
-            ? current
-            : {
-                ...current,
-                rev: res.rev,
-                dirty: current.content !== submitted,
-                diskChanged: false,
-                conflict: null,
-              },
-        ),
-      }));
+      const diskRev = tab.conflict.diskRev;
+      const previous = queues.tabSave.get(id) ?? Promise.resolve();
+      const operation = previous.catch(() => undefined).then(async () => {
+        const res = await api.putNode(id, submitted, diskRev);
+        selfWrittenRevs.set(id, res.rev);
+        set((st) => ({
+          tabs: st.tabs.map((current) =>
+            current.id !== id
+              ? current
+              : {
+                  ...current,
+                  rev: res.rev,
+                  dirty: current.content !== submitted,
+                  diskChanged: false,
+                  conflict: null,
+                },
+          ),
+        }));
+      });
+      queues.tabSave.set(id, operation);
+      const cleanup = () => {
+        if (queues.tabSave.get(id) === operation) queues.tabSave.delete(id);
+      };
+      void operation.then(cleanup, cleanup);
+      await operation;
     }
   },
 });
