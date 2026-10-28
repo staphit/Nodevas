@@ -4,7 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/analytics"
 	"nodevas/internal/audit"
@@ -15,6 +18,7 @@ import (
 	explorerapi "nodevas/internal/httpapi/explorer"
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/runs"
 )
 
 // Agent analytics on the server: background cost settlement and raw-history
@@ -204,5 +208,42 @@ func (s *Server) autoRoute(ctx context.Context, ownerID, project, nodeID, role s
 	return out
 }
 
-// changesScorecards reports a write that can change agent scorecards.
-func changesScorecards(method, path string) bool { return false }
+// changesScorecards reports a write that can change agent scorecards: a
+// verdict, a person's review vote, or anything else under /api/runs that
+// starts, settles or merges a run. Run settings (budget, roles, routing) do
+// not.
+func changesScorecards(method, path string) bool {
+	if !isUnsafeMethod(method) {
+		return false
+	}
+	if path == "/api/verdicts" || path == "/api/runs" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(path, "/api/runs/")
+	if !ok {
+		return false
+	}
+	switch rest {
+	case "budget", "roles", "routing":
+		return false
+	}
+	return true
+}
+
+// withScorecardInvalidation drops the cached scorecards after a successful
+// write that changes them (changesScorecards). Runs settled over the runner
+// socket are caught by the dispatcher observer in UseRunnersDB.
+func (s *Server) withScorecardInvalidation(c *gin.Context) {
+	c.Next()
+	if c.Writer.Status() < http.StatusBadRequest && changesScorecards(c.Request.Method, c.Request.URL.Path) {
+		analytics.InvalidateScorecards()
+	}
+}
+
+// invalidateScorecardsOn is the dispatcher observer that drops the cached
+// scorecards when a run ends or a pipeline moves.
+func invalidateScorecardsOn(u runs.Update) {
+	if u.Pipeline != nil || runnerwire.RunFinal(u.Run.Status) {
+		analytics.InvalidateScorecards()
+	}
+}

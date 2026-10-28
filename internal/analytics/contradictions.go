@@ -40,98 +40,63 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+// contradictedSQL decides every rule for every verdict in one statement.
+// Each rule is an EXISTS on the tables the rule reads; C4's 14-day bound is
+// checked in Go on the earliest later QA fail, because the stamps are text
+// and an unparseable one must answer "not contradicted", not fail the query.
+const contradictedSQL = `
+SELECT v.run_id, v.role, v.pipeline_id, v.outcome, v.created_at,
+       CASE WHEN v.role = ? AND v.pipeline_id <> '' AND v.outcome = 'pass' THEN
+            EXISTS (SELECT 1 FROM run_evidence e
+                     WHERE e.pipeline_id = v.pipeline_id AND e.kind = ? AND e.outcome = 'fail' AND e.at > v.created_at
+                       AND NOT EXISTS (SELECT 1 FROM run_verdicts n
+                                        WHERE n.pipeline_id = v.pipeline_id AND n.round > v.round
+                                          AND n.created_at > v.created_at AND n.created_at <= e.at))
+         OR EXISTS (SELECT 1 FROM review_votes h
+                     WHERE h.pipeline_id = v.pipeline_id AND h.round = v.round AND h.reviewer = ? AND h.verdict = ?)
+       ELSE false END AS c1c2,
+       CASE WHEN v.role = ? AND v.pipeline_id <> '' AND v.outcome = 'fail' THEN
+            EXISTS (SELECT 1 FROM review_votes h
+                     WHERE h.pipeline_id = v.pipeline_id AND h.round = v.round AND h.reviewer = ? AND h.verdict = ?)
+        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.pipeline_id = v.pipeline_id AND r.kind = ? AND r.created_at > v.created_at)
+       ELSE false END AS c3,
+       CASE WHEN v.role = ? AND v.outcome = 'pass' THEN
+            (SELECT MIN(q.created_at) FROM run_verdicts q
+              WHERE q.project = v.project AND q.node_id = v.node_id AND q.role = ? AND q.outcome = 'fail'
+                AND q.created_at > v.created_at AND q.run_id <> v.run_id)
+       END AS qa_fail
+  FROM run_verdicts v
+ WHERE v.run_id = ANY(?)`
+
 func contradictedOn(ctx context.Context, database querier, verdictRunIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(verdictRunIDs) == 0 {
 		return out, nil
 	}
-	var verdicts []verdictRow
-	for start := 0; start < len(verdictRunIDs); start += 500 {
-		chunk := verdictRunIDs[start:min(start+500, len(verdictRunIDs))]
-		args := make([]any, len(chunk))
-		for i, id := range chunk {
-			args[i] = id
-		}
-		rows, err := database.QueryContext(ctx, `
-SELECT run_id, project, node_id, pipeline_id, role, round, outcome, created_at
-  FROM run_verdicts WHERE run_id IN (`+marks(len(chunk))+`)`, args...)
-		if err != nil {
+	rows, err := database.QueryContext(ctx, contradictedSQL,
+		engine.RoleReviewer, runnerwire.PhaseCI, humanReviewer, runnerwire.VerdictChanges,
+		engine.RoleReviewer, humanReviewer, runnerwire.VerdictApprove, runnerwire.JobRevise,
+		engine.RoleQA, engine.RoleQA,
+		verdictRunIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, role, pipeline, outcome, created string
+		var c1c2, c3 bool
+		var qaFail sql.NullString
+		if err := rows.Scan(&id, &role, &pipeline, &outcome, &created, &c1c2, &c3, &qaFail); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var v verdictRow
-			var round int64
-			if err := rows.Scan(&v.runID, &v.project, &v.node, &v.pipeline, &v.role, &round, &v.outcome, &v.created); err != nil {
-				rows.Close()
-				return nil, err
+		c := c1c2 || c3
+		if role == engine.RoleQA && outcome == "pass" && qaFail.Valid {
+			// C4: the earliest later QA fail falls within 14 days.
+			if at, ok := parseStamp(created); ok {
+				c = qaFail.String <= formatStamp(at.Add(qaContradictionWindow))
 			}
-			v.round = int(round)
-			verdicts = append(verdicts, v)
 		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
+		out[id] = c
 	}
-	for _, v := range verdicts {
-		c, err := contradicted(ctx, database, v)
-		if err != nil {
-			return nil, err
-		}
-		out[v.runID] = c
-	}
-	return out, nil
-}
-
-func contradicted(ctx context.Context, database querier, v verdictRow) (bool, error) {
-	exists := func(query string, args ...any) (bool, error) {
-		var n int
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+query+` LIMIT 1) hit`, args...).Scan(&n); err != nil {
-			return false, err
-		}
-		return n > 0, nil
-	}
-	switch {
-	case v.role == engine.RoleReviewer && v.pipeline != "" && v.outcome == "pass":
-		// C1: CI failed after the pass, before a later round's verdict.
-		next := ""
-		if err := database.QueryRowContext(ctx, `
-SELECT COALESCE(MIN(created_at), '') FROM run_verdicts WHERE pipeline_id = ? AND round > ? AND created_at > ?`,
-			v.pipeline, v.round, v.created).Scan(&next); err != nil {
-			return false, err
-		}
-		query := `SELECT 1 FROM run_evidence WHERE pipeline_id = ? AND kind = ? AND outcome = 'fail' AND at > ?`
-		args := []any{v.pipeline, runnerwire.PhaseCI, v.created}
-		if next != "" {
-			query += ` AND at < ?`
-			args = append(args, next)
-		}
-		if hit, err := exists(query, args...); err != nil || hit {
-			return hit, err
-		}
-		// C2: a person asked for changes in the same round.
-		return exists(`SELECT 1 FROM review_votes WHERE pipeline_id = ? AND round = ? AND reviewer = ? AND verdict = ?`,
-			v.pipeline, v.round, humanReviewer, runnerwire.VerdictChanges)
-	case v.role == engine.RoleReviewer && v.pipeline != "" && v.outcome == "fail":
-		// C3: a person approved over it, and no revise followed.
-		approved, err := exists(`SELECT 1 FROM review_votes WHERE pipeline_id = ? AND round = ? AND reviewer = ? AND verdict = ?`,
-			v.pipeline, v.round, humanReviewer, runnerwire.VerdictApprove)
-		if err != nil || !approved {
-			return false, err
-		}
-		revised, err := exists(`SELECT 1 FROM runs WHERE pipeline_id = ? AND kind = ? AND created_at > ?`,
-			v.pipeline, runnerwire.JobRevise, v.created)
-		return !revised, err
-	case v.role == engine.RoleQA && v.outcome == "pass":
-		// C4: a QA fail on the node within 14 days.
-		created, ok := parseStamp(v.created)
-		if !ok {
-			return false, nil
-		}
-		return exists(`SELECT 1 FROM run_verdicts WHERE project = ? AND node_id = ? AND role = ? AND outcome = 'fail'
-   AND created_at > ? AND created_at <= ? AND run_id <> ?`,
-			v.project, v.node, engine.RoleQA, v.created, formatStamp(created.Add(qaContradictionWindow)), v.runID)
-	}
-	return false, nil
+	return out, rows.Err()
 }

@@ -57,12 +57,19 @@ func ScorecardsFor(ctx context.Context, database *db.DB, q Query) (Scorecards, e
 	if track != TrackCode && track != TrackStory {
 		track = TrackAll
 	}
+	key := scorecardKey{db: database, owner: q.OwnerID, project: q.Project, viewer: q.Viewer,
+		since: w.sinceStamp(), days: w.days, track: track}
+	cached, ok, generation := cachedScorecards(key)
+	if ok {
+		return cached, nil
+	}
 	out := Scorecards{Days: w.days, Since: w.sinceOut(), MinSamples: MinSamples, Rows: []ScorecardRow{}}
 	h, err := loadHistory(ctx, database, filter{owner: q.OwnerID, project: q.Project, viewer: q.Viewer, since: w.sinceStamp()})
 	if err != nil {
 		return out, err
 	}
 	out.Rows = scoreRows(h, buildUnits(h), track)
+	storeScorecards(key, out, generation)
 	return out, nil
 }
 

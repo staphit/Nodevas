@@ -328,6 +328,8 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	// and its approval marks the node done (the Executor may not).
 	s.runs.SetEvidence(s.recordEvidence)
 	s.runs.SetOnApproved(s.stagedApproved)
+	// A run that ends or a pipeline that moves changes the scorecards.
+	s.runs.Observe(invalidateScorecardsOn)
 	// Runs waiting for an agent's usage limit to reset are offered again
 	// when it has (internal/runs/handoff.go); the waits are stored, so this
 	// picks up those a restart interrupted.

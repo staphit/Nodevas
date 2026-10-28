@@ -451,6 +451,11 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 	if isExpensivePath(path) {
 		return ClassExpensive, 2.0
 	}
+	// A report costs one token: the page asks for three at once, and the
+	// scorecards under them are cached for a minute.
+	if method == http.MethodGet && analyticsReportPath(path) {
+		return ClassExpensive, 1.0
+	}
 	if isUnsafeMethod(method) {
 		return ClassWrite, 1.0
 	}
@@ -485,6 +490,21 @@ func isExpensivePath(path string) bool {
 	return strings.HasPrefix(path, "/api/remote/") &&
 		path != "/api/remote/config" &&
 		path != "/api/remote/sync/status"
+}
+
+// analyticsReportPath is an analytics report: each loads a window (up to a
+// year) of run history and aggregates it. Settings, retention and route
+// picks are plain reads.
+// analyticsSlotWait is how long an analytics report waits for a slot.
+const analyticsSlotWait = 5 * time.Second
+
+func analyticsReportPath(path string) bool {
+	switch path {
+	case "/api/analytics/insights", "/api/analytics/overview",
+		"/api/analytics/scorecards", "/api/analytics/tiers":
+		return true
+	}
+	return false
 }
 
 func expensivePath(path string) bool {
@@ -817,18 +837,38 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		sem = s.abuse.sem
 	}
 
+	// The analytics page asks for its reports together; on a small host
+	// they wait their turn for a slot rather than fail.
+	var wait <-chan time.Time
+	if analyticsReportPath(path) {
+		timer := time.NewTimer(analyticsSlotWait)
+		defer timer.Stop()
+		wait = timer.C
+	}
 	select {
 	case sem <- struct{}{}:
 		defer func() { <-sem }()
 		c.Next()
+		return
 	case <-c.Request.Context().Done():
 		return
 	default:
-		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, 1)
-		c.Header("Retry-After", "1")
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
-		c.Abort()
 	}
+	if wait != nil {
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+			c.Next()
+			return
+		case <-c.Request.Context().Done():
+			return
+		case <-wait:
+		}
+	}
+	s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, 1)
+	c.Header("Retry-After", "1")
+	httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
+	c.Abort()
 }
 
 // directLocalActor reports a request from the local user of a standalone
