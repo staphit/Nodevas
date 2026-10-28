@@ -1029,6 +1029,76 @@ describe("LaneView", () => {
     });
   });
 
+  // A horizontal timeline runs its dates across and its lanes down. Selecting
+  // a node scrolled across by the lane's index as if the lanes ran across, so
+  // any selection jumped the dates about a fortnight back and today went off
+  // screen. Selecting does not move the dates; a lane out of view is
+  // brought in by scrolling down to it, today staying where it was.
+  describe("selecting a node on a horizontal timeline", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    });
+
+    function mountHorizontal(lanes: number) {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      useApp.getState().updateUIPreference("timelineOrientation", "horizontal");
+      const today = new Date();
+      const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const ids = Array.from({ length: lanes }, (_, index) => `lane-${index}`);
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: ids.map((id) => ({ id, title: id })),
+          edges: [],
+          ui: { plans: { "lane-0": [{ date: key, status: "started" }] } },
+        },
+      });
+      const view = render(<LaneView variant="timeline" {...paneProps} />);
+      const board = view.container.querySelector<HTMLElement>(".board")!;
+      const scrollTo = vi.fn((options: ScrollToOptions) => {
+        board.scrollLeft = options.left ?? board.scrollLeft;
+        board.scrollTop = options.top ?? board.scrollTop;
+      });
+      board.scrollTo = scrollTo as unknown as typeof board.scrollTo;
+      const select = (id: string) =>
+        view.rerender(<LaneView variant="timeline" {...paneProps} selectedNodeId={id} />);
+      return { ...view, board, scrollTo, select };
+    }
+
+    it("leaves the dates where they are", () => {
+      const { board, select } = mountHorizontal(3);
+      const opened = board.scrollLeft;
+      // Opened on today, well past the calendar's start.
+      expect(opened).toBeGreaterThan(0);
+      select("lane-2");
+      expect(board.scrollLeft).toBe(opened);
+      select("lane-0");
+      expect(board.scrollLeft).toBe(opened);
+    });
+
+    it("scrolls down to a lane out of view, not across", () => {
+      const { container, board, scrollTo, select } = mountHorizontal(40);
+      const opened = { left: board.scrollLeft, top: board.scrollTop };
+      select("lane-39");
+      expect(scrollTo).toHaveBeenCalled();
+      expect(board.scrollLeft).toBe(opened.left);
+      const inner = container.querySelector<HTMLElement>(".board-inner")!;
+      const zoom = Number(inner.style.zoom || "1");
+      const head = [...container.querySelectorAll<HTMLElement>(".horizontal-node-head")].find(
+        (element) => element.textContent?.includes("lane-39"),
+      );
+      const laneH = parseFloat(head?.style.height ?? "") || 0;
+      expect(laneH).toBeGreaterThan(0);
+      // Lane 39 sits below the 48px date header and 39 lanes.
+      const top = (48 + 39 * laneH) * zoom;
+      expect(top).toBeGreaterThanOrEqual(board.scrollTop);
+      expect(top + laneH * zoom).toBeLessThanOrEqual(board.scrollTop + 680);
+    });
+  });
+
   // Opening a node lays its drawer over the board's right side. A card that
   // ended up under it was opened and then hidden by its own document; the
   // card is brought into the part of the board still showing, as Ctrl+K does.
