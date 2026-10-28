@@ -22,6 +22,7 @@ import { SidebarBackdrop } from "./components/Sidebar";
 import { useNarrowViewport } from "./components/TopbarOverflow";
 import ExplorerShell from "./explorer/ExplorerShell";
 import { useExplorer } from "./explorer/explorerStore";
+import { useProjectNodeSelection } from "./projectSelection";
 import { GraphPane } from "./components/GraphPane";
 import { TimelinePane } from "./components/TimelinePane";
 import { ConfirmDialogHost } from "./components/ConfirmDialog";
@@ -566,11 +567,11 @@ function ResizableStage({
     setSplit(preferredSplit);
   }, [preferredSplit]);
   const [stageHeight, setStageHeight] = useState(0);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activePane, setActivePane] = useState<"graph" | "timeline" | null>(null);
   const bothOpen = paneOpen.graph && paneOpen.timeline;
   const activeTab = useApp((state) => state.activeTab);
   const activeProject = useApp((state) => state.activeProject);
+  const [selectedNodeId, setSelectedNodeId] = useProjectNodeSelection(activeProject);
 
   useEffect(
     () => () => {
