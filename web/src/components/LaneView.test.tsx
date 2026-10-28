@@ -726,6 +726,66 @@ describe("LaneView", () => {
       expect(todayRow).toBeGreaterThan(0);
       expect(board.scrollTop).toBe(todayRow * step * zoom);
     });
+
+    // A template with no cards, only its four quadrants, opened on a corner
+    // of the first one: the opening framed cards and ignored the groups.
+    it("frames a board's groups when it has no cards, with its hint above them", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(933, 665);
+      const quadrant = (id: string, x: number, y: number) => ({
+        id,
+        title: id,
+        x,
+        y,
+        width: 620,
+        height: 380,
+      });
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: [],
+          edges: [],
+          ui: {
+            groups: [
+              quadrant("do", 0, 0),
+              quadrant("schedule", 640, 0),
+              quadrant("delegate", 0, 400),
+              quadrant("drop", 640, 400),
+            ],
+          },
+        },
+      });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      const board = container.querySelector<HTMLElement>(".board")!;
+      const inner = container.querySelector<HTMLElement>(".board-inner")!;
+      const zoom = Number(inner.style.zoom || "1");
+      const view = {
+        left: board.scrollLeft / zoom,
+        top: board.scrollTop / zoom,
+        right: (board.scrollLeft + 933) / zoom,
+        bottom: (board.scrollTop + 665) / zoom,
+      };
+      const groups = [...container.querySelectorAll<HTMLElement>(".canvas-decoration.group")];
+      expect(groups).toHaveLength(4);
+      for (const group of groups) {
+        const left = parseFloat(group.style.left);
+        const top = parseFloat(group.style.top);
+        // Each quadrant's title bar is on screen.
+        expect(left).toBeLessThan(view.right - 40);
+        expect(left + parseFloat(group.style.width)).toBeGreaterThan(view.left);
+        expect(top).toBeGreaterThanOrEqual(view.top);
+        expect(top + 40).toBeLessThan(view.bottom);
+      }
+      // The empty-state hint sits in the view, above the groups, not over them.
+      const hint = container.querySelector<HTMLElement>(".board-empty")!;
+      const hintTop = parseFloat(hint.style.top);
+      const hintLeft = parseFloat(hint.style.left);
+      const groupsTop = Math.min(...groups.map((group) => parseFloat(group.style.top)));
+      expect(hintLeft).toBeGreaterThanOrEqual(view.left);
+      expect(hintLeft).toBeLessThan(view.right);
+      expect(hintTop).toBeGreaterThan(view.top);
+      expect(hintTop).toBeLessThanOrEqual(groupsTop);
+    });
   });
 
   // The board unmounts whenever the app shows Station or Settings instead, so

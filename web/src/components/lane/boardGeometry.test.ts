@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { addLocalDays, CARD_H, CARD_W, type Col } from "../canvas/geometry";
 import type { TimelineRowItem } from "../timeline/TimelineGrid";
 import type { GraphNode } from "../../types";
-import { nearestFreeGraphCell, timelineOpeningScroll } from "./boardGeometry";
+import { nearestFreeGraphCell, openingScroll, timelineOpeningScroll } from "./boardGeometry";
 
 function card(id: string, index: number, row: number): Col {
   return { node: { id, title: id } as GraphNode, index, row, width: CARD_W, height: CARD_H };
@@ -125,5 +125,29 @@ describe("timelineOpeningScroll", () => {
       orientation: "vertical",
     });
     expect(scroll.top).toBe(100 + 20 + 100);
+  });
+});
+
+// A template board with no cards, only its four quadrant groups: 1,260px
+// wide, which fits a 1,280px view, but not with 72px of room on each side, so
+// the opening started at the left edge and cut the right-hand quadrants.
+describe("openingScroll", () => {
+  const rect = (left: number, top: number, width: number, height: number) => ({
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+  });
+
+  it("centres content that fits the view, however little room it leaves", () => {
+    const quadrants = [
+      rect(1697, 933, 620, 380),
+      rect(2337, 933, 620, 380),
+      rect(1697, 1333, 620, 380),
+      rect(2337, 1333, 620, 380),
+    ];
+    const scroll = openingScroll(quadrants, 1, { width: 1280, height: 700 });
+    expect(scroll.left).toBeLessThanOrEqual(1697);
+    expect(scroll.left + 1280).toBeGreaterThanOrEqual(2957);
   });
 });
