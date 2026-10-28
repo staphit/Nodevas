@@ -156,3 +156,39 @@ describe("CommandPalette: jumping to a node", () => {
     }
   });
 });
+
+describe("CommandPalette: while a search is on its way", () => {
+  it("says it is searching, not that nothing matched, until the answer arrives", async () => {
+    let answer: (value: Awaited<ReturnType<typeof api.search>>) => void = () => {};
+    const searchSpy = vi
+      .spyOn(api, "search")
+      .mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    vi.useFakeTimers();
+    try {
+      open();
+      search("zzqx");
+      // Inside the debounce, and while the request is out: no "no results".
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(searchSpy).toHaveBeenCalledWith("zzqx");
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+      await act(async () => {
+        answer({ results: [] });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("No matching commands or content")).toBeTruthy();
+      expect(screen.queryByText("Searching…")).toBeNull();
+      // A new query is pending again until its own answer arrives.
+      search("zzqxy");
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+      searchSpy.mockRestore();
+    }
+  });
+});
