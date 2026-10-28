@@ -116,9 +116,25 @@ export function Sidebar() {
   const canCreateProjects = !viewer || viewer.role === "admin";
   const toolsId = useId();
   const workspaceExpanded = usePreference("explorerWorkspaceExpanded");
-  const [projectTransferNotice, setProjectTransferNotice] = useState<string | null>(
-    null,
+  // The notice line says what the last project action did, so it belongs to
+  // the project open when it was said: opening another (a switch, an example)
+  // clears it. Actions that open a project set it once that one is open.
+  const [projectNotice, setProjectNotice] = useState<{
+    text: string;
+    project: string;
+  } | null>(null);
+  const setProjectTransferNotice = useCallback(
+    (text: string | null) =>
+      setProjectNotice(
+        text === null ? null : { text, project: useApp.getState().activeProject },
+      ),
+    [],
   );
+  const projectTransferNotice =
+    projectNotice?.project === activeProject ? projectNotice.text : null;
+  useEffect(() => {
+    if (projectNotice && projectNotice.project !== activeProject) setProjectNotice(null);
+  }, [projectNotice, activeProject]);
   const [folderOpenBusy, setFolderOpenBusy] = useState<string | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeMenuTarget | null>(
     null,
