@@ -29,6 +29,9 @@ describe("voice copilot button clearance", () => {
   it.each([
     ".app:has(> .copilot-fab) .drawer .tab-footer",
     ".app:has(> .copilot-fab) .drawer .drawer-more-props > summary",
+    // The last row of an opened "More properties": its Delete node button
+    // ends at the drawer's bottom right, under the button ("Delete [mic]e").
+    ".app:has(> .copilot-fab) .drawer .meta-actions",
     ".app:has(> .copilot-fab) .lane-wrap.timeline.pane-collapsed > .board-title",
   ])("%s keeps clear of the button", (selector) => {
     expect(rules(selector)).toMatch(/padding-right:\s*var\(--copilot-fab-clearance\)/);
