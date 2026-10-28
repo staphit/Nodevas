@@ -5,6 +5,7 @@
  * stays mounted however far away the view goes.
  */
 import { act, fireEvent, render } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
 import { useApp } from "../../store";
@@ -198,6 +199,31 @@ describe("viewport culling", () => {
     act(() => frames.flush());
     expect(card(idAt(38, 24))).not.toBeNull();
     expect(card(idAt(0, 0))).toBeNull();
+  });
+
+  it("pans inside the window without rendering the board, moving only the minimap frame", () => {
+    useApp.setState({ graph: gridGraph(1000) });
+    let commits = 0;
+    const { container } = render(
+      <Profiler id="board" onRender={() => commits++}>
+        <LaneView variant="graph" {...paneProps} />
+      </Profiler>,
+    );
+    const board = container.querySelector<HTMLElement>(".board")!;
+    const frame = container.querySelector<HTMLElement>(".graph-minimap-viewport")!;
+    const before = { left: frame.style.left, top: frame.style.top };
+    commits = 0;
+
+    act(() => {
+      board.scrollLeft += 40;
+      board.scrollTop += 20;
+      fireEvent.scroll(board);
+    });
+    act(() => frames.flush());
+
+    expect(commits).toBe(0);
+    expect(frame.style.left).not.toBe(before.left);
+    expect(frame.style.top).not.toBe(before.top);
   });
 
   it("draws a wire whose ends are both off screen when it crosses the view", () => {
