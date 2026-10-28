@@ -1167,6 +1167,55 @@ describe("LaneView", () => {
       expect(rect.left).toBeGreaterThanOrEqual(0);
       expect(rect.right).toBeLessThanOrEqual(560);
     });
+
+    // The toolbar's New node aims at the middle of what the reader is looking
+    // at. With a drawer open that is the part of the board left of it, not the
+    // board's middle: there, both the form and the card it makes were hidden.
+    it("puts the toolbar's new node and its form clear of an open drawer", async () => {
+      drawerLeft = 560;
+      const drawer = document.createElement("aside");
+      drawer.className = "drawer";
+      document.body.appendChild(drawer);
+      const realCreateNode = useApp.getState().createNode;
+      const createNode = vi.fn(
+        async (
+          node: { title?: string },
+          options?: { position?: { x: number; y: number } },
+        ) => {
+          const current = useApp.getState().graph!;
+          useApp.setState({
+            graph: {
+              ...current,
+              nodes: [...current.nodes, { id: "n", title: node.title ?? "n" }],
+              ui: {
+                ...current.ui,
+                positions: { ...current.ui?.positions, n: options!.position! },
+              },
+            },
+          });
+          return "n";
+        },
+      );
+      useApp.setState({ createNode });
+      try {
+        const user = userEvent.setup();
+        const { container } = mount();
+        await user.click(screen.getByRole("button", { name: /新增節點/ }));
+        const form = container.ownerDocument.querySelector<HTMLElement>(".node-create-menu")!;
+        // The form is at most 380px wide (12-timeline.css).
+        expect(parseFloat(form.style.left) + 380).toBeLessThanOrEqual(560);
+
+        await user.type(screen.getByLabelText(/節點標題/), "新卡片");
+        await user.click(within(form).getByRole("button", { name: "建立節點" }));
+        await act(async () => undefined);
+        expect(createNode).toHaveBeenCalled();
+        const rect = landed(container.querySelector<HTMLElement>('.col-card[data-node-id="n"]')!);
+        expect(rect.left).toBeGreaterThanOrEqual(0);
+        expect(rect.right).toBeLessThanOrEqual(560);
+      } finally {
+        useApp.setState({ createNode: realCreateNode });
+      }
+    });
   });
 
   describe("leaving the board and coming back", () => {
