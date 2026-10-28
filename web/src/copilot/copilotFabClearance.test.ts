@@ -99,6 +99,15 @@ describe("voice copilot button clearance", () => {
     );
   });
 
+  // Settings scrolls as one page, and its last rows end at the bottom right:
+  // under the button sat "Agent performance ›" and Advanced's "7 項 ›", even
+  // scrolled to the end. The page leaves room below them to scroll clear.
+  it("gives Settings room to scroll its last rows out from under the button", () => {
+    expect(rules(".app:has(> .copilot-fab) .settings-page")).toMatch(
+      /padding-bottom:\s*calc\(48px \+ 18px \+ \d+px\)/,
+    );
+  });
+
   // The vertical timeline's date ruler is sticky at its right edge: rows
   // scroll, the ruler never does, so a button over it hides a date for good.
   // While such a timeline is open the button stands left of the ruler.
