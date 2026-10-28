@@ -138,7 +138,7 @@ type Report struct {
 
 // testHookAfterTable, when set, runs after each table is copied inside the
 // import transaction; an error aborts the import. Tests only.
-var testHookAfterTable func(table string) error
+var testHookAfterTable func(table string, tx *sql.Tx) error
 
 // SourcePath is the workspace's legacy SQLite file.
 func SourcePath(root string) string { return db.PathFor(root) }
@@ -486,7 +486,7 @@ func Import(ctx context.Context, target *db.DB, source string) (Result, error) {
 			result.Counts[table] = n
 		}
 		if testHookAfterTable != nil {
-			if err := testHookAfterTable(table); err != nil {
+			if err := testHookAfterTable(table, tx); err != nil {
 				return Result{Source: source}, err
 			}
 		}

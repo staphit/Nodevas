@@ -298,7 +298,7 @@ func TestImportIsAtomicOnMidwayFailure(t *testing.T) {
 	root := legacyWorkspace(t, "nodevas-0025.db")
 	target := testpg.New(t)
 	injected := errors.New("injected failure")
-	testHookAfterTable = func(table string) error {
+	testHookAfterTable = func(table string, _ *sql.Tx) error {
 		if table == "runs" {
 			return injected
 		}
@@ -318,6 +318,40 @@ func TestImportIsAtomicOnMidwayFailure(t *testing.T) {
 	}
 	if !exists(SourcePath(root)) || exists(SourcePath(root)+ImportedSuffix) {
 		t.Error("a failed import renamed the file")
+	}
+}
+
+// A large file is copied in one long transaction on the writer pool, whose
+// statement, lock and idle-in-transaction timeouts are sized for requests.
+// The import lifts them inside its own transaction.
+func TestImportTransactionHasNoRequestTimeouts(t *testing.T) {
+	root := legacyWorkspace(t, "nodevas-0025.db")
+	target := testpg.New(t)
+	seen := map[string]string{}
+	testHookAfterTable = func(table string, tx *sql.Tx) error {
+		if len(seen) > 0 {
+			return nil
+		}
+		for _, name := range []string{"statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout"} {
+			var value string
+			if err := tx.QueryRow("SHOW " + name).Scan(&value); err != nil {
+				return err
+			}
+			seen[name] = value
+		}
+		return nil
+	}
+	t.Cleanup(func() { testHookAfterTable = nil })
+	if _, err := MaybeImport(context.Background(), target, root); err != nil {
+		t.Fatalf("MaybeImport: %v", err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("hook never ran")
+	}
+	for name, value := range seen {
+		if value != "0" {
+			t.Errorf("%s = %q inside the import, want 0", name, value)
+		}
 	}
 }
 
