@@ -780,18 +780,19 @@ describe("LaneView", () => {
     it("opens with the cards clear of the minimap when they have room to be", () => {
       mockNarrowViewport(false);
       mockBoardSize(773, 665);
-      // jsdom has no layout: the board fills the pane from 0,0 and the map
-      // sits where the stylesheet puts it, 14px in and 76px up (the Copilot
-      // button is below it), at whatever size it draws itself.
+      // jsdom has no layout: the board fills the pane from 0,0 with 15px
+      // scrollbars past its 773x665 client area, and the map sits where the
+      // stylesheet puts it, 14px in and 76px up from the pane's corner (the
+      // Copilot button is below it), at whatever size it draws itself.
       const realRect = HTMLElement.prototype.getBoundingClientRect;
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
         this: HTMLElement,
       ) {
-        if (this.classList.contains("board")) return new DOMRect(0, 0, 773, 665);
+        if (this.classList.contains("board")) return new DOMRect(0, 0, 788, 680);
         if (this.classList.contains("graph-minimap")) {
           const width = parseFloat(this.style.width) || 170;
           const height = parseFloat(this.style.height) || 108;
-          return new DOMRect(773 - 14 - width, 665 - 76 - height, width, height);
+          return new DOMRect(788 - 14 - width, 680 - 76 - height, width, height);
         }
         return realRect.call(this);
       });

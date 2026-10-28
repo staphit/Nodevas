@@ -99,6 +99,8 @@ export function boardMetrics({
 
 /** Room the opening scroll leaves between the view's edge and the first card. */
 const OPENING_PADDING = 72;
+/** Past this many cards the opening does not search for room beside the minimap. */
+const CORNER_SEARCH_MAX_CARDS = 80;
 
 /**
  * Where a board this session has not shown opens. With no content it is the
@@ -110,11 +112,16 @@ const OPENING_PADDING = 72;
  * nothing but margin when they did not.
  *
  * `cards` are the content's rectangles, in board pixels before the zoom.
+ * `corner` is what floats over the view's bottom-right corner — the minimap —
+ * in view pixels: content that fits is moved within its room in the view, as
+ * little as will do, so no card sits under it — or, with no such room, so as
+ * little of the cards as can be does.
  */
 export function openingScroll(
   cards: readonly Rect[],
   zoom: number,
   viewport: { width: number; height: number },
+  corner?: { width: number; height: number } | null,
 ): { left: number; top: number } {
   if (cards.length === 0) {
     return { left: GRAPH_PAN_BUFFER_X * zoom, top: GRAPH_PAN_BUFFER_Y * zoom };
@@ -145,10 +152,78 @@ export function openingScroll(
         : from * zoom - padding;
     return Math.max(0, scroll);
   };
-  return {
+  const opening = {
     left: axis(bounds.left, bounds.right, anchor.left, viewport.width),
     top: axis(bounds.top, bounds.bottom, anchor.top, viewport.height),
   };
+  if (!corner || corner.width <= 0 || corner.height <= 0) return opening;
+  if (cards.length > CORNER_SEARCH_MAX_CARDS) return opening;
+  const cornerLeft = viewport.width - corner.width;
+  const cornerTop = viewport.height - corner.height;
+  // How much of the content the corner covers with the view scrolled here.
+  const covered = (left: number, top: number) => {
+    let area = 0;
+    for (const card of cards) {
+      const width = card.right * zoom - left - Math.max(cornerLeft, card.left * zoom - left);
+      const height = card.bottom * zoom - top - Math.max(cornerTop, card.top * zoom - top);
+      if (width > 0 && height > 0) area += width * height;
+    }
+    return area;
+  };
+  const openingCovered = covered(opening.left, opening.top);
+  if (openingCovered === 0) return opening;
+  // Scrolling further right or down moves the content away from the corner;
+  // along an axis the content fits, as far as keeps all of it in view. The
+  // covered area only turns where a card's edge crosses the corner's, so
+  // those scrolls and the two ends are the only ones worth trying.
+  const candidates = (
+    from: number,
+    start: number,
+    end: number,
+    size: number,
+    cornerStart: number,
+    edges: number[],
+  ) => {
+    const most = (end - start) * zoom <= size ? Math.max(from, start * zoom) : from;
+    const values = new Set([from, most]);
+    for (const edge of edges) {
+      const value = edge * zoom - cornerStart;
+      if (value > from && value < most) values.add(value);
+    }
+    return [...values];
+  };
+  const lefts = candidates(
+    opening.left,
+    bounds.left,
+    bounds.right,
+    viewport.width,
+    cornerLeft,
+    cards.flatMap((card) => [card.left, card.right]),
+  );
+  const tops = candidates(
+    opening.top,
+    bounds.top,
+    bounds.bottom,
+    viewport.height,
+    cornerTop,
+    cards.flatMap((card) => [card.top, card.bottom]),
+  );
+  // Least covered first, then the least moved from the plain opening.
+  let best = opening;
+  let leastCovered = openingCovered;
+  let leastMoved = 0;
+  for (const left of lefts) {
+    for (const top of tops) {
+      const area = covered(left, top);
+      const moved = left - opening.left + (top - opening.top);
+      if (area < leastCovered || (area === leastCovered && moved < leastMoved)) {
+        best = { left, top };
+        leastCovered = area;
+        leastMoved = moved;
+      }
+    }
+  }
+  return best;
 }
 
 /**

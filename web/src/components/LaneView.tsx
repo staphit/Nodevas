@@ -370,6 +370,21 @@ export function LaneView({
   // Set once the cards are laid out below; the opening scroll reads it.
   const openingCardsRef = useRef<() => Rect[]>(() => []);
   const timelineOpeningRef = useRef(() => ({ left: 0, top: 0 }));
+  // The minimap floats over the board's bottom-right corner; the opening
+  // keeps the cards out from under it when they have room to be.
+  const minimapRef = useRef<HTMLDivElement>(null);
+  const openingCornerRef = useRef(() => {
+    const board = boardRef.current;
+    const map = minimapRef.current;
+    if (!board || !map) return null;
+    const view = board.getBoundingClientRect();
+    const rect = map.getBoundingClientRect();
+    const right = view.left + board.clientLeft + board.clientWidth;
+    const bottom = view.top + board.clientTop + board.clientHeight;
+    if (rect.width <= 0 || rect.left >= right || rect.top >= bottom) return null;
+    // A little room between a card and the map's edge.
+    return { width: right - rect.left + 8, height: bottom - rect.top + 8 };
+  });
   const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
@@ -378,6 +393,7 @@ export function LaneView({
     zoom: viewScale,
     userZoom: zoom,
     openingCards: openingCardsRef,
+    openingCorner: openingCornerRef,
     timelineOpening: timelineOpeningRef,
     timelineOrientation,
     contentReady: graphReady,
@@ -1638,6 +1654,7 @@ export function LaneView({
           graphOffsetY={graphOffsetY}
           centerX={centerX}
           rowTop={rowTop}
+          mapRef={minimapRef}
         />
       )}
       {isGraph && problemsOpen && (

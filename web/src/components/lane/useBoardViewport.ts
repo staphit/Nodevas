@@ -25,6 +25,7 @@ export function useBoardViewport({
   zoom,
   userZoom = zoom,
   openingCards,
+  openingCorner,
   timelineOpening,
   timelineOrientation,
   contentReady = true,
@@ -45,6 +46,11 @@ export function useBoardViewport({
    * the opening needs them: it calls it after the render that set it.
    */
   openingCards?: RefObject<() => Rect[]>;
+  /**
+   * What floats over the view's bottom-right corner — the minimap — in view
+   * pixels, read with the cards: the opening keeps them out from under it.
+   */
+  openingCorner?: RefObject<() => { width: number; height: number } | null>;
   /** The timeline's opening scroll, read the same way as openingCards. */
   timelineOpening?: RefObject<() => { left: number; top: number }>;
   /** A new orientation is a new layout, so it opens afresh too. */
@@ -94,7 +100,12 @@ export function useBoardViewport({
     if (!remembered && !contentReady) return;
     const scroll = remembered
       ? restoredScroll(remembered, zoom, boardViewport)
-      : openingScroll(openingCards?.current?.() ?? [], zoom, boardViewport);
+      : openingScroll(
+          openingCards?.current?.() ?? [],
+          zoom,
+          boardViewport,
+          openingCorner?.current?.(),
+        );
     board.scrollLeft = scroll.left;
     board.scrollTop = scroll.top;
     graphViewportKeyRef.current = viewportKey;

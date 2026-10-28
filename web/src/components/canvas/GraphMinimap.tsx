@@ -6,9 +6,33 @@
  * correct at any zoom without recomputing the layout.
  */
 
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, type Ref } from "react";
 import { ROW_H, type Col } from "./geometry";
 import { useI18n } from "../../i18n";
+
+const MAP_W = 170;
+const MAP_H = 108;
+/** The smallest pane the map keeps its full size in. */
+const FULL_PANE_W = 1100;
+const FULL_PANE_H = 700;
+
+/**
+ * The map's size in a pane of this size: 170x108 in a pane at least
+ * 1100x700, scaled down with a smaller one — with the timeline open below or
+ * a wide explorer it otherwise took a third of the graph pane and covered
+ * the cards it is there to help find — but never under 60%, where it stops
+ * reading as a map. Not measured yet, it keeps its full size.
+ */
+export function minimapSize(pane: { width: number; height: number }): {
+  width: number;
+  height: number;
+} {
+  const scale =
+    pane.width > 0 && pane.height > 0
+      ? Math.max(0.6, Math.min(1, pane.width / FULL_PANE_W, pane.height / FULL_PANE_H))
+      : 1;
+  return { width: Math.round(MAP_W * scale), height: Math.round(MAP_H * scale) };
+}
 
 export function GraphMinimap({
   cols,
@@ -22,6 +46,7 @@ export function GraphMinimap({
   graphOffsetY,
   centerX,
   rowTop,
+  mapRef,
 }: {
   cols: Col[];
   selectedGraphNodeIDs: Set<string>;
@@ -35,6 +60,8 @@ export function GraphMinimap({
   graphOffsetY: number;
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
+  /** The map's element, for the board's opening to keep cards out from under it. */
+  mapRef?: Ref<HTMLDivElement>;
 }) {
   const { t } = useI18n();
   // The board hands down new layout functions every render; the dots are laid
@@ -88,7 +115,9 @@ export function GraphMinimap({
   }, [boardRef, zoom, boardW, svgH]);
   return (
     <div
+      ref={mapRef}
       className="graph-minimap"
+      style={minimapSize(boardViewport)}
       role="img"
       aria-label={t("canvas.minimapAria")}
       onPointerDown={(event) => {

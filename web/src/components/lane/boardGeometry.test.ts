@@ -193,9 +193,27 @@ describe("openingScroll", () => {
       expect(clear).toEqual(openingScroll(cards, 1, viewport));
     });
 
-    it("stays centred when no room in the view keeps the content clear", () => {
-      const big = { width: 400, height: 400 };
-      expect(openingScroll(cards, 1, viewport, big)).toEqual(openingScroll(cards, 1, viewport));
+    // 150% text, explorer 520: the cards fit the view with 3px to spare
+    // across and nothing places them all clear of the map, but sliding them
+    // up leaves only the foot of 'Weekly review' under it, not its title.
+    it("covers as little of the content as it can when no room keeps it clear", () => {
+      const tight = { width: 733, height: 647 };
+      const map = { width: 120, height: 141 };
+      const coveredAt = (scroll: { left: number; top: number }) =>
+        onScreen(scroll)
+          .map(
+            (card) =>
+              Math.max(0, card.right - Math.max(card.left, tight.width - map.width)) *
+              Math.max(0, card.bottom - Math.max(card.top, tight.height - map.height)),
+          )
+          .reduce((sum, area) => sum + area, 0);
+      const plain = openingScroll(cards, 1, tight);
+      const scroll = openingScroll(cards, 1, tight, map);
+      expect(coveredAt(scroll)).toBeLessThan(coveredAt(plain) / 4);
+      for (const card of onScreen(scroll)) {
+        expect(card.top).toBeGreaterThanOrEqual(0);
+        expect(card.right).toBeLessThanOrEqual(tight.width);
+      }
     });
   });
 });
