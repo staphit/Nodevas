@@ -86,6 +86,12 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 					strings.HasPrefix(filepath.Clean(ev.Name), nodesDir) {
 					store.InvalidateNodeTree(root)
 				}
+				// A node's files changed from outside the store: its page
+				// listings re-check their files (pages_cache.go). The store's
+				// own writes are regular files and need not drop them.
+				if strings.HasPrefix(filepath.Clean(ev.Name), nodesDir) && !st.WasSelfWrite(ev.Name) {
+					st.InvalidatePageLists()
+				}
 				// graph.yaml changed under the store (git checkout, an agent,
 				// an editor). Reads verify the bytes anyway; dropping the
 				// parsed graph now just frees it before the next read.
