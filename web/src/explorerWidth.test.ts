@@ -7,6 +7,7 @@ import {
   EXPLORER_MIN_W,
   EXPLORER_RAIL_W,
   explorerMinWidth,
+  explorerRailWidth,
   explorerShellStyle,
   explorerWidthFor,
 } from "./explorerWidth";
@@ -26,11 +27,28 @@ describe("explorer width", () => {
     expect(explorerMinWidth(0.9)).toBe(EXPLORER_MIN_W + EXPLORER_RAIL_W);
   });
 
-  it("counts the tab rail as the stylesheet draws it", () => {
+  // The rail's tabs carry a label under the icon. At 150% text "Nodes" was
+  // 44px on a 40px tab and "Agent" filled it edge to edge, so the active
+  // tab's outline ran through the "A". The tabs, and the rail with them,
+  // widen with the text size (never below their width at 100%).
+  it("counts the tab rail as the stylesheet draws it, at every text size", () => {
     const css = readFileSync(join(__dirname, "explorer", "explorer.css"), "utf8");
-    const rail = /\.ex-rail \{[^}]*flex: 0 0 (\d+)px;[^}]*border-right: (\d+)px/.exec(css);
+    const rail =
+      /\.ex-rail \{[^}]*flex: 0 0 calc\((\d+)px \+ (\d+)px \* max\(1, var\(--font-scale, 1\)\)\);[^}]*border-right: (\d+)px/.exec(
+        css,
+      );
     expect(rail).not.toBeNull();
-    expect(EXPLORER_RAIL_W).toBe(Number(rail![1]) + Number(rail![2]));
+    const [, padding, tab, border] = rail!.map(Number);
+    const tabRule = /\.ex-rail button \{([^}]*)\}/.exec(css);
+    expect(tabRule?.[1]).toMatch(new RegExp(String.raw`width: calc\(${tab}px \* max\(1, var\(--font-scale, 1\)\)\)`));
+    for (const scale of [0.9, 1, 1.25, 1.5]) {
+      expect(explorerRailWidth(scale)).toBe(Math.round(padding + tab * Math.max(1, scale)) + border);
+    }
+    expect(EXPLORER_RAIL_W).toBe(explorerRailWidth(1));
+  });
+
+  it("keeps the panel's minimum beside a rail widened for larger text", () => {
+    expect(explorerMinWidth(1.5) - explorerRailWidth(1.5)).toBeGreaterThanOrEqual(300);
   });
 
   it("starts wide enough for the panel's minimum", () => {
