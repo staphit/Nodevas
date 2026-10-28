@@ -119,7 +119,7 @@ describe("useBoardColumns graph layout", () => {
     const graph = wideGraph();
     graph.ui = {
       positions: Object.fromEntries(
-        graph.nodes.map((node, index) => [
+        (graph.nodes ?? []).map((node, index) => [
           node.id,
           index < 500 ? { x: index, y: 0 } : { x: 499.976, y: 0 },
         ]),
