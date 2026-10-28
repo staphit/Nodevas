@@ -58,3 +58,69 @@ describe("Explorer rail", () => {
     expect((useApp.getState().preferences as unknown as Record<string, unknown>).explorerTab).toBe("git");
   });
 });
+
+/** jsdom's matchMedia reports no match; the phone breakpoint is faked here. */
+function mockViewport(narrow: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: narrow,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
+}
+
+const collapsed = () =>
+  (useApp.getState().preferences as unknown as Record<string, unknown>).explorerCollapsed;
+
+// On a phone the Files, Git and Agent panels overlay the board, and only the
+// Nodes tab had a way to fold the explorer away.
+describe("Folding the explorer from any tab", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["Files", "Git", "Agent"])("%s has a collapse control", async (name) => {
+    render(<ExplorerShell />);
+    await userEvent.click(screen.getByRole("button", { name }));
+    const collapse = screen.getByRole("button", { name: "Collapse project explorer" });
+    expect(collapse).toHaveAttribute("aria-controls", "project-explorer");
+    await userEvent.click(collapse);
+    expect(collapsed()).toBe(true);
+  });
+
+  it("leaves Nodes to its own collapse control", () => {
+    render(<ExplorerShell />);
+    const rail = screen.getByRole("group", { name: "Sidebar tabs" });
+    expect(within(rail).queryByRole("button", { name: "Collapse project explorer" })).not.toBeInTheDocument();
+  });
+
+  it("closes the phone overlay when the open tab is tapped again", async () => {
+    mockViewport(true);
+    render(<ExplorerShell />);
+    await userEvent.click(screen.getByRole("button", { name: "Git" }));
+    expect(collapsed()).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Git" }));
+    expect(collapsed()).toBe(true);
+  });
+
+  it("keeps the open tab open on a wide window, where the panel sits beside the board", async () => {
+    mockViewport(false);
+    render(<ExplorerShell />);
+    await userEvent.click(screen.getByRole("button", { name: "Git" }));
+    await userEvent.click(screen.getByRole("button", { name: "Git" }));
+    expect(collapsed()).toBe(false);
+  });
+
+  it("closes the phone overlay on Escape", async () => {
+    mockViewport(true);
+    render(<ExplorerShell />);
+    await userEvent.click(screen.getByRole("button", { name: "Files" }));
+    await userEvent.keyboard("{Escape}");
+    expect(collapsed()).toBe(true);
+  });
+});
