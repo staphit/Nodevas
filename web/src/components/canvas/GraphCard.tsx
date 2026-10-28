@@ -86,10 +86,36 @@ export interface GraphCardProps {
 
 /**
  * Where a lifted card is drawn. The offset changes every frame of a drag and
- * is written to the board as two custom properties, so the card itself only
- * renders when it is picked up and when it is put down.
+ * is written to the lifted cards themselves as two custom properties (see
+ * paintLiftedCards), so the card only renders when it is picked up and when
+ * it is put down.
  */
 export const LIFTED_TRANSFORM = "translate(var(--drag-dx, 0px), var(--drag-dy, 0px))";
+
+/**
+ * Writes a drag's live offset onto the cards being moved, and nowhere else.
+ * Custom properties inherit: written on the board surface, every card, gate
+ * and wire under it has its style recomputed each frame, which on a board of
+ * thousands is the whole frame and more. The properties are set on a card
+ * before it is drawn lifted, so it never shows a stale offset, and left on it
+ * afterwards, where nothing reads them until the next drag overwrites them.
+ */
+export function paintLiftedCards(
+  surface: HTMLElement | null,
+  ids: readonly string[],
+  dx: number,
+  dy: number,
+) {
+  if (!surface || ids.length === 0) return;
+  const lifted = new Set(ids);
+  const x = `${dx}px`;
+  const y = `${dy}px`;
+  for (const card of surface.querySelectorAll<HTMLElement>("[data-node-id]")) {
+    if (!lifted.has(card.dataset.nodeId ?? "")) continue;
+    card.style.setProperty("--drag-dx", x);
+    card.style.setProperty("--drag-dy", y);
+  }
+}
 
 export const GraphCard = memo(function GraphCard({
   node: n,

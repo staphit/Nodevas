@@ -28,6 +28,7 @@ import { useMilestoneDrag } from "./timeline/useMilestoneDrag";
 import { usePlanMenu } from "./timeline/usePlanMenu";
 import { useNarrowViewport } from "./TopbarOverflow";
 import { GraphCanvas } from "./canvas/GraphCanvas";
+import { paintLiftedCards } from "./canvas/GraphCard";
 import { GraphMinimap } from "./canvas/GraphMinimap";
 import { ProblemsPanel, problemCount } from "./canvas/ProblemsPanel";
 import { useCardResize } from "./canvas/useCardResize";
@@ -543,9 +544,7 @@ export function LaneView({
   const lastDragSentAt = useRef(0);
   const dragReported = useRef(false);
   const paintDrag = (live: CardDragState) => {
-    const surface = boardInnerRef.current;
-    surface?.style.setProperty("--drag-dx", `${live.dx}px`);
-    surface?.style.setProperty("--drag-dy", `${live.dy}px`);
+    paintLiftedCards(boardInnerRef.current, live.ids, live.dx, live.dy);
     if (!isGraph || !live.moved) return;
     // About thirty a second: enough to read as motion, far under the socket's
     // stream budget, and the gesture is redrawn locally either way.
