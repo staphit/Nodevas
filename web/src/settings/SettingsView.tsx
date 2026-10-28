@@ -154,7 +154,7 @@ export default function SettingsView() {
             {hits.map((hit) => (
               <button key={`${hit.entry.label}-${hit.entry.page}`} type="button" onClick={() => pick(hit)}>
                 <span>{hit.label}</span>
-                <small>{hit.where}</small>
+                <small title={hit.where}>{hit.where}</small>
               </button>
             ))}
             {hits.length === 0 && (

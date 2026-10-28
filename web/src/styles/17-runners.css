@@ -159,11 +159,11 @@
   min-width: 0;
   gap: 8px;
 }
-.runner-repos li span {
-  overflow: hidden;
+.runner-repo-path {
+  min-width: 0;
   color: var(--text-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 .runner-token {
   display: flex;

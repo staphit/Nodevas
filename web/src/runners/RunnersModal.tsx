@@ -260,7 +260,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
       <div className="runner-card-head">
         <span className={`runner-dot${runner.online ? " online" : ""}`} aria-hidden="true" />
         <div className="runner-card-title">
-          <strong>{runnerDisplayName(t, runner.name)}</strong>
+          <strong title={runnerDisplayName(t, runner.name)}>{runnerDisplayName(t, runner.name)}</strong>
           {/* Cut with an ellipsis where the card is narrow; whole on hover. */}
           <span title={summary}>{summary}</span>
         </div>
@@ -321,7 +321,10 @@ function RunnerCard({ runner }: { runner: Runner }) {
                   {repos.map((repo) => (
                     <li key={repo.id}>
                       <strong>{repo.name}</strong>
-                      <span>{repo.remote || repo.path}</span>
+                      {/* Wrapped whole, never cut: a path is read and copied. */}
+                      <span className="runner-repo-path" title={repo.remote || repo.path}>
+                        {repo.remote || repo.path}
+                      </span>
                     </li>
                   ))}
                 </ul>

@@ -10,6 +10,7 @@ import {
   shouldReloadForPreloadError,
 } from "./preloadReload";
 import { resetPreferences, VIEW_SELECTION_PREFERENCES } from "./preferences";
+import { installTruncationTitles } from "./truncationTitle";
 import "./app.css";
 
 // A chunk that will not load (vite:preloadError) usually means the server was
@@ -46,6 +47,9 @@ function resetView() {
   resetPreferences(VIEW_SELECTION_PREFERENCES);
   window.location.reload();
 }
+
+// Text cut with an ellipsis shows its whole value on hover, app-wide.
+installTruncationTitles(document);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

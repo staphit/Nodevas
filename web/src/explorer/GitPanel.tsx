@@ -100,7 +100,9 @@ function RepoChanges({ repo }: { repo: RepoSummary }) {
             onClick={() => open(diff)}
           >
             <span className="ex-ico">{entry.mark}</span>
-            <span className="ex-name">{baseName(entry.path)}</span>
+            <span className="ex-name" title={entry.path}>
+              {baseName(entry.path)}
+            </span>
           </button>
         ))
       )}
@@ -160,7 +162,9 @@ export default function GitPanel() {
                     onClick={() => open(target)}
                   >
                     <span className="ex-ico">{change.mark}</span>
-                    <span className="ex-name">{baseName(change.path)}</span>
+                    <span className="ex-name" title={change.path}>
+                      {baseName(change.path)}
+                    </span>
                   </button>
                 );
               })
@@ -189,7 +193,9 @@ export default function GitPanel() {
                   <span className="ex-ico" aria-hidden="true">
                     ⎇
                   </span>
-                  <span className="ex-name">{run.branch}</span>
+                  <span className="ex-name" title={run.branch}>
+                    {run.branch}
+                  </span>
                   {verdict && <span className={`ex-chip ${verdict.cls}`}>{t(verdict.key)}</span>}
                   {ci && <span className={`ex-chip ${ci.cls}`}>{t(ci.key)}</span>}
                 </button>
@@ -225,7 +231,9 @@ export default function GitPanel() {
                     <span className="ex-ico" aria-hidden="true">
                       ○
                     </span>
-                    <span className="ex-name">{commitSubjectText(commit.subject, language)}</span>
+                    <span className="ex-name" title={commitSubjectText(commit.subject, language)}>
+                      {commitSubjectText(commit.subject, language)}
+                    </span>
                     <span className="ex-meta">{clockText(commit.at)}</span>
                   </button>
                 );
