@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  EXPLORER_DEFAULT_W,
   EXPLORER_MAX_W,
   EXPLORER_MIN_W,
+  EXPLORER_RAIL_W,
   explorerMinWidth,
   explorerShellStyle,
   explorerWidthFor,
@@ -12,15 +14,31 @@ import {
 // At 200-220px the explorer wrapped its own heading (專案總 / 管), gave project
 // names 22-32px and node titles 38px; at 150% text a name was one letter. The
 // narrowest it goes is where its rows still read, and larger text needs more.
+//
+// The width dragged is the whole shell, tab rail included; the rows live in
+// the panel beside the rail. Counting the rail into the minimum left the panel
+// 207px at "260": a short project name was cut and its current-project badge
+// wrapped. The minimum is the panel's, with the rail added on top.
 describe("explorer width", () => {
   it("never goes below where a row still reads", () => {
     expect(EXPLORER_MIN_W).toBeGreaterThanOrEqual(260);
-    expect(explorerMinWidth(1)).toBe(EXPLORER_MIN_W);
-    expect(explorerMinWidth(0.9)).toBe(EXPLORER_MIN_W);
+    expect(explorerMinWidth(1)).toBe(EXPLORER_MIN_W + EXPLORER_RAIL_W);
+    expect(explorerMinWidth(0.9)).toBe(EXPLORER_MIN_W + EXPLORER_RAIL_W);
+  });
+
+  it("counts the tab rail as the stylesheet draws it", () => {
+    const css = readFileSync(join(__dirname, "explorer", "explorer.css"), "utf8");
+    const rail = /\.ex-rail \{[^}]*flex: 0 0 (\d+)px;[^}]*border-right: (\d+)px/.exec(css);
+    expect(rail).not.toBeNull();
+    expect(EXPLORER_RAIL_W).toBe(Number(rail![1]) + Number(rail![2]));
+  });
+
+  it("starts wide enough for the panel's minimum", () => {
+    expect(EXPLORER_DEFAULT_W).toBeGreaterThanOrEqual(explorerMinWidth(1));
   });
 
   it("asks for more room at larger text, within the maximum", () => {
-    expect(explorerMinWidth(1.5)).toBeGreaterThanOrEqual(300);
+    expect(explorerMinWidth(1.5) - EXPLORER_RAIL_W).toBeGreaterThanOrEqual(300);
     expect(explorerMinWidth(1.5)).toBeLessThanOrEqual(EXPLORER_MAX_W);
     expect(explorerMinWidth(1.25)).toBeGreaterThan(explorerMinWidth(1));
   });
@@ -28,7 +46,8 @@ describe("explorer width", () => {
   it("widens a stored width that is too narrow for the text size, and leaves wider ones", () => {
     expect(explorerWidthFor(260, 1.5)).toBe(explorerMinWidth(1.5));
     expect(explorerWidthFor(400, 1.5)).toBe(400);
-    expect(explorerWidthFor(304, 1)).toBe(304);
+    expect(explorerWidthFor(400, 1)).toBe(400);
+    expect(explorerWidthFor(304, 1)).toBe(explorerMinWidth(1));
   });
 });
 
