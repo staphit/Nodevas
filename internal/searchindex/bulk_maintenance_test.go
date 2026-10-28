@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
@@ -93,11 +94,26 @@ func explainRank(tb testing.TB, database *db.DB, root, query string, analyze boo
 }
 
 // checkRankPlanUsesIndexes fails unless both GIN indexes answer the token
-// probes and no probe scans the table.
+// probes and no probe scans the table testing every tsvector. (The project's
+// N and average length are one aggregate over token_count, which may well be
+// a sequential scan of a one-project table; that one reads no tsvector.)
 func checkRankPlanUsesIndexes(tb testing.TB, plan string) {
 	tb.Helper()
-	if strings.Contains(plan, "Seq Scan on search_documents") {
-		tb.Errorf("ranked query scans search_documents sequentially:\n%s", plan)
+	lines := strings.Split(plan, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "Seq Scan on search_documents") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		for _, below := range lines[i+1:] {
+			if len(below)-len(strings.TrimLeft(below, " ")) <= indent {
+				break
+			}
+			if strings.Contains(below, "_tokens @@") {
+				tb.Errorf("a token probe scans search_documents sequentially:\n%s", plan)
+				return
+			}
+		}
 	}
 	for _, index := range []string{"search_documents_meta_tokens", "search_documents_body_tokens"} {
 		if !strings.Contains(plan, "Index Scan on "+index) {
@@ -132,9 +148,11 @@ func TestBulkLoadLeavesRankOnTheGINIndexes(t *testing.T) {
 	const docs = 2000
 	root := writeBulkProject(t, docs, 400)
 	m := NewManagerWithDB(database)
+	started := time.Now()
 	if _, err := m.RankContext(ctx, root, "warm", 10); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("bulk load of %d documents: %s", docs, time.Since(started))
 	if n := count(t, database, `SELECT count(*) FROM search_documents`); n != docs {
 		t.Fatalf("%d rows after the bulk load, want %d", n, docs)
 	}

@@ -132,6 +132,10 @@ type projectIndex struct {
 	pending      []pendingWrite
 	pendingAt    map[string]int
 	pendingBytes int
+
+	// unmaintained counts rows written since the table was last maintained
+	// (docStore.maintain); a bulk write past bulkWrites triggers it.
+	unmaintained int
 }
 
 // pendingWrite is one node queued for the database.
@@ -145,6 +149,11 @@ const (
 	// commit cheap, few enough bytes that one transaction stays small.
 	writeBatch      = 64
 	writeBatchBytes = 4 << 20
+
+	// bulkWrites is how many rows one graph refresh or reconcile writes
+	// before it maintains the table afterwards: a cold build, a large import,
+	// a rescan after Rebuild. A few edits never pay for an ANALYZE.
+	bulkWrites = 256
 )
 
 func newProjectIndex(root string, docs *docStore) *projectIndex {
@@ -338,6 +347,7 @@ func (ix *projectIndex) flush(ctx context.Context) error {
 	if err := ix.store.putMany(ctx, ix.project, batch); err != nil {
 		return err
 	}
+	ix.unmaintained += len(batch)
 	for _, write := range batch {
 		doc := write.doc
 		ix.setDoc(&document{id: doc.nodeID, title: doc.title, meta: doc.meta, path: doc.path, stamp: write.stamp})
@@ -465,7 +475,18 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 	}
 	ix.order = order
 	ix.graph = stampFile(ix.root, graphPath)
+	ix.maintainAfterBulk(ctx)
 	return nil
+}
+
+// maintainAfterBulk maintains the table once enough rows were written since
+// it last was.
+func (ix *projectIndex) maintainAfterBulk(ctx context.Context) {
+	if ix.unmaintained < bulkWrites {
+		return
+	}
+	ix.unmaintained = 0
+	ix.store.maintain(ctx)
 }
 
 // rewriteMeta replaces a node's metadata without touching its files.
@@ -601,6 +622,7 @@ func (ix *projectIndex) reconcile(ctx context.Context) (bool, error) {
 	if err := ix.flush(ctx); err != nil {
 		return false, err
 	}
+	ix.maintainAfterBulk(ctx)
 	return changed, nil
 }
 

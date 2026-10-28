@@ -72,6 +72,20 @@ const maxLexemeBytes = 1_000_000
 //     finds text in the part whose bigrams were not kept.
 const Schema = db.SearchIndexSchema
 
+// SchemaTuning is what ensure runs after Schema, as migration 0029 did for a
+// migrated table (db.SearchIndexTuning): both GIN indexes with fastupdate
+// off, so a bulk load never leaves a pending list for the planner to price
+// the index probes off.
+const SchemaTuning = db.SearchIndexTuning
+
+// cleanPendingLists merges whatever sits in the GIN indexes' pending lists
+// into the index proper. With fastupdate off there is nothing to merge; it
+// stays cheap insurance for a server that turned it back on.
+const cleanPendingLists = `
+SELECT gin_clean_pending_list(v.idx)
+FROM (VALUES (to_regclass('search_documents_meta_tokens')), (to_regclass('search_documents_body_tokens'))) AS v(idx)
+WHERE v.idx IS NOT NULL`
+
 // schemaLock is the advisory lock ensure holds while it runs Schema. It is the
 // key internal/db's migrations hold, so recreating the table can never race a
 // migration creating it, nor two processes race each other: CREATE TABLE IF
@@ -141,10 +155,25 @@ SELECT to_regclass('search_documents') IS NOT NULL
 			if _, err := tx.ExecContext(ctx, Schema); err != nil {
 				return fmt.Errorf("search schema: %w", err)
 			}
+			if _, err := tx.ExecContext(ctx, SchemaTuning); err != nil {
+				return fmt.Errorf("search schema: %w", err)
+			}
 			return nil
 		})
 	})
 	return s.err
+}
+
+// maintain runs after a bulk reindex: it empties the GIN pending lists and
+// refreshes the planner's statistics for search_documents. A table that went
+// from empty to thousands of rows without either is planned as if it were
+// still empty, and the ranked query's token probes flip to sequential scans.
+//
+// It is best effort. The index is correct without it, only slower, and a
+// role that may write the table but not ANALYZE it must not fail the build.
+func (s *docStore) maintain(ctx context.Context) {
+	_, _ = s.sql.ExecContext(ctx, cleanPendingLists)
+	_, _ = s.sql.ExecContext(ctx, `ANALYZE search_documents`)
 }
 
 // isUndefinedTable reports a query that failed because search_documents is

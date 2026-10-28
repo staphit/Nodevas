@@ -1010,6 +1010,12 @@ CREATE TABLE analytics_dismissed (
 );
 `,
 	},
+	{
+		// The search index's GIN indexes without a pending list. See
+		// SearchIndexTuning.
+		name: "0029_search_gin_fastupdate",
+		stmt: SearchIndexTuning,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as
@@ -1033,6 +1039,31 @@ CREATE TABLE IF NOT EXISTS search_documents (
 CREATE INDEX IF NOT EXISTS search_documents_meta_tokens ON search_documents USING gin (meta_tokens);
 CREATE INDEX IF NOT EXISTS search_documents_body_tokens ON search_documents USING gin (body_tokens);
 CREATE INDEX IF NOT EXISTS search_documents_oversize ON search_documents (project) WHERE oversize;
+`
+
+// SearchIndexTuning is migration 0029, and what internal/searchindex runs
+// after recreating a dropped table (searchindex.SchemaTuning): the two GIN
+// indexes with fastupdate off, and whatever an older server left in their
+// pending lists merged into the index proper.
+//
+// With fastupdate on (PostgreSQL's default) new entries go to an unsorted
+// pending list that every probe scans in full and that is merged only by
+// (auto)vacuum or when it outgrows gin_pending_list_limit. A bulk reindex of
+// a few thousand documents leaves the list large, the planner prices each
+// index probe off it, and the ranked query flips to a sequential scan that
+// reads every tsvector: seconds instead of milliseconds on 5,000 documents.
+// Writes to this table are batched and asynchronous already, so the cheaper
+// insert the pending list buys is not worth it.
+//
+// Every statement tolerates the table being gone (an operator may drop it;
+// the search index recreates it on first use). Setting a GIN index's
+// fastupdate takes an exclusive lock on it, which a migration can afford.
+const SearchIndexTuning = `
+ALTER INDEX IF EXISTS search_documents_meta_tokens SET (fastupdate = off);
+ALTER INDEX IF EXISTS search_documents_body_tokens SET (fastupdate = off);
+SELECT gin_clean_pending_list(v.idx)
+FROM (VALUES (to_regclass('search_documents_meta_tokens')), (to_regclass('search_documents_body_tokens'))) AS v(idx)
+WHERE v.idx IS NOT NULL;
 `
 
 // pgMigrationLock is the advisory lock key migrations hold, so a CLI command
