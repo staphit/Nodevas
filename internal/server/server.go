@@ -93,6 +93,12 @@ type Server struct {
 	forwardingOnce sync.Once
 	stop           chan struct{}
 	stopOnce       sync.Once
+	// background is the goroutines Shutdown waits for (background.go);
+	// backgroundRunning counts them for tests and metrics.
+	background        sync.WaitGroup
+	backgroundMu      sync.Mutex
+	backgroundStopped bool
+	backgroundRunning atomic.Int64
 	// allowedHosts are the Host header names this server answers on, lowercased
 	// and without a port. A nil map means nobody has said where this server
 	// listens, so there is no name to judge a Host against: that is the zero
