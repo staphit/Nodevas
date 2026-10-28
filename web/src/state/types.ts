@@ -156,6 +156,12 @@ export interface WorkspaceSlice {
   trash: TrashItem[];
   refreshTrash: () => Promise<void>;
   refreshProjects: () => Promise<void>;
+  /**
+   * Runs a change to the workspace's projects (create, rename, move, delete,
+   * import, copy) and reloads the project list afterwards, whether the change
+   * worked or not. Resolves or rejects as the change did.
+   */
+  changeProjects: <T>(change: () => Promise<T>) => Promise<T>;
   addWorkspace: (path: string) => Promise<{ path: string; label: string }>;
   switchWorkspace: (path: string) => Promise<void>;
   removeWorkspace: (path: string) => Promise<{ workspace: string }>;

@@ -51,6 +51,7 @@ export function useProjectTransfer({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const switchProject = useApp((state) => state.switchProject);
+  const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const runGraphCommand = useApp((state) => state.runGraphCommand);
   const { t } = useI18n();
@@ -188,13 +189,16 @@ export function useProjectTransfer({
     setProjectTransferBusy(true);
     setProjectTransferNotice(t("explorer.importingFile", { name: file.name }));
     try {
-      const imported = await api.importProject(
-        file,
-        choice?.mode === "folder" ? choice.name : undefined,
-        choice?.mode,
-        importTarget,
-      );
-      await switchProject(imported.active);
+      const imported = await changeProjects(async () => {
+        const result = await api.importProject(
+          file,
+          choice?.mode === "folder" ? choice.name : undefined,
+          choice?.mode,
+          importTarget,
+        );
+        await switchProject(result.active);
+        return result;
+      });
       const next = new Set(expandedProjects);
       next.add(imported.active);
       persistExpandedProjects(next);

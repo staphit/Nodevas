@@ -24,7 +24,7 @@ export function useProjectRename({
   persistExpandedProjects: (next: Set<string>) => void;
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const { t } = useI18n();
   const [projectRenameTarget, setProjectRenameTarget] =
@@ -92,7 +92,7 @@ export function useProjectRename({
     setProjectRenameBusy(true);
     setProjectRenameError(null);
     try {
-      const result = await api.moveProject(target.name, parent, nextLabel);
+      const result = await changeProjects(() => api.moveProject(target.name, parent, nextLabel));
       const remapExpandedName = (name: string) =>
         name === target.name
           ? result.name
@@ -102,7 +102,6 @@ export function useProjectRename({
       persistExpandedProjects(
         new Set([...expandedProjects].map(remapExpandedName)),
       );
-      await refreshProjects();
       if (result.active) await loadAll();
       setProjectTransferNotice(
         t("explorer.renamed", {

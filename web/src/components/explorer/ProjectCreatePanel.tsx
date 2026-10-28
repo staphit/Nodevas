@@ -28,7 +28,7 @@ export function useProjectCreate({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const switchProject = useApp((state) => state.switchProject);
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const { t } = useI18n();
   const [projectCreateTarget, setProjectCreateTarget] =
     useState<ProjectCreateTarget | null>(null);
@@ -86,14 +86,14 @@ export function useProjectCreate({
     setProjectCreateBusy(true);
     setProjectCreateError(null);
     try {
-      if (projectCreateTarget.mode === "folder") {
-        await api.createProjectFolder(fullName);
-        await refreshProjects();
-        setProjectTransferNotice(t("explorer.createdFolder", { name: fullName }));
-      } else {
-        await switchProject(fullName, true, projectTemplate);
-        setProjectTransferNotice(t("explorer.createdProject", { name: fullName }));
-      }
+      const mode = projectCreateTarget.mode;
+      await changeProjects(async () => {
+        if (mode === "folder") await api.createProjectFolder(fullName);
+        else await switchProject(fullName, true, projectTemplate);
+      });
+      setProjectTransferNotice(
+        t(mode === "folder" ? "explorer.createdFolder" : "explorer.createdProject", { name: fullName }),
+      );
       const next = new Set(expandedProjects);
       next.add(fullName);
       if (projectCreateTarget.parent) next.add(projectCreateTarget.parent);

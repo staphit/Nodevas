@@ -59,6 +59,7 @@ import { useTouchContextMenu } from "./components/touch";
 import { TopBar } from "./components/topbar/TopBar";
 import { useI18n } from "./i18n";
 import { lazyWithRetry } from "./lazyWithRetry";
+import { watchProjectList } from "./state/projectListSync";
 
 const Drawer = lazyWithRetry(() =>
   import("./components/Drawer").then((module) => ({ default: module.Drawer })),
@@ -410,6 +411,11 @@ function MainApp() {
       live.close();
     };
   }, [loadAll, refreshState, refreshTrash, refreshProjects, notifyDiskChange]);
+
+  // A project written straight into the workspace (an agent, a script) comes
+  // with no broadcast; the explorer finds it when the reader comes back, and
+  // now and then while it is on screen.
+  useEffect(() => watchProjectList(refreshProjects), [refreshProjects]);
 
   // The socket only carries the project this window shows, so a project switch
   // has to move the client to the other room.

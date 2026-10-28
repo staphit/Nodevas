@@ -27,6 +27,7 @@ export function useSaveAs({
 }) {
   const { t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
+  const changeProjects = useApp((state) => state.changeProjects);
   const saveAllTabs = useApp((state) => state.saveAllTabs);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
@@ -75,8 +76,10 @@ export function useSaveAs({
     try {
       // Write pending edits first, or the copy silently loses them.
       await saveAllTabs();
-      await api.copyProject(activeProject, name, parent, true);
-      await switchProject(fullName);
+      await changeProjects(async () => {
+        await api.copyProject(activeProject, name, parent, true);
+        await switchProject(fullName);
+      });
       const next = new Set(expandedProjects);
       next.add(fullName);
       if (parent) next.add(parent);

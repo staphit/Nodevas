@@ -60,16 +60,34 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
 
   // Three reads, and a project switch triggers this both directly and through
   // the `project-changed` broadcast it emits, so the whole trio is coalesced.
+  changeProjects: async (change) => {
+    try {
+      return await change();
+    } finally {
+      // Whatever happened, the workspace may hold a project more or less than
+      // the tree shows: a create that landed and then failed to open still
+      // made one.
+      await get()
+        .refreshProjects()
+        .catch(() => {});
+    }
+  },
+
   refreshProjects: () =>
     coalesceRequest("projects", async () => {
       const p = await api.getProjects();
       // An older server, or one with nothing to list, sent null for the
       // lists; the explorer and the top bar iterate them unchecked.
+      // The list is also re-read on focus and on a timer (projectListSync);
+      // an answer with nothing new keeps the arrays the tree already drew.
+      const current = get();
+      const projects = p.projects ?? [];
+      const workspaces = p.workspaces ?? [];
       set({
         workspace: p.workspace,
-        workspaces: p.workspaces ?? [],
+        workspaces: sameJSON(current.workspaces, workspaces) ? current.workspaces : workspaces,
         activeProject: getProjectOverride() || p.active,
-        projects: p.projects ?? [],
+        projects: sameJSON(current.projects, projects) ? current.projects : projects,
       });
       // The manual order belongs to the workspace the list just came from, so it
       // is refreshed with the list rather than on its own schedule. A workspace
@@ -248,6 +266,10 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
     }
   },
 });
+
+function sameJSON(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 // Re-exported so tests can assert the guard without reaching into internals.
 export { generations };
