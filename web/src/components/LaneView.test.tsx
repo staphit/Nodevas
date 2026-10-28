@@ -994,7 +994,7 @@ describe("LaneView", () => {
       const firstRun: RunState = {
         nodes: {},
         history: [
-          { t: dayOffset(-40).toISOString(), event: "status", node: "a", to: "running" },
+          { t: dayOffset(-40).toISOString(), event: "status", node: "a", to: "started" },
         ],
       };
       const firstGraph = graph([{ id: "a", title: "設計稿" }]);

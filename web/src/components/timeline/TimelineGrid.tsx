@@ -286,6 +286,9 @@ export function TimelineGrid({
                     key={d.getTime()}
                     data-date={key}
                     className={`board-row${isToday ? " board-today" : ""}${isFuture ? " board-future" : ""}`}
+                    // A day is a day tall with no lanes to stretch it too: the
+                    // opening scroll and the culling count rows at this size.
+                    style={{ minHeight: timelineCellHeight }}
                   >
                     {columnSlots.map((slot) => {
                       if (slot.kind === "skip") {

@@ -45,7 +45,13 @@ import { useCanvasPan } from "./canvas/useCanvasPan";
 import { useConnectionDrag } from "./canvas/useConnectionDrag";
 import { useMarquee } from "./canvas/useMarquee";
 import { useViewWindow } from "./canvas/useViewWindow";
-import { boardViewKey, recallBoardView } from "./canvas/boardViewMemory";
+import {
+  boardViewKey,
+  recallBoardView,
+  recallTimelineView,
+  rememberTimelineView,
+  timelineViewKey,
+} from "./canvas/boardViewMemory";
 import { CULL_MIN_CARDS, cardRect, rectsIntersect } from "./canvas/viewportCulling";
 import {
   GraphGestureModeProvider,
@@ -357,10 +363,13 @@ export function LaneView({
   // a mounted board: the old project's, kept until the new one loads. Not
   // when the board came up before the workspace named any project: what was
   // loaded then is the server's active project, the one now being named.
+  // `staleRunState` is the same for the run state, which loads beside the
+  // graph and can land after it.
   const [shownProject, setShownProject] = useState(() => ({
     project: activeProject,
     remembered: rememberedView !== undefined,
     staleGraph: null as typeof graph,
+    staleRunState: null as typeof runState,
   }));
   if (shownProject.project !== activeProject) {
     const remembered = isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined;
@@ -368,6 +377,7 @@ export function LaneView({
       project: activeProject,
       remembered: remembered !== undefined,
       staleGraph: shownProject.project ? graph : null,
+      staleRunState: shownProject.project ? runState : null,
     });
     if (isGraph) setZoomDirect(remembered?.zoom ?? 1);
   }
@@ -379,9 +389,16 @@ export function LaneView({
     graph !== null &&
     shownProject.project === activeProject &&
     (graph !== shownProject.staleGraph || graphProject === activeProject);
+  // The timeline's calendar is built from the records too, so its opening
+  // also waits for this project's run state: built from the last project's,
+  // it opened on the last project's days.
+  const runStateReady =
+    shownProject.staleRunState === null || runState !== shownProject.staleRunState;
   // Set once the cards are laid out below; the opening scroll reads it.
   const openingCardsRef = useRef<() => Rect[]>(() => []);
   const timelineOpeningRef = useRef(() => ({ left: 0, top: 0 }));
+  // The timeline view whose opening has landed; its scroll is recorded below.
+  const timelineOpenedRef = useRef("");
   // The minimap floats over the board's bottom-right corner; the opening
   // keeps the cards out from under it when they have room to be.
   const minimapRef = useRef<HTMLDivElement>(null);
@@ -408,7 +425,7 @@ export function LaneView({
     openingCorner: openingCornerRef,
     timelineOpening: timelineOpeningRef,
     timelineOrientation,
-    contentReady: graphReady,
+    contentReady: isGraph ? graphReady : graphReady && runStateReady,
   });
 
   const userNames = useMemo(
@@ -929,7 +946,33 @@ export function LaneView({
         ]
       : [];
   openingCardsRef.current = openingContent;
+  // The timeline comes back where this project's was left — its scroll is a
+  // place in this project's calendar, never another's — and a project it has
+  // not shown opens on today (timelineOpeningScroll).
+  const timelineKey = timelineViewKey(activeProject, timelineOrientation);
+  const timelineDaySize =
+    timelineOrientation === "horizontal" ? timelineCellWidth : timelineCellHeight;
   timelineOpeningRef.current = () => {
+    timelineOpenedRef.current = timelineKey;
+    const horizontal = timelineOrientation === "horizontal";
+    const remembered = recallTimelineView(timelineKey);
+    // Days collapsed into gaps have no fixed size, and a different day size or
+    // zoom is a different layout: those open afresh.
+    if (
+      remembered &&
+      !collapseEmpty &&
+      remembered.daySize === timelineDaySize &&
+      remembered.scale === viewScale
+    ) {
+      // The range may have grown into the past since: the same day is further on.
+      const shift = days.findIndex((day) => dayKey(day) === remembered.firstDay);
+      if (shift >= 0) {
+        const delta = shift * timelineDaySize * viewScale;
+        return horizontal
+          ? { left: remembered.left + delta, top: remembered.top }
+          : { left: remembered.left, top: remembered.top + delta };
+      }
+    }
     const contentDays = new Set<string>();
     for (const byDay of [...byNodeDay.values(), ...plansByNodeDay.values()]) {
       for (const [day, items] of byDay) if (items.length > 0) contentDays.add(day);
@@ -944,7 +987,6 @@ export function LaneView({
           ),
         ),
     );
-    const horizontal = timelineOrientation === "horizontal";
     return timelineOpeningScroll({
       days,
       rowItems,
@@ -962,6 +1004,28 @@ export function LaneView({
       laneInset: horizontal ? TIMELINE_DATE_HEADER_H : RULER_W,
     });
   };
+
+  // Recorded as the timeline scrolls, once its opening has landed for this
+  // project: before that the scroll is still the last project's.
+  const recordTimelineRef = useRef(() => undefined as void);
+  recordTimelineRef.current = () => {
+    const board = boardRef.current;
+    if (isGraph || collapsed || !board || timelineOpenedRef.current !== timelineKey) return;
+    rememberTimelineView(timelineKey, {
+      left: board.scrollLeft,
+      top: board.scrollTop,
+      firstDay: days.length > 0 ? dayKey(days[0]) : "",
+      daySize: timelineDaySize,
+      scale: viewScale,
+    });
+  };
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board || isGraph || collapsed) return;
+    const onScroll = () => recordTimelineRef.current();
+    board.addEventListener("scroll", onScroll, { passive: true });
+    return () => board.removeEventListener("scroll", onScroll);
+  }, [collapsed, isGraph]);
 
   useBoardReveal({
     isGraph,

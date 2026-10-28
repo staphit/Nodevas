@@ -32,9 +32,41 @@ export function rememberBoardView(key: string, view: BoardView) {
   views.set(key, view);
 }
 
+/**
+ * Where a project's timeline was left. Its scroll is a place in that
+ * project's calendar, so it is kept per project and orientation, with what
+ * it was measured against: the first day drawn (the range grows into the past
+ * as the reader scrolls) and the size a day was drawn at.
+ */
+export interface TimelineView {
+  left: number;
+  top: number;
+  firstDay: string;
+  daySize: number;
+  scale: number;
+}
+
+const timelineViews = new Map<string, TimelineView>();
+
+export function timelineViewKey(
+  project: string | null | undefined,
+  orientation: string | undefined,
+): string {
+  return `${boardViewKey(project)}/${orientation ?? ""}`;
+}
+
+export function recallTimelineView(key: string): TimelineView | undefined {
+  return timelineViews.get(key);
+}
+
+export function rememberTimelineView(key: string, view: TimelineView) {
+  timelineViews.set(key, view);
+}
+
 /** Tests only: every test starts from a board nobody has looked at. */
 export function forgetBoardViews() {
   views.clear();
+  timelineViews.clear();
 }
 
 /**
