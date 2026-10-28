@@ -116,6 +116,12 @@
 .app:has(> .copilot-fab) .lane-wrap.timeline .board {
   padding-bottom: calc(48px + 18px);
 }
+/* Settings scrolls as one page whose last rows end at the bottom right (a
+   row's value and ›): room below them, past the page's own 16px, so the end
+   of the page scrolls clear of the button. */
+.app:has(> .copilot-fab) .settings-page {
+  padding-bottom: calc(48px + 18px + 16px);
+}
 /* The editor leaves room below its last line, so it can always be scrolled
    clear of the button. */
 .app:has(> .copilot-fab) .drawer .cm-content {
