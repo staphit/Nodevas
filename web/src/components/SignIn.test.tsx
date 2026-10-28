@@ -5,6 +5,9 @@ import { AuthGate, SignIn, SignOutButton, useTeamServer, useViewer } from "./Sig
 import { AuthError, api } from "../api";
 import { useApp } from "../store";
 
+/** The email field, in either interface language. */
+const EMAIL = /^(Email|電子郵件)$/;
+
 /**
  * The component is the whole subject here, so the network is stubbed rather
  * than the fetch layer: what matters is which call the form makes with which
@@ -41,7 +44,7 @@ async function requestPasscode(
   user: ReturnType<typeof userEvent.setup>,
   email = "ming@example.com",
 ) {
-  await user.type(screen.getByLabelText("Email"), email);
+  await user.type(screen.getByLabelText(EMAIL), email);
   await user.click(screen.getByRole("button", { name: "寄送驗證碼" }));
 }
 
@@ -64,7 +67,7 @@ describe("SignIn", () => {
   it("starts with an email field and no PIN", () => {
     render(<SignIn onSignedIn={vi.fn()} />);
 
-    const field = screen.getByLabelText("Email");
+    const field = screen.getByLabelText(EMAIL);
     expect(field).toHaveAttribute("type", "email");
     expect(field).toHaveAttribute("autocomplete", "email");
     expect(field).toHaveAttribute("inputmode", "email");
@@ -142,7 +145,7 @@ describe("SignIn", () => {
     const onSignedIn = vi.fn();
     render(<SignIn onSignedIn={onSignedIn} />);
 
-    await user.type(screen.getByLabelText("Email"), "ming@example.com{Enter}");
+    await user.type(screen.getByLabelText(EMAIL), "ming@example.com{Enter}");
     expect(mocked.requestOtp).toHaveBeenCalledWith("ming@example.com");
 
     await user.keyboard("a7k2m9p4{Enter}");
@@ -156,10 +159,10 @@ describe("SignIn", () => {
     render(<SignIn onSignedIn={vi.fn()} />);
 
     await requestPasscode(user, "mign@example.com");
-    expect(screen.getByLabelText("Email")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText(EMAIL)).toHaveAttribute("readonly");
 
     await user.click(screen.getByRole("button", { name: "更換 email" }));
-    const field = screen.getByLabelText("Email");
+    const field = screen.getByLabelText(EMAIL);
     expect(field).not.toHaveAttribute("readonly");
     expect(screen.queryByLabelText("驗證碼")).toBeNull();
 
@@ -182,7 +185,7 @@ describe("SignIn", () => {
     await user.click(screen.getByRole("button", { name: "登入" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("驗證碼不正確或已過期");
-    expect(screen.getByLabelText("Email")).toHaveValue("ming@example.com");
+    expect(screen.getByLabelText(EMAIL)).toHaveValue("ming@example.com");
     expect(onSignedIn).not.toHaveBeenCalled();
   });
 
@@ -355,7 +358,7 @@ describe("AuthGate", () => {
     await user.click(button);
 
     expect(mocked.logout).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText(EMAIL)).toBeInTheDocument();
     expect(screen.queryByText("app")).toBeNull();
   });
 
@@ -383,7 +386,7 @@ describe("AuthGate", () => {
     expect(screen.queryByText("app")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "重試" }));
-    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(await screen.findByLabelText(EMAIL)).toBeInTheDocument();
   });
 });
 
@@ -403,7 +406,7 @@ describe("SignIn with an authenticator app", () => {
   });
 
   async function passTheEmailStep(user: ReturnType<typeof userEvent.setup>) {
-    await user.type(screen.getByLabelText("Email"), "ming@example.com");
+    await user.type(screen.getByLabelText(EMAIL), "ming@example.com");
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     await user.type(screen.getByLabelText("Verification code"), "A7K2M9P4");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -457,6 +460,6 @@ describe("SignIn with an authenticator app", () => {
     await user.type(field, "654321{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("This sign-in expired.");
     expect(screen.queryByLabelText("Authenticator code")).toBeNull();
-    expect(screen.getByLabelText("Email")).not.toHaveAttribute("readonly");
+    expect(screen.getByLabelText(EMAIL)).not.toHaveAttribute("readonly");
   });
 });

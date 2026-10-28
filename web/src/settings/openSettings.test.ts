@@ -69,7 +69,7 @@ describe("settings search", () => {
     expect(budget.map((hit) => [hit.label, hit.where])).toEqual([["Daily budget", "Agents › Advanced"]]);
     expect(budget[0].entry).toMatchObject({ page: "agents", row: "budget" });
 
-    expect(searchSettings("預算", zh, everything).map((hit) => hit.where)).toEqual(["Agents › 進階"]);
+    expect(searchSettings("預算", zh, everything).map((hit) => hit.where)).toEqual(["Agent 與 Runner › 進階"]);
     expect(searchSettings("this project", en, everything).length).toBeGreaterThan(3);
     expect(searchSettings("   ", en, everything)).toEqual([]);
   });

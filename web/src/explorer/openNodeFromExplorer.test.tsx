@@ -76,7 +76,7 @@ describe("a node file's front matter", () => {
     expect(screen.queryByText(/assignee: alex/)).not.toBeInTheDocument();
     const fields = container.querySelector(".ex-fields");
     expect(fields).not.toBeNull();
-    expect(fields?.textContent).toContain("assignee");
+    expect(fields?.textContent).toContain("Assignee");
     expect(fields?.textContent).toContain("alex");
     expect(fields?.textContent).toContain("daily, external");
     expect(fields?.textContent).toContain("Client follow-up");

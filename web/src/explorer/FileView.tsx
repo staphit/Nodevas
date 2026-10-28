@@ -23,6 +23,9 @@ interface Shown {
   url?: string;
 }
 
+/** Front matter fields with a name in the interface language. */
+const KNOWN_FIELDS = new Set(["assignee", "priority", "requires", "tags", "title", "kind", "id", "status", "due", "start", "external"]);
+
 /** The cap the hub and the runner put on a file's text. */
 const TEXT_CAP = 512 << 10;
 
@@ -104,7 +107,7 @@ export default function FileView({ view }: FileViewProps) {
                 <dl className="ex-fields">
                   {markdown.fields.map((field) => (
                     <div key={field.key} className="ex-field">
-                      <dt>{field.key}</dt>
+                      <dt>{KNOWN_FIELDS.has(field.key) ? t(`explorer.frontMatter.${field.key}`) : field.key}</dt>
                       <dd>{field.value || "—"}</dd>
                     </div>
                   ))}
