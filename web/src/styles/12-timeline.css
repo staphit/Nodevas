@@ -716,6 +716,10 @@
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: 0 10px 30px var(--shadow);
+  /* A menu taller than the window keeps its top edge (floatingPanel) and
+     scrolls the rest, rather than running off the bottom. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .lane-context-menu.node-create-menu {
   width: min(380px, calc(100vw - 16px));

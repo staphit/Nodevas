@@ -6,8 +6,8 @@
  * to create — can be dragged out of the way by its heading.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { useFloatingPanel } from "../floatingPanel";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { clampToViewport, useFloatingPanel } from "../floatingPanel";
 import { useI18n } from "../../i18n";
 import type { Graph, GraphEdge, LogicGate, PlanStatusDefinition } from "../../types";
 import type { useGraphWiring } from "../canvas/useGraphWiring";
@@ -109,6 +109,26 @@ export function LaneContextMenuLayer({
   );
   const { ref, placement, dragging, dragHandleProps } =
     useFloatingPanel<HTMLDivElement>(anchor);
+  // The panel is placed by the size it opens at, and its content can grow
+  // after that: an error under the New node form, the plan menu's message.
+  // Clamped again by the size it grows to, so the part that grew — and the
+  // buttons below it — stay on screen.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const panel = ref.current;
+    if (!panel) return;
+    const measure = () => {
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      setSize((current) =>
+        current?.width === width && current.height === height ? current : { width, height },
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [ref]);
+  const position = size ? clampToViewport(placement, size.width, size.height) : placement;
   return (
     <div
       ref={ref}
@@ -127,7 +147,7 @@ export function LaneContextMenuLayer({
           ? t("board.nodeMenu.label", { title: nodeTitle(contextMenu.nodeId) })
           : undefined
       }
-      style={placement}
+      style={position}
       onPointerDown={(event) => event.stopPropagation()}
     >
       {contextMenu.kind === "graph" ? (
