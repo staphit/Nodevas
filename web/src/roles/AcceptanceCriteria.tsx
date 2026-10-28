@@ -174,7 +174,10 @@ export function AcceptanceCriteria({ id }: { id: string }) {
           id={newId}
           value={draft}
           maxLength={MAX_ACCEPTANCE_TEXT}
+          // The placeholder is the short ask, so it fits the drawer at any
+          // text size; the example is said on hover.
           placeholder={t("acceptance.placeholder")}
+          title={t("acceptance.placeholderHint")}
           aria-label={t("acceptance.new")}
           disabled={items.length >= MAX_ACCEPTANCE_ITEMS}
           onChange={(event) => setDraft(event.target.value)}
