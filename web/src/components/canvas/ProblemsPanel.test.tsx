@@ -44,4 +44,30 @@ describe("ProblemsPanel", () => {
     expect(onPick).toHaveBeenCalledWith("a");
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent("0");
   });
+
+  // An issue about the graph as a whole has no node to name, and its row read
+  // a bare English "graph" in either language.
+  it("names a graph-wide issue in the reader's language", () => {
+    const graphWide: Issue = { severity: "error", field: "edges", msg: "cycle" };
+    const panel = () =>
+      render(
+        <ProblemsPanel
+          analysis={empty}
+          issues={[graphWide]}
+          nodeTitle={(id) => id ?? ""}
+          onPick={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+    const first = panel();
+    const warnings = screen.getByRole("region", { name: "驗證警告" });
+    expect(within(warnings).getByText("整張關係圖")).toBeInTheDocument();
+    expect(within(warnings).queryByText("graph")).toBeNull();
+    first.unmount();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    panel();
+    const english = screen.getByRole("region", { name: "Validation warnings" });
+    expect(within(english).getByText("Whole graph")).toBeInTheDocument();
+  });
 });
