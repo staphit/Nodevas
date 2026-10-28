@@ -107,8 +107,10 @@ export function ProblemsPanel({
                 <>
                   <IconWarning size={12} />
                   <span>
-                    <b>{issue.nodeId ? nodeTitle(issue.nodeId) : t("board.problemsWholeGraph")}</b>
-                    {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
+                    <span className="problems-issue-title">
+                      <b>{issue.nodeId ? nodeTitle(issue.nodeId) : t("board.problemsWholeGraph")}</b>
+                      {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
+                    </span>
                     <small>{issue.msg}</small>
                   </span>
                 </>

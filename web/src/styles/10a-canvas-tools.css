@@ -671,7 +671,9 @@ button.problems-issue:focus-visible {
   flex-shrink: 0;
   margin-top: 2px;
 }
-.problems-issue b,
+/* The name and the part at fault share one line ("Bravo · Prerequisites");
+   a block name pushed " · field" onto a line that began with the dot. */
+.problems-issue-title,
 .problems-issue small {
   display: block;
 }
