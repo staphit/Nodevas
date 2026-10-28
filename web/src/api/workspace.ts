@@ -131,10 +131,12 @@ export const workspaceApi = {
       method: "POST",
       body: JSON.stringify({ example, language }),
     }),
-  openProject: (name: string, create = false, template = "") =>
+  /** Opens (or creates) a project. A template writes titles into the new
+   * project in `language`; left empty, the hub goes by Accept-Language. */
+  openProject: (name: string, create = false, template = "", language = "") =>
     req<{ root: string; active: string }>("/api/projects/open", {
       method: "POST",
-      body: JSON.stringify({ name, create, template }),
+      body: JSON.stringify(language ? { name, create, template, language } : { name, create, template }),
     }),
   moveProject: (
     name: string,

@@ -213,7 +213,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
     try {
       await parkDirtyTabs(get);
       try {
-        await api.openProject(name, create, template);
+        await api.openProject(name, create, template, get().preferences.language);
         // The server's active project moved; per-request scoping would now
         // shadow it with something stale.
         setProjectOverride("");
