@@ -965,6 +965,38 @@ describe("LaneView", () => {
       expect(hintTop).toBeGreaterThan(view.top);
       expect(hintTop).toBeLessThanOrEqual(groupsTop);
     });
+
+    // The hint was placed by a fixed allowance for its card above the groups:
+    // at 150% text the card is taller and lay over the first quadrant's title
+    // bar, and at any size the box's 48px bottom margin, the pane's full width,
+    // took the clicks meant for the quadrants' × buttons beneath it.
+    it("ends the hint's card above the groups at any height, and lets clicks through around it", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(933, 665);
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: [],
+          edges: [],
+          ui: { groups: [{ id: "do", title: "do", x: 0, y: 0, width: 620, height: 380 }] },
+        },
+      });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      const group = container.querySelector<HTMLElement>(".canvas-decoration.group")!;
+      const groupsTop = parseFloat(group.style.top);
+      const hint = container.querySelector<HTMLElement>(".board-empty")!;
+      // Placed by its bottom edge, so a taller card grows upward, away from them.
+      expect(hint.style.transform).toBe("translateY(-100%)");
+      // Its bottom less the card's 48px margin is above the groups, and close.
+      const cardBottom = parseFloat(hint.style.top) - 48;
+      expect(cardBottom).toBeLessThan(groupsTop);
+      expect(cardBottom).toBeGreaterThan(groupsTop - 48);
+      // Only the card takes the pointer.
+      expect(hint.style.pointerEvents).toBe("none");
+      const card = hint.querySelector<HTMLElement>(".ui-empty-state")!;
+      expect(card.parentElement!.style.display).toBe("contents");
+      expect(card.parentElement!.style.pointerEvents).toBe("auto");
+    });
   });
 
   // The board unmounts whenever the app shows Station or Settings instead, so
