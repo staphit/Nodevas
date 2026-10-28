@@ -48,8 +48,11 @@ type historyMark struct {
 	snapshotAt time.Time
 }
 
-// noteHistoryWrite records what this store just put on disk. Caller holds s.mu.
+// noteHistoryWrite records what this store just put on disk. Caller holds s.mu
+// (or, for a page save, s.mu for reading and path's lock).
 func (s *Store) noteHistoryWrite(path, rev string) {
+	s.marksMu.Lock()
+	defer s.marksMu.Unlock()
 	if s.historyMarks == nil {
 		s.historyMarks = map[string]historyMark{}
 	}
@@ -61,7 +64,29 @@ func (s *Store) noteHistoryWrite(path, rev string) {
 // forgetHistoryMark drops what we believed about a file, forcing the next write
 // to snapshot. Caller holds s.mu.
 func (s *Store) forgetHistoryMark(path string) {
+	s.marksMu.Lock()
+	defer s.marksMu.Unlock()
 	delete(s.historyMarks, path)
+}
+
+// loadHistoryMark is what the store remembers about path.
+func (s *Store) loadHistoryMark(path string) (historyMark, bool) {
+	s.marksMu.Lock()
+	defer s.marksMu.Unlock()
+	mark, ok := s.historyMarks[path]
+	return mark, ok
+}
+
+// storeHistoryMark replaces what the store remembers about path. The caller
+// read the mark it replaces as path's only writer at the time (s.mu held
+// exclusively, or path's lock), so nothing changed between the two.
+func (s *Store) storeHistoryMark(path string, mark historyMark) {
+	s.marksMu.Lock()
+	defer s.marksMu.Unlock()
+	if s.historyMarks == nil {
+		s.historyMarks = map[string]historyMark{}
+	}
+	s.historyMarks[path] = mark
 }
 
 // snapshotHistory copies the current on-disk version of path into
@@ -99,7 +124,7 @@ func (s *Store) snapshotHistoryWithin(path string, window time.Duration) error {
 		return err
 	}
 	if window > 0 {
-		mark, known := s.historyMarks[path]
+		mark, known := s.loadHistoryMark(path)
 		if known && mark.rev == Rev(data) && !mark.snapshotAt.IsZero() &&
 			time.Since(mark.snapshotAt) < window {
 			return nil
@@ -117,12 +142,9 @@ func (s *Store) snapshotHistoryWithin(path string, window time.Duration) error {
 	if err := s.WriteAtomic(filepath.Join(dir, name), data); err != nil {
 		return err
 	}
-	if s.historyMarks == nil {
-		s.historyMarks = map[string]historyMark{}
-	}
-	mark := s.historyMarks[path]
+	mark, _ := s.loadHistoryMark(path)
 	mark.snapshotAt = time.Now()
-	s.historyMarks[path] = mark
+	s.storeHistoryMark(path, mark)
 	return s.pruneHistory(dir)
 }
 

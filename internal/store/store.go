@@ -103,8 +103,16 @@ type Store struct {
 	compactFailedAt time.Time
 
 	// historyMarks is what lets version history survive auto-saving editors;
-	// see snapshotHistory. Guarded by mu, like every other write path here.
+	// see snapshotHistory. Guarded by marksMu: a page save updates it while
+	// holding mu only for reading. One path's mark is only ever changed by
+	// that path's writer (mu exclusively, or the path's lock).
+	marksMu      sync.Mutex
 	historyMarks map[string]historyMark
+
+	// pathLocks serialises writers of one file that hold mu only for
+	// reading (page saves); see lockPath.
+	pathLocksMu sync.Mutex
+	pathLocks   map[string]*pathLock
 
 	// historyImpl is where version history goes, chosen on first use; see
 	// history_backend.go. historyMode is a choice made before that.
@@ -250,6 +258,49 @@ func (s *Store) markSelfWrite(path string) {
 	s.selfMu.Unlock()
 }
 
+// ---------- per-file write serialisation ----------
+
+// pathLock is one file's write lock, kept only while someone holds or waits
+// for it.
+type pathLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockPath takes path's write lock and returns its release.
+//
+// A page save changes one file, and taking the store-wide write lock for its
+// read, history snapshot, fsync and rename made every reader and every other
+// page wait on it. So a page save holds mu for reading, which still keeps out
+// every writer that restructures the tree (a node delete or move, a page
+// delete or conversion, an import), and this lock, which keeps out a second
+// save of the same file: the revision check, the history mark and the write
+// stay one step per file, in the order their locks are granted.
+func (s *Store) lockPath(path string) func() {
+	key := filepath.Clean(path)
+	s.pathLocksMu.Lock()
+	if s.pathLocks == nil {
+		s.pathLocks = map[string]*pathLock{}
+	}
+	lock := s.pathLocks[key]
+	if lock == nil {
+		lock = &pathLock{}
+		s.pathLocks[key] = lock
+	}
+	lock.refs++
+	s.pathLocksMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		s.pathLocksMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(s.pathLocks, key)
+		}
+		s.pathLocksMu.Unlock()
+	}
+}
+
 // ---------- atomic write + local history ----------
 
 // WriteAtomic writes via temp file + rename so a crash can never leave a
@@ -285,6 +336,8 @@ type fileUpdate struct {
 // content.
 //
 // The caller must hold s.mu — the compiler cannot check that, hence the name.
+// A single-file write may instead hold s.mu for reading together with that
+// file's lockPath, as a page save does.
 func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) error {
 	return s.applyUpdatesForLocked([]identity.Actor{actor}, updates)
 }

@@ -420,8 +420,11 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
 		return zero, "", "", fmt.Errorf("invalid node or page id")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// A read: shared with other readers and with saves of other pages. The
+	// page's own lock keeps it from opening the file in the middle of a save
+	// of this page, which would fail the read's changed-while-reading check.
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return zero, "", "", err
@@ -437,7 +440,10 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 	if !found {
 		return zero, "", "", fmt.Errorf("page %q not found for node %q", pageID, nodeID)
 	}
-	data, err := s.ReadFile(s.NodePagePath(nodeID, pageID, page.Format))
+	path := s.NodePagePath(nodeID, pageID, page.Format)
+	unlock := s.lockPath(path)
+	defer unlock()
+	data, err := s.ReadFile(path)
 	if err != nil {
 		return zero, "", "", err
 	}
@@ -466,8 +472,11 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if len(content) > maxPageBytes {
 		return "", fmt.Errorf("page content is too large")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Shared, not exclusive: readers and saves of other pages go on while
+	// this one writes; the page's own lock below orders saves of this page
+	// (see lockPath).
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return "", err
@@ -493,8 +502,11 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if err != nil {
 		return "", err
 	}
+	path := s.NodePagePath(nodeID, pageID, page.Format)
+	unlock := s.lockPath(path)
+	defer unlock()
 	if err := s.applyUpdatesLocked(actor, []fileUpdate{{
-		path:          s.NodePagePath(nodeID, pageID, page.Format),
+		path:          path,
 		data:          data,
 		checkRevision: true,
 		expectedRev:   baseRev,

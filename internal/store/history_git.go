@@ -117,7 +117,8 @@ func newGitHistory(s *Store, window time.Duration) *gitHistory {
 // version an editing session started from. Later writes in the same session
 // need nothing: the window coalesces them on purpose.
 //
-// Caller holds s.mu. History never fails a save, so errors are logged.
+// Caller holds s.mu, exclusively or (a page save) for reading together with
+// abs's path lock. History never fails a save, so errors are logged.
 func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 	data, err := g.s.ReadFile(abs)
 	if err != nil {
@@ -126,7 +127,7 @@ func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 		}
 		return nil
 	}
-	mark, known := g.s.historyMarks[abs]
+	mark, known := g.s.loadHistoryMark(abs)
 	own := known && mark.rev == Rev(data)
 	now := time.Now()
 	if own && !always && !mark.snapshotAt.IsZero() && now.Sub(mark.snapshotAt) < g.window {
@@ -144,7 +145,7 @@ func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 		// created and then edited within one window is not lost to the
 		// window's single commit.
 		mark.snapshotAt = now
-		g.s.historyMarks[abs] = mark
+		g.s.storeHistoryMark(abs, mark)
 		g.mu.Lock()
 		pending := g.pendingLocked()
 		pending.segments = append(pending.segments, gitSegment{changes: []gitrepo.Change{change}, at: now})
@@ -153,11 +154,8 @@ func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 		return nil
 	}
 	// Content this store did not write starts a session too.
-	if g.s.historyMarks == nil {
-		g.s.historyMarks = map[string]historyMark{}
-	}
 	mark.snapshotAt = now
-	g.s.historyMarks[abs] = mark
+	g.s.storeHistoryMark(abs, mark)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	pending := g.pendingLocked()
