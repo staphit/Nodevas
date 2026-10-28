@@ -87,3 +87,21 @@ describe("vertical timeline lane header height", () => {
     expect(copy!.querySelector(".lane-head-assignee")).not.toBeNull();
   });
 });
+
+// The header is as wide as what it heads: its lanes and the ruler's corner.
+// An empty project's header was a lane wider than its corner (the board keeps
+// one lane's room), so a 200px strip with nothing in it sat beside the ruler,
+// its bottom rule stopping short of the day rows' grid.
+describe("vertical timeline lane header width", () => {
+  it.each([
+    ["an empty project", 0],
+    ["a project with lanes", 3],
+    ["a culled 2000-lane project", 2000],
+  ])("is the width of its lanes and the ruler's corner on %s", (_, lanes) => {
+    const corner = rulerCorner(laneGraph(lanes));
+    const row = corner.parentElement!;
+    const children = Array.from(row.children) as HTMLElement[];
+    const sum = children.reduce((total, child) => total + parseFloat(child.style.width || "0"), 0);
+    expect(parseFloat(row.style.width)).toBe(sum);
+  });
+});
