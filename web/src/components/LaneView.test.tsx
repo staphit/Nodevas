@@ -672,6 +672,53 @@ describe("LaneView", () => {
       },
     );
 
+    // A board too big to fit even at the smallest zoom (gates2k: 2000 cards,
+    // hundreds of columns, a few tall ones) was centred on the middle of its
+    // bounds, which on a wide, mostly shallow board is a stretch with the top
+    // card row cut and empty grid below. It opens like the desktop does
+    // instead: on the card nearest the content's top-left corner.
+    it("opens a phone's board too big to fit on its top-left card, not its empty middle", () => {
+      mockNarrowViewport(true);
+      mockBoardSize(485, 643);
+      const nodes: Graph["nodes"] = [];
+      const positions: Record<string, { x: number; y: number }> = {};
+      // Two shallow rows across 120 columns...
+      for (let col = 0; col < 120; col++) {
+        for (let row = 0; row < 2; row++) {
+          const id = `w${col}-${row}`;
+          nodes.push({ id, title: id });
+          positions[id] = { x: col, y: row };
+        }
+      }
+      // ...and one column at the left edge that runs nineteen rows deep.
+      for (let row = 2; row < 19; row++) {
+        const id = `deep-${row}`;
+        nodes.push({ id, title: id });
+        positions[id] = { x: 0, y: row };
+      }
+      useApp.setState({ graph: { version: 1, nodes, edges: [], ui: { positions } } });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      expect(container.querySelector<HTMLElement>(".board-inner")!.style.zoom).toBe("0.5");
+
+      const board = container.querySelector<HTMLElement>(".board")!;
+      const zoom = 0.5;
+      const view = {
+        left: board.scrollLeft / zoom,
+        top: board.scrollTop / zoom,
+        right: (board.scrollLeft + 485) / zoom,
+        bottom: (board.scrollTop + 643) / zoom,
+      };
+      const corner = container.querySelector<HTMLElement>('.col-card[data-node-id="w0-0"]');
+      expect(corner).not.toBeNull();
+      const left = parseFloat(corner!.style.left);
+      const top = parseFloat(corner!.style.top);
+      // The top-left card is wholly on screen, not cut by the view's top edge.
+      expect(left).toBeGreaterThanOrEqual(view.left);
+      expect(top).toBeGreaterThanOrEqual(view.top);
+      expect(left + parseFloat(corner!.style.width)).toBeLessThanOrEqual(view.right);
+      expect(top + parseFloat(corner!.style.height)).toBeLessThanOrEqual(view.bottom);
+    });
+
     it("leaves the opening zoom alone on a desktop", () => {
       mockNarrowViewport(false);
       mockBoardSize(1280, 800);
