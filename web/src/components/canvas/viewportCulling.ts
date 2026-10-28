@@ -97,25 +97,3 @@ export function boundsOf(rects: Rect[], points: Point[] = []): Rect | null {
   for (const point of points) grow(point.x, point.y, point.x, point.y);
   return bounds;
 }
-
-/**
- * The obstacles a wire on a culled board routes against: the ones near the
- * box around its ends, gate and bends — the routing never leaves that box by
- * more than a gate — and the ones in view, where a pointer can drag its gate
- * or a bend. The rest of the board cannot change the wire. Board order is
- * kept, since the routing takes the first obstacle that a point is inside.
- */
-export function obstaclesNear(
-  obstacles: readonly Rect[],
-  bounds: Rect,
-  view: Rect,
-  pad: number,
-): Rect[] {
-  const near = {
-    left: bounds.left - pad,
-    top: bounds.top - pad,
-    right: bounds.right + pad,
-    bottom: bounds.bottom + pad,
-  };
-  return obstacles.filter((rect) => rectsIntersect(rect, near) || rectsIntersect(rect, view));
-}

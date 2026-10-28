@@ -29,7 +29,7 @@ import { SnapGuides } from "./SnapGuides";
 import type { SnapBox, SnapGuide } from "./snapping";
 import { GraphCard, type CardEvents } from "./GraphCard";
 import { PeerOverlay } from "./PeerOverlay";
-import { GATE_H, GATE_W, GateWiring, type Gate } from "./GateWiring";
+import { GateWiring, gateLayout, type Gate, type GateLayout } from "./GateWiring";
 import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
 import { StandaloneLogicGate } from "./LogicGate";
 import type { useCardDrag, CardDragState } from "./useCardDrag";
@@ -47,10 +47,10 @@ import {
 import {
   boundsOf,
   cardRect,
-  obstaclesNear,
   rectsIntersect,
   type ViewWindow,
 } from "./viewportCulling";
+import { obstacleIndex, watchedIndex, type ObstacleIndex } from "./obstacleIndex";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
 import { safeCssColor } from "../../cssColor";
@@ -223,6 +223,18 @@ export function GraphCanvas({
     selectNode,
     setContextMenu,
     openTab,
+    centerX,
+    rowTop,
+    graphSelection,
+    setGraphSelection,
+    onSelectedNodeChange,
+    openConditionMenu,
+    saveGatePlacement,
+    getWireVertices,
+    saveWireVertices,
+    updateNode,
+    setGraphNotice,
+    t,
   };
   const latest = useRef(handed);
   latest.current = handed;
@@ -309,6 +321,68 @@ export function GraphCanvas({
     }),
     [],
   );
+  // The gates are memoized too: their handlers forward to this render's, and
+  // the geometry they read at render time comes with a new layout whenever
+  // it moves (see gateLayoutOf).
+  const gateEvents = useMemo(
+    () => ({
+      centerX: (column: Col) => latest.current.centerX(column),
+      rowTop: (row: number) => latest.current.rowTop(row),
+      getWireVertices: (wireKey: string) => latest.current.getWireVertices(wireKey),
+      saveWireVertices: (wireKey: string, vertices: Point[]) =>
+        latest.current.saveWireVertices(wireKey, vertices),
+      saveGatePlacement: (targetId: string, point: Point) =>
+        latest.current.saveGatePlacement(targetId, point),
+      selectEdge: (from: string, to: string) => {
+        latest.current.setGraphSelection({ kind: "edge", from, to });
+        latest.current.onSelectedNodeChange?.(null);
+      },
+      openEdgeMenu: (edges: { from: string; to: string }[], x: number, y: number) => {
+        const now = latest.current;
+        const first = edges[0];
+        if (!first) return;
+        // Right-clicking one of several selected wires acts on the whole
+        // selection, the way it does for cards.
+        const selection = now.graphSelection;
+        const inSelection =
+          selection?.kind === "edges" &&
+          selection.edges.some((edge) => edge.from === first.from && edge.to === first.to);
+        const targets = inSelection && selection?.kind === "edges" ? selection.edges : edges;
+        if (!inSelection) {
+          now.setGraphSelection({ kind: "edge", from: first.from, to: first.to });
+        }
+        now.onSelectedNodeChange?.(null);
+        now.setContextMenu({ kind: "edge", edges: targets, x, y });
+      },
+      selectVertex: (wireKey: string, index: number) => {
+        latest.current.setGraphSelection({ kind: "vertex", wireKey, index });
+        latest.current.onSelectedNodeChange?.(null);
+      },
+      editGate: (targetId: string, x: number, y: number) =>
+        latest.current.openConditionMenu(targetId, x, y),
+      deleteGate: (targetId: string) => {
+        void latest.current
+          .updateNode({
+            type: "node.setRequires",
+            nodeId: targetId,
+            requires: "",
+            // Keep the edges: only the condition expression goes.
+            refs: null,
+          })
+          .then((result) => {
+            if (!result.ok) {
+              reportError(new Error(result.message));
+              return;
+            }
+            latest.current.setGraphNotice({
+              text: latest.current.t("canvas.deleteGateNotice"),
+              kind: "ok",
+            });
+          });
+      },
+    }),
+    [],
+  );
   const lifted = drag?.moved ? new Set(drag.ids) : null;
 
   // Where a gate's condition box was put by hand, in board units.
@@ -319,15 +393,117 @@ export function GraphCanvas({
       : undefined;
   };
 
+  // The board's obstacles, kept as the same list while nothing on it moves so
+  // the gates drawn against them can skip a render, with an index to route a
+  // gate against the cards around it instead of every card on the board.
+  const routing = useRef<{
+    obstacles: Rect[];
+    index: ObstacleIndex;
+    layouts: Map<string, CachedGateLayout>;
+    gates: Gate[] | null;
+    inputs: Map<Gate, GateInputs>;
+    inputsFrom: unknown[];
+  } | null>(null);
+  if (!routing.current) {
+    routing.current = {
+      obstacles: graphObstacles,
+      index: obstacleIndex(graphObstacles),
+      layouts: new Map(),
+      gates: null,
+      inputs: new Map(),
+      inputsFrom: [],
+    };
+  } else if (routing.current.obstacles !== graphObstacles) {
+    const moved = movedRects(routing.current.obstacles, graphObstacles);
+    if (moved === null || moved.length > 0) {
+      // A layout that never looked where a card moved still holds.
+      for (const [id, cached] of routing.current.layouts) {
+        const reach = cached.reach;
+        if (reach && (moved === null || moved.some((rect) => rectsIntersect(rect, reach)))) {
+          routing.current.layouts.delete(id);
+        }
+      }
+      routing.current.obstacles = graphObstacles;
+      routing.current.index = obstacleIndex(graphObstacles);
+    }
+  }
+  const { obstacles: boardObstacles, index: boardIndex, layouts: layoutCache } = routing.current;
+  if (routing.current.gates !== gates) {
+    const ids = new Set(gates.map((gate) => gate.to.node.id));
+    for (const id of layoutCache.keys()) if (!ids.has(id)) layoutCache.delete(id);
+    routing.current.gates = gates;
+  }
+
+  // What a gate's place is worked out from: its cards, its hand placement and
+  // the bends of its wires (the bends do not move the box, but the gate draws
+  // them, so they are part of what it is redrawn for). In graph mode all of it
+  // follows from the cards, the stored layout and the board's offset, so it
+  // carries over from render to render — a pan reads it, never rebuilds it.
+  const inputsFrom = [gates, cols, graph?.ui, graphOffsetX, graphOffsetY];
+  if (!sameValues(routing.current.inputsFrom, inputsFrom)) {
+    routing.current.inputs = new Map();
+    routing.current.inputsFrom = inputsFrom;
+  }
+  const gateInputs = routing.current.inputs;
+  const inputsOf = (gate: Gate): GateInputs => {
+    const known = gateInputs.get(gate);
+    if (known) return known;
+    const ends = [gate.to, ...gate.parents.map((parent) => parent.from)];
+    const rects = ends.map((end) => cardRect(end, centerX, rowTop));
+    const placement = gatePlacement(gate);
+    const ratio = graph?.ui?.gates?.[gate.to.node.id]?.ratio;
+    const wires = [
+      getWireVertices(gateWireKey(gate.to.node.id)),
+      ...gate.parents.map((parent) =>
+        getWireVertices(edgePlacementKey(parent.from.node.id, gate.to.node.id)),
+      ),
+    ];
+    const key: number[] = [placement?.x ?? NaN, placement?.y ?? NaN, ratio ?? NaN];
+    for (const rect of rects) key.push(rect.left, rect.top, rect.right, rect.bottom);
+    for (const wire of wires) {
+      key.push(wire.length);
+      for (const point of wire) key.push(point.x, point.y);
+    }
+    const inputs = {
+      rects,
+      placement,
+      ratio,
+      bends: [...(placement ? [placement] : []), ...wires.flat()],
+      key,
+    };
+    gateInputs.set(gate, inputs);
+    return inputs;
+  };
+  // A gate's layout, worked out again only when something it was worked out
+  // from has moved: a pan that keeps a gate on screen reuses it, and one that
+  // brings a gate back finds it here.
+  const gateLayoutOf = (gate: Gate): GateLayout => {
+    const inputs = inputsOf(gate);
+    const cached = layoutCache.get(gate.to.node.id);
+    if (
+      cached &&
+      cached.gate === gate &&
+      (cached.key === inputs.key || sameNumbers(cached.key, inputs.key))
+    ) {
+      return cached.layout;
+    }
+    const watched = watchedIndex(boardIndex);
+    const layout = gateLayout(gate, centerX, rowTop, inputs.placement, inputs.ratio, watched);
+    layoutCache.set(gate.to.node.id, {
+      gate,
+      key: inputs.key,
+      layout,
+      reach: watched.reach(),
+    });
+    return layout;
+  };
+
   // A culled board draws the cards near the view and the ones somebody is
   // holding: selected, open, focused (with its tab neighbours), dragged,
   // resized, or an end of the wire being drawn. Every card keeps its place
   // in draw order, so tab order and stacking do not change.
   let drawnCols = cols;
   let drawnGates = gates;
-  // What each drawn wire routes around: every card, or on a culled board the
-  // ones that can still change it.
-  let gateObstacles = (_gate: Gate): Rect[] => graphObstacles;
   if (viewWindow) {
     const pinned = new Set(selectedGraphNodeIDs);
     if (activeTab) pinned.add(activeTab);
@@ -351,36 +527,16 @@ export function GraphCanvas({
     // A wire is drawn when the box around its ends, its gate and its bends
     // meets the view — so one crossing the view from two cards out of it is —
     // or when a card it joins is being dragged.
-    const gateBounds = new Map<Gate, Rect>();
     const dragged = new Set(drag?.ids);
     drawnGates = view
       ? gates.filter((gate) => {
-          const ends = [gate.to, ...gate.parents.map((parent) => parent.from)];
-          const placement = gatePlacement(gate);
-          const bends = [
-            ...(placement ? [placement] : []),
-            ...getWireVertices(gateWireKey(gate.to.node.id)),
-            ...gate.parents.flatMap((parent) =>
-              getWireVertices(edgePlacementKey(parent.from.node.id, gate.to.node.id)),
-            ),
-          ];
-          const bounds = boundsOf(
-            ends.map((end) => cardRect(end, centerX, rowTop)),
-            bends,
-          );
-          if (bounds) gateBounds.set(gate, bounds);
-          if (ends.some((end) => dragged.has(end.node.id))) return true;
+          if (dragged.has(gate.to.node.id)) return true;
+          if (gate.parents.some((parent) => dragged.has(parent.from.node.id))) return true;
+          const { rects, bends } = inputsOf(gate);
+          const bounds = boundsOf(rects, bends);
           return bounds !== null && rectsIntersect(bounds, view);
         })
       : [];
-    if (view) {
-      gateObstacles = (gate) => {
-        const bounds = gateBounds.get(gate);
-        return bounds
-          ? obstaclesNear(graphObstacles, bounds, view, GATE_W + GATE_H + ROW_H)
-          : graphObstacles;
-      };
-    }
   }
 
   const agentSessions = useAgents((s) => s.sessions);
@@ -444,31 +600,32 @@ export function GraphCanvas({
 
   // A marquee grabs cards, but a wire between two grabbed cards belongs to the
   // same selection: it is drawn selected so the picked set reads as one shape.
-  const selectedEdgeKeys = new Set<string>();
-  if (graphSelection?.kind === "edge") {
-    selectedEdgeKeys.add(
-      edgePlacementKey(graphSelection.from, graphSelection.to),
-    );
-  } else if (graphSelection?.kind === "edges") {
-    for (const edge of graphSelection.edges) {
-      selectedEdgeKeys.add(edgePlacementKey(edge.from, edge.to));
+  // One set per selection, so a gate can tell that nothing changed.
+  const graphEdges = graph?.edges;
+  const selectedEdgeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (graphSelection?.kind === "edge") {
+      keys.add(edgePlacementKey(graphSelection.from, graphSelection.to));
+    } else if (graphSelection?.kind === "edges") {
+      for (const edge of graphSelection.edges) {
+        keys.add(edgePlacementKey(edge.from, edge.to));
+      }
+    } else if (
+      graphSelection?.kind === "vertex" &&
+      !graphSelection.wireKey.startsWith("gate:")
+    ) {
+      keys.add(graphSelection.wireKey);
     }
-  } else if (
-    graphSelection?.kind === "vertex" &&
-    !graphSelection.wireKey.startsWith("gate:")
-  ) {
-    selectedEdgeKeys.add(graphSelection.wireKey);
-  }
-  if (selectedGraphNodeIDs.size > 1) {
-    for (const edge of graph?.edges ?? []) {
-      if (
-        selectedGraphNodeIDs.has(edge.from) &&
-        selectedGraphNodeIDs.has(edge.to)
-      ) {
-        selectedEdgeKeys.add(edgePlacementKey(edge.from, edge.to));
+    if (selectedGraphNodeIDs.size > 1) {
+      for (const edge of graphEdges ?? []) {
+        if (selectedGraphNodeIDs.has(edge.from) && selectedGraphNodeIDs.has(edge.to)) {
+          keys.add(edgePlacementKey(edge.from, edge.to));
+        }
       }
     }
-  }
+    return keys;
+  }, [graphSelection, selectedGraphNodeIDs, graphEdges]);
+  const selectedVertex = graphSelection?.kind === "vertex" ? graphSelection : null;
 
   return (
     <>
@@ -629,69 +786,20 @@ export function GraphCanvas({
           <GateWiring
             key={gate.to.node.id}
             gate={gate}
-            centerX={centerX}
-            rowTop={rowTop}
-            storedPoint={gatePlacement(gate)}
-            storedRatio={graph?.ui?.gates?.[gate.to.node.id]?.ratio}
-            onPositionChange={saveGatePlacement}
+            centerX={gateEvents.centerX}
+            rowTop={gateEvents.rowTop}
+            layout={gateLayoutOf(gate)}
+            onPositionChange={gateEvents.saveGatePlacement}
             selectedEdges={selectedEdgeKeys}
-            onSelectEdge={(from, to) => {
-              setGraphSelection({ kind: "edge", from, to });
-              onSelectedNodeChange?.(null);
-            }}
-            onOpenEdgeMenu={(edges, x, y) => {
-              const first = edges[0];
-              if (!first) return;
-              // Right-clicking one of several selected wires acts on the whole
-              // selection, the way it does for cards.
-              const inSelection =
-                graphSelection?.kind === "edges" &&
-                graphSelection.edges.some(
-                  (edge) => edge.from === first.from && edge.to === first.to,
-                );
-              const targets =
-                inSelection && graphSelection?.kind === "edges"
-                  ? graphSelection.edges
-                  : edges;
-              if (!inSelection) {
-                setGraphSelection({
-                  kind: "edge",
-                  from: first.from,
-                  to: first.to,
-                });
-              }
-              onSelectedNodeChange?.(null);
-              setContextMenu({ kind: "edge", edges: targets, x, y });
-            }}
-            getWireVertices={getWireVertices}
-            onWireVerticesChange={saveWireVertices}
-            selectedVertex={
-              graphSelection?.kind === "vertex" ? graphSelection : null
-            }
-            onSelectVertex={(wireKey, index) => {
-              setGraphSelection({ kind: "vertex", wireKey, index });
-              onSelectedNodeChange?.(null);
-            }}
-            obstacles={gateObstacles(gate)}
-            onEditGate={(targetId, x, y) => openConditionMenu(targetId, x, y)}
-            onDeleteGate={(targetId) => {
-              void updateNode({
-                type: "node.setRequires",
-                nodeId: targetId,
-                requires: "",
-                // Keep the edges: only the condition expression goes.
-                refs: null,
-              }).then((result) => {
-                if (!result.ok) {
-                  reportError(new Error(result.message));
-                  return;
-                }
-                setGraphNotice({
-                  text: t("canvas.deleteGateNotice"),
-                  kind: "ok",
-                });
-              });
-            }}
+            onSelectEdge={gateEvents.selectEdge}
+            onOpenEdgeMenu={gateEvents.openEdgeMenu}
+            getWireVertices={gateEvents.getWireVertices}
+            onWireVerticesChange={gateEvents.saveWireVertices}
+            selectedVertex={selectedVertex}
+            onSelectVertex={gateEvents.selectVertex}
+            obstacles={boardObstacles}
+            onEditGate={gateEvents.editGate}
+            onDeleteGate={gateEvents.deleteGate}
           />
         ))}
       </svg>
@@ -794,3 +902,51 @@ export function GraphCanvas({
 }
 
 const NO_STATUS_DEFINITIONS: StatusDefinition[] = [];
+
+/** What a gate's layout was last worked out from, and how far it looked. */
+interface CachedGateLayout {
+  gate: Gate;
+  key: number[];
+  layout: GateLayout;
+  /** The box around every obstacle it looked up; null when it looked up none. */
+  reach: Rect | null;
+}
+
+interface GateInputs {
+  /** The gate's node first, then each input's card. */
+  rects: Rect[];
+  placement: Point | undefined;
+  ratio: number | undefined;
+  /** The hand placement and every bend of its wires. */
+  bends: Point[];
+  /** All of the above as numbers, to tell whether any of it moved. */
+  key: number[];
+}
+
+function sameValues(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
+}
+
+function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false;
+  return true;
+}
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
+}
+
+/**
+ * The obstacles that moved between two lists of the board's obstacles, both
+ * where they were and where they are; null when the lists do not line up (a
+ * card came or went) and anything may have moved.
+ */
+function movedRects(before: readonly Rect[], after: readonly Rect[]): Rect[] | null {
+  if (before.length !== after.length) return null;
+  const moved: Rect[] = [];
+  for (let i = 0; i < after.length; i++) {
+    if (!sameRect(before[i], after[i])) moved.push(before[i], after[i]);
+  }
+  return moved;
+}

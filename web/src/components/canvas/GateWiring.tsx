@@ -6,7 +6,7 @@
  * first-class gates.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { memo, useState, useEffect, useRef } from "react";
 import {
   ROW_H,
   WIRE_CLEARANCE,
@@ -16,7 +16,6 @@ import {
   constrainPointOutsideRects,
   edgePlacementKey,
   gateWireKey,
-  nearestClearRatio,
   pointOnLine,
   rectBoundary,
   svgPointerPoint,
@@ -28,6 +27,12 @@ import type { EdgeLine, EdgeRelation } from "../../types";
 import { DependencyLine } from "./DependencyLine";
 import { useI18n } from "../../i18n";
 import { isPlainAllOfRequirement } from "./simpleDependency";
+import {
+  constrainPointOutsideIndex,
+  nearestClearRatioInIndex,
+  obstacleIndex,
+  type ObstacleIndex,
+} from "./obstacleIndex";
 
 
 
@@ -82,51 +87,32 @@ export function showsGateBadge(gate: Gate): boolean {
   return !defaultAllOf;
 }
 
-export function GateWiring({
-  gate,
-  centerX,
-  rowTop,
-  storedPoint,
-  storedRatio,
-  onPositionChange,
-  selectedEdges,
-  onSelectEdge,
-  onOpenEdgeMenu,
-  getWireVertices,
-  onWireVerticesChange,
-  selectedVertex,
-  onSelectVertex,
-  obstacles,
-  onEditGate,
-  onDeleteGate,
-}: {
-  gate: Gate;
-  centerX: (c: Col) => number;
-  rowTop: (row: number) => number;
-  storedPoint?: Point;
-  storedRatio?: number;
-  onPositionChange: (targetId: string, point: Point) => void;
-  /** Wire keys drawn as selected: the picked edge, plus any wire whose two
-      endpoints are both inside a marquee selection. */
-  selectedEdges: ReadonlySet<string>;
-  onSelectEdge: (from: string, to: string) => void;
-  onOpenEdgeMenu: (
-    edges: { from: string; to: string }[],
-    x: number,
-    y: number,
-  ) => void;
-  getWireVertices: (wireKey: string) => Point[];
-  onWireVerticesChange: (wireKey: string, vertices: Point[]) => void;
-  selectedVertex: { wireKey: string; index: number } | null;
-  onSelectVertex: (wireKey: string, index: number) => void;
-  obstacles: Rect[];
-  onEditGate: (targetId: string, x: number, y: number) => void;
-  onDeleteGate: (targetId: string) => void;
-}) {
-  const { t } = useI18n();
+/** Where a gate's condition box sits, in board units. */
+export interface GateLayout {
+  /** Where the box is drawn: its hand placement pushed off any card, or else
+      the fallback. */
+  center: Point;
+  /** Where the box goes without a placement — on the line from its inputs to
+      its node, clear of the cards. A double-click puts it back here. */
+  fallback: Point;
+}
+
+/**
+ * Lays out a gate's box against the board's obstacles. A gate drawn as plain
+ * wires has no box, so nothing is routed for it.
+ */
+export function gateLayout(
+  gate: Gate,
+  centerX: (c: Col) => number,
+  rowTop: (row: number) => number,
+  storedPoint: Point | undefined,
+  storedRatio: number | undefined,
+  obstacles: ObstacleIndex,
+): GateLayout {
   const tx = centerX(gate.to);
   const cardTop = rowTop(gate.to.row);
   const targetCenter = { x: tx, y: cardTop + ROW_H / 2 };
+  if (!showsGateBadge(gate)) return { center: targetCenter, fallback: targetCenter };
   const sourceCenters = gate.parents.map((parent) => cardCenter(parent.from, centerX, rowTop));
   const sourceAverage =
     sourceCenters.length > 0
@@ -147,10 +133,10 @@ export function GateWiring({
     typeof storedRatio === "number" && Number.isFinite(storedRatio)
       ? Math.max(0, Math.min(1, storedRatio))
       : DEFAULT_GATE_RATIO;
-  const fallbackCenter = pointOnLine(
+  const fallback = pointOnLine(
     axisStart,
     axisEnd,
-    nearestClearRatio(
+    nearestClearRatioInIndex(
       axisStart,
       axisEnd,
       storedGateRatio,
@@ -159,16 +145,79 @@ export function GateWiring({
       GATE_H / 2 + WIRE_CLEARANCE,
     ),
   );
-  const initialCenter =
+  const center =
     storedPoint &&
     Number.isFinite(storedPoint.x) &&
     Number.isFinite(storedPoint.y)
-      ? constrainPointOutsideRects(
+      ? constrainPointOutsideIndex(
           storedPoint,
           obstacles,
           Math.max(GATE_W, GATE_H) / 2 + WIRE_CLEARANCE,
         )
-      : fallbackCenter;
+      : fallback;
+  return { center, fallback };
+}
+
+/**
+ * Memoized: on a large board a pan that moves the culling window re-renders
+ * the canvas, and a gate that stays on screen with the same layout, handlers
+ * and selection is left alone. The board hands it one layout object per
+ * placement — a new one whenever its cards, placement, bends or the cards
+ * around it move — and handlers that keep their identity.
+ */
+export const GateWiring = memo(function GateWiring({
+  gate,
+  centerX,
+  rowTop,
+  layout,
+  storedPoint,
+  storedRatio,
+  onPositionChange,
+  selectedEdges,
+  onSelectEdge,
+  onOpenEdgeMenu,
+  getWireVertices,
+  onWireVerticesChange,
+  selectedVertex,
+  onSelectVertex,
+  obstacles,
+  onEditGate,
+  onDeleteGate,
+}: {
+  gate: Gate;
+  centerX: (c: Col) => number;
+  rowTop: (row: number) => number;
+  /** The box's place, worked out by the board; left out, it is worked out
+      here from the stored placement and ratio. */
+  layout?: GateLayout;
+  storedPoint?: Point;
+  storedRatio?: number;
+  onPositionChange: (targetId: string, point: Point) => void;
+  /** Wire keys drawn as selected: the picked edge, plus any wire whose two
+      endpoints are both inside a marquee selection. */
+  selectedEdges: ReadonlySet<string>;
+  onSelectEdge: (from: string, to: string) => void;
+  onOpenEdgeMenu: (
+    edges: { from: string; to: string }[],
+    x: number,
+    y: number,
+  ) => void;
+  getWireVertices: (wireKey: string) => Point[];
+  onWireVerticesChange: (wireKey: string, vertices: Point[]) => void;
+  selectedVertex: { wireKey: string; index: number } | null;
+  onSelectVertex: (wireKey: string, index: number) => void;
+  /** What a dragged box or bend is kept off: every card on the board. */
+  obstacles: Rect[];
+  onEditGate: (targetId: string, x: number, y: number) => void;
+  onDeleteGate: (targetId: string) => void;
+}) {
+  const { t } = useI18n();
+  const tx = centerX(gate.to);
+  const cardTop = rowTop(gate.to.row);
+  const targetCenter = { x: tx, y: cardTop + ROW_H / 2 };
+  const { center: initialCenter, fallback: fallbackCenter } =
+    layout ??
+    gateLayout(gate, centerX, rowTop, storedPoint, storedRatio, obstacleIndex(obstacles));
   const [gateCenter, setGateCenter] = useState(initialCenter);
   const centerRef = useRef(initialCenter);
   const dragRef = useRef<{
@@ -470,4 +519,4 @@ export function GateWiring({
       </g>
     </g>
   );
-}
+});
