@@ -137,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	sys.Register(api)
+	s.registerHealth(api)
 	if s.copilot != nil {
 		s.copilot.Register(api)
 	}

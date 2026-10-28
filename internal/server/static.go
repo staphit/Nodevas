@@ -67,7 +67,7 @@ func QuietRequest(r *http.Request) bool {
 	if strings.HasPrefix(r.URL.Path, "/assets/") {
 		return true
 	}
-	return r.URL.Path == "/" && auth.DirectLoopback(r)
+	return (r.URL.Path == "/" || r.URL.Path == healthzPath) && auth.DirectLoopback(r)
 }
 
 // LogRequests is simple request logging middleware.

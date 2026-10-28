@@ -49,8 +49,10 @@ ENV NODEVAS_REQUIRE_DATABASE_URL=1
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 5666
+# /api/healthz answers 503 when the database does not, which wget treats as
+# a failure; the probe's successes are left out of the request log.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5666/ || exit 1
+    CMD wget -q -T 4 -O /dev/null http://127.0.0.1:5666/api/healthz || exit 1
 ENTRYPOINT ["/usr/local/bin/nodevas"]
 # --no-runner: the image has no coding agents, so a runner in it could take
 # no run. Runners belong on the machines that have them.

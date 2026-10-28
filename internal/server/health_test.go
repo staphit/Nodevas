@@ -41,6 +41,18 @@ func TestHealthzNeedsNoSignInAndReportsTheDatabase(t *testing.T) {
 	if cache := response.Header().Get("Cache-Control"); cache != "no-store" {
 		t.Fatalf("healthz Cache-Control = %q, want no-store", cache)
 	}
+	head := httptest.NewRequest(http.MethodHead, "/api/healthz", nil)
+	head.RemoteAddr = "203.0.113.7:40000"
+	headResponse := httptest.NewRecorder()
+	handler.ServeHTTP(headResponse, head)
+	if headResponse.Code != http.StatusOK {
+		t.Fatalf("HEAD healthz = %d, want 200", headResponse.Code)
+	}
+	probe := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
+	probe.RemoteAddr = "127.0.0.1:40000"
+	if !QuietRequest(probe) {
+		t.Fatal("the container's own health probe fills the request log")
+	}
 	if class, _ := ClassifyRoute(http.MethodGet, "/api/healthz"); class != ClassRead {
 		t.Fatalf("healthz is the %s class, want read", class)
 	}
@@ -78,14 +90,14 @@ func TestMetricsAreForAdminsOrLoopback(t *testing.T) {
 	if response := getAs(handler, "/api/metrics", "203.0.113.7", nil); response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous metrics = %d, want 401", response.Code)
 	}
-	member, _ := signIn(t, server, inbox, testEmail)
+	if err := users.AddWithEmail(context.Background(), "bea", "correct-horse-battery", identity.RoleMember, "bea@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	member, _ := signIn(t, server, inbox, "bea@example.test")
 	if response := getAs(handler, "/api/metrics", "203.0.113.7", member); response.Code != http.StatusForbidden {
 		t.Fatalf("a member's metrics = %d %s, want 403", response.Code, response.Body)
 	}
-	if err := users.SetRole(context.Background(), "ann", identity.RoleAdmin); err != nil {
-		t.Fatal(err)
-	}
-	admin, _ := signIn(t, server, inbox, testEmail)
+	admin, _ := signIn(t, server, inbox, testEmail) // ann, the first account, is an admin
 	response := getAs(handler, "/api/metrics", "203.0.113.7", admin)
 	if response.Code != http.StatusOK {
 		t.Fatalf("an admin's metrics = %d %s, want 200", response.Code, response.Body)

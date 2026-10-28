@@ -64,6 +64,9 @@ type Server struct {
 	// analyticsDB is the workspace database agent analytics reads (pure
 	// SQL, never a model); nil until UseRunnersDB.
 	analyticsDB *db.DB
+	// database is the workspace database healthz pings and metrics reads
+	// (health.go); the first one a Use*DB call was given.
+	database *db.DB
 	// links holds device link codes and runnerAccess the Access service
 	// token they carry (runner_links.go); nil until UseRunnersDB.
 	links        *runners.Links
@@ -302,6 +305,7 @@ func (s *Server) UseAudit(store *audit.Store) {
 // UseAgentsDB attaches the workspace database to the agent collaboration hub so
 // messages and ask_user requests persist across restarts.
 func (s *Server) UseAgentsDB(database *db.DB) {
+	s.useDatabase(database)
 	if s.agents != nil {
 		s.agents.SetDatabase(database)
 	}
@@ -314,6 +318,7 @@ func (s *Server) UseAgentsDB(database *db.DB) {
 // database. Call it before Handler. Without it the runner endpoints do not
 // exist and a runner token opens nothing.
 func (s *Server) UseRunnersDB(database *db.DB) {
+	s.useDatabase(database)
 	s.runners = runners.NewRegistry(database, func() {
 		if s.hub != nil {
 			s.hub.Broadcast(runnerwire.ChangedEvent, "")

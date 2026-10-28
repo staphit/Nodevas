@@ -27,6 +27,7 @@ import (
 // to every signed-in account, so turning this on changes nothing until
 // someone restricts a project.
 func (s *Server) UseMembersDB(database *db.DB) {
+	s.useDatabase(database)
 	store := members.NewStore(database)
 	if err := store.Load(context.Background()); err != nil {
 		// Failing open here would expose every restricted project, so the

@@ -102,6 +102,12 @@ Accounts, sessions, the audit trail, settings, runs, the copilot's conversations
 
 Each project keeps its history in its own git repository (`<project>/.vised/git`), and backups can push it to a git remote. `NODEVAS_HISTORY=files|git|auto` chooses the backend. See [History and backup](./history-and-backup.md).
 
+## Health and metrics
+
+`GET /api/healthz` (or `HEAD`) needs no sign-in and pings the database: `200 {"status":"ok","database":"ok"}`, or `503` with `"database":"down"` when it does not answer within two seconds. The container image's `HEALTHCHECK` uses it, so a hub that lost its database is reported unhealthy; its successful probes from the container itself are left out of the request log. It is rate-limited like any read.
+
+`GET /api/metrics` is JSON for an administrator, or for a scraper on the same machine (a direct loopback request without forwarding headers needs no account): `db` has each connection pool's `sql.DBStats` (`write`, `read`, `search`: `max_open`, `open`, `in_use`, `idle`, `wait_count`, `wait_duration_ms`, ...), `limiter` the rate limiter's refusals by kind of route since start (`rejected_by_class`) and its concurrency slots, `runs` the number of runs in each state, `realtime.connections` the open WebSocket connections when the hub reports them, `audit_queue` the audit writes waiting for the database, and `goroutines`.
+
 ## Logs and audit events
 
 `nodevas serve` writes one JSON object per line to stderr; `logging.format: text` prints the same fields for a terminal. Keys are flat dotted names. Every line has `@timestamp` (UTC, milliseconds), `log.level` (`debug`, `info`, `warn` or `error`), `message` and `service.name` (`nodevas`). A line written while serving a request also has `http.request.id`, the value the browser gets back as `X-Request-Id`.

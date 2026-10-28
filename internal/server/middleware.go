@@ -152,7 +152,7 @@ func (s *Server) withAuth(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if !guarded || auth.PublicPaths[r.URL.Path] {
+	if !guarded || auth.PublicPaths[r.URL.Path] || publicHealthPath(r) {
 		c.Next()
 		return
 	}
