@@ -103,8 +103,10 @@
 /* An open vertical timeline ends there too, and its date ruler is sticky at
    the right edge: rows scroll out from under the button, the ruler never
    does. The button stands left of the ruler (56px at 100%, and the board's
-   scrollbar) while such a timeline is open. */
-.app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)) > .copilot-fab {
+   scrollbar) while such a timeline is open. An open document covers the
+   ruler, and its footer keeps clear of the button where it normally stands,
+   so the button stays put then. */
+.app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)):not(:has(.drawer:not(.collapsed-rail))) > .copilot-fab {
   right: calc(max(18px, env(safe-area-inset-right, 0px)) + 56px + 16px);
 }
 /* Room below the timeline's last row, so whatever lies under the button can
