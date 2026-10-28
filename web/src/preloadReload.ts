@@ -71,3 +71,33 @@ export function parseLastReload(stored: string | null): number | null {
   const at = Number(stored);
   return Number.isFinite(at) ? at : null;
 }
+
+/** Whether the server answers at all (any status). A request that never gets
+ * an answer means it is stopped or out of reach. */
+export function serverAnswers(): Promise<boolean> {
+  return fetch("/", { method: "HEAD", cache: "no-store" }).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Reloads once the server answers. A chunk also fails to load when the server
+ * is simply down (stopped, restarting); reloading then swaps the whole app for
+ * the browser's "refused to connect" page, which stays there after the server
+ * is back. So the reload waits, probing every intervalMs, and the view's error
+ * boundary shows meanwhile.
+ */
+export function reloadWhenServerAnswers(
+  probe: () => Promise<boolean>,
+  reload: () => void,
+  intervalMs = 2_000,
+): void {
+  const attempt = () => {
+    void probe().then((answered) => {
+      if (answered) reload();
+      else setTimeout(attempt, intervalMs);
+    });
+  };
+  attempt();
+}

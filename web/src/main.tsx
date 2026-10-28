@@ -2,7 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ViewErrorBoundary } from "./components/ViewErrorBoundary";
-import { createPreloadFailureTracker, parseLastReload, shouldReloadForPreloadError } from "./preloadReload";
+import {
+  createPreloadFailureTracker,
+  parseLastReload,
+  reloadWhenServerAnswers,
+  serverAnswers,
+  shouldReloadForPreloadError,
+} from "./preloadReload";
 import { resetPreferences, VIEW_SELECTION_PREFERENCES } from "./preferences";
 import "./app.css";
 
@@ -28,8 +34,10 @@ window.addEventListener("vite:preloadError", (event) => {
     // No session storage (blocked): never reload on our own, so no loop.
     return;
   }
-  event.preventDefault();
-  window.location.reload();
+  // Not prevented: the failure reaches the view's error boundary, which shows
+  // while the reload waits for a server that may be down (a reload into a dead
+  // server would replace the app with the browser's error page).
+  reloadWhenServerAnswers(serverAnswers, () => window.location.reload());
 });
 
 // The root boundary's way out of a crash tied to the view the app opens on:
