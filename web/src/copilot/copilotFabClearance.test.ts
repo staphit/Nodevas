@@ -37,4 +37,26 @@ describe("voice copilot button clearance", () => {
   it("goes round while a document is open", () => {
     expect(rules(".app:has(.drawer:not(.collapsed-rail)) > .copilot-fab")).toMatch(/width:\s*48px/);
   });
+
+  // On a phone the open document fills the screen and the keyboard lifts the
+  // editor's last lines to where the button floats: it covered the text being
+  // typed. While a document is being edited on a narrow screen the button
+  // steps aside, and anywhere the editor leaves room below its last line.
+  it("steps aside while a document is being edited on a phone", () => {
+    const phone = /@media \(max-width:\s*(\d+)px\)\s*\{([^@]*)/g;
+    const hidden: string[] = [];
+    for (let match = phone.exec(css); match; match = phone.exec(css)) {
+      if (Number(match[1]) < 500) continue;
+      const block = /([^{}]*\.drawer[^{}]*cm-focused[^{}]*>\s*\.copilot-fab[^{}]*)\{([^}]*)\}/.exec(match[2]);
+      if (block) hidden.push(block[2]);
+    }
+    expect(hidden.join(" ")).toMatch(/visibility:\s*hidden/);
+    expect(hidden.join(" ")).toMatch(/pointer-events:\s*none/);
+  });
+
+  it("leaves room below the editor's last line for the button", () => {
+    expect(rules(".app:has(> .copilot-fab) .drawer .cm-content")).toMatch(
+      /padding-bottom:\s*calc\(48px/,
+    );
+  });
 });
