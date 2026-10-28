@@ -7,6 +7,7 @@ import { usePopoutLiveUpdates } from "./popoutLiveUpdates";
 const socket = vi.hoisted(() => ({
   handler: null as null | ((ev: WSEvent) => void),
   close: vi.fn(),
+  subscribe: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -15,7 +16,7 @@ vi.mock("../api", async (importOriginal) => {
     ...actual,
     connectWS: vi.fn((onEvent: (ev: WSEvent) => void) => {
       socket.handler = onEvent;
-      return { close: socket.close } as unknown as ReturnType<typeof actual.connectWS>;
+      return { close: socket.close, subscribe: socket.subscribe } as unknown as ReturnType<typeof actual.connectWS>;
     }),
   };
 });
@@ -45,6 +46,14 @@ describe("usePopoutLiveUpdates", () => {
 
     unmount();
     expect(socket.close).toHaveBeenCalledTimes(1);
+  });
+
+  // Node ids repeat across projects: node-0004 of another project changing
+  // must not reach this one.
+  it("listens in the project it shows", () => {
+    useApp.setState({ activeProject: "main" });
+    renderHook(() => usePopoutLiveUpdates("node-0004"));
+    expect(socket.subscribe).toHaveBeenCalledWith("main");
   });
 
   it("opens no socket without a node", () => {

@@ -7,6 +7,7 @@ import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
 import { NodeTitleField } from "./inspector/NodeMetaForm";
+import { usePopoutLiveUpdates } from "./popoutLiveUpdates";
 
 export function PopoutEditor() {
   const { t } = useI18n();
@@ -23,6 +24,8 @@ export function PopoutEditor() {
   const [error, setError] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [saveRequest, setSaveRequest] = useState(0);
+
+  usePopoutLiveUpdates(nodeID);
 
   const node = nodeById(graph, nodeID);
   const title = node?.title || nodeID || t("node.title");
