@@ -162,9 +162,12 @@ export function useNodeCreation({
         const applied = await setLifecycleStatus(id, nodeCreateStatus, t("nodeCreate.creationNote"));
         if (!applied.ok) statusWarning = applied.message ?? "";
       }
+      // Named the way the board names it: by its title, by its id only when
+      // it has none.
+      const title = nodeCreateTitle.trim() || id;
       const createdText = plans.length
-        ? t("nodeCreate.createdWithPlans", { id, count: plans.length })
-        : t("nodeCreate.created", { id });
+        ? t("nodeCreate.createdWithPlans", { title, count: plans.length })
+        : t("nodeCreate.created", { title });
       setGraphNotice({
         text: statusWarning
           ? `${createdText} ${t("nodeCreate.statusWarning", { message: statusWarning })}`
