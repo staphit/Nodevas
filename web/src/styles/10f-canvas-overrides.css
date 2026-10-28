@@ -124,7 +124,7 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
   color: var(--accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -330,6 +330,12 @@
     gap: 5px;
     min-width: 0;
     overflow-x: auto;
+    /* Sideways only. With overflow-x alone the other axis computes to auto as
+       well, and the chevron's 44px tap overlay below sticks out above and
+       below this ~24px strip — so a collapsed timeline's header drew its own
+       tiny vertical scrollbar, whose arrows took width from the pane name.
+       The overlay was already clipped to the strip either way. */
+    overflow-y: hidden;
     /* Without this the swipe that scrolls the strip continues into the board
        behind it once the strip reaches its end. */
     overscroll-behavior-x: contain;
