@@ -9,7 +9,7 @@ import { formatList, languageLocale, useI18n } from "../i18n";
 import { CopyButton, LinkDeviceDialog } from "./LinkDevice";
 import { useTeamServer } from "../components/SignIn";
 import { useRunners } from "./runnerStore";
-import { runnerDisplayName } from "./runnerName";
+import { runnerAgentProblem, runnerDisplayName, runnerModelLabel } from "./runnerName";
 
 /** "3 minutes ago" in the reader's language, or "" for an unparseable time. */
 export function relativeTime(iso: string, now = Date.now()): string {
@@ -289,7 +289,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
                     <span className="runner-agent-version">
                       {agent.installed
                         ? agent.version || t("runners.installed")
-                        : agent.error || t("runners.notInstalled")}
+                        : agent.error ? runnerAgentProblem(t, agent.error) : t("runners.notInstalled")}
                     </span>
                     {agent.installed && agent.models.length > 0 && (
                       <span className="runner-models">
@@ -299,7 +299,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
                             className={`runner-model${model.default ? " default" : ""}`}
                             title={model.default ? t("runners.defaultModel") : undefined}
                           >
-                            {model.label || model.id}
+                            {runnerModelLabel(t, model)}
                             {model.default ? " ★" : ""}
                           </span>
                         ))}

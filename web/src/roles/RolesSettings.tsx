@@ -23,7 +23,7 @@ import {
   toolTokenLabel,
 } from "../domain/graph/roles";
 import { formatList, useI18n } from "../i18n";
-import { runnerDisplayName } from "../runners/runnerName";
+import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
 import { nodeTypeLabel } from "../nodeTypeTheme";
 import { useRunners } from "../runners/runnerStore";
 import { agentCatalog, agentModelProblem, agentModelText, catalogDefaultModel, FallbackChainEditor, trimAgentModel } from "../runs/AgentModelFields";
@@ -269,7 +269,7 @@ function WhoRunsIt({ role, project }: { role: AgentRole; project: string }) {
             {!target.model && <option value="">{t("routing.chooseModel")}</option>}
             {(agent?.models ?? []).map((model) => (
               <option key={model.id} value={model.id}>
-                {(model.label || model.id) + (model.default ? t("runs.defaultSuffix") : "")}
+                {runnerModelLabel(t, model) + (model.default ? t("runs.defaultSuffix") : "")}
               </option>
             ))}
             {target.model && !agent?.models.some((model) => model.id === target.model) && (

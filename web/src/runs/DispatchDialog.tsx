@@ -17,7 +17,7 @@ import {
 import { useViewer } from "../components/SignIn";
 import { IconClose, IconSend } from "../icons";
 import { useI18n } from "../i18n";
-import { runnerDisplayName } from "../runners/runnerName";
+import { runnerDisplayName, runnerModelLabel } from "../runners/runnerName";
 import { useApp } from "../store";
 import { useRunners } from "../runners/runnerStore";
 import {
@@ -588,7 +588,7 @@ export function DispatchDialog({
                         {models.length === 0 && <option value="">{t("runs.noModelsOption")}</option>}
                         {models.map((item) => (
                           <option key={item.id} value={item.id}>
-                            {(item.label || item.id) + (item.default ? t("runs.defaultSuffix") : "")}
+                            {runnerModelLabel(t, item) + (item.default ? t("runs.defaultSuffix") : "")}
                           </option>
                         ))}
                       </select>
