@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { api } from "../api";
 import { IconClose, IconDoc } from "../icons";
 import { nodeById, useApp, usePreference } from "../store";
 import { applyTextScale } from "../preferences/textScale";
@@ -24,6 +25,9 @@ export function PopoutEditor() {
   const [error, setError] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [saveRequest, setSaveRequest] = useState(0);
+  // A subpage is named by its title, as the drawer's page menu names it; its
+  // id is an internal handle. Blank until the list answers.
+  const [pageTitle, setPageTitle] = useState("");
 
   usePopoutLiveUpdates(nodeID);
 
@@ -64,6 +68,22 @@ export function PopoutEditor() {
   }, [loadAll, nodeID, openTab, refreshProjects, refreshTrash]);
 
   useEffect(() => {
+    if (!nodeID || pageID === "main") return;
+    let cancelled = false;
+    void api
+      .listNodePages(nodeID)
+      .then(({ pages }) => {
+        if (!cancelled) setPageTitle(pages.find((page) => page.id === pageID)?.title ?? "");
+      })
+      .catch(() => {
+        // The header only loses the name; TabBody reports a page it cannot open.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeID, pageID]);
+
+  useEffect(() => {
     document.title = `${title} — Nodevas`;
   }, [title]);
 
@@ -85,7 +105,7 @@ export function PopoutEditor() {
           <div>
             {/* The title is edited here: the popout has no node panel header. */}
             {node ? <NodeTitleField id={nodeID} /> : <strong>{title}</strong>}
-            <span>{pageID === "main" ? t("drawer.mainPage") : pageID}</span>
+            <span>{pageID === "main" ? t("drawer.mainPage") : pageTitle}</span>
           </div>
         </div>
         <div className="popout-editor-actions">
