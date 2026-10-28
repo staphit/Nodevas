@@ -8,11 +8,16 @@ const KEYS = [
   ...each("explorer.tab", ["nodes", "files", "git", "agent"]),
   "explorer.tabs",
   ...each("explorer.files", [
-    "workspace", "hub", "repo", "offline", "offlineNote", "readOnlyNote", "readOnlyNoteNone", "marks", "search",
+    "workspace", "hub", "repo", "offline", "offlineNote", "readOnlyNote", "readOnlyNoteNone", "search",
     "browseOff", "noRepos", "truncated",
   ]),
   ...each("explorer.file", ["readOnly", "openNode", "binary", "truncatedFile", "hidden"]),
-  ...each("explorer.git", ["workspace", "pendingNone", "branches", "commits", "filesBackend", "uncommitted", "whichAgent", "byPerson", "stat"]),
+  ...each("explorer.git", ["workspace", "pendingNone", "branches", "commits", "filesBackend", "uncommitted", "whichAgent", "byPerson", "statOne", "statMany", "markSeparator"]),
+  ...each("explorer.git.mark", ["M", "A", "D", "R"]),
+  ...each("explorer.commit", ["group", "separator", "kindSeparator", "graph", "more", "update"]),
+  ...each("explorer.commit.kind", [
+    "create", "delete", "edit", "move", "restore", "pages", "addPage", "editPage", "deletePage", "convertPage", "outsideEdit",
+  ]),
   ...each("explorer.git.ci", ["pass", "fail", "pending"]),
   ...each("explorer.agent", [
     "live", "external", "recent", "tokens", "cache", "cost", "estimate", "time", "verdict", "filesTouched", "events",
@@ -21,7 +26,7 @@ const KEYS = [
   ...each("explorer.agent.state", ["running", "succeeded", "failed", "cancelled", "online", "offline"]),
   ...each("explorer.empty", ["title", "hint"]),
   "explorer.close",
-  ...each("explorer.action", ["joined", "left", "doing", "message", "ask", "changes", "usage"]),
+  ...each("explorer.action", ["joined", "left", "doing", "message", "ask", "changesOne", "changesMany", "usage"]),
   "verdict.pass",
   "verdict.fail",
   ...each("verdict.severity", ["none", "low", "medium", "high", "critical"]),
