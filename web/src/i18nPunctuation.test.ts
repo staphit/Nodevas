@@ -50,6 +50,15 @@ describe("zh-TW punctuation", () => {
     expect(offenders(zhValues())).toEqual([]);
   });
 
+  // 「所有 Agent (*)」: the bracket sits between Latin and a symbol, so the
+  // neighbour check above never sees a CJK character, yet the line is Chinese.
+  it("uses full-width （） anywhere in a zh-TW catalog value that has CJK text", () => {
+    const hits = zhValues()
+      .filter(([, value]) => CJK.test(value) && /[()]/.test(value))
+      .map(([key, value]) => `${key}: ${value}`);
+    expect(hits).toEqual([]);
+  });
+
   it("leaves ASCII punctuation outside CJK alone", () => {
     expect(halfWidthNextToCJK("{n} items, {m} done?")).toBe(false);
     expect(halfWidthNextToCJK("https://example.com/a?b=1")).toBe(false);
