@@ -288,24 +288,44 @@ func (g *gitHistory) commitStartsSoon() {
 func (g *gitHistory) commitSegments(ctx context.Context) error {
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
-	g.mu.Lock()
-	var segments []gitSegment
-	if g.pending != nil {
-		segments, g.pending.segments = g.pending.segments, nil
-	}
-	g.mu.Unlock()
-	if len(segments) == 0 {
+	if !g.hasSegments() {
 		return nil
 	}
+	// Opened before the segments are taken: a repository opening now commits
+	// them ahead of the work tree (importCopies), which is newer than they are.
 	repo, err := g.readyLocked(ctx)
 	if errors.Is(err, errProjectGone) {
+		g.takeSegments()
 		return nil
 	}
 	if err != nil {
-		g.requeue(&gitPending{kinds: map[string]string{}, segments: segments})
 		return err
 	}
+	segments := g.takeSegments()
+	if len(segments) == 0 {
+		return nil
+	}
 	return g.commitSegmentsLocked(ctx, repo, g.titlesWithCommitted(ctx, repo), segments)
+}
+
+// hasSegments reports whether earlier versions wait in the batch.
+func (g *gitHistory) hasSegments() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.pending != nil && len(g.pending.segments) > 0
+}
+
+// takeSegments removes the earlier versions waiting in the batch and returns
+// them, oldest first.
+func (g *gitHistory) takeSegments() []gitSegment {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending == nil {
+		return nil
+	}
+	segments := g.pending.segments
+	g.pending.segments = nil
+	return segments
 }
 
 // commitSegmentsLocked commits earlier versions in order. Caller holds gitMu.
@@ -357,17 +377,15 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
 	g.mu.Lock()
-	pending := g.pending
-	g.pending = nil
-	if g.timer != nil {
-		g.timer.Stop()
-		g.timer = nil
-	}
+	idle := g.pending == nil
 	g.mu.Unlock()
-	if pending == nil && !force {
+	if idle && !force {
 		return nil
 	}
+	// Opened before the batch is taken: a repository opening now commits the
+	// batch's earlier versions ahead of the work tree (importCopies).
 	repo, err := g.readyLocked(ctx)
+	pending := g.takePending()
 	if errors.Is(err, errProjectGone) {
 		return nil
 	}
@@ -404,6 +422,19 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 		log.Printf("history for %s: gc: %v", g.s.root, err)
 	}
 	return nil
+}
+
+// takePending removes the open batch, and its window, and returns it.
+func (g *gitHistory) takePending() *gitPending {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	pending := g.pending
+	g.pending = nil
+	if g.timer != nil {
+		g.timer.Stop()
+		g.timer = nil
+	}
+	return pending
 }
 
 // requeue puts a batch that could not be committed back in front of
@@ -558,6 +589,14 @@ func (g *gitHistory) importCopies(ctx context.Context, repo *gitrepo.Repo) error
 			return err
 		}
 		imported += len(batch)
+	}
+	// Earlier versions saved while the repository was opening are older than
+	// the work tree: committed after it, they would read as a change undoing
+	// what the work tree holds.
+	if segments := g.takeSegments(); len(segments) > 0 {
+		if err := g.commitSegmentsLocked(ctx, repo, titles, segments); err != nil {
+			return err
+		}
 	}
 	paths, err := g.s.historyTrackedFiles()
 	if err != nil {
