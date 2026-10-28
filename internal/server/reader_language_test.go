@@ -164,3 +164,29 @@ func TestServerRefusalsSpeakTheReadersLanguage(t *testing.T) {
 		})
 	}
 }
+
+// Creating a project whose name is taken says so in the reader's language.
+func TestProjectNameTakenSpeaksTheReadersLanguage(t *testing.T) {
+	for _, language := range []string{"en-US,en;q=0.9", "zh-TW,zh;q=0.9"} {
+		t.Run(language, func(t *testing.T) {
+			server, _ := readerLanguageFixture(t)
+			response := askIn(t, server, language, http.MethodPost, "/api/projects/open",
+				`{"name":"main","create":true}`)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+			}
+			var refusal struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(refusal.Error, "main") {
+				t.Fatalf("refusal %q does not name the project", refusal.Error)
+			}
+			if chinese := strings.HasPrefix(language, "zh"); hasCJK(refusal.Error) != chinese {
+				t.Fatalf("refusal for %s reads %q", language, refusal.Error)
+			}
+		})
+	}
+}
