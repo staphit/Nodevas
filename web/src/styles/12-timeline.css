@@ -6,16 +6,23 @@
  */
 /* ---------- graph view: plain alignment grid ---------- */
 .board-inner.graph-bg {
-  background-image: repeating-linear-gradient(
+  /* One cell per tile, each line drawn once at its leading edge, and the tile
+     repeated. Repeating gradients made each layer a single image the size of
+     the board, and Chrome rasterises those only up to its texture limit: on a
+     board tens of thousands of pixels wide the lines gave way to a few pale
+     vertical bands. */
+  background-image: linear-gradient(
       90deg,
       color-mix(in srgb, var(--border) 70%, transparent) 0 1px,
-      transparent 1px var(--col-w)
+      transparent 1px
     ),
-    repeating-linear-gradient(
-      0deg,
+    linear-gradient(
+      180deg,
       color-mix(in srgb, var(--border) 45%, transparent) 0 1px,
-      transparent 1px var(--step)
+      transparent 1px
   );
+  background-size: var(--col-w) var(--step);
+  background-repeat: repeat;
   /* The graph centres its content in the viewport, so the cells start a
      fraction of a cell in from the element origin. Lines painted from 0 would
      be a ruler for a different board: a snapped card would sit at a constant
