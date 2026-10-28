@@ -1,3 +1,4 @@
+import { markServerReachable, markServerUnreachable } from "./connectivity";
 import { notifyUnauthorized } from "./http";
 import type { Actor } from "./auth";
 import type { GraphOp } from "./graph";
@@ -202,6 +203,7 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
     };
     ws.onopen = () => {
       retry = 500;
+      markServerReachable();
       if (project) post({ type: "subscribe", project });
       if (presenceState) post({ type: "presence", ...presenceState });
       for (const nodeId of heldLocks) post({ type: "lock", nodeId });
@@ -219,6 +221,8 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
         return;
       }
       if (!closed) {
+        // Dropped, not closed on purpose: out of reach until the reopen.
+        markServerUnreachable();
         retry = Math.min(retry * 1.5, 10000);
         const jitter = 0.8 + Math.random() * 0.4;
         const delay = Math.round(retry * jitter);

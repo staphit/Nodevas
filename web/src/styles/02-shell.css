@@ -233,6 +233,33 @@ header.topbar {
 .topbar-runner-pill:hover {
   background: var(--surface-2);
 }
+/* Up for as long as the server is out of reach (OfflineIndicator). */
+.topbar-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 45%, var(--border));
+  border-radius: 12px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+.topbar-offline-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.topbar-offline-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* A laptop-width bar: the shortcut hint yields before anything wraps. */
 @media (max-width: 1000px) {
   .topbar .command-trigger kbd {
@@ -1285,6 +1312,15 @@ header.topbar {
   }
   .topbar-runner-pill-text {
     display: none;
+  }
+  /* The red dot alone on a phone; the words stay for screen readers. */
+  .topbar-offline-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .topbar-avatar {
     width: 44px;

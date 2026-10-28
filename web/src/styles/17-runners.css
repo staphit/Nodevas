@@ -53,6 +53,12 @@
   background: var(--st-done-fg);
   opacity: 1;
 }
+/* Offline: the last list is stale, so neither up nor down — hollow grey. */
+.runner-dot.unknown {
+  border: 1px dashed var(--text-2);
+  background: transparent;
+  opacity: 0.8;
+}
 .runner-card-title {
   display: flex;
   min-width: 0;

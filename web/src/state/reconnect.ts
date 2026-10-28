@@ -12,10 +12,12 @@
  */
 
 import { isNetworkFailure } from "../api";
+import { markServerReachable } from "../api/connectivity";
 import { useApp } from "../store";
 import type { OperationMap } from "./operations";
 
 export async function resyncAfterReconnect(): Promise<void> {
+  markServerReachable();
   useApp.setState((state) => {
     const operations: OperationMap = {};
     for (const [scope, entry] of Object.entries(state.operations)) {

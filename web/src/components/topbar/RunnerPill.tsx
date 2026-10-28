@@ -10,6 +10,7 @@
 
 import { useEffect } from "react";
 
+import { useConnectivity } from "../../api/connectivity";
 import { setProjectMode } from "../../station/projectMode";
 import { useI18n } from "../../i18n";
 import { useWorkstationVisible } from "../../runners/workstation";
@@ -28,6 +29,8 @@ export function RunnerPill() {
   const visible = useWorkstationVisible();
   const runners = useRunners((s) => s.runners);
   const cost = useBudget((s) => s.status?.used.costUsd);
+  // Offline, the last list is stale: no runner is known to be up or down.
+  const offline = useConnectivity((s) => s.offline);
 
   useEffect(() => {
     if (!visible) return;
@@ -41,6 +44,24 @@ export function RunnerPill() {
   }, [visible]);
 
   if (!visible) return null;
+
+  if (offline) {
+    const unknown = t("topbar.runnerPill.unknown");
+    return (
+      <button
+        type="button"
+        className="topbar-runner-pill"
+        onClick={() => setProjectMode("station")}
+        title={`${unknown} — ${t("topbar.runnerPill.open")}`}
+        aria-label={unknown}
+      >
+        <span className="runner-dot unknown" aria-hidden />
+        <span className="topbar-runner-pill-text" aria-hidden>
+          ?
+        </span>
+      </button>
+    );
+  }
 
   const online = runners.filter((runner) => runner.online).length;
   const count = online === 1 ? t("topbar.runnerPill.one") : t("topbar.runnerPill.many", { count: online });

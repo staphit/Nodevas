@@ -1,9 +1,9 @@
 /**
  * The top bar, left to right: the brand; the project menu; Board | Station;
- * then, pushed right, what is happening (the last operation, who else is
- * here), search, the runners pill, Settings (a labelled button: one click
- * in, pressed while open), the theme toggle and, on a server with a session,
- * the account avatar.
+ * then, pushed right, what is happening (offline while the server is out
+ * of reach, the last operation, who else is here), search, the runners
+ * pill, Settings (a labelled button: one click in, pressed while open), the
+ * theme toggle and, on a server with a session, the account avatar.
  *
  * Everything the bar used to carry besides is a menu entry, a Settings row or
  * a palette command now: the explorer toggle (the board's explorer, the
@@ -20,6 +20,7 @@ import { OperationStatus } from "../InteractionPrimitives";
 import { PresenceAvatars } from "../PresenceAvatars";
 import { useNarrowViewport } from "../TopbarOverflow";
 import { AccountMenu } from "./AccountMenu";
+import { OfflineIndicator } from "./OfflineIndicator";
 import { openCommandPalette } from "./actions";
 import { ProjectMenu } from "./ProjectMenu";
 import { RunnerPill } from "./RunnerPill";
@@ -39,6 +40,7 @@ export function TopBar() {
       <ProjectMenu />
       <ModeSwitch />
       <span className="topbar-spacer" />
+      <OfflineIndicator />
       {lastOperation && (
         <OperationStatus
           status={lastOperation.status}

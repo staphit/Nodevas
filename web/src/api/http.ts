@@ -1,3 +1,4 @@
+import { markServerReachable, markServerUnreachable } from "./connectivity";
 import type { Verifier } from "./verify";
 
 /** Optimistic-lock failure: server refused to overwrite a newer disk version. */
@@ -171,11 +172,16 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("請求逾時");
     }
-    if (error instanceof TypeError) throw new NetworkError();
+    if (error instanceof TypeError) {
+      markServerUnreachable();
+      throw new NetworkError();
+    }
     throw error;
   } finally {
     window.clearTimeout(timeout);
   }
+  // Any answer, an error status included, means the server is there.
+  markServerReachable();
   if (res.status === 401) {
     notifyUnauthorized();
     throw new UnauthorizedError();
