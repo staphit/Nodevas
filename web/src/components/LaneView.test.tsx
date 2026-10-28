@@ -1033,7 +1033,7 @@ describe("LaneView", () => {
   // a node scrolled across by the lane's index as if the lanes ran across, so
   // any selection jumped the dates about a fortnight back and today went off
   // screen. Selecting does not move the dates; a lane out of view is
-  // brought in by scrolling down to it, today staying where it was.
+  // brought in by scrolling the lanes, today staying where it was.
   describe("selecting a node on a horizontal timeline", () => {
     afterEach(() => {
       vi.unstubAllGlobals();
@@ -1079,22 +1079,23 @@ describe("LaneView", () => {
       expect(board.scrollLeft).toBe(opened);
     });
 
-    it("scrolls down to a lane out of view, not across", () => {
+    // The selected node's lane moves to the top (useBoardColumns): a reader
+    // scrolled down the lanes is brought up to it, along the lanes only.
+    it("brings its lane into view along the lanes, not across the dates", () => {
       const { container, board, scrollTo, select } = mountHorizontal(40);
-      const opened = { left: board.scrollLeft, top: board.scrollTop };
+      board.scrollTop = 2000;
+      const left = board.scrollLeft;
       select("lane-39");
       expect(scrollTo).toHaveBeenCalled();
-      expect(board.scrollLeft).toBe(opened.left);
-      const inner = container.querySelector<HTMLElement>(".board-inner")!;
-      const zoom = Number(inner.style.zoom || "1");
-      const head = [...container.querySelectorAll<HTMLElement>(".horizontal-node-head")].find(
-        (element) => element.textContent?.includes("lane-39"),
-      );
-      const laneH = parseFloat(head?.style.height ?? "") || 0;
-      expect(laneH).toBeGreaterThan(0);
-      // Lane 39 sits below the 48px date header and 39 lanes.
-      const top = (48 + 39 * laneH) * zoom;
-      expect(top).toBeGreaterThanOrEqual(board.scrollTop);
+      expect(board.scrollLeft).toBe(left);
+      const heads = [...container.querySelectorAll<HTMLElement>(".horizontal-node-head")];
+      const index = heads.findIndex((element) => element.textContent?.includes("lane-39"));
+      expect(index).toBe(0);
+      const zoom = Number(container.querySelector<HTMLElement>(".board-inner")!.style.zoom || "1");
+      const laneH = parseFloat(heads[0].style.height);
+      // Below the 48px sticky date header, wholly in the 680px pane.
+      const top = 48 * zoom;
+      expect(top).toBeGreaterThanOrEqual(board.scrollTop + 48 * zoom);
       expect(top + laneH * zoom).toBeLessThanOrEqual(board.scrollTop + 680);
     });
   });
