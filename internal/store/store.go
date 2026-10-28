@@ -76,6 +76,13 @@ type Store struct {
 	selfMu     sync.Mutex
 	selfWrites map[string]time.Time
 
+	// opsQueue holds the graph-op calls waiting for the next group commit,
+	// and opsLeading says one of them is committing; see graph_ops_batch.go.
+	// Guarded by opsMu, never held together with mu except to drain.
+	opsMu      sync.Mutex
+	opsQueue   []*graphOpsCall
+	opsLeading bool
+
 	// sharedStatuses supplies the workspace-wide lifecycle vocabulary; see
 	// workspacedefs.go. Absent for a store nobody wired one into.
 	sharedMu       sync.Mutex
@@ -237,6 +244,13 @@ type fileUpdate struct {
 //
 // The caller must hold s.mu — the compiler cannot check that, hence the name.
 func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) error {
+	return s.applyUpdatesForLocked([]identity.Actor{actor}, updates)
+}
+
+// applyUpdatesForLocked is applyUpdatesLocked for a write made on behalf of
+// several actors at once (a group commit): each becomes an author of the
+// history record.
+func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpdate) error {
 	history := s.history()
 	for i := range updates {
 		before, err := s.ReadFile(updates[i].path)
@@ -300,7 +314,9 @@ func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) e
 		for i, update := range applied {
 			paths[i] = update.path
 		}
-		history.wrote(actor, "", paths)
+		for _, actor := range actors {
+			history.wrote(actor, "", paths)
+		}
 	}
 	return nil
 }

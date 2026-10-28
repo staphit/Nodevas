@@ -97,6 +97,14 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 
 // ApplyGraphOpsSynced is ApplyGraphOps that also names the nodes whose files
 // it rewrote; see SaveGraphSynced for why a caller needs them.
+//
+// Calls that arrive while another write holds the store are committed
+// together (graph_ops_batch.go): each is still applied, validated and
+// accepted or refused on its own, in arrival order, but graph.yaml is read,
+// written and fsynced once for all of them. The graph returned is the one
+// that write put on disk, with the rev to match; it may already include the
+// calls queued behind this one, and it is shared between them, so it is
+// read-only, like LoadGraph's.
 func (s *Store) ApplyGraphOpsSynced(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, []string, error) {
 	if len(ops) == 0 {
 		return nil, "", nil, fmt.Errorf("no operations given")
@@ -104,54 +112,25 @@ func (s *Store) ApplyGraphOpsSynced(actor identity.Actor, ops []GraphOp) (*engin
 	if len(ops) > maxGraphOps {
 		return nil, "", nil, fmt.Errorf("too many operations in one request (maximum %d)", maxGraphOps)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	call := s.queueGraphOps(actor, ops)
+	return call.graph, call.rev, call.synced, call.err
+}
 
-	graph, _, err := s.loadGraphLocked()
-	if err != nil {
-		return nil, "", nil, err
-	}
+// applyGraphOpsLocked applies one call's ops to graph, which the caller owns,
+// and validates the result. On error graph is left half-changed: the caller
+// throws it away.
+func (s *Store) applyGraphOpsLocked(actor identity.Actor, graph *engine.Graph, ops []GraphOp, touched map[string]bool) error {
 	if graph.UI == nil {
 		graph.UI = &engine.UIState{}
 	}
-	touched := map[string]bool{}
 	createdBy := s.createdByActorRunLocked(actor)
 	for _, op := range ops {
 		if err := applyGraphOp(actor, graph, op, touched, createdBy); err != nil {
-			return nil, "", nil, err
+			return err
 		}
 	}
 	engine.NormalizeLogicGates(graph)
-	if err := ValidateGraphForStorage(graph); err != nil {
-		return nil, "", nil, err
-	}
-	data, err := s.marshalGraph(graph)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	updates := make([]fileUpdate, 0, len(touched)+1)
-	var synced []string
-	// Node metadata lives in two places: graph.yaml and the document's
-	// frontmatter. Writing only one of them is how they drift apart.
-	for id := range touched {
-		node := graph.NodeByID(id)
-		if node == nil {
-			continue
-		}
-		update, err := s.prepareNodeFileUpdate(node)
-		if err != nil {
-			return nil, "", nil, fmt.Errorf("sync node %s: %w", id, err)
-		}
-		if update != nil {
-			updates = append(updates, *update)
-			synced = append(synced, id)
-		}
-	}
-	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data})
-	if err := s.applyUpdatesLocked(actor, updates); err != nil {
-		return nil, "", nil, err
-	}
-	return graph, Rev(data), synced, nil
+	return ValidateGraphForStorage(graph)
 }
 
 func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool, createdBy createdByRunFunc) error {
