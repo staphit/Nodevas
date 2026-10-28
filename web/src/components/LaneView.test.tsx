@@ -1058,7 +1058,9 @@ describe("LaneView", () => {
       });
       // The drawer is the app's, not the board's: it opens with the node.
       useApp.setState({
-        openTab: vi.fn(async () => {
+        activeTab: null,
+        openTab: vi.fn(async (id: string) => {
+          useApp.setState({ activeTab: id });
           if (!document.querySelector(".drawer")) {
             const drawer = document.createElement("aside");
             drawer.className = "drawer";
@@ -1074,7 +1076,7 @@ describe("LaneView", () => {
       vi.unstubAllGlobals();
       Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
       Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
-      useApp.setState({ revealRequest: null });
+      useApp.setState({ revealRequest: null, activeTab: null });
     });
 
     function mount() {
@@ -1135,6 +1137,35 @@ describe("LaneView", () => {
       await act(async () => undefined);
       expect(scrollTo).not.toHaveBeenCalled();
       expect({ left: board.scrollLeft, top: board.scrollTop }).toEqual(before);
+    });
+
+    // The explorer's tree, Agents, Autopilot: they open the node through the
+    // store, never through the board, and the drawer covers the card all the same.
+    it("brings a card opened from outside the board out from under the drawer", async () => {
+      drawerLeft = 560;
+      const { card, scrollTo } = mount();
+      await act(async () => {
+        await useApp.getState().openTab("a");
+      });
+      await act(async () => undefined);
+      expect(scrollTo).toHaveBeenCalled();
+      const rect = landed(card());
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(560);
+    });
+
+    it("brings a card out from under the drawer its menu's Add dependency… opens", async () => {
+      drawerLeft = 560;
+      const user = userEvent.setup();
+      const { card, scrollTo } = mount();
+      fireEvent.contextMenu(card());
+      const menu = document.querySelector<HTMLElement>(".lane-context-menu")!;
+      await user.click(within(menu).getByRole("menuitem", { name: "新增相依…" }));
+      await act(async () => undefined);
+      expect(scrollTo).toHaveBeenCalled();
+      const rect = landed(card());
+      expect(rect.left).toBeGreaterThanOrEqual(0);
+      expect(rect.right).toBeLessThanOrEqual(560);
     });
   });
 
