@@ -63,6 +63,20 @@ describe("DiffView", () => {
     expect(await screen.findByText("2 files · +3 −1")).toBeInTheDocument();
   });
 
+  it("titles a workspace commit in the reader's language", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    vi.spyOn(explorerApi, "workspaceCommit").mockResolvedValue({
+      sha,
+      at: "2026-10-28T09:00:00Z",
+      author: "patrick",
+      subject: "graph: outside edit",
+      patch: PATCH,
+      truncated: false,
+    });
+    render(<DiffView view={{ kind: "diff", source: "workspace", sha }} />);
+    expect(await screen.findByRole("heading", { name: "關係圖：外部編輯" })).toBeInTheDocument();
+  });
+
   it("renders a workspace commit and finds the agent that made it", async () => {
     vi.spyOn(explorerApi, "workspaceCommit").mockResolvedValue({
       sha,

@@ -113,4 +113,41 @@ describe("GitPanel", () => {
     expect(await screen.findByText("harness: edit")).toBeInTheDocument();
     expect(screen.getByText("No pending changes")).toBeInTheDocument();
   });
+
+  it("shows commit subjects in Chinese in the zh-TW interface", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    vi.mocked(explorerApi.workspaceGit).mockResolvedValue({
+      backend: "git",
+      branch: "main",
+      pending: [],
+      commits: [
+        { sha: "a".repeat(40), at: "2026-10-28T09:00:00Z", author: "patrick", subject: "乙節點: create; graph: edit" },
+        { sha: "b".repeat(40), at: "2026-10-28T08:00:00Z", author: "patrick", subject: "graph: create" },
+      ],
+    });
+    render(<GitPanel />);
+    const commits = await screen.findByRole("region", { name: "提交紀錄" });
+    expect(within(commits).getByText("乙節點：建立；關係圖：編輯")).toBeInTheDocument();
+    expect(within(commits).getByText("關係圖：建立")).toBeInTheDocument();
+  });
+
+  it("explains each mark the pending changes show, deletions included", async () => {
+    vi.mocked(explorerApi.workspaceGit).mockResolvedValue({
+      backend: "git",
+      branch: "main",
+      pending: [
+        { path: "graph.yaml", mark: "M" },
+        { path: "nodes/old.md", mark: "D" },
+      ],
+      commits: [],
+    });
+    render(<GitPanel />);
+    expect(await screen.findByText("M = modified, D = deleted")).toBeInTheDocument();
+  });
+
+  it("explains the marks in zh-TW", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    render(<GitPanel />);
+    expect(await screen.findByText("M = 有修改，A = 新增")).toBeInTheDocument();
+  });
 });
