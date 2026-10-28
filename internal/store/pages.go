@@ -43,12 +43,23 @@ type nodePagesManifest struct {
 	Pages []NodePageInfo `json:"pages"`
 }
 
-// LoadNodePagesManifest reads and validates a node's pages.json.
+// LoadNodePagesManifest reads and validates a node's pages.json, including
+// that each listed page file is a regular file if it exists.
 //
 // Contract: callers that go on to write hold s.mu, so the manifest they act
 // on is the one still on disk. Reading it without the lock is only safe for a
 // Store nobody else can reach yet (import validation).
 func (s *Store) LoadNodePagesManifest(nodeID string) (nodePagesManifest, error) {
+	manifest, err := s.parseNodePagesManifest(nodeID)
+	if err != nil {
+		return manifest, err
+	}
+	return manifest, s.checkNodePageFiles(nodeID, manifest)
+}
+
+// parseNodePagesManifest is LoadNodePagesManifest without the per-page stat:
+// one file read, so it is cheap enough to do under the lock.
+func (s *Store) parseNodePagesManifest(nodeID string) (nodePagesManifest, error) {
 	var manifest nodePagesManifest
 	data, err := s.ReadFile(s.NodePagesManifestPath(nodeID))
 	if os.IsNotExist(err) {
@@ -76,17 +87,24 @@ func (s *Store) LoadNodePagesManifest(nodeID string) (nodePagesManifest, error) 
 			return manifest, fmt.Errorf("node %q page %q: %w", nodeID, page.ID, err)
 		}
 		manifest.Pages[index].Format = format
-		pagePath := s.NodePagePath(nodeID, page.ID, format)
-		info, statErr := s.statPath(pagePath)
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return manifest, fmt.Errorf("node %q page %q: %w", nodeID, page.ID, statErr)
-		}
-		if statErr == nil && !info.Mode().IsRegular() {
-			return manifest, fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
-		}
 		seen[page.ID] = true
 	}
 	return manifest, nil
+}
+
+// checkNodePageFiles stats each page a manifest lists: up to maxNodePages
+// filesystem calls, which ListNodePages makes after releasing the lock.
+func (s *Store) checkNodePageFiles(nodeID string, manifest nodePagesManifest) error {
+	for _, page := range manifest.Pages {
+		info, statErr := s.statPath(s.NodePagePath(nodeID, page.ID, page.Format))
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("node %q page %q: %w", nodeID, page.ID, statErr)
+		}
+		if statErr == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
+		}
+	}
+	return nil
 }
 
 func marshalNodePagesManifest(manifest nodePagesManifest) ([]byte, error) {
@@ -101,22 +119,31 @@ func (s *Store) ListNodePages(nodeID string) ([]NodePageInfo, error) {
 	if !engine.ValidNodeID(nodeID) {
 		return nil, fmt.Errorf("invalid node id")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	manifest, err := s.listNodePagesManifest(nodeID)
 	if err != nil {
 		return nil, err
 	}
-	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found in graph", nodeID)
-	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
-	if err != nil {
+	// Outside the lock: a page file replaced between the read and the stat
+	// is the same race a reader always had with the next writer.
+	if err := s.checkNodePageFiles(nodeID, manifest); err != nil {
 		return nil, err
 	}
 	pages := make([]NodePageInfo, len(manifest.Pages))
 	copy(pages, manifest.Pages)
 	return pages, nil
+}
+
+func (s *Store) listNodePagesManifest(nodeID string) (nodePagesManifest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	g, _, err := s.graphViewLocked()
+	if err != nil {
+		return nodePagesManifest{}, err
+	}
+	if g.NodeByID(nodeID) == nil {
+		return nodePagesManifest{}, fmt.Errorf("node %q not found in graph", nodeID)
+	}
+	return s.parseNodePagesManifest(nodeID)
 }
 
 // CreateNodePage adds a page stored in the requested format; an empty format
@@ -310,7 +337,7 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return zero, "", "", err
 	}

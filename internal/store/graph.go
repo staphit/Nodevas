@@ -15,31 +15,14 @@ import (
 
 // ---------- graph ----------
 
+// LoadGraph returns the project graph and its revision.
+//
+// The graph is shared with every other reader (graph_cache.go): treat it as
+// read-only, and Clone it before changing anything.
 func (s *Store) LoadGraph() (*engine.Graph, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadGraphLocked()
-}
-
-func (s *Store) loadGraphLocked() (*engine.Graph, string, error) {
-	data, err := s.ReadFile(s.GraphPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &engine.Graph{Version: 1}, "", nil
-		}
-		return nil, "", err
-	}
-	g, err := engine.ParseGraph(data)
-	if err != nil {
-		return nil, "", err
-	}
-	if err := ValidateGraphForStorage(g); err != nil {
-		return nil, "", fmt.Errorf("graph.yaml: %w", err)
-	}
-	// The workspace vocabulary is part of the graph everyone downstream reads,
-	// but never part of the file: see workspacedefs.go.
-	mergeSharedStatuses(g, s.sharedStatusDefinitions())
-	return g, Rev(data), nil
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.graphViewLocked()
 }
 
 // SaveGraph writes graph.yaml (optimistic-locked) and
@@ -195,7 +178,7 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	if err := s.checkRevision(s.NodePath(id), baseRev); err != nil {
 		return "", "", err
 	}
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return "", "", err
 	}

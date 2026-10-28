@@ -54,6 +54,8 @@ func saveWith(t *testing.T, st *Store, actor identity.Actor, mutate func(*engine
 	if err != nil {
 		t.Fatal(err)
 	}
+	// LoadGraph's graph is shared and read-only; an edit starts from a copy.
+	g = g.Clone()
 	mutate(g)
 	_, err = st.SaveGraph(actor, g, rev)
 	return err

@@ -345,8 +345,8 @@ func NodeFolderAssignments(root string) map[string]string {
 
 // NodeFolders reports the folder tree and which node sits in which folder.
 func (s *Store) NodeFolders() ([]string, map[string]string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return ListNodeFolders(s.root), NodeFolderAssignments(s.root)
 }
 

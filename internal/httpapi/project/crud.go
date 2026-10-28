@@ -569,6 +569,8 @@ func (a *API) defaultWorkflow(c *gin.Context, name string) {
 	if err != nil || g.Workflow != nil {
 		return
 	}
+	// LoadGraph's graph is shared with every reader; edit a copy.
+	g = g.Clone()
 	g.Workflow = engine.NewProjectWorkflow(g.Type)
 	if _, err := st.SaveGraph(auth.ActorFrom(c.Request), g, rev); err != nil {
 		log.Printf("new project %s: default workflow: %v", name, err)

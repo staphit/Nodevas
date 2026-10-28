@@ -369,8 +369,8 @@ func (s *Store) ReleaseClaim(nodeID, owner string) error {
 
 // ClaimFor returns the live claim on a node, if any.
 func (s *Store) ClaimFor(nodeID string) *Claim {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	claim := s.loadClaimsLocked().Claims[nodeID]
 	if !claim.Live(claimClock()) {
 		return nil
@@ -380,8 +380,8 @@ func (s *Store) ClaimFor(nodeID string) *Claim {
 
 // LiveClaims lists every node currently held.
 func (s *Store) LiveClaims() []*Claim {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	now := claimClock()
 	var live []*Claim
 	for _, claim := range s.loadClaimsLocked().Claims {

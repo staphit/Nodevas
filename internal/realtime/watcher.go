@@ -86,6 +86,12 @@ func WatchWithCallback(st *store.Store, hub *Hub, onEvent func(string, string)) 
 					strings.HasPrefix(filepath.Clean(ev.Name), nodesDir) {
 					store.InvalidateNodeTree(root)
 				}
+				// graph.yaml changed under the store (git checkout, an agent,
+				// an editor). Reads verify the bytes anyway; dropping the
+				// parsed graph now just frees it before the next read.
+				if filepath.Clean(ev.Name) == filepath.Clean(st.GraphPath()) {
+					st.InvalidateGraphCache()
+				}
 				pending[ev.Name] = time.Now()
 			case err, ok := <-w.Errors:
 				if !ok {

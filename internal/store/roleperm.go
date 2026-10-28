@@ -596,8 +596,8 @@ func (s *Store) recordCreatedByRunLocked(runID string, ids []string) {
 
 // CreatedByRun is the run whose agent created a node, or "".
 func (s *Store) CreatedByRun(nodeID string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.createdByRunLocked(nodeID)
 }
 

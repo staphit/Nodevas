@@ -1,4 +1,4 @@
-// The project store: one directory on disk, one mutex, and the reads and writes every other layer goes through. State and the journal live here too because they are written under the same lock as the graph.
+// The project store: one directory on disk, one read-write lock, and the reads and writes every other layer goes through. State and the journal live here too because they are written under the same lock as the graph.
 
 package store
 
@@ -60,9 +60,18 @@ func Rev(data []byte) string {
 // Layout: graph.yaml, nodes/<id>.md, run/{state.json,journal.jsonl},
 // .vised/{history,trash,drafts}.
 type Store struct {
-	mu      sync.Mutex
+	// mu orders access to the project's files: writers take it exclusively,
+	// readers (LoadGraph, ListNodePages, claims) share it.
+	mu      sync.RWMutex
 	mediaMu sync.Mutex
 	root    string
+
+	// graphCache is the last graph.yaml parsed, shared read-only by every
+	// reader; see graph_cache.go. Guarded by graphCacheMu, not mu, because
+	// readers holding mu only for reading fill it.
+	graphCacheMu sync.Mutex
+	graphFillMu  sync.Mutex
+	graphCache   *cachedGraph
 
 	selfMu     sync.Mutex
 	selfWrites map[string]time.Time
@@ -204,6 +213,11 @@ func (s *Store) markSelfWrite(path string) {
 // WriteAtomic writes via temp file + rename so a crash can never leave a
 // half-written file (the VS Code pattern).
 func (s *Store) WriteAtomic(path string, data []byte) error {
+	if s.isGraphPath(path) {
+		// The cache is keyed by content and would miss anyway; dropping it
+		// here just frees the old graph as soon as it is stale.
+		defer s.InvalidateGraphCache()
+	}
 	return writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite)
 }
 
@@ -394,7 +408,7 @@ func (s *Store) SetStatus(nodeID string, status engine.Status, by, note string) 
 // — a check that releases the lock before writing is not a check — so the two
 // halves cannot each take the lock for themselves.
 func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note string) (*engine.RunState, error) {
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +421,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 		return nil, noStatusError(nodeID, nodeType)
 	}
 	if strings.HasPrefix(string(status), "custom-status-") {
-		// loadGraphLocked already merged the workspace vocabulary in, so this
+		// graphViewLocked already merged the workspace vocabulary in, so this
 		// check covers both project-local and workspace-wide definitions.
 		defined := false
 		if g.UI != nil {
@@ -487,7 +501,7 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 	if target == nil {
 		return nil, fmt.Errorf("event %q not found", id)
 	}
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return nil, err
 	}
