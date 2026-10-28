@@ -647,11 +647,12 @@ func TestAuthenticationRoleAbuseIntegration(t *testing.T) {
 	pm := projectManagerForTest(t)
 	hub := realtime.NewHub()
 	guard := newAbuseGuardWithOptions(AbuseGuardOptions{
-		ReadGlobalRate:   100,
-		ReadGlobalBurst:  100,
-		ReadIPRate:       100,
-		ReadIPBurst:      100,
-		ReadActorRate:    3,
+		ReadGlobalRate:  100,
+		ReadGlobalBurst: 100,
+		ReadIPRate:      100,
+		ReadIPBurst:     100,
+		// Slow enough that a 4th read is past the read queue, not in it.
+		ReadActorRate:    0.001,
 		ReadActorBurst:   3,
 		WriteGlobalRate:  100,
 		WriteGlobalBurst: 100,
@@ -679,7 +680,7 @@ func TestAuthenticationRoleAbuseIntegration(t *testing.T) {
 			}
 		}
 
-		// User1 4th read request is rate-limited
+		// User1 4th read request is past the queue: refused
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 		req.RemoteAddr = "192.168.1.10:1234"

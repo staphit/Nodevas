@@ -125,42 +125,7 @@ func (s *tokenBucketStore) allowMulti(checks []bucketCheck, now time.Time) (bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. Memory bounding & cleanup strategy
-	if len(s.entries) >= s.maxEntries {
-		for k, entry := range s.entries {
-			if !isPinnedBucket(k) && now.Sub(entry.seen) > s.ttl {
-				delete(s.entries, k)
-			}
-		}
-		// If still full after TTL cleanup, evict oldest non-pinned entries (LRU by seen timestamp)
-		if len(s.entries) >= s.maxEntries {
-			type kv struct {
-				k    string
-				seen time.Time
-			}
-			evictable := make([]kv, 0, len(s.entries))
-			for k, entry := range s.entries {
-				if !isPinnedBucket(k) {
-					evictable = append(evictable, kv{k: k, seen: entry.seen})
-				}
-			}
-			// Sort oldest seen first
-			for i := 0; i < len(evictable)-1; i++ {
-				for j := i + 1; j < len(evictable); j++ {
-					if evictable[j].seen.Before(evictable[i].seen) {
-						evictable[i], evictable[j] = evictable[j], evictable[i]
-					}
-				}
-			}
-			toRemove := s.maxEntries / 5
-			if toRemove < 1 {
-				toRemove = 1
-			}
-			for i := 0; i < len(evictable) && i < toRemove; i++ {
-				delete(s.entries, evictable[i].k)
-			}
-		}
-	}
+	s.makeRoom(now)
 
 	// 2. First pass: check token availability across all dimensions without mutation
 	type evaluatedBucket struct {
@@ -246,6 +211,107 @@ func (s *tokenBucketStore) allowMulti(checks []bucketCheck, now time.Time) (bool
 	}
 
 	return true, 0
+}
+
+// makeRoom bounds the store's memory: when it is full it drops entries idle
+// past the TTL, then the least recently seen. The caller holds s.mu.
+func (s *tokenBucketStore) makeRoom(now time.Time) {
+	if len(s.entries) >= s.maxEntries {
+		for k, entry := range s.entries {
+			if !isPinnedBucket(k) && now.Sub(entry.seen) > s.ttl {
+				delete(s.entries, k)
+			}
+		}
+		// If still full after TTL cleanup, evict oldest non-pinned entries (LRU by seen timestamp)
+		if len(s.entries) >= s.maxEntries {
+			type kv struct {
+				k    string
+				seen time.Time
+			}
+			evictable := make([]kv, 0, len(s.entries))
+			for k, entry := range s.entries {
+				if !isPinnedBucket(k) {
+					evictable = append(evictable, kv{k: k, seen: entry.seen})
+				}
+			}
+			// Sort oldest seen first
+			for i := 0; i < len(evictable)-1; i++ {
+				for j := i + 1; j < len(evictable); j++ {
+					if evictable[j].seen.Before(evictable[i].seen) {
+						evictable[i], evictable[j] = evictable[j], evictable[i]
+					}
+				}
+			}
+			toRemove := s.maxEntries / 5
+			if toRemove < 1 {
+				toRemove = 1
+			}
+			for i := 0; i < len(evictable) && i < toRemove; i++ {
+				delete(s.entries, evictable[i].k)
+			}
+		}
+	}
+}
+
+// reserveMulti is allowMulti for a caller that can wait its turn. When the
+// buckets are short it still takes the cost, running them into debt, and
+// reports how long the caller waits for them to refill, as long as that is
+// at most maxWait: the debt is the queue, so the next caller waits behind
+// it. Past maxWait nothing is taken and the retry is in whole seconds.
+func (s *tokenBucketStore) reserveMulti(checks []bucketCheck, now time.Time, maxWait time.Duration) (time.Duration, bool, int) {
+	if len(checks) == 0 {
+		return 0, true, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.makeRoom(now)
+
+	tokens := make([]float64, len(checks))
+	entries := make([]*abuseEntry, len(checks))
+	var wait float64
+	for i := range checks {
+		if checks[i].cost <= 0 {
+			checks[i].cost = 1.0
+		}
+		check := checks[i]
+		cur := check.burst
+		if entry := s.entries[check.key]; entry != nil {
+			elapsed := max(now.Sub(entry.last).Seconds(), 0)
+			cur = min(entry.tokens+elapsed*check.rate, check.burst)
+			entries[i] = entry
+		} else if len(s.entries) >= s.maxEntries && !isPinnedBucket(check.key) {
+			return 0, false, 1
+		}
+		tokens[i] = cur
+		if short := check.cost - cur; short > 0 {
+			wait = max(wait, short/check.rate)
+		}
+	}
+	if over := wait - maxWait.Seconds(); over > 0 {
+		return 0, false, max(1, int(math.Ceil(over)))
+	}
+	for i, check := range checks {
+		if entry := entries[i]; entry != nil {
+			entry.tokens = tokens[i] - check.cost
+			entry.last = now
+			entry.seen = now
+		} else {
+			s.entries[check.key] = &abuseEntry{tokens: tokens[i] - check.cost, last: now, seen: now}
+		}
+	}
+	return time.Duration(wait * float64(time.Second)), true, 0
+}
+
+// refund gives back what reserveMulti took, for a caller that stopped
+// waiting, so the callers queued behind it move up.
+func (s *tokenBucketStore) refund(checks []bucketCheck) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, check := range checks {
+		if entry := s.entries[check.key]; entry != nil {
+			entry.tokens = min(entry.tokens+check.cost, check.burst)
+		}
+	}
 }
 
 func (s *tokenBucketStore) allow(key string, now time.Time, rate, burst, cost float64) (bool, int) {
@@ -561,7 +627,40 @@ func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip stri
 	if class == ClassPublicAuth {
 		return true, 0
 	}
+	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip), now)
+	if !ok {
+		g.recordRejection(class)
+		return false, retry
+	}
+	return true, 0
+}
 
+// readQueueWait is the longest a read waits for its turn. A person switching
+// projects fast in a few tabs sends a few hundred reads in a second; they
+// wait a moment instead of failing. Past it a read is refused: that is a
+// flood, not a person.
+const readQueueWait = 10 * time.Second
+
+// ReserveRoute is AllowRoute for a request that waits its turn rather than
+// fail: it reports how long to wait (up to maxWait) and a cancel that gives
+// the place back when the request stops waiting. Past maxWait it refuses,
+// taking nothing, like AllowRoute.
+func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
+	if class == ClassPublicAuth {
+		return 0, true, 0, func() {}
+	}
+	checks := g.routeChecks(class, cost, actorID, ip)
+	wait, ok, retry := g.store.reserveMulti(checks, now, maxWait)
+	if !ok {
+		g.recordRejection(class)
+		return 0, false, retry, func() {}
+	}
+	return wait, true, 0, func() { g.store.refund(checks) }
+}
+
+// routeChecks is the buckets a request of class is charged to: the class's
+// global one, its address's and its actor's.
+func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string) []bucketCheck {
 	var gRate, gBurst, ipRate, ipBurst, actRate, actBurst float64
 	switch class {
 	case ClassRead:
@@ -609,13 +708,7 @@ func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip stri
 			cost:  cost,
 		})
 	}
-
-	ok, retry := g.store.allowMulti(checks, now)
-	if !ok {
-		g.recordRejection(class)
-		return false, retry
-	}
-	return true, 0
+	return checks
 }
 
 func (g *abuseGuard) allow(key string, now time.Time, rate, burst float64) bool {
@@ -814,7 +907,23 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		actorID = ""
 	}
 
-	if ok, retrySec := s.abuse.AllowRoute(class, cost, actorID, ip, now); !ok {
+	// A read past the burst waits its turn (a person clicking fast); every
+	// other class is refused at once.
+	var allowed bool
+	var retrySec int
+	if class == ClassRead {
+		var wait time.Duration
+		var cancel func()
+		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, ip, now, readQueueWait)
+		if allowed && wait > 0 && !waitTurn(c.Request.Context(), wait) {
+			cancel()
+			c.Abort()
+			return
+		}
+	} else {
+		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, ip, now)
+	}
+	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
 		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
@@ -869,6 +978,19 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	c.Header("Retry-After", "1")
 	httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
 	c.Abort()
+}
+
+// waitTurn waits d, and reports false when ctx ends first (the client gave
+// up).
+func waitTurn(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // directLocalActor reports a request from the local user of a standalone
