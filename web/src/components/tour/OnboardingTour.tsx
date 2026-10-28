@@ -62,6 +62,22 @@ function findStep(steps: TourStep[], from: number, dir: 1 | -1): number | null {
   return null;
 }
 
+/**
+ * True while the user is busy with something the click itself opened: a text
+ * field, or anything inside a menu, dialog or form. A chapter that started
+ * then would take the keyboard mid-sentence (Enter would step the tour instead
+ * of submitting), so the trigger lets it pass; the next press in the region
+ * tries again.
+ */
+function userIsBusy(): boolean {
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  if (active.closest(".tour-popover, .tour-welcome")) return false;
+  if (active instanceof HTMLElement && active.isContentEditable) return true;
+  if (active.matches("input, textarea, select")) return true;
+  return active.closest('[role="menu"], [role="dialog"], form') !== null;
+}
+
 function boxesEqual(a: Box | null, b: Box | null): boolean {
   if (a === null || b === null) return a === b;
   return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
@@ -92,6 +108,8 @@ export function OnboardingTour() {
   const welcomeRef = useRef<HTMLDivElement | null>(null);
   const promptedRef = useRef(false);
   const pendingStartRef = useRef<number | null>(null);
+  // Where focus was before a chapter took it, so closing gives it back.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   // Live mirrors for the document-level pointerdown listener, so it never
   // acts on a stale closure.
@@ -114,6 +132,9 @@ export function OnboardingTour() {
     const usable = findStep(next.steps, 0, 1);
     if (usable === null) return;
     setTargetBox(null); // don't flash the previous chapter's cutout
+    const active = document.activeElement;
+    returnFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
     setStepIndex(usable);
     setChapter(next);
   }, []);
@@ -236,6 +257,7 @@ export function OnboardingTour() {
           pendingStartRef.current = null;
           if (chapterRef.current || welcomeOpenRef.current) return;
           if (chaptersDoneRef.current.includes(candidate.id)) return;
+          if (userIsBusy()) return;
           startChapter(candidate);
         }, POINTER_TRIGGER_DELAY);
         return;
@@ -360,6 +382,14 @@ export function OnboardingTour() {
   useEffect(() => {
     if (chapter) popoverRef.current?.focus();
   }, [chapter, stepIndex]);
+  // When the chapter closes, focus goes back where it was instead of <body>.
+  const hasChapter = chapter !== null;
+  useEffect(() => {
+    if (hasChapter) return;
+    const back = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (back?.isConnected) back.focus();
+  }, [hasChapter]);
   useEffect(() => {
     if (welcomeOpen) welcomeRef.current?.focus();
   }, [welcomeOpen]);
