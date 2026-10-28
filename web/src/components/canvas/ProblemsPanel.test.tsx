@@ -70,4 +70,70 @@ describe("ProblemsPanel", () => {
     const english = screen.getByRole("region", { name: "Validation warnings" });
     expect(within(english).getByText("Whole graph")).toBeInTheDocument();
   });
+
+  // A row named the part of the node at fault by the file's own key —
+  // "· requires", "· edges" — in English whatever the language.
+  it("names the part at fault in the reader's language", () => {
+    const issues: Issue[] = [
+      { severity: "error", nodeId: "a", field: "requires", msg: "未知的節點" },
+      { severity: "error", nodeId: "b", field: "edges", msg: "循環依賴" },
+      { severity: "error", nodeId: "c", field: "effects[2]", msg: "壞掉的效果" },
+      { severity: "warning", nodeId: "d", field: "ui.plans", msg: "日期順序" },
+    ];
+    const panel = () =>
+      render(
+        <ProblemsPanel
+          analysis={empty}
+          issues={issues}
+          nodeTitle={(id) => id ?? ""}
+          onPick={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+    const rowText = (region: HTMLElement) =>
+      within(region)
+        .getAllByRole("button")
+        .map((row) => row.textContent ?? "");
+
+    const first = panel();
+    const rows = rowText(screen.getByRole("region", { name: "驗證警告" }));
+    expect(rows[0]).toContain("· 前置條件");
+    expect(rows[1]).toContain("· 相依關係");
+    expect(rows[2]).toContain("· 效果");
+    expect(rows[3]).toContain("· 計畫");
+    for (const raw of ["requires", "edges", "effects", "ui.plans"]) {
+      expect(rows.join(" ")).not.toContain(raw);
+    }
+    first.unmount();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    panel();
+    const english = rowText(screen.getByRole("region", { name: "Validation warnings" }));
+    expect(english[0]).toContain("· Prerequisites");
+    expect(english[1]).toContain("· Dependencies");
+  });
+
+  it("says one day, not one days, for a one-day critical path", () => {
+    const panel = (criticalDays: number) =>
+      render(
+        <ProblemsPanel
+          analysis={{ ...empty, criticalDays }}
+          issues={[]}
+          nodeTitle={(id) => id ?? ""}
+          onPick={() => undefined}
+          onClose={() => undefined}
+        />,
+      );
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    const one = panel(1);
+    expect(screen.getByText("Critical path: 1 day")).toBeInTheDocument();
+    one.unmount();
+    const two = panel(2);
+    expect(screen.getByText("Critical path: 2 days")).toBeInTheDocument();
+    two.unmount();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    panel(1);
+    expect(screen.getByText("關鍵路徑：1 天")).toBeInTheDocument();
+  });
 });
