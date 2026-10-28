@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { useI18n } from "../../i18n";
 import { COL_W, ROW_H, snapDragDelta, type Col, type Rect } from "./geometry";
 import {
@@ -26,6 +26,19 @@ export interface CardDragState {
   guides: SnapGuide[];
 }
 
+function sameGuides(a: readonly SnapGuide[], b: readonly SnapGuide[]) {
+  return (
+    a.length === b.length &&
+    a.every(
+      (guide, index) =>
+        guide.axis === b[index].axis &&
+        guide.position === b[index].position &&
+        guide.from === b[index].from &&
+        guide.to === b[index].to,
+    )
+  );
+}
+
 export function useCardDrag({
   zoom,
   columns,
@@ -37,6 +50,7 @@ export function useCardDrag({
   snapToGrid = false,
   snapEnabled = false,
   snapBoxes = [],
+  onFrame,
 }: {
   zoom: number;
   columns: Col[];
@@ -59,6 +73,14 @@ export function useCardDrag({
   snapEnabled?: boolean;
   /** Everything on the board that can be aligned to, cards and decorations. */
   snapBoxes?: readonly SnapBox[];
+  /**
+   * Paints the live offset, at most once per animation frame. The pointer
+   * moves far more often than anything else about a drag changes, so the
+   * offset never goes through React: `state` only changes when the drag
+   * starts, lifts, lands on different guides or ends, and its dx/dy are as of
+   * that moment. `live()` is always current.
+   */
+  onFrame?: (live: CardDragState) => void;
 }) {
   const { t } = useI18n();
   const dragStart = useRef({ x: 0, y: 0 });
@@ -68,6 +90,23 @@ export function useCardDrag({
   const dragTargets = useRef<SnapTargets>(NO_SNAP_TARGETS);
   const dragRef = useRef<CardDragState | null>(null);
   const [state, setState] = useState<CardDragState | null>(null);
+  const frame = useRef<number | null>(null);
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
+
+  const cancelFrame = () => {
+    if (frame.current === null) return;
+    cancelAnimationFrame(frame.current);
+    frame.current = null;
+  };
+  // Unmounted mid-drag: nothing is left to paint.
+  useEffect(() => cancelFrame, []);
+
+  const paint = () => {
+    frame.current = null;
+    const live = dragRef.current;
+    if (live) onFrameRef.current?.(live);
+  };
 
   const onPointerDown = (event: PointerEvent<HTMLElement>, id: string) => {
     if (event.button !== 0) return;
@@ -134,7 +173,15 @@ export function useCardDrag({
       moved: current.moved || Math.abs(screenDx) + Math.abs(screenDy) > 5,
     };
     dragRef.current = next;
-    setState(next);
+    if (next.moved !== current.moved || !sameGuides(next.guides, current.guides)) {
+      // Something React draws changed: the lift, or the guides. Paint now, in
+      // step with that render, so the card does not sit a frame behind it.
+      cancelFrame();
+      paint();
+      setState(next);
+    } else if (frame.current === null) {
+      frame.current = requestAnimationFrame(paint);
+    }
     return true;
   };
 
@@ -143,6 +190,7 @@ export function useCardDrag({
     if (!current || current.id !== id) return false;
     const wasMoved = current.moved;
     const { dx, dy } = current;
+    cancelFrame();
     dragRef.current = null;
     dragBounds.current = null;
     dragTargets.current = NO_SNAP_TARGETS;
@@ -219,6 +267,7 @@ export function useCardDrag({
 
   const cancel = () => {
     if (!dragRef.current) return false;
+    cancelFrame();
     dragRef.current = null;
     dragBounds.current = null;
     dragTargets.current = NO_SNAP_TARGETS;
@@ -228,6 +277,8 @@ export function useCardDrag({
 
   return {
     state,
+    /** The drag as of the last pointermove, or null between drags. */
+    live: () => dragRef.current,
     handlers: {
       onPointerDown,
       onPointerMove,

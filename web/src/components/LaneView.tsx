@@ -31,7 +31,7 @@ import { GraphCanvas } from "./canvas/GraphCanvas";
 import { GraphMinimap } from "./canvas/GraphMinimap";
 import { ProblemsPanel, problemCount } from "./canvas/ProblemsPanel";
 import { useCardResize } from "./canvas/useCardResize";
-import { useCardDrag } from "./canvas/useCardDrag";
+import { useCardDrag, type CardDragState } from "./canvas/useCardDrag";
 import {
   rectOfColumn,
   snapBoxesOfColumns,
@@ -433,6 +433,7 @@ export function LaneView({
    */
 
   const { state: drag, handlers: cardDragHandlers } = useCardDrag({
+    onFrame: (live) => paintDrag(live),
     zoom: viewScale,
     snapToGrid,
     columns: cols,
@@ -519,35 +520,41 @@ export function LaneView({
     runCanvasCommand({ type: "canvas.moveNodes", positions });
     setGraphNotice({ text: t("lane.nodesAligned", { count: moved }), kind: "ok" });
   };
-  // ----- live drag. What a peer sees while a card is still under a pointer;
-  // where it lands arrives afterwards as a graph op.
+  // ----- live drag. The offset changes on every pointermove and goes nowhere
+  // near React: each animation frame writes it to the board as two custom
+  // properties, which the lifted cards' transform reads. The same frame tells
+  // the peers, who see it as a ghost; where the cards land arrives afterwards
+  // as a graph op.
+  const boardInnerRef = useRef<HTMLDivElement>(null);
   const reportDrag = useApp((state) => state.reportDrag);
-  const ghosts = useApp((state) => state.ghosts);
-  const peers = useApp((state) => state.peers);
   const lastDragSentAt = useRef(0);
   const dragReported = useRef(false);
+  const paintDrag = (live: CardDragState) => {
+    const surface = boardInnerRef.current;
+    surface?.style.setProperty("--drag-dx", `${live.dx}px`);
+    surface?.style.setProperty("--drag-dy", `${live.dy}px`);
+    if (!isGraph || !live.moved) return;
+    // About thirty a second: enough to read as motion, far under the socket's
+    // stream budget, and the gesture is redrawn locally either way.
+    const now = Date.now();
+    if (now - lastDragSentAt.current < 33) return;
+    lastDragSentAt.current = now;
+    dragReported.current = true;
+    reportDrag(live.ids, live.dx, live.dy, true);
+  };
   useEffect(() => {
-    if (!isGraph) return;
-    if (drag?.moved) {
-      // About thirty a second: enough to read as motion, far under the socket's
-      // stream budget, and the gesture is redrawn locally either way.
-      const now = Date.now();
-      if (now - lastDragSentAt.current < 33) return;
-      lastDragSentAt.current = now;
-      dragReported.current = true;
-      reportDrag(drag.ids, drag.dx, drag.dy, true);
-      return;
-    }
+    if (drag) return;
     // One last message so the ghost goes away even if the drop changed nothing.
     if (dragReported.current) {
       dragReported.current = false;
       reportDrag([], 0, 0, false);
     }
-  }, [isGraph, drag, reportDrag]);
+  }, [drag, reportDrag]);
 
   // A pointer on the board, in the same offset-free space the ghosts use, so a
-  // window scrolled somewhere else still draws it over the right card.
-  const presences = useApp((state) => state.presences);
+  // window scrolled somewhere else still draws it over the right card. Other
+  // people's pointers and ghosts are drawn by PeerOverlay, which subscribes to
+  // them itself: the board does not re-render for somebody else's mouse.
   const reportPresenceState = useApp((state) => state.reportPresenceState);
   const reportPointer = (event: React.PointerEvent<HTMLElement>) => {
     if (!isGraph) return;
@@ -564,30 +571,6 @@ export function LaneView({
     // The board is not on screen any more, so neither is this pointer.
     return () => reportPresenceState({ pointer: undefined });
   }, [reportPresenceState, isGraph]);
-
-  const peerPointers = useMemo(
-    () =>
-      peers
-        .filter((peer) => presences[peer.id]?.pointer)
-        .map((peer) => ({
-          peerId: peer.id,
-          name: peer.actor?.name || "?",
-          color: peer.color || "#888",
-          point: presences[peer.id].pointer!,
-        })),
-    [peers, presences],
-  );
-
-  const peerGhosts = useMemo(
-    () =>
-      Object.entries(ghosts).map(([peerId, ghost]) => ({
-        peerId,
-        color: peers.find((peer) => peer.id === peerId)?.color || "#888",
-        name: peers.find((peer) => peer.id === peerId)?.actor?.name ?? "",
-        ...ghost,
-      })),
-    [ghosts, peers],
-  );
 
 
   const saveGatePlacement = (targetId: string, point: Point) => {
@@ -1260,6 +1243,7 @@ export function LaneView({
         }}
       >
         <div
+          ref={boardInnerRef}
           className={`board-inner${isGraph ? " graph-bg" : ""}${
             drag?.moved ? " dragging" : ""
           }${
@@ -1372,8 +1356,6 @@ export function LaneView({
               // One gesture runs at a time, so whichever is live owns the lines.
               snapGuides={drag?.guides ?? cardResize?.guides ?? decorationGuides}
               onSnapGuides={setDecorationGuides}
-              peerGhosts={peerGhosts}
-              peerPointers={peerPointers}
               drag={drag}
               cardDragHandlers={cardDragHandlers}
               cardResize={cardResize}

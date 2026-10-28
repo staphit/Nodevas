@@ -8,9 +8,8 @@
  * place and how it reacts in another.
  */
 
-import { Fragment } from "react";
+import { useMemo, useRef } from "react";
 import { reportError } from "../../store";
-import { StatusShape } from "../../statusTheme";
 import { localizedStatusLabel, useI18n } from "../../i18n";
 import type {
   CanvasAnnotation,
@@ -28,24 +27,8 @@ import type { CommandResult } from "../../state/operations";
 import { CanvasDecoration } from "./CanvasDecoration";
 import { SnapGuides } from "./SnapGuides";
 import type { SnapBox, SnapGuide } from "./snapping";
-
-/** Somebody else's selection, mid-gesture. */
-export interface PeerGhost {
-  peerId: string;
-  color: string;
-  name: string;
-  ids: string[];
-  dx: number;
-  dy: number;
-}
-
-/** Where somebody else's pointer is, in board coordinates. */
-export interface PeerPointer {
-  peerId: string;
-  color: string;
-  name: string;
-  point: Point;
-}
+import { GraphCard, type CardEvents } from "./GraphCard";
+import { PeerOverlay } from "./PeerOverlay";
 import { GateWiring, type Gate } from "./GateWiring";
 import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
 import { StandaloneLogicGate } from "./LogicGate";
@@ -54,11 +37,6 @@ import type { useCardResize, CardResizeState } from "./useCardResize";
 import type { useConnectionDrag, ConnectionDragState } from "./useConnectionDrag";
 
 import {
-  CARD_HANDLES,
-  CARD_MAX_H,
-  CARD_MAX_W,
-  CARD_MIN_H,
-  CARD_MIN_W,
   ROW_H,
   edgePlacementKey,
   type Col,
@@ -67,11 +45,9 @@ import {
 } from "./geometry";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
-import { RunCardBadge } from "../../runs/RunChanges";
-import { AutopilotCardBadge } from "../../autopilot/AutopilotCardBadge";
 import { safeCssColor } from "../../cssColor";
 import { nodeTypeOf } from "../../domain/graph/nodeTypes";
-import { NodeTypeChip, effectiveShape, nodeTypeLabel } from "../../nodeTypeTheme";
+import { effectiveShape, nodeTypeLabel } from "../../nodeTypeTheme";
 
 type ConnectionHandlers = ReturnType<typeof useConnectionDrag>["handlers"];
 type CardResizeHandlers = ReturnType<typeof useCardResize>["handlers"];
@@ -109,11 +85,6 @@ export interface GraphCanvasProps {
   snapBoxes: readonly SnapBox[];
   snapGuides: SnapGuide[];
   onSnapGuides: (guides: SnapGuide[]) => void;
-
-  /** Cards other people are dragging right now, in their own colour. */
-  peerGhosts: PeerGhost[];
-  /** Where other people's pointers are. */
-  peerPointers: PeerPointer[];
 
   // Live gestures.
   drag: CardDragState | null;
@@ -184,8 +155,6 @@ export function GraphCanvas({
   snapBoxes,
   snapGuides,
   onSnapGuides,
-  peerGhosts,
-  peerPointers,
   drag,
   cardDragHandlers,
   cardResize,
@@ -220,6 +189,109 @@ export function GraphCanvas({
   setGraphNotice,
 }: GraphCanvasProps) {
   const { t } = useI18n();
+  // A missing list is a new [] on every board render; one shared empty list
+  // keeps the cards' props equal so they can skip it.
+  const statusDefinitions = customStatuses.length ? customStatuses : NO_STATUS_DEFINITIONS;
+
+  // The cards are memoized, so they get one handler object for good and every
+  // call is forwarded to whatever this render was handed.
+  const handed = {
+    onCardPointerDown,
+    onCardPointerMove,
+    onCardPointerUp,
+    finishConnectionDrag,
+    cardDragHandlers,
+    cardResizeHandlers,
+    connectionDrag,
+    connectionHover,
+    connectionHandlers,
+    selectedGraphNodeIDs,
+    selectNode,
+    setContextMenu,
+    openTab,
+  };
+  const latest = useRef(handed);
+  latest.current = handed;
+  const cardEvents = useMemo<CardEvents>(
+    () => ({
+      pointerDown: (event, id) => latest.current.onCardPointerDown(event, id),
+      pointerMove: (event) => latest.current.onCardPointerMove(event),
+      pointerUp: (event, id) => latest.current.onCardPointerUp(event, id),
+      pointerCancel: (event) => {
+        const now = latest.current;
+        if (!now.finishConnectionDrag(event, false)) now.cardDragHandlers.cancel();
+      },
+      pointerEnter: (id) => setHoveredReferenceCard(id),
+      pointerLeave: (id) => {
+        const now = latest.current;
+        setHoveredReferenceCard(null);
+        if (now.connectionHover?.nodeId === id && !now.connectionDrag) {
+          now.connectionHandlers.clearHover();
+        }
+      },
+      lostPointerCapture: (id) => {
+        const now = latest.current;
+        now.cardDragHandlers.cancel();
+        if (now.connectionDrag?.sourceId === id) now.connectionHandlers.cancel();
+      },
+      focus: (id) => {
+        const now = latest.current;
+        if (!now.selectedGraphNodeIDs.has(id)) now.selectNode(id);
+      },
+      keyDown: (event, id) => {
+        // The menu key and Shift+F10 open the node menu, as a right
+        // click would, at the card's own corner.
+        if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          latest.current.setContextMenu({
+            kind: "node-actions",
+            nodeId: id,
+            x: rect.left + 8,
+            y: rect.bottom + 4,
+          });
+          return;
+        }
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        void latest.current.openTab(id).catch(reportError);
+      },
+      contextMenu: (event, id) => {
+        event.preventDefault();
+        event.stopPropagation();
+        latest.current.selectNode(id);
+        latest.current.setContextMenu({
+          kind: "node-actions",
+          nodeId: id,
+          x: event.clientX,
+          y: event.clientY,
+        });
+      },
+      moreClick: (event, id) => {
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        latest.current.selectNode(id);
+        latest.current.setContextMenu({
+          kind: "node-actions",
+          nodeId: id,
+          x: rect.left,
+          y: rect.bottom + 4,
+        });
+      },
+      resizePointerDown: (event, id, dirX, dirY, width, height) =>
+        latest.current.cardResizeHandlers.onPointerDown(event, id, dirX, dirY, width, height),
+      resizePointerMove: (event) => latest.current.cardResizeHandlers.onPointerMove(event),
+      resizePointerUp: (event) => latest.current.cardResizeHandlers.onPointerUp(event),
+      resizePointerCancel: (event) => latest.current.cardResizeHandlers.onPointerCancel(event),
+      resizeKeyDown: (event, id, dirX, dirY, width, height) =>
+        latest.current.cardResizeHandlers.onKeyDown(event, id, dirX, dirY, width, height),
+    }),
+    [],
+  );
+  const lifted = drag?.moved ? new Set(drag.ids) : null;
+
   const agentSessions = useAgents((s) => s.sessions);
   const agentByNodeId = new Map<string, { name: string; agent: string }>();
   for (const s of agentSessions) {
@@ -544,7 +616,7 @@ export function GraphCanvas({
         const n = c.node;
         const st: Status = statuses[n.id] ?? "ready";
         const assigned = (n.assignee && userNames.get(n.assignee)) || t("canvas.unassigned");
-        const isDragging = drag?.ids.includes(n.id) === true && drag.moved;
+        const isDragging = lifted?.has(n.id) === true;
         const isConnectionTarget = connectionDrag?.targetId === n.id;
         const nodeStyle = graph?.ui?.nodeStyles?.[n.id];
         // The type decides the default look; a per-node style still wins.
@@ -552,22 +624,26 @@ export function GraphCanvas({
         const typeLabel = nodeTypeLabel(nodeType, t);
         const shape = effectiveShape(nodeStyle, nodeType);
         const hasStatus = nodeType.completion !== "none";
-        const borderColor = safeCssColor(nodeStyle?.borderColor || nodeType.color);
         const filteredOut = !matchesViewFilter(n);
         const resizing = cardResize?.nodeId === n.id ? cardResize : null;
         const liveWidth = resizing ? resizing.width : c.width;
         const liveHeight = resizing ? resizing.height : c.height;
         const connectionTargetError =
           isConnectionTarget && connectionDrag ? connectionPreviewError : null;
+        const selected = selectedGraphNodeIDs.has(n.id);
+        const marker = cardMarker(n.id);
+        const agent = agentByNodeId.get(n.id);
         return (
-          <Fragment key={n.id}>
-          <div
-            data-node-id={n.id}
-            role="button"
-            tabIndex={0}
+          <GraphCard
+            key={n.id}
+            node={n}
+            left={centerX(c) - liveWidth / 2}
+            top={rowTop(c.row) + ROW_H / 2 - liveHeight / 2}
+            width={liveWidth}
+            height={liveHeight}
             className={`col-card ${hasStatus ? `status-${st}` : "no-status"}${errorNodes.has(n.id) ? " has-error" : ""}${
               activeTab === n.id ? " active" : ""
-            }${selectedGraphNodeIDs.has(n.id) ? " selected" : ""}${
+            }${selected ? " selected" : ""}${
               isDragging ? " lifting" : ""
             }${filteredOut ? " filtered-out" : ""}${
               analysis.overdue.has(n.id) ? " analysis-overdue" : ""
@@ -590,202 +666,29 @@ export function GraphCanvas({
             }${shape !== "rect" ? ` shape-${shape}` : ""}${
               nodeStyle?.align ? ` align-${nodeStyle.align}` : ""
             }${nodeStyle?.valign ? ` valign-${nodeStyle.valign}` : ""}`}
-            style={{
-              left: centerX(c) - liveWidth / 2,
-              top: rowTop(c.row) + ROW_H / 2 - liveHeight / 2,
-              width: liveWidth,
-              height: liveHeight,
-              // Shape insets are computed from these.
-              ["--card-w" as string]: `${liveWidth}px`,
-              ["--card-h" as string]: `${liveHeight}px`,
-              // Fill and outline travel as variables: a clipped shape
-              // draws its own edge and cannot use the box border.
-              ["--card-bg" as string]: safeCssColor(nodeStyle?.color),
-              ["--card-border-color" as string]: borderColor,
-              ["--card-type-color" as string]: safeCssColor(nodeType.color) || undefined,
-              borderColor,
-              color: safeCssColor(nodeStyle?.textColor),
-              transform: isDragging
-                ? `translate(${drag.dx}px, ${drag.dy}px)`
-                : undefined,
-            }}
-            onPointerDown={(e) => onCardPointerDown(e, n.id)}
-            onPointerMove={onCardPointerMove}
-            onPointerUp={(event) => onCardPointerUp(event, n.id)}
-            onPointerCancel={(event) => {
-              if (!finishConnectionDrag(event, false)) cardDragHandlers.cancel();
-            }}
-            onPointerEnter={() => setHoveredReferenceCard(n.id)}
-            onPointerLeave={() => {
-              setHoveredReferenceCard(null);
-              if (connectionHover?.nodeId === n.id && !connectionDrag) {
-                connectionHandlers.clearHover();
-              }
-            }}
-            onFocus={() => {
-              if (!selectedGraphNodeIDs.has(n.id)) selectNode(n.id);
-            }}
-            onKeyDown={(event) => {
-              // The menu key and Shift+F10 open the node menu, as a right
-              // click would, at the card's own corner.
-              if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
-                event.preventDefault();
-                event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                setContextMenu({
-                  kind: "node-actions",
-                  nodeId: n.id,
-                  x: rect.left + 8,
-                  y: rect.bottom + 4,
-                });
-                return;
-              }
-              if (event.key !== "Enter") return;
-              event.preventDefault();
-              event.stopPropagation();
-              void openTab(n.id).catch(reportError);
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              selectNode(n.id);
-              setContextMenu({
-                kind: "node-actions",
-                nodeId: n.id,
-                x: event.clientX,
-                y: event.clientY,
-              });
-            }}
-            onLostPointerCapture={() => {
-              cardDragHandlers.cancel();
-              if (connectionDrag?.sourceId === n.id) connectionHandlers.cancel();
-            }}
-            aria-selected={selectedGraphNodeIDs.has(n.id)}
-            aria-label={[
+            cardBg={safeCssColor(nodeStyle?.color)}
+            borderColor={safeCssColor(nodeStyle?.borderColor || nodeType.color)}
+            typeColor={safeCssColor(nodeType.color)}
+            textColor={safeCssColor(nodeStyle?.textColor)}
+            dragging={isDragging}
+            hasStatus={hasStatus}
+            status={st}
+            customStatuses={statusDefinitions}
+            nodeType={nodeType}
+            assigned={assigned}
+            markerKind={marker?.kind}
+            markerLabel={marker?.label}
+            agentName={agent?.name}
+            agentKind={agent?.agent}
+            ariaLabel={[
               n.title || n.id,
               typeLabel,
               ...(hasStatus ? [localizedStatusLabel(st, customStatuses)] : []),
             ].join(" · ")}
-            title={cardDetails(n, st, assigned, typeLabel, hasStatus).join("\n")}
-          >
-            <span className="col-card-head">
-              {hasStatus && <StatusShape status={st} definitions={customStatuses} />}
-              <span className="col-card-title">{n.title || n.id}</span>
-              <RunCardBadge nodeId={n.id} />
-              <AutopilotCardBadge nodeId={n.id} />
-            </span>
-            <span className="col-card-meta">
-              <NodeTypeChip type={nodeType} />
-              <span
-                className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
-                data-assignee-prefix={t("canvas.assigneePrefix")}
-              >
-                {assigned}
-              </span>
-              {(() => {
-                const marker = cardMarker(n.id);
-                return (
-                  marker && (
-                    <span className={`col-card-marker ${marker.kind}`}>{marker.label}</span>
-                  )
-                );
-              })()}
-            </span>
-            {agentByNodeId.has(n.id) && (
-              <span
-                className="col-card-agent"
-                title={`${agentByNodeId.get(n.id)!.name} (${agentByNodeId.get(n.id)!.agent})`}
-              >
-                ● {agentByNodeId.get(n.id)!.name}
-              </span>
-            )}
-          </div>
-          {/* The menu for a pointer that does not right-click: a sibling laid
-              over the card's corner rather than a child, so no control sits
-              inside the card's own button. Shown on hover, focus or
-              selection (04-board.css), and stopped before the board can read
-              its press as the start of a pan or a marquee. */}
-          <button
-            type="button"
-            className="col-card-more"
-            style={{
-              left: centerX(c) + liveWidth / 2,
-              top: rowTop(c.row) + ROW_H / 2 - liveHeight / 2,
-            }}
-            aria-label={t("board.nodeMenu.more", { title: n.title || n.id })}
-            title={t("board.nodeMenu.more", { title: n.title || n.id })}
-            aria-haspopup="menu"
-            onPointerDown={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              const rect = event.currentTarget.getBoundingClientRect();
-              selectNode(n.id);
-              setContextMenu({
-                kind: "node-actions",
-                nodeId: n.id,
-                x: rect.left,
-                y: rect.bottom + 4,
-              });
-            }}
-          >
-            ⋯
-          </button>
-          {selectedGraphNodeIDs.has(n.id) && (
-            // Sibling of the card: a clipped shape would otherwise clip
-            // its own handles away.
-            <div
-              className="card-resize-frame"
-              style={{
-                left: centerX(c) - liveWidth / 2,
-                top: rowTop(c.row) + ROW_H / 2 - liveHeight / 2,
-                width: liveWidth,
-                height: liveHeight,
-              }}
-            >
-              {CARD_HANDLES.map((handle) => (
-                <span
-                  key={handle.name}
-                  className={`col-card-handle ${handle.name}`}
-                  role="slider"
-                  tabIndex={0}
-                  aria-label={t("canvas.resizeCard", {
-                    handle: t(`canvas.handle.${handle.name}`),
-                    title: n.title || n.id,
-                  })}
-                  aria-valuemin={handle.dirX ? CARD_MIN_W : CARD_MIN_H}
-                  aria-valuemax={handle.dirX ? CARD_MAX_W : CARD_MAX_H}
-                  aria-valuenow={Math.round(handle.dirX ? liveWidth : liveHeight)}
-                  aria-valuetext={`${Math.round(liveWidth)}×${Math.round(liveHeight)}`}
-                  title={t("canvas.resizeCardTitle")}
-                  onPointerDown={(event) =>
-                    cardResizeHandlers.onPointerDown(
-                      event,
-                      n.id,
-                      handle.dirX,
-                      handle.dirY,
-                      liveWidth,
-                      liveHeight,
-                    )
-                  }
-                  onPointerMove={cardResizeHandlers.onPointerMove}
-                  onPointerUp={cardResizeHandlers.onPointerUp}
-                  onPointerCancel={cardResizeHandlers.onPointerCancel}
-                  onKeyDown={(event) =>
-                    cardResizeHandlers.onKeyDown(
-                      event,
-                      n.id,
-                      handle.dirX,
-                      handle.dirY,
-                      liveWidth,
-                      liveHeight,
-                    )
-                  }
-                />
-              ))}
-            </div>
-          )}
-          </Fragment>
+            tooltip={cardDetails(n, st, assigned, typeLabel, hasStatus).join("\n")}
+            selected={selected}
+            events={cardEvents}
+          />
         );
       })}
       <SnapGuides
@@ -794,43 +697,17 @@ export function GraphCanvas({
         offsetY={graphOffsetY}
         zoom={zoom}
       />
-      {/* An outline rather than a copy of the card: it says where the card is
-          going without competing with the one that is still where it was. */}
-      {peerGhosts.flatMap((ghost) =>
-        ghost.ids.map((nodeId) => {
-          const column = colOf.get(nodeId);
-          if (!column) return null;
-          return (
-            <div
-              key={`${ghost.peerId}-${nodeId}`}
-              className="peer-ghost"
-              aria-hidden
-              title={ghost.name}
-              style={{
-                left: centerX(column) - column.width / 2 + ghost.dx,
-                top: rowTop(column.row) + ROW_H / 2 - column.height / 2 + ghost.dy,
-                width: column.width,
-                height: column.height,
-                ["--peer-color" as string]: ghost.color,
-              }}
-            />
-          );
-        }),
-      )}
-      {peerPointers.map((peer) => (
-        <div
-          key={peer.peerId}
-          className="peer-pointer"
-          aria-hidden
-          style={{
-            left: graphOffsetX + peer.point.x,
-            top: graphOffsetY + peer.point.y,
-            ["--peer-color" as string]: peer.color,
-          }}
-        >
-          <span className="peer-pointer-label">{peer.name}</span>
-        </div>
-      ))}
+      {/* Other people: their own subscription, so a remote pointer redraws
+          this layer and nothing else. */}
+      <PeerOverlay
+        colOf={colOf}
+        centerX={centerX}
+        rowTop={rowTop}
+        offsetX={graphOffsetX}
+        offsetY={graphOffsetY}
+      />
     </>
   );
 }
+
+const NO_STATUS_DEFINITIONS: StatusDefinition[] = [];
