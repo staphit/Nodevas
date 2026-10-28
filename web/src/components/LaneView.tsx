@@ -1450,6 +1450,72 @@ export function LaneView({
       graphOffsetY,
     });
 
+  const emptyHint = cols.length === 0 && (
+    // The graph opens scrolled to its pan buffer (useBoardViewport), so
+    // the hint is placed in that opening view rather than at the
+    // surface's top-left corner, which is off screen. The timeline
+    // opens on today, far down or across its calendar: the hint comes
+    // ahead of the calendar, stuck to the pane's top-left and taking
+    // no room, so it is in the pane wherever the calendar is scrolled.
+    <div
+      className="board-empty"
+      style={
+        isGraph
+          ? {
+              position: "absolute",
+              // Over decorations: across the opening view, just above them.
+              left: emptyHintRect
+                ? openingScroll(openingContent(), viewScale, boardViewport).left / viewScale
+                : GRAPH_PAN_BUFFER_X,
+              top: emptyHintRect
+                ? emptyHintRect.top - EMPTY_HINT_MARGIN
+                : GRAPH_PAN_BUFFER_Y,
+              width:
+                boardViewport.width > 0
+                  ? boardViewport.width / viewScale
+                  : undefined,
+            }
+          : {
+              position: "sticky",
+              top: 0,
+              left: 0,
+              height: 0,
+              // Its own formatting context: the message's top margin would
+              // otherwise collapse through it and push the calendar down.
+              display: "flow-root",
+              // Over the sticky date header and the lane heads.
+              zIndex: 14,
+              width:
+                boardViewport.width > 0
+                  ? boardViewport.width / viewScale
+                  : undefined,
+            }
+      }
+    >
+      <EmptyState
+        title={t("lane.emptyTitle")}
+        description={t("lane.emptyDescription")}
+        action={
+          <button
+            type="button"
+            onClick={(event) =>
+              openNodeCreationMenu({
+                kind: "graph",
+                x: event.clientX || 24,
+                y: event.clientY || 88,
+                col: 0,
+                row: 0,
+              })
+            }
+          >
+            <IconPlus size={13} />
+            {t("nodeCreate.create")}
+          </button>
+        }
+      />
+    </div>
+  );
+
   return (
     <GraphGestureModeProvider value={gestureMode}>
     <section
@@ -1604,6 +1670,7 @@ export function LaneView({
               aria-hidden
             />
           )}
+          {!isGraph && emptyHint}
           {/* ---------- timeline: lane header + expected/actual lifecycle cards ---------- */}
           {!isGraph && (
             <TimelineGrid
@@ -1713,54 +1780,7 @@ export function LaneView({
               setGraphNotice={setGraphNotice}
             />
           )}
-          {cols.length === 0 && (
-            // The graph opens scrolled to its pan buffer (useBoardViewport), so
-            // the hint is placed in that opening view rather than at the
-            // surface's top-left corner, which is off screen.
-            <div
-              className="board-empty"
-              style={
-                isGraph
-                  ? {
-                      position: "absolute",
-                      // Over decorations: across the opening view, just above them.
-                      left: emptyHintRect
-                        ? openingScroll(openingContent(), viewScale, boardViewport).left / viewScale
-                        : GRAPH_PAN_BUFFER_X,
-                      top: emptyHintRect
-                        ? emptyHintRect.top - EMPTY_HINT_MARGIN
-                        : GRAPH_PAN_BUFFER_Y,
-                      width:
-                        boardViewport.width > 0
-                          ? boardViewport.width / viewScale
-                          : undefined,
-                    }
-                  : undefined
-              }
-            >
-              <EmptyState
-                title={t("lane.emptyTitle")}
-                description={t("lane.emptyDescription")}
-                action={
-                  <button
-                    type="button"
-                    onClick={(event) =>
-                      openNodeCreationMenu({
-                        kind: "graph",
-                        x: event.clientX || 24,
-                        y: event.clientY || 88,
-                        col: 0,
-                        row: 0,
-                      })
-                    }
-                  >
-                    <IconPlus size={13} />
-                    {t("nodeCreate.create")}
-                  </button>
-                }
-              />
-            </div>
-          )}
+          {isGraph && emptyHint}
         </div>
       </div>
       {isGraph && minimapVisible && cols.length > 0 && (

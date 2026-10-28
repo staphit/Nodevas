@@ -573,6 +573,8 @@ describe("LaneView", () => {
         expect(empty.style.top).toBe("0px");
         expect(empty.style.left).toBe("0px");
         expect(empty.style.height).toBe("0px");
+        // Or the message's margin collapses through it and pushes the calendar down.
+        expect(empty.style.display).toBe("flow-root");
         const zoom = Number(inner.style.zoom || "1");
         expect(parseFloat(empty.style.width)).toBeCloseTo(948 / zoom);
         expect(within(empty).getByRole("button", { name: /建立節點/ })).toBeInTheDocument();
