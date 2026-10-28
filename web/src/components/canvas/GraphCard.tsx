@@ -198,7 +198,9 @@ export const GraphCard = memo(function GraphCard({
             className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
             data-assignee-prefix={markerKind ? undefined : t("canvas.assigneePrefix")}
           >
-            {assigned}
+            {/* "Unassigned" beside a marker took the line's room and was cut;
+                the short form fits, and the tooltip says it in full. */}
+            {!n.assignee && markerKind ? t("canvas.unassignedShort") : assigned}
           </span>
           {markerKind && (
             <span className={`col-card-marker ${markerKind}`}>{markerLabel}</span>

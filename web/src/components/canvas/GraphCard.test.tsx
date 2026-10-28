@@ -104,7 +104,7 @@ describe("GraphCard unassigned label", () => {
   // a Latin glyph at 0.56em (measured: "Unassigned" at 9.5px is 49px, 0.52em),
   // a CJK one at a full em.
   const width = (text: string, fontPx: number) =>
-    [...text].reduce((sum, ch) => sum + (/[　-鿿＀-￯]/.test(ch) ? 1 : 0.56) * fontPx, 0);
+    [...text].reduce((sum, ch) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(ch) ? 1 : 0.56) * fontPx, 0);
   const LINE = 152 - 2 * 8 - 2; // card width less its padding and borders
   const GAP = 6;
 
