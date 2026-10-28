@@ -284,6 +284,9 @@ func bootstrapWorkspace(root string) (*realtime.Hub, *project.ProjectManager, *d
 	if err := pm.PruneSearchIndex(context.Background()); err != nil {
 		slog.Warn("could not prune the search index", logging.Err(err))
 	}
+	// The first node drawer anyone opens lists links from every project;
+	// reading them now is what keeps that drawer from waiting on the scan.
+	pm.WarmNodeLinks()
 	return hub, pm, database
 }
 

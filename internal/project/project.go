@@ -122,6 +122,11 @@ type ProjectManager struct {
 	// take an arbitrary host path then stop accepting one: an account is
 	// permission to edit projects, not to reach the whole disk.
 	remote bool
+
+	// linksWarm counts WarmNodeLinks passes still reading; closing tells them
+	// to stop at the next project.
+	linksWarm sync.WaitGroup
+	closing   atomic.Bool
 }
 
 // DefaultCatalogRoot is where NewProjectManager keeps the workspace catalog,
@@ -253,6 +258,10 @@ func (pm *ProjectManager) Store() *store.Store {
 }
 
 func (pm *ProjectManager) Close() {
+	// A link warm-up reads every project's documents; it stops at the next
+	// project, and nothing reads them once Close returns.
+	pm.closing.Store(true)
+	pm.linksWarm.Wait()
 	pm.mu.Lock()
 	if pm.stopWatch != nil {
 		_ = pm.stopWatch()

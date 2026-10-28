@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/safego"
 	"nodevas/internal/store"
 )
 
@@ -94,22 +95,74 @@ var readLinkDocument = func(root, path string) ([]byte, error) {
 	return store.ReadProjectFileLimit(root, path, maxLinkScanBytes)
 }
 
-// WarmNodeLinks is not written yet.
-func (pm *ProjectManager) WarmNodeLinks() {}
-
-// scanProjectLinks reads one project's documents and returns their links.
-func scanProjectLinks(info ProjectInfo) []NodeLink {
-	var links []NodeLink
-	for _, node := range graphNodes(info.Path) {
-		data, err := readLinkDocument(info.Path, store.NodeDocPath(info.Path, node.ID))
+// WarmNodeLinks scans every project's links in the background, so the first
+// node drawer opened after a start is answered from the cache rather than from
+// a read of every document in the workspace (seconds, on a large one with a
+// cold disk). A drawer opened during the warm-up waits for the project being
+// scanned instead of reading it a second time. Close stops it at the next
+// project and waits for it.
+func (pm *ProjectManager) WarmNodeLinks() {
+	if pm.closing.Load() {
+		return
+	}
+	pm.linksWarm.Add(1)
+	go func() {
+		defer pm.linksWarm.Done()
+		defer safego.Recover("warm node links")
+		projects, err := pm.List()
 		if err != nil {
-			continue
+			return
 		}
-		for _, link := range ParseNodeLinks(string(data), info.Name) {
-			link.FromNode = node.ID
-			link.FromTitle = node.Title
-			links = append(links, link)
+		for _, info := range projects {
+			if pm.closing.Load() {
+				return
+			}
+			if !info.IsFolder {
+				projectLinks(info)
+			}
 		}
+	}()
+}
+
+// linkScanWorkers is how many documents of one project a scan reads at once.
+// The reads wait on the disk, not the CPU: overlapping them is what turns a
+// cold scan of thousands of documents from seconds into a fraction of that.
+const linkScanWorkers = 8
+
+// scanProjectLinks reads one project's documents and returns their links, in
+// graph order.
+func scanProjectLinks(info ProjectInfo) []NodeLink {
+	nodes := graphNodes(info.Path)
+	found := make([][]NodeLink, len(nodes))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(linkScanWorkers, len(nodes)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer safego.Recover("scan node links")
+			for i := range next {
+				node := nodes[i]
+				data, err := readLinkDocument(info.Path, store.NodeDocPath(info.Path, node.ID))
+				if err != nil {
+					continue
+				}
+				for _, link := range ParseNodeLinks(string(data), info.Name) {
+					link.FromNode = node.ID
+					link.FromTitle = node.Title
+					found[i] = append(found[i], link)
+				}
+			}
+		}()
+	}
+	for i := range nodes {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	var links []NodeLink
+	for _, nodeLinks := range found {
+		links = append(links, nodeLinks...)
 	}
 	return links
 }
@@ -185,7 +238,18 @@ var (
 	// linkCacheNames keeps the project name each cached scan was made under,
 	// because the name is written into every link a project produces.
 	linkCacheNames = map[string]string{}
+	// linkScans are the scans running now, per project directory: a second
+	// caller with the same stamp and name waits for the first one's result
+	// instead of reading the project again.
+	linkScans = map[string]*linkScan{}
 )
+
+type linkScan struct {
+	stamp string
+	name  string
+	done  chan struct{}
+	links []NodeLink
+}
 
 // graphNodes returns the ids and titles in one project's graph.yaml, parsing
 // the file only when it changed. The returned slice is shared with the cache
@@ -231,27 +295,42 @@ func readGraphNodes(root string) []graphNode {
 // modified.
 func projectLinks(info ProjectInfo) []NodeLink {
 	stamp, cacheable := projectDocumentsStamp(info.Path)
-	if cacheable {
-		linkCacheMu.Lock()
-		entry, ok := linkCache[info.Path]
-		name := linkCacheNames[info.Path]
-		linkCacheMu.Unlock()
-		if ok && entry.stamp == stamp && name == info.Name {
-			return entry.value
-		}
+	if !cacheable {
+		return scanProjectLinks(info)
 	}
-	links := scanProjectLinks(info)
-	if cacheable {
-		linkCacheMu.Lock()
-		if len(linkCache) >= maxCachedProjects {
-			linkCache = map[string]cacheEntry[[]NodeLink]{}
-			linkCacheNames = map[string]string{}
-		}
-		linkCache[info.Path] = cacheEntry[[]NodeLink]{stamp: stamp, value: links}
-		linkCacheNames[info.Path] = info.Name
+	linkCacheMu.Lock()
+	entry, ok := linkCache[info.Path]
+	if ok && entry.stamp == stamp && linkCacheNames[info.Path] == info.Name {
 		linkCacheMu.Unlock()
+		return entry.value
 	}
-	return links
+	if running, ok := linkScans[info.Path]; ok && running.stamp == stamp && running.name == info.Name {
+		linkCacheMu.Unlock()
+		<-running.done
+		return running.links
+	}
+	scan := &linkScan{stamp: stamp, name: info.Name, done: make(chan struct{})}
+	linkScans[info.Path] = scan
+	linkCacheMu.Unlock()
+
+	defer func() {
+		linkCacheMu.Lock()
+		if linkScans[info.Path] == scan {
+			delete(linkScans, info.Path)
+		}
+		linkCacheMu.Unlock()
+		close(scan.done)
+	}()
+	scan.links = scanProjectLinks(info)
+	linkCacheMu.Lock()
+	if len(linkCache) >= maxCachedProjects {
+		linkCache = map[string]cacheEntry[[]NodeLink]{}
+		linkCacheNames = map[string]string{}
+	}
+	linkCache[info.Path] = cacheEntry[[]NodeLink]{stamp: stamp, value: scan.links}
+	linkCacheNames[info.Path] = info.Name
+	linkCacheMu.Unlock()
+	return scan.links
 }
 
 // projectDocumentsStamp fingerprints the files a scan of this project would

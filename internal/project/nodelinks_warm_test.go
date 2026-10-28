@@ -128,8 +128,7 @@ func TestConcurrentScansOfAColdProjectReadItOnce(t *testing.T) {
 
 // A hub warms the link cache when it starts, so the first node drawer
 // anyone opens is answered from it instead of from a read of every document
-// in the workspace. Close waits for the warm-up: nothing reads the
-// workspace after it.
+// in the workspace.
 func TestWarmNodeLinksFillsTheCacheBeforeTheFirstDrawer(t *testing.T) {
 	workspace := t.TempDir()
 	first := linkProject(t, workspace, "first", 4)
@@ -138,8 +137,9 @@ func TestWarmNodeLinksFillsTheCacheBeforeTheFirstDrawer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(pm.Close)
 	pm.WarmNodeLinks()
-	pm.Close()
+	pm.linksWarm.Wait()
 
 	reads := countLinkReads(t, nil)
 	links := ScanNodeLinks([]ProjectInfo{first, second})
@@ -148,5 +148,49 @@ func TestWarmNodeLinksFillsTheCacheBeforeTheFirstDrawer(t *testing.T) {
 	}
 	if got := reads.Load(); got != 0 {
 		t.Fatalf("first scan after the warm-up read %d documents, want 0", got)
+	}
+}
+
+// Close stops a warm-up still reading and waits for it, so nothing reads the
+// workspace once Close returns.
+func TestCloseStopsALinkWarmUp(t *testing.T) {
+	workspace := t.TempDir()
+	for i := range 3 {
+		linkProject(t, workspace, fmt.Sprintf("p%d", i), 3)
+	}
+	pm, err := NewManagerAt(workspace, realtime.NewHub(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var first sync.Once
+	reads := countLinkReads(t, func(string) {
+		first.Do(func() {
+			close(entered)
+			<-release
+		})
+	})
+	pm.WarmNodeLinks()
+	<-entered
+	closed := make(chan struct{})
+	go func() {
+		pm.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while the warm-up was still reading")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-closed
+	after := reads.Load()
+	if after > 3 {
+		t.Fatalf("warm-up read %d documents after Close began, want only the project it was on (3)", after)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if reads.Load() != after {
+		t.Fatal("warm-up kept reading after Close returned")
 	}
 }
