@@ -36,12 +36,72 @@ import type { AppSlice, DocumentSlice } from "./types";
 const selfWrittenRevs = new Map<string, string>();
 
 /**
+ * The same, for the subpage open on each node (keyed like `pageDocs`). A
+ * subpage save is announced as its node's `node-changed`, so without this the
+ * echo of every subpage autosave would cost a read of the page and of the
+ * node's own document.
+ */
+const selfWrittenPageRevs = new Map<string, string>();
+
+/**
  * Body size above which an unload save stops asking for `keepalive`. The spec's
  * budget is 64 KB across every keepalive request in flight; staying well under
  * it leaves room for the JSON envelope and for a second document being flushed
  * by the same unload.
  */
 const UNLOAD_BODY_LIMIT = 48_000;
+
+type SliceSet = Parameters<AppSlice<DocumentSlice>>[0];
+type SliceGet = Parameters<AppSlice<DocumentSlice>>[1];
+
+async function reloadTabFromDisk(set: SliceSet, get: SliceGet, id: string) {
+  const tab = get().tabs.find((t) => t.id === id);
+  if (!tab || !tab.loaded) return;
+  if (tab.dirty) {
+    set((st) => ({ tabs: patchTab(st.tabs, id, { diskChanged: true }) }));
+    return;
+  }
+  const file = await api.getNode(id);
+  set((st) => ({
+    tabs: st.tabs.map((current) =>
+      current.id !== id
+        ? current
+        : current.dirty
+          ? { ...current, diskChanged: true }
+          : { ...current, content: file.content, rev: file.rev, diskChanged: false },
+    ),
+  }));
+}
+
+// A clean subpage takes the file as it is now, which is what lets an edit
+// made in the pop-out show up in the main window and back. A dirty one is
+// left alone: its next save meets the newer revision and the conflict banner
+// asks which version to keep, rather than this throwing typing away.
+async function reloadPageFromDisk(set: SliceSet, get: SliceGet, id: string) {
+  const page = get().pageDocs[id];
+  if (!page || page.nodeId !== id || page.loading || page.dirty) return;
+  const file = await api.getNodePage(id, page.id);
+  if (file.rev === page.rev) return;
+  set((state) => {
+    const current = state.pageDocs[id];
+    // Typed into, switched away from or reloaded while the read was out.
+    if (!current || current.id !== page.id || current.dirty || current.rev !== page.rev) {
+      return {};
+    }
+    return {
+      pageDocs: {
+        ...state.pageDocs,
+        [id]: {
+          ...current,
+          content: file.content,
+          rev: file.rev,
+          format: file.format ?? current.format,
+          conflict: null,
+        },
+      },
+    };
+  });
+}
 
 export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   tabs: [],
@@ -77,6 +137,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         snapshot.rev,
       );
       get().settleOperation(scope, { status: "saved", operation: "document.save" });
+      selfWrittenPageRevs.set(key, response.rev);
       set((state) => {
         const current = state.pageDocs[key];
         if (!current || current.id !== snapshot.id) return {};
@@ -354,38 +415,32 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   },
 
   // ws said the file changed on disk. Clean tab: reload silently.
-  // Dirty tab: flag it — never clobber unsaved edits.
+  // Dirty tab: flag it — never clobber unsaved edits. The event names the node,
+  // not the file, so the subpage open on it (if any) is checked the same way.
   notifyDiskChange: async (id) => {
     // The hub broadcasts before it answers the PUT, so our own echo usually
     // arrives mid-save. Judged then, it looks foreign (the revision it wrote
     // is not known yet), and the revision remembered afterwards is never
     // consumed — swallowing the next real change instead. Waiting for the save
     // in flight lets the echo be recognised for what it is.
-    const inFlight = queues.tabSave.get(id);
-    if (inFlight) await inFlight.catch(() => undefined);
+    const inFlight = [queues.tabSave.get(id), queues.pageSave.get(id)];
+    await Promise.all(inFlight.map((save) => save?.catch(() => undefined)));
     const tab = get().tabs.find((t) => t.id === id);
-    if (!tab || !tab.loaded) return;
-    // Our own save coming back around. Nothing changed that this tab does not
-    // already have, so reading it again would be a request per save and would
-    // flag the document as externally modified against its own author [C-03].
-    if (selfWrittenRevs.get(id) === tab.rev) {
+    const page = get().pageDocs[id];
+    // Our own save coming back around. Nothing changed that this window does
+    // not already have, so reading it again would be a request per save and
+    // would flag the document as externally modified against its own author
+    // [C-03]. One event is one write, so recognising it as ours for either
+    // file settles the event for both.
+    if (tab?.loaded && selfWrittenRevs.get(id) === tab.rev) {
       selfWrittenRevs.delete(id);
       return;
     }
-    if (tab.dirty) {
-      set((st) => ({ tabs: patchTab(st.tabs, id, { diskChanged: true }) }));
+    if (page && !page.loading && selfWrittenPageRevs.get(id) === page.rev) {
+      selfWrittenPageRevs.delete(id);
       return;
     }
-    const file = await api.getNode(id);
-    set((st) => ({
-      tabs: st.tabs.map((current) =>
-        current.id !== id
-          ? current
-          : current.dirty
-            ? { ...current, diskChanged: true }
-            : { ...current, content: file.content, rev: file.rev, diskChanged: false },
-      ),
-    }));
+    await Promise.all([reloadTabFromDisk(set, get, id), reloadPageFromDisk(set, get, id)]);
   },
 
   saveTab: (id, options = {}) => {
