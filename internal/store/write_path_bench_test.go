@@ -74,9 +74,10 @@ func BenchmarkListNodePages(b *testing.B) {
 // ns/op is one move; moves/s and writes/s (moves plus page saves) are the
 // throughput the store sustains under that read load.
 func BenchmarkMoveUnderReadLoad(b *testing.B) {
-	for _, pages := range []int{0, 150} {
-		b.Run(fmt.Sprintf("pages=%d", pages), func(b *testing.B) {
-			const nodes, readers, pageWriters, movers = 12, 8, 4, 4
+	for _, bench := range []struct{ pages, movers int }{{0, 4}, {150, 4}, {0, 32}, {150, 32}} {
+		pages, movers := bench.pages, bench.movers
+		b.Run(fmt.Sprintf("pages=%d/movers=%d", pages, movers), func(b *testing.B) {
+			const nodes, readers, pageWriters = 12, 8, 4
 			st := benchPagesStore(b, nodes, pages)
 			actor := identity.Actor{ID: "bench", Name: "bench"}
 			if pages == 0 {

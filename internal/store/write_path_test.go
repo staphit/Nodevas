@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"nodevas/internal/identity"
 )
@@ -142,5 +143,113 @@ func TestConcurrentWritersLoseNothing(t *testing.T) {
 		if want := fmt.Sprintf("title: %s v%d", nodeID, rounds); !strings.Contains(doc, want) {
 			t.Errorf("%s document frontmatter lost the last title edit:\n%s", nodeID, doc)
 		}
+	}
+}
+
+// queueMovesBehindLock starts one move per node while the test holds the
+// store's write lock, so every one of them is waiting when it is released.
+func queueMovesBehindLock(t *testing.T, st *Store, calls []func() (string, error)) []string {
+	t.Helper()
+	st.mu.Lock()
+	revs := make([]string, len(calls))
+	errs := make([]error, len(calls))
+	var wg sync.WaitGroup
+	for i, call := range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			revs[i], errs[i] = call()
+		}()
+	}
+	// Long enough for every caller to reach the lock; the assertions below
+	// hold however they happen to be ordered.
+	time.Sleep(300 * time.Millisecond)
+	st.mu.Unlock()
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			revs[i] = "error: " + err.Error()
+		}
+	}
+	return revs
+}
+
+func TestQueuedGraphOpsShareOneCommit(t *testing.T) {
+	const nodes = 8
+	st := benchPagesStore(t, nodes, 0)
+	actor := identity.Actor{ID: "writer", Name: "Writer"}
+	calls := make([]func() (string, error), nodes)
+	for i := range calls {
+		calls[i] = func() (string, error) {
+			x, y := float64(1000+i), float64(i)
+			_, rev, err := st.ApplyGraphOps(actor, []GraphOp{{Kind: "move", NodeID: fmt.Sprintf("n%05d", i), X: &x, Y: &y}})
+			return rev, err
+		}
+	}
+	revs := queueMovesBehindLock(t, st, calls)
+
+	g, rev, err := st.LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range nodes {
+		if got := g.UI.Positions[fmt.Sprintf("n%05d", i)].X; got != float64(1000+i) {
+			t.Errorf("n%05d x = %v, want %v", i, got, 1000+i)
+		}
+	}
+	// Moves that queued behind one lock hold are written together: one
+	// graph.yaml write, so one revision, and it is the one on disk.
+	distinct := map[string]bool{}
+	for _, r := range revs {
+		distinct[r] = true
+	}
+	if len(distinct) != 1 || !distinct[rev] {
+		t.Fatalf("queued moves returned %d revisions %v, want the one on disk (%s) for all", len(distinct), revs, rev)
+	}
+}
+
+func TestQueuedGraphOpsFailAlone(t *testing.T) {
+	st := benchPagesStore(t, 3, 0)
+	actor := identity.Actor{ID: "writer", Name: "Writer"}
+	moveTo := func(nodeID string, x float64) GraphOp {
+		y := 0.0
+		return GraphOp{Kind: "move", NodeID: nodeID, X: &x, Y: &y}
+	}
+	calls := []func() (string, error){
+		func() (string, error) {
+			_, rev, err := st.ApplyGraphOps(actor, []GraphOp{moveTo("n00000", 11)})
+			return rev, err
+		},
+		// A valid move and then an op that fails: neither may land.
+		func() (string, error) {
+			_, rev, err := st.ApplyGraphOps(actor, []GraphOp{moveTo("n00001", 22), moveTo("missing", 1)})
+			return rev, err
+		},
+		func() (string, error) {
+			_, rev, err := st.ApplyGraphOps(actor, []GraphOp{moveTo("n00002", 33)})
+			return rev, err
+		},
+	}
+	revs := queueMovesBehindLock(t, st, calls)
+	if !strings.HasPrefix(revs[1], "error: ") || !strings.Contains(revs[1], "missing") {
+		t.Fatalf("the call with a bad op returned %q, want its own error", revs[1])
+	}
+	for _, i := range []int{0, 2} {
+		if strings.HasPrefix(revs[i], "error: ") {
+			t.Fatalf("call %d failed with its neighbour: %s", i, revs[i])
+		}
+	}
+	g, _, err := st.LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.UI.Positions["n00000"].X; got != 11 {
+		t.Errorf("n00000 x = %v, want 11", got)
+	}
+	if got := g.UI.Positions["n00002"].X; got != 33 {
+		t.Errorf("n00002 x = %v, want 33", got)
+	}
+	if got := g.UI.Positions["n00001"].X; got == 22 {
+		t.Error("the valid half of a failed call was written")
 	}
 }
