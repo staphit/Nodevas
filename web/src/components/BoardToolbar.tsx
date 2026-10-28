@@ -349,8 +349,10 @@ export function BoardToolbar({
         </button>
         {/* An open graph needs no caption — the cards say what it is — but a
             folded one is a single row and the name is all it shows. */}
+        {/* On a phone the header cuts the name short; whole on hover. */}
         <span
           className={`board-title-main${isGraph && !collapsed ? " visually-hidden" : ""}`}
+          title={isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         >
           {isGraph ? t("board.graphTitle") : t("board.timelineTitle")}
         </span>
@@ -437,7 +439,10 @@ export function BoardToolbar({
           </span>
         )}
         {!isGraph && selectedNodeId && (
-          <span className="board-title-message selection">
+          <span
+            className="board-title-message selection"
+            title={t("board.selectedNode", { title: nodeTitle(selectedNodeId) })}
+          >
             {t("board.selectedNode", { title: nodeTitle(selectedNodeId) })}
           </span>
         )}
