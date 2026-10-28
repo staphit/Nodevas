@@ -1408,6 +1408,88 @@ describe("LaneView", () => {
         useApp.setState({ createNode: realCreateNode });
       }
     });
+
+    // A card the toolbar makes becomes the selection. The drawer, when one is
+    // open, follows it as it follows a click: graph, timeline, drawer and
+    // explorer all name one node. A card made under the drawer was revealed —
+    // and so selected — while the drawer stayed on the node it showed; one
+    // made in sight was not selected at all.
+    describe("the node New node makes is the one everything shows", () => {
+      function stubCreateNode() {
+        const realCreateNode = useApp.getState().createNode;
+        const createNode = vi.fn(
+          async (
+            node: { title?: string },
+            options?: { position?: { x: number; y: number } },
+          ) => {
+            const current = useApp.getState().graph!;
+            useApp.setState({
+              graph: {
+                ...current,
+                nodes: [...(current.nodes ?? []), { id: "n", title: node.title ?? "n" }],
+                ui: {
+                  ...current.ui,
+                  positions: { ...current.ui?.positions, n: options!.position! },
+                },
+              },
+            });
+            return "n";
+          },
+        );
+        useApp.setState({ createNode });
+        return () => useApp.setState({ createNode: realCreateNode });
+      }
+
+      async function createFromToolbar(container: HTMLElement) {
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: /新增節點/ }));
+        await user.type(screen.getByLabelText(/節點標題/), "新卡片{Enter}");
+        await act(async () => undefined);
+        await act(async () => undefined);
+        expect(container.querySelector('.col-card[data-node-id="n"]')).not.toBeNull();
+      }
+
+      function selectedCards(container: HTMLElement) {
+        return [...container.querySelectorAll<HTMLElement>(".col-card.selected")].map(
+          (card) => card.dataset.nodeId,
+        );
+      }
+
+      for (const [where, left] of [
+        ["under the drawer", 560],
+        ["clear of the drawer", 900],
+      ] as const) {
+        it(`moves the open drawer to a card made ${where}`, async () => {
+          drawerLeft = left;
+          const restore = stubCreateNode();
+          try {
+            const { container, card } = mount();
+            openCard(card());
+            await act(async () => undefined);
+            expect(useApp.getState().activeTab).toBe("a");
+
+            await createFromToolbar(container);
+            expect(useApp.getState().activeTab).toBe("n");
+            expect(selectedCards(container)).toEqual(["n"]);
+          } finally {
+            restore();
+          }
+        });
+      }
+
+      it("selects the new card without opening a drawer that was closed", async () => {
+        drawerLeft = 900;
+        const restore = stubCreateNode();
+        try {
+          const { container } = mount();
+          await createFromToolbar(container);
+          expect(useApp.getState().activeTab).toBeNull();
+          expect(selectedCards(container)).toEqual(["n"]);
+        } finally {
+          restore();
+        }
+      });
+    });
   });
 
   describe("leaving the board and coming back", () => {
