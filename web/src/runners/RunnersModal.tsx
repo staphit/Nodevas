@@ -5,7 +5,7 @@ import { IconShield, IconTrash } from "../icons";
 import { MODE_INTERACTIVE } from "../runs/autoAccept";
 import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
 import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
-import { languageLocale, useI18n } from "../i18n";
+import { formatList, languageLocale, useI18n } from "../i18n";
 import { CopyButton, LinkDeviceDialog } from "./LinkDevice";
 import { useTeamServer } from "../components/SignIn";
 import { useRunners } from "./runnerStore";
@@ -215,7 +215,7 @@ export function runnerSummary(runner: Runner, t: Translate): string {
   const repos = info.repos?.length ?? 0;
   return [
     seen,
-    agents.join(", "),
+    formatList(agents),
     repos === 1 ? t("settingsPage.runnerRepoOne") : t("settingsPage.runnerRepos", { count: repos }),
   ]
     .filter(Boolean)

@@ -6798,6 +6798,14 @@ export function localizePlanOrderError(
   return key ? translate(key, language) : error;
 }
 
+/** A list read out to the reader: 「a、b、c」 in Traditional Chinese, "a, b, c" in English. */
+export function formatList(
+  items: readonly string[],
+  language: Language = useApp.getState().preferences.language,
+): string {
+  return items.join(language === "zh-TW" ? "、" : ", ");
+}
+
 export function useI18n() {
   const language = useApp((state) => state.preferences.language);
   const updateUIPreference = useApp((state) => state.updateUIPreference);

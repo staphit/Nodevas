@@ -333,7 +333,7 @@ describe("LaneView", () => {
     // Tags, priority and the status word are in the tooltip, not on the face.
     expect(card).not.toHaveTextContent("ui");
     expect(card.querySelector(".col-card-st, .col-card-tags, .entry-flag")).toBeNull();
-    expect(card.title).toContain("標籤：ui, spec");
+    expect(card.title).toContain("標籤：ui、spec");
     expect(card.title).toContain("起始節點");
   });
 

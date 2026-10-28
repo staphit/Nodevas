@@ -22,7 +22,7 @@ import {
   toolsetTokens,
   toolTokenLabel,
 } from "../domain/graph/roles";
-import { useI18n } from "../i18n";
+import { formatList, useI18n } from "../i18n";
 import { nodeTypeLabel } from "../nodeTypeTheme";
 import { useRunners } from "../runners/runnerStore";
 import { agentCatalog, agentModelProblem, agentModelText, catalogDefaultModel, FallbackChainEditor, trimAgentModel } from "../runs/AgentModelFields";
@@ -353,7 +353,7 @@ function WhatItMayDo({ role, onError }: { role: AgentRole; onError: (message: st
           </label>
         ))}
       </fieldset>
-      <p className="run-hint">{t("roles.what.caps", { caps: capsForTools(role.tools).join(", ") || "—" })}</p>
+      <p className="run-hint">{t("roles.what.caps", { caps: formatList(capsForTools(role.tools)) || "—" })}</p>
       <fieldset className="role-tools">
         <legend>{t("roles.what.types")}</legend>
         {types.map((type) => (

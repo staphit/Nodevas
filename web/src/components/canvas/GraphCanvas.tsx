@@ -10,7 +10,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { reportError } from "../../store";
-import { localizedStatusLabel, useI18n } from "../../i18n";
+import { formatList, localizedStatusLabel, useI18n } from "../../i18n";
 import type {
   CanvasAnnotation,
   CanvasGroup,
@@ -566,8 +566,8 @@ export function GraphCanvas({
   const referenceTitles = (refs: string[]) => {
     const titles = refs.map((ref) => titleOf.get(ref) ?? ref);
     return titles.length > 5
-      ? `${titles.slice(0, 5).join(", ")} +${titles.length - 5}`
-      : titles.join(", ");
+      ? `${formatList(titles.slice(0, 5))} +${titles.length - 5}`
+      : formatList(titles);
   };
   // The cards whose references are drawn lit: what is selected and what is
   // open. The card under the pointer joins them inside ReferenceLines.
@@ -596,7 +596,7 @@ export function GraphCanvas({
     ...(node.priority
       ? [t("board.card.priority", { priority: t(`graphTools.${node.priority}`) })]
       : []),
-    ...(node.tags?.length ? [t("board.card.tags", { tags: node.tags.join(", ") })] : []),
+    ...(node.tags?.length ? [t("board.card.tags", { tags: formatList(node.tags) })] : []),
     ...(node.refs?.length ? [t("board.card.refs", { titles: referenceTitles(node.refs) })] : []),
   ];
 

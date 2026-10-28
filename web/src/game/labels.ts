@@ -4,6 +4,7 @@
 // translated.
 
 import { excerpt } from "../agents/agentStore";
+import { formatList } from "../i18n";
 import type { Actor, Area, ClickTarget, CompactOffice, MeetingItem, OfficeStyle, ProjectOffice, Rack } from "./world";
 
 export type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -63,7 +64,7 @@ export function compactSummary(t: Translate, c: Pick<CompactOffice, "counts">): 
   if (c.counts.offered) parts.push(t("game.compact.offered", { count: c.counts.offered }));
   if (c.counts.sleeping) parts.push(t("game.compact.sleeping", { count: c.counts.sleeping }));
   if (c.counts.othersActive) parts.push(t("game.compact.others", { count: c.counts.othersActive }));
-  return parts.length ? parts.join(", ") : t("game.compact.idle");
+  return parts.length ? formatList(parts) : t("game.compact.idle");
 }
 
 /** "app: 2 working, 1 waiting on you, Engineering. Go to app". */

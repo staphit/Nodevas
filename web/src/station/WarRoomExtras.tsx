@@ -10,7 +10,7 @@ import { AutopilotStatusChip } from "../autopilot/AutopilotPanel";
 import { analyzeGraph } from "../analysis";
 import { useViewer } from "../components/SignIn";
 import { IconMore } from "../icons";
-import { useI18n } from "../i18n";
+import { formatList, useI18n } from "../i18n";
 import { RunStatusBadge } from "../runs/NodeRuns";
 import { useRuns } from "../runs/runStore";
 import { useApp } from "../store";
@@ -138,7 +138,7 @@ function WaitingTasks({ titleOf }: { titleOf: TitleOf }) {
               dot="off"
               title={task.title || titleOf(task.nodeId)}
               nodeId={task.nodeId}
-              meta={t("station.progress.lockedBy", { names: task.blockers.map(titleOf).join(", ") })}
+              meta={t("station.progress.lockedBy", { names: formatList(task.blockers.map(titleOf)) })}
               onOpen={() => openNode(task.nodeId)}
             />
           ))}

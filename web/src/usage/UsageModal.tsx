@@ -8,7 +8,7 @@ import {
   type UsageReport,
   type UsageSession,
 } from "../api";
-import { useI18n } from "../i18n";
+import { formatList, useI18n } from "../i18n";
 import { IconClose, IconRefresh, IconUsage, IconWarning } from "../icons";
 import { roleNameById } from "../roles/roleLabels";
 import { relativeTime } from "../runners/RunnersModal";
@@ -74,7 +74,7 @@ function UnpricedWarning({ report, onAddPrices }: { report: UsageReport; onAddPr
       <span>
         {t("usage.unpriced", {
           tokens: formatTokens(report.totals.unpricedTokens),
-          models: models.join(", ") || t("usage.unknownModel"),
+          models: formatList(models) || t("usage.unknownModel"),
         })}
       </span>
       <button type="button" className="usage-link-btn" onClick={() => onAddPrices(models)}>
@@ -321,7 +321,7 @@ function SessionTable({ sessions, onOpenRun }: { sessions: UsageSession[]; onOpe
                 <CostCell group={{ ...s, key: s.id }} />
                 <td className="num">{s.lastAt ? relativeTime(s.lastAt) : "—"}</td>
                 <td>{s.agent}</td>
-                <td className="usage-model usage-models">{models.join(", ") || "—"}</td>
+                <td className="usage-model usage-models">{formatList(models) || "—"}</td>
               </tr>
             );
           })}

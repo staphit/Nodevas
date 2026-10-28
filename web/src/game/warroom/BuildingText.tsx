@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 
-import { useI18n } from "../../i18n";
+import { formatList, useI18n } from "../../i18n";
 import { actorLabel, agentWho, areaName, compactLabel, itemLabel, placeOf, rackLabel } from "../labels";
 import type { Actor, Area, Building } from "../world";
 import { drawnInLounge, visitorLabel } from "./Lounge";
@@ -63,7 +63,7 @@ export function BuildingText({ building }: { building: Building }) {
           return actor && drawnInLounge(actor) ? say(actor) : null;
         })}
         {offline.length > 0 && (
-          <li>{t("game.lounge.offline", { names: offline.map((actor) => agentWho(actor.agent, actor.model)).join(", ") })}</li>
+          <li>{t("game.lounge.offline", { names: formatList(offline.map((actor) => agentWho(actor.agent, actor.model))) })}</li>
         )}
         {building.lounge.length === 0 && <li>{t("game.lounge.empty")}</li>}
         {building.loungeMore > 0 && <li>{t("game.lounge.more", { count: building.loungeMore })}</li>}
