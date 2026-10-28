@@ -400,6 +400,14 @@ describe("loadAll", () => {
     expect(useApp.getState().graph!.nodes![0].title).toBe("A");
     expect(useApp.getState().graphRev).toBe("rev-1");
   });
+
+  // The explorer's project badge reads the graph on screen, which it may only
+  // do while that graph is the active project's and not the one before it.
+  it("records which project the graph on screen belongs to", async () => {
+    useApp.setState({ activeProject: "board", graphProject: "" });
+    await useApp.getState().loadAll();
+    expect(useApp.getState().graphProject).toBe("board");
+  });
 });
 
 describe("transferNodes", () => {
