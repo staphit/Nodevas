@@ -42,7 +42,7 @@ const (
 
 var (
 	ErrFolderName     = errors.New("invalid folder name")
-	ErrFolderExists   = errors.New("folder already exists")
+	ErrFolderExists   = locale.Errorf("folder already exists", "資料夾已存在")
 	ErrFolderMissing  = errors.New("folder not found")
 	ErrFolderIntoSelf = errors.New("cannot move a folder into itself")
 )

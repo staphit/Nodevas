@@ -483,7 +483,7 @@ func (pm *ProjectManager) Create(name, template, language string) error {
 func (pm *ProjectManager) createLocked(name, dir, template, language string, workflow bool) error {
 	graphPath := filepath.Join(dir, "graph.yaml")
 	if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
-		return fmt.Errorf("project %q already exists", name)
+		return locale.Errorf("project %q already exists", "專案 %q 已存在", name)
 	} else if !os.IsNotExist(statErr) {
 		return statErr
 	}
