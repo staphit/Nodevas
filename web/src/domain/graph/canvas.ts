@@ -15,6 +15,7 @@ import type {
   Graph,
   SavedView,
 } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 import { DEFAULT_LINE, edgeRelation, edgeStylePatch } from "./edgeStyle";
 import { edgeWireKey, gateWireKey } from "./keys";
@@ -45,7 +46,7 @@ export function moveNodes(
   layout.positions = layout.positions ?? {};
   for (const [nodeId, point] of Object.entries(positions)) {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
-      throw invalid("節點座標無效。");
+      throw invalid(translate("domain.error.badPosition"));
     }
     layout.positions[nodeId] = { x: point.x, y: point.y };
   }
@@ -66,7 +67,7 @@ export function shiftBoard(
 ): void {
   const layout = ui(graph);
   if (!Number.isFinite(shift.columns) || !Number.isFinite(shift.rows)) {
-    throw invalid("位移量無效。");
+    throw invalid(translate("domain.error.badShift"));
   }
   for (const position of Object.values(layout.positions ?? {})) {
     position.x = round2(position.x + shift.columns);
@@ -152,11 +153,22 @@ export function setEdgeStyle(
     if (patch.relation !== undefined) {
       const owner = logicGateOwningEdge(graph, target.from, target.to);
       if (owner) {
-        throw invalid(`關係線「${target.from} → ${target.to}」由邏輯閘「${owner.id}」控制。`);
+        throw invalid(
+          translate("dependency.error.edgeOwnedByGate", undefined, {
+            source: target.from,
+            target: target.to,
+            gate: owner.id,
+          }),
+        );
       }
       const booleanOwner = booleanLogicGateForOutput(graph, target.to);
       if (booleanOwner && (edgeRelation(edge) === "" || patch.relation === "")) {
-        throw invalid(`「${target.to}」由邏輯閘「${booleanOwner.id}」控制，請改為編輯該閘門。`);
+        throw invalid(
+          translate("dependency.error.targetOwnedByGate", undefined, {
+            target: target.to,
+            gate: booleanOwner.id,
+          }),
+        );
       }
     }
     const relation = patch.relation ?? edgeRelation(edge);
@@ -214,12 +226,14 @@ export function pruneEdgeDecorations(graph: Graph): void {
 export function removeEdge(graph: Graph, from: string, to: string): void {
   const owner = logicGateOwningEdge(graph, from, to);
   if (owner) {
-    throw invalid(`關係線「${from} → ${to}」由邏輯閘「${owner.id}」控制。`);
+    throw invalid(
+      translate("dependency.error.edgeOwnedByGate", undefined, { source: from, target: to, gate: owner.id }),
+    );
   }
   const selected = graph.edges?.find((edge) => edge.from === from && edge.to === to);
   const booleanOwner = booleanLogicGateForOutput(graph, to);
   if (selected && edgeRelation(selected) === "" && booleanOwner) {
-    throw invalid(`「${to}」由邏輯閘「${booleanOwner.id}」控制，請改為編輯該閘門。`);
+    throw invalid(translate("dependency.error.targetOwnedByGate", undefined, { target: to, gate: booleanOwner.id }));
   }
   graph.edges = (graph.edges ?? []).filter(
     (edge) => edge.from !== from || edge.to !== to,
@@ -269,7 +283,7 @@ export function removeAnnotation(graph: Graph, id: string): void {
 export function saveView(graph: Graph, view: SavedView): void {
   const layout = ui(graph);
   const views = layout.savedViews ?? [];
-  if (!view.name.trim()) throw invalid("檢視名稱不可空白。");
+  if (!view.name.trim()) throw invalid(translate("domain.error.viewNameEmpty"));
   const index = views.findIndex((item) => item.id === view.id);
   layout.savedViews =
     index === -1
@@ -279,6 +293,6 @@ export function saveView(graph: Graph, view: SavedView): void {
 
 export function removeView(graph: Graph, id: string): void {
   if (!graph.ui?.savedViews) return;
-  if (!graph.ui.savedViews.some((view) => view.id === id)) throw notFound("檢視");
+  if (!graph.ui.savedViews.some((view) => view.id === id)) throw notFound(translate("domain.subject.view"));
   graph.ui.savedViews = graph.ui.savedViews.filter((view) => view.id !== id);
 }

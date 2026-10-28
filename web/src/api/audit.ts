@@ -1,4 +1,5 @@
 import { AuthError, notifyUnauthorized, req, RequestError, UnauthorizedError } from "./http";
+import { translate } from "../i18n";
 
 /**
  * The server's audit trail and its health, for administrators
@@ -80,7 +81,7 @@ async function getAuditHealth(): Promise<AuditHealth> {
   try {
     res = await fetch("/api/audit/health", { signal: controller.signal });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw new Error("請求逾時");
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error(translate("api.error.timeout"));
     throw error;
   } finally {
     window.clearTimeout(timeout);

@@ -45,7 +45,7 @@ const WRITE_ACCESS_VALUES = new Set(["worker", "orchestrator", "human-only"]);
 
 export function findNode(graph: Graph, nodeId: string): GraphNode {
   const node = graph.nodes?.find((candidate) => candidate.id === nodeId);
-  if (!node) throw notFound(`節點「${nodeId}」`);
+  if (!node) throw notFound(translate("domain.subject.node", undefined, { id: nodeId }));
   return node;
 }
 
@@ -67,7 +67,7 @@ export function updateNodeMetadata(
     // A legacy free-form kind may be written back unchanged; a new value has
     // to name a type this project knows.
     if (kind !== (node.kind ?? "") && !isKnownKind(graph, kind)) {
-      throw invalid("未知的節點類型。");
+      throw invalid(translate("domain.error.unknownNodeType"));
     }
     node.kind = (kind as NodeKind) || undefined;
   }
@@ -77,14 +77,14 @@ export function updateNodeMetadata(
   if ("deadline" in patch) {
     const deadline = blankToUndefined(patch.deadline);
     if (deadline && !DEADLINE_PATTERN.test(deadline)) {
-      throw invalid("死線格式須為 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm。");
+      throw invalid(translate("domain.error.deadlineFormat"));
     }
     node.deadline = deadline;
   }
   if ("writeAccess" in patch) {
     const writeAccess = blankToUndefined(patch.writeAccess);
     if (writeAccess && !WRITE_ACCESS_VALUES.has(writeAccess)) {
-      throw invalid("寫入權限須為 worker、orchestrator 或 human-only。");
+      throw invalid(translate("domain.error.writeAccess"));
     }
     node.writeAccess = writeAccess as GraphNode["writeAccess"];
   }
@@ -145,7 +145,7 @@ function nextUserID(users: GraphUser[]): string {
     const candidate = `user-${String(sequence).padStart(4, "0")}`;
     if (!used.has(candidate)) return candidate;
   }
-  throw invalid("使用者數量已達上限");
+  throw invalid(translate("domain.error.usersFull"));
 }
 
 /**
@@ -183,7 +183,7 @@ export function assignNodes(
   userId: string | undefined,
 ): void {
   if (userId && !(graph.users ?? []).some((user) => user.id === userId)) {
-    throw notFound(`使用者「${userId}」`);
+    throw notFound(translate("domain.subject.user", undefined, { id: userId }));
   }
   const targets = new Set(nodeIds);
   for (const node of graph.nodes ?? []) {
@@ -197,7 +197,7 @@ export function setUserEmail(
   email: string | undefined,
 ): void {
   const user = graph.users?.find((candidate) => candidate.id === userId);
-  if (!user) throw notFound(`使用者「${userId}」`);
+  if (!user) throw notFound(translate("domain.subject.user", undefined, { id: userId }));
   user.email = blankToUndefined(email);
 }
 
@@ -266,8 +266,8 @@ export function setNodeLinks(
   for (const link of links.slice(0, 64)) {
     const target = link.node.trim();
     const label = link.label.trim();
-    if (!target) throw invalid("連結必須指向一個節點。");
-    if (!label) throw invalid("連結名稱不可空白。");
+    if (!target) throw invalid(translate("domain.error.linkTarget"));
+    if (!label) throw invalid(translate("domain.error.linkLabel"));
     const key = `${link.project ?? ""}/${target}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -295,13 +295,15 @@ export function setNodeRequires(
   const node = findNode(graph, nodeId);
   const owner = booleanLogicGateForOutput(graph, nodeId);
   if (owner) {
-    throw invalid(`「${nodeId}」由邏輯閘「${owner.id}」控制，請改為編輯該閘門。`);
+    throw invalid(translate("dependency.error.targetOwnedByGate", undefined, { target: nodeId, gate: owner.id }));
   }
   if (refs !== null) {
     for (const ref of refs) {
       const gate = logicGateOwningEdge(graph, ref, nodeId);
       if (gate) {
-        throw invalid(`關係線「${ref} → ${nodeId}」由邏輯閘「${gate.id}」控制。`);
+        throw invalid(
+          translate("dependency.error.edgeOwnedByGate", undefined, { source: ref, target: nodeId, gate: gate.id }),
+        );
       }
     }
   }
@@ -337,11 +339,11 @@ export const MAX_NODE_REFS = 32;
 export function addNodeRef(graph: Graph, nodeId: string, ref: string): void {
   const node = findNode(graph, nodeId);
   findNode(graph, ref);
-  if (ref === nodeId) throw invalid("節點不能參考自己。");
+  if (ref === nodeId) throw invalid(translate("domain.error.refSelf"));
   const refs = node.refs ?? [];
   if (refs.includes(ref)) return;
   if (refs.length >= MAX_NODE_REFS) {
-    throw invalid(`每個節點最多 ${MAX_NODE_REFS} 個參考。`);
+    throw invalid(translate("domain.error.refsTooMany", undefined, { max: MAX_NODE_REFS }));
   }
   node.refs = [...refs, ref];
 }

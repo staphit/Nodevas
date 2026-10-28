@@ -10,17 +10,8 @@
 
 import type { EdgeLine, EdgeRelation, GraphEdge } from "../../types";
 
-export const RELATION_LABELS: Record<EdgeRelation, string> = {
-  "": "必要",
-  optional: "選用",
-  deprecated: "棄用",
-};
-
-export const LINE_LABELS: Record<Exclude<EdgeLine, "">, string> = {
-  solid: "實線",
-  dashed: "虛線",
-  dotted: "點線",
-};
+/** The lines an edge can be drawn with; names come from localizedLineLabel. */
+export const EDGE_LINES: readonly Exclude<EdgeLine, "">[] = ["solid", "dashed", "dotted"];
 
 /** The line a relation is drawn with when the edge does not override it. */
 export const DEFAULT_LINE: Record<EdgeRelation, Exclude<EdgeLine, "">> = {

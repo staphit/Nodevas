@@ -7,6 +7,7 @@
  */
 
 import type { Graph, PlanMilestone } from "../../types";
+import { translate } from "../../i18n";
 import { invalid } from "../errors";
 import type { MilestoneType } from "../glossary";
 import { isBuiltinMilestoneType } from "../glossary";
@@ -35,12 +36,12 @@ export function nodeMilestones(graph: Graph, nodeId: string): PlanMilestone[] {
 }
 
 function assertDate(date: string): void {
-  if (!DATE_PATTERN.test(date)) throw invalid("日期格式須為 YYYY-MM-DD。");
+  if (!DATE_PATTERN.test(date)) throw invalid(translate("domain.error.dateFormat"));
 }
 
 function assertTime(time: string | undefined): void {
   if (time !== undefined && time !== "" && !TIME_PATTERN.test(time)) {
-    throw invalid("時間格式須為 HH:mm。");
+    throw invalid(translate("domain.error.timeFormat"));
   }
 }
 
@@ -79,7 +80,7 @@ export function movePlanMilestone(
   assertTime(time);
   const current = graph.ui?.plans?.[nodeId];
   const existing = current?.find((plan) => plan.status === type);
-  if (!current || !existing) throw invalid("找不到要移動的預期里程碑。");
+  if (!current || !existing) throw invalid(translate("domain.error.milestoneMissing"));
   graph.ui!.plans![nodeId] = sortMilestones(
     current.map((plan) => {
       if (plan.status !== type) return plan;
@@ -127,8 +128,8 @@ export function planOrderIssue(
   const progress =
     type === "in_progress" ? date : plans.find((p) => p.status === "in_progress")?.date;
   const done = type === "done" ? date : plans.find((p) => p.status === "done")?.date;
-  if (start && progress && start > progress) return "預計進行日期不可早於開始日期。";
-  if (progress && done && progress > done) return "死線不可早於預計進行日期。";
-  if (start && done && start > done) return "死線不可早於開始日期。";
+  if (start && progress && start > progress) return translate("plan.validation.progressBeforeStart");
+  if (progress && done && progress > done) return translate("plan.validation.deadlineBeforeProgress");
+  if (start && done && start > done) return translate("plan.validation.deadlineBeforeStart");
   return null;
 }

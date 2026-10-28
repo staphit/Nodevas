@@ -15,6 +15,7 @@
  * follows from the current state.
  */
 
+import { translate } from "../i18n";
 import type { Graph, Status } from "../types";
 
 export const MAX_UNDO_ENTRIES = 50;
@@ -38,12 +39,13 @@ export type UndoEntry =
       label?: string;
     };
 
+/** Catalog keys, read when the label is shown so it follows the language. */
 const DEFAULT_LABELS: Record<UndoEntry["kind"], string> = {
-  graph: "圖譜變更",
-  "create-node": "新增節點",
-  "delete-node": "刪除節點",
-  "lifecycle-status": "實際狀態變更",
-  "lifecycle-move": "實際時間調整",
+  graph: "undo.label.graph",
+  "create-node": "undo.label.createNode",
+  "delete-node": "undo.label.deleteNode",
+  "lifecycle-status": "undo.label.lifecycleStatus",
+  "lifecycle-move": "undo.label.lifecycleMove",
 };
 
 let stack: UndoEntry[] = [];
@@ -126,5 +128,5 @@ export function redoDepth(): number {
 
 export function undoEntryLabel(entry: UndoEntry | undefined): string | null {
   if (!entry) return null;
-  return entry.label ?? DEFAULT_LABELS[entry.kind];
+  return entry.label ?? translate(DEFAULT_LABELS[entry.kind]);
 }

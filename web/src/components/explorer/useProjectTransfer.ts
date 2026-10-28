@@ -271,7 +271,7 @@ export function useProjectTransfer({
           }),
         );
         reportError(
-          new Error(t("explorer.markdownImportFailed", { details: failures.join("；") })),
+          new Error(t("explorer.markdownImportFailed", { details: failures.join(t("explorer.markdownImportFailureSeparator")) })),
         );
       } else {
         setProjectTransferNotice(

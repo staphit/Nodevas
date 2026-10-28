@@ -7,7 +7,7 @@
  * stays exactly as the hub wrote it.
  */
 
-import { translate } from "./i18n";
+import { formatList, translate } from "./i18n";
 import type { Language } from "./preferences";
 import type { Issue } from "./types";
 
@@ -105,9 +105,9 @@ function unquote(raw: string): string {
 function localizeKinds(raw: string, language: Language): string {
   if (language === "en") return raw;
   const parts = [...raw.matchAll(new RegExp(`${Q} ×(\\d+)|…`, "g"))].map((match) =>
-    match[0] === "…" ? "…" : `「${unquote(match[1])}」×${match[2]}`,
+    match[0] === "…" ? "…" : translate("issue.kindCount", language, { kind: unquote(match[1]), count: match[2] }),
   );
-  return parts.length > 0 ? parts.join("、") : raw;
+  return parts.length > 0 ? formatList(parts, language) : raw;
 }
 
 /** A cycle `a -> b -> a`, drawn with arrows. */

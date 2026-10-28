@@ -19,6 +19,7 @@
  */
 
 import { api, ConflictError } from "../api";
+import { translate } from "../i18n";
 import { describeFailure, operationScope } from "./operations";
 import { enqueuePageSave, patchTab, queues } from "./internals";
 import type { AppSlice, DocumentSlice } from "./types";
@@ -178,11 +179,11 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         get().settleOperation(scope, {
           status: "conflict",
           operation: "document.save",
-          message: "子頁已被外部修改；請選擇保留哪一版。",
+          message: translate("document.error.pageConflict"),
         });
         return { ok: false };
       }
-      const message = error instanceof Error ? error.message : "子頁儲存失敗";
+      const message = error instanceof Error ? error.message : translate("document.error.pageSaveFailed");
       get().settleOperation(scope, {
         status: "error",
         operation: "document.save",
@@ -196,13 +197,13 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
     const state = get();
     if (project && project !== state.activeProject) {
       if (!state.projects.some((entry) => entry.name === project)) {
-        throw new Error(`找不到專案「${project}」`);
+        throw new Error(translate("document.error.projectMissing", undefined, { project }));
       }
       await state.switchProject(project);
     }
     const graph = get().graph;
     if (graph && !(graph.nodes ?? []).some((node) => node.id === nodeId)) {
-      throw new Error(`找不到節點「${nodeId}」`);
+      throw new Error(translate("document.error.nodeMissing", undefined, { node: nodeId }));
     }
     await get().openTab(nodeId);
     // Opening the document is only half the jump: the board still shows
@@ -341,10 +342,10 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
 
     if (retained.length > 0) {
       const subject =
-        retained.length === 1 ? `分頁「${retained[0]}」` : `${retained.length} 個分頁`;
-      throw new Error(
-        `無法安全關閉${subject}：最新內容尚未儲存，分頁與編輯內容已保留。請檢查連線或磁碟空間後重試。`,
-      );
+        retained.length === 1
+          ? translate("document.error.closeOneTab", undefined, { tab: retained[0] })
+          : translate("document.error.closeTabs", undefined, { count: retained.length });
+      throw new Error(translate("document.error.closeUnsaved", undefined, { subject }));
     }
   },
 
@@ -528,15 +529,15 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
             status: "conflict",
             operation: "document.save",
             message: draftSaved
-              ? "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中，也已存為草稿。"
-              : "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中。",
+              ? translate("document.error.fileConflictDrafted")
+              : translate("document.error.fileConflict"),
           });
           return;
         }
         get().settleOperation(scope, {
           status: "error",
           operation: "document.save",
-          message: describeFailure(e, "文件儲存失敗"),
+          message: describeFailure(e, translate("document.error.saveFailed")),
         });
         // A failed automatic save also goes to a draft, so the work survives
         // the tab being closed before the retry succeeds.

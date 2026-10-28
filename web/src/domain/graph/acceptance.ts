@@ -5,6 +5,7 @@
 // Everything here is pure. Reducers throw `CommandError`.
 
 import type { Acceptance, AcceptanceItem, AgentRoleDef, Graph, Workflow } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 import { nodeTypeOf } from "./nodeTypes";
 import { validateAgentRoleDefs } from "./roles";
@@ -37,15 +38,15 @@ export function nextAcceptanceItemID(items: readonly AcceptanceItem[]): string {
 
 /** Throws with the first problem in an item list. */
 export function validateAcceptanceItems(items: readonly AcceptanceItem[]): void {
-  if (items.length > MAX_ACCEPTANCE_ITEMS) throw invalid(`驗收條件最多 ${MAX_ACCEPTANCE_ITEMS} 條。`);
+  if (items.length > MAX_ACCEPTANCE_ITEMS) throw invalid(translate("domain.error.acceptanceTooMany", undefined, { max: MAX_ACCEPTANCE_ITEMS }));
   const seen = new Set<string>();
   for (const item of items) {
-    if (!ITEM_ID.test(item.id)) throw invalid(`驗收條件編號 ${item.id} 不正確。`);
-    if (seen.has(item.id)) throw invalid(`驗收條件編號 ${item.id} 重複。`);
+    if (!ITEM_ID.test(item.id)) throw invalid(translate("domain.error.acceptanceBadId", undefined, { id: item.id }));
+    if (seen.has(item.id)) throw invalid(translate("domain.error.acceptanceDuplicateId", undefined, { id: item.id }));
     seen.add(item.id);
     const length = [...item.text].length;
     if (length === 0 || length > MAX_ACCEPTANCE_TEXT || /[\r\n]/.test(item.text)) {
-      throw invalid(`每條驗收條件需為 1–${MAX_ACCEPTANCE_TEXT} 字的一行。`);
+      throw invalid(translate("domain.error.acceptanceText", undefined, { max: MAX_ACCEPTANCE_TEXT }));
     }
   }
 }
@@ -60,14 +61,14 @@ function asInvalid(check: () => void): void {
 
 function findNode(graph: Graph, nodeId: string) {
   const node = (graph.nodes ?? []).find((candidate) => candidate.id === nodeId);
-  if (!node) throw notFound(`節點 ${nodeId} `);
+  if (!node) throw notFound(translate("domain.subject.node", undefined, { id: nodeId }));
   return node;
 }
 
 /** Replaces a node's criteria; null or no items clears them. Lock and author stay. */
 export function setAcceptance(graph: Graph, nodeId: string, acceptance: Acceptance | null): void {
   const node = findNode(graph, nodeId);
-  if (!hasAcceptance(graph, node.kind)) throw invalid("這種節點類型沒有驗收條件。");
+  if (!hasAcceptance(graph, node.kind)) throw invalid(translate("domain.error.acceptanceUnsupported"));
   const items = acceptance?.items ?? [];
   validateAcceptanceItems(items);
   if (items.length === 0 && !node.acceptance?.locked) {
@@ -80,7 +81,7 @@ export function setAcceptance(graph: Graph, nodeId: string, acceptance: Acceptan
 /** A Goal's (autopilot type's) stage override; null drops it. */
 export function setNodeWorkflow(graph: Graph, nodeId: string, workflow: Workflow | null): void {
   const node = findNode(graph, nodeId);
-  if (!hasWorkflowOverride(graph, node.kind)) throw invalid("只有自動推進類型的節點可以覆寫階段。");
+  if (!hasWorkflowOverride(graph, node.kind)) throw invalid(translate("domain.error.workflowOverrideUnsupported"));
   if (!workflow) {
     delete node.workflow;
     return;

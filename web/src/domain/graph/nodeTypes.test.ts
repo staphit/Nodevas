@@ -274,7 +274,7 @@ describe("node.updateMetadata kind", () => {
         nodeId: "c",
         patch: { kind: "custom-type-9" },
       }),
-    ).toThrow("未知的節點類型");
+    ).toThrow("Unknown node type");
   });
 
   it("lets a legacy kind be written back unchanged", () => {

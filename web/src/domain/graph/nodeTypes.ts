@@ -26,6 +26,7 @@ import type {
   NodeType,
   NodeTypeDef,
 } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 
 export const NODE_SHAPES: readonly NodeShape[] = [
@@ -203,42 +204,42 @@ function sameLabel(a: string, b: string): boolean {
 
 function assertShape(shape: string | undefined) {
   if (shape !== undefined && shape !== "" && !NODE_SHAPES.includes(shape as NodeShape)) {
-    throw invalid("不支援的圖形。");
+    throw invalid(translate("domain.error.shapeUnsupported"));
   }
 }
 
 function assertColor(color: string | undefined) {
-  if (color && !safeCssColor(color)) throw invalid("顏色格式不正確。");
+  if (color && !safeCssColor(color)) throw invalid(translate("domain.error.colorFormat"));
 }
 
 /** §1.5 rule 4, for one custom entry. */
 function assertCustomBehaviour(def: NodeTypeDef) {
   if (!def.agentMode || !AGENT_MODES.includes(def.agentMode)) {
-    throw invalid("請選擇 agent 模式。");
+    throw invalid(translate("domain.error.pickAgentMode"));
   }
   if (!def.completion || !NODE_COMPLETIONS.includes(def.completion)) {
-    throw invalid("請選擇完成方式。");
+    throw invalid(translate("domain.error.pickCompletion"));
   }
   if (typeof def.countsInProgress !== "boolean") {
-    throw invalid("請指定是否計入進度。");
+    throw invalid(translate("domain.error.pickCountsInProgress"));
   }
   if ((def.completion === "auto" || def.completion === "none") && def.agentMode !== "none") {
-    throw invalid("自動完成或沒有狀態的類型不能派給 agent。");
+    throw invalid(translate("domain.error.autoNoAgent"));
   }
   if (def.completion === "none" && def.countsInProgress) {
-    throw invalid("沒有狀態的類型不能計入進度。");
+    throw invalid(translate("domain.error.noStatusNoProgress"));
   }
   if (def.agentMode === "autopilot" && def.completion !== "anyone" && def.completion !== "people") {
-    throw invalid("Autopilot 類型須由人或成功的 run 完成。");
+    throw invalid(translate("domain.error.autopilotCompletion"));
   }
 }
 
 function assertLabel(label: string | undefined, customs: NodeTypeDef[], id?: string): string {
   const trimmed = (label ?? "").trim();
-  if (!trimmed) throw invalid("名稱不可空白。");
-  if (trimmed.length > MAX_LABEL) throw invalid(`名稱不可超過 ${MAX_LABEL} 字。`);
+  if (!trimmed) throw invalid(translate("domain.error.nameEmpty"));
+  if (trimmed.length > MAX_LABEL) throw invalid(translate("domain.error.nameTooLong", undefined, { max: MAX_LABEL }));
   if (customs.some((def) => def.id !== id && sameLabel(def.label ?? "", trimmed))) {
-    throw invalid(`已存在名稱「${trimmed}」。`);
+    throw invalid(translate("domain.error.nameTaken", undefined, { name: trimmed }));
   }
   return trimmed;
 }
@@ -248,10 +249,10 @@ export function validateNodeTypeDefs(defs: readonly NodeTypeDef[]): void {
   const ids = new Set<string>();
   const customs = defs.filter((def) => !isBuiltinKind(def.id));
   if (customs.length > MAX_CUSTOM_NODE_TYPES) {
-    throw invalid(`自訂類型最多 ${MAX_CUSTOM_NODE_TYPES} 種。`);
+    throw invalid(translate("domain.error.customTypesTooMany", undefined, { max: MAX_CUSTOM_NODE_TYPES }));
   }
   for (const def of defs) {
-    if (ids.has(def.id)) throw invalid(`類型代號「${def.id}」重複。`);
+    if (ids.has(def.id)) throw invalid(translate("domain.error.typeIdDuplicate", undefined, { id: def.id }));
     ids.add(def.id);
     assertShape(def.shape);
     assertColor(def.color);
@@ -262,11 +263,11 @@ export function validateNodeTypeDefs(defs: readonly NodeTypeDef[]): void {
         def.completion !== undefined ||
         def.countsInProgress !== undefined
       ) {
-        throw invalid("內建類型只能修改形狀與顏色。");
+        throw invalid(translate("domain.error.builtinTypeLook"));
       }
       continue;
     }
-    if (!CUSTOM_ID.test(def.id)) throw invalid(`類型代號「${def.id}」格式不正確。`);
+    if (!CUSTOM_ID.test(def.id)) throw invalid(translate("domain.error.typeIdFormat", undefined, { id: def.id }));
     assertLabel(def.label, customs, def.id);
     assertCustomBehaviour(def);
   }
@@ -308,11 +309,11 @@ export function addNodeType(
   const current = graph.nodeTypes ?? [];
   const customs = current.filter((def) => !isBuiltinKind(def.id));
   if (customs.length >= MAX_CUSTOM_NODE_TYPES) {
-    throw invalid(`自訂類型最多 ${MAX_CUSTOM_NODE_TYPES} 種。`);
+    throw invalid(translate("domain.error.customTypesTooMany", undefined, { max: MAX_CUSTOM_NODE_TYPES }));
   }
   const id = definition.id ?? nextCustomNodeTypeID(current);
-  if (!CUSTOM_ID.test(id)) throw invalid(`類型代號「${id}」格式不正確。`);
-  if (current.some((def) => def.id === id)) throw invalid(`類型代號「${id}」已存在。`);
+  if (!CUSTOM_ID.test(id)) throw invalid(translate("domain.error.typeIdFormat", undefined, { id }));
+  if (current.some((def) => def.id === id)) throw invalid(translate("domain.error.typeIdTaken", undefined, { id }));
   const label = assertLabel(definition.label, customs);
   assertShape(definition.shape);
   assertColor(definition.color);
@@ -342,7 +343,7 @@ export function updateNodeType(
     const behaviour = (["label", "agentMode", "completion", "countsInProgress"] as const).some(
       (key) => key in patch && patch[key] !== undefined,
     );
-    if (behaviour) throw invalid("內建類型只能修改形狀與顏色。");
+    if (behaviour) throw invalid(translate("domain.error.builtinTypeLook"));
     const existing = current.find((def) => def.id === id);
     const next: NodeTypeDef = { ...(existing ?? { id }) };
     if ("shape" in patch) {
@@ -363,7 +364,7 @@ export function updateNodeType(
     return;
   }
   const target = current.find((def) => def.id === id);
-  if (!target) throw notFound(`節點類型「${id}」`);
+  if (!target) throw notFound(translate("domain.subject.nodeType", undefined, { id }));
   const customs = current.filter((def) => !isBuiltinKind(def.id));
   const merged: NodeTypeDef = { ...target };
   if (patch.label !== undefined) merged.label = assertLabel(patch.label, customs, id);
@@ -385,9 +386,9 @@ export function updateNodeType(
  * left pointing at a type that no longer exists.
  */
 export function removeNodeType(graph: Graph, id: string): void {
-  if (isBuiltinKind(id)) throw invalid("內建類型不能刪除。");
+  if (isBuiltinKind(id)) throw invalid(translate("domain.error.builtinTypeDelete"));
   const current = graph.nodeTypes ?? [];
-  if (!current.some((def) => def.id === id)) throw notFound(`節點類型「${id}」`);
+  if (!current.some((def) => def.id === id)) throw notFound(translate("domain.subject.nodeType", undefined, { id }));
   for (const node of graph.nodes ?? []) {
     if (node.kind === id) node.kind = "task";
   }

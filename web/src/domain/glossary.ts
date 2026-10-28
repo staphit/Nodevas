@@ -13,6 +13,7 @@
  * Nothing here changes serialization: every alias is the wire type.
  */
 
+import { translate } from "../i18n";
 import { isBuiltinPlanStatus } from "../plan";
 import type {
   BuiltinNodeKind,
@@ -78,18 +79,23 @@ export type CustomNodeTypeId = WireCustomNodeTypeId;
  * written by different actions, and undo differently.
  */
 export const TERMS = {
-  lifecycleStatus: "實際狀態",
-  lifecycleEvent: "實際紀錄",
-  planMilestone: "預期里程碑",
-  planSchedule: "預期計畫",
-  milestoneType: "里程碑類型",
-  document: "文件",
-  workflow: "工作流程定義",
-  projectLayout: "專案版面",
-  uiPreference: "個人偏好",
+  lifecycleStatus: "term.lifecycleStatus",
+  lifecycleEvent: "term.lifecycleEvent",
+  planMilestone: "term.planMilestone",
+  planSchedule: "term.planSchedule",
+  milestoneType: "term.milestoneType",
+  document: "term.document",
+  workflow: "term.workflow",
+  projectLayout: "term.projectLayout",
+  uiPreference: "term.uiPreference",
 } as const;
 
 export type TermKey = keyof typeof TERMS;
+
+/** A fixed term in the reader's language; TERMS holds catalog keys. */
+export function term(key: TermKey): string {
+  return translate(TERMS[key]);
+}
 
 /** Builtin lifecycle states, in engine progression order. */
 export const BUILTIN_LIFECYCLE_STATUSES: readonly BuiltinLifecycleStatus[] = [

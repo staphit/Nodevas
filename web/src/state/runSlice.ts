@@ -13,6 +13,7 @@ import {
   describeFailure,
   operationScope,
 } from "./operations";
+import { translate } from "../i18n";
 import { coalesceRequest } from "./coalesce";
 import { nodeTypeErrorMessage } from "../nodeTypeErrors";
 import { generations } from "./internals";
@@ -90,13 +91,13 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
       return commandSucceeded(name, scope, undefined);
     } catch (e) {
       const message =
-        nodeTypeErrorMessage(e, nodeId) ?? describeFailure(e, "套用實際狀態失敗");
+        nodeTypeErrorMessage(e, nodeId) ?? describeFailure(e, translate("run.error.statusFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       return commandFailed(name, scope, message);
     }
   },
 
-  moveActualEvent: async (eventId, timestamp, note = "時間軸拖曳調整", options = {}) => {
+  moveActualEvent: async (eventId, timestamp, note = translate("run.note.timelineDrag"), options = {}) => {
     const target = get().runState?.history.find((event) => event.id === eventId);
     const nodeId = target?.node;
     const previousTimestamp = target?.t;
@@ -112,7 +113,7 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
       get().settleOperation(scope, { status: "saved", operation: name });
       return commandSucceeded(name, scope, undefined);
     } catch (e) {
-      const message = describeFailure(e, "調整實際時間失敗");
+      const message = describeFailure(e, translate("run.error.moveFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       return commandFailed(name, scope, message);
     }

@@ -194,7 +194,7 @@ describe("document tabs", () => {
     });
 
     await expect(useApp.getState().closeTabs(["a"])).rejects.toThrow(
-      "最新內容尚未儲存，分頁與編輯內容已保留",
+      "the latest content is not saved yet, so the tab and its edits were kept",
     );
 
     expect(api.putDraft).toHaveBeenCalledTimes(1);
@@ -227,7 +227,7 @@ describe("document tabs", () => {
     });
 
     await expect(useApp.getState().closeTabs(["a", "b", "c"])).rejects.toThrow(
-      "分頁「a」",
+      "tab “a”",
     );
 
     expect(useApp.getState().tabs.map((item) => item.id)).toEqual(["a", "d"]);
@@ -256,7 +256,7 @@ describe("document tabs", () => {
     useApp.getState().setTabContent("a", "newest version");
     finishDraft();
 
-    await expect(closing).rejects.toThrow("最新內容尚未儲存");
+    await expect(closing).rejects.toThrow("the latest content is not saved yet");
     expect(useApp.getState().tabs[0]).toMatchObject({
       id: "a",
       content: "newest version",

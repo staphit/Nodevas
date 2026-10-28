@@ -1,3 +1,4 @@
+import { translate } from "../i18n";
 import type { Graph, Issue, RunState, Status } from "../types";
 
 /**
@@ -20,7 +21,7 @@ export class ApiShapeError extends Error {
   endpoint: string;
   field: string;
   constructor(endpoint: string, field: string, expected: string, actual: string) {
-    super(`${endpoint} 回應格式不符：${field} 應為 ${expected}，實際為 ${actual}`);
+    super(translate("api.error.shape", undefined, { endpoint, field, expected, actual }));
     this.name = "ApiShapeError";
     this.endpoint = endpoint;
     this.field = field;
@@ -31,7 +32,7 @@ export type Verifier<T> = (value: unknown, endpoint: string) => T;
 
 function describe(value: unknown): string {
   if (value === null) return "null";
-  if (value === undefined) return "缺少";
+  if (value === undefined) return translate("api.shape.missing");
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
@@ -177,7 +178,7 @@ export const verifyGraphResponse: Verifier<{
   issues: Issue[] | null;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   checkGraph(check, body.graph, "graph");
   check.string(body.rev, "rev");
   checkStatusMap(check, body.statuses, "statuses");
@@ -196,7 +197,7 @@ export const verifyStateResponse: Verifier<{
   statuses: Record<string, Status>;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   checkRunState(check, body.state, "state");
   checkStatusMap(check, body.statuses, "statuses");
   return value as { state: RunState; statuses: Record<string, Status> };
@@ -231,7 +232,7 @@ export const verifyProjectsResponse: Verifier<ProjectsResponse> = (
   endpoint,
 ) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   check.string(body.workspace, "workspace");
   check.string(body.active, "active");
   check.nullableArray(body.workspaces, "workspaces").forEach((entry, index) => {
@@ -257,7 +258,7 @@ export const verifyNodeResponse: Verifier<{
   rev: string;
 }> = (value, endpoint) => {
   const check = new Check(endpoint);
-  const body = check.object(value, "回應");
+  const body = check.object(value, translate("api.shape.response"));
   check.string(body.id, "id");
   check.string(body.content, "content");
   check.string(body.rev, "rev");

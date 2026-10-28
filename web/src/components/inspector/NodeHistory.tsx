@@ -125,7 +125,7 @@ function NodeHistory({
                 {ev.from ? localizedStatusLabel(ev.from, graph?.ui?.customStatuses ?? []) : "—"} → <b>{ev.to ? localizedStatusLabel(ev.to, graph?.ui?.customStatuses ?? []) : t("history.unknownStatus")}</b>
               </span>
               {ev.by && <span className="nh-by">by {ev.by}</span>}
-              {ev.note && <span className="nh-note">「{ev.note}」</span>}
+              {ev.note && <span className="nh-note">{t("common.quoted", { text: ev.note })}</span>}
             </li>
           ))}
         </ul>

@@ -8,6 +8,7 @@
  */
 
 import { api, AuthError, getProjectOverride, setProjectOverride } from "../api";
+import { translate } from "../i18n";
 import { coalesceRequest } from "./coalesce";
 import { describeFailure, operationScope } from "./operations";
 import { drainWrites, generations, invalidateGenerations } from "./internals";
@@ -23,7 +24,7 @@ async function parkDirtyTabs(get: () => AppState): Promise<void> {
       .filter(([, page]) => page.dirty && !page.loading)
       .map(async ([key]) => {
         if (!(await get().savePageDoc(key)).ok) {
-          throw new Error("子頁尚未儲存，已保留內容並取消切換。");
+          throw new Error(translate("workspace.error.pagesUnsaved"));
         }
       }),
   );
@@ -37,7 +38,7 @@ async function parkDirtyTabs(get: () => AppState): Promise<void> {
     get().tabs.some((tab) => tab.dirty && drafted.get(tab.id) !== tab.content) ||
     Object.values(get().pageDocs).some((page) => page.dirty)
   ) {
-    throw new Error("儲存期間內容已變更，已保留編輯並取消切換。請重試。");
+    throw new Error(translate("workspace.error.changedWhileSaving"));
   }
 }
 
@@ -101,7 +102,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       get().settleOperation(scope, {
         status: "error",
         operation: "workspace.saveProjectOrder",
-        message: describeFailure(e, "儲存專案排序失敗"),
+        message: describeFailure(e, translate("workspace.error.orderSaveFailed")),
       });
       throw e;
     }
@@ -241,7 +242,7 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       get().settleOperation(scope, {
         status: "error",
         operation: "workspace.switchProject",
-        message: describeFailure(e, "切換專案失敗"),
+        message: describeFailure(e, translate("workspace.error.switchFailed")),
       });
       throw e;
     }

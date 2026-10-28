@@ -7,6 +7,7 @@
  */
 
 import { api, type ExportRequest } from "../api";
+import { translate } from "../i18n";
 
 /** Downloads one export; resolves with the file name the server chose. */
 export async function downloadExport(request: ExportRequest): Promise<string> {
@@ -64,7 +65,7 @@ export async function printExport(
       window.setTimeout(resolve, 2000);
     });
     const target = frame.contentWindow;
-    if (!target) throw new Error("無法建立列印視窗");
+    if (!target) throw new Error(translate("editor.printWindowFailed"));
     const dispose = () => frame.remove();
     target.addEventListener("afterprint", dispose, { once: true });
     // A user who cancels the dialog never fires afterprint on every browser.

@@ -356,7 +356,7 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       const exhaustive: never = command;
       throw new CommandError(
         "unsupported",
-        `未知的指令：${JSON.stringify(exhaustive)}`,
+        translate("domain.error.unknownCommand", undefined, { command: JSON.stringify(exhaustive) }),
       );
     }
   }

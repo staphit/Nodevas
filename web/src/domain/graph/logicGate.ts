@@ -98,7 +98,7 @@ export function logicGateExpression(gate: LogicGate): string {
 
 export function findLogicGate(graph: Graph, gateId: string): LogicGate {
   const gate = graph.ui?.logicGates?.find((candidate) => candidate.id === gateId);
-  if (!gate) throw notFound(`邏輯閘「${gateId}」`);
+  if (!gate) throw notFound(translate("domain.subject.gate", undefined, { id: gateId }));
   return gate;
 }
 
@@ -296,20 +296,20 @@ export function convertEdgesToLogicGate(
   edges: { from: string; to: string }[],
   point: { x: number; y: number },
 ): string {
-  if (edges.length === 0) throw invalid("沒有可轉換的關係線。");
+  if (edges.length === 0) throw invalid(translate("domain.error.gateNoEdges"));
   const existing = edges.map((target) => {
     const edge = (graph.edges ?? []).find(
       (candidate) => candidate.from === target.from && candidate.to === target.to,
     );
-    if (!edge) throw notFound(`關係線「${target.from} → ${target.to}」`);
+    if (!edge) throw notFound(translate("domain.subject.edge", undefined, { from: target.from, to: target.to }));
     return edge;
   });
   const relation = edgeRelation(existing[0]);
   if (existing.some((edge) => edgeRelation(edge) !== relation)) {
-    throw invalid("選取的關係線語意不一致，請先統一為同一種關係。");
+    throw invalid(translate("domain.error.gateMixedRelations"));
   }
   if (!logicGateRelation(relation as LogicGateOperator)) {
-    throw invalid("必要關係請改用 AND／OR 等邏輯閘。");
+    throw invalid(translate("domain.error.gateRequiredRelation"));
   }
   const outputs = [...new Set(edges.map((edge) => edge.to))];
   // The gate owns every edge of this relation reaching its outputs, so the ones
@@ -324,12 +324,12 @@ export function convertEdgesToLogicGate(
     ),
   ];
   if (inputs.some((id) => outputs.includes(id))) {
-    throw invalid("同一個節點不可同時作為此閘門的輸入與輸出。");
+    throw invalid(translate("domain.error.gateInputIsOutput"));
   }
   for (const gate of graph.ui?.logicGates ?? []) {
     const owned = logicGateOutputs(gate).find((id) => outputs.includes(id));
     if (owned) {
-      throw invalid(`「${owned}」已由邏輯閘「${gate.id}」控制。`);
+      throw invalid(translate("domain.error.gateAlreadyOwned", undefined, { node: owned, gate: gate.id }));
     }
   }
 
@@ -363,7 +363,7 @@ export function connectLogicGateInput(
   const gate = findLogicGate(graph, gateId);
   if (gate.inputs.includes(sourceId)) return;
   if (gate.operator === "must" && gate.inputs.length >= 1) {
-    throw invalid("MUST 僅接受一個輸入節點。");
+    throw invalid(translate("domain.error.gateMustOneInput"));
   }
   gate.inputs.push(sourceId);
   materializeLogicGate(graph, gate);

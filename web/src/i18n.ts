@@ -1,6 +1,5 @@
-import { useCallback } from "react";
-import type { Language } from "./preferences";
-import { useApp } from "./store";
+import { useCallback, useSyncExternalStore } from "react";
+import { readPreference, type Language } from "./preferences";
 
 type MessageValues = Record<string, string | number>;
 type MessageCatalog = Record<string, string>;
@@ -3439,6 +3438,129 @@ const messages: Record<Language, MessageCatalog> = {
     "tour.step.explorer-tree.body": "Click a project to switch to it; New project and subprojects are created from the buttons above.",
     "tour.step.explorer-transfer.title": "Import and export",
     "tour.step.explorer-transfer.body": "Project packages and Markdown can be imported; save, save as and export are here too.",
+    "domain.error.notFound": "{what} does not exist or was deleted.",
+    "domain.error.unknownCommand": "Unknown command: {command}",
+    "domain.subject.node": "Node “{id}”",
+    "domain.subject.view": "View",
+    "domain.subject.gate": "Logic gate “{id}”",
+    "domain.subject.edge": "Link “{from} → {to}”",
+    "domain.subject.user": "User “{id}”",
+    "domain.subject.nodeType": "Node type “{id}”",
+    "domain.subject.status": "Status “{id}”",
+    "domain.subject.milestoneType": "Milestone type “{id}”",
+    "domain.error.acceptanceTooMany": "At most {max} acceptance criteria.",
+    "domain.error.acceptanceBadId": "Acceptance criterion id {id} is not valid.",
+    "domain.error.acceptanceDuplicateId": "Acceptance criterion id {id} is used twice.",
+    "domain.error.acceptanceText": "Each acceptance criterion is one line of 1–{max} characters.",
+    "domain.error.acceptanceUnsupported": "This node type has no acceptance criteria.",
+    "domain.error.workflowOverrideUnsupported": "Only Autopilot node types can override their stages.",
+    "domain.error.badPosition": "Node coordinates are not valid.",
+    "domain.error.badShift": "The shift is not valid.",
+    "domain.error.viewNameEmpty": "A view needs a name.",
+    "domain.error.importTooMany": "At most {max} nodes per import.",
+    "domain.error.gateNoEdges": "There are no links to convert.",
+    "domain.error.gateMixedRelations": "The selected links mean different things; give them one relation first.",
+    "domain.error.gateRequiredRelation": "For required links, use an AND / OR logic gate instead.",
+    "domain.error.gateInputIsOutput": "A node cannot be both an input and an output of this gate.",
+    "domain.error.gateAlreadyOwned": "“{node}” is already controlled by logic gate “{gate}”.",
+    "domain.error.gateMustOneInput": "MUST takes only one input node.",
+    "domain.error.unknownNodeType": "Unknown node type.",
+    "domain.error.deadlineFormat": "A deadline is written YYYY-MM-DD or YYYY-MM-DDTHH:mm.",
+    "domain.error.writeAccess": "Write access is worker, orchestrator or human-only.",
+    "domain.error.usersFull": "The project has reached its user limit.",
+    "domain.error.linkTarget": "A link has to point at a node.",
+    "domain.error.linkLabel": "A link needs a name.",
+    "domain.error.refSelf": "A node cannot reference itself.",
+    "domain.error.refsTooMany": "At most {max} references per node.",
+    "domain.error.shapeUnsupported": "That shape is not supported.",
+    "domain.error.colorFormat": "That color is not valid.",
+    "domain.error.pickAgentMode": "Pick an agent mode.",
+    "domain.error.pickCompletion": "Pick how it is completed.",
+    "domain.error.pickCountsInProgress": "Say whether it counts toward progress.",
+    "domain.error.autoNoAgent": "A type that completes itself or has no status cannot be given to an agent.",
+    "domain.error.noStatusNoProgress": "A type with no status cannot count toward progress.",
+    "domain.error.autopilotCompletion": "An Autopilot type is completed by a person or a successful run.",
+    "domain.error.nameEmpty": "A name is required.",
+    "domain.error.nameTooLong": "A name can be at most {max} characters.",
+    "domain.error.nameTaken": "The name “{name}” is already used.",
+    "domain.error.customTypesTooMany": "At most {max} custom types.",
+    "domain.error.typeIdDuplicate": "Type id “{id}” is used twice.",
+    "domain.error.builtinTypeLook": "A built-in type only changes its shape and color.",
+    "domain.error.typeIdFormat": "Type id “{id}” is not valid.",
+    "domain.error.typeIdTaken": "Type id “{id}” already exists.",
+    "domain.error.builtinTypeDelete": "A built-in type cannot be deleted.",
+    "domain.error.dateFormat": "A date is written YYYY-MM-DD.",
+    "domain.error.timeFormat": "A time is written HH:mm.",
+    "domain.error.milestoneMissing": "The planned milestone to move was not found.",
+    "domain.error.statusIdTaken": "Status id “{id}” already exists.",
+    "domain.error.milestoneIdTaken": "Milestone id “{id}” already exists.",
+    "term.lifecycleStatus": "Actual status",
+    "term.lifecycleEvent": "Actual record",
+    "term.planMilestone": "Planned milestone",
+    "term.planSchedule": "Planned schedule",
+    "term.milestoneType": "Milestone type",
+    "term.document": "Document",
+    "term.workflow": "Workflow definition",
+    "term.projectLayout": "Project layout",
+    "term.uiPreference": "Personal preference",
+    "plan.statusShort.started": "Start",
+    "plan.statusShort.in_progress": "In progress",
+    "plan.statusShort.done": "Deadline",
+    "undo.label.graph": "Graph change",
+    "undo.label.createNode": "Add node",
+    "undo.label.deleteNode": "Delete node",
+    "undo.label.deleteNodes": "Delete {count} nodes",
+    "undo.label.lifecycleStatus": "Actual status change",
+    "undo.label.lifecycleMove": "Actual time change",
+    "undo.note.undoStatus": "Undo: back to the earlier actual status",
+    "undo.note.undoMove": "Undo: back to the earlier time",
+    "undo.note.redoStatus": "Redo: apply the actual status again",
+    "undo.note.redoMove": "Redo: apply the time change again",
+    "undo.error.reloadFailed": "Reload failed",
+    "undo.error.revertFailed": "Undo failed",
+    "document.error.pageConflict": "This subpage was changed elsewhere; choose which version to keep.",
+    "document.error.pageSaveFailed": "Subpage save failed",
+    "document.error.projectMissing": "Project “{project}” was not found",
+    "document.error.nodeMissing": "Node “{node}” was not found",
+    "document.error.closeOneTab": "tab “{tab}”",
+    "document.error.closeTabs": "{count} tabs",
+    "document.error.closeUnsaved": "Can't safely close {subject}: the latest content is not saved yet, so the tab and its edits were kept. Check the connection or disk space, then try again.",
+    "document.error.fileConflictDrafted": "The file was changed elsewhere; choose which version to keep. Your content is still in the editor and was also saved as a draft.",
+    "document.error.fileConflict": "The file was changed elsewhere; choose which version to keep. Your content is still in the editor.",
+    "document.error.saveFailed": "Document save failed",
+    "workspace.error.pagesUnsaved": "A subpage is not saved yet; its content was kept and the switch was cancelled.",
+    "workspace.error.changedWhileSaving": "Content changed while saving; your edits were kept and the switch was cancelled. Try again.",
+    "workspace.error.orderSaveFailed": "Saving the project order failed",
+    "workspace.error.switchFailed": "Switching project failed",
+    "run.error.statusFailed": "Applying the actual status failed",
+    "run.note.timelineDrag": "Adjusted by dragging on the timeline",
+    "run.error.moveFailed": "Adjusting the actual time failed",
+    "remote.error.saveConfigFailed": "Saving the backup settings failed",
+    "remote.error.backupFailed": "Backup failed",
+    "remote.error.restoreFailed": "Restore failed",
+    "remote.error.testFailed": "Connection test failed",
+    "remote.error.pushFailed": "Push failed",
+    "remote.error.saveFailed": "Save failed",
+    "remote.error.testMailFailed": "Sending the test mail failed",
+    "app.error.unexpected": "Something unexpected went wrong",
+    "api.error.timeout": "The request timed out",
+    "api.error.unreachable": "Can't reach the server",
+    "api.error.signInRequired": "Sign-in required",
+    "api.error.shape": "{endpoint} returned an unexpected shape: {field} should be {expected}, got {actual}",
+    "api.shape.missing": "missing",
+    "api.shape.response": "response",
+    "editor.printWindowFailed": "Could not open the print window",
+    "editor.task.done": "Done",
+    "editor.task.open": "Not done",
+    "editor.table.column": "Column {n}",
+    "issue.kindCount": "“{kind}” ×{count}",
+    "common.quoted": "“{text}”",
+    "common.colon": ": ",
+    "explorer.markdownImportFailureSeparator": "; ",
+    "domain.title.nodeMetadata": "Node metadata",
+    "domain.title.document": "Document content",
+    "domain.title.uiPreference": "Personal layout preferences",
+    "domain.title.uiEphemeral": "Temporary UI state",
   },
   "zh-TW": {
     "language.label": "語系",
@@ -6873,8 +6995,158 @@ const messages: Record<Language, MessageCatalog> = {
     "tour.step.explorer-tree.body": "點專案即可切換；「新專案」與子專案都從上方的按鈕建立。",
     "tour.step.explorer-transfer.title": "匯入與匯出",
     "tour.step.explorer-transfer.body": "專案封裝、Markdown 都能匯入；儲存、另存新檔與匯出也都在這裡。",
+    "domain.error.notFound": "{what}不存在或已被刪除。",
+    "domain.error.unknownCommand": "未知的指令：{command}",
+    "domain.subject.node": "節點「{id}」",
+    "domain.subject.view": "檢視",
+    "domain.subject.gate": "邏輯閘「{id}」",
+    "domain.subject.edge": "關係線「{from} → {to}」",
+    "domain.subject.user": "使用者「{id}」",
+    "domain.subject.nodeType": "節點類型「{id}」",
+    "domain.subject.status": "狀態「{id}」",
+    "domain.subject.milestoneType": "里程碑類型「{id}」",
+    "domain.error.acceptanceTooMany": "驗收條件最多 {max} 條。",
+    "domain.error.acceptanceBadId": "驗收條件編號 {id} 不正確。",
+    "domain.error.acceptanceDuplicateId": "驗收條件編號 {id} 重複。",
+    "domain.error.acceptanceText": "每條驗收條件需為 1–{max} 字的一行。",
+    "domain.error.acceptanceUnsupported": "這種節點類型沒有驗收條件。",
+    "domain.error.workflowOverrideUnsupported": "只有自動推進類型的節點可以覆寫階段。",
+    "domain.error.badPosition": "節點座標無效。",
+    "domain.error.badShift": "位移量無效。",
+    "domain.error.viewNameEmpty": "檢視名稱不可空白。",
+    "domain.error.importTooMany": "單次最多匯入 {max} 個節點。",
+    "domain.error.gateNoEdges": "沒有可轉換的關係線。",
+    "domain.error.gateMixedRelations": "選取的關係線語意不一致，請先統一為同一種關係。",
+    "domain.error.gateRequiredRelation": "必要關係請改用 AND／OR 等邏輯閘。",
+    "domain.error.gateInputIsOutput": "同一個節點不可同時作為此閘門的輸入與輸出。",
+    "domain.error.gateAlreadyOwned": "「{node}」已由邏輯閘「{gate}」控制。",
+    "domain.error.gateMustOneInput": "MUST 僅接受一個輸入節點。",
+    "domain.error.unknownNodeType": "未知的節點類型。",
+    "domain.error.deadlineFormat": "死線格式須為 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm。",
+    "domain.error.writeAccess": "寫入權限須為 worker、orchestrator 或 human-only。",
+    "domain.error.usersFull": "使用者數量已達上限",
+    "domain.error.linkTarget": "連結必須指向一個節點。",
+    "domain.error.linkLabel": "連結名稱不可空白。",
+    "domain.error.refSelf": "節點不能參考自己。",
+    "domain.error.refsTooMany": "每個節點最多 {max} 個參考。",
+    "domain.error.shapeUnsupported": "不支援的圖形。",
+    "domain.error.colorFormat": "顏色格式不正確。",
+    "domain.error.pickAgentMode": "請選擇 agent 模式。",
+    "domain.error.pickCompletion": "請選擇完成方式。",
+    "domain.error.pickCountsInProgress": "請指定是否計入進度。",
+    "domain.error.autoNoAgent": "自動完成或沒有狀態的類型不能派給 agent。",
+    "domain.error.noStatusNoProgress": "沒有狀態的類型不能計入進度。",
+    "domain.error.autopilotCompletion": "Autopilot 類型須由人或成功的 run 完成。",
+    "domain.error.nameEmpty": "名稱不可空白。",
+    "domain.error.nameTooLong": "名稱不可超過 {max} 字。",
+    "domain.error.nameTaken": "已存在名稱「{name}」。",
+    "domain.error.customTypesTooMany": "自訂類型最多 {max} 種。",
+    "domain.error.typeIdDuplicate": "類型代號「{id}」重複。",
+    "domain.error.builtinTypeLook": "內建類型只能修改形狀與顏色。",
+    "domain.error.typeIdFormat": "類型代號「{id}」格式不正確。",
+    "domain.error.typeIdTaken": "類型代號「{id}」已存在。",
+    "domain.error.builtinTypeDelete": "內建類型不能刪除。",
+    "domain.error.dateFormat": "日期格式須為 YYYY-MM-DD。",
+    "domain.error.timeFormat": "時間格式須為 HH:mm。",
+    "domain.error.milestoneMissing": "找不到要移動的預期里程碑。",
+    "domain.error.statusIdTaken": "狀態代號「{id}」已存在。",
+    "domain.error.milestoneIdTaken": "里程碑代號「{id}」已存在。",
+    "term.lifecycleStatus": "實際狀態",
+    "term.lifecycleEvent": "實際紀錄",
+    "term.planMilestone": "預期里程碑",
+    "term.planSchedule": "預期計畫",
+    "term.milestoneType": "里程碑類型",
+    "term.document": "文件",
+    "term.workflow": "工作流程定義",
+    "term.projectLayout": "專案版面",
+    "term.uiPreference": "個人偏好",
+    "plan.statusShort.started": "開始",
+    "plan.statusShort.in_progress": "進行中",
+    "plan.statusShort.done": "死線",
+    "undo.label.graph": "圖譜變更",
+    "undo.label.createNode": "新增節點",
+    "undo.label.deleteNode": "刪除節點",
+    "undo.label.deleteNodes": "刪除 {count} 個節點",
+    "undo.label.lifecycleStatus": "實際狀態變更",
+    "undo.label.lifecycleMove": "實際時間調整",
+    "undo.note.undoStatus": "撤銷：回到先前的實際狀態",
+    "undo.note.undoMove": "撤銷：回到先前的時間",
+    "undo.note.redoStatus": "重做：重新套用實際狀態",
+    "undo.note.redoMove": "重做：重新套用時間調整",
+    "undo.error.reloadFailed": "重新載入失敗",
+    "undo.error.revertFailed": "還原失敗",
+    "document.error.pageConflict": "子頁已被外部修改；請選擇保留哪一版。",
+    "document.error.pageSaveFailed": "子頁儲存失敗",
+    "document.error.projectMissing": "找不到專案「{project}」",
+    "document.error.nodeMissing": "找不到節點「{node}」",
+    "document.error.closeOneTab": "分頁「{tab}」",
+    "document.error.closeTabs": "{count} 個分頁",
+    "document.error.closeUnsaved": "無法安全關閉{subject}：最新內容尚未儲存，分頁與編輯內容已保留。請檢查連線或磁碟空間後重試。",
+    "document.error.fileConflictDrafted": "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中，也已存為草稿。",
+    "document.error.fileConflict": "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中。",
+    "document.error.saveFailed": "文件儲存失敗",
+    "workspace.error.pagesUnsaved": "子頁尚未儲存，已保留內容並取消切換。",
+    "workspace.error.changedWhileSaving": "儲存期間內容已變更，已保留編輯並取消切換。請重試。",
+    "workspace.error.orderSaveFailed": "儲存專案排序失敗",
+    "workspace.error.switchFailed": "切換專案失敗",
+    "run.error.statusFailed": "套用實際狀態失敗",
+    "run.note.timelineDrag": "時間軸拖曳調整",
+    "run.error.moveFailed": "調整實際時間失敗",
+    "remote.error.saveConfigFailed": "儲存備份設定失敗",
+    "remote.error.backupFailed": "備份失敗",
+    "remote.error.restoreFailed": "還原失敗",
+    "remote.error.testFailed": "連線測試失敗",
+    "remote.error.pushFailed": "推送失敗",
+    "remote.error.saveFailed": "儲存失敗",
+    "remote.error.testMailFailed": "測試寄送失敗",
+    "app.error.unexpected": "發生未預期的錯誤",
+    "api.error.timeout": "請求逾時",
+    "api.error.unreachable": "無法連線到伺服器",
+    "api.error.signInRequired": "需要登入",
+    "api.error.shape": "{endpoint} 回應格式不符：{field} 應為 {expected}，實際為 {actual}",
+    "api.shape.missing": "缺少",
+    "api.shape.response": "回應",
+    "editor.printWindowFailed": "無法建立列印視窗",
+    "editor.task.done": "已完成",
+    "editor.task.open": "未完成",
+    "editor.table.column": "欄 {n}",
+    "issue.kindCount": "「{kind}」×{count}",
+    "common.quoted": "「{text}」",
+    "common.colon": "：",
+    "explorer.markdownImportFailureSeparator": "；",
+    "domain.title.nodeMetadata": "節點 metadata",
+    "domain.title.document": "文件內容",
+    "domain.title.uiPreference": "個人版面偏好",
+    "domain.title.uiEphemeral": "UI 暫態",
   },
 };
+
+/**
+ * Where the reader's language lives: the store, which connects itself here
+ * when it is created. The catalog does not import the store, so any module
+ * (domain, state, api) can read a message without an import cycle; before the
+ * store exists the saved preference answers.
+ */
+export interface LanguageSource {
+  get(): Language;
+  subscribe(listener: () => void): () => void;
+  set(language: Language): void;
+}
+
+let source: LanguageSource | null = null;
+
+export function connectLanguageSource(next: LanguageSource): void {
+  source = next;
+}
+
+/** The interface language right now. */
+export function currentLanguage(): Language {
+  return source ? source.get() : readPreference("language");
+}
+
+function subscribeLanguage(listener: () => void): () => void {
+  return source ? source.subscribe(listener) : () => {};
+}
 
 function formatMessage(message: string, values?: MessageValues): string {
   if (!values) return message;
@@ -6883,20 +7155,20 @@ function formatMessage(message: string, values?: MessageValues): string {
 
 export function translate(
   key: string,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
   values?: MessageValues,
 ): string {
   const message = messages[language][key] ?? messages.en[key] ?? key;
   return formatMessage(message, values);
 }
 
-export function languageLocale(language: Language = useApp.getState().preferences.language): string {
+export function languageLocale(language: Language = currentLanguage()): string {
   return language === "zh-TW" ? "zh-TW" : "en-US";
 }
 
 export function formatLocalizedDate(
   value: string | Date,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
   options: Intl.DateTimeFormatOptions = {},
 ): string {
   const date = value instanceof Date ? value : new Date(value);
@@ -6912,28 +7184,28 @@ const TIME_OF_DAY: Intl.DateTimeFormatOptions = { timeStyle: "short" };
 
 export function formatLocalizedDateTime(
   value: string | Date,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return formatLocalizedDate(value, language, { dateStyle: "short", ...TIME_OF_DAY });
 }
 
 export function formatLocalizedTime(
   value: string | Date,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return formatLocalizedDate(value, language, TIME_OF_DAY);
 }
 
 export function formatLocalizedMonthDay(
   value: string | Date,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return formatLocalizedDate(value, language, { month: "numeric", day: "numeric" });
 }
 
 export function formatLocalizedWeekday(
   value: string | Date,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return formatLocalizedDate(value, language, { weekday: "short" });
 }
@@ -6953,7 +7225,7 @@ const BUILTIN_STATUS_KEYS: Record<string, string> = {
 export function localizedStatusLabel(
   status: string,
   definitions: readonly { id: string; label: string }[] = [],
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   const builtinKey = BUILTIN_STATUS_KEYS[status];
   if (builtinKey) return translate(builtinKey, language);
@@ -6962,7 +7234,7 @@ export function localizedStatusLabel(
 
 export function localizedRelationLabel(
   relation: string,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   const key = relation === "" ? "relations.edge.needed" : `relations.edge.${relation}`;
   return translate(key, language);
@@ -6970,7 +7242,7 @@ export function localizedRelationLabel(
 
 export function localizedLineLabel(
   line: string,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return translate(`relations.line.${line}`, language);
 }
@@ -6978,7 +7250,7 @@ export function localizedLineLabel(
 export function localizedPlanStatusLabel(
   status: string,
   definitions: readonly { id: string; label: string }[] = [],
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   if (status === "started" || status === "in_progress" || status === "done") {
     return translate(`plan.status.${status}`, language);
@@ -6986,38 +7258,29 @@ export function localizedPlanStatusLabel(
   return definitions.find((definition) => definition.id === status)?.label ?? translate("plan.status.custom", language);
 }
 
+/** planOrderError's answer (a catalog key) in words. */
 export function localizePlanOrderError(
   error: string,
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
-  const keys: Record<string, string> = {
-    "預計進行日期不可早於開始日期。": "plan.validation.progressBeforeStart",
-    "死線不可早於預計進行日期。": "plan.validation.deadlineBeforeProgress",
-    "死線不可早於開始日期。": "plan.validation.deadlineBeforeStart",
-  };
-  const key = keys[error];
-  return key ? translate(key, language) : error;
+  return translate(error, language);
 }
 
 /** A list read out to the reader: 「a、b、c」 in Traditional Chinese, "a, b, c" in English. */
 export function formatList(
   items: readonly string[],
-  language: Language = useApp.getState().preferences.language,
+  language: Language = currentLanguage(),
 ): string {
   return items.join(language === "zh-TW" ? "、" : ", ");
 }
 
 export function useI18n() {
-  const language = useApp((state) => state.preferences.language);
-  const updateUIPreference = useApp((state) => state.updateUIPreference);
+  const language = useSyncExternalStore(subscribeLanguage, currentLanguage);
   const t = useCallback(
     (key: string, values?: MessageValues) => translate(key, language, values),
     [language],
   );
-  const setLanguage = useCallback(
-    (next: Language) => updateUIPreference("language", next),
-    [updateUIPreference],
-  );
+  const setLanguage = useCallback((next: Language) => source?.set(next), []);
   return { language, setLanguage, t };
 }
 

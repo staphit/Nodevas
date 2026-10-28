@@ -1,5 +1,7 @@
 import { markServerReachable, markServerUnreachable } from "./connectivity";
 import type { Verifier } from "./verify";
+import { LANGUAGE_OPTIONS, translate } from "../i18n";
+import type { Language } from "../preferences";
 
 /** Optimistic-lock failure: server refused to overwrite a newer disk version. */
 export class ConflictError extends Error {
@@ -45,21 +47,23 @@ export class NetworkError extends Error {
   }
 }
 
-const NETWORK_FAILURE_ZH = "無法連線到伺服器";
-const NETWORK_FAILURE_EN = "Can't reach the server";
 /** What browsers say when a fetch is refused, in case one slips through. */
 const BROWSER_NETWORK_FAILURES = ["Failed to fetch", "Load failed", "NetworkError when attempting to fetch resource."];
 
+/** The page's language, as the document says: http stays clear of the store. */
+function pageLanguage(): Language {
+  return document.documentElement.lang.startsWith("zh") ? "zh-TW" : "en";
+}
+
 function networkFailureText(): string {
-  return document.documentElement.lang.startsWith("zh") ? NETWORK_FAILURE_ZH : NETWORK_FAILURE_EN;
+  return translate("api.error.unreachable", pageLanguage());
 }
 
 /** Whether a failure message says the server could not be reached. */
 export function isNetworkFailure(message: string | null | undefined): boolean {
   if (!message) return false;
   return (
-    message === NETWORK_FAILURE_ZH ||
-    message === NETWORK_FAILURE_EN ||
+    LANGUAGE_OPTIONS.some((language) => message === translate("api.error.unreachable", language)) ||
     BROWSER_NETWORK_FAILURES.includes(message)
   );
 }
@@ -67,7 +71,7 @@ export function isNetworkFailure(message: string | null | undefined): boolean {
 /** Raised when the server has accounts on and this browser is not signed in. */
 export class UnauthorizedError extends Error {
   constructor() {
-    super("需要登入");
+    super(translate("api.error.signInRequired", pageLanguage()));
   }
 }
 
@@ -190,7 +194,7 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("請求逾時");
+      throw new Error(translate("api.error.timeout", pageLanguage()));
     }
     if (error instanceof TypeError) {
       markServerUnreachable();
@@ -280,9 +284,9 @@ export async function authPost<T>(url: string, body: unknown): Promise<T> {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new AuthError(0, "請求逾時");
+      throw new AuthError(0, translate("api.error.timeout", pageLanguage()));
     }
-    throw new AuthError(0, "無法連線到伺服器");
+    throw new AuthError(0, networkFailureText());
   } finally {
     window.clearTimeout(timeout);
   }

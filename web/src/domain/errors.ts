@@ -1,5 +1,7 @@
 /** Domain failures [A-04]. Thrown by reducers, converted to `CommandResult`. */
 
+import { translate } from "../i18n";
+
 export type CommandErrorCode =
   | "not-found"
   | "invalid"
@@ -15,8 +17,9 @@ export class CommandError extends Error {
   }
 }
 
+/** `what` is already in the reader's language (a `domain.subject.*` message). */
 export function notFound(what: string): CommandError {
-  return new CommandError("not-found", `${what}不存在或已被刪除。`);
+  return new CommandError("not-found", translate("domain.error.notFound", undefined, { what }));
 }
 
 export function invalid(message: string): CommandError {

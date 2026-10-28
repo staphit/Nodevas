@@ -354,7 +354,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
       kind: "delete-node",
       graph: before,
       trashFiles: result.trashFiles.filter(Boolean),
-      label: ids.length > 1 ? `刪除 ${ids.length} 個節點` : undefined,
+      label: ids.length > 1 ? translate("undo.label.deleteNodes", undefined, { count: ids.length }) : undefined,
     });
     for (const id of ids) get().closeTab(id);
     await Promise.all([get().loadAll(), get().refreshTrash()]);

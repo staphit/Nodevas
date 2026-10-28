@@ -1,4 +1,5 @@
 import { AuthError, RequestError, req, send } from "./http";
+import { translate } from "../i18n";
 import type { AgentModel } from "./runs";
 import { ApiShapeError } from "./verify";
 
@@ -200,7 +201,7 @@ export const RETENTION_MAX_DAYS = 3650;
 export const EXPLORATION_MAX_PCT = 50;
 
 function shape(endpoint: string, field: string, expected: string, value: unknown): never {
-  const actual = value === null ? "null" : value === undefined ? "缺少" : Array.isArray(value) ? "array" : typeof value;
+  const actual = value === null ? "null" : value === undefined ? translate("api.shape.missing") : Array.isArray(value) ? "array" : typeof value;
   throw new ApiShapeError(endpoint, field, expected, actual);
 }
 

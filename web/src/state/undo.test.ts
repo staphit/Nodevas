@@ -222,11 +222,11 @@ describe("undoEntryLabel", () => {
   // Every UndoEntry kind has a default label the UI falls back to, since a
   // command that omits `label` must still describe itself in the undo button.
   it.each([
-    ["graph", "圖譜變更"],
-    ["create-node", "新增節點"],
-    ["delete-node", "刪除節點"],
-    ["lifecycle-status", "實際狀態變更"],
-    ["lifecycle-move", "實際時間調整"],
+    ["graph", "Graph change"],
+    ["create-node", "Add node"],
+    ["delete-node", "Delete node"],
+    ["lifecycle-status", "Actual status change"],
+    ["lifecycle-move", "Actual time change"],
   ] as const)("falls back to the %s default when no label is given", (kind, expected) => {
     const byKind: Record<string, UndoEntry> = {
       graph: { kind: "graph", graph: { version: 1, nodes: [] } },

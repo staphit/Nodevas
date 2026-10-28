@@ -797,7 +797,7 @@ export function TabBody({
       {tab.conflict && (
         <div className="banner banner-conflict">
           <div className="banner-text">
-            <b>{t("drawer.conflictTitle")}</b>：{t("drawer.conflictDescription")}
+            <b>{t("drawer.conflictTitle")}</b>{t("common.colon")}{t("drawer.conflictDescription")}
           </div>
           <div className="banner-actions">
              <button onClick={() => void resolveConflict(id, "disk").catch(reportError)}>{t("drawer.loadDisk")}</button>

@@ -10,6 +10,7 @@
  */
 
 import type { EdgeRelation, Graph, GraphNode, NodeStyle } from "../../types";
+import { translate } from "../../i18n";
 import { invalid } from "../errors";
 
 export interface ImportedNode {
@@ -43,7 +44,7 @@ const MAX_IMPORT_NODES = 1000;
 
 export function applyImport(graph: Graph, payload: ImportPayload): void {
   if (payload.nodes.length > MAX_IMPORT_NODES) {
-    throw invalid(`單次最多匯入 ${MAX_IMPORT_NODES} 個節點。`);
+    throw invalid(translate("domain.error.importTooMany", undefined, { max: MAX_IMPORT_NODES }));
   }
   graph.ui = graph.ui ?? {};
   graph.ui.positions = graph.ui.positions ?? {};
