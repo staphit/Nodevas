@@ -117,6 +117,10 @@ func TestValidClientMessageRejectsOversizedAndUnknownInput(t *testing.T) {
 		{Type: "unlock", NodeID: "node"},
 		{Type: "awareness", Payload: "AQID"},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DX: 1, DY: -1},
+		// The end of a gesture names nothing: it only tells peers to drop
+		// the ghost, and refusing it hung up on every card drag.
+		{Type: "graph-drag", IDs: []string{}, Active: false},
+		{Type: "graph-drag"},
 	}
 	for _, message := range valid {
 		if !validClientMessage(message) {
@@ -131,8 +135,10 @@ func TestValidClientMessageRejectsOversizedAndUnknownInput(t *testing.T) {
 		{Type: "subscribe", Project: "bad\nname"},
 		{Type: "awareness"},
 		{Type: "awareness", Payload: strings.Repeat("A", maxAwarenessBytes+1)},
-		{Type: "graph-drag"},
+		{Type: "graph-drag", Active: true},
 		{Type: "graph-drag", IDs: make([]string, maxDragIDs+1)},
+		{Type: "graph-drag", IDs: []string{"alpha"}, DX: math.NaN()},
+		{Type: "graph-drag", DX: math.Inf(-1)},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DX: math.NaN()},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DY: math.Inf(1)},
 		{Type: "graph-drag", IDs: []string{"bad\nid"}},
