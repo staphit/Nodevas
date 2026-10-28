@@ -319,6 +319,19 @@ export function LaneView({
   const zoomAt = canvasPan.zoomAt;
   const setZoomDirect = canvasPan.setZoom;
   const graphPointFromClient = canvasPan.pointFromClient;
+  // The project menu swaps the project under a board that stays mounted, so
+  // the zoom follows it here: the new project's remembered zoom, or 100% for
+  // one this session has not shown. Set during render, so the commit that
+  // shows the new project is already drawn at its own zoom, and the opening
+  // scroll useBoardViewport restores below lands at that scale rather than
+  // being re-centred from the old one.
+  const [zoomProject, setZoomProject] = useState(activeProject);
+  if (zoomProject !== activeProject) {
+    setZoomProject(activeProject);
+    if (isGraph) {
+      setZoomDirect(recallBoardView(boardViewKey(activeProject))?.zoom ?? 1);
+    }
+  }
   const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
