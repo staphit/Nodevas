@@ -272,11 +272,11 @@
   background: var(--surface-2);
   font-size: calc(9.5px * var(--font-scale, 1));
 }
-/* One row however large the text or narrow the sidebar: the caption gives
-   way first (flex-shrink 99), then each label ends in an ellipsis — never one
-   character per line. */
+/* One row however large the text or narrow the sidebar: the caption takes
+   only what the buttons leave (a zero basis), then each label ends in an
+   ellipsis — never one character per line. */
 .explorer-transfer-actions > span {
-  flex: 0 99 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
