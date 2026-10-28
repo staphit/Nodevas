@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { explorerApi, type AgentItem } from "../api/explorer";
 import { useI18n } from "../i18n";
+import { useApp } from "../store";
 import { costText, roleText, stateText } from "./explorerFormat";
 import { useExplorer } from "./explorerStore";
 import { useLoad } from "./useExplorerData";
@@ -22,7 +23,8 @@ export default function AgentsTab() {
   const { t } = useI18n();
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
-  const agents = useLoad(() => explorerApi.agents(), "agents");
+  const project = useApp((s) => s.activeProject);
+  const agents = useLoad(() => explorerApi.agents(), `agents:${project}`);
   const { reload } = agents;
   useEffect(() => {
     const timer = window.setInterval(reload, REFRESH_MS);

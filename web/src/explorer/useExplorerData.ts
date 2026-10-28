@@ -18,9 +18,15 @@ export interface Loaded<T> {
   reload: () => void;
 }
 
-/** Runs load once per key and again on reload; a stale answer is dropped. */
+/**
+ * Runs load once per key and again on reload; a stale answer is dropped. What
+ * was loaded under another key (another project, another file) is never
+ * handed back: a reload keeps the last answer up while it runs, a new key
+ * starts empty.
+ */
 export function useLoad<T>(load: () => Promise<T>, key: string): Loaded<T> {
-  const [state, setState] = useState<{ data: T | null; error: unknown; loading: boolean }>({
+  const [state, setState] = useState<{ key: string; data: T | null; error: unknown; loading: boolean }>({
+    key,
     data: null,
     error: null,
     loading: true,
@@ -30,17 +36,23 @@ export function useLoad<T>(load: () => Promise<T>, key: string): Loaded<T> {
   loadRef.current = load;
   useEffect(() => {
     let live = true;
-    setState((current) => ({ ...current, loading: true }));
+    setState((current) =>
+      current.key === key ? { ...current, loading: true } : { key, data: null, error: null, loading: true },
+    );
     loadRef
       .current()
-      .then((data) => live && setState({ data, error: null, loading: false }))
-      .catch((error: unknown) => live && setState((current) => ({ data: current.data, error, loading: false })));
+      .then((data) => live && setState({ key, data, error: null, loading: false }))
+      .catch(
+        (error: unknown) =>
+          live && setState((current) => ({ key, data: current.key === key ? current.data : null, error, loading: false })),
+      );
     return () => {
       live = false;
     };
   }, [key, nonce]);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { ...state, reload };
+  if (state.key !== key) return { data: null, error: null, loading: true, reload };
+  return { data: state.data, error: state.error, loading: state.loading, reload };
 }
 
 const none = <T,>(): Promise<T | null> => Promise.resolve(null);

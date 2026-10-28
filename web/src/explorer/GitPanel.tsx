@@ -2,6 +2,7 @@ import { api } from "../api";
 import { explorerApi, type RepoSummary } from "../api/explorer";
 import type { Run } from "../api/runs";
 import { useI18n } from "../i18n";
+import { useApp } from "../store";
 import { clockText, baseName } from "./explorerFormat";
 import { useExplorer, type ExplorerView } from "./explorerStore";
 import { useLoad } from "./useExplorerData";
@@ -71,8 +72,11 @@ export default function GitPanel() {
   const { t } = useI18n();
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
-  const git = useLoad(() => explorerApi.workspaceGit(), "ws-git");
-  const runs = useLoad(() => api.listProjectRuns(), "runs");
+  // Both belong to the open project, so a switch from the header loads the
+  // new one's, as the Files tab does.
+  const project = useApp((s) => s.activeProject);
+  const git = useLoad(() => explorerApi.workspaceGit(), `ws-git:${project}`);
+  const runs = useLoad(() => api.listProjectRuns(), `runs:${project}`);
   const repos = useLoad(() => explorerApi.repos(), "repos");
 
   const branches = new Map<string, Run[]>();
