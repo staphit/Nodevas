@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
@@ -219,11 +220,22 @@ func TestGuideExplainsTypeRefusals(t *testing.T) {
 
 func TestSearchNodesAnswersAWholeChineseQuestion(t *testing.T) {
 	url, pm := liveServer(t)
+	awaitSearchIndex(t, pm)
 	storyBoard(t, pm)
+	session := mcpSession(t, url, "")
+	// The note's body reaches the built index in the background, a debounce
+	// and one pass after the save returns, so the answer is awaited.
 	var out searchOutput
-	result := call(t, mcpSession(t, url, ""), "search_nodes", map[string]any{"query": "林曉怕不怕水？她的手有什麼特徵"}, &out)
-	if result.IsError {
-		t.Fatal(errorText(result))
+	for began := time.Now(); ; {
+		out = searchOutput{}
+		result := call(t, session, "search_nodes", map[string]any{"query": "林曉怕不怕水？她的手有什麼特徵"}, &out)
+		if result.IsError {
+			t.Fatal(errorText(result))
+		}
+		if len(out.Results) > 0 || time.Since(began) > 10*time.Second {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if len(out.Results) == 0 || out.Results[0].NodeID != "note-01" || out.Results[0].Snippet == "" ||
 		out.Results[0].Match != "terms" || !strings.Contains(out.Note, "No exact phrase match") {

@@ -100,8 +100,11 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 // instead, and a save is searchable within a second of returning.
 func TestAStoreWriteIsSearchableWithinASecond(t *testing.T) {
 	pm, info, st := searchLoadProject(t, 20)
-	if _, err := pm.SearchProjectNodes(info, "needle"); err != nil {
-		t.Fatal(err)
+	// A search no longer waits out the first build (coldSearchWait), so the
+	// build is awaited here: the second this test measures starts at a save
+	// into a built index, not at a cold build on a loaded machine.
+	if !pm.AwaitSearchIndex(info.Path, 30*time.Second) {
+		t.Fatal("the project's search index was not built")
 	}
 	_, rev, err := st.LoadNodeContent("n0003")
 	if err != nil {
