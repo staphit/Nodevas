@@ -192,9 +192,11 @@ export const GraphCard = memo(function GraphCard({
         </span>
         <span className="col-card-meta">
           <NodeTypeChip type={nodeType} />
+          {/* A 152px card's second line has no room for both the label and a
+              marker: with one there the label goes, so the name still shows. */}
           <span
             className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
-            data-assignee-prefix={t("canvas.assigneePrefix")}
+            data-assignee-prefix={markerKind ? undefined : t("canvas.assigneePrefix")}
           >
             {assigned}
           </span>
