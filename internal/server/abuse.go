@@ -472,16 +472,14 @@ func isHeavyPath(path string) bool {
 }
 
 func isExpensivePath(path string) bool {
-	if path == "/api/search" || path == "/api/validate" || path == "/api/dsl/check" ||
+	// Search and repo browsing are read-class: a person typing or clicking
+	// through folders fast is normal use, and each is cheap and capped.
+	if path == "/api/validate" || path == "/api/dsl/check" ||
 		path == "/api/history/version" || path == "/api/history/restore" ||
 		path == "/api/trash/restore" || path == "/api/notify/test" ||
 		path == "/api/audit" || path == "/api/audit/health" ||
 		// One call may create a hundred nodes and validates the graph twice.
 		path == "/api/graph/subgraph" {
-		return true
-	}
-	// Repo browsing reaches a person's runner and its disk.
-	if strings.HasPrefix(path, "/api/explorer/repos/") {
 		return true
 	}
 	return strings.HasPrefix(path, "/api/remote/") &&
