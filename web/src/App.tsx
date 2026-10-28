@@ -15,9 +15,11 @@ import {
   EXPLORER_DEFAULT_W,
   EXPLORER_MAX_W,
   explorerMinWidth,
+  explorerShellStyle,
   explorerWidthFor,
 } from "./explorerWidth";
 import { SidebarBackdrop } from "./components/Sidebar";
+import { useNarrowViewport } from "./components/TopbarOverflow";
 import ExplorerShell from "./explorer/ExplorerShell";
 import { useExplorer } from "./explorer/explorerStore";
 import { GraphPane } from "./components/GraphPane";
@@ -118,6 +120,7 @@ function MainApp() {
   // only drawn wider while the text size asks for it.
   const explorerMin = explorerMinWidth(textScale);
   const shownExplorerWidth = explorerWidthFor(explorerWidth, textScale);
+  const narrowViewport = useNarrowViewport();
 
   // Ctrl/⌘+Z steps back, Shift+Z (and Ctrl+Y, which Windows users reach for)
   // steps forward again. Text fields keep their own history, so anything
@@ -475,15 +478,16 @@ function MainApp() {
           id="project-explorer"
           className={`sidebar-shell${explorerCollapsed ? " collapsed" : ""}`}
           aria-hidden={explorerCollapsed}
-          style={
-            explorerCollapsed
-              ? undefined
-              : { width: shownExplorerWidth, flexBasis: shownExplorerWidth }
-          }
+          style={explorerShellStyle({
+            width: shownExplorerWidth,
+            collapsed: explorerCollapsed,
+            narrow: narrowViewport,
+          })}
         >
           {!explorerCollapsed && <ExplorerShell />}
         </div>
-        {!explorerCollapsed && (
+        {/* The phone overlay has a fixed width, so there is nothing to drag. */}
+        {!explorerCollapsed && !narrowViewport && (
           <ResizeHandle
             className="explorer-resize"
             orientation="vertical"

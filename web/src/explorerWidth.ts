@@ -20,3 +20,21 @@ export function explorerMinWidth(textScale: number): number {
 export function explorerWidthFor(width: number, textScale: number): number {
   return Math.max(width, explorerMinWidth(textScale));
 }
+
+/**
+ * The explorer shell's inline size. Beside the board it is the dragged width;
+ * on a phone-width screen it is an overlay sized by the stylesheet, and an
+ * inline width would beat that and push the panel past the screen's edge.
+ */
+export function explorerShellStyle({
+  width,
+  collapsed,
+  narrow,
+}: {
+  width: number;
+  collapsed: boolean;
+  narrow: boolean;
+}): { width: number; flexBasis: number } | undefined {
+  if (collapsed || narrow) return undefined;
+  return { width, flexBasis: width };
+}
