@@ -27,7 +27,7 @@
 .plan-time {
   margin-left: auto;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .timeline-plan-edit-row span {
   color: var(--text-2);
