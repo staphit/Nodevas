@@ -43,3 +43,34 @@ describe("Station scrolling", () => {
     expect(rules(".station-side > .station-network.is-open")).toMatch(/min-height:\s*0/);
   });
 });
+
+// At 1280x800 the docked agent chat was squeezed into slivers: every section
+// shrank together, so the how-to-connect intro got 117px of its 246px, the
+// message list 37px of its 49px, each behind its own scrollbar, and the
+// header's "Agent chat" wrapped while "0 online" ellipsised to "0.".
+describe("Station's docked agent chat", () => {
+  it("keeps its sections at their own height and lets the column scroll instead", () => {
+    const panel = rules(".station-side > .station-network.is-open > .agent-panel.is-docked");
+    expect(panel).toMatch(/flex:\s*1 0 auto/);
+    expect(rules(".agent-panel.is-docked > *")).toMatch(/flex-shrink:\s*0/);
+  });
+
+  it("shows the whole connect intro, not a 200px window onto it", () => {
+    expect(rules(".agent-panel.is-docked > .agent-roster-section.is-intro")).toMatch(
+      /max-height:\s*none/,
+    );
+  });
+
+  it("gives the message list room for its empty state and a few messages", () => {
+    const list = rules(".agent-panel.is-docked > .agent-messages-list");
+    const basis = list.match(/flex:\s*1 0 (\d+)px/);
+    expect(basis).not.toBeNull();
+    expect(Number(basis?.[1])).toBeGreaterThanOrEqual(120);
+  });
+
+  it("wraps the header's controls rather than the title or the online count", () => {
+    expect(rules(".agent-panel.is-docked .copilot-header-row")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rules(".agent-panel.is-docked .copilot-heading")).toMatch(/white-space:\s*nowrap/);
+    expect(rules(".agent-panel.is-docked .copilot-model")).toMatch(/flex:\s*1 0 auto/);
+  });
+});

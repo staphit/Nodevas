@@ -92,6 +92,15 @@ describe("AgentPanel", () => {
     expect(answerAsk).toHaveBeenCalledWith("ask-1", "approved", "After backup");
   });
 
+  it("marks the roster as the connect intro while nobody is connected", () => {
+    const { container, rerender } = render(<AgentPanel onClose={vi.fn()} />);
+    const roster = () => container.querySelector(".agent-roster-section");
+    expect(roster()).not.toHaveClass("is-intro");
+    useAgents.setState({ sessions: [] });
+    rerender(<AgentPanel onClose={vi.fn()} />);
+    expect(roster()).toHaveClass("is-intro");
+  });
+
   it("shows another person's ask without answer controls", () => {
     const answerAsk = vi.fn().mockResolvedValue(undefined);
     useAgents.setState({ answerAsk, viewer: { id: "bob", name: "bob", role: "member" } });
