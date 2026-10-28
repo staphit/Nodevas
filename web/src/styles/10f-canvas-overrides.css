@@ -404,6 +404,18 @@
     min-width: 36px;
     min-height: 32px;
   }
+  /* Slack before the strip scrolls. Once the pane name is at its floor the
+     strip can come up a pixel or two short (1.45px at 500px and 150% text in
+     English) and drew a whole scrollbar for it. The ⋯ menu, always last, gives
+     up to 8px of its width first: no narrower than the ? toggle beside it. */
+  .board-title-controls > .board-overflow:last-child {
+    flex-shrink: 1;
+    min-width: 28px;
+  }
+  .board-title-controls > .board-overflow:last-child .board-overflow-trigger {
+    width: 100%;
+    min-width: 0;
+  }
   .board-overflow-item {
     min-height: 44px;
     font-size: 13px;
