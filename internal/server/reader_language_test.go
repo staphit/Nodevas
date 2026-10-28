@@ -190,3 +190,53 @@ func TestProjectNameTakenSpeaksTheReadersLanguage(t *testing.T) {
 		})
 	}
 }
+
+// A graph.yaml that does not parse is the reader's to fix, not the server's
+// failure: the board's reads answer 422 naming the line, in the reader's
+// language, and a write refuses the same way.
+func TestUnreadableGraphNamesTheLineInTheReadersLanguage(t *testing.T) {
+	for _, language := range []string{"en-US,en;q=0.9", "zh-TW,zh;q=0.9"} {
+		t.Run(language, func(t *testing.T) {
+			server, pm := readerLanguageFixture(t)
+			if err := os.WriteFile(pm.Store().GraphPath(),
+				[]byte("version: 1\nnodes:\n  - id: [broken\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// The line yaml.v3 reports for this file.
+			line := "line 2 "
+			if strings.HasPrefix(language, "zh") {
+				line = "第 2 行"
+			}
+			for _, request := range []struct{ method, path, body string }{
+				{http.MethodGet, "/api/graph", ""},
+				{http.MethodGet, "/api/state", ""},
+				{http.MethodPost, "/api/nodes", `{"title":"New"}`},
+			} {
+				response := askIn(t, server, language, request.method, request.path, request.body)
+				if response.Code < 400 || response.Code >= 500 {
+					t.Fatalf("%s %s: status = %d, body = %s", request.method, request.path, response.Code, response.Body)
+				}
+				var refusal struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(refusal.Error, "graph.yaml") || !strings.Contains(refusal.Error, line) {
+					t.Fatalf("%s %s: %q does not name the file and line", request.method, request.path, refusal.Error)
+				}
+				if chinese := strings.HasPrefix(language, "zh"); hasCJK(refusal.Error) != chinese {
+					t.Fatalf("%s %s for %s reads %q", request.method, request.path, language, refusal.Error)
+				}
+			}
+			// Nothing was written over the file the reader has to fix.
+			data, err := os.ReadFile(pm.Store().GraphPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != "version: 1\nnodes:\n  - id: [broken\n" {
+				t.Fatalf("graph.yaml was rewritten: %q", data)
+			}
+		})
+	}
+}
