@@ -102,6 +102,7 @@ import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
 import { useTimelineOrderDrag } from "./lane/useTimelineOrderDrag";
+import { useMinuteClock } from "./lane/useMinuteClock";
 import { visibleBoardArea } from "./lane/boardVisibleArea";
 import { VIEWPORT_MARGIN } from "./floatingPanel";
 
@@ -466,6 +467,12 @@ export function LaneView({
       document.removeEventListener("visibilitychange", refreshNow);
     };
   }, []);
+  // The current-time line is labelled to the minute, so it keeps its own
+  // clock; a day it moves into is a new today for the calendar too.
+  const clock = useMinuteClock(!isGraph && !collapsed);
+  useEffect(() => {
+    if (dayKey(clock) !== dayKey(now)) setNow(clock);
+  }, [clock]);
 
   const errorNodes = useMemo(() => {
     const set = new Set<string>();
@@ -872,7 +879,7 @@ export function LaneView({
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
   const nowOffset =
-    ((now.getHours() * 60 + now.getMinutes()) / (24 * 60)) *
+    ((clock.getHours() * 60 + clock.getMinutes()) / (24 * 60)) *
     timelineCellHeight;
   const centerX = (c: Col) =>
     getCenterX(c, {
@@ -1638,7 +1645,7 @@ export function LaneView({
               planDrag={planDrag}
               actualDrag={actualDrag}
               selectedNodeId={selectedNodeId}
-              now={now}
+              now={clock}
               timelineOrderDragRef={timelineOrderDragRef}
               updateTimelineOrderDrag={updateTimelineOrderDrag}
             />
