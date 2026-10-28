@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/engine"
@@ -72,6 +73,11 @@ type Store struct {
 	graphCacheMu sync.Mutex
 	graphFillMu  sync.Mutex
 	graphCache   *cachedGraph
+
+	// pageLists is each node's last page listing; see pages_cache.go.
+	pageListMu  sync.Mutex
+	pageLists   map[string]*cachedPageList
+	pageListGen atomic.Uint64
 
 	selfMu     sync.Mutex
 	selfWrites map[string]time.Time

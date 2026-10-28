@@ -49,6 +49,7 @@ func TestListNodePagesStillRefusesBrokenAndAllowsMissingPages(t *testing.T) {
 		t.Fatalf("listed %d pages, want 3", len(pages))
 	}
 	breakPage(t, st, "n00001", "page-0003")
+	st.InvalidatePageLists() // what the file watcher does on that change
 	if _, err := st.ListNodePages("n00001"); err == nil || !strings.Contains(err.Error(), "page-0003") {
 		t.Fatalf("ListNodePages with a page that is a directory = %v, want an error naming it", err)
 	}
@@ -84,5 +85,65 @@ func TestPageListingIsServedFromTheLastCheckUntilTheManifestChanges(t *testing.T
 	}
 	if _, err := st.ListNodePages("n00001"); err == nil || !strings.Contains(err.Error(), "page-0003") {
 		t.Fatalf("listing after the manifest changed = %v, want the broken page reported", err)
+	}
+}
+
+func TestPageListingRechecksAfterAnOutsideChangeOrTheRecheckInterval(t *testing.T) {
+	st := benchPagesStore(t, 2, 3)
+	if _, err := st.ListNodePages("n00001"); err != nil {
+		t.Fatal(err)
+	}
+	breakPage(t, st, "n00001", "page-0003")
+	st.InvalidatePageLists()
+	if _, err := st.ListNodePages("n00001"); err == nil {
+		t.Fatal("a listing after InvalidatePageLists missed the broken page")
+	}
+
+	// Repaired, rechecked and remembered again...
+	path := st.NodePagePath("n00001", "page-0003", PageFormatMarkdown)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# fixed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.InvalidatePageLists()
+	if _, err := st.ListNodePages("n00001"); err != nil {
+		t.Fatal(err)
+	}
+	// ...a verdict nobody invalidated still expires.
+	breakPage(t, st, "n00001", "page-0003")
+	defer func(previous time.Duration) { pageListRecheck = previous }(pageListRecheck)
+	pageListRecheck = 0
+	if _, err := st.ListNodePages("n00001"); err == nil {
+		t.Fatal("a listing past the recheck interval reused the old verdict")
+	}
+}
+
+func TestPageListingFollowsAMovedNode(t *testing.T) {
+	_, st := folderProject(t)
+	actor := identity.Actor{ID: "writer", Name: "Writer"}
+	if _, _, _, err := st.CreateNodePage(actor, "alpha", "Page", PageFormatMarkdown); err != nil {
+		t.Fatal(err)
+	}
+	before, err := st.ListNodePages("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateNodeFolder("drafts"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MoveNodesToFolder([]string{"alpha"}, "drafts"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.ListNodePages("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("after the move %d pages, want %d", len(after), len(before))
+	}
+	if _, _, _, err := st.LoadNodePage("alpha", after[0].ID); err != nil {
+		t.Fatalf("the listed page does not open after the move: %v", err)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,13 +67,28 @@ func (s *Store) LoadNodePagesManifest(nodeID string) (nodePagesManifest, error) 
 // parseNodePagesManifest is LoadNodePagesManifest without the per-page stat:
 // one file read, so it is cheap enough to do under the lock.
 func (s *Store) parseNodePagesManifest(nodeID string) (nodePagesManifest, error) {
-	var manifest nodePagesManifest
+	data, err := s.readNodePagesManifest(nodeID)
+	if err != nil {
+		return nodePagesManifest{}, err
+	}
+	return decodeNodePagesManifest(nodeID, data)
+}
+
+// readNodePagesManifest is pages.json's bytes; nil when the node has none.
+func (s *Store) readNodePagesManifest(nodeID string) ([]byte, error) {
 	data, err := s.ReadFile(s.NodePagesManifestPath(nodeID))
 	if os.IsNotExist(err) {
-		return manifest, nil
+		return nil, nil
 	}
-	if err != nil {
-		return manifest, err
+	return data, err
+}
+
+// decodeNodePagesManifest parses and validates pages.json's bytes; nil is a
+// node without pages.
+func decodeNodePagesManifest(nodeID string, data []byte) (nodePagesManifest, error) {
+	var manifest nodePagesManifest
+	if data == nil {
+		return manifest, nil
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return manifest, fmt.Errorf("node pages manifest: %w", err)
@@ -111,7 +127,15 @@ func (s *Store) checkNodePageFiles(nodeID string, manifest nodePagesManifest) er
 	if len(manifest.Pages) == 0 {
 		return nil
 	}
-	dir := s.NodePagesDir(nodeID)
+	return s.checkNodePageFilesIn(nodeID, s.NodePagesDir(nodeID), manifest.Pages)
+}
+
+// checkNodePageFilesIn is checkNodePageFiles with the node's pages directory
+// already resolved.
+func (s *Store) checkNodePageFilesIn(nodeID, dir string, pages []NodePageInfo) error {
+	if len(pages) == 0 {
+		return nil
+	}
 	entries, _, err := readProjectDirEntries(s.root, dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("node %q pages: %w", nodeID, err)
@@ -120,7 +144,7 @@ func (s *Store) checkNodePageFiles(nodeID string, manifest nodePagesManifest) er
 	for _, entry := range entries {
 		byName[entry.Name()] = entry
 	}
-	for _, page := range manifest.Pages {
+	for _, page := range pages {
 		name := page.ID + pageFileExtension(page.Format)
 		entry, listed := byName[name]
 		if !listed {
@@ -151,35 +175,60 @@ func marshalNodePagesManifest(manifest nodePagesManifest) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
+// ListNodePages is a node's pages, in order. The listing is reused while the
+// manifest's bytes are unchanged; see pages_cache.go.
 func (s *Store) ListNodePages(nodeID string) ([]NodePageInfo, error) {
 	if !engine.ValidNodeID(nodeID) {
 		return nil, fmt.Errorf("invalid node id")
 	}
-	manifest, err := s.listNodePagesManifest(nodeID)
+	// Read before the manifest: an invalidation from here on leaves what
+	// this call remembers already stale.
+	generation := s.pageListGen.Load()
+	data, err := s.listNodePagesManifest(nodeID)
 	if err != nil {
 		return nil, err
 	}
-	// Outside the lock: a page file replaced between the read and the stat
+	sum := sha256.Sum256(data)
+	dir := s.NodePagesDir(nodeID)
+	cached := s.cachedPageList(nodeID, sum)
+	if cached.fresh(dir, generation, time.Now()) {
+		return slices.Clone(cached.pages), nil
+	}
+	var pages []NodePageInfo
+	if cached != nil {
+		pages = cached.pages
+	} else {
+		manifest, err := decodeNodePagesManifest(nodeID, data)
+		if err != nil {
+			return nil, err
+		}
+		pages = manifest.Pages
+	}
+	// Outside the lock: a page file replaced between the read and the check
 	// is the same race a reader always had with the next writer.
-	if err := s.checkNodePageFiles(nodeID, manifest); err != nil {
+	checkedAt := time.Now()
+	if err := s.checkNodePageFilesIn(nodeID, dir, pages); err != nil {
 		return nil, err
 	}
-	pages := make([]NodePageInfo, len(manifest.Pages))
-	copy(pages, manifest.Pages)
-	return pages, nil
+	s.rememberPageList(nodeID, &cachedPageList{
+		sum: sum, dir: dir, pages: pages, checkedAt: checkedAt, generation: generation,
+	})
+	return slices.Clone(pages), nil
 }
 
-func (s *Store) listNodePagesManifest(nodeID string) (nodePagesManifest, error) {
+// listNodePagesManifest is the node's pages.json, read under the lock after
+// checking the node exists.
+func (s *Store) listNodePagesManifest(nodeID string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	g, _, err := s.graphViewLocked()
 	if err != nil {
-		return nodePagesManifest{}, err
+		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nodePagesManifest{}, fmt.Errorf("node %q not found in graph", nodeID)
+		return nil, fmt.Errorf("node %q not found in graph", nodeID)
 	}
-	return s.parseNodePagesManifest(nodeID)
+	return s.readNodePagesManifest(nodeID)
 }
 
 // CreateNodePage adds a page stored in the requested format; an empty format
