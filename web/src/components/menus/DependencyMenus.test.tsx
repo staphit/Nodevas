@@ -20,6 +20,7 @@ function nodeMenu(
     incoming?: GraphEdge[];
     controllingLogicGate?: LogicGate;
     conditionOperator?: string;
+    edges?: GraphEdge[];
   } = {},
 ) {
   const incoming = options.incoming ?? [
@@ -35,6 +36,7 @@ function nodeMenu(
   const props: NodeMenuProps = {
     contextMenu: { kind: "node", nodeId: "ship", x: 0, y: 0 },
     nodeTitle,
+    edges: options.edges ?? incoming,
     incomingConditions: incoming,
     availableConditionSources: [{ id: "other", title: "Other" }],
     conditionSource: "other",
@@ -69,6 +71,24 @@ describe("NodeMenu dependencies", () => {
       "No nodes available to add",
     ]);
     expect(picker).toBeDisabled();
+  });
+
+  // Other already waits on Ship (through Review here), so Ship waiting for
+  // Other would close a loop that Add then refuses.
+  it("does not offer a node that already waits on this one", () => {
+    nodeMenu({
+      requires: "design",
+      incoming: [{ from: "design", to: "ship" }],
+      edges: [
+        { from: "design", to: "ship" },
+        { from: "ship", to: "review" },
+        { from: "review", to: "other" },
+      ],
+    });
+    const picker = screen.getByRole("combobox", { name: "Add a dependency" });
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "No nodes available to add",
+    ]);
   });
 
   it("shows the default all-of condition as a plain depends-on list", async () => {
