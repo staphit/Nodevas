@@ -237,31 +237,7 @@ func (s *Store) ReadFile(path string) ([]byte, error) {
 }
 
 func readProjectDir(rootPath, path string) ([]os.DirEntry, error) {
-	rel, err := projectRelativePath(rootPath, path)
-	if err != nil {
-		return nil, err
-	}
-	root, err := openProjectRoot(rootPath)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	if err := validateProjectPath(root, rel, false); err != nil {
-		return nil, err
-	}
-	dir, err := root.Open(rel)
-	if err != nil {
-		return nil, err
-	}
-	defer dir.Close()
-	info, err := dir.Stat()
-	if err != nil || !info.IsDir() {
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: %q is not a directory", ErrUnsafeProjectPath, rel)
-	}
-	entries, err := dir.ReadDir(-1)
+	entries, rel, err := readProjectDirEntries(rootPath, path)
 	if err != nil {
 		return nil, err
 	}
@@ -270,14 +246,49 @@ func readProjectDir(rootPath, path string) ([]os.DirEntry, error) {
 			return nil, fmt.Errorf("%w: %q is a symbolic link", ErrUnsafeProjectPath, filepath.Join(rel, entry.Name()))
 		}
 	}
+	return entries, nil
+}
+
+// readProjectDirEntries is readProjectDir without the verdict on the
+// entries: the directory itself is contained, not a link and unchanged while
+// read, and every entry is reported with its type for the caller to judge.
+func readProjectDirEntries(rootPath, path string) ([]os.DirEntry, string, error) {
+	rel, err := projectRelativePath(rootPath, path)
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := openProjectRoot(rootPath)
+	if err != nil {
+		return nil, "", err
+	}
+	defer root.Close()
+	if err := validateProjectPath(root, rel, false); err != nil {
+		return nil, "", err
+	}
+	dir, err := root.Open(rel)
+	if err != nil {
+		return nil, "", err
+	}
+	defer dir.Close()
+	info, err := dir.Stat()
+	if err != nil || !info.IsDir() {
+		if err != nil {
+			return nil, "", err
+		}
+		return nil, "", fmt.Errorf("%w: %q is not a directory", ErrUnsafeProjectPath, rel)
+	}
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, "", err
+	}
 	pathAfter, err := root.Lstat(rel)
 	if err != nil || pathAfter.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathAfter) {
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return nil, fmt.Errorf("%w: directory %q changed while reading", ErrUnsafeProjectPath, rel)
+		return nil, "", fmt.Errorf("%w: directory %q changed while reading", ErrUnsafeProjectPath, rel)
 	}
-	return entries, nil
+	return entries, rel, nil
 }
 
 // ReadProjectDir lists a contained non-symlink directory. Entries are not

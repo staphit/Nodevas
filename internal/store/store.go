@@ -140,11 +140,16 @@ func (s *Store) NodePagesManifestPath(id string) string {
 	return filepath.Join(s.NodePagesDir(id), "pages.json")
 }
 func (s *Store) NodePagePath(nodeID, pageID, format string) string {
-	extension, ok := pageFormatExtension[format]
-	if !ok {
-		extension = ".md"
+	return filepath.Join(s.NodePagesDir(nodeID), pageID+pageFileExtension(format))
+}
+
+// pageFileExtension is the extension a page of format is stored with;
+// Markdown for a format this build does not know.
+func pageFileExtension(format string) string {
+	if extension, ok := pageFormatExtension[format]; ok {
+		return extension
 	}
-	return filepath.Join(s.NodePagesDir(nodeID), pageID+extension)
+	return ".md"
 }
 func (s *Store) draftPath(id string) string {
 	return filepath.Join(s.root, DataDir, "drafts", id+".md")

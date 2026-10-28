@@ -98,15 +98,45 @@ func (s *Store) parseNodePagesManifest(nodeID string) (nodePagesManifest, error)
 	return manifest, nil
 }
 
-// checkNodePageFiles stats each page a manifest lists: up to maxNodePages
-// filesystem calls, which ListNodePages makes after releasing the lock.
+// checkNodePageFiles checks that each page a manifest lists is a regular file
+// if it exists, which ListNodePages does after releasing the lock.
+//
+// It reads the pages directory once and judges the listed files by their
+// entries, instead of resolving and statting up to maxNodePages paths one at
+// a time: on a node with a long tail of pages that was the whole cost of the
+// pages endpoint. A listed page without an entry of exactly its name (absent,
+// or spelled in another case on a case-insensitive disk) is statted on its
+// own, as before.
 func (s *Store) checkNodePageFiles(nodeID string, manifest nodePagesManifest) error {
+	if len(manifest.Pages) == 0 {
+		return nil
+	}
+	dir := s.NodePagesDir(nodeID)
+	entries, _, err := readProjectDirEntries(s.root, dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("node %q pages: %w", nodeID, err)
+	}
+	byName := make(map[string]os.DirEntry, len(entries))
+	for _, entry := range entries {
+		byName[entry.Name()] = entry
+	}
 	for _, page := range manifest.Pages {
-		info, statErr := s.statPath(s.NodePagePath(nodeID, page.ID, page.Format))
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return fmt.Errorf("node %q page %q: %w", nodeID, page.ID, statErr)
+		name := page.ID + pageFileExtension(page.Format)
+		entry, listed := byName[name]
+		if !listed {
+			info, statErr := s.statPath(filepath.Join(dir, name))
+			if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+				return fmt.Errorf("node %q page %q: %w", nodeID, page.ID, statErr)
+			}
+			if statErr == nil && !info.Mode().IsRegular() {
+				return fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
+			}
+			continue
 		}
-		if statErr == nil && !info.Mode().IsRegular() {
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("node %q page %q: %w: %q is a symbolic link", nodeID, page.ID, ErrUnsafeProjectPath, name)
+		}
+		if !entry.Type().IsRegular() {
 			return fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
 		}
 	}
