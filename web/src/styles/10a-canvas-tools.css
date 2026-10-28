@@ -171,7 +171,9 @@
 .command-palette-results button {
   width: 100%;
   display: grid;
-  grid-template-columns: 28px 1fr auto;
+  /* minmax(0, …): a bare 1fr never shrinks below the unwrapped snippet, so a
+     long one would scroll the list sideways instead of ending in "…". */
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
