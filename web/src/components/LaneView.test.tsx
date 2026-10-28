@@ -1029,6 +1029,60 @@ describe("LaneView", () => {
     });
   });
 
+  // The current-time line is labelled to the minute, and it refreshed every
+  // half hour: the label could be thirty minutes out. It ticks on the minute
+  // now, and not at all while the page is hidden.
+  describe("the timeline's current time", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      Reflect.deleteProperty(document, "hidden");
+    });
+
+    // "目前時間 上午10:00": the minute is what is checked.
+    const label = (container: HTMLElement) =>
+      container
+        .querySelector<HTMLElement>(".now-line")
+        ?.getAttribute("aria-label")
+        ?.match(/\d\d:\d\d/)?.[0];
+
+    it("moves on with each minute, on the minute", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+      vi.setSystemTime(new Date(2026, 9, 29, 10, 0, 30));
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+      expect(label(container)).toBe("10:00");
+
+      act(() => vi.advanceTimersByTime(29_000));
+      expect(label(container)).toBe("10:00");
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(label(container)).toBe("10:01");
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(label(container)).toBe("10:02");
+    });
+
+    it("does not tick while the page is hidden, and catches up when it shows", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+      vi.setSystemTime(new Date(2026, 9, 29, 10, 0, 30));
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      act(() => vi.advanceTimersByTime(5 * 60_000));
+      expect(label(container)).toBe("10:00");
+
+      vi.setSystemTime(new Date(2026, 9, 29, 10, 7, 10));
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(label(container)).toBe("10:07");
+      act(() => vi.advanceTimersByTime(50_000));
+      expect(label(container)).toBe("10:08");
+    });
+  });
+
   // A horizontal timeline runs its dates across and its lanes down. Selecting
   // a node scrolled across by the lane's index as if the lanes ran across, so
   // any selection jumped the dates about a fortnight back and today went off
