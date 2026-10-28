@@ -1179,8 +1179,13 @@ export function LaneView({
     planStatusDefinitions,
     // A card made where the reader is looking can still land out of sight:
     // under the drawer, or left of column 0's place on a narrow board.
+    // The card just made is the selection, and an open drawer follows it the
+    // way it follows a click, so the board, the timeline, the drawer and the
+    // explorer all name one node. A closed drawer stays closed.
     createNode: async (node, options) => {
       const id = await createNode(node, options);
+      selectNode(id);
+      if (useApp.getState().activeTab !== null) void openTab(id).catch(reportError);
       revealIfHidden(id);
       return id;
     },
