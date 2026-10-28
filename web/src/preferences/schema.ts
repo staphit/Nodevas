@@ -127,11 +127,15 @@ function stringListPref(
 export const EDITOR_MODES = ["live", "source", "preview"] as const;
 export const EDITOR_FONT_SIZE = { min: 11, max: 22, fallback: 14 } as const;
 
+/** The interface's text size, as a multiple of the design size. */
+export const TEXT_SCALE = { min: 0.9, max: 1.5, fallback: 1, decimals: 2 } as const;
+
 export const PREFERENCE_SCHEMA = {
   // appearance
   // Dark until the viewer picks light, whatever the OS prefers.
   theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, () => "dark" as const),
   language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, () => "en" as const),
+  textScale: numberPref("vised-text-scale", "appearance", TEXT_SCALE),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),
