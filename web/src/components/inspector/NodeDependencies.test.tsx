@@ -82,6 +82,28 @@ describe("NodeDependencies", () => {
     });
   });
 
+  // UX sweep: the picker still offered prerequisites the node already had —
+  // the one just added, until the server answered, and any the expression
+  // names without a wire (a requires saved while the server could not check
+  // it).
+  it("stops offering a prerequisite the moment it is added", async () => {
+    const user = userEvent.setup();
+    updateNode.mockImplementationOnce(() => new Promise(() => {}));
+    render(<NodeDependencies id="design" />);
+    const picker = screen.getByLabelText("選擇前置節點");
+    await user.selectOptions(picker, "review");
+    await user.click(screen.getByRole("button", { name: "新增" }));
+    const offered = within(screen.getByLabelText("選擇前置節點")).getAllByRole("option").map((option) => option.textContent);
+    expect(offered).toEqual(["上線"]);
+  });
+
+  it("does not offer a prerequisite the expression already names", () => {
+    useApp.setState({ graph: graph("plan and review") });
+    render(<NodeDependencies id="design" />);
+    const offered = within(screen.getByLabelText("選擇前置節點")).getAllByRole("option").map((option) => option.textContent);
+    expect(offered).toEqual(["上線"]);
+  });
+
   it("keeps advanced conditions folded unless the node already uses one", () => {
     const { unmount } = render(<NodeDependencies id="design" />);
     expect(screen.getByText("進階條件").closest("details")).not.toHaveAttribute("open");

@@ -60,6 +60,17 @@ const advancedDisclosure = (container: HTMLElement) =>
   container.querySelector("details.dependency-advanced") as HTMLDetailsElement;
 
 describe("NodeMenu dependencies", () => {
+  // UX sweep: a prerequisite the expression names without a wire was still
+  // offered as a new one.
+  it("does not offer a prerequisite the expression already names", () => {
+    nodeMenu({ requires: "design and review and other" });
+    const picker = screen.getByRole("combobox");
+    expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "No nodes available to add",
+    ]);
+    expect(picker).toBeDisabled();
+  });
+
   it("shows the default all-of condition as a plain depends-on list", async () => {
     const { container, addDependency } = nodeMenu({ requires: "design and review" });
     const list = container.querySelector(".dependency-list") as HTMLElement;
