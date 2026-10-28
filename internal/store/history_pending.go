@@ -62,9 +62,36 @@ func (s *Store) historyRepo(ctx context.Context) (*gitrepo.Repo, error) {
 	return g.ready(ctx)
 }
 
+// gitReadRetries are the pauses before HistoryGit reads again. A history
+// commit moves the branch by replacing its ref file, and a git that reads
+// the ref just then finds no branch: it lists no commits, or stops with
+// "your current branch 'main' does not have any commits yet" (a 500 about
+// once in 1,600 Git tab reads under a load of saves). The ref is back within
+// milliseconds. A var only so tests can shorten it.
+var gitReadRetries = []time.Duration{25 * time.Millisecond, 75 * time.Millisecond}
+
 // HistoryGit is the workspace's backend, pending changes and newest
-// commits (at most 50).
+// commits (at most 50). A read that failed, or found a git repository with
+// no commits, is made again (gitReadRetries): reads are idempotent, and a
+// branch with no commits at all only happens before the first save.
 func (s *Store) HistoryGit(ctx context.Context) (WorkspaceGit, error) {
+	out, err := s.historyGitOnce(ctx)
+	for _, pause := range gitReadRetries {
+		if err == nil && (out.Backend != string(HistoryGit) || len(out.Commits) > 0) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return out, err
+		case <-time.After(pause):
+		}
+		out, err = s.historyGitOnce(ctx)
+	}
+	return out, err
+}
+
+// historyGitOnce is one read of what HistoryGit returns.
+func (s *Store) historyGitOnce(ctx context.Context) (WorkspaceGit, error) {
 	out := WorkspaceGit{Backend: string(HistoryFiles), Pending: []WorkspacePending{}, Commits: []WorkspaceCommit{}}
 	repo, err := s.historyRepo(ctx)
 	if errors.Is(err, ErrNoGitHistory) {
