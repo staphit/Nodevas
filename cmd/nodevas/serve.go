@@ -96,6 +96,36 @@ func stepUpMinutesDefault() int {
 	return runnerwire.StepUpWindowSeconds / 60
 }
 
+// wsLimitFlags registers the WebSocket connection caps on fs. Each flag's
+// default comes from its NODEVAS_SERVE_WS_* variable, else the hub default, so
+// the command line wins over the environment. The returned function reads the
+// parsed values.
+func wsLimitFlags(fs *flag.FlagSet, lookup func(string) (string, bool)) func() realtime.ConnectionLimits {
+	defaults := realtime.DefaultConnectionLimits()
+	fromEnv := func(name string, fallback int) int {
+		raw, ok := lookup(name)
+		if !ok {
+			return fallback
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || value <= 0 {
+			log.Printf("ignoring %s=%q: not a positive whole number", name, raw)
+			return fallback
+		}
+		return value
+	}
+	total := fs.Int("ws-max-conns", fromEnv("NODEVAS_SERVE_WS_MAX_CONNS", defaults.Total),
+		"most WebSocket connections the hub keeps open; env NODEVAS_SERVE_WS_MAX_CONNS")
+	perAccount := fs.Int("ws-max-conns-per-account",
+		fromEnv("NODEVAS_SERVE_WS_MAX_CONNS_PER_ACCOUNT", defaults.PerAccount),
+		"most WebSocket connections one account may hold (tabs, devices); env NODEVAS_SERVE_WS_MAX_CONNS_PER_ACCOUNT")
+	perIP := fs.Int("ws-max-conns-per-ip", fromEnv("NODEVAS_SERVE_WS_MAX_CONNS_PER_IP", defaults.PerIP),
+		"most WebSocket connections from one client IP; env NODEVAS_SERVE_WS_MAX_CONNS_PER_IP")
+	return func() realtime.ConnectionLimits {
+		return realtime.ConnectionLimits{Total: *total, PerAccount: *perAccount, PerIP: *perIP}
+	}
+}
+
 // secretEnvironment reads a secret directly or from the file named by the
 // conventional NAME_FILE variable. File-backed secrets keep credentials out
 // of container definitions and process listings.
@@ -376,6 +406,7 @@ func serve(args []string) {
 	abuseMaxConcurrentHeavy := fs.Int("abuse-max-concurrent-heavy", serveConfig.Abuse.MaxConcurrentHeavy, "max concurrent heavy operations")
 	abuseMaxConcurrentDOCX := fs.Int("abuse-max-concurrent-docx", serveConfig.Abuse.MaxConcurrentDOCX, "max concurrent DOCX operations")
 	abuseMaxConcurrentRemote := fs.Int("abuse-max-concurrent-remote", serveConfig.Abuse.MaxConcurrentRemote, "max concurrent remote sync operations")
+	wsLimits := wsLimitFlags(fs, os.LookupEnv)
 	_ = fs.Parse(args)
 
 	// The flag values now represent the complete precedence chain:
@@ -483,6 +514,10 @@ func serve(args []string) {
 	}
 
 	hub, pm, database := bootstrapWorkspace(root)
+	hub.SetConnectionLimits(wsLimits())
+	wsLimitsInForce := hub.ConnectionLimits()
+	slog.Info("websocket limits", slog.Int("total", wsLimitsInForce.Total),
+		slog.Int("per_account", wsLimitsInForce.PerAccount), slog.Int("per_ip", wsLimitsInForce.PerIP))
 	defer pm.Close()
 	defer database.Close()
 	// Refused even when --behind-proxy is off: a list that does not parse is

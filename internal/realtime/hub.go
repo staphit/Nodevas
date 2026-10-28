@@ -30,7 +30,9 @@ type Hub struct {
 	actorConns map[string]int
 	ipConns    map[string]int
 	reserved   int
-	closed     bool
+	// limits caps reserved, actorConns and ipConns; see ConnectionLimits.
+	limits ConnectionLimits
+	closed bool
 	// removals counts connection cleanups after a client has left conns but
 	// before leaveAllDocs has durably handed its last document to the sidecar.
 	// Close waits for it so a workspace is never torn down underneath that I/O.
@@ -167,13 +169,63 @@ func NewHub() *Hub {
 		docEncode:            make(chan struct{}, 1),
 		snapshotActorCadence: map[string]*snapshotCadence{},
 		snapshotDocCadence:   map[docPersistenceKey]*snapshotCadence{},
+		limits:               DefaultConnectionLimits(),
 	}
 }
 
+// ConnectionLimits caps live WebSocket connections: in all, per account (an
+// unauthenticated loopback client counts by name), and per client IP.
+//
+// A connection is cheap to keep (broadcasts are small and fan out from one
+// goroutine), so the caps are about runaway clients, not load. A person with
+// several tabs, devices and the desktop app open can hold a dozen, and behind
+// a proxy every user arrives from a few addresses, hence the generous per-IP
+// cap.
+type ConnectionLimits struct {
+	Total      int
+	PerAccount int
+	PerIP      int
+}
+
+// DefaultConnectionLimits is what a hub enforces unless told otherwise.
+func DefaultConnectionLimits() ConnectionLimits {
+	return ConnectionLimits{
+		Total:      maxWSConnections,
+		PerAccount: maxWSConnectionsPerActor,
+		PerIP:      maxWSConnectionsPerIP,
+	}
+}
+
+// SetConnectionLimits replaces the caps. A zero or negative field keeps its
+// default. Connections already open stay open; the caps apply to new ones.
+func (h *Hub) SetConnectionLimits(limits ConnectionLimits) {
+	defaults := DefaultConnectionLimits()
+	if limits.Total <= 0 {
+		limits.Total = defaults.Total
+	}
+	if limits.PerAccount <= 0 {
+		limits.PerAccount = defaults.PerAccount
+	}
+	if limits.PerIP <= 0 {
+		limits.PerIP = defaults.PerIP
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.limits = limits
+}
+
+// ConnectionLimits reports the caps in force.
+func (h *Hub) ConnectionLimits() ConnectionLimits {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.limits
+}
+
 const (
-	maxWSConnections         = 128
-	maxWSConnectionsPerActor = 8
-	maxWSConnectionsPerIP    = 16
+	// Default connection caps (ConnectionLimits); serve can change them.
+	maxWSConnections         = 512
+	maxWSConnectionsPerActor = 16
+	maxWSConnectionsPerIP    = 32
 	wsMessageBurst           = 20
 	wsMessagesPerSecond      = 2
 	wsPingInterval           = 30 * time.Second
@@ -220,9 +272,9 @@ func (h *Hub) reserveConnection(actor identity.Actor, ip string) bool {
 	actorKey := actorConnectionKey(actor)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || h.reserved >= maxWSConnections ||
-		h.actorConns[actorKey] >= maxWSConnectionsPerActor ||
-		h.ipConns[ip] >= maxWSConnectionsPerIP {
+	if h.closed || h.reserved >= h.limits.Total ||
+		h.actorConns[actorKey] >= h.limits.PerAccount ||
+		h.ipConns[ip] >= h.limits.PerIP {
 		return false
 	}
 	h.reserved++
