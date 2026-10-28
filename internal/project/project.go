@@ -316,7 +316,29 @@ func (pm *ProjectManager) releaseWorkspaceLock() {
 	pm.lockedRoot = ""
 }
 
-func templateGraph(template string) *engine.Graph {
+// eisenhowerTitles are the Eisenhower template's quadrant titles per
+// interface language, in do / schedule / delegate / eliminate order. The
+// titles are written into the new project's graph, so they are chosen once,
+// in the language of whoever created it.
+var eisenhowerTitles = map[string][4]string{
+	"en":    {"Important and urgent: do now", "Important, not urgent: schedule", "Urgent, not important: delegate", "Neither urgent nor important: drop"},
+	"zh-TW": {"重要且緊急：立刻做", "重要不緊急：排程做", "緊急不重要：委派", "不緊急不重要：捨棄"},
+}
+
+// TemplateLanguage maps a language tag ("zh-TW", "zh-Hant-TW", "en-US", an
+// Accept-Language list...) to one the templates are written in: Chinese
+// for any zh tag, English for everything else.
+func TemplateLanguage(tag string) string {
+	first, _, _ := strings.Cut(tag, ",")
+	first, _, _ = strings.Cut(first, ";")
+	first = strings.ToLower(strings.TrimSpace(first))
+	if first == "zh" || strings.HasPrefix(first, "zh-") {
+		return "zh-TW"
+	}
+	return "en"
+}
+
+func templateGraph(template, language string) *engine.Graph {
 	if template == "eisenhower" {
 		quadrant := func(id, title, color string, x, y float64) engine.CanvasGroup {
 			return engine.CanvasGroup{
@@ -324,15 +346,16 @@ func templateGraph(template string) *engine.Graph {
 				X: x, Y: y, Width: 620, Height: 380,
 			}
 		}
+		titles := eisenhowerTitles[TemplateLanguage(language)]
 		return &engine.Graph{
 			Version: 1,
 			Type:    "workflow",
 			UI: &engine.UIState{
 				Groups: []engine.CanvasGroup{
-					quadrant("quad-do", "重要且緊急：立刻做", "#9f2f2d", 0, 0),
-					quadrant("quad-schedule", "重要不緊急：排程做", "#1f6c9f", 640, 0),
-					quadrant("quad-delegate", "緊急不重要：委派", "#956400", 0, 400),
-					quadrant("quad-eliminate", "不緊急不重要：捨棄", "#6f6c66", 640, 400),
+					quadrant("quad-do", titles[0], "#9f2f2d", 0, 0),
+					quadrant("quad-schedule", titles[1], "#1f6c9f", 640, 0),
+					quadrant("quad-delegate", titles[2], "#956400", 0, 400),
+					quadrant("quad-eliminate", titles[3], "#6f6c66", 640, 400),
 				},
 			},
 		}
@@ -340,19 +363,21 @@ func templateGraph(template string) *engine.Graph {
 	return &engine.Graph{Version: 1, Type: "story"}
 }
 
-func (pm *ProjectManager) Activate(name string, create bool, template string) error {
+// Activate opens name, first creating it from template when create is set;
+// language is the creator's interface language for the template's titles.
+func (pm *ProjectManager) Activate(name string, create bool, template, language string) error {
 	pm.activateMu.Lock()
 	defer pm.activateMu.Unlock()
-	return pm.activateLocked(name, create, template)
+	return pm.activateLocked(name, create, template, language)
 }
 
-func (pm *ProjectManager) activateLocked(name string, create bool, template string) error {
+func (pm *ProjectManager) activateLocked(name string, create bool, template, language string) error {
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return err
 	}
 	if create {
-		if err := pm.createLocked(name, dir, template); err != nil {
+		if err := pm.createLocked(name, dir, template, language); err != nil {
 			return err
 		}
 	}
@@ -398,7 +423,7 @@ func (pm *ProjectManager) SetPerAccount(perAccount bool) { pm.perAccount.Store(p
 // business.
 func (pm *ProjectManager) OpenForCaller(name string) error {
 	if !pm.perAccount.Load() {
-		return pm.Activate(name, false, "")
+		return pm.Activate(name, false, "", "")
 	}
 	st, err := pm.StoreFor(name)
 	if err != nil {
@@ -414,14 +439,14 @@ func (pm *ProjectManager) OpenForCaller(name string) error {
 // Create makes a new project without opening it. On a server with accounts
 // each person has their own current project (internal/server), so one person
 // creating a project must not move the project everyone else starts on.
-func (pm *ProjectManager) Create(name, template string) error {
+func (pm *ProjectManager) Create(name, template, language string) error {
 	pm.activateMu.Lock()
 	defer pm.activateMu.Unlock()
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return err
 	}
-	if err := pm.createLocked(name, dir, template); err != nil {
+	if err := pm.createLocked(name, dir, template, language); err != nil {
 		return err
 	}
 	if _, _, err := pm.cachedStore(dir).LoadGraph(); err != nil {
@@ -430,7 +455,7 @@ func (pm *ProjectManager) Create(name, template string) error {
 	return nil
 }
 
-func (pm *ProjectManager) createLocked(name, dir, template string) error {
+func (pm *ProjectManager) createLocked(name, dir, template, language string) error {
 	graphPath := filepath.Join(dir, "graph.yaml")
 	if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
 		return fmt.Errorf("project %q already exists", name)
@@ -451,7 +476,7 @@ func (pm *ProjectManager) createLocked(name, dir, template string) error {
 		return err
 	}
 	if _, err := store.StatProjectPath(pm.workspace, graphPath); os.IsNotExist(err) {
-		data, merr := engine.MarshalGraph(templateGraph(template))
+		data, merr := engine.MarshalGraph(templateGraph(template, language))
 		if merr != nil {
 			return merr
 		}
@@ -570,7 +595,7 @@ func (pm *ProjectManager) openWorkspaceLocked() error {
 		log.Printf("share workspace statuses: %v", err)
 	}
 	if len(openable) == 0 {
-		return pm.activateLocked("main", true, "")
+		return pm.activateLocked("main", true, "", "")
 	}
 	name := openable[0].Name
 	if data, readErr := store.ReadProjectFile(pm.workspace, pm.lastFile()); readErr == nil {
@@ -582,7 +607,7 @@ func (pm *ProjectManager) openWorkspaceLocked() error {
 			}
 		}
 	}
-	return pm.activateLocked(name, false, "")
+	return pm.activateLocked(name, false, "", "")
 }
 
 func (pm *ProjectManager) SwitchWorkspace(root string) error {

@@ -246,7 +246,7 @@ func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, 
 		if replacement == "" {
 			return "", fmt.Errorf("create or import another project before removing the last project")
 		}
-		if err := pm.Activate(replacement, false, ""); err != nil {
+		if err := pm.Activate(replacement, false, "", ""); err != nil {
 			return "", fmt.Errorf("switch project before removal: %w", err)
 		}
 		active = replacement

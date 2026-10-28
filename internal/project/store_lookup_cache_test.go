@@ -25,7 +25,7 @@ func lookupWorkspace(t *testing.T) (*ProjectManager, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pm.Close)
-	if err := pm.Create("alpha", ""); err != nil {
+	if err := pm.Create("alpha", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	dir, err := pm.Resolve("alpha")
@@ -126,7 +126,7 @@ func TestALookupIsRecheckedAfterItsTTL(t *testing.T) {
 func TestTheWatcherDropsALookupWhoseGraphWentAway(t *testing.T) {
 	pinLookupTTL(t, time.Hour)
 	pm, dir := lookupWorkspace(t)
-	if err := pm.Activate("alpha", false, ""); err != nil {
+	if err := pm.Activate("alpha", false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pm.StoreFor("alpha"); err != nil {
@@ -167,7 +167,7 @@ func BenchmarkStoreFor(b *testing.B) {
 				b.Fatal(err)
 			}
 			b.Cleanup(pm.Close)
-			if err := pm.Create("alpha", ""); err != nil {
+			if err := pm.Create("alpha", "", ""); err != nil {
 				b.Fatal(err)
 			}
 			b.ResetTimer()

@@ -295,11 +295,11 @@ func TestCurrentProjectThroughRunnerProxy(t *testing.T) {
 // On loopback there is one person and one active project, as before.
 func TestCurrentProjectLoopbackUnchanged(t *testing.T) {
 	pm := projectManagerForTest(t)
-	if err := pm.Activate("other", true, ""); err != nil {
+	if err := pm.Activate("other", true, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	otherRoot := pm.Store().Root()
-	if err := pm.Activate("main", false, ""); err != nil {
+	if err := pm.Activate("main", false, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	hub := realtime.NewHub()

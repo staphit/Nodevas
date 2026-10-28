@@ -22,6 +22,8 @@ import (
 )
 
 // PostProjectOpen switches to a project, creating it first with create.
+// A template writes titles into the new project in language, the creator's
+// interface language; without one, the request's Accept-Language decides.
 //
 // On loopback it moves the server's active project, and every window follows.
 // With per-account projects it moves only the caller's current project (and
@@ -32,13 +34,18 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		Name     string `json:"name"`
 		Create   bool   `json:"create"`
 		Template string `json:"template"` // "", "empty", "eisenhower"
+		Language string `json:"language"` // "en", "zh-TW"; optional
 	}
 	if !httpx.DecodeJSON(c, &body) {
 		return
 	}
 	if body.Name == "" {
-		httpx.Err(c, 400, fmt.Errorf("body must be {name, create?, template?}"))
+		httpx.Err(c, 400, fmt.Errorf("body must be {name, create?, template?, language?}"))
 		return
+	}
+	language := body.Language
+	if language == "" {
+		language = c.GetHeader("Accept-Language")
 	}
 	if a.current != nil {
 		// Registered outside the administrators' group (routes.go).
@@ -48,11 +55,11 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 				return
 			}
 		}
-		a.openForCaller(c, body.Name, body.Create, body.Template)
+		a.openForCaller(c, body.Name, body.Create, body.Template, language)
 		return
 	}
 	isNew := body.Create && !a.projectExists(body.Name)
-	if err := a.pm.Activate(body.Name, body.Create, body.Template); err != nil {
+	if err := a.pm.Activate(body.Name, body.Create, body.Template, language); err != nil {
 		httpx.Err(c, 400, err)
 		return
 	}
@@ -66,10 +73,10 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 }
 
 // openForCaller is PostProjectOpen with per-account projects.
-func (a *API) openForCaller(c *gin.Context, name string, create bool, template string) {
+func (a *API) openForCaller(c *gin.Context, name string, create bool, template, language string) {
 	name = strings.Trim(strings.TrimSpace(name), "/")
 	if create {
-		if err := a.pm.Create(name, template); err != nil {
+		if err := a.pm.Create(name, template, language); err != nil {
 			httpx.Err(c, http.StatusBadRequest, err)
 			return
 		}
@@ -450,7 +457,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 	a.pm.EvictStores(src)
 	if err := store.RenameProjectPath(a.pm.Workspace(), src, targetWorkspace, dst); err != nil {
 		if stopsWatcher && activeErr == nil {
-			_ = a.pm.Activate(active.Name, false, "")
+			_ = a.pm.Activate(active.Name, false, "", "")
 		}
 		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("搬移失敗：%w", err))
 		return
@@ -470,7 +477,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		}
 		var openErr error
 		if newActive != "" {
-			openErr = a.pm.Activate(newActive, false, "")
+			openErr = a.pm.Activate(newActive, false, "", "")
 		} else {
 			openErr = a.pm.OpenWorkspace()
 			if current, currentErr := a.pm.ActiveProject(); currentErr == nil {
@@ -487,7 +494,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		}
 	} else if movesActive {
 		newActive = newName + strings.TrimPrefix(active.Name, name)
-		if err := a.pm.Activate(newActive, false, ""); err != nil {
+		if err := a.pm.Activate(newActive, false, "", ""); err != nil {
 			httpx.Err(c, http.StatusInternalServerError,
 				fmt.Errorf("已搬移，但重新開啟失敗：%w", err))
 			return

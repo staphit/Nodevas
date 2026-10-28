@@ -53,7 +53,7 @@ func searchLoadProject(tb testing.TB, nodes int) (*ProjectManager, ProjectInfo, 
 		tb.Fatal(err)
 	}
 	pm.UseDatabase(testpg.New(tb))
-	if err := pm.Activate("main", false, ""); err != nil {
+	if err := pm.Activate("main", false, "", ""); err != nil {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(pm.Close)
