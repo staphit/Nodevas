@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,50 +26,34 @@ func (c *Config) RepoBrowseOn() bool {
 
 // Repo browsing limits on this runner.
 const (
+	// repoBrowseConcurrent reads run at once; the rest wait their turn.
 	repoBrowseConcurrent = 4
-	repoBrowsePerMinute  = 120
+	// repoSlotWait is how long a read waits for its turn: past the hub's
+	// own wait (runners.DefaultRepoTimeout), nobody is listening any more.
+	repoSlotWait = 15 * time.Second
 	// binarySniffBytes is how much of a file is checked for a NUL byte.
 	binarySniffBytes = 8 << 10
 )
 
-// repoLimiter bounds repo requests: a few at once, and a rate per minute.
-var repoLimiter = struct {
-	sync.Mutex
-	active int
-	recent []time.Time
-}{}
+// repoSlots bounds the reads in flight. Clicking through folders fast is
+// normal use, so a read past the bound queues instead of being refused; the
+// owner is the only one who may browse, and every read is size-capped.
+var repoSlots = make(chan struct{}, repoBrowseConcurrent)
 
-func acquireRepoSlot(context.Context) error {
-	if !tryRepoSlot() {
-		return refuseRepo(runnerwire.RepoErrBusy, "too many repo requests; try again shortly")
+// acquireRepoSlot waits for a turn until ctx ends or repoSlotWait passes.
+func acquireRepoSlot(ctx context.Context) error {
+	timer := time.NewTimer(repoSlotWait)
+	defer timer.Stop()
+	select {
+	case repoSlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+	case <-timer.C:
 	}
-	return nil
+	return refuseRepo(runnerwire.RepoErrBusy, "too many repo requests; try again shortly")
 }
 
-func tryRepoSlot() bool {
-	repoLimiter.Lock()
-	defer repoLimiter.Unlock()
-	now := time.Now()
-	kept := repoLimiter.recent[:0]
-	for _, t := range repoLimiter.recent {
-		if now.Sub(t) < time.Minute {
-			kept = append(kept, t)
-		}
-	}
-	repoLimiter.recent = kept
-	if repoLimiter.active >= repoBrowseConcurrent || len(repoLimiter.recent) >= repoBrowsePerMinute {
-		return false
-	}
-	repoLimiter.active++
-	repoLimiter.recent = append(repoLimiter.recent, now)
-	return true
-}
-
-func releaseRepoSlot() {
-	repoLimiter.Lock()
-	repoLimiter.active--
-	repoLimiter.Unlock()
-}
+func releaseRepoSlot() { <-repoSlots }
 
 // repoErr is a refusal with its wire code.
 type repoErr struct{ code, msg string }
