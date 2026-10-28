@@ -1,5 +1,5 @@
 import { useApp, usePreference } from "../../store";
-import { LANGUAGE_OPTIONS, useI18n } from "../../i18n";
+import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../../i18n";
 import { EDITOR_FONT_SIZE, EDITOR_MODES, TEXT_SCALE } from "../../preferences/schema";
 import { confirmAction } from "../ConfirmDialog";
 import { openShortcutsHelp, replayTour } from "../topbar/actions";
@@ -35,8 +35,8 @@ export function AppearanceEditor() {
           onChange={(event) => setLanguage(event.target.value as typeof language)}
         >
           {LANGUAGE_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {t(`language.option.${option}`)}
+            <option key={option} value={option} lang={option}>
+              {LANGUAGE_NATIVE_NAMES[option]}
             </option>
           ))}
         </select>

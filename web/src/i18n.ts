@@ -8,8 +8,6 @@ type MessageCatalog = Record<string, string>;
 const messages: Record<Language, MessageCatalog> = {
   en: {
     "language.label": "Language",
-    "language.option.en": "English",
-    "language.option.zh-TW": "Traditional Chinese",
     "topbar.workspace": "Workspace",
     "topbar.project": "Project",
     "topbar.switchProject": "Switch project",
@@ -3258,8 +3256,6 @@ const messages: Record<Language, MessageCatalog> = {
   },
   "zh-TW": {
     "language.label": "語系",
-    "language.option.en": "English",
-    "language.option.zh-TW": "繁體中文",
     "topbar.workspace": "工作區",
     "topbar.project": "專案",
     "topbar.switchProject": "切換專案",
@@ -6639,6 +6635,13 @@ export function useI18n() {
 }
 
 export const LANGUAGE_OPTIONS: readonly Language[] = ["en", "zh-TW"];
+
+/** Each language in its own name, whatever the page is in: a reader who
+ * landed in the wrong one still finds theirs. */
+export const LANGUAGE_NATIVE_NAMES: Readonly<Record<Language, string>> = {
+  en: "English",
+  "zh-TW": "繁體中文",
+};
 
 /** Whether language's own catalog has key (no fallback to English). */
 export function hasMessage(language: Language, key: string): boolean {
