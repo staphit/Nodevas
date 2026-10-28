@@ -325,12 +325,16 @@ export function LaneView({
   // shows the new project is already drawn at its own zoom, and the opening
   // scroll useBoardViewport restores below lands at that scale rather than
   // being re-centred from the old one.
-  const [zoomProject, setZoomProject] = useState(activeProject);
-  if (zoomProject !== activeProject) {
-    setZoomProject(activeProject);
-    if (isGraph) {
-      setZoomDirect(recallBoardView(boardViewKey(activeProject))?.zoom ?? 1);
-    }
+  // Whether the project on show had been shown before it came up, which is
+  // also what spares a phone's board a second first-sight fit below.
+  const [shownProject, setShownProject] = useState(() => ({
+    project: activeProject,
+    remembered: rememberedView !== undefined,
+  }));
+  if (shownProject.project !== activeProject) {
+    const remembered = isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined;
+    setShownProject({ project: activeProject, remembered: remembered !== undefined });
+    if (isGraph) setZoomDirect(remembered?.zoom ?? 1);
   }
   const { boardViewport } = useBoardViewport({
     boardRef,
@@ -1105,10 +1109,9 @@ export function LaneView({
   // remembered opening scroll rather than under it.
   const narrow = useNarrowViewport();
   // A board this session already showed has been through its first sight:
-  // coming back from Station or Settings keeps the user's zoom, not a refit.
-  const autoFitKeyRef = useRef<string | null>(
-    rememberedView ? boardViewKey(activeProject) : null,
-  );
+  // coming back from Station or Settings, or to it from another project in
+  // the project menu, keeps the user's zoom, not a refit.
+  const autoFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isGraph || collapsed || !narrow) return;
     if (boardViewport.width <= 0 || boardViewport.height <= 0) return;
@@ -1116,6 +1119,7 @@ export function LaneView({
     const key = boardViewKey(activeProject);
     if (autoFitKeyRef.current === key) return;
     autoFitKeyRef.current = key;
+    if (shownProject.remembered) return;
     fitGraph(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitGraph is
     // recreated every render; the guards above decide when a fit happens.
