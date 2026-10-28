@@ -13,6 +13,7 @@ import type { Graph } from "../../types";
 import { ROW_H, type Col } from "../canvas/geometry";
 import type { GraphSelection } from "../LaneView";
 import { RULER_W } from "./boardGeometry";
+import { visibleBoardCentre } from "./boardVisibleArea";
 
 export function useBoardReveal({
   isGraph,
@@ -72,12 +73,12 @@ export function useBoardReveal({
     if (!column || !board) return;
     setGraphSelection({ kind: "node", id: revealRequest.nodeId });
     onSelectedNodeChange?.(revealRequest.nodeId);
+    // Centred in what is showing, not on the whole board: the drawer this
+    // jump just opened is laid over the board's right side.
+    const centre = visibleBoardCentre(board);
     board.scrollTo({
-      left: Math.max(0, (centerX(column) - board.clientWidth / 2 / zoom) * zoom),
-      top: Math.max(
-        0,
-        (rowTop(column.row) + ROW_H / 2 - board.clientHeight / 2 / zoom) * zoom,
-      ),
+      left: Math.max(0, centerX(column) * zoom - centre.x),
+      top: Math.max(0, (rowTop(column.row) + ROW_H / 2) * zoom - centre.y),
       behavior: "smooth",
     });
     clearRevealRequest();
