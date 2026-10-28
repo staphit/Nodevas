@@ -257,7 +257,25 @@ export function TimelineGrid({
                   </button>
                 );
               })}
-              <div className="lane-head-cell ruler" style={{ width: RULER_W }} />
+              {/* The ruler's corner carries a lane head's two lines, unseen,
+                  so the header is as tall before its lanes mount (a large
+                  timeline mounts them once the view is known; an empty
+                  project has none) as after. The day rows start below it and
+                  the opening scroll puts today's right under it: a header
+                  that grew afterwards slid today's row under itself, as the
+                  browser's scroll anchoring held the rows still. */}
+              <div className="lane-head-cell ruler" style={{ width: RULER_W }}>
+                {/* A lane head is a button, whose line height is the font's
+                    own rather than the page's. */}
+                <span
+                  className="lane-head-copy"
+                  aria-hidden="true"
+                  style={{ visibility: "hidden", lineHeight: "normal" }}
+                >
+                  <span className="lane-head-title">&nbsp;</span>
+                  <span className="lane-head-assignee">&nbsp;</span>
+                </span>
+              </div>
             </div>
             <div className="board-rows">
               {rowItems.map((item, idx) => {
