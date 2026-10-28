@@ -1186,7 +1186,7 @@ describe("LaneView", () => {
           useApp.setState({
             graph: {
               ...current,
-              nodes: [...current.nodes, { id: "n", title: node.title ?? "n" }],
+              nodes: [...(current.nodes ?? []), { id: "n", title: node.title ?? "n" }],
               ui: {
                 ...current.ui,
                 positions: { ...current.ui?.positions, n: options!.position! },

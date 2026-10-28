@@ -102,6 +102,11 @@ import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
 import { useTimelineOrderDrag } from "./lane/useTimelineOrderDrag";
+import { visibleBoardArea } from "./lane/boardVisibleArea";
+import { VIEWPORT_MARGIN } from "./floatingPanel";
+
+/** The new-node form's widest (12-timeline.css `.node-create-menu`). */
+const NODE_CREATE_FORM_W = 380;
 
 /** A horizontal timeline's sticky date header (TimelineGrid's HORIZONTAL_HEADER_H). */
 const TIMELINE_DATE_HEADER_H = 48;
@@ -326,7 +331,7 @@ export function LaneView({
   const boardRef = useRef<HTMLDivElement>(null);
   // Every way the board opens a node — a card, Enter, its menu, a row in
   // Problems — keeps the card out from under the drawer that opens with it.
-  const openTab = useRevealOpenedCard({
+  const { openTab, revealIfHidden } = useRevealOpenedCard({
     enabled: isGraph && !collapsed,
     boardRef,
     openTab: openTabInStore,
@@ -1131,7 +1136,13 @@ export function LaneView({
   // ----- right-click creation: graph nodes and expected timeline milestones
   const nodeCreation = useNodeCreation({
     planStatusDefinitions,
-    createNode,
+    // A card made where the reader is looking can still land out of sight:
+    // under the drawer, or left of column 0's place on a narrow board.
+    createNode: async (node, options) => {
+      const id = await createNode(node, options);
+      revealIfHidden(id);
+      return id;
+    },
     setLifecycleStatus,
     setGraphNotice,
     setContextMenu,
@@ -1231,18 +1242,28 @@ export function LaneView({
   /**
    * Anchor for the toolbar's "新增節點" button: the middle of what the user is
    * currently looking at, so the node appears where they are working rather
-   * than at the origin [B-03].
+   * than at the origin [B-03]. What they are looking at is the board less
+   * the drawer laid over it: the board's own middle can be under the drawer,
+   * and the form and the card with it.
    */
   const viewportCreationAnchor = (): Extract<LaneContextMenu, { kind: "graph" }> => {
     const board = boardRef.current;
-    const rect = board?.getBoundingClientRect();
-    const x = rect ? rect.left + rect.width / 2 : 240;
-    const y = rect ? rect.top + Math.min(rect.height / 2, 320) : 200;
-    if (!board || !isGraph) return { kind: "graph", x, y, col: 0, row: 0 };
-    const contentX =
-      (board.scrollLeft + board.clientWidth / 2) / viewScale - graphOffsetX;
+    if (!board) return { kind: "graph", x: 240, y: 200, col: 0, row: 0 };
+    const rect = board.getBoundingClientRect();
+    const visible = visibleBoardArea(board);
+    const centreX = (visible.left + visible.right) / 2;
+    // The form opens with its corner here: as near the middle as lets all of
+    // it fit in what is showing, never past its left edge.
+    const x = Math.max(
+      visible.left + VIEWPORT_MARGIN,
+      Math.min(centreX, visible.right - NODE_CREATE_FORM_W - VIEWPORT_MARGIN),
+    );
+    const y = visible.top + Math.min((visible.bottom - visible.top) / 2, 320);
+    if (!isGraph) return { kind: "graph", x, y, col: 0, row: 0 };
+    const contentX = (board.scrollLeft + centreX - rect.left) / viewScale - graphOffsetX;
     const contentY =
-      (board.scrollTop + board.clientHeight / 2) / viewScale - graphOffsetY;
+      (board.scrollTop + (visible.top + visible.bottom) / 2 - rect.top) / viewScale -
+      graphOffsetY;
     return {
       kind: "graph",
       x,

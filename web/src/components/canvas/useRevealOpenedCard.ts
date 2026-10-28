@@ -13,6 +13,10 @@
  * shows is watched rather than the board's own `openTab`. That one is still
  * wrapped for the one open the drawer does not change on: the node it
  * already shows, opened again from its card.
+ *
+ * A card the board has just made — the toolbar's New node — is checked the
+ * same way, drawer or not: it should land where the reader is looking, and
+ * when it cannot (a new card never goes left of column 0) it is brought there.
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
@@ -36,7 +40,10 @@ export function useRevealOpenedCard({
   enabled: boolean;
   boardRef: RefObject<HTMLDivElement | null>;
   openTab: (id: string) => Promise<void>;
-}): (nodeId: string) => Promise<void> {
+}): {
+  openTab: (nodeId: string) => Promise<void>;
+  revealIfHidden: (nodeId: string) => void;
+} {
   const revealNode = useApp((state) => state.revealNode);
   const activeTab = useApp((state) => state.activeTab);
   const [opened, setOpened] = useState<{ nodeId: string } | null>(null);
@@ -67,7 +74,7 @@ export function useRevealOpenedCard({
 
   // `openTab` itself, so anything on the board that opens a node can take it.
   // A node the drawer moves to is caught above; this is the one it was on.
-  return useCallback(
+  const openTabInSight = useCallback(
     (nodeId: string) => {
       const already = useApp.getState().activeTab === nodeId;
       const opening = openTab(nodeId);
@@ -76,4 +83,12 @@ export function useRevealOpenedCard({
     },
     [openTab, enabled],
   );
+  // Measured after the commit that mounts the card.
+  const revealIfHidden = useCallback(
+    (nodeId: string) => {
+      if (enabled) setOpened({ nodeId });
+    },
+    [enabled],
+  );
+  return { openTab: openTabInSight, revealIfHidden };
 }
