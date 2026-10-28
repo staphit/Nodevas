@@ -1,4 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analyzeGraph } from "../../analysis";
 import { readPreferences } from "../../preferences";
@@ -111,6 +113,38 @@ describe("ProblemsPanel", () => {
     const english = rowText(screen.getByRole("region", { name: "Validation warnings" }));
     expect(english[0]).toContain("· Prerequisites");
     expect(english[1]).toContain("· Dependencies");
+  });
+
+  // The node's name was display:block, so " · 前置條件" wrapped onto a line
+  // of its own that began with the dot. The name and the part at fault are
+  // one heading line; jsdom applies no CSS, so the stylesheet is read too.
+  it("keeps the part at fault on the node's line, not a new line starting with ·", () => {
+    render(
+      <ProblemsPanel
+        analysis={empty}
+        issues={[{ severity: "error", nodeId: "b", field: "requires", msg: "未知的節點" }]}
+        nodeTitle={() => "Bravo"}
+        onPick={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    const name = screen.getByText("Bravo");
+    const heading = name.parentElement!;
+    expect(heading).toHaveClass("problems-issue-title");
+    expect(heading.textContent).toBe("Bravo · 前置條件");
+
+    const css = readFileSync(resolve(process.cwd(), "src/styles/10a-canvas-tools.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+    const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)];
+    const rulesFor = (selector: string) =>
+      blocks
+        .filter(([, head]) => head.split(",").some((part) => part.trim() === selector))
+        .map(([, , body]) => body)
+        .join(";");
+    expect(rulesFor(".problems-issue b")).not.toMatch(/display:\s*block/);
+    expect(rulesFor(".problems-issue-title")).toMatch(/display:\s*block/);
   });
 
   it("says one day, not one days, for a one-day critical path", () => {
