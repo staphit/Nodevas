@@ -636,31 +636,41 @@ describe("LaneView", () => {
     });
 
     // The fit changes the zoom, and with it where the board centres a small
-    // graph; the scroll has to be worked out for the zoom it lands on.
-    it("fits a phone's board so its cards are in view", () => {
-      mockNarrowViewport(true);
-      mockBoardSize(500, 608);
-      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-        callback(0);
-        return 0;
-      });
-      useApp.setState({
-        graph: {
-          version: 1,
-          nodes: [
-            { id: "outline", title: "寫大綱" },
-            { id: "chapter", title: "寫第一章" },
-          ],
-          edges: [{ from: "outline", to: "chapter" }],
-          ui: {
-            positions: { outline: { x: 3.348, y: 0 }, chapter: { x: 1.39, y: 0 } },
+    // graph; the scroll has to be worked out for the zoom it lands on, and has
+    // to land whether the next frame comes before the new zoom is drawn (as a
+    // browser may run it) or after.
+    it.each(["before", "after"])(
+      "fits a phone's board so its cards are in view, frame %s the zoom",
+      (order) => {
+        mockNarrowViewport(true);
+        mockBoardSize(500, 608);
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+          if (order === "before") callback(0);
+          else frames.push(callback);
+          return 1;
+        });
+        useApp.setState({
+          graph: {
+            version: 1,
+            nodes: [
+              { id: "outline", title: "寫大綱" },
+              { id: "chapter", title: "寫第一章" },
+            ],
+            edges: [{ from: "outline", to: "chapter" }],
+            ui: {
+              positions: { outline: { x: 3.348, y: 0 }, chapter: { x: 1.39, y: 0 } },
+            },
           },
-        },
-      });
-      const { container } = render(<LaneView variant="graph" {...paneProps} />);
-      expect(container.querySelector<HTMLElement>(".board-inner")!.style.zoom).not.toBe("1");
-      expect(cardsInView(container, 500, 608)).toHaveLength(2);
-    });
+        });
+        const { container } = render(<LaneView variant="graph" {...paneProps} />);
+        act(() => {
+          for (const frame of frames.splice(0)) frame(0);
+        });
+        expect(container.querySelector<HTMLElement>(".board-inner")!.style.zoom).not.toBe("1");
+        expect(cardsInView(container, 500, 608)).toHaveLength(2);
+      },
+    );
 
     it("leaves the opening zoom alone on a desktop", () => {
       mockNarrowViewport(false);
