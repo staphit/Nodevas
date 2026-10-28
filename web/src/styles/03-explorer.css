@@ -207,10 +207,16 @@
   font-size: calc(10px * var(--font-scale, 1));
 }
 .explorer-create-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
+}
+/* As many tools per row as fit at their natural width, the row's slack shared
+   out; a tool that does not fit starts the next row whole. A fixed three
+   columns cut 新增子專案 at text size 150% in a 220px sidebar. */
+.explorer-create-actions > * {
+  flex: 1 1 auto;
 }
 .explorer-create-actions button {
   display: inline-flex;
@@ -226,7 +232,12 @@
   cursor: pointer;
   font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
-  white-space: nowrap;
+  /* Only a label wider than the whole row wraps, inside its own button. */
+  white-space: normal;
+  text-align: center;
+}
+.explorer-create-actions button > svg {
+  flex: none;
 }
 .explorer-create-actions button.primary {
   border-color: var(--accent);
@@ -248,7 +259,7 @@
   font-size: calc(11px * var(--font-scale, 1));
 }
 .explorer-create-actions .workspace-connect-action {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
@@ -259,11 +270,10 @@
 }
 .explorer-transfer-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  min-width: 0;
   margin-top: 7px;
   padding: 5px 6px;
   border: 1px solid var(--border);
@@ -272,27 +282,24 @@
   background: var(--surface-2);
   font-size: calc(9.5px * var(--font-scale, 1));
 }
-/* One row however large the text or narrow the sidebar: the caption takes
-   only what the buttons leave (a zero basis), then each label ends in an
-   ellipsis — never one character per line. */
+/* Every label whole, however large the text or narrow the sidebar: when the
+   row runs out of room the buttons move under the caption, then onto as many
+   rows as they need. Cutting labels to an ellipsis made 匯入 and 匯出 both
+   read "匯…" at 150%. */
 .explorer-transfer-actions > span {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 1 0 auto;
   white-space: nowrap;
 }
 .explorer-transfer-actions > div {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   flex: 0 1 auto;
+  justify-content: flex-end;
   gap: 4px;
-  min-width: 0;
+  margin-left: auto;
 }
 .explorer-transfer-actions button {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
   padding: 2px 7px;
   border: 0;
@@ -312,12 +319,9 @@
 /* Import/export menus: one entry point each, described in words. */
 .transfer-menu {
   position: relative;
-  min-width: 0;
+  flex: none;
 }
 .transfer-menu > summary {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   padding: 2px 7px;
   border-radius: 4px;
   color: var(--text-2);
@@ -1269,5 +1273,5 @@ div.tree-empty-row {
   margin-top: 6px;
 }
 .explorer-create-actions .explorer-example-action {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
 }

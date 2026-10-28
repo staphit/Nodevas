@@ -20,8 +20,9 @@ function rule(selector: string): string {
 /** Every declaration block in the file that styles `selector`, alone or in a list. */
 function rulesMentioning(selector: string): string[] {
   const blocks: string[] = [];
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const pattern = /([^{}]+)\{([^}]*)\}/g;
-  for (let match = pattern.exec(css); match; match = pattern.exec(css)) {
+  for (let match = pattern.exec(source); match; match = pattern.exec(source)) {
     const selectors = match[1].split(",").map((part) => part.trim());
     if (selectors.includes(selector)) blocks.push(match[2]);
   }
