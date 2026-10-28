@@ -253,6 +253,19 @@ func NodeDocPath(root, id string) string {
 	return filepath.Join(root, "nodes", filepath.FromSlash(nodeFolder(root, id)), id+".md")
 }
 
+// NodeDocPaths maps every node id with a document under nodes/ to that
+// document's absolute path, as NodeDocPath resolves it, from one walk of the
+// tree. NodeDocPath checks the file is still there with a stat per call; a
+// caller resolving thousands of nodes at once takes this map instead.
+func NodeDocPaths(root string) map[string]string {
+	locations, _ := scanNodeTree(root)
+	paths := make(map[string]string, len(locations))
+	for id, folder := range locations {
+		paths[id] = filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")
+	}
+	return paths
+}
+
 // NodePagesPath is the absolute path of a node's subpage directory.
 func NodePagesPath(root, id string) string {
 	return filepath.Join(root, "nodes", filepath.FromSlash(nodeFolder(root, id)), id+".pages")
