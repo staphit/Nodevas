@@ -163,10 +163,16 @@ func (s *Store) prepareNodeFileUpdate(n *engine.Node) (*fileUpdate, error) {
 
 // ---------- node content ----------
 
+// LoadNodeContent returns a node's document and its revision. It reads under
+// the store's read lock: the store replaces a document by renaming a new file
+// over it, and a read that opened the old file just before that would fail
+// its changed-while-reading check rather than return either version.
 func (s *Store) LoadNodeContent(id string) (string, string, error) {
 	if !engine.ValidNodeID(id) {
 		return "", "", fmt.Errorf("invalid node id")
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	data, err := s.ReadFile(s.NodePath(id))
 	if err != nil {
 		return "", "", err
