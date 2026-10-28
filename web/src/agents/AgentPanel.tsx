@@ -200,14 +200,19 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
     >
       <header className="copilot-header">
         <div className="copilot-header-row">
-          <h2 id={headingId} className="copilot-heading">
+          {/* Docked, the Station card's toggle right above already reads
+              "Agent chat · N online"; the heading stays only to name the
+              region for screen readers. */}
+          <h2 id={headingId} className={docked ? "copilot-heading sr-only" : "copilot-heading"}>
             {t("agents.title")}
           </h2>
-          <span className="copilot-model">
-            {t("agents.onlineCount", {
-              count: sessions.filter((s) => s.online).length,
-            })}
-          </span>
+          {!docked && (
+            <span className="copilot-model">
+              {t("agents.onlineCount", {
+                count: sessions.filter((s) => s.online).length,
+              })}
+            </span>
+          )}
           <label className="agent-toggle-offline">
             <input
               type="checkbox"
