@@ -183,6 +183,21 @@ func (s *Store) pruneHistory(dir string) error {
 	return nil
 }
 
+// CreateGraph writes a new project's first graph.yaml as this store's own
+// write: the project's history starts with it, and the next save continues
+// from it instead of recording it as an edit made outside.
+func (s *Store) CreateGraph(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path := s.GraphPath()
+	if err := s.WriteAtomic(path, data); err != nil {
+		return err
+	}
+	s.noteHistoryWrite(path, Rev(data))
+	s.history().wrote(identity.Actor{}, "", []string{path})
+	return nil
+}
+
 // WriteVersioned = keep the previous version + atomic write. Its only caller is the
 // restore path, where the version being replaced is the one the user was just
 // looking at, so keeping it is unconditional.

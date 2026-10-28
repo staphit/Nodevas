@@ -386,7 +386,7 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template, lan
 		return err
 	}
 	if create {
-		if err := pm.createLocked(name, dir, template, language); err != nil {
+		if err := pm.createLocked(name, dir, template, language, false); err != nil {
 			return err
 		}
 	}
@@ -445,7 +445,24 @@ func (pm *ProjectManager) OpenForCaller(name string) error {
 	return nil
 }
 
-// Create makes a new project without opening it. On a server with accounts
+// ActivateNew creates name from template, with the workflow a project a
+// person creates starts with, and opens it; language is the creator's
+// interface language for the template's titles.
+func (pm *ProjectManager) ActivateNew(name, template, language string) error {
+	pm.activateMu.Lock()
+	defer pm.activateMu.Unlock()
+	dir, err := pm.Resolve(name)
+	if err != nil {
+		return err
+	}
+	if err := pm.createLocked(name, dir, template, language, true); err != nil {
+		return err
+	}
+	return pm.activateLocked(name, false, "", "")
+}
+
+// Create makes a new project, with the workflow a project a person creates
+// starts with, without opening it. On a server with accounts
 // each person has their own current project (internal/server), so one person
 // creating a project must not move the project everyone else starts on.
 func (pm *ProjectManager) Create(name, template, language string) error {
@@ -455,7 +472,7 @@ func (pm *ProjectManager) Create(name, template, language string) error {
 	if err != nil {
 		return err
 	}
-	if err := pm.createLocked(name, dir, template, language); err != nil {
+	if err := pm.createLocked(name, dir, template, language, true); err != nil {
 		return err
 	}
 	if _, _, err := pm.cachedStore(dir).LoadGraph(); err != nil {
@@ -464,7 +481,11 @@ func (pm *ProjectManager) Create(name, template, language string) error {
 	return nil
 }
 
-func (pm *ProjectManager) createLocked(name, dir, template, language string) error {
+// createLocked writes a new project. workflow gives it the workflow a project
+// a person creates starts with (engine.NewProjectWorkflow); without it the
+// project has none (legacy) until someone picks a preset, which is what a
+// workspace's own first project and programmatic callers get.
+func (pm *ProjectManager) createLocked(name, dir, template, language string, workflow bool) error {
 	graphPath := filepath.Join(dir, "graph.yaml")
 	if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
 		return fmt.Errorf("project %q already exists", name)
@@ -485,11 +506,18 @@ func (pm *ProjectManager) createLocked(name, dir, template, language string) err
 		return err
 	}
 	if _, err := store.StatProjectPath(pm.workspace, graphPath); os.IsNotExist(err) {
-		data, merr := engine.MarshalGraph(templateGraph(template, language))
+		// Written once, workflow included: a second write right after this
+		// one could beat the history's first open and leave the creation
+		// recorded twice, once as an edit undoing the other.
+		graph := templateGraph(template, language)
+		if workflow {
+			graph.Workflow = engine.NewProjectWorkflow(graph.Type)
+		}
+		data, merr := engine.MarshalGraph(graph)
 		if merr != nil {
 			return merr
 		}
-		if werr := pm.cachedStore(dir).WriteAtomic(graphPath, data); werr != nil {
+		if werr := pm.cachedStore(dir).CreateGraph(data); werr != nil {
 			return werr
 		}
 	} else if err != nil {
