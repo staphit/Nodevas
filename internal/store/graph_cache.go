@@ -27,6 +27,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,8 +67,24 @@ func (s *Store) cachedGraphFor(sum [sha256.Size]byte, shared []engine.StatusDefi
 	return cached
 }
 
+// settledRead runs read again, a few times, while it fails because a file it
+// read was replaced (renamed over) in the middle of the read: the error
+// ReadProjectFile gives instead of either version. It is for the reads that
+// hold no store lock, against writers that replace files whole; a path that is
+// really unsafe fails every time and is reported.
+func settledRead(read func() error) error {
+	var err error
+	for range 4 {
+		if err = read(); err == nil || !errors.Is(err, ErrUnsafeProjectPath) {
+			return err
+		}
+	}
+	return err
+}
+
 // graphViewLocked returns the current graph as a shared, read-only value.
-// The caller holds s.mu, for reading or writing.
+// The caller holds s.mu, for reading or writing, or is LoadGraph, which
+// reads without it.
 func (s *Store) graphViewLocked() (*engine.Graph, string, error) {
 	entry, err := s.currentGraphLocked()
 	if err != nil {
@@ -90,7 +107,8 @@ func (s *Store) loadGraphLocked() (*engine.Graph, string, error) {
 // currentGraphLocked reads graph.yaml and returns the cache entry for its
 // bytes, parsing them on a miss.
 //
-// Readers holding s.mu only for reading may run this concurrently;
+// Readers holding s.mu only for reading, or not at all, may run this
+// concurrently;
 // graphFillMu makes the ones that miss wait for one parse instead of each
 // parsing the same bytes.
 func (s *Store) currentGraphLocked() (*cachedGraph, error) {

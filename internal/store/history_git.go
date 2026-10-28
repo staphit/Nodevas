@@ -119,13 +119,16 @@ func newGitHistory(s *Store, window time.Duration) *gitHistory {
 //
 // Caller holds s.mu, exclusively or (a page save) for reading together with
 // abs's path lock. History never fails a save, so errors are logged.
-func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
-	data, err := g.s.ReadFile(abs)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("history for %s: read before overwrite: %v", g.s.root, err)
+func (g *gitHistory) beforeOverwrite(abs string, data []byte, always bool) error {
+	if data == nil {
+		var err error
+		data, err = g.s.ReadFile(abs)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("history for %s: read before overwrite: %v", g.s.root, err)
+			}
+			return nil
 		}
-		return nil
 	}
 	mark, known := g.s.loadHistoryMark(abs)
 	own := known && mark.rev == Rev(data)

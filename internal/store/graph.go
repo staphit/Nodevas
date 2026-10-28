@@ -19,10 +19,19 @@ import (
 //
 // The graph is shared with every other reader (graph_cache.go): treat it as
 // read-only, and Clone it before changing anything.
+//
+// It takes no store lock: graph.yaml is only ever replaced whole, by a rename,
+// so a read sees one version or the next and never a mix (see settledRead).
+// Behind a writer's lock, every board's graph read queued behind every card
+// move's commit, which is what a mixed load spends its reads waiting on.
 func (s *Store) LoadGraph() (*engine.Graph, string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.graphViewLocked()
+	var g *engine.Graph
+	var rev string
+	err := settledRead(func() (err error) {
+		g, rev, err = s.graphViewLocked()
+		return err
+	})
+	return g, rev, err
 }
 
 // SaveGraph writes graph.yaml (optimistic-locked) and
@@ -153,9 +162,15 @@ func (s *Store) prepareNodeFileUpdate(n *engine.Node) (*fileUpdate, error) {
 	if prev != nil {
 		expectedRev = Rev(prev)
 	}
+	// Read just now under the same exclusive lock the write is made under:
+	// the write path takes it as read rather than reading it twice more
+	// (its revision check, its history snapshot).
 	return &fileUpdate{
 		path:          path,
 		data:          out,
+		before:        prev,
+		existed:       prev != nil,
+		read:          true,
 		checkRevision: true,
 		expectedRev:   expectedRev,
 	}, nil
@@ -163,17 +178,19 @@ func (s *Store) prepareNodeFileUpdate(n *engine.Node) (*fileUpdate, error) {
 
 // ---------- node content ----------
 
-// LoadNodeContent returns a node's document and its revision. It reads under
-// the store's read lock: the store replaces a document by renaming a new file
-// over it, and a read that opened the old file just before that would fail
-// its changed-while-reading check rather than return either version.
+// LoadNodeContent returns a node's document and its revision. Like LoadGraph
+// it takes no store lock: the store replaces a document by renaming a new
+// file over it, and a read that opened the old file just before that, and so
+// fails its changed-while-reading check, reads again (settledRead).
 func (s *Store) LoadNodeContent(id string) (string, string, error) {
 	if !engine.ValidNodeID(id) {
 		return "", "", fmt.Errorf("invalid node id")
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	data, err := s.ReadFile(s.NodePath(id))
+	var data []byte
+	err := settledRead(func() (err error) {
+		data, err = s.ReadFile(s.NodePath(id))
+		return err
+	})
 	if err != nil {
 		return "", "", err
 	}

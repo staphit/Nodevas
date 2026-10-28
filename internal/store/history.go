@@ -116,12 +116,21 @@ func (s *Store) snapshotHistoryAlways(path string) error {
 }
 
 func (s *Store) snapshotHistoryWithin(path string, window time.Duration) error {
-	data, err := s.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+	return s.snapshotContentWithin(path, nil, window)
+}
+
+// snapshotContentWithin is snapshotHistoryWithin for path whose content is
+// data, read from disk when nil.
+func (s *Store) snapshotContentWithin(path string, data []byte, window time.Duration) error {
+	if data == nil {
+		var err error
+		data, err = s.ReadFile(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
-		return err
 	}
 	if window > 0 {
 		mark, known := s.loadHistoryMark(path)
@@ -184,7 +193,7 @@ func (s *Store) WriteVersioned(path string, data []byte) error {
 // writeVersionedLocked is WriteVersioned on behalf of actor. Caller holds s.mu.
 func (s *Store) writeVersionedLocked(actor identity.Actor, kind, path string, data []byte) error {
 	backend := s.history()
-	if err := backend.beforeOverwrite(path, true); err != nil {
+	if err := backend.beforeOverwrite(path, nil, true); err != nil {
 		return fmt.Errorf("snapshot %s: %w", filepath.Base(path), err)
 	}
 	if err := s.WriteAtomic(path, data); err != nil {

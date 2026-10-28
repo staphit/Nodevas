@@ -19,10 +19,12 @@ import (
 // write-side hooks with s.mu held, so they must be quick and must never wait
 // on git; the read side and flush run without it.
 type historyBackend interface {
-	// beforeOverwrite runs just before path is replaced. always is for the
+	// beforeOverwrite runs just before path is replaced, whose content is
+	// current (nil: read it from disk; a caller that has just read the file
+	// under s.mu passes what it read, sparing a read). always is for the
 	// writes that destroy a version on purpose (a restore, a lossy format
 	// conversion): that version must be recoverable however recent it is.
-	beforeOverwrite(path string, always bool) error
+	beforeOverwrite(path string, current []byte, always bool) error
 	// wrote runs after paths were written for actor. kind names the change
 	// when the paths alone would not say it ("restore"); "" means derive it.
 	wrote(actor identity.Actor, kind string, paths []string)
@@ -171,11 +173,12 @@ func (s *Store) Close(ctx context.Context) error {
 // overwritten, under .vised/history. Its code is in history.go.
 type fileHistory struct{ s *Store }
 
-func (f fileHistory) beforeOverwrite(path string, always bool) error {
+func (f fileHistory) beforeOverwrite(path string, current []byte, always bool) error {
+	window := historyCoalesceWindow
 	if always {
-		return f.s.snapshotHistoryAlways(path)
+		window = 0
 	}
-	return f.s.snapshotHistory(path)
+	return f.s.snapshotContentWithin(path, current, window)
 }
 
 func (fileHistory) wrote(identity.Actor, string, []string) {}

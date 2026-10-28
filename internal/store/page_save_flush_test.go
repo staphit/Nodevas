@@ -4,24 +4,26 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"nodevas/internal/identity"
 )
 
-// stallPageFlush makes the disk flush of every write to a file named like
-// page hang until the returned release is called, and reports on flushing
-// when one has started.
+// stallPageFlush makes the first disk flush of a write to a file named like
+// page (the new content's) hang until the returned release is called, and
+// reports on flushing when it has started.
 func stallPageFlush(t *testing.T, page string) (flushing <-chan struct{}, release func()) {
 	t.Helper()
 	started := make(chan struct{}, 16)
 	gate := make(chan struct{})
 	var once sync.Once
 	release = func() { once.Do(func() { close(gate) }) }
+	var stalled atomic.Bool
 	previous := syncFile
 	syncFile = func(file *os.File) error {
-		if strings.Contains(file.Name(), page) {
+		if strings.Contains(file.Name(), page) && stalled.CompareAndSwap(false, true) {
 			started <- struct{}{}
 			<-gate
 		}
@@ -34,14 +36,15 @@ func stallPageFlush(t *testing.T, page string) (flushing <-chan struct{}, releas
 	return started, release
 }
 
-// A page save spends most of its time waiting for the disk to flush the new
-// content (tens of milliseconds on Windows under load). If it holds the store
-// lock meanwhile, even shared, a card move that wants the lock exclusively
-// waits for the flush, and every reader that arrives behind the move waits
-// too: under an auto-saving editor and a few people dragging cards, the board's
-// reads queue behind flushes they have nothing to do with. So the flush holds
-// no store lock: the move and the reads go on while it is stalled.
-func TestAPageSavesDiskFlushHoldsNoStoreLock(t *testing.T) {
+// A board's reads (the graph, a node, its page list) must not queue behind
+// the store's writers. A page save holds the store lock shared through its
+// write and disk flush (tens of milliseconds on Windows under load); a card
+// move that wants the lock exclusively waits for it, and with the lock
+// preferring a waiting writer, every reader that arrives after the move used
+// to wait too. Under an auto-saving editor and a few people dragging cards,
+// that made a mixed load's reads five times slower. These reads take no store
+// lock, so they answer while the flush is stalled and the move waits.
+func TestReadsDoNotQueueBehindAWriterWaitingOnAPageSave(t *testing.T) {
 	st := benchPagesStore(t, 3, 1)
 	actor := identity.Actor{ID: "ann", Name: "Ann"}
 	_, _, rev, err := st.LoadNodePage("n00000", "page-0001")
@@ -69,35 +72,33 @@ func TestAPageSavesDiskFlushHoldsNoStoreLock(t *testing.T) {
 		_, _, err := st.ApplyGraphOps(actor, []GraphOp{{Kind: "move", NodeID: "n00001", X: &x, Y: &y}})
 		moved <- err
 	}()
-	time.Sleep(50 * time.Millisecond) // the move is waiting for the lock, or done
+	time.Sleep(50 * time.Millisecond) // the move is waiting for the lock
 
-	read := make(chan error, 1)
-	go func() {
-		_, _, err := st.LoadGraph()
-		read <- err
-	}()
-	select {
-	case err := <-read:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		release()
-		t.Fatal("a graph read waited for another page's disk flush (behind a waiting card move)")
+	reads := map[string]func() error{
+		"graph":     func() error { _, _, err := st.LoadGraph(); return err },
+		"node":      func() error { _, _, err := st.LoadNodeContent("n00002"); return err },
+		"page list": func() error { _, err := st.ListNodePages("n00002"); return err },
 	}
-	select {
-	case err := <-moved:
-		if err != nil {
-			t.Fatal(err)
+	for name, read := range reads {
+		done := make(chan error, 1)
+		go func() { done <- read() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s read: %v", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			release()
+			t.Fatalf("a %s read waited behind a card move waiting on another page's disk flush", name)
 		}
-	case <-time.After(5 * time.Second):
-		release()
-		t.Fatal("a card move waited for another page's disk flush")
 	}
 
 	release()
 	if err := <-saved; err != nil {
 		t.Fatalf("save: %v", err)
+	}
+	if err := <-moved; err != nil {
+		t.Fatalf("move: %v", err)
 	}
 	_, content, _, err := st.LoadNodePage("n00000", "page-0001")
 	if err != nil {

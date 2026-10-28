@@ -216,19 +216,24 @@ func (s *Store) ListNodePages(nodeID string) ([]NodePageInfo, error) {
 	return slices.Clone(pages), nil
 }
 
-// listNodePagesManifest is the node's pages.json, read under the lock after
-// checking the node exists.
+// listNodePagesManifest is the node's pages.json, read after checking the
+// node exists. It takes no store lock, like LoadGraph: pages.json is replaced
+// whole, so the read sees one version or the next; a node deleted between
+// the two reads has no pages.json left, which reads as no pages.
 func (s *Store) listNodePagesManifest(nodeID string) ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	g, _, err := s.graphViewLocked()
+	g, _, err := s.LoadGraph()
 	if err != nil {
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
 		return nil, fmt.Errorf("node %q not found in graph", nodeID)
 	}
-	return s.readNodePagesManifest(nodeID)
+	var data []byte
+	err = settledRead(func() (err error) {
+		data, err = s.readNodePagesManifest(nodeID)
+		return err
+	})
+	return data, err
 }
 
 // CreateNodePage adds a page stored in the requested format; an empty format
@@ -391,7 +396,7 @@ func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target str
 	// The old file leaves a snapshot behind: a conversion is lossy, and the
 	// previous version has to stay recoverable.
 	history := s.history()
-	if err := history.beforeOverwrite(oldPath, true); err != nil {
+	if err := history.beforeOverwrite(oldPath, nil, true); err != nil {
 		return nil, "", "", err
 	}
 	if err := s.applyUpdatesLocked(actor, []fileUpdate{

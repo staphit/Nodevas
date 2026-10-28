@@ -62,7 +62,9 @@ func Rev(data []byte) string {
 // .vised/{history,trash,drafts}.
 type Store struct {
 	// mu orders access to the project's files: writers take it exclusively,
-	// readers (LoadGraph, ListNodePages, claims) share it.
+	// readers (claims, page reads, page saves) share it. The hot reads of
+	// files that are only ever replaced whole (LoadGraph, LoadNodeContent,
+	// ListNodePages) take none: see settledRead.
 	mu      sync.RWMutex
 	mediaMu sync.Mutex
 	root    string
@@ -322,10 +324,13 @@ func (s *Store) WriteAtomic(path string, data []byte) error {
 }
 
 type fileUpdate struct {
-	path          string
-	data          []byte
-	before        []byte
-	existed       bool
+	path    string
+	data    []byte
+	before  []byte
+	existed bool
+	// read says before and existed are already what the file holds: the
+	// caller read it under s.mu, held exclusively, so it cannot have changed.
+	read          bool
 	checkRevision bool
 	expectedRev   string
 }
@@ -348,14 +353,16 @@ func (s *Store) applyUpdatesLocked(actor identity.Actor, updates []fileUpdate) e
 func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpdate) error {
 	history := s.history()
 	for i := range updates {
-		before, err := s.ReadFile(updates[i].path)
-		switch {
-		case err == nil:
-			updates[i].before = before
-			updates[i].existed = true
-		case errors.Is(err, os.ErrNotExist):
-		default:
-			return err
+		if !updates[i].read {
+			before, err := s.ReadFile(updates[i].path)
+			switch {
+			case err == nil:
+				updates[i].before = before
+				updates[i].existed = true
+			case errors.Is(err, os.ErrNotExist):
+			default:
+				return err
+			}
 		}
 		if updates[i].checkRevision {
 			actualRev := ""
@@ -369,7 +376,10 @@ func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpd
 		if updates[i].existed && bytes.Equal(updates[i].before, updates[i].data) {
 			continue
 		}
-		if err := history.beforeOverwrite(updates[i].path, false); err != nil {
+		if !updates[i].existed {
+			continue // nothing to keep
+		}
+		if err := history.beforeOverwrite(updates[i].path, updates[i].before, false); err != nil {
 			return err
 		}
 	}
@@ -415,6 +425,7 @@ func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpd
 	}
 	return nil
 }
+
 func (s *Store) checkRevision(path, baseRev string) error {
 	current, err := s.ReadFile(path)
 	if err != nil {
