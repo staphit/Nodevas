@@ -695,12 +695,15 @@ div.tree-empty-row {
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
+/* The 目前/資料夾 tag wraps under the name rather than eating into it: at a
+   large text size in a narrow sidebar the name is what has to stay readable. */
 .project-tree-open {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 5px;
+  gap: 2px 5px;
   padding: 0;
   border: 0;
   color: inherit;
@@ -827,8 +830,11 @@ div.tree-empty-row {
   transform: translateY(-1px);
 }
 .project-tree-name {
-  flex: 1;
+  /* Basis auto: the name claims its own width, so a tag that does not fit
+     beside it goes to the next line; only a name wider than the row is cut. */
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
