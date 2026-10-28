@@ -39,9 +39,11 @@ describe("project transfer bar layout", () => {
   });
 
   it("lets the caption give way before the buttons do", () => {
-    const caption = /flex:\s*0\s+(\d+)/.exec(rule(".explorer-transfer-actions > span"));
-    expect(caption).not.toBeNull();
-    expect(Number(caption![1])).toBeGreaterThan(1);
+    // A zero basis: the buttons get their full width first and the caption
+    // only what is left, so no button is cut while the caption still shows.
+    // A shrink ratio alone still took a pixel off 儲存 at 150%.
+    expect(rule(".explorer-transfer-actions > span")).toMatch(/flex:\s*1\s+1\s+0(px)?\s*;/);
+    expect(rule(".explorer-transfer-actions > div")).toMatch(/flex:\s*0\s+1\s+auto/);
     expect(rule(".transfer-menu")).toMatch(/min-width:\s*0/);
   });
 });
