@@ -424,7 +424,7 @@ export function OnboardingTour() {
         >
           <strong className="tour-title">歡迎使用 Nodevas</strong>
           <p className="tour-body">
-            要花 30 秒認識一下介面嗎?之後點到各區塊時,會在第一次使用時給你簡短提示。
+            要花 30 秒認識一下介面嗎？之後點到各區塊時，會在第一次使用時給你簡短提示。
           </p>
           <div className="tour-actions">
             <button type="button" className="tour-btn tour-btn--ghost" onClick={declineTour}>
