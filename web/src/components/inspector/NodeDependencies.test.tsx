@@ -63,6 +63,21 @@ describe("NodeDependencies", () => {
     });
   });
 
+  // 上線 waits for 設計, so 設計 waiting for 上線 (or for anything that
+  // waits on 上線) would close a loop: the picker used to offer it first and
+  // the Add button then failed with a circular-dependency error.
+  it("never offers a node that already waits on this one, however far down", () => {
+    const g = graph();
+    g.nodes!.push({ id: "launch", title: "發表" });
+    g.edges!.push({ from: "ship", to: "launch" });
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    const picker = screen.getByLabelText("選擇前置節點");
+    const offered = within(picker).getAllByRole("option").map((option) => option.textContent);
+    expect(offered).toEqual(["審查"]);
+    expect(picker).toHaveValue("review");
+  });
+
   it("adds the prerequisite picked from the nodes not yet connected", async () => {
     const user = userEvent.setup();
     render(<NodeDependencies id="design" />);
