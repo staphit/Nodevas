@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ConflictError } from "../api";
 import { useApp } from "../store";
 import { drainWrites } from "./internals";
-import type { Tab } from "./types";
+import type { PageDoc, Tab } from "./types";
 
 /**
  * The save-on-leave paths queue their write rather than awaiting it, so that
@@ -21,6 +21,7 @@ vi.mock("../api", async (importOriginal) => {
       putDraft: vi.fn(),
       putNode: vi.fn(),
       putNodePage: vi.fn(),
+      getNodePage: vi.fn(),
     },
   };
 });
@@ -466,6 +467,85 @@ describe("automatic saving", () => {
     await useApp.getState().notifyDiskChange("echo");
     expect(api.getNode).toHaveBeenCalledTimes(1);
     expect(useApp.getState().tabs[0]).toMatchObject({ content: "彈出視窗的版本", rev: "rev-3" });
+  });
+});
+
+// A subpage is a file of the node, and its save is announced as the node's
+// `node-changed` like the node's own document. Only the main document used to
+// be read back, so a subpage typed in the pop-out never reached the main
+// window (nor the other way round), and the stale window's next keystroke was
+// refused as a version conflict.
+describe("a subpage changed in another window", () => {
+  const page = (options: Partial<PageDoc> = {}): PageDoc => ({
+    nodeId: "a",
+    id: "page-0001",
+    content: "舊內容",
+    rev: "page-rev-1",
+    format: "md",
+    dirty: false,
+    loading: false,
+    conflict: null,
+    ...options,
+  });
+
+  it("is read back into the open subpage", async () => {
+    useApp.setState({ tabs: [tab("a")], activeTab: "a", pageDocs: { a: page() } });
+    vi.mocked(api.getNode).mockResolvedValue({ id: "a", content: "a content", rev: "rev-1" });
+    vi.mocked(api.getNodePage).mockResolvedValue({
+      nodeId: "a",
+      pageId: "page-0001",
+      format: "md",
+      content: "SUB6",
+      rev: "page-rev-2",
+    });
+
+    await useApp.getState().notifyDiskChange("a");
+
+    expect(api.getNodePage).toHaveBeenCalledWith("a", "page-0001");
+    expect(useApp.getState().pageDocs.a).toMatchObject({
+      content: "SUB6",
+      rev: "page-rev-2",
+      dirty: false,
+      conflict: null,
+    });
+  });
+
+  it("does not overwrite a subpage with unsaved typing", async () => {
+    useApp.setState({ pageDocs: { a: page({ content: "還沒存", dirty: true }) } });
+    vi.mocked(api.getNodePage).mockResolvedValue({
+      nodeId: "a",
+      pageId: "page-0001",
+      format: "md",
+      content: "SUB6",
+      rev: "page-rev-2",
+    });
+
+    await useApp.getState().notifyDiskChange("a");
+
+    expect(useApp.getState().pageDocs.a).toMatchObject({ content: "還沒存", dirty: true });
+  });
+
+  it("costs no read when it is the echo of this window's own subpage save", async () => {
+    let finish!: (result: { ok: boolean; rev: string }) => void;
+    vi.mocked(api.putNodePage).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    useApp.setState({
+      tabs: [tab("a")],
+      activeTab: "a",
+      pageDocs: { a: page({ content: "SUB6", dirty: true }) },
+    });
+
+    const saving = useApp.getState().savePageDoc("a");
+    await vi.waitFor(() => expect(api.putNodePage).toHaveBeenCalledTimes(1));
+    // The hub announces the write before it answers the PUT.
+    const echo = useApp.getState().notifyDiskChange("a");
+    finish({ ok: true, rev: "page-rev-2" });
+    await Promise.all([saving, echo]);
+
+    expect(api.getNodePage).not.toHaveBeenCalled();
+    expect(api.getNode).not.toHaveBeenCalled();
+    expect(useApp.getState().pageDocs.a).toMatchObject({ rev: "page-rev-2", dirty: false });
   });
 });
 
