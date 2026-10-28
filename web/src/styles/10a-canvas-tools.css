@@ -28,10 +28,48 @@
 }
 /* An open node drawer lies over the pane's right side; the toolbar keeps
    Problems, the timeline switch, ? and ⋯ left of it (useDrawerCover measures
-   the reach). It wraps rather than hiding them. On a phone the drawer is a
-   sheet below the toolbars and the reach is never set. */
+   the reach). On a phone the drawer is a sheet below the toolbars and the
+   reach is never set. What is left is about 320px at 1280×800: wrapping kept
+   every control in it but took 4 rows at 150% text, ~200px of a 366px
+   timeline pane. So it stays one row and scrolls sideways, as the phone strip
+   does; every control is still there, in the tab order. Menus open fixed, and
+   the ? hint hangs from .board-title, so the strip clips neither. */
 .lane-wrap[data-drawer-cover] > .board-title {
   padding-right: calc(14px + var(--drawer-cover));
+  flex-wrap: nowrap;
+}
+.lane-wrap[data-drawer-cover] > .board-title > .board-title-controls {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  /* A mouse needs the bar to reach the far end; thin keeps it off the row. */
+  scrollbar-width: thin;
+}
+/* .timeline-layout-controls is display: contents, so its children are this
+   strip's items too. */
+.lane-wrap[data-drawer-cover] .board-title-controls > *,
+.lane-wrap[data-drawer-cover] .board-title-controls .timeline-layout-controls > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* The pane name and the followed node's title can lose characters without
+   losing a control, so they shrink first. */
+.lane-wrap[data-drawer-cover] .board-title-controls > .board-title-main {
+  flex: 0 1 auto;
+  min-width: 3.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lane-wrap[data-drawer-cover] .board-title-controls > .board-title-message.selection {
+  flex: 0 1 auto;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Transparent to layout everywhere the header fits on one line: on a desktop
    every control inside sits directly in .board-title exactly as it did before
