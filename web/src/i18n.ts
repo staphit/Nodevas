@@ -6777,18 +6777,25 @@ export function formatLocalizedDate(
   return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(languageLocale(language), options).format(date);
 }
 
+/**
+ * The one way a time of day is written, alone or after a date: 「凌晨2:42」,
+ * "2:42 AM". A second set of options (an "上午02:42" beside it) would make
+ * one moment read as two.
+ */
+const TIME_OF_DAY: Intl.DateTimeFormatOptions = { timeStyle: "short" };
+
 export function formatLocalizedDateTime(
   value: string | Date,
   language: Language = useApp.getState().preferences.language,
 ): string {
-  return formatLocalizedDate(value, language, { dateStyle: "short", timeStyle: "short" });
+  return formatLocalizedDate(value, language, { dateStyle: "short", ...TIME_OF_DAY });
 }
 
 export function formatLocalizedTime(
   value: string | Date,
   language: Language = useApp.getState().preferences.language,
 ): string {
-  return formatLocalizedDate(value, language, { hour: "2-digit", minute: "2-digit" });
+  return formatLocalizedDate(value, language, TIME_OF_DAY);
 }
 
 export function formatLocalizedMonthDay(

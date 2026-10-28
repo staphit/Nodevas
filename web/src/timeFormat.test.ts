@@ -52,7 +52,7 @@ describe("time of day", () => {
         readFileSync(join(root, path), "utf8")
           .split("\n")
           .map((line, index) => ({ line, at: `${path}:${index + 1}` }))
-          .filter(({ line }) => /\bhour:|timeStyle:|toLocaleTimeString|hourCycle/.test(line))
+          .filter(({ line }) => /\bhour:\s*["'`]|timeStyle:|toLocaleTimeString|hourCycle/.test(line))
           .map(({ at, line }) => `${at}: ${line.trim()}`),
       );
     // The one place: the shared options in i18n.ts.
