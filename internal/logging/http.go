@@ -128,6 +128,9 @@ type Options struct {
 	// only about successful GET and HEAD requests, so a write, a refusal and a
 	// failure are recorded whatever it says. Nil keeps every line.
 	Quiet func(*http.Request) bool
+
+	// clock is time.Now unless a test moves it by hand.
+	clock func() time.Time
 }
 
 // Middleware logs one record per request with the default options.
