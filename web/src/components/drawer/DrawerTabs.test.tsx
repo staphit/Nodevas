@@ -74,6 +74,24 @@ describe("DrawerTabs", () => {
     expect(screen.getByRole("group", { name: "已開啟的節點" })).toHaveTextContent("審查");
   });
 
+  it("names each tab's close button after the node's title, not its id", () => {
+    useApp.setState({
+      tabs: [tab("a"), tab("b"), tab("gone")],
+      preferences: { ...useApp.getState().preferences, language: "en" },
+    });
+    renderHead();
+    const strip = screen.getByRole("group", { name: "Open nodes" });
+    const closers = [...strip.querySelectorAll("button.tab-close")];
+    expect(closers.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Close 設計稿",
+      "Close 審查",
+      // A node the graph no longer has keeps the name its tab shows.
+      "Close gone",
+    ]);
+    expect(closers.map((button) => button.getAttribute("title"))).toEqual(["Close 設計稿", "Close 審查", "Close gone"]);
+    expect(screen.queryByRole("button", { name: "Close a" })).not.toBeInTheDocument();
+  });
+
   it("keeps the tab actions and collapsing reachable from the ⋯ menu", async () => {
     const user = userEvent.setup();
     const { onToggleCollapsed } = renderHead();
