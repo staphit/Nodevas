@@ -19,7 +19,9 @@
   font-size: calc(12px * var(--font-scale, 1));
 }
 .timeline-plan-edit-row.with-time {
-  grid-template-columns: calc(90px * var(--font-scale, 1)) 1fr calc(92px * var(--font-scale, 1));
+  /* The time field as wide as its own time and clock icon: a fixed column
+     cut "10:00 AM" short, more so as the text size grows. */
+  grid-template-columns: calc(90px * var(--font-scale, 1)) 1fr auto;
 }
 .timeline-plan-edit-row.with-time small {
   grid-column: 2 / 4;
