@@ -174,7 +174,8 @@ export default function SettingsView() {
                 onClick={() => go(id, null, false)}
               >
                 <span>{t(`settingsPage.page.${id}`)}</span>
-                <small>{sub[id]}</small>
+                {/* Cut with an ellipsis where the list is narrow; whole on hover. */}
+                <small title={sub[id]}>{sub[id]}</small>
               </button>
             ))}
           </div>
