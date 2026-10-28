@@ -130,4 +130,10 @@ describe("Page-format select at 150% text", () => {
       }
     });
   }
+
+  it("gives the new page's title room for its placeholder before the select", () => {
+    // The row wraps the select and buttons under the title rather than
+    // squeezing it to a few letters.
+    expect(rules(editor, ".content-page-create input")).toMatch(/flex:\s*1 1 calc\(\d+px \* var\(--font-scale, 1\)\)/);
+  });
 });

@@ -135,7 +135,10 @@ export default function SettingsView() {
           type="search"
           className="settings-search"
           value={query}
-          placeholder={t("settingsPage.searchPlaceholder")}
+          // The placeholder is the short name, so it fits the column at any
+          // text size; what the search finds is said on hover.
+          placeholder={t("settingsPage.search")}
+          title={t("settingsPage.searchHint")}
           aria-label={t("settingsPage.search")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {

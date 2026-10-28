@@ -184,17 +184,19 @@
   flex: 0 0 auto;
   color: var(--accent);
 }
+/* The title wants room for its example placeholder; when the row is short
+   of it, the select and buttons wrap under it instead. */
 .content-page-create input {
-  flex: 1;
-  min-width: 80px;
+  flex: 1 1 calc(240px * var(--font-scale, 1));
+  min-width: calc(80px * var(--font-scale, 1));
 }
 .content-page-create button {
   white-space: nowrap;
 }
 .content-page-create select {
   flex: 0 0 auto;
-  height: 26px;
-  padding: 0 5px;
+  min-height: 26px;
+  padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--surface-2);
@@ -212,10 +214,13 @@
 .content-page-create {
   flex-wrap: wrap;
 }
+/* Sized by its text, so a larger text size widens it rather than cutting
+   off the format's name. */
 .content-page-format-select {
-  height: 24px;
-  max-width: 130px;
-  padding: 0 4px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  max-width: calc(130px * var(--font-scale, 1));
+  padding: 1px 4px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
