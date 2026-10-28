@@ -217,22 +217,31 @@ func (t *nodeTree) load(root string) {
 // nodeFolder returns the folder a node's document sits in ("" for the root of
 // nodes/). Unknown nodes resolve to the root, which is where a new document is
 // created.
+//
+// Every path the store resolves for a node comes through here, readers' and
+// writers' alike, so the check that the document is still where the index
+// says runs outside the tree's lock: held across that stat, the lock would
+// queue every request in the project behind every other one's filesystem
+// call.
 func nodeFolder(root, id string) string {
 	tree := treeFor(root)
 	tree.mu.Lock()
-	defer tree.mu.Unlock()
 	tree.load(root)
 	folder, ok := tree.locations[id]
-	if ok {
-		if _, err := StatProjectPath(root, filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")); err == nil {
-			return folder
-		}
-		// The file moved behind our back: rescan rather than serve a path
-		// that no longer exists.
-		tree.loaded = false
-		tree.load(root)
-		folder, ok = tree.locations[id]
+	tree.mu.Unlock()
+	if !ok {
+		return ""
 	}
+	if _, err := StatProjectPath(root, filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")); err == nil {
+		return folder
+	}
+	// The file moved behind our back: rescan rather than serve a path that
+	// no longer exists.
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+	tree.loaded = false
+	tree.load(root)
+	folder, ok = tree.locations[id]
 	if !ok {
 		return ""
 	}

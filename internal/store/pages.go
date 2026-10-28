@@ -49,6 +49,12 @@ type nodePagesManifest struct {
 // Contract: callers that go on to write hold s.mu, so the manifest they act
 // on is the one still on disk. Reading it without the lock is only safe for a
 // Store nobody else can reach yet (import validation).
+//
+// It is for callers that act on every page (copy, export, restore). A write
+// to one page uses parseNodePagesManifest: the file it reads or replaces is
+// opened through the same regular-file checks anyway, and statting the other
+// pages under s.mu, up to maxNodePages of them, is time every other write
+// spends waiting.
 func (s *Store) LoadNodePagesManifest(nodeID string) (nodePagesManifest, error) {
 	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
@@ -163,7 +169,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return zero, "", "", err
 	}
@@ -176,7 +182,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return zero, "", "", err
 	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return zero, "", "", err
 	}
@@ -267,7 +273,7 @@ func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target str
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -344,7 +350,7 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 	if g.NodeByID(nodeID) == nil {
 		return zero, "", "", fmt.Errorf("node %q not found in graph", nodeID)
 	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return zero, "", "", err
 	}
@@ -383,7 +389,7 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return "", err
 	}
@@ -396,7 +402,7 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return "", err
 	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return "", err
 	}
@@ -430,7 +436,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +449,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return nil, err
 	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +503,7 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g, _, err := s.loadGraphLocked()
+	g, _, err := s.graphViewLocked()
 	if err != nil {
 		return zero, err
 	}
@@ -509,7 +515,7 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
 		return zero, err
 	}
-	manifest, err := s.LoadNodePagesManifest(nodeID)
+	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
 		return zero, err
 	}
