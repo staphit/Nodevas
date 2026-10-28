@@ -228,7 +228,7 @@ export function SubpageControls({ pages: subpages }: { pages: NodePages }) {
               </option>
             ))}
           </select>
-          <button type="submit" disabled={!pageTitle.trim() || pageBusy}>
+          <button type="submit" className="primary" disabled={!pageTitle.trim() || pageBusy}>
             {pageBusy ? t("subpage.creating") : t("subpage.create")}
           </button>
           <button

@@ -189,9 +189,56 @@
 .content-page-create input {
   flex: 1 1 calc(240px * var(--font-scale, 1));
   min-width: calc(80px * var(--font-scale, 1));
+  min-height: 26px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
 }
+.content-page-create input:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 0;
+  border-color: transparent;
+}
+/* Themed like the select beside them: no user-agent outset boxes. Create is
+   the filled one; Import and Cancel stay quiet. */
 .content-page-create button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(11.5px * var(--font-scale, 1));
   white-space: nowrap;
+  cursor: pointer;
+}
+.content-page-create button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.content-page-create button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.content-page-create button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.content-page-create button.ghost {
+  background: transparent;
+}
+.content-page-create button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .content-page-create select {
   flex: 0 0 auto;
