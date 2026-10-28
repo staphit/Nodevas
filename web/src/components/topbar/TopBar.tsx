@@ -1,9 +1,10 @@
 /**
- * The top bar, left to right: the brand; the project menu; Board | Station;
+ * The top bar, left to right: the brand; the project menu; Board | Station | Settings;
  * then, pushed right, what is happening (offline while the server is out
  * of reach, the last operation, who else is here), search, the runners
- * pill, Settings (a labelled button: one click in, pressed while open), the
- * theme toggle and, on a server with a session, the account avatar.
+ * pill and, on a server with a session, the account avatar. Settings (a
+ * labelled button: one click in, pressed while open) sits in the mode switch
+ * beside Board and Station; the theme is chosen in Settings › General.
  *
  * Everything the bar used to carry besides is a menu entry, a Settings row or
  * a palette command now: the explorer toggle (the board's explorer, the
