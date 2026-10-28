@@ -342,7 +342,10 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
         </section>
       )}
 
-      <section className="agent-roster-section" aria-label={t("agents.roster")}>
+      <section
+        className={`agent-roster-section${sessions.length === 0 ? " is-intro" : ""}`}
+        aria-label={t("agents.roster")}
+      >
         {sessions.length === 0 ? (
           <AgentChatEmpty />
         ) : (

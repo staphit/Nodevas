@@ -128,12 +128,44 @@
 .station-side > .station-panel {
   flex: 0 0 auto;
 }
-.station-side > .station-network.is-open {
-  flex: 1 1 auto;
-  min-height: 0;
+/* With the chat open the column is exactly Station's height, so the chat can
+   grow into whatever the cards above leave. It never shrinks below its own
+   sections: shrinking them together cut the connect intro and the message
+   list into slivers that each scrolled. When even that does not fit, the
+   column scrolls, once. */
+.station-side:has(> .station-network.is-open) {
+  height: 100cqh;
 }
+.station-side > .station-network.is-open,
 .station-side > .station-network.is-open > .agent-panel.is-docked {
-  min-height: 260px;
+  flex: 1 0 auto;
+}
+.agent-panel.is-docked > * {
+  flex-shrink: 0;
+}
+/* Nobody connected yet: the intro is read once, top to bottom. */
+.agent-panel.is-docked > .agent-roster-section.is-intro {
+  max-height: none;
+  overflow: visible;
+}
+/* Room for a few messages; the one line that says there are none needs no
+   more than itself. */
+.agent-panel.is-docked > .agent-messages-list {
+  flex: 1 0 140px;
+}
+.agent-panel.is-docked > .agent-messages-list:has(> .copilot-empty) {
+  flex-basis: auto;
+}
+/* A narrow column at large text: the controls wrap, the title and the online
+   count stay whole. */
+.agent-panel.is-docked .copilot-header-row {
+  flex-wrap: wrap;
+}
+.agent-panel.is-docked .copilot-heading {
+  white-space: nowrap;
+}
+.agent-panel.is-docked .copilot-model {
+  flex: 1 0 auto;
 }
 
 .station-panel {
@@ -793,9 +825,13 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  /* At large text the summary goes under the name, not the name over two
+     lines. */
+  flex-wrap: wrap;
 }
 .station-network-name {
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
   font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
 }
@@ -844,8 +880,10 @@
     grid-column: 1;
     grid-row: auto;
   }
-  .station-side {
+  .station-side,
+  .station-side:has(> .station-network.is-open) {
     position: static;
+    height: auto;
     max-height: none;
     overflow: visible;
   }

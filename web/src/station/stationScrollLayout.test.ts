@@ -39,8 +39,11 @@ describe("Station scrolling", () => {
     expect(side).toMatch(/grid-row:\s*1\s*\/\s*span 3/);
   });
 
-  it("lets the open agent chat give up height instead of the column scrolling", () => {
-    expect(rules(".station-side > .station-network.is-open")).toMatch(/min-height:\s*0/);
+  it("lets the open agent chat fill the column's height", () => {
+    expect(rules(".station-side:has(> .station-network.is-open)")).toMatch(
+      /height:\s*100cqh/,
+    );
+    expect(rules(".station-side > .station-network.is-open")).toMatch(/flex:\s*1 0 auto/);
   });
 });
 
@@ -72,5 +75,8 @@ describe("Station's docked agent chat", () => {
     expect(rules(".agent-panel.is-docked .copilot-header-row")).toMatch(/flex-wrap:\s*wrap/);
     expect(rules(".agent-panel.is-docked .copilot-heading")).toMatch(/white-space:\s*nowrap/);
     expect(rules(".agent-panel.is-docked .copilot-model")).toMatch(/flex:\s*1 0 auto/);
+    // The card's own toggle row too: "Agent chat" stayed one word per line.
+    expect(rules(".station-network-toggle")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rules(".station-network-name")).toMatch(/white-space:\s*nowrap/);
   });
 });
