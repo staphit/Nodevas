@@ -61,6 +61,21 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: /Deadline reminders/ })).toHaveAttribute("aria-expanded", "false");
   });
 
+  // A section's line is cut with an ellipsis where the list is narrow
+  // ("Appearance, language, notifications, c…"); its whole text shows on hover.
+  it("gives each section's line its whole text as a tooltip", () => {
+    act(() => openSettings("appearance"));
+    render(<SettingsView />);
+
+    const general = within(nav()).getByRole("button", { name: /^General/ });
+    const line = general.querySelector("small");
+    expect(line).toHaveAttribute("title", "Appearance, language, notifications, copilot");
+    for (const button of within(nav()).getAllByRole("button")) {
+      const small = button.querySelector("small");
+      if (small) expect(small).toHaveAttribute("title", small.textContent ?? "");
+    }
+  });
+
   it("opens an old part's row: routing under Agents › Advanced", async () => {
     act(() => openSettings("routing"));
     render(<SettingsView />);
