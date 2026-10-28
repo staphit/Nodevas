@@ -138,3 +138,61 @@ describe("StationSide", () => {
     expect(screen.getByRole("region", { name: "Agent chat" })).toBeInTheDocument();
   });
 });
+
+// At 1280x800 the side column is pinned to Station's height and scrolls on
+// its own once the open agent chat no longer fits, right beside Station's own
+// scrollbar: two bars 30px apart. A column taller than Station now lets go of
+// its pin and scrolls with the rest, so there is one scrollbar.
+describe("StationSide in a Station too short for it", () => {
+  let observed: Array<() => void> = [];
+  beforeEach(() => {
+    observed = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: () => void) {
+          observed.push(() => this.callback());
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function sized(station: number, side: number) {
+    const host = document.createElement("div");
+    host.className = "station";
+    Object.defineProperty(host, "clientHeight", { configurable: true, get: () => station });
+    document.body.appendChild(host);
+    const view = render(<StationSide world={world} />, { container: host });
+    const column = host.querySelector(".station-side") as HTMLElement;
+    let content = side;
+    Object.defineProperty(column, "scrollHeight", { configurable: true, get: () => content });
+    return {
+      column,
+      resize(next: number) {
+        content = next;
+        act(() => observed.forEach((fire) => fire()));
+      },
+      unmount() {
+        view.unmount();
+        host.remove();
+      },
+    };
+  }
+
+  it("scrolls with Station instead of on its own once it is taller", () => {
+    const station = sized(700, 600);
+    station.resize(600);
+    expect(station.column).not.toHaveClass("is-overflowing");
+    station.resize(820);
+    expect(station.column).toHaveClass("is-overflowing");
+    station.resize(640);
+    expect(station.column).not.toHaveClass("is-overflowing");
+    station.unmount();
+  });
+});

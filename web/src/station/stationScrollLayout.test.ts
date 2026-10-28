@@ -98,3 +98,20 @@ describe("Station's end and the voice copilot button", () => {
     expect(rule?.[1]).toMatch(/padding-bottom:\s*calc\([^;]*48px[^;]*\)/);
   });
 });
+
+// A side column taller than Station is not pinned or capped: it scrolls with
+// Station, so Station keeps the only scrollbar (StationSide sets the class).
+describe("Station's side column when it does not fit", () => {
+  it("lets go of the pin, the cap and its own scrollbar", () => {
+    const rule = rules(".station-side.is-overflowing");
+    expect(rule).toMatch(/position:\s*static/);
+    expect(rule).toMatch(/max-height:\s*none/);
+    expect(rule).toMatch(/height:\s*auto/);
+    expect(rule).toMatch(/overflow:\s*visible/);
+  });
+
+  it("outranks the open chat's full-height rule", () => {
+    const selectors = css.match(/([^{}]+)\{[^}]*position:\s*static[^}]*\}/g)?.join("\n") ?? "";
+    expect(selectors).toContain(".station-side.is-overflowing:has(> .station-network.is-open)");
+  });
+});
