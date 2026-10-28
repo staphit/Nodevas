@@ -126,6 +126,59 @@ describe("timelineOpeningScroll", () => {
     });
     expect(scroll.top).toBe(100 + 20 + 100);
   });
+
+  // Daily work schedule at 150% text, explorer 520: the timeline opened on
+  // 10/29's row, but today's plans were in lanes behind the date ruler and
+  // the lanes in view were empty. The lane axis opens on them too.
+  describe("along the lanes", () => {
+    // Six lanes of 300px; the date ruler (or header) takes 56px of the view.
+    const lanes = (planned: Record<number, string[]>) =>
+      Array.from({ length: 6 }, (_, index) => new Set(planned[index] ?? []));
+    const laneBase = { ...base, laneSize: 300, laneInset: 56, viewport: { width: 1000, height: 700 } };
+
+    it("brings today's lanes into view when they lie past it", () => {
+      const scroll = timelineOpeningScroll({
+        ...laneBase,
+        days,
+        rowItems: dayItems(),
+        contentDays: new Set(["2026-10-28"]),
+        lanes: lanes({ 3: ["2026-10-28"], 4: ["2026-10-28"], 0: ["2026-10-20"] }),
+        orientation: "vertical",
+      });
+      expect(scroll.top).toBe(1300);
+      // Lanes 3 and 4 (900-1500) in a 944px span.
+      expect(scroll.left).toBeLessThanOrEqual(900);
+      expect(scroll.left + 1000 - 56).toBeGreaterThanOrEqual(1500);
+    });
+
+    it("leaves lanes already in view where they are", () => {
+      const scroll = timelineOpeningScroll({
+        ...laneBase,
+        days,
+        rowItems: dayItems(),
+        contentDays: new Set(["2026-10-28"]),
+        lanes: lanes({ 1: ["2026-10-28"] }),
+        orientation: "vertical",
+      });
+      expect(scroll.left).toBe(0);
+    });
+
+    it("starts at the first of today's lanes when they do not all fit", () => {
+      const scroll = timelineOpeningScroll({
+        ...laneBase,
+        zoom: 0.5,
+        days,
+        rowItems: dayItems(),
+        contentDays: new Set(["2026-10-28"]),
+        lanes: lanes({ 2: ["2026-10-28"], 5: ["2026-10-28"] }),
+        viewport: { width: 1000, height: 300 },
+        orientation: "horizontal",
+      });
+      // Horizontal: lanes run down the page; 600px of lanes at 50% is 300px.
+      expect(scroll.top).toBe(300);
+      expect(scroll.left).toBe(650);
+    });
+  });
 });
 
 // A template board with no cards, only its four quadrant groups: 1,260px

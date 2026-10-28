@@ -774,6 +774,42 @@ describe("LaneView", () => {
       expect(board.scrollTop).toBe(todayRow * step * zoom);
     });
 
+    // Opening on today's row was half of it: today's plans sat in lanes
+    // behind the date ruler, and the lanes in view were empty.
+    it("opens a vertical timeline on the lanes that have something today", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const key = (offset: number) => {
+        const date = new Date(today);
+        date.setDate(date.getDate() + offset);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      };
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      const ids = Array.from({ length: 12 }, (_, index) => `lane-${index}`);
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: ids.map((id) => ({ id, title: id })),
+          edges: [],
+          ui: { plans: { "lane-10": [{ date: key(0), status: "started" }] } },
+        },
+      });
+      const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+      const board = container.querySelector<HTMLElement>(".board")!;
+      const zoom = Number(container.querySelector<HTMLElement>(".board-inner")!.style.zoom || "1");
+      const heads = [
+        ...container.querySelectorAll<HTMLElement>(".lane-head-row > .lane-head-cell:not(.ruler)"),
+      ];
+      const width = parseFloat(heads[0].style.width);
+      const index = heads.findIndex((head) => head.textContent?.includes("lane-10"));
+      expect(index).toBeGreaterThan(0);
+      // The lane is wholly in view, left of the date ruler stuck to the right edge.
+      expect(index * width * zoom).toBeGreaterThanOrEqual(board.scrollLeft);
+      expect((index + 1) * width * zoom).toBeLessThanOrEqual(board.scrollLeft + 948 - 56 * zoom);
+    });
+
     // The minimap floats over the board's bottom-right corner. Daily work
     // schedule in a 773x665 pane (explorer 480) opened centred with 'Weekly
     // review' under it, though its cards had room to sit clear of the map.
