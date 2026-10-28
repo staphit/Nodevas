@@ -774,11 +774,25 @@ func cleanEvent(e runnerwire.RunEvent) runnerwire.RunEvent {
 	return e
 }
 
+// insertEvents writes a batch of events in one statement: one round trip on
+// the single writer however many events a runner sent, where a row at a time
+// held the writer (and every audit and session write queued behind it) for
+// one round trip per event. The arrays are positional, so the parameter count
+// is fixed whatever the batch size.
+const insertEvents = `
+INSERT INTO run_events (run_id, seq, type, at, payload)
+SELECT ?, e.seq, e.type, e.at, e.payload
+FROM unnest(?::bigint[], ?::text[], ?::text[], ?::text[]) AS e(seq, type, at, payload)`
+
 // AppendEvents stores a batch of a run's events and reports how many were
 // new. A seq at or below the last one stored is a resend and is dropped, as
 // is anything past MaxRunEvents. A usage event also updates the run's usage,
 // even past the cap: usage is cumulative and the latest figure is the one
 // that matters.
+//
+// The batch is filtered in order first (a seq at or below the last one kept,
+// stored or earlier in this batch, is a resend) and the survivors written in
+// one INSERT.
 func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerwire.RunEvent) (int, error) {
 	added := 0
 	table := s.priceTable(ctx)
@@ -791,6 +805,8 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			return err
 		}
 		var usage *runnerwire.Usage
+		var seqs []int64
+		var types, ats, payloads []string
 		for _, event := range events {
 			if event.Seq <= 0 || (last.Valid && event.Seq <= last.Int64) {
 				continue
@@ -807,13 +823,17 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO run_events (run_id, seq, type, at, payload) VALUES (?, ?, ?, ?, ?)`,
-				runID, event.Seq, event.Type, event.At, string(payload)); err != nil {
+			seqs = append(seqs, event.Seq)
+			types = append(types, event.Type)
+			ats = append(ats, event.At)
+			payloads = append(payloads, string(payload))
+			count++
+		}
+		if len(seqs) > 0 {
+			if _, err := tx.ExecContext(ctx, insertEvents, runID, seqs, types, ats, payloads); err != nil {
 				return err
 			}
-			count++
-			added++
+			added = len(seqs)
 		}
 		if usage == nil {
 			return nil
