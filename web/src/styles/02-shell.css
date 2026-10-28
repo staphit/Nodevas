@@ -30,6 +30,19 @@
   margin: 0;
   white-space: nowrap;
 }
+/* The bar is one row at every width: a long failure ends in an ellipsis
+   (the badge's tooltip has the whole text) instead of wrapping and doubling
+   the bar's height. */
+.topbar .operation-status {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.topbar .operation-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .explorer-toggle {
   min-width: 42px;
   justify-content: center;

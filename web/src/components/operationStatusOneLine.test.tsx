@@ -7,7 +7,8 @@ import { OperationStatus } from "./InteractionPrimitives";
 // jsdom applies no CSS, so the contract is read from the stylesheets: the
 // top bar's status badge is one line at every width (a long failure ends in an
 // ellipsis, its whole text in the tooltip), not only on a phone.
-const styles = (file: string) => readFileSync(resolve(process.cwd(), "src/styles", file), "utf8");
+const styles = (file: string) =>
+  readFileSync(resolve(process.cwd(), "src/styles", file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** Declarations of selector's rules outside any @media block. */
 function topLevelRule(css: string, selector: string): string {
@@ -49,7 +50,7 @@ describe("operation status badge", () => {
     const css = ["02-shell.css", "10a-canvas-tools.css"].map(styles).join("\n");
     const badge = topLevelRule(css, ".topbar .operation-status");
     expect(badge).toMatch(/min-width:\s*0/);
-    const text = topLevelRule(css, ".operation-status-text");
+    const text = topLevelRule(css, ".topbar .operation-status-text");
     expect(text).toMatch(/white-space:\s*nowrap/);
     expect(text).toMatch(/overflow:\s*hidden/);
     expect(text).toMatch(/text-overflow:\s*ellipsis/);

@@ -7,8 +7,9 @@
  * tabs, undo history and operation badges are cleared.
  */
 
-import { api, AuthError, getProjectOverride, setProjectOverride } from "../api";
+import { api, AuthError, getProjectOverride, RequestError, setProjectOverride } from "../api";
 import { translate } from "../i18n";
+import type { Language } from "../preferences";
 import { coalesceRequest } from "./coalesce";
 import { describeFailure, operationScope } from "./operations";
 import { drainWrites, generations, invalidateGenerations } from "./internals";
@@ -257,15 +258,36 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
         operation: "workspace.switchProject",
       });
     } catch (e) {
+      const label = get().projects.find((project) => project.name === name)?.label || name;
+      const unreadable = unreadableGraphMessage(e, label, get().preferences.language);
       get().settleOperation(scope, {
         status: "error",
         operation: "workspace.switchProject",
-        message: describeFailure(e, translate("workspace.error.switchFailed")),
+        // The banner explains an unreadable graph.yaml; the badge only says
+        // the switch failed, so the bar does not repeat the explanation.
+        message: unreadable
+          ? translate("workspace.error.switchFailed")
+          : describeFailure(e, translate("workspace.error.switchFailed")),
       });
+      if (unreadable) throw new Error(unreadable, { cause: e });
       throw e;
     }
   },
 });
+
+/**
+ * The hub refuses to open a project whose graph.yaml does not parse, and says
+ * so in the YAML parser's English ('load project "x": graph.yaml: yaml:
+ * unmarshal errors: line 16: ...'). The reader gets that in their language,
+ * keeping the line to fix; null for any other failure.
+ */
+function unreadableGraphMessage(error: unknown, label: string, language: Language): string | null {
+  if (!(error instanceof RequestError) || !/(^|: )graph\.yaml: /.test(error.message)) return null;
+  const line = /\bline (\d+)\b/.exec(error.message)?.[1];
+  return line
+    ? translate("workspace.error.graphUnreadableLine", language, { name: label, line })
+    : translate("workspace.error.graphUnreadable", language, { name: label });
+}
 
 function sameJSON(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
