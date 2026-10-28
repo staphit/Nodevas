@@ -13,6 +13,7 @@ import {
 } from "../store";
 import { statusOptions } from "../statusTheme";
 import { useI18n } from "../i18n";
+import { localizeIssue } from "../issueMessages";
 import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
 import { analyzeGraph } from "../analysis";
@@ -152,7 +153,7 @@ export function LaneView({
   keyboardActive,
   onActivate,
 }: PaneProps & { variant: "graph" | "timeline" }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const isGraph = variant === "graph";
   const graph = useApp((s) => s.graph);
   const statuses = useApp((s) => s.statuses);
@@ -384,6 +385,11 @@ export function LaneView({
     for (const i of issues) if (i.severity === "error" && i.nodeId) set.add(i.nodeId);
     return set;
   }, [issues]);
+  // The hub writes its findings in English; the panel reads them in the UI's language.
+  const localizedIssues = useMemo(
+    () => issues.map((issue) => localizeIssue(issue, language)),
+    [issues, language],
+  );
 
   // ----- graph layout: stored positions use continuous grid units so
   // integer coordinates remain compatible while dragging is fully free-form.
@@ -1502,7 +1508,7 @@ export function LaneView({
       {isGraph && problemsOpen && (
         <ProblemsPanel
           analysis={analysis}
-          issues={issues}
+          issues={localizedIssues}
           nodeTitle={nodeTitle}
           onPick={(nodeId) => {
             setProblemsOpen(false);
