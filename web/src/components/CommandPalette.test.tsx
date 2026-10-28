@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../api";
 import { readPreferences } from "../preferences";
 import { useSettingsRequest } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
@@ -132,5 +133,26 @@ describe("CommandPalette: new nodes by type", () => {
     search("Review");
     await user.click(screen.getByRole("option", { name: /^New node: Review/ }));
     expect(createNode).toHaveBeenCalledWith({ title: expect.any(String), kind: "gate" });
+  });
+});
+
+describe("CommandPalette: jumping to a node", () => {
+  it("opens a found node and scrolls the board to it", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "far-card", title: "Far card", kind: "node" }],
+    });
+    try {
+      const user = userEvent.setup();
+      open();
+      search("Far card");
+      await user.click(await screen.findByRole("option", { name: /Far card/ }));
+      expect(openTab).toHaveBeenCalledWith("far-card");
+      // The board may be showing anywhere else: the jump has to reach it too.
+      expect(useApp.getState().revealRequest?.nodeId).toBe("far-card");
+    } finally {
+      searchSpy.mockRestore();
+    }
   });
 });
