@@ -113,6 +113,26 @@ export function csrfToken(): string {
 
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/** What a reverse proxy answers when the hub behind it is down. */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+
+/**
+ * Whether a response is a proxy standing in for a hub it cannot reach: a
+ * 502/503/504 whose body is not the hub's own JSON error. The hub does send
+ * 503 itself (no mail transport, say), always as {"error": ...}; a proxy's
+ * page, an empty body or someone else's JSON is the hub being out of reach.
+ */
+export async function isGatewayFailure(res: Response): Promise<boolean> {
+  if (!GATEWAY_STATUSES.has(res.status)) return false;
+  if (!(res.headers.get("Content-Type") ?? "").includes("json")) return true;
+  try {
+    const body = await res.clone().json();
+    return !(body && typeof body === "object" && typeof body.error === "string");
+  } catch {
+    return true;
+  }
+}
+
 /**
  * When set, every project-scoped request carries this project name in the
  * X-Nodevas-Project header, and the server answers about that project instead
@@ -180,7 +200,12 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
   } finally {
     window.clearTimeout(timeout);
   }
-  // Any answer, an error status included, means the server is there.
+  // A proxy answering for a hub that is down is no answer from the hub.
+  if (await isGatewayFailure(res)) {
+    markServerUnreachable();
+    throw new NetworkError();
+  }
+  // Any other answer, an error status included, means the server is there.
   markServerReachable();
   if (res.status === 401) {
     notifyUnauthorized();

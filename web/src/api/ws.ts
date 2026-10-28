@@ -1,5 +1,5 @@
 import { markServerReachable, markServerUnreachable } from "./connectivity";
-import { notifyUnauthorized } from "./http";
+import { isGatewayFailure, notifyUnauthorized } from "./http";
 import type { Actor } from "./auth";
 import type { GraphOp } from "./graph";
 
@@ -220,7 +220,8 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
     let up = false;
     try {
       const res = await fetch(HEALTH_PATH, { cache: "no-store", signal: controller.signal });
-      up = res.ok;
+      // Any answer from the hub itself; a proxy's 502 for it is not one.
+      up = !(await isGatewayFailure(res));
     } catch {
       up = false;
     } finally {
