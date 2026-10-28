@@ -296,7 +296,7 @@ function unreadableGraphMessage(error: unknown, label: string, language: Languag
       : translate("workspace.error.graphUnreadable", language, { name: label });
   }
   // The frame ends the sentence itself; a localized finding brings its own 。
-  const localized = localizeGraphRefusal(reason, language).replace(/[。.]$/, "");
+  const localized = localizeGraphRefusal(reason, language).replace(/[\u3002.]$/, "");
   return translate("workspace.error.graphInvalid", language, { name: label, reason: localized });
 }
 

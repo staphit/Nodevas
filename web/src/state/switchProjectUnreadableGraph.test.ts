@@ -100,7 +100,7 @@ describe("switching to a project whose graph.yaml fails validation", () => {
     expect(error.message).not.toMatch(/無法讀取|invalid priority|load project/);
     expect(error.message).toContain("Disk project");
     expect(error.message).toContain("graph.yaml");
-    expect(error.message).toContain("節點「c」的優先度「zzz」無效");
+    expect(error.message).toBe("無法開啟「Disk project」，graph.yaml 有問題：節點「c」的優先度「zzz」無效。修正檔案後再切換一次。");
   });
 
   it("says why a note cannot be opened with acceptance criteria", async () => {
