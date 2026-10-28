@@ -88,11 +88,20 @@ func ScanNodeLinks(projects []ProjectInfo) []NodeLink {
 	return links
 }
 
+// readLinkDocument reads one document for a link scan. A var so tests can
+// watch the reads.
+var readLinkDocument = func(root, path string) ([]byte, error) {
+	return store.ReadProjectFileLimit(root, path, maxLinkScanBytes)
+}
+
+// WarmNodeLinks is not written yet.
+func (pm *ProjectManager) WarmNodeLinks() {}
+
 // scanProjectLinks reads one project's documents and returns their links.
 func scanProjectLinks(info ProjectInfo) []NodeLink {
 	var links []NodeLink
 	for _, node := range graphNodes(info.Path) {
-		data, err := store.ReadProjectFileLimit(info.Path, store.NodeDocPath(info.Path, node.ID), maxLinkScanBytes)
+		data, err := readLinkDocument(info.Path, store.NodeDocPath(info.Path, node.ID))
 		if err != nil {
 			continue
 		}
