@@ -104,8 +104,17 @@ describe("graph cards", () => {
     expect(cardRenders.get("c") ?? 0).toBe(0);
 
     act(() => frames.flush());
-    expect(surface.style.getPropertyValue("--drag-dx")).toBe("240px");
-    expect(surface.style.getPropertyValue("--drag-dy")).toBe("100px");
+    // The offset lives on the lifted card alone. Set on the surface, every
+    // card, gate and wire under it inherits the change and has its style
+    // recomputed each frame, which on a 2000-card board is the whole frame.
+    expect(card.style.getPropertyValue("--drag-dx")).toBe("240px");
+    expect(card.style.getPropertyValue("--drag-dy")).toBe("100px");
+    expect(surface.style.getPropertyValue("--drag-dx")).toBe("");
+    expect(
+      container
+        .querySelector<HTMLElement>('.col-card[data-node-id="b"]')!
+        .style.getPropertyValue("--drag-dx"),
+    ).toBe("");
     expect(card.style.transform).toContain("var(--drag-dx");
     expect(commands).toHaveLength(0);
 
