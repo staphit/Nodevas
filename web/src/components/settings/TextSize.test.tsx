@@ -72,3 +72,42 @@ describe("stylesheets", () => {
     expect(fixed).toEqual([]);
   });
 });
+
+// The timeline and the board's chrome are read at the text size like the
+// rest: no fixed size in their stylesheets, the `font:` shorthand included.
+// The canvas overrides file is skipped above for its zoom-scaled board
+// chrome, but its drawer plan editor and the timeline's cell-size controls in
+// the board's ⋯ menu are ordinary UI and follow the text size too.
+describe("timeline and canvas stylesheets", () => {
+  const styles = join(__dirname, "..", "..", "styles");
+  const FOLLOW = ["04-board.css", "10a-canvas-tools.css", "10c-canvas-minimap.css", "10d-canvas-chrome.css", "12-timeline.css"];
+  const fixedSize = /font(-size)?:[^;]*?(^|[\s:])[\d.]+px/;
+  const scaled = /calc\([^)]*var\(--font-scale/;
+  const fixedLines = (file: string, inRule: (selector: string) => boolean = () => true) => {
+    const fixed: string[] = [];
+    let selector = "";
+    readFileSync(join(styles, file), "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        const open = line.match(/^\s*([^{}@][^{}]*)\{\s*$/);
+        if (open) selector = open[1].trim();
+        const declaration = line.replace(scaled, "");
+        if (/^\s*font(-size)?:/.test(line) && fixedSize.test(declaration) && inRule(selector)) {
+          fixed.push(`${file}:${i + 1}: ${selector} { ${line.trim()} }`);
+        }
+      });
+    return fixed;
+  };
+
+  it("multiply every fixed font size, shorthand too, by --font-scale", () => {
+    expect(FOLLOW.flatMap((file) => fixedLines(file))).toEqual([]);
+  });
+
+  it("scale the drawer's plan editor and the ⋯ menu's cell-size controls", () => {
+    expect(
+      fixedLines("10f-canvas-overrides.css", (selector) =>
+        /\.timeline-plan-edit-row|\.board-overflow-section/.test(selector),
+      ),
+    ).toEqual([]);
+  });
+});
