@@ -80,6 +80,12 @@ header.topbar {
   flex: 0 1 auto;
   min-width: 0;
 }
+/* A long status badge squeezes the bar, and the menu with it: as a flex item
+   the trigger shrinks too and truncates the name, instead of keeping its width
+   and spilling over Board. */
+.topbar-project {
+  display: flex;
+}
 .topbar-project-trigger {
   display: inline-flex;
   align-items: center;
