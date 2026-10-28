@@ -100,6 +100,15 @@ html[data-theme="dark"] {
   color-scheme: dark;
 }
 
+/* A control takes its font size from the user agent (13.33px), not its
+   parent; this one follows Settings › Text size. A class that sizes its own
+   control still wins. */
+button,
+input,
+select,
+textarea {
+  font-size: calc(13px * var(--font-scale, 1));
+}
 button {
   font-family: inherit;
   color: inherit;

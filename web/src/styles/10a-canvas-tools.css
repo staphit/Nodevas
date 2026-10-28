@@ -181,6 +181,8 @@
   border-radius: 8px;
   background: transparent;
   color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
   text-align: left;
 }
 .command-palette-results button.selected {
@@ -254,6 +256,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.command-palette-results b {
+  font-size: calc(13px * var(--font-scale, 1));
 }
 .command-palette-results small,
 .command-palette-empty {

@@ -118,6 +118,25 @@
   border-color: var(--border);
   background: var(--surface);
 }
+.acceptance-add button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.acceptance-add button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.acceptance-add button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .acceptance-error {
   margin: 6px 0 0;
   color: var(--st-failed-fg);
