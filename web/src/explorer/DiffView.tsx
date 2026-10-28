@@ -140,7 +140,9 @@ export default function DiffView({ view }: DiffViewProps) {
   };
 
   const title =
-    view.source === "repo" && !view.ref ? t("explorer.git.uncommitted") : shown?.title ?? "";
+    view.source === "repo" && !view.ref
+      ? t("explorer.git.uncommitted", { repo: view.repoName || view.repoId })
+      : shown?.title ?? "";
 
   return (
     <div className="ex-view">

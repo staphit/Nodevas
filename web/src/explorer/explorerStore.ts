@@ -8,7 +8,7 @@ export type ExplorerView =
   | { kind: "file"; source: "repo"; runnerId: string; runnerName: string; repoId: string; path: string }
   | { kind: "diff"; source: "run"; runId: string }
   | { kind: "diff"; source: "workspace"; sha: string }
-  | { kind: "diff"; source: "repo"; runnerId: string; repoId: string; ref: string }
+  | { kind: "diff"; source: "repo"; runnerId: string; repoId: string; repoName: string; ref: string }
   | { kind: "agent"; id: string };
 
 export interface ExplorerState {

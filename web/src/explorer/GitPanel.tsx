@@ -30,7 +30,14 @@ function RepoChanges({ repo }: { repo: RepoSummary }) {
   const view = useExplorer((s) => s.view);
   const open = useExplorer((s) => s.open);
   const status = useLoad(() => explorerApi.repoStatus(repo.runnerId, repo.repoId), `${repo.runnerId}/${repo.repoId}`);
-  const diff: ExplorerView = { kind: "diff", source: "repo", runnerId: repo.runnerId, repoId: repo.repoId, ref: "" };
+  const diff: ExplorerView = {
+    kind: "diff",
+    source: "repo",
+    runnerId: repo.runnerId,
+    repoId: repo.repoId,
+    repoName: repo.name,
+    ref: "",
+  };
   const label = t("explorer.files.repo", { name: repo.name });
   if (!status.data) return null;
   return (
