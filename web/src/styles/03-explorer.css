@@ -259,8 +259,11 @@
 }
 .explorer-transfer-actions {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
   margin-top: 7px;
   padding: 5px 6px;
   border: 1px solid var(--border);
@@ -269,11 +272,28 @@
   background: var(--surface-2);
   font-size: calc(9.5px * var(--font-scale, 1));
 }
+/* One row however large the text or narrow the sidebar: the caption gives
+   way first (flex-shrink 99), then each label ends in an ellipsis — never one
+   character per line. */
+.explorer-transfer-actions > span {
+  flex: 0 99 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .explorer-transfer-actions > div {
   display: flex;
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
   gap: 4px;
+  min-width: 0;
 }
 .explorer-transfer-actions button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 7px;
   border: 0;
   border-radius: 4px;
@@ -292,8 +312,12 @@
 /* Import/export menus: one entry point each, described in words. */
 .transfer-menu {
   position: relative;
+  min-width: 0;
 }
 .transfer-menu > summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 2px 7px;
   border-radius: 4px;
   color: var(--text-2);
