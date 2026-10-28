@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { api } from "../api";
 import { explorerApi, type RepoSummary } from "../api/explorer";
 import type { Run } from "../api/runs";
@@ -35,6 +36,34 @@ function marksLegend(pending: { mark: string }[], t: (key: string) => string): s
   return MARKS.filter((mark) => shown.has(mark))
     .map((mark) => t(`explorer.git.mark.${mark}`))
     .join(t("explorer.git.markSeparator"));
+}
+
+/** How long a burst of saves settles before the tab asks once. */
+const REFRESH_DELAY_MS = 300;
+
+/**
+ * Calls reload after the workspace changes under the open tab: a graph save
+ * or reload (a new graph rev, which a change from elsewhere also brings), a
+ * page save, or the window coming back into focus. A burst becomes one call.
+ */
+function useWorkspaceChanges(reload: () => void) {
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(reload, REFRESH_DELAY_MS);
+    };
+    const unsubscribe = useApp.subscribe((state, previous) => {
+      const saved = state.lastOperation !== previous.lastOperation && state.lastOperation?.status === "saved";
+      if (state.graphRev !== previous.graphRev || saved) schedule();
+    });
+    window.addEventListener("focus", schedule);
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener("focus", schedule);
+    };
+  }, [reload]);
 }
 
 /** A repo's uncommitted changes, from its runner. */
@@ -88,6 +117,7 @@ export default function GitPanel() {
   // new one's, as the Files tab does.
   const project = useApp((s) => s.activeProject);
   const git = useLoad(() => explorerApi.workspaceGit(), `ws-git:${project}`);
+  useWorkspaceChanges(git.reload);
   const runs = useLoad(() => api.listProjectRuns(), `runs:${project}`);
   const repos = useLoad(() => explorerApi.repos(), "repos");
 
