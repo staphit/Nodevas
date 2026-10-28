@@ -37,9 +37,9 @@ const paneProps = {
   onActivate: () => undefined,
 };
 
-// The board opens scrolled to the pan buffer (8 columns, 8 rows) and draws the
-// graph two columns and one row further in: card (0, 0) is the top-left one
-// on screen.
+// The board's pan buffer is 8 columns by 8 rows, and the graph is drawn two
+// columns and one row further in; a board this large opens framing card
+// (0, 0) at its top left.
 const BUFFER_X = 8 * COL_W;
 const BUFFER_Y = 8 * ROW_H;
 const ORIGIN_X = BUFFER_X + 2 * COL_W;
@@ -211,6 +211,14 @@ describe("viewport culling", () => {
     );
     const board = container.querySelector<HTMLElement>(".board")!;
     const frame = container.querySelector<HTMLElement>(".graph-minimap-viewport")!;
+    // From a known spot well inside a window step, not wherever the opening
+    // framed the cards, so the small pan below cannot cross a step.
+    act(() => {
+      board.scrollLeft = BUFFER_X;
+      board.scrollTop = BUFFER_Y;
+      fireEvent.scroll(board);
+    });
+    act(() => frames.flush());
     const before = { left: frame.style.left, top: frame.style.top };
     commits = 0;
 
