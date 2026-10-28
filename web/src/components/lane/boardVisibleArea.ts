@@ -61,7 +61,7 @@ export function visibleArea(board: Area, overlays: readonly Area[]): Area {
  * (and a phone's sheet slides up) while a jump is being answered, and the
  * card should be centred against where it comes to rest.
  */
-function restingRect(element: HTMLElement): Area {
+export function restingRect(element: HTMLElement): Area {
   const rect = element.getBoundingClientRect();
   const transform = getComputedStyle(element).transform;
   if (!transform || transform === "none" || typeof DOMMatrixReadOnly === "undefined") {

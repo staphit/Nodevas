@@ -26,6 +26,13 @@
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+/* An open node drawer lies over the pane's right side; the toolbar keeps
+   Problems, the timeline switch, ? and ⋯ left of it (useDrawerCover measures
+   the reach). It wraps rather than hiding them. On a phone the drawer is a
+   sheet below the toolbars and the reach is never set. */
+.lane-wrap[data-drawer-cover] > .board-title {
+  padding-right: calc(14px + var(--drawer-cover));
+}
 /* Transparent to layout everywhere the header fits on one line: on a desktop
    every control inside sits directly in .board-title exactly as it did before
    this wrapper existed, so nothing about the wide header changes. It only

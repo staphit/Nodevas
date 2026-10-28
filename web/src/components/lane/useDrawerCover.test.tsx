@@ -57,11 +57,15 @@ describe("useDrawerCover", () => {
       return realRect.call(this);
     });
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.querySelectorAll("main[data-test-stage]").forEach((stage) => stage.remove());
+  });
 
   function mount() {
     const stage = document.createElement("main");
     stage.className = "stage";
+    stage.dataset.testStage = "";
     document.body.appendChild(stage);
     const view = render(<Pane />, { container: stage });
     const pane = () => stage.querySelector<HTMLElement>(".lane-wrap")!;
@@ -90,13 +94,13 @@ describe("useDrawerCover", () => {
   });
 
   it("measures a drawer already open when the pane mounts", () => {
-    const stage = document.createElement("main");
-    document.body.appendChild(stage);
-    const drawer = document.createElement("div");
-    drawer.className = "drawer";
-    stage.appendChild(drawer);
-    render(<Pane />, { container: stage });
-    expect(stage.querySelector<HTMLElement>(".lane-wrap")!.dataset.cover).toBe("580");
+    const { container } = render(
+      <main className="stage">
+        <Pane />
+        <div className="drawer" />
+      </main>,
+    );
+    expect(container.querySelector<HTMLElement>(".lane-wrap")!.dataset.cover).toBe("580");
   });
 });
 

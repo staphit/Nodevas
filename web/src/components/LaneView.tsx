@@ -98,6 +98,7 @@ import {
 } from "./lane/LaneContextMenuLayer";
 import { useBoardReveal } from "./lane/useBoardReveal";
 import { useBoardViewport } from "./lane/useBoardViewport";
+import { useDrawerCover } from "./lane/useDrawerCover";
 import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
@@ -330,6 +331,10 @@ export function LaneView({
     runCanvasCommand,
   });
   const boardRef = useRef<HTMLDivElement>(null);
+  // The node drawer lies over the pane's right side; the toolbar keeps its
+  // right-hand controls clear of it.
+  const paneRef = useRef<HTMLElement>(null);
+  const drawerCover = useDrawerCover(paneRef);
   // Every way the board opens a node — a card, Enter, its menu, a row in
   // Problems — keeps the card out from under the drawer that opens with it.
   const { openTab, revealIfHidden } = useRevealOpenedCard({
@@ -1519,11 +1524,19 @@ export function LaneView({
   return (
     <GraphGestureModeProvider value={gestureMode}>
     <section
+      ref={paneRef}
       className={`lane-wrap ${isGraph ? "graph" : "timeline"}${
         collapsed ? " pane-collapsed" : ""
       }${timelineWidthResizeEdge ? " timeline-cell-resizing" : ""}`}
       aria-label={isGraph ? t("lane.graph") : t("lane.timeline")}
-      style={collapsed ? undefined : paneStyle}
+      data-drawer-cover={drawerCover > 0 ? "" : undefined}
+      style={
+        drawerCover > 0
+          ? ({ ...(collapsed ? {} : paneStyle), "--drawer-cover": `${drawerCover}px` } as CSSProperties)
+          : collapsed
+            ? undefined
+            : paneStyle
+      }
       onPointerDownCapture={onActivate}
       onFocusCapture={onActivate}
     >
