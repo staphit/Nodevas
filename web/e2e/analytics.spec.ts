@@ -69,7 +69,7 @@ test("Agent performance shows scorecards and applies a suggestion only once conf
   await mockAnalytics(page, captured);
   await freshProject(page, ["設計稿"]);
   await page.getByRole("button", { name: /設定|Settings/ }).first().click();
-  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: /^(代理|Agents)/ }).click();
+  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: /^(Agent 與 Runner|Agents)/ }).click();
   const advanced = page.getByRole("region", { name: /進階|Advanced/ });
   await advanced.getByRole("button", { name: /^(進階|Advanced)/ }).click();
   await advanced.getByRole("button", { name: /^Agent 表現/ }).click();

@@ -87,7 +87,7 @@ function stagedRuns(nodeId: string) {
 test("choosing the Standard preset shows its cost hint", async ({ page }) => {
   await freshProject(page, ["設計稿"]);
   await page.getByRole("button", { name: /設定|Settings/ }).first().click();
-  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: /^(代理|Agents)/ }).click();
+  await page.getByRole("navigation", { name: /設定|Settings/ }).getByRole("button", { name: /^(Agent 與 Runner|Agents)/ }).click();
   const advanced = page.getByRole("region", { name: /進階|Advanced/ });
   await advanced.getByRole("button", { name: /^(進階|Advanced)/ }).click();
   await advanced.getByRole("button", { name: /(工作流程階段|Workflow stages)/ }).click();

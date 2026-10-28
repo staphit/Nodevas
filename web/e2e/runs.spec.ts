@@ -493,7 +493,7 @@ for (const [name, viewport] of Object.entries({
     await second.getByRole("combobox", { name: "目標 agent" }).selectOption("claude");
     await second.getByText("Fallback 鏈（0）").click();
     await second.getByRole("button", { name: "新增 fallback" }).click();
-    await second.getByRole("combobox", { name: "Fallback 1 agent" }).selectOption("codex");
+    await second.getByRole("combobox", { name: "備援 1 agent" }).selectOption("codex");
     await second.getByRole("button", { name: "上移規則 2" }).click();
     await expectInside(page, await dialog.boundingBox(), viewport.width);
 
@@ -536,7 +536,7 @@ for (const [name, viewport] of Object.entries({
     const chain = dialog.getByTestId("dispatch-fallbacks");
     await expect(chain).not.toHaveAttribute("open", "");
     await chain.getByText("Fallback 鏈（1）").click();
-    await expect(chain.getByRole("combobox", { name: "Fallback 1模型" })).toHaveValue("opus");
+    await expect(chain.getByRole("combobox", { name: "備援 1模型" })).toHaveValue("opus");
     await expectInside(page, await dialog.boundingBox(), viewport.width);
   });
 }

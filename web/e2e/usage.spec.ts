@@ -136,7 +136,7 @@ for (const [name, viewport] of Object.entries({
     await expect(dialog.locator(".usage-tooltip")).toBeVisible();
     await shot(page, `${name}-tooltip`);
 
-    await dialog.getByRole("tab", { name: "Session" }).click();
+    await dialog.getByRole("tab", { name: "工作階段" }).click();
     await expect(dialog.getByText("patrick")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, `${name}-sessions`);
