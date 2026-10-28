@@ -80,3 +80,21 @@ describe("Station's docked agent chat", () => {
     expect(rules(".station-network-name")).toMatch(/white-space:\s*nowrap/);
   });
 });
+
+// Under 1181px the voice copilot's button stays in the bottom right corner,
+// which at the end of Station's scroll is the agent chat's Send button (at
+// 500px, 150% text, elementFromPoint on Send returned the button). Station's
+// end keeps the button's height clear, so the last row scrolls up past it.
+describe("Station's end and the voice copilot button", () => {
+  const raw = readFileSync(resolve(process.cwd(), "src/styles/25-station.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+
+  it("pads its bottom by the button's height wherever the button sits over it", () => {
+    const media = raw.match(/@media \(max-width: 1180px\)\s*\{((?:[^{}]*\{[^}]*\})*)[^{}]*\}/);
+    expect(media).not.toBeNull();
+    const rule = media?.[1].match(/\.app\.mode-station:has\(> \.copilot-fab\) \.station\s*\{([^}]*)\}/);
+    expect(rule?.[1]).toMatch(/padding-bottom:\s*calc\([^;]*48px[^;]*\)/);
+  });
+});
