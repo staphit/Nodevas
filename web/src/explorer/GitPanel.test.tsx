@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -81,5 +81,36 @@ describe("GitPanel", () => {
     expect(
       await screen.findByText("This workspace keeps history as file copies; the commit view needs git history."),
     ).toBeInTheDocument();
+  });
+
+  // Switching project from the header left the panel on the previous
+  // project's pending changes and commits until the tab was left and reopened.
+  it("loads the new project's history when the project changes", async () => {
+    useApp.setState({ activeProject: "gates2k" });
+    const workspaceGit = vi.mocked(explorerApi.workspaceGit);
+    render(<GitPanel />);
+    const commits = await screen.findByRole("region", { name: "Commits" });
+    expect(within(commits).getByText("login: done")).toBeInTheDocument();
+
+    let answer!: (value: Awaited<ReturnType<typeof explorerApi.workspaceGit>>) => void;
+    workspaceGit.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    const listRuns = vi.mocked(api.listProjectRuns);
+    const runCalls = listRuns.mock.calls.length;
+    act(() => useApp.setState({ activeProject: "ai-harness-engineering" }));
+    // The old project's history is gone at once, not shown under the new one.
+    expect(screen.queryByText("login: done")).not.toBeInTheDocument();
+    expect(screen.queryByText("login.md")).not.toBeInTheDocument();
+    expect(listRuns.mock.calls.length).toBeGreaterThan(runCalls);
+
+    await act(async () =>
+      answer({
+        backend: "git",
+        branch: "main",
+        pending: [],
+        commits: [{ sha: "e".repeat(40), at: "2026-10-28T10:00:00Z", author: "patrick", subject: "harness: edit" }],
+      }),
+    );
+    expect(await screen.findByText("harness: edit")).toBeInTheDocument();
+    expect(screen.getByText("No pending changes")).toBeInTheDocument();
   });
 });

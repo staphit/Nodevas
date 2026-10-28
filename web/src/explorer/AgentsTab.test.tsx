@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { explorerApi } from "../api/explorer";
@@ -38,6 +38,20 @@ describe("AgentsTab", () => {
 
     await userEvent.click(within(recent).getByText("Login form"));
     expect(useExplorer.getState().view).toEqual({ kind: "agent", id: "run:r1" });
+  });
+
+  it("lists the new project's agents when the project changes", async () => {
+    useApp.setState({ activeProject: "gates2k" });
+    const agents = vi
+      .spyOn(explorerApi, "agents")
+      .mockResolvedValue({ live: [], external: [], recent: [agentItem()] });
+    render(<AgentsTab />);
+    expect(await screen.findByText("Login form")).toBeInTheDocument();
+    agents.mockResolvedValue({ live: [], external: [], recent: [] });
+    act(() => useApp.setState({ activeProject: "ai-harness-engineering" }));
+    expect(screen.queryByText("Login form")).not.toBeInTheDocument();
+    expect(await screen.findByText("No agents yet")).toBeInTheDocument();
+    expect(agents).toHaveBeenCalledTimes(2);
   });
 
   it("says when there are no agents", async () => {
