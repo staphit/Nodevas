@@ -75,11 +75,8 @@ function restingRect(element: HTMLElement): Area {
   }
 }
 
-/**
- * Where, in the board's own client coordinates, a card should be centred so
- * it lands in the middle of what is showing.
- */
-export function visibleBoardCentre(board: HTMLElement): { x: number; y: number } {
+/** The part of `board` that is showing, in viewport coordinates. */
+export function visibleBoardArea(board: HTMLElement): Area {
   const rect = board.getBoundingClientRect();
   const area: Area = {
     left: rect.left,
@@ -93,7 +90,16 @@ export function visibleBoardCentre(board: HTMLElement): { x: number; y: number }
   )
     .filter((element) => !board.contains(element))
     .map(restingRect);
-  const visible = visibleArea(area, overlays);
+  return visibleArea(area, overlays);
+}
+
+/**
+ * Where, in the board's own client coordinates, a card should be centred so
+ * it lands in the middle of what is showing.
+ */
+export function visibleBoardCentre(board: HTMLElement): { x: number; y: number } {
+  const rect = board.getBoundingClientRect();
+  const visible = visibleBoardArea(board);
   return {
     x: (visible.left + visible.right) / 2 - rect.left,
     y: (visible.top + visible.bottom) / 2 - rect.top,

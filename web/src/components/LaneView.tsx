@@ -54,6 +54,7 @@ import {
 import { useGraphWiring } from "./canvas/useGraphWiring";
 import { useBoardShortcuts } from "./canvas/useBoardShortcuts";
 import { useNodeCreation } from "./canvas/useNodeCreation";
+import { useRevealOpenedCard } from "./canvas/useRevealOpenedCard";
 import { useNodeConditions } from "./canvas/useNodeConditions";
 import { useCanvasDecorations } from "./canvas/useCanvasDecorations";
 import { useGraphViews } from "./canvas/useGraphViews";
@@ -175,7 +176,7 @@ export function LaneView({
   const statuses = useApp((s) => s.statuses);
   const runState = useApp((s) => s.runState);
   const issues = useApp((s) => s.issues);
-  const openTab = useApp((s) => s.openTab);
+  const openTabInStore = useApp((s) => s.openTab);
   const updateCanvasLayout = useApp((s) => s.updateCanvasLayout);
   const updatePlan = useApp((s) => s.updatePlan);
   const updateWorkflowDefinition = useApp((s) => s.updateWorkflowDefinition);
@@ -317,6 +318,13 @@ export function LaneView({
     runCanvasCommand,
   });
   const boardRef = useRef<HTMLDivElement>(null);
+  // Every way the board opens a node — a card, Enter, its menu, a row in
+  // Problems — keeps the card out from under the drawer that opens with it.
+  const openTab = useRevealOpenedCard({
+    enabled: isGraph && !collapsed,
+    boardRef,
+    openTab: openTabInStore,
+  });
   // Station and Settings unmount the board, so the view this project was left
   // at in this session — if any — is read once, on mount.
   const [rememberedView] = useState(() =>
