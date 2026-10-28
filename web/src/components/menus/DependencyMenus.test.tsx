@@ -64,7 +64,7 @@ describe("NodeMenu dependencies", () => {
   // offered as a new one.
   it("does not offer a prerequisite the expression already names", () => {
     nodeMenu({ requires: "design and review and other" });
-    const picker = screen.getByRole("combobox");
+    const picker = screen.getByRole("combobox", { name: "Add a dependency" });
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "No nodes available to add",
     ]);

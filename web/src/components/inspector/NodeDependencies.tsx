@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { nodeTypeOf } from "../../domain/graph/nodeTypes";
+import { requiresNodeRefs } from "../../domain/graph/requires";
 import { IconClose, IconPlus } from "../../icons";
 import { localizedRelationLabel, useI18n } from "../../i18n";
 import { NodeTypeChip } from "../../nodeTypeTheme";
@@ -43,7 +44,13 @@ export function NodeDependencies({ id }: { id: string }) {
   const activeProject = useApp((state) => state.activeProject);
   const logicGates = graph?.ui?.logicGates ?? NO_GATES;
   const [notice, setNotice] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
-  useEffect(() => setNotice(null), [id]);
+  // Added but not yet answered: the server materialises a dependency before
+  // the board shows it, and the picker must not offer it again meanwhile.
+  const [adding, setAdding] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setNotice(null);
+    setAdding(new Set());
+  }, [id]);
 
   const nodeTitle = (nodeId: string | undefined) =>
     (nodeId && graph?.nodes?.find((node) => node.id === nodeId)?.title) || nodeId || "";
@@ -94,12 +101,44 @@ export function NodeDependencies({ id }: { id: string }) {
     conditionTarget,
   } = conditions;
 
+  // Not on offer: a node already wired in, one the expression names without
+  // a wire yet, and one just added whose answer is still on its way.
+  const targetRequires = conditionTarget?.requires;
+  const choices = useMemo(() => {
+    const named = new Set(requiresNodeRefs(targetRequires));
+    return availableConditionSources.filter((node) => !named.has(node.id) && !adding.has(node.id));
+  }, [availableConditionSources, targetRequires, adding]);
+
   // Adding a prerequisite removes it from the choices; the picker moves on to
   // the next one rather than pointing at a node it no longer offers.
   useEffect(() => {
-    if (availableConditionSources.some((node) => node.id === conditionSource)) return;
-    setConditionSource(availableConditionSources[0]?.id ?? "");
-  }, [availableConditionSources, conditionSource, setConditionSource]);
+    if (choices.some((node) => node.id === conditionSource)) return;
+    setConditionSource(choices[0]?.id ?? "");
+  }, [choices, conditionSource, setConditionSource]);
+
+  const addDependency = () => {
+    const sourceId = conditionSource;
+    if (!sourceId || sourceId === id) return;
+    setAdding((current) => new Set(current).add(sourceId));
+    const settle = () =>
+      setAdding((current) => {
+        const next = new Set(current);
+        next.delete(sourceId);
+        return next;
+      });
+    void updateNode({
+      type: "node.addDependency",
+      sourceId,
+      targetId: id,
+      operator: conditionOperator,
+      relation: conditionRelation,
+    })
+      .then((result) => {
+        if (!result.ok) setNotice({ text: result.message, kind: "error" });
+      })
+      .catch(reportError)
+      .finally(settle);
+  };
 
   const outgoing = (graph?.edges ?? []).filter((edge) => edge.from === id);
   const requires = conditionTarget?.requires?.trim() ?? "";
@@ -183,19 +222,19 @@ export function NodeDependencies({ id }: { id: string }) {
             className="node-dependency-add"
             onSubmit={(event) => {
               event.preventDefault();
-              conditions.addDependency(id);
+              addDependency();
             }}
           >
             <select
               value={conditionSource}
               aria-label={t("drawer.deps.pick")}
-              disabled={availableConditionSources.length === 0}
+              disabled={choices.length === 0}
               onChange={(event) => setConditionSource(event.target.value)}
             >
-              {availableConditionSources.length === 0 ? (
+              {choices.length === 0 ? (
                 <option value="">{t("nodeMenu.noSources")}</option>
               ) : (
-                availableConditionSources.map((node) => (
+                choices.map((node) => (
                   <option key={node.id} value={node.id}>
                     {node.title || node.id}
                   </option>

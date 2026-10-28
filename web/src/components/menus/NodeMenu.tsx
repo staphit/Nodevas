@@ -9,9 +9,10 @@
  * and the agent actions are the short menu's (NodeActionsMenu).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
+import { requiresNodeRefs } from "../../domain/graph/requires";
 import { IconPlus } from "../../icons";
 import type { LaneContextMenu } from "../LaneView";
 import { localizedRelationLabel, useI18n } from "../../i18n";
@@ -68,6 +69,16 @@ export function NodeMenu({
 }: NodeMenuProps) {
   const { t, language } = useI18n();
   const requires = conditionTarget?.requires?.trim() ?? "";
+  // A node the expression already names is a prerequisite even before its
+  // wire is drawn, so it is not offered again.
+  const choices = useMemo(() => {
+    const named = new Set(requiresNodeRefs(requires));
+    return availableConditionSources.filter((node) => !named.has(node.id));
+  }, [availableConditionSources, requires]);
+  useEffect(() => {
+    if (choices.some((node) => node.id === conditionSource)) return;
+    setConditionSource(choices[0]?.id ?? "");
+  }, [choices, conditionSource, setConditionSource]);
   const conditionKind = advancedConditionKind(requires);
   const hasRelationOverride = incomingConditions.some(
     (edge) => edgeRelation(edge) !== "",
@@ -140,13 +151,13 @@ export function NodeMenu({
             <span className="lane-context-label">{t("nodeMenu.addSource")}</span>
             <select
               value={conditionSource}
-              disabled={availableConditionSources.length === 0}
+              disabled={choices.length === 0}
               onChange={(event) => setConditionSource(event.target.value)}
             >
-              {availableConditionSources.length === 0 ? (
+              {choices.length === 0 ? (
                 <option value="">{t("nodeMenu.noSources")}</option>
               ) : (
-                availableConditionSources.map((node) => (
+                choices.map((node) => (
                   <option key={node.id} value={node.id}>
                     {node.title || node.id}
                   </option>
