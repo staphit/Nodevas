@@ -7,7 +7,7 @@
  * to, so the two never fork.
  */
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useApp } from "../../store";
 import type { Graph } from "../../types";
 import { ROW_H, type Col } from "../canvas/geometry";
@@ -67,6 +67,28 @@ export function useBoardReveal({
       setGraphSelection((current) => (current?.kind === "node" ? null : current));
     }
   }, [isGraph, selectedNodeId]);
+
+  // And the other way: a node the drawer comes to show — a click on one of its
+  // tabs, the tab left when another closes, the explorer's tree — becomes the
+  // selection, so dependency and timeline actions aim at the open page. Moved
+  // through the shared selection, which the timeline follows; the graph pane
+  // owns it so the two never fork. A multi-selection that already holds the
+  // node (a plain click on one of its cards) is kept, and a drawer closing
+  // leaves the selection where it is.
+  const activeTab = useApp((state) => state.activeTab);
+  const shownTab = useRef(activeTab);
+  useEffect(() => {
+    if (activeTab === shownTab.current) return;
+    shownTab.current = activeTab;
+    if (!isGraph || activeTab === null) return;
+    const held =
+      graphSelection?.kind === "node"
+        ? graphSelection.id === activeTab
+        : graphSelection?.kind === "nodes" && graphSelection.ids.includes(activeTab);
+    if (held) return;
+    setGraphSelection({ kind: "node", id: activeTab });
+    onSelectedNodeChange?.(activeTab);
+  }, [activeTab, isGraph]);
 
   // Following a link opens the document; the board answers by selecting the
   // node and scrolling it into view, so the jump is visible on the canvas too.
