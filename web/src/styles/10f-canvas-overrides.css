@@ -13,13 +13,13 @@
 }
 .timeline-plan-edit-row {
   display: grid;
-  grid-template-columns: 90px 1fr;
+  grid-template-columns: calc(90px * var(--font-scale, 1)) 1fr;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .timeline-plan-edit-row.with-time {
-  grid-template-columns: 90px 1fr 92px;
+  grid-template-columns: calc(90px * var(--font-scale, 1)) 1fr calc(92px * var(--font-scale, 1));
 }
 .timeline-plan-edit-row.with-time small {
   grid-column: 2 / 4;
@@ -40,14 +40,14 @@
   border-radius: 6px;
   color: var(--text);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .timeline-plan-edit-row small {
   grid-column: 2;
   color: var(--text-2);
 }
 .timeline-plan-edit-row.in-progress {
-  grid-template-columns: 90px auto auto;
+  grid-template-columns: calc(90px * var(--font-scale, 1)) auto auto;
 }
 .timeline-plan-edit-row.in-progress button {
   justify-self: start;
@@ -57,7 +57,7 @@
   background: var(--surface);
   color: var(--st-failed-fg);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 /* future date rows */
@@ -231,7 +231,7 @@
 }
 .board-overflow-section label span {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .board-overflow-section input[type="range"] {
   width: 100%;
@@ -240,12 +240,12 @@
 }
 .board-overflow-section output {
   color: var(--text);
-  font: 600 10px/1.2 var(--mono);
+  font: 600 calc(10px * var(--font-scale, 1))/1.2 var(--mono);
   text-align: right;
 }
 .board-overflow-section small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 

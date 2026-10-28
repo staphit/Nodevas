@@ -142,7 +142,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   cursor: pointer;
-  font: 600 10.5px/1.25 var(--mono);
+  font: 600 calc(10.5px * var(--font-scale, 1))/1.25 var(--mono);
   white-space: nowrap;
 }
 .timeline-size-control > summary::-webkit-details-marker,
@@ -204,7 +204,7 @@
 }
 .timeline-size-popover output {
   color: var(--text);
-  font: 600 10px/1.2 var(--mono);
+  font: 600 calc(10px * var(--font-scale, 1))/1.2 var(--mono);
   text-align: right;
 }
 .timeline-size-popover small {
@@ -234,7 +234,7 @@
   color: var(--text);
   background: transparent;
   cursor: pointer;
-  font: 600 13px/1 var(--sans);
+  font: 600 calc(13px * var(--font-scale, 1))/1 var(--sans);
 }
 .timeline-width-stepper button:hover:not(:disabled),
 .timeline-width-stepper button:focus-visible {
@@ -253,7 +253,7 @@
 .timeline-width-stepper output {
   border-left: 1px solid var(--border);
   color: var(--text);
-  font: 600 9.5px/1 var(--mono);
+  font: 600 calc(9.5px * var(--font-scale, 1))/1 var(--mono);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -264,7 +264,7 @@
   border-radius: 4px;
   color: var(--text-2);
   background: var(--surface-2);
-  font: 600 10.5px/1.4 var(--mono);
+  font: 600 calc(10.5px * var(--font-scale, 1))/1.4 var(--mono);
   cursor: pointer;
   white-space: nowrap;
 }

@@ -206,7 +206,7 @@
   border-radius: 4px;
   background: var(--surface-2);
   color: var(--text-2);
-  font: 10px var(--mono);
+  font: calc(10px * var(--font-scale, 1)) var(--mono);
 }
 .command-palette-results {
   max-height: min(52vh, 460px);
