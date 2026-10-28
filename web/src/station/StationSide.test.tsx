@@ -109,6 +109,15 @@ describe("StationSide", () => {
     expect(useApp.getState().preferences.settingsSection).toBe("runners");
   });
 
+  it("names the hub's own runner in the reader's language", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    useRunners.setState({ runners: [{ id: "r0", name: "this machine", online: true } as never] });
+    render(<StationSide world={world} />);
+    const card = screen.getByRole("region", { name: "Runner" });
+    expect(within(card).getByText("本機")).toBeInTheDocument();
+    expect(within(card).queryByText("this machine")).not.toBeInTheDocument();
+  });
+
   it("keeps Agent chat folded to what is unread until opened, and reads it when open", () => {
     render(<StationSide world={world} />);
     const toggle = screen.getByRole("button", { name: /^Agent chat/ });

@@ -95,6 +95,15 @@ describe("RunnersPanel", () => {
     expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
   });
 
+  it("names the hub's own runner in the reader's language", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...desktop, name: "this machine" }] });
+    render(<RunnersPanel />);
+    expect(await screen.findByText("本機")).toBeInTheDocument();
+    expect(screen.queryByText("this machine")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /本機/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("opens the add form when asked from outside, once", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
     const opened = vi.fn();

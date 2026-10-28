@@ -289,6 +289,15 @@ describe("the building", () => {
     expect(openSettings).toHaveBeenCalledWith("runners");
   });
 
+  it("names the hub's own runner's rack in the reader's language", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    mount(building({ runners: [runner("rn0", "this machine", 1)] }));
+    const room = screen.getByRole("region", { name: "機房" });
+    const rack = within(room).getByRole("button", { name: /^Runner 本機：在線/ });
+    expect(within(rack).getByText("本機")).toBeInTheDocument();
+    expect(room.textContent).not.toContain("this machine");
+  });
+
   it("says the building in words for a screen reader, by project and room", () => {
     const pr = makeRun({ id: "pr1", status: "succeeded", nodeId: "login", prUrl: "https://x/pull/2" });
     mount(
