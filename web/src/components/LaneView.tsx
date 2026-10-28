@@ -41,6 +41,8 @@ import {
 import { useCanvasPan } from "./canvas/useCanvasPan";
 import { useConnectionDrag } from "./canvas/useConnectionDrag";
 import { useMarquee } from "./canvas/useMarquee";
+import { useViewWindow } from "./canvas/useViewWindow";
+import { CULL_MIN_CARDS, cardRect, rectsIntersect } from "./canvas/viewportCulling";
 import {
   GraphGestureModeProvider,
   type GraphGestureMode,
@@ -366,6 +368,14 @@ export function LaneView({
       timelineCellWidth,
       timelineCellHeight,
     });
+  // A large graph mounts only the cards near the view. Read after
+  // useBoardViewport's opening scroll, which lands in the same commit.
+  const viewWindow = useViewWindow({
+    boardRef,
+    enabled: isGraph && !collapsed && cols.length >= CULL_MIN_CARDS,
+    zoom: viewScale,
+    viewport: boardViewport,
+  });
 
   const { boardW, graphOffsetX, graphCanvasH, graphOffsetY } = boardMetrics({
     isGraph,
@@ -648,6 +658,13 @@ export function LaneView({
     enabled: isGraph,
     withoutModifier: gestureMode === "marquee",
     pointFromClient: graphPointFromClient,
+    // A culled board has no element for most cards; the layout knows them all.
+    nodesInRect: viewWindow
+      ? (rect) =>
+          cols.flatMap((column) =>
+            rectsIntersect(cardRect(column, centerX, rowTop), rect) ? [column.node.id] : [],
+          )
+      : undefined,
     onSingleSelect: (nodeId) => selectNode(nodeId),
     onMultiSelect: (nodeIds) => {
       setGraphSelection(nodeIds.length ? { kind: "nodes", ids: nodeIds } : null);
@@ -1354,6 +1371,7 @@ export function LaneView({
               graphObstacles={graphObstacles}
               centerX={centerX}
               rowTop={rowTop}
+              viewWindow={viewWindow}
               snapEnabled={snapGuidesEnabled}
               snapBoxes={snapBoxes}
               // One gesture runs at a time, so whichever is live owns the lines.

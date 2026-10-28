@@ -8,7 +8,7 @@
  * place and how it reacts in another.
  */
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { reportError } from "../../store";
 import { localizedStatusLabel, useI18n } from "../../i18n";
 import type {
@@ -39,10 +39,12 @@ import type { useConnectionDrag, ConnectionDragState } from "./useConnectionDrag
 import {
   ROW_H,
   edgePlacementKey,
+  gateWireKey,
   type Col,
   type Point,
   type Rect,
 } from "./geometry";
+import { boundsOf, cardRect, rectsIntersect, type ViewWindow } from "./viewportCulling";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
 import { safeCssColor } from "../../cssColor";
@@ -78,6 +80,11 @@ export interface GraphCanvasProps {
   graphObstacles: Rect[];
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
+  /**
+   * The part of the board to draw on a culled board (see viewportCulling);
+   * null or left out, every card and wire is drawn.
+   */
+  viewWindow?: ViewWindow;
 
   // Alignment. The boxes are shared by every gesture that can snap; the guides
   // are whatever the gesture currently running has landed on.
@@ -151,6 +158,7 @@ export function GraphCanvas({
   graphObstacles,
   centerX,
   rowTop,
+  viewWindow = null,
   snapEnabled,
   snapBoxes,
   snapGuides,
@@ -212,6 +220,9 @@ export function GraphCanvas({
   };
   const latest = useRef(handed);
   latest.current = handed;
+  // The card holding keyboard focus. A culled board keeps it, and the cards
+  // either side of it in tab order, mounted wherever the view goes.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const cardEvents = useMemo<CardEvents>(
     () => ({
       pointerDown: (event, id) => latest.current.onCardPointerDown(event, id),
@@ -236,8 +247,10 @@ export function GraphCanvas({
       },
       focus: (id) => {
         const now = latest.current;
+        setFocusedId(id);
         if (!now.selectedGraphNodeIDs.has(id)) now.selectNode(id);
       },
+      blur: (id) => setFocusedId((current) => (current === id ? null : current)),
       keyDown: (event, id) => {
         // The menu key and Shift+F10 open the node menu, as a right
         // click would, at the card's own corner.
@@ -291,6 +304,64 @@ export function GraphCanvas({
     [],
   );
   const lifted = drag?.moved ? new Set(drag.ids) : null;
+
+  // Where a gate's condition box was put by hand, in board units.
+  const gatePlacement = (gate: Gate): Point | undefined => {
+    const placement = graph?.ui?.gates?.[gate.to.node.id];
+    return Number.isFinite(placement?.x) && Number.isFinite(placement?.y)
+      ? { x: graphOffsetX + placement!.x!, y: graphOffsetY + placement!.y! }
+      : undefined;
+  };
+
+  // A culled board draws the cards near the view and the ones somebody is
+  // holding: selected, open, focused (with its tab neighbours), dragged,
+  // resized, or an end of the wire being drawn. Every card keeps its place
+  // in draw order, so tab order and stacking do not change.
+  let drawnCols = cols;
+  let drawnGates = gates;
+  if (viewWindow) {
+    const pinned = new Set(selectedGraphNodeIDs);
+    if (activeTab) pinned.add(activeTab);
+    for (const id of drag?.ids ?? []) pinned.add(id);
+    if (cardResize) pinned.add(cardResize.nodeId);
+    if (connectionDrag?.sourceId) pinned.add(connectionDrag.sourceId);
+    if (connectionDrag?.targetId) pinned.add(connectionDrag.targetId);
+    if (connectionHover) pinned.add(connectionHover.nodeId);
+    if (focusedId) {
+      const at = cols.findIndex((column) => column.node.id === focusedId);
+      for (const column of [cols[at - 1], cols[at], cols[at + 1]]) {
+        if (at >= 0 && column) pinned.add(column.node.id);
+      }
+    }
+    const view = viewWindow === "measuring" ? null : viewWindow;
+    drawnCols = cols.filter(
+      (column) =>
+        pinned.has(column.node.id) ||
+        (view !== null && rectsIntersect(cardRect(column, centerX, rowTop), view)),
+    );
+    // A wire is drawn when the box around its ends, its gate and its bends
+    // meets the view — so one crossing the view from two cards out of it is —
+    // or when a card it joins is being dragged.
+    drawnGates = view
+      ? gates.filter((gate) => {
+          const ends = [gate.to, ...gate.parents.map((parent) => parent.from)];
+          if (drag && ends.some((end) => drag.ids.includes(end.node.id))) return true;
+          const placement = gatePlacement(gate);
+          const bends = [
+            ...(placement ? [placement] : []),
+            ...getWireVertices(gateWireKey(gate.to.node.id)),
+            ...gate.parents.flatMap((parent) =>
+              getWireVertices(edgePlacementKey(parent.from.node.id, gate.to.node.id)),
+            ),
+          ];
+          const bounds = boundsOf(
+            ends.map((end) => cardRect(end, centerX, rowTop)),
+            bends,
+          );
+          return bounds !== null && rectsIntersect(bounds, view);
+        })
+      : [];
+  }
 
   const agentSessions = useAgents((s) => s.sessions);
   const agentByNodeId = new Map<string, { name: string; agent: string }>();
@@ -534,21 +605,13 @@ export function GraphCanvas({
             obstacles={graphObstacles}
           />
         ))}
-        {gates.map((gate) => (
+        {drawnGates.map((gate) => (
           <GateWiring
             key={gate.to.node.id}
             gate={gate}
             centerX={centerX}
             rowTop={rowTop}
-            storedPoint={(() => {
-              const placement = graph?.ui?.gates?.[gate.to.node.id];
-              return Number.isFinite(placement?.x) && Number.isFinite(placement?.y)
-                ? {
-                    x: graphOffsetX + placement!.x!,
-                    y: graphOffsetY + placement!.y!,
-                  }
-                : undefined;
-            })()}
+            storedPoint={gatePlacement(gate)}
             storedRatio={graph?.ui?.gates?.[gate.to.node.id]?.ratio}
             onPositionChange={saveGatePlacement}
             selectedEdges={selectedEdgeKeys}
@@ -612,7 +675,7 @@ export function GraphCanvas({
           />
         ))}
       </svg>
-      {cols.map((c) => {
+      {drawnCols.map((c) => {
         const n = c.node;
         const st: Status = statuses[n.id] ?? "ready";
         const assigned = (n.assignee && userNames.get(n.assignee)) || t("canvas.unassigned");

@@ -160,8 +160,9 @@ describe("viewport culling", () => {
     panTo(30, 18);
     expect(card(idAt(0, 0))).not.toBeNull();
     expect(document.activeElement).toBe(card(idAt(0, 0)));
-    // Tab and Shift+Tab land on mounted cards.
-    expect(card(idAt(1, 0))).not.toBeNull();
+    // Tab lands on a mounted card: the next one in draw order, which runs
+    // down each column of placed cards before the next column.
+    expect(card(idAt(0, 1))).not.toBeNull();
     expect(card(idAt(5, 5))).toBeNull();
   });
 

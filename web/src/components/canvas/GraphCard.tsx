@@ -31,6 +31,7 @@ export interface CardEvents {
   pointerLeave: (id: string) => void;
   lostPointerCapture: (id: string) => void;
   focus: (id: string) => void;
+  blur: (id: string) => void;
   keyDown: (event: React.KeyboardEvent<HTMLElement>, id: string) => void;
   contextMenu: (event: React.MouseEvent<HTMLElement>, id: string) => void;
   moreClick: (event: React.MouseEvent<HTMLElement>, id: string) => void;
@@ -149,6 +150,7 @@ export const GraphCard = memo(function GraphCard({
         onPointerEnter={() => events.pointerEnter(n.id)}
         onPointerLeave={() => events.pointerLeave(n.id)}
         onFocus={() => events.focus(n.id)}
+        onBlur={() => events.blur(n.id)}
         onKeyDown={(event) => events.keyDown(event, n.id)}
         onContextMenu={(event) => events.contextMenu(event, n.id)}
         onLostPointerCapture={() => events.lostPointerCapture(n.id)}
