@@ -117,8 +117,8 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 			t.Errorf("step %s is gone: the NAS database has it recorded", kept)
 		}
 	}
-	if n := len(names); n < 3 || names[n-3] != "0026_search_index" || names[n-2] != "0027_legacy_imports" || names[n-1] != "0028_agent_analytics" {
-		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics", names[max(0, len(names)-4):])
+	if n := len(names); n < 4 || names[n-4] != "0026_search_index" || names[n-3] != "0027_legacy_imports" || names[n-2] != "0028_agent_analytics" || names[n-1] != "0029_search_gin_fastupdate" {
+		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate", names[max(0, len(names)-5):])
 	}
 }
 

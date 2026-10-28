@@ -383,47 +383,43 @@ func TestConcurrentPutsOfSameNodeDoNotDuplicate(t *testing.T) {
 }
 
 // 50. Budget: p95 under 150 ms for a ranked whole-sentence query over 5k docs.
+// The plan sub-benchmark checks, after the same bulk load, that the token
+// probes run on the GIN indexes, and reports the buffers one query touches.
 func BenchmarkRank5kDocs(b *testing.B) {
 	database, err := db.OpenPostgres(testpg.NewURL(b), 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { database.Close() })
-	random := rand.New(rand.NewPCG(3, 4))
-	root := b.TempDir()
-	graph := &engine.Graph{Version: 1}
-	_ = os.MkdirAll(filepath.Join(root, "nodes"), 0o755)
-	for i := range 5000 {
-		id := fmt.Sprintf("n%04d", i)
-		graph.Nodes = append(graph.Nodes, &engine.Node{ID: id, Title: id})
-		var body strings.Builder
-		for range 400 {
-			body.WriteRune(rune(0x4E00 + random.IntN(3000)))
-		}
-		_ = os.WriteFile(filepath.Join(root, "nodes", id+".md"), []byte(body.String()), 0o644)
-	}
-	data, _ := engine.MarshalGraph(graph)
-	_ = os.WriteFile(filepath.Join(root, "graph.yaml"), data, 0o644)
+	root := writeBulkProject(b, 5000, 400)
 	m := NewManagerWithDB(database)
 	ctx := context.Background()
 	if _, err := m.RankContext(ctx, root, "warm", 10); err != nil {
 		b.Fatal(err)
 	}
-	query := "林雨的妹妹叫什麼名字她從小就怕水嗎"
-	var durations []time.Duration
-	b.ResetTimer()
-	for b.Loop() {
-		started := time.Now()
-		if _, err := m.RankContext(ctx, root, query, 10); err != nil {
-			b.Fatal(err)
+	b.Run("plan", func(b *testing.B) {
+		buffers := 0
+		for b.Loop() {
+			plan := explainRank(b, database, root, rankPlanQuery, true)
+			checkRankPlanUsesIndexes(b, plan)
+			buffers = planBuffers(plan)
 		}
-		durations = append(durations, time.Since(started))
-	}
-	b.StopTimer()
-	slices.Sort(durations)
-	p95 := durations[len(durations)*95/100]
-	b.ReportMetric(float64(p95.Milliseconds()), "p95-ms")
-	if p95 > 150*time.Millisecond {
-		b.Errorf("p95 %s over the 150 ms budget", p95)
-	}
+		b.ReportMetric(float64(buffers), "buffers/op")
+	})
+	b.Run("rank", func(b *testing.B) {
+		var durations []time.Duration
+		for b.Loop() {
+			started := time.Now()
+			if _, err := m.RankContext(ctx, root, rankPlanQuery, 10); err != nil {
+				b.Fatal(err)
+			}
+			durations = append(durations, time.Since(started))
+		}
+		slices.Sort(durations)
+		p95 := durations[len(durations)*95/100]
+		b.ReportMetric(float64(p95.Milliseconds()), "p95-ms")
+		if p95 > 150*time.Millisecond {
+			b.Errorf("p95 %s over the 150 ms budget", p95)
+		}
+	})
 }
