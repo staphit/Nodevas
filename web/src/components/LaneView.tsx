@@ -309,7 +309,7 @@ export function LaneView({
   const zoomAt = canvasPan.zoomAt;
   const setZoomDirect = canvasPan.setZoom;
   const graphPointFromClient = canvasPan.pointFromClient;
-  const { boardViewport, boardScroll, setBoardScroll } = useBoardViewport({
+  const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
     isGraph,
@@ -646,11 +646,9 @@ export function LaneView({
 
 
   const handleBoardScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    if (isGraph) {
-      const element = event.currentTarget;
-      setBoardScroll({ left: element.scrollLeft, top: element.scrollTop });
-      return;
-    }
+    // The graph's scroll is read where it is used — the culling window and the
+    // minimap frame each follow it by frame — so a pan renders no board.
+    if (isGraph) return;
     onBoardScroll(event);
   };
 
@@ -1444,7 +1442,6 @@ export function LaneView({
           boardW={boardW}
           svgH={svgH}
           zoom={viewScale}
-          boardScroll={boardScroll}
           boardViewport={boardViewport}
           centerX={centerX}
           rowTop={rowTop}

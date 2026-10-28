@@ -6,6 +6,7 @@
  * correct at any zoom without recomputing the layout.
  */
 
+import { useLayoutEffect, useRef } from "react";
 import { ROW_H, type Col } from "./geometry";
 import { useI18n } from "../../i18n";
 
@@ -16,7 +17,6 @@ export function GraphMinimap({
   boardW,
   svgH,
   zoom,
-  boardScroll,
   boardViewport,
   centerX,
   rowTop,
@@ -27,12 +27,37 @@ export function GraphMinimap({
   boardW: number;
   svgH: number;
   zoom: number;
-  boardScroll: { left: number; top: number };
   boardViewport: { width: number; height: number };
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
 }) {
   const { t } = useI18n();
+  // The frame follows the board's scroll by itself, one style write a frame,
+  // so a pan renders neither the board nor the map.
+  const frameRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    const frame = frameRef.current;
+    if (!board || !frame) return;
+    const place = () => {
+      frame.style.left = `${(board.scrollLeft / zoom / boardW) * 100}%`;
+      frame.style.top = `${(board.scrollTop / zoom / svgH) * 100}%`;
+    };
+    place();
+    let pending = 0;
+    const onScroll = () => {
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = 0;
+        place();
+      });
+    };
+    board.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      board.removeEventListener("scroll", onScroll);
+      if (pending) cancelAnimationFrame(pending);
+    };
+  }, [boardRef, zoom, boardW, svgH]);
   return (
     <div
       className="graph-minimap"
@@ -63,10 +88,9 @@ export function GraphMinimap({
         />
       ))}
       <span
+        ref={frameRef}
         className="graph-minimap-viewport"
         style={{
-          left: `${(boardScroll.left / zoom / boardW) * 100}%`,
-          top: `${(boardScroll.top / zoom / svgH) * 100}%`,
           width: `${Math.min(100, (boardViewport.width / zoom / boardW) * 100)}%`,
           height: `${Math.min(100, (boardViewport.height / zoom / svgH) * 100)}%`,
         }}

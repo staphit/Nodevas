@@ -1,7 +1,8 @@
 /**
- * What the board can currently see: the size of the scrolling element and how
- * far it has been scrolled. Both panes measure themselves the same way; only
- * the graph gets an opening scroll position.
+ * What the board can currently see: the size of the scrolling element. Both
+ * panes measure themselves the same way; only the graph gets an opening scroll
+ * position. How far it has scrolled is read by whatever follows it
+ * (useViewWindow, the minimap), so a pan does not render the board.
  */
 
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
@@ -21,7 +22,6 @@ export function useBoardViewport({
   zoom: number;
 }) {
   const [boardViewport, setBoardViewport] = useState({ width: 0, height: 0 });
-  const [boardScroll, setBoardScroll] = useState({ left: 0, top: 0 });
   const graphViewportKeyRef = useRef("");
 
   useLayoutEffect(() => {
@@ -66,5 +66,5 @@ export function useBoardViewport({
     zoom,
   ]);
 
-  return { boardViewport, boardScroll, setBoardScroll };
+  return { boardViewport };
 }
