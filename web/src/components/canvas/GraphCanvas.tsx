@@ -29,7 +29,7 @@ import { SnapGuides } from "./SnapGuides";
 import type { SnapBox, SnapGuide } from "./snapping";
 import { GraphCard, type CardEvents } from "./GraphCard";
 import { PeerOverlay } from "./PeerOverlay";
-import { GateWiring, type Gate } from "./GateWiring";
+import { GATE_H, GATE_W, GateWiring, type Gate } from "./GateWiring";
 import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
 import { StandaloneLogicGate } from "./LogicGate";
 import type { useCardDrag, CardDragState } from "./useCardDrag";
@@ -44,7 +44,13 @@ import {
   type Point,
   type Rect,
 } from "./geometry";
-import { boundsOf, cardRect, rectsIntersect, type ViewWindow } from "./viewportCulling";
+import {
+  boundsOf,
+  cardRect,
+  obstaclesNear,
+  rectsIntersect,
+  type ViewWindow,
+} from "./viewportCulling";
 import type { GraphSelection, LaneContextMenu } from "../LaneView";
 import { useAgents } from "../../agents/agentStore";
 import { safeCssColor } from "../../cssColor";
@@ -319,6 +325,9 @@ export function GraphCanvas({
   // in draw order, so tab order and stacking do not change.
   let drawnCols = cols;
   let drawnGates = gates;
+  // What each drawn wire routes around: every card, or on a culled board the
+  // ones that can still change it.
+  let gateObstacles = (_gate: Gate): Rect[] => graphObstacles;
   if (viewWindow) {
     const pinned = new Set(selectedGraphNodeIDs);
     if (activeTab) pinned.add(activeTab);
@@ -342,10 +351,11 @@ export function GraphCanvas({
     // A wire is drawn when the box around its ends, its gate and its bends
     // meets the view — so one crossing the view from two cards out of it is —
     // or when a card it joins is being dragged.
+    const gateBounds = new Map<Gate, Rect>();
+    const dragged = new Set(drag?.ids);
     drawnGates = view
       ? gates.filter((gate) => {
           const ends = [gate.to, ...gate.parents.map((parent) => parent.from)];
-          if (drag && ends.some((end) => drag.ids.includes(end.node.id))) return true;
           const placement = gatePlacement(gate);
           const bends = [
             ...(placement ? [placement] : []),
@@ -358,9 +368,19 @@ export function GraphCanvas({
             ends.map((end) => cardRect(end, centerX, rowTop)),
             bends,
           );
+          if (bounds) gateBounds.set(gate, bounds);
+          if (ends.some((end) => dragged.has(end.node.id))) return true;
           return bounds !== null && rectsIntersect(bounds, view);
         })
       : [];
+    if (view) {
+      gateObstacles = (gate) => {
+        const bounds = gateBounds.get(gate);
+        return bounds
+          ? obstaclesNear(graphObstacles, bounds, view, GATE_W + GATE_H + ROW_H)
+          : graphObstacles;
+      };
+    }
   }
 
   const agentSessions = useAgents((s) => s.sessions);
@@ -652,7 +672,7 @@ export function GraphCanvas({
               setGraphSelection({ kind: "vertex", wireKey, index });
               onSelectedNodeChange?.(null);
             }}
-            obstacles={graphObstacles}
+            obstacles={gateObstacles(gate)}
             onEditGate={(targetId, x, y) => openConditionMenu(targetId, x, y)}
             onDeleteGate={(targetId) => {
               void updateNode({

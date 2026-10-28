@@ -6,7 +6,7 @@
  * correct at any zoom without recomputing the layout.
  */
 
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { ROW_H, type Col } from "./geometry";
 import { useI18n } from "../../i18n";
 
@@ -18,6 +18,8 @@ export function GraphMinimap({
   svgH,
   zoom,
   boardViewport,
+  graphOffsetX,
+  graphOffsetY,
   centerX,
   rowTop,
 }: {
@@ -28,10 +30,36 @@ export function GraphMinimap({
   svgH: number;
   zoom: number;
   boardViewport: { width: number; height: number };
+  /** Where the graph sits on the board: with the cards, all centerX and rowTop read. */
+  graphOffsetX: number;
+  graphOffsetY: number;
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
 }) {
   const { t } = useI18n();
+  // The board hands down new layout functions every render; the dots are laid
+  // out again only when what those functions read changes. On a large board
+  // that is a few thousand elements a pan no longer touches.
+  const dots = useMemo(
+    () =>
+      cols.map((column) => (
+        <span
+          key={column.node.id}
+          className={`graph-minimap-node${
+            selectedGraphNodeIDs.has(column.node.id) ? " selected" : ""
+          }`}
+          style={{
+            left: `${((centerX(column) - column.width / 2) / boardW) * 100}%`,
+            top: `${((rowTop(column.row) + ROW_H / 2 - column.height / 2) / svgH) * 100}%`,
+            width: `${Math.max(1.5, (column.width / boardW) * 100)}%`,
+            height: `${Math.max(2, (column.height / svgH) * 100)}%`,
+          }}
+        />
+      )),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- centerX and
+    // rowTop are new every render and read only the offsets listed here.
+    [cols, selectedGraphNodeIDs, boardW, svgH, graphOffsetX, graphOffsetY],
+  );
   // The frame follows the board's scroll by itself, one style write a frame,
   // so a pan renders neither the board nor the map.
   const frameRef = useRef<HTMLSpanElement>(null);
@@ -73,20 +101,7 @@ export function GraphMinimap({
         board.scrollTop = contentY * zoom - board.clientHeight / 2;
       }}
     >
-      {cols.map((column) => (
-        <span
-          key={column.node.id}
-          className={`graph-minimap-node${
-            selectedGraphNodeIDs.has(column.node.id) ? " selected" : ""
-          }`}
-          style={{
-            left: `${((centerX(column) - column.width / 2) / boardW) * 100}%`,
-            top: `${((rowTop(column.row) + ROW_H / 2 - column.height / 2) / svgH) * 100}%`,
-            width: `${Math.max(1.5, (column.width / boardW) * 100)}%`,
-            height: `${Math.max(2, (column.height / svgH) * 100)}%`,
-          }}
-        />
-      ))}
+      {dots}
       <span
         ref={frameRef}
         className="graph-minimap-viewport"

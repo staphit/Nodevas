@@ -1443,6 +1443,8 @@ export function LaneView({
           svgH={svgH}
           zoom={viewScale}
           boardViewport={boardViewport}
+          graphOffsetX={graphOffsetX}
+          graphOffsetY={graphOffsetY}
           centerX={centerX}
           rowTop={rowTop}
         />
