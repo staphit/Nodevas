@@ -35,6 +35,20 @@ afterEach(() => vi.restoreAllMocks());
 
 // W-12: workspace changes, agent branches, commits.
 describe("GitPanel", () => {
+  it("opens a repo's uncommitted diff under the repo's name", async () => {
+    vi.spyOn(explorerApi, "repos").mockResolvedValue([
+      { runnerId: "rn1", runnerName: "mac-mini", online: true, repoId: "r1", name: "api-server", browsable: true },
+    ]);
+    vi.spyOn(explorerApi, "repoStatus").mockResolvedValue({
+      branch: "main", head: sha, entries: [{ path: "src/math.js", mark: "M" }], hidden: 0, truncated: false,
+    });
+    render(<GitPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: /math\.js/ }));
+    expect(useExplorer.getState().view).toEqual({
+      kind: "diff", source: "repo", runnerId: "rn1", repoId: "r1", repoName: "api-server", ref: "",
+    });
+  });
+
   it("shows the workspace's branch and pending changes", async () => {
     render(<GitPanel />);
     const workspace = await screen.findByRole("region", { name: "Workspace · main" });

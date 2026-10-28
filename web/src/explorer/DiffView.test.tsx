@@ -82,8 +82,10 @@ describe("DiffView", () => {
 
   it("renders a repo's uncommitted diff", async () => {
     vi.spyOn(explorerApi, "repoDiff").mockResolvedValue({ ref: "", patch: PATCH, truncated: false, hidden: 1 });
-    render(<DiffView view={{ kind: "diff", source: "repo", runnerId: "rn1", repoId: "r1", ref: "" }} />);
-    expect(await screen.findByText("Workspace · uncommitted changes")).toBeInTheDocument();
+    // Named after the repo: the workspace is a different tree (UX sweep).
+    render(<DiffView view={{ kind: "diff", source: "repo", runnerId: "rn1", repoId: "r1", repoName: "api-server", ref: "" }} />);
+    expect(await screen.findByRole("heading", { name: "api-server · uncommitted changes" })).toBeInTheDocument();
+    expect(screen.queryByText(/Workspace/)).toBeNull();
     expect(screen.getByRole("table")).toHaveTextContent("export const add");
   });
 });
