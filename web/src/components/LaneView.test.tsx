@@ -552,6 +552,37 @@ describe("LaneView", () => {
     expect(screen.getByText("尚無節點")).toBeInTheDocument();
   });
 
+  // jsdom has no layout, so this is the contract that puts it in the pane.
+  // The timeline opens scrolled to today, a long way down (or across) its
+  // calendar, and the message came after the calendar: below the pane, with
+  // only the empty lane header in view. It is stuck to the pane's top-left
+  // instead, ahead of the calendar and taking no room from it.
+  it.each(["vertical", "horizontal"] as const)(
+    "keeps an empty %s timeline's message in the pane, wherever it is scrolled",
+    (orientation) => {
+      try {
+        mockBoardSize(948, 680);
+        useApp.getState().updateUIPreference("timelineOrientation", orientation);
+        useApp.setState({ graph: graph([]) });
+        const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+        const inner = container.querySelector<HTMLElement>(".board-inner")!;
+        const empty = container.querySelector<HTMLElement>(".board-empty")!;
+        expect(empty.parentElement).toBe(inner);
+        expect(inner.firstElementChild).toBe(empty);
+        expect(empty.style.position).toBe("sticky");
+        expect(empty.style.top).toBe("0px");
+        expect(empty.style.left).toBe("0px");
+        expect(empty.style.height).toBe("0px");
+        const zoom = Number(inner.style.zoom || "1");
+        expect(parseFloat(empty.style.width)).toBeCloseTo(948 / zoom);
+        expect(within(empty).getByRole("button", { name: /建立節點/ })).toBeInTheDocument();
+      } finally {
+        Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      }
+    },
+  );
+
   // A phone at 100% shows about two cards, so the first sight of a project is
   // fitted to the whole board — once, after which the zoom is the user's own.
   describe("opening fit on a phone", () => {
