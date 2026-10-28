@@ -1173,7 +1173,12 @@ export function LaneView({
   });
 
 
-  const fitGraph = (selectionOnly: boolean) => {
+  // `opening` is a phone's first sight of the board: a board that does not
+  // fit even at the smallest zoom is then framed the way a desktop opens it
+  // (openingScroll) — on the card nearest its top-left corner — rather than
+  // centred on the middle of its bounds, which on a wide, mostly shallow
+  // board is empty grid with the top card row cut off.
+  const fitGraph = (selectionOnly: boolean, opening = false) => {
     const board = boardRef.current;
     if (!board) return;
     const candidates = selectionOnly
@@ -1201,9 +1206,29 @@ export function LaneView({
       boardViewport,
       zoom: nextViewScale,
     });
+    const shiftX = next.graphOffsetX - graphOffsetX;
+    const shiftY = next.graphOffsetY - graphOffsetY;
+    if (opening) {
+      const viewport = { width: board.clientWidth, height: board.clientHeight };
+      const scroll = openingScroll(
+        openingContent().map((rect) => ({
+          left: rect.left + shiftX,
+          right: rect.right + shiftX,
+          top: rect.top + shiftY,
+          bottom: rect.bottom + shiftY,
+        })),
+        nextViewScale,
+        viewport,
+      );
+      canvasPan.zoomOnto(nextZoom, {
+        x: (scroll.left + viewport.width / 2) / nextViewScale,
+        y: (scroll.top + viewport.height / 2) / nextViewScale,
+      });
+      return;
+    }
     canvasPan.zoomOnto(nextZoom, {
-      x: view.focusX - graphOffsetX + next.graphOffsetX,
-      y: view.focusY - graphOffsetY + next.graphOffsetY,
+      x: view.focusX + shiftX,
+      y: view.focusY + shiftY,
     });
   };
 
@@ -1228,7 +1253,7 @@ export function LaneView({
     if (autoFitKeyRef.current === key) return;
     autoFitKeyRef.current = key;
     if (shownProject.remembered) return;
-    fitGraph(false);
+    fitGraph(false, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitGraph is
     // recreated every render; the guards above decide when a fit happens.
   }, [
