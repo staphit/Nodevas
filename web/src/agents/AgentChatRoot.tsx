@@ -129,7 +129,7 @@ export function AgentChatRoot() {
           }
           aria-expanded={false}
           aria-controls="agent-network-panel"
-          title={`${t("agents.open")} (Ctrl+Shift+A)`}
+          title={t("common.withHint", { label: t("agents.open"), hint: "Ctrl+Shift+A" })}
         >
           <IconChat size={18} />
           <span className="agent-fab-label">{t("agents.fab.label")}</span>

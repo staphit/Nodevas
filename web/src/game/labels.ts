@@ -54,7 +54,10 @@ export function styleName(t: Translate, style: OfficeStyle): string {
 
 /** The office's name with its style: "Office app (Engineering)". */
 export function officeLabel(t: Translate, office: Pick<ProjectOffice, "label" | "style">): string {
-  return `${t("game.office.label", { name: office.label })} (${styleName(t, office.style)})`;
+  return t("common.withHint", {
+    label: t("game.office.label", { name: office.label }),
+    hint: styleName(t, office.style),
+  });
 }
 
 /** What a glance through another office's door shows, in words. */

@@ -226,7 +226,7 @@ export function ExportDialog({
               ? t("export.summary", {
                   target: scopeTarget[scope],
                   scope: t(`export.scope.${scope}`),
-                  format: `${t(format[1])} (${format[2]})`,
+                  format: t("common.withHint", { label: t(format[1]), hint: format[2] }),
                 })
               : t("export.pickFormat")}
             {choice === "pdf" && <small>{t("export.pdfHint")}</small>}

@@ -248,7 +248,7 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
               className="copilot-icon-btn"
               onClick={onClose}
               aria-label={t("agents.close")}
-              title={`${t("agents.close")} (Esc)`}
+              title={t("common.withHint", { label: t("agents.close"), hint: "Esc" })}
             >
               <IconClose size={14} />
             </button>

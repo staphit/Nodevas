@@ -182,7 +182,7 @@ export function SubpageControls({ pages: subpages }: { pages: NodePages }) {
           >
             {PAGE_FORMATS.map(([format, _label, extension]) => (
               <option key={format} value={format}>
-                {t(`format.${format}`)} ({extension})
+                {t("common.withHint", { label: t(`format.${format}`), hint: extension })}
               </option>
             ))}
           </select>
@@ -224,7 +224,7 @@ export function SubpageControls({ pages: subpages }: { pages: NodePages }) {
           >
             {PAGE_FORMATS.map(([format, _label, extension]) => (
               <option key={format} value={format}>
-                {t(`format.${format}`)} ({extension})
+                {t("common.withHint", { label: t(`format.${format}`), hint: extension })}
               </option>
             ))}
           </select>

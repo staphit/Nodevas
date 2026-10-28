@@ -81,7 +81,7 @@ export function BreakdownForm({ goalNodeId }: { goalNodeId: string }) {
     } catch (err) {
       // 409: the runner predates plan runs (or lost the capability).
       if (err instanceof RequestError && err.status === 409) {
-        setError(`${t("autopilot.planUnsupported")} (${err.message})`);
+        setError(t("common.withHint", { label: t("autopilot.planUnsupported"), hint: err.message }));
       } else {
         setError(err instanceof Error ? err.message : String(err));
       }

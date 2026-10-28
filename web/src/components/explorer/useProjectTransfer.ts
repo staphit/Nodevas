@@ -161,7 +161,7 @@ export function useProjectTransfer({
     const confirmed = await confirmExport(
       t("explorer.confirmExport.document", {
         target: projectLabel,
-        format: `${t(`explorer.documentExport.${choice}`)} (.${choice})`,
+        format: t("common.withHint", { label: t(`explorer.documentExport.${choice}`), hint: `.${choice}` }),
       }),
     );
     if (!confirmed) return;

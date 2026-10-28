@@ -200,7 +200,10 @@ export function CopilotRoot() {
           }`}
           aria-expanded={false}
           aria-controls="copilot-panel"
-          title={`${t("copilot.open")} (Ctrl+Shift+Space) · ${t("copilot.pushToTalk")} (Alt+Space)`}
+          title={[
+            t("common.withHint", { label: t("copilot.open"), hint: "Ctrl+Shift+Space" }),
+            t("common.withHint", { label: t("copilot.pushToTalk"), hint: "Alt+Space" }),
+          ].join(" · ")}
         >
           <IconMic size={20} />
           <span className="copilot-fab-label">{t("copilot.fab.label")}</span>

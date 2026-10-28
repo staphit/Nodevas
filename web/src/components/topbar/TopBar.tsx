@@ -58,7 +58,7 @@ export function TopBar() {
           className="command-trigger"
           type="button"
           onClick={() => openCommandPalette()}
-          title={`${t("topbar.searchOrCommand")} (Ctrl/⌘ K)`}
+          title={t("common.withHint", { label: t("topbar.searchOrCommand"), hint: "Ctrl/⌘ K" })}
         >
           <span className="command-trigger-text">{t("topbar.searchOrCommand")}</span> <kbd>Ctrl/⌘ K</kbd>
         </button>
