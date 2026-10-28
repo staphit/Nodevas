@@ -311,8 +311,12 @@
   justify-content: center;
   width: calc(18px * var(--card-font-scale, 1));
   height: calc(16px * var(--card-font-scale, 1));
-  /* Inside the 3px top border and clear of the corner's resize grip. */
-  transform: translate(calc(-100% - 6px), 6px);
+  /* Inside the 3px top border and clear of the corner's resize grip. Placed
+     by the translate property rather than a transform, because every pressed
+     button shrinks through the more specific button:active transform, which
+     would drop the offset mid-click and move the button from under the
+     pointer, so the click would land on the board. */
+  translate: calc(-100% - 6px) 6px;
   padding: 0;
   border: 0;
   border-radius: 4px;
