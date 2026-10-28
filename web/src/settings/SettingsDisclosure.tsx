@@ -38,7 +38,12 @@ export function SettingsDisclosure({
         onClick={onToggle}
       >
         <span className="settings-disclosure-label">{label}</span>
-        {value && <span className="settings-disclosure-value">{value}</span>}
+        {/* Cut with an ellipsis where the row is narrow; whole on hover. */}
+        {value && (
+          <span className="settings-disclosure-value" title={value}>
+            {value}
+          </span>
+        )}
         <span className="settings-disclosure-chevron" aria-hidden="true">
           ›
         </span>

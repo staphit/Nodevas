@@ -248,6 +248,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
     if (ok) await revoke(runner.id);
   };
 
+  const summary = runnerSummary(runner, t);
   const machine = info
     ? [info.hostname, info.os && `${info.os}/${info.arch}`, info.version && `nodevas ${info.version}`]
         .filter(Boolean)
@@ -260,7 +261,8 @@ function RunnerCard({ runner }: { runner: Runner }) {
         <span className={`runner-dot${runner.online ? " online" : ""}`} aria-hidden="true" />
         <div className="runner-card-title">
           <strong>{runnerDisplayName(t, runner.name)}</strong>
-          <span>{runnerSummary(runner, t)}</span>
+          {/* Cut with an ellipsis where the card is narrow; whole on hover. */}
+          <span title={summary}>{summary}</span>
         </div>
         <button
           type="button"
