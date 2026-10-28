@@ -88,6 +88,27 @@ const paneProps = {
     });
   }
 
+  /** Ids of the cards the board's scroll puts at least partly in view. */
+  function cardsInView(container: HTMLElement, width: number, height: number): string[] {
+    const board = container.querySelector<HTMLElement>(".board")!;
+    const zoom = Number(container.querySelector<HTMLElement>(".board-inner")!.style.zoom || "1");
+    const view = {
+      left: board.scrollLeft / zoom,
+      top: board.scrollTop / zoom,
+      right: (board.scrollLeft + width) / zoom,
+      bottom: (board.scrollTop + height) / zoom,
+    };
+    return [...container.querySelectorAll<HTMLElement>(".col-card")]
+      .filter((card) => {
+        const left = parseFloat(card.style.left);
+        const top = parseFloat(card.style.top);
+        const right = left + parseFloat(card.style.width);
+        const bottom = top + parseFloat(card.style.height);
+        return right > view.left && left < view.right && bottom > view.top && top < view.bottom;
+      })
+      .map((card) => card.getAttribute("data-node-id") ?? card.textContent ?? "");
+  }
+
 describe("LaneView", () => {
   it("offers node creation without a right click", async () => {
     const user = userEvent.setup();
@@ -585,6 +606,60 @@ describe("LaneView", () => {
       expect(left).toBeLessThan(view.right);
       expect(top).toBeGreaterThanOrEqual(view.top);
       expect(top).toBeLessThan(view.bottom);
+    });
+
+    // Saved positions need not start at the origin: a board whose cards all
+    // sit a few columns right of it used to open on the empty margin.
+    it("opens with the cards in view when they sit away from the origin", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: ["one", "two", "three", "four", "five", "six"].map((id) => ({ id, title: id })),
+          edges: [],
+          ui: {
+            positions: {
+              one: { x: 10, y: 0 },
+              two: { x: 16, y: 30 },
+              three: { x: 21, y: 7 },
+              four: { x: 27, y: 28 },
+              five: { x: 30, y: 3 },
+              six: { x: 32, y: 29 },
+            },
+          },
+        },
+      });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      expect(container.querySelectorAll(".col-card")).toHaveLength(6);
+      expect(cardsInView(container, 948, 680)).not.toEqual([]);
+    });
+
+    // The fit changes the zoom, and with it where the board centres a small
+    // graph; the scroll has to be worked out for the zoom it lands on.
+    it("fits a phone's board so its cards are in view", () => {
+      mockNarrowViewport(true);
+      mockBoardSize(500, 608);
+      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+        callback(0);
+        return 0;
+      });
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: [
+            { id: "outline", title: "寫大綱" },
+            { id: "chapter", title: "寫第一章" },
+          ],
+          edges: [{ from: "outline", to: "chapter" }],
+          ui: {
+            positions: { outline: { x: 3.348, y: 0 }, chapter: { x: 1.39, y: 0 } },
+          },
+        },
+      });
+      const { container } = render(<LaneView variant="graph" {...paneProps} />);
+      expect(container.querySelector<HTMLElement>(".board-inner")!.style.zoom).not.toBe("1");
+      expect(cardsInView(container, 500, 608)).toHaveLength(2);
     });
 
     it("leaves the opening zoom alone on a desktop", () => {
