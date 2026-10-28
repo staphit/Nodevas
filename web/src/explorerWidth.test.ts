@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -75,4 +75,21 @@ describe("explorer shell style", () => {
 it("is what the app shell draws the explorer with", () => {
   const app = readFileSync(join(__dirname, "App.tsx"), "utf8");
   expect(app).toMatch(/style=\{explorerShellStyle\(\{[^}]*narrow/);
+});
+
+// The end-to-end specs read the explorer's width off its separator. When the
+// default moved from 304 to 320 they kept the old number, so a double click
+// "reset" and the settings reset both failed against a correct app. Every
+// width they expect as a literal is the default one.
+it("is the default width the end-to-end specs expect", () => {
+  const dir = join(__dirname, "..", "e2e");
+  const literals = readdirSync(dir)
+    .filter((name) => name.endsWith(".spec.ts"))
+    .flatMap((name) =>
+      [...readFileSync(join(dir, name), "utf8").matchAll(/"aria-valuenow",\s*"(\d+)"/g)].map(
+        (match) => `${name}: ${match[1]}`,
+      ),
+    );
+  expect(literals.length).toBeGreaterThan(0);
+  for (const literal of literals) expect(literal).toMatch(new RegExp(`: ${EXPLORER_DEFAULT_W}$`));
 });
