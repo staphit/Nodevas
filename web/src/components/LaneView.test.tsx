@@ -58,6 +58,36 @@ const paneProps = {
   onActivate: () => undefined,
 };
 
+  // jsdom's matchMedia always reports "no match" and has no listener
+  // plumbing, and its elements have no layout, so both are faked: the
+  // breakpoint decides whether the fit runs, the measurements decide what
+  // zoom it lands on.
+  function mockNarrowViewport(narrow: boolean) {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: narrow,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+  }
+  function mockBoardSize(width: number, height: number) {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => width,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => height,
+    });
+  }
+
 describe("LaneView", () => {
   it("offers node creation without a right click", async () => {
     const user = userEvent.setup();
@@ -503,36 +533,6 @@ describe("LaneView", () => {
   // A phone at 100% shows about two cards, so the first sight of a project is
   // fitted to the whole board — once, after which the zoom is the user's own.
   describe("opening fit on a phone", () => {
-    // jsdom's matchMedia always reports "no match" and has no listener
-    // plumbing, and its elements have no layout, so both are faked: the
-    // breakpoint decides whether the fit runs, the measurements decide what
-    // zoom it lands on.
-    function mockNarrowViewport(narrow: boolean) {
-      vi.stubGlobal(
-        "matchMedia",
-        vi.fn((query: string) => ({
-          matches: narrow,
-          media: query,
-          onchange: null,
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        })),
-      );
-    }
-    function mockBoardSize(width: number, height: number) {
-      Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-        configurable: true,
-        get: () => width,
-      });
-      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-        configurable: true,
-        get: () => height,
-      });
-    }
-
     afterEach(() => {
       vi.unstubAllGlobals();
       Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
@@ -593,6 +593,72 @@ describe("LaneView", () => {
       const { container } = render(<LaneView variant="graph" {...paneProps} />);
       const inner = container.querySelector<HTMLElement>(".board-inner")!;
       expect(inner.style.zoom).toBe("1");
+    });
+  });
+
+  // The board unmounts whenever the app shows Station or Settings instead, so
+  // coming back must not land on the opening scroll: the pan and the zoom are
+  // where the user left them, like the open drawer is.
+  describe("leaving the board and coming back", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    });
+
+    it("comes back panned and zoomed where it was left", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(1280, 800);
+      const first = render(<LaneView variant="graph" {...paneProps} />);
+      let board = first.container.querySelector<HTMLElement>(".board")!;
+      fireEvent.wheel(board, { altKey: true, deltaY: -100 });
+      const zoomed = first.container.querySelector<HTMLElement>(".board-inner")!.style.zoom;
+      expect(zoomed).not.toBe("1");
+      board.scrollLeft = 1700;
+      board.scrollTop = 900;
+      fireEvent.scroll(board);
+      first.unmount();
+
+      const second = render(<LaneView variant="graph" {...paneProps} />);
+      board = second.container.querySelector<HTMLElement>(".board")!;
+      expect(second.container.querySelector<HTMLElement>(".board-inner")!.style.zoom).toBe(zoomed);
+      expect(board.scrollLeft).toBe(1700);
+      expect(board.scrollTop).toBe(900);
+    });
+
+    it("does not refit a phone's board it has already fitted", () => {
+      mockNarrowViewport(true);
+      mockBoardSize(390, 700);
+      const first = render(<LaneView variant="graph" {...paneProps} />);
+      const board = first.container.querySelector<HTMLElement>(".board")!;
+      // The fit lands in a frame; the user then zooms back out by hand.
+      fireEvent.wheel(board, { altKey: true, deltaY: 100 });
+      const zoomed = first.container.querySelector<HTMLElement>(".board-inner")!.style.zoom;
+      first.unmount();
+
+      const second = render(<LaneView variant="graph" {...paneProps} />);
+      expect(second.container.querySelector<HTMLElement>(".board-inner")!.style.zoom).toBe(zoomed);
+    });
+
+    it("opens a project it has not shown yet at the opening scroll", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(1280, 800);
+      const first = render(<LaneView variant="graph" {...paneProps} />);
+      const board = first.container.querySelector<HTMLElement>(".board")!;
+      const opening = { left: board.scrollLeft, top: board.scrollTop };
+      board.scrollLeft = 1700;
+      fireEvent.scroll(board);
+      first.unmount();
+
+      const project = useApp.getState().activeProject;
+      act(() => useApp.setState({ activeProject: "elsewhere" }));
+      try {
+        const second = render(<LaneView variant="graph" {...paneProps} />);
+        const again = second.container.querySelector<HTMLElement>(".board")!;
+        expect({ left: again.scrollLeft, top: again.scrollTop }).toEqual(opening);
+      } finally {
+        act(() => useApp.setState({ activeProject: project }));
+      }
     });
   });
 });
