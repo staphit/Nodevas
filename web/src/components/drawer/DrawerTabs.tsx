@@ -293,33 +293,38 @@ export function DrawerTabs({
       </div>
       {severalTabs && (
         <div className="tab-bar" role="group" aria-label={t("drawer.openNodes")}>
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`tab${tab.id === activeTab ? " active" : ""}${tab.pinned ? " pinned" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setTabContextMenu({ id: tab.id, x: event.clientX, y: event.clientY });
-              }}
-              aria-haspopup="menu"
-            >
-              <IconDoc size={12} />
-              <span>{nodeById(graph, tab.id)?.title || tab.id}</span>
-              {tab.pinned && <IconPin className="tab-pin" size={11} />}
-              {tab.dirty && <span className="dirty-dot" aria-label={t("drawer.tabs.unsaved")} />}
-              <button
-                className="tab-close"
-                aria-label={t("drawer.tabs.close", { id: tab.id })}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void closeTabs([tab.id]).catch(reportError);
+          {tabs.map((tab) => {
+            const name = nodeById(graph, tab.id)?.title || tab.id;
+            return (
+              <div
+                key={tab.id}
+                className={`tab${tab.id === activeTab ? " active" : ""}${tab.pinned ? " pinned" : ""}`}
+                onClick={() => setActiveTab(tab.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setTabContextMenu({ id: tab.id, x: event.clientX, y: event.clientY });
                 }}
+                aria-haspopup="menu"
               >
-                <IconClose size={11} />
-              </button>
-            </div>
-          ))}
+                <IconDoc size={12} />
+                <span>{name}</span>
+                {tab.pinned && <IconPin className="tab-pin" size={11} />}
+                {tab.dirty && <span className="dirty-dot" aria-label={t("drawer.tabs.unsaved")} />}
+                <button
+                  type="button"
+                  className="tab-close"
+                  aria-label={t("drawer.tabs.close", { name })}
+                  title={t("drawer.tabs.close", { name })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void closeTabs([tab.id]).catch(reportError);
+                  }}
+                >
+                  <IconClose size={11} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
       {tabContextMenu && contextTab && (
