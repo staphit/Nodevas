@@ -18,9 +18,41 @@
 .content-page-manage input {
   min-width: 120px;
   flex: 1;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.content-page-manage input:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 0;
+  border-color: transparent;
 }
 .content-page-manage button {
   min-width: 27px;
+}
+/* ← / →: the same box as the format select beside them. */
+.content-page-manage button:not(.danger) {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.content-page-manage button:not(.danger):hover:not(:disabled) {
+  background: var(--hover);
+}
+.content-page-manage button:not(.danger):disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .board-title-opt {
   display: inline-flex;
