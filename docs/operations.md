@@ -86,6 +86,8 @@ Accounts, sessions, the audit trail, settings, runs, the copilot's conversations
 
 **Backups.** The database is no longer a file in the workspace, so copying the workspace folder does not back it up. Use `nodevas db dump --out nodevas.dump` (the bundled `pg_dump`, custom format) and `nodevas db restore --in nodevas.dump`; both work against the embedded or an external server. `nodevas db status` shows which one a workspace uses.
 
+**Search index freshness.** A project's index is built in the background when the project is opened; only a search that arrives before any index exists waits for it. After that, searches read the last committed index and never wait on a reindex: a save, a card move or an outside edit is reindexed in the background (just the nodes it touched) and is searchable within about a tenth of a second, and a walk every quarter second of searching catches anything nobody reported.
+
 **Upgrading from a SQLite release.** Earlier releases kept this data in `<workspace>/.vised/nodevas.db`. On the first start of this release, a workspace whose new database is empty imports that file in one transaction and renames it `nodevas.db.imported` (with its `-wal` and `-shm` files); it is never deleted. If the import fails, `serve` stops without changing anything: `nodevas db import-sqlite --report` compares the file with the database, and `NODEVAS_SKIP_SQLITE_IMPORT=1` starts without it (`nodevas db import-sqlite` imports it later). The importer is removed in the next release.
 
 **Upgrading a server on PostgreSQL (the NAS).**

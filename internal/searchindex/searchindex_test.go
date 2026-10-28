@@ -324,12 +324,11 @@ func TestGraphUpdateAddsRemovesAndRetitles(t *testing.T) {
 	}
 }
 
-// The server marks its own writes so the watcher never re-emits them, so the
-// walk-based net is the only thing that sees an edit the API made.
+// An edit nothing announced (no watcher, no store write) is only seen by the
+// walk-based net. The query that notices the index is old asks for the walk
+// and answers from what it has; a query a moment later sees the edit.
 func TestReconcileCatchesAnUnannouncedEdit(t *testing.T) {
-	previous := revalidateAfter
-	revalidateAfter = 0
-	t.Cleanup(func() { revalidateAfter = previous })
+	pinRevalidate(t, 0)
 
 	root := writeProject(t, fixtureNode{id: "alpha", title: "Alpha", body: "before body"})
 	manager := newManager(t)
@@ -339,18 +338,12 @@ func TestReconcileCatchesAnUnannouncedEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "nodes", "alpha.md"), []byte("after body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "after")); len(got) != 1 {
-		t.Fatalf("unannounced edit not picked up: %v", got)
-	}
-	if got := ids(search(t, manager, root, "before")); len(got) != 0 {
-		t.Fatalf("stale content after unannounced edit: %v", got)
-	}
+	eventually(t, manager, root, "after", []string{"alpha"}, time.Second)
+	eventually(t, manager, root, "before", nil, time.Second)
 }
 
 func TestSubpagesAreIndexedAndRefreshed(t *testing.T) {
-	previous := revalidateAfter
-	revalidateAfter = 0
-	t.Cleanup(func() { revalidateAfter = previous })
+	pinRevalidate(t, 0)
 
 	root := writeProject(t, fixtureNode{
 		id: "alpha", title: "Alpha", body: "body",
@@ -364,17 +357,13 @@ func TestSubpagesAreIndexedAndRefreshed(t *testing.T) {
 	if err := os.WriteFile(page, []byte("subpage beacon"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "beacon")); len(got) != 1 {
-		t.Fatalf("edited subpage not picked up: %v", got)
-	}
+	eventually(t, manager, root, "beacon", []string{"alpha"}, time.Second)
 	// A deleted subpage leaves no newer file behind, so only the file count in
 	// the stamp can notice it.
 	if err := os.Remove(page); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "beacon")); len(got) != 0 {
-		t.Fatalf("a deleted subpage is still searchable: %v", got)
-	}
+	eventually(t, manager, root, "beacon", nil, time.Second)
 }
 
 // ---------- tokenisation ----------

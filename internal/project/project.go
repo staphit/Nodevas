@@ -88,6 +88,9 @@ type ProjectManager struct {
 	store       *store.Store
 	stopWatch   func() error
 	searchIndex *searchIndex
+	// searchLive mirrors searchIndex for the store write hook, which may run
+	// while pm.mu is held; see noteSearchChange.
+	searchLive atomic.Pointer[searchIndex]
 
 	// watches are the watchers on projects other than the active one that
 	// Watch was asked for, keyed like stores. They are dropped with their
@@ -258,8 +261,10 @@ func (pm *ProjectManager) Close() {
 	closeStores(pm.cachedStores(), 30*time.Second)
 	// Persist the search index before dropping the workspace: it is a pure
 	// cache, but losing it on every clean shutdown means paying for a full
-	// rebuild on the next start for no reason.
+	// rebuild on the next start for no reason. Then wait for its background
+	// passes: they read project files the caller may be about to remove.
 	pm.FlushSearchIndex()
+	pm.closeSearchIndex()
 	pm.releaseWorkspaceLock()
 }
 
@@ -370,6 +375,7 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template stri
 	// The active project has its own watcher now; a second one would report
 	// every external edit twice.
 	pm.stopExtraWatches(func(key string) bool { return key == storeCacheKey(dir) })
+	pm.warmSearch(dir)
 	if err := store.WriteProjectFileAtomic(pm.workspace, pm.lastFile(), []byte(name)); err != nil {
 		log.Printf("save last project: %v", err)
 	}
@@ -397,6 +403,7 @@ func (pm *ProjectManager) OpenForCaller(name string) error {
 	if _, _, err := st.LoadGraph(); err != nil {
 		return fmt.Errorf("load project %q: %w", name, err)
 	}
+	pm.warmSearch(st.Root())
 	return nil
 }
 
@@ -489,6 +496,7 @@ func (pm *ProjectManager) Watch(st *store.Store) {
 		pm.watches = make(map[string]func() error)
 	}
 	pm.watches[key] = stop
+	pm.warmSearch(st.Root())
 }
 
 // Watching reports whether external edits to the project in dir are being
@@ -628,6 +636,9 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 	st.SetSharedStatuses(func() []engine.StatusDefinition {
 		return store.LoadWorkspaceStatuses(pm.workspaceRoot())
 	})
+	// The store's own writes are invisible to the watcher by design; this is
+	// how they reach the search index.
+	st.SetOnChange(func(path string) { pm.noteSearchChange(dir, path) })
 	pm.stores[key] = st
 	return st
 }

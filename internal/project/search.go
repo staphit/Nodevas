@@ -73,12 +73,22 @@ func (si *searchIndex) indexes() *searchindex.Manager {
 }
 
 // invalidate is the watcher hook. nodeID is empty when graph.yaml changed.
-// It is an incremental update, not a drop: only the touched node is re-read.
+// It is an incremental update, not a drop: only the touched node is re-read,
+// in the background, so the watcher never waits on the index.
 func (si *searchIndex) invalidate(projectPath, nodeID string) {
 	if si == nil {
 		return
 	}
-	si.indexes().Update(projectPath, nodeID)
+	si.indexes().NotifyNode(projectPath, nodeID)
+}
+
+// changed is the store hook: path was written, renamed or removed by the
+// server itself, which the watcher never reports.
+func (si *searchIndex) changed(projectPath, path string) {
+	if si == nil {
+		return
+	}
+	si.indexes().Notify(projectPath, path)
 }
 
 func (si *searchIndex) search(project ProjectInfo, normalized string) ([]SearchResult, error) {
@@ -144,6 +154,7 @@ func (pm *ProjectManager) UseDatabase(database *db.DB) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.searchIndex = &searchIndex{manager: searchindex.NewManagerWithDB(database)}
+	pm.searchLive.Store(pm.searchIndex)
 }
 
 // PruneSearchIndex drops index rows for projects that are no longer in the
@@ -174,6 +185,7 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 	defer pm.mu.Unlock()
 	if pm.searchIndex == nil {
 		pm.searchIndex = newSearchIndex()
+		pm.searchLive.Store(pm.searchIndex)
 	}
 	return pm.searchIndex
 }
@@ -203,6 +215,26 @@ func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit
 
 func (pm *ProjectManager) invalidateSearch(projectPath, nodeID string) {
 	pm.getSearchIndex().invalidate(projectPath, nodeID)
+}
+
+// noteSearchChange is what every Store this manager hands out reports its
+// writes to. A Store calls it with its own lock held, possibly while this
+// manager holds pm.mu, so it reads the index through searchLive and takes no
+// lock of the manager's.
+func (pm *ProjectManager) noteSearchChange(projectPath, path string) {
+	pm.searchLive.Load().changed(projectPath, path)
+}
+
+// warmSearch starts building a project's index in the background, so the
+// first search after it opens does not pay for the build.
+func (pm *ProjectManager) warmSearch(projectPath string) {
+	pm.getSearchIndex().indexes().Warm(projectPath)
+}
+
+// closeSearchIndex waits for the index's background work to finish, so
+// nothing is still reading a project's files once the manager is closed.
+func (pm *ProjectManager) closeSearchIndex() {
+	_ = pm.getSearchIndex().indexes().Close()
 }
 
 // FlushSearchIndex writes every pending index to disk. Useful at shutdown and

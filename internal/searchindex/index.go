@@ -6,8 +6,9 @@
 // freshness stamp of the files it was built from. The text and the tokens are
 // in PostgreSQL (see persist.go).
 //
-// Nothing in this file locks. Every method here is called with the owning
-// entry's mutex held (see manager.go for the locking contract).
+// Nothing in this file locks. Every projectIndex method is called with the
+// owning entry's build lock held; an indexView is immutable once made and is
+// what queries read with no lock at all (see manager.go for the contract).
 
 package searchindex
 
@@ -374,6 +375,27 @@ func relativePath(root, path string) string {
 
 // ---------- querying ----------
 
+// indexView is what a query reads: the project's graph order and titles as of
+// one moment, never changed after it is made. The rows it points at are
+// whatever PostgreSQL has committed, so a query running while a reindex is
+// part way through sees each node either before or after its write.
+type indexView struct {
+	project string
+	store   *docStore
+	order   []string
+	titles  map[string]string
+}
+
+// view snapshots the index for queries. order is shared rather than copied:
+// refreshGraph replaces the slice, it never writes into one.
+func (ix *projectIndex) view() *indexView {
+	titles := make(map[string]string, len(ix.docs))
+	for id, doc := range ix.docs {
+		titles[id] = doc.title
+	}
+	return &indexView{project: ix.project, store: ix.store, order: ix.order, titles: titles}
+}
+
 // query returns every document whose stored text contains the (already
 // lowercased) query, in graph order.
 //
@@ -383,7 +405,7 @@ func relativePath(root, path string) string {
 // containing "abc". Where the candidates come from changed, not that they are
 // candidates, so containsFold still has to see the query as a substring of the
 // text before a document is a result.
-func (ix *projectIndex) query(ctx context.Context, lowered string) ([]Match, error) {
+func (ix *indexView) query(ctx context.Context, lowered string) ([]Match, error) {
 	candidates, err := ix.store.candidates(ctx, ix.project, queryTokens(lowered))
 	if err != nil {
 		return nil, err
@@ -660,7 +682,7 @@ func matchTier(match string) int {
 // the whole query as a phrase, then any shared terms, each tier by BM25 and
 // then by graph order. Unlike query, a document need not contain every term,
 // which is what lets a question typed as a sentence find anything.
-func (ix *projectIndex) rank(ctx context.Context, query string, limit int) ([]Ranked, error) {
+func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranked, error) {
 	trimmed := strings.TrimSpace(query)
 	lowered := strings.ToLower(trimmed)
 	candidates, err := ix.store.rankedCandidates(ctx, ix.project, rankTokens(lowered), limit)
@@ -679,8 +701,8 @@ func (ix *projectIndex) rank(ctx context.Context, query string, limit int) ([]Ra
 	}
 	// An exact title always comes first, even when the terms did not fetch it.
 	for _, id := range ix.order {
-		doc := ix.docs[id]
-		if doc == nil || byID[id] != nil || !strings.EqualFold(strings.TrimSpace(doc.title), trimmed) {
+		title, known := ix.titles[id]
+		if !known || byID[id] != nil || !strings.EqualFold(strings.TrimSpace(title), trimmed) {
 			continue
 		}
 		stored, err := ix.store.document(ctx, ix.project, id)

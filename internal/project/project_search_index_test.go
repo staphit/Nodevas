@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/identity"
 	"nodevas/internal/searchindex"
 	"nodevas/internal/testpg"
 )
@@ -16,7 +18,34 @@ import (
 // wires it with UseDatabase.
 func newTestSearchIndex(t testing.TB) *searchIndex {
 	t.Helper()
-	return &searchIndex{manager: searchindex.NewManagerWithDB(testpg.New(t))}
+	index := &searchIndex{manager: searchindex.NewManagerWithDB(testpg.New(t))}
+	// Background passes read the fixture's files; they end before it goes.
+	t.Cleanup(func() { _ = index.manager.Close() })
+	return index
+}
+
+// searchEventually polls a search until it returns exactly the nodes in want
+// (in order) or within has passed.
+func searchEventually(t *testing.T, index *searchIndex, project ProjectInfo, query string, want []string, within time.Duration) {
+	t.Helper()
+	began := time.Now()
+	for {
+		results, err := index.search(project, query)
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		got := make([]string, 0, len(results))
+		for _, result := range results {
+			got = append(got, result.NodeID)
+		}
+		if fmt.Sprint(got) == fmt.Sprint(want) {
+			return
+		}
+		if time.Since(began) > within {
+			t.Fatalf("search %q = %v after %v, want %v", query, got, within, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func writeSearchProject(t testing.TB, nodes ...*engine.Node) string {
@@ -57,23 +86,44 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 	}
 
 	writeNodeBody(t, root, "alpha", "after body with more text")
-	// The watcher hook is the primary freshness path; internal/searchindex
-	// covers the stat-walk net that catches edits it never hears about.
+	// The watcher hook is the primary freshness path for outside edits; it
+	// refreshes the node in the background, within a second.
+	// internal/searchindex covers the stat-walk net that catches edits it
+	// never hears about.
 	index.invalidate(root, "alpha")
 
-	results, err = index.search(project, "after")
+	searchEventually(t, index, project, "after", []string{"alpha"}, time.Second)
+	searchEventually(t, index, project, "before", []string{}, time.Second)
+}
+
+// The server's own writes never reach the watcher. The store reports them
+// instead, and a save is searchable within a second of returning.
+func TestAStoreWriteIsSearchableWithinASecond(t *testing.T) {
+	pm, info, st := searchLoadProject(t, 20)
+	if _, err := pm.SearchProjectNodes(info, "needle"); err != nil {
+		t.Fatal(err)
+	}
+	_, rev, err := st.LoadNodeContent("n0003")
 	if err != nil {
-		t.Fatalf("search after edit: %v", err)
+		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].NodeID != "alpha" {
-		t.Fatalf("results after edit = %+v", results)
+	if _, _, err := st.SaveNodeContent(identity.Actor{ID: "u", Name: "u"}, "n0003", "a freshly saved lighthouse\n", rev); err != nil {
+		t.Fatal(err)
 	}
-	results, err = index.search(project, "before")
-	if err != nil {
-		t.Fatalf("search old term: %v", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("stale results after edit = %+v", results)
+	began := time.Now()
+	for {
+		results, err := pm.SearchProjectNodes(info, "lighthouse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) == 1 && results[0].NodeID == "n0003" {
+			t.Logf("searchable after %v", time.Since(began))
+			return
+		}
+		if time.Since(began) > time.Second {
+			t.Fatalf("a saved node was not searchable within a second: %+v", results)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

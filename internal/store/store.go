@@ -82,6 +82,10 @@ type Store struct {
 	selfMu     sync.Mutex
 	selfWrites map[string]time.Time
 
+	// onChange hears every path this store writes, renames or removes; see
+	// SetOnChange.
+	onChange atomic.Pointer[func(path string)]
+
 	// opsQueue holds the graph-op calls waiting for the next group commit,
 	// and opsLeading says one of them is committing; see graph_ops_batch.go.
 	// Guarded by opsMu, never held together with mu except to drain.
@@ -210,7 +214,27 @@ func (s *Store) WasSelfWrite(path string) bool {
 	return now.Sub(t) <= 2*time.Second
 }
 
+// SetOnChange registers fn to hear every path this store writes, renames or
+// removes. Those are exactly the changes the file watcher keeps quiet about
+// (self-writes), so anything that mirrors the files, such as the search index,
+// needs them from here. fn runs on the writer's goroutine, often with s.mu
+// held: it must only note the path and return, never call back into the store.
+func (s *Store) SetOnChange(fn func(path string)) {
+	if fn == nil {
+		s.onChange.Store(nil)
+		return
+	}
+	s.onChange.Store(&fn)
+}
+
+func (s *Store) noteChange(path string) {
+	if fn := s.onChange.Load(); fn != nil {
+		(*fn)(path)
+	}
+}
+
 func (s *Store) markSelfWrite(path string) {
+	s.noteChange(path)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return
@@ -236,7 +260,14 @@ func (s *Store) WriteAtomic(path string, data []byte) error {
 		// here just frees the old graph as soon as it is stale.
 		defer s.InvalidateGraphCache()
 	}
-	return writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite)
+	if err := writeProjectFileAtomic(s.root, path, data, 0o644, s.markSelfWrite); err != nil {
+		return err
+	}
+	// markSelfWrite already reported it, just before the rename; once more
+	// now that the new content is in place, for a listener that got there
+	// first and read the old one.
+	s.noteChange(path)
+	return nil
 }
 
 type fileUpdate struct {
