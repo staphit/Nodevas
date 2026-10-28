@@ -34,6 +34,19 @@ describe("voice copilot button clearance", () => {
     expect(rules(selector)).toMatch(/padding-right:\s*var\(--copilot-fab-clearance\)/);
   });
 
+  it("never moves the button left of where an open document's footer keeps clear", () => {
+    const pattern = /([^{}]+)\{([^}]*)\}/g;
+    const offenders: string[] = [];
+    for (let match = pattern.exec(css); match; match = pattern.exec(css)) {
+      if (!/(^|[\s;])right:\s*calc\(/.test(match[2])) continue;
+      for (const selector of match[1].split(",").map((part) => part.trim().replace(/\s+/g, " "))) {
+        if (!selector.endsWith("> .copilot-fab")) continue;
+        if (!selector.includes(":not(:has(.drawer:not(.collapsed-rail)))")) offenders.push(selector);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("goes round while a document is open", () => {
     expect(rules(".app:has(.drawer:not(.collapsed-rail)) > .copilot-fab")).toMatch(/width:\s*48px/);
   });
@@ -86,9 +99,13 @@ describe("voice copilot button clearance", () => {
   // The vertical timeline's date ruler is sticky at its right edge: rows
   // scroll, the ruler never does, so a button over it hides a date for good.
   // While such a timeline is open the button stands left of the ruler.
-  it("stands left of an open timeline's date ruler", () => {
+  // An open document covers the stage's right side, ruler and all, and its
+  // footer keeps clear of the button where it normally stands: moved left for
+  // a ruler the document hides, the button covered the footer's "S 立即儲存"
+  // and the "類型、優先度、標籤… ›" summary.
+  it("stands left of an open timeline's date ruler unless a document covers it", () => {
     const moved = rules(
-      ".app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)) > .copilot-fab",
+      ".app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)):not(:has(.drawer:not(.collapsed-rail))) > .copilot-fab",
     );
     expect(moved).toMatch(/right:\s*calc\(max\(18px, env\(safe-area-inset-right, 0px\)\)\s*\+\s*56px\s*\+/);
   });
