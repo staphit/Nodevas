@@ -271,24 +271,31 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
       for (const doc of openDocs.values()) post({ type: "doc-open", ...doc });
     };
     ws.onclose = (event: CloseEvent) => {
-      // StatusPolicyViolation (1008). Policy violations are non-recoverable client
-      // misbehaviors or auth expirations; do not reconnect in a tight loop.
-      if (event.code === 1008) {
-        if (event.reason?.includes("authorization expired")) {
-          notifyUnauthorized();
-        }
+      // StatusPolicyViolation (1008). Only an expired authorization is final:
+      // reconnecting cannot help until the user signs in again.
+      if (event.code === 1008 && event.reason?.includes("authorization expired")) {
+        notifyUnauthorized();
         return;
       }
-      if (!closed) {
-        // Dropped, not closed on purpose: out of reach until the reopen.
-        markServerUnreachable();
-        retry = Math.min(retry * 1.5, 10000);
+      if (closed) return;
+      if (event.code === 1008) {
+        // Any other policy close (rate limit, a rejected message) comes from a
+        // hub that is up: reconnect, but back off from at least 2 s so a
+        // client that keeps tripping it does not loop.
+        retry = Math.min(Math.max(retry * 1.5, 2000), 10000);
         const jitter = 0.8 + Math.random() * 0.4;
-        const delay = Math.round(retry * jitter);
         clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(open, delay);
-        startProbe();
+        reconnectTimer = setTimeout(open, Math.round(retry * jitter));
+        return;
       }
+      // Dropped, not closed on purpose: out of reach until the reopen.
+      markServerUnreachable();
+      retry = Math.min(retry * 1.5, 10000);
+      const jitter = 0.8 + Math.random() * 0.4;
+      const delay = Math.round(retry * jitter);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(open, delay);
+      startProbe();
     };
   };
   open();
