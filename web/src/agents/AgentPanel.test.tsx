@@ -268,3 +268,23 @@ describe("AgentPanel W1.5", () => {
     }
   });
 });
+
+// Docked in Station, the panel sits under the card's own "Agent chat · N
+// online" toggle; its own large "Agent chat / N online" header said the same
+// thing a second time. The heading stays for screen readers (it names the
+// region) and the count is left to the card.
+describe("AgentPanel docked header", () => {
+  it("does not repeat the card's title and online count", () => {
+    render(<AgentPanel docked />);
+    const heading = screen.getByRole("heading", { name: "Agent chat" });
+    expect(heading).toHaveClass("sr-only");
+    expect(screen.queryByText("1 online")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Agent chat" })).toBeInTheDocument();
+  });
+
+  it("keeps both when floating over the board", () => {
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Agent chat" })).not.toHaveClass("sr-only");
+    expect(screen.getByText("1 online")).toBeInTheDocument();
+  });
+});
