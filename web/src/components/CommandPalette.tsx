@@ -123,6 +123,7 @@ export function CommandPalette() {
   const { language, t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
   const openTab = useApp((state) => state.openTab);
+  const revealNode = useApp((state) => state.revealNode);
   const createNode = useApp((state) => state.createNode);
   const nodeTypes = useNodeTypes();
   const togglePane = useApp((state) => state.togglePane);
@@ -645,7 +646,11 @@ export function CommandPalette() {
     }
     setOpen(false);
     if (item.project !== activeProject) await switchProject(item.project);
-    if (item.nodeId) await openTab(item.nodeId);
+    if (!item.nodeId) return;
+    await openTab(item.nodeId);
+    // As with following a link: the board shows wherever the reader was, so
+    // the jump scrolls it to the node too.
+    revealNode(item.nodeId);
   };
 
   if (!open) return null;
