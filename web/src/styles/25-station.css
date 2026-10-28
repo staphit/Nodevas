@@ -868,6 +868,17 @@
   }
 }
 
+/* Narrower, the button stays in the corner, over the side column's end (the
+   agent chat's Send) or, in one column, the last card's. Station's end keeps
+   the button's height (48px, its 18px inset and some air) clear, so the last
+   row scrolls up past it; the side column, sized by the content box, ends
+   above it too. */
+@media (max-width: 1180px) {
+  .app.mode-station:has(> .copilot-fab) .station {
+    padding-bottom: calc(48px + 18px + 12px);
+  }
+}
+
 /* Narrower: one column, the side cards under the main ones. */
 @media (max-width: 900px) {
   .station {
