@@ -740,6 +740,9 @@
 .px-cell.is-free {
   opacity: 0.8;
 }
+.px-cell.is-spare {
+  opacity: 0.45;
+}
 .px-cell.is-meeting,
 .px-cell.is-seat {
   width: var(--px-seat);

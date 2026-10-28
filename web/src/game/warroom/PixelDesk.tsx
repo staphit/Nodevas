@@ -32,11 +32,12 @@ import { deskScene, doorScene, meetingScene, POSE_LOOP_MS, SEAT_W, sofaScene, ty
 
 export type DeskSceneKind = "desk" | "door" | "meeting" | "sofa";
 
-/** A free desk: furniture only, nothing to press. */
-export const FreeDesk = memo(function FreeDesk({ style }: { style: OfficeStyle }) {
-  const parts = useMemo(() => deskScene("empty", "other", { style }), [style]);
+/** A free desk (a runner's free slot), or a spare one (padding, no slot):
+ * furniture only, nothing to press. */
+export const FreeDesk = memo(function FreeDesk({ style, spare = false }: { style: OfficeStyle; spare?: boolean }) {
+  const parts = useMemo(() => deskScene("empty", "other", { style, spare }), [style, spare]);
   return (
-    <div className="px-cell is-free" aria-hidden="true">
+    <div className={`px-cell ${spare ? "is-spare" : "is-free"}`} aria-hidden="true">
       <span className="px-art">
         <PixelSprite parts={parts} width={CELL} height={CELL} />
       </span>

@@ -167,7 +167,7 @@ export function OfficeRoom({
     <section
       className={`px-office-room px-style--${style}`}
       aria-label={t("game.office.label", { name: office.label })}
-      style={{ ["--px-cols" as string]: Math.min(Math.max(layout.desks.length, 3), 6) } as CSSProperties}
+      style={{ ["--px-cols" as string]: Math.min(Math.max(layout.desks.length + layout.spareDesks, 3), 6) } as CSSProperties}
     >
       <header className="px-office-head">
         <DoorSign office={office} />
@@ -176,7 +176,9 @@ export function OfficeRoom({
           <Chip glyph="✋" label={t("game.office.waiting", { count: waiting })} count={waiting} attention />
           <Chip glyph="🚪" label={t("game.office.offered", { count: layout.entrance.length })} count={layout.entrance.length} />
         </span>
-        <span className="px-office-free">{t("game.office.free", { count: office.freeDesks })}</span>
+        <span className="px-office-free">
+          {office.freeDesks === 1 ? t("game.office.freeOne") : t("game.office.free", { count: office.freeDesks })}
+        </span>
       </header>
       <div className="px-scene">
         <StyleWall style={style} />
@@ -187,6 +189,9 @@ export function OfficeRoom({
             </span>
             <div className="px-floor px-desks">
               {layout.desks.map((id, i) => (id ? desk(id, "desk") : <FreeDesk key={`free-${i}`} style={style} />))}
+              {Array.from({ length: layout.spareDesks }, (_, i) => (
+                <FreeDesk key={`spare-${i}`} style={style} spare />
+              ))}
             </div>
           </div>
           <div className="px-area is-meeting" role="group" aria-label={areaName(t, "meeting")}>

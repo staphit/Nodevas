@@ -155,6 +155,8 @@ export interface DeskOptions {
   mail?: boolean;
   /** The office's style: its desk top, chair and table. */
   style?: OfficeStyle;
+  /** An empty desk with no runner slot behind it: no monitor, no screen. */
+  spare?: boolean;
 }
 
 /** The chair, its bottom where the default chair's is whatever its height. */
@@ -168,11 +170,10 @@ function chair(style: OfficeStyle): Placed {
  * The style changes the desk top and the chair, nothing the agent does. */
 export function deskScene(pose: Pose | "empty", kind: string, options: DeskOptions = {}): Placed[] {
   const style = options.style ?? "default";
-  const parts: Placed[] = [
-    at("monitor", S.MONITOR, 0, 0),
-    at("desk", deskTopOf(style), 0, S.DESK_TOP_Y),
-    ...screen(pose),
-  ];
+  const spare = pose === "empty" && Boolean(options.spare);
+  const parts: Placed[] = spare
+    ? [at("desk", deskTopOf(style), 0, S.DESK_TOP_Y)]
+    : [at("monitor", S.MONITOR, 0, 0), at("desk", deskTopOf(style), 0, S.DESK_TOP_Y), ...screen(pose)];
   if (pose !== "empty") parts.push(...agent(pose, kind));
   parts.push(chair(style));
   if (pose !== "empty") parts.push(...extras(pose, Boolean(options.mail)));

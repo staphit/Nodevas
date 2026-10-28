@@ -46,7 +46,8 @@ describe("layoutOffice", () => {
 
   it("puts who waits at the door at the entrance, and drops actors not in view", () => {
     const layout = layoutOffice(office({ work: ["a", "gone"], entrance: ["d", "gone2"] }), byId("a", "d"));
-    expect(layout.desks).toEqual(["a", null]);
+    expect(layout.desks).toEqual(["a"]);
+    expect(layout.spareDesks).toBe(1);
     expect(layout.entrance).toEqual(["d"]);
   });
 });

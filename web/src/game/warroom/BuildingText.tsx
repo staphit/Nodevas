@@ -31,7 +31,7 @@ export function BuildingText({ building }: { building: Building }) {
       {area("work")}
       <ul>
         {actors(office.work).map(say)}
-        {free > 0 && <li>{t("game.warroom.freeDesks", { count: free })}</li>}
+        {free > 0 && <li>{free === 1 ? t("game.warroom.freeDesksOne") : t("game.warroom.freeDesks", { count: free })}</li>}
       </ul>
       {area("meeting")}
       <ul>
