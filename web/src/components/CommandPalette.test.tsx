@@ -40,7 +40,7 @@ function open(view?: "help") {
 }
 
 function search(text: string) {
-  fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: text } });
+  fireEvent.change(screen.getByRole("textbox", { name: /^Search/ }), { target: { value: text } });
 }
 
 describe("CommandPalette: what the top bar no longer shows", () => {
@@ -117,7 +117,7 @@ describe("CommandPalette: what the top bar no longer shows", () => {
   it("opens straight on the help view when asked", () => {
     open("help");
     expect(screen.getByText("Keyboard shortcuts and help")).toBeTruthy();
-    expect(screen.queryByRole("textbox", { name: "Search" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /^Search/ })).toBeNull();
   });
 });
 

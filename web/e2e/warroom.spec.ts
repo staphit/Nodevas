@@ -453,7 +453,7 @@ test("war room: Station draws it straight away, a character opens its node and i
   await closeAgentPanel(page);
   // The palette finds Station by the war room's name too.
   await page.evaluate(() => window.dispatchEvent(new Event("nodevas-command-palette")));
-  await page.getByPlaceholder(/Search projects, nodes/).fill("war room");
+  await page.getByRole("textbox", { name: /Search projects, nodes/ }).fill("war room");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Station" })).toHaveAttribute("aria-pressed", "true");
   const stage = page.getByRole("region", { name: "War room" });

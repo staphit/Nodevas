@@ -720,8 +720,11 @@ export function CommandPalette() {
               <input
                 ref={inputRef}
                 value={query}
+                // The placeholder is the short form that fits at any text
+                // size; the name and tooltip say everything it searches.
                 placeholder={t("palette.searchPlaceholder")}
                 aria-label={t("palette.search")}
+                title={t("palette.search")}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
