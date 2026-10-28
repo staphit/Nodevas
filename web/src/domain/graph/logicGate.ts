@@ -141,6 +141,24 @@ export function dependencyConnectionError(
   return null;
 }
 
+/**
+ * Every node that waits on `nodeId`, directly or through others: none of them
+ * can become its prerequisite without closing a loop.
+ */
+export function nodesWaitingOn(edges: readonly { from: string; to: string }[], nodeId: string): Set<string> {
+  const outgoing = new Map<string, string[]>();
+  for (const edge of edges) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
+  const found = new Set<string>();
+  const pending = [...(outgoing.get(nodeId) ?? [])];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (found.has(current)) continue;
+    found.add(current);
+    pending.push(...(outgoing.get(current) ?? []));
+  }
+  return found;
+}
+
 /** Undoes what {@link materializeLogicGate} wrote into the output nodes. */
 export function detachLogicGateOutput(graph: Graph, gate: LogicGate): void {
   const outputs = logicGateOutputs(gate);

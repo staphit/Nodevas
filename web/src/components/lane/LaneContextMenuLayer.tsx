@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFloatingPanel } from "../floatingPanel";
 import { useI18n } from "../../i18n";
-import type { Graph, LogicGate, PlanStatusDefinition } from "../../types";
+import type { Graph, GraphEdge, LogicGate, PlanStatusDefinition } from "../../types";
 import type { useGraphWiring } from "../canvas/useGraphWiring";
 import type { useNodeConditions } from "../canvas/useNodeConditions";
 import type { useNodeCreation } from "../canvas/useNodeCreation";
@@ -22,6 +22,8 @@ import { NodeActionsMenu, type NodeActionsMenuProps } from "../menus/NodeActions
 import { NodeMenu } from "../menus/NodeMenu";
 import { PlanMenu } from "../menus/PlanMenu";
 import type { LaneContextMenu } from "../LaneView";
+
+const NO_EDGES: readonly GraphEdge[] = [];
 
 /**
  * The open menu, and the two ways of dismissing one: pressing Escape or
@@ -187,6 +189,7 @@ export function LaneContextMenuLayer({
           {...conditions}
           contextMenu={contextMenu}
           nodeTitle={nodeTitle}
+          edges={graph?.edges ?? NO_EDGES}
           assignExistingLogicGateToNode={wiring.assignExistingLogicGateToNode}
           setContextMenu={setContextMenu}
         />

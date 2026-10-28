@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
+import { nodesWaitingOn } from "../../domain/graph/logicGate";
 import { requiresNodeRefs } from "../../domain/graph/requires";
 import { IconPlus } from "../../icons";
 import type { LaneContextMenu } from "../LaneView";
@@ -24,6 +25,8 @@ import {
 export interface NodeMenuProps {
   contextMenu: Extract<LaneContextMenu, { kind: "node" }>;
   nodeTitle: (id: string | undefined) => string;
+  /** The board's dependency edges, to leave out nodes that would close a loop. */
+  edges: readonly GraphEdge[];
   incomingConditions: GraphEdge[];
   availableConditionSources: GraphNode[];
   conditionSource: string;
@@ -50,6 +53,7 @@ export interface NodeMenuProps {
 export function NodeMenu({
   contextMenu,
   nodeTitle,
+  edges,
   incomingConditions,
   availableConditionSources,
   conditionSource,
@@ -70,11 +74,14 @@ export function NodeMenu({
   const { t, language } = useI18n();
   const requires = conditionTarget?.requires?.trim() ?? "";
   // A node the expression already names is a prerequisite even before its
-  // wire is drawn, so it is not offered again.
+  // wire is drawn, so it is not offered again; nor is one that already waits
+  // on this node, which would close a loop the add is refused for.
+  const nodeId = contextMenu.nodeId;
   const choices = useMemo(() => {
     const named = new Set(requiresNodeRefs(requires));
-    return availableConditionSources.filter((node) => !named.has(node.id));
-  }, [availableConditionSources, requires]);
+    const downstream = nodesWaitingOn(edges, nodeId);
+    return availableConditionSources.filter((node) => !named.has(node.id) && !downstream.has(node.id));
+  }, [availableConditionSources, requires, edges, nodeId]);
   useEffect(() => {
     if (choices.some((node) => node.id === conditionSource)) return;
     setConditionSource(choices[0]?.id ?? "");

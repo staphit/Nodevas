@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { edgeRelation } from "../../domain/graph/edgeStyle";
+import { nodesWaitingOn } from "../../domain/graph/logicGate";
 import { nodeTypeOf } from "../../domain/graph/nodeTypes";
 import { requiresNodeRefs } from "../../domain/graph/requires";
 import { IconClose, IconPlus } from "../../icons";
@@ -109,7 +110,7 @@ export function NodeDependencies({ id }: { id: string }) {
   const edges = graph?.edges;
   const choices = useMemo(() => {
     const named = new Set(requiresNodeRefs(targetRequires));
-    const downstream = waitingOn(edges ?? [], id);
+    const downstream = nodesWaitingOn(edges ?? [], id);
     return availableConditionSources.filter(
       (node) => !named.has(node.id) && !adding.has(node.id) && !downstream.has(node.id),
     );
@@ -381,21 +382,6 @@ export function NodeDependencies({ id }: { id: string }) {
       <div className="node-relations-help">{t("relations.help")}</div>
     </div>
   );
-}
-
-/** Every node that waits on `id`, directly or through others. */
-function waitingOn(edges: readonly { from: string; to: string }[], id: string): Set<string> {
-  const outgoing = new Map<string, string[]>();
-  for (const edge of edges) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
-  const found = new Set<string>();
-  const pending = [...(outgoing.get(id) ?? [])];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (found.has(current)) continue;
-    found.add(current);
-    pending.push(...(outgoing.get(current) ?? []));
-  }
-  return found;
 }
 
 const byTitle = (a: GraphNode, b: GraphNode) =>
