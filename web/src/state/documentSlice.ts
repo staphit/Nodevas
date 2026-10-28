@@ -356,6 +356,13 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   // ws said the file changed on disk. Clean tab: reload silently.
   // Dirty tab: flag it — never clobber unsaved edits.
   notifyDiskChange: async (id) => {
+    // The hub broadcasts before it answers the PUT, so our own echo usually
+    // arrives mid-save. Judged then, it looks foreign (the revision it wrote
+    // is not known yet), and the revision remembered afterwards is never
+    // consumed — swallowing the next real change instead. Waiting for the save
+    // in flight lets the echo be recognised for what it is.
+    const inFlight = queues.tabSave.get(id);
+    if (inFlight) await inFlight.catch(() => undefined);
     const tab = get().tabs.find((t) => t.id === id);
     if (!tab || !tab.loaded) return;
     // Our own save coming back around. Nothing changed that this tab does not
