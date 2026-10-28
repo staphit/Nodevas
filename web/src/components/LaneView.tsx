@@ -43,6 +43,7 @@ import { useCanvasPan } from "./canvas/useCanvasPan";
 import { useConnectionDrag } from "./canvas/useConnectionDrag";
 import { useMarquee } from "./canvas/useMarquee";
 import { useViewWindow } from "./canvas/useViewWindow";
+import { boardViewKey, recallBoardView } from "./canvas/boardViewMemory";
 import { CULL_MIN_CARDS, cardRect, rectsIntersect } from "./canvas/viewportCulling";
 import {
   GraphGestureModeProvider,
@@ -298,10 +299,16 @@ export function LaneView({
     runCanvasCommand,
   });
   const boardRef = useRef<HTMLDivElement>(null);
+  // Station and Settings unmount the board, so the view this project was left
+  // at in this session — if any — is read once, on mount.
+  const [rememberedView] = useState(() =>
+    isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined,
+  );
   const canvasPan = useCanvasPan({
     boardRef,
     collapsed,
     displayScale: graphNodeScale,
+    initialZoom: rememberedView?.zoom,
   });
   // Two different numbers on purpose. `zoom` is the user's own, and the only
   // one the toolbar shows or the wheel changes. `viewScale` is what the board
@@ -318,6 +325,7 @@ export function LaneView({
     isGraph,
     activeProject,
     zoom: viewScale,
+    userZoom: zoom,
   });
 
   const userNames = useMemo(
@@ -1083,12 +1091,16 @@ export function LaneView({
   // writes its scroll in a requestAnimationFrame, so it lands after the
   // remembered opening scroll rather than under it.
   const narrow = useNarrowViewport();
-  const autoFitKeyRef = useRef<string | null>(null);
+  // A board this session already showed has been through its first sight:
+  // coming back from Station or Settings keeps the user's zoom, not a refit.
+  const autoFitKeyRef = useRef<string | null>(
+    rememberedView ? boardViewKey(activeProject) : null,
+  );
   useEffect(() => {
     if (!isGraph || collapsed || !narrow) return;
     if (boardViewport.width <= 0 || boardViewport.height <= 0) return;
     if (cols.length === 0) return;
-    const key = activeProject || "__default__";
+    const key = boardViewKey(activeProject);
     if (autoFitKeyRef.current === key) return;
     autoFitKeyRef.current = key;
     fitGraph(false);

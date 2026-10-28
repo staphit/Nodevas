@@ -43,9 +43,12 @@ export function useCanvasPan({
   boardRef,
   collapsed,
   displayScale = 1,
+  initialZoom = 1,
 }: {
   boardRef: RefObject<HTMLDivElement>;
   collapsed?: boolean;
+  /** The zoom a fresh mount starts at: 100%, or where the board was left. */
+  initialZoom?: number;
   /**
    * A second, independent multiplier the board is drawn at — the graph's node
    * scale. It rides on the same CSS `zoom` the user's zoom does, so every
@@ -55,7 +58,7 @@ export function useCanvasPan({
    */
   displayScale?: number;
 }) {
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(() => clampZoom(initialZoom));
   const viewScale = zoom * displayScale;
   const [panning, setPanning] = useState(false);
   const panRef = useRef<PanState | null>(null);
