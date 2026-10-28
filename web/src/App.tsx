@@ -9,6 +9,7 @@ import { connectWS } from "./api";
 import { decodePresence } from "./collab/presence";
 import { liveDocumentSink } from "./collab/useLiveDocument";
 import { reportError, useApp, usePreference } from "./store";
+import { resyncAfterReconnect } from "./state/reconnect";
 import { applyTextScale } from "./preferences/textScale";
 import { SidebarBackdrop } from "./components/Sidebar";
 import ExplorerShell from "./explorer/ExplorerShell";
@@ -185,6 +186,8 @@ function MainApp() {
     void loadAll().catch(reportError);
     void refreshTrash().catch(reportError);
     void refreshProjects().catch(reportError);
+    // The first hello is this page's own start, which the loads above cover.
+    let socketGenerations = 0;
     const live = connectWS((ev) => {
       const persistenceAction = documentPersistenceAction(ev);
       if (persistenceAction) {
@@ -372,6 +375,10 @@ function MainApp() {
           // whatever run lists and live runs are on screen.
           useRuns.getState().resync();
           useSessions.getState().resync();
+          // A later one is the server coming back: clear what only said it
+          // was unreachable, and reload what it broadcast while it was gone.
+          socketGenerations += 1;
+          if (socketGenerations > 1) void resyncAfterReconnect();
           break;
         case "presence":
           useApp.getState().setPeers(ev.peers ?? []);

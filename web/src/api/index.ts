@@ -28,6 +28,8 @@ export {
   AuthError,
   ConflictError,
   getProjectOverride,
+  isNetworkFailure,
+  NetworkError,
   onUnauthorized,
   RequestError,
   setProjectOverride,

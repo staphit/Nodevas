@@ -30,6 +30,39 @@ export class RequestError extends Error {
   }
 }
 
+/**
+ * The request never got an answer: the server is stopped, restarting, or out
+ * of reach. The browser's own wording ("Failed to fetch", "Load failed") is
+ * replaced, because it reaches the banner and the status pill as-is. The page
+ * language comes from <html lang>, which App keeps in step with the
+ * preference; importing the i18n module here would close a cycle through the
+ * store.
+ */
+export class NetworkError extends Error {
+  constructor() {
+    super(networkFailureText());
+  }
+}
+
+const NETWORK_FAILURE_ZH = "無法連線到伺服器";
+const NETWORK_FAILURE_EN = "Can't reach the server";
+/** What browsers say when a fetch is refused, in case one slips through. */
+const BROWSER_NETWORK_FAILURES = ["Failed to fetch", "Load failed", "NetworkError when attempting to fetch resource."];
+
+function networkFailureText(): string {
+  return document.documentElement.lang.startsWith("zh") ? NETWORK_FAILURE_ZH : NETWORK_FAILURE_EN;
+}
+
+/** Whether a failure message says the server could not be reached. */
+export function isNetworkFailure(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return (
+    message === NETWORK_FAILURE_ZH ||
+    message === NETWORK_FAILURE_EN ||
+    BROWSER_NETWORK_FAILURES.includes(message)
+  );
+}
+
 /** Raised when the server has accounts on and this browser is not signed in. */
 export class UnauthorizedError extends Error {
   constructor() {
@@ -138,6 +171,7 @@ export async function send(url: string, init?: RequestInit): Promise<Response> {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("請求逾時");
     }
+    if (error instanceof TypeError) throw new NetworkError();
     throw error;
   } finally {
     window.clearTimeout(timeout);
