@@ -62,6 +62,12 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  /* The one scroll container. Positioned, so the office's absolutely placed
+     art scrolls inside it instead of hanging out into .main (a scroller too,
+     through its overflow-x) and scrolling that as well. Its height comes from
+     .main, never from its content, so it can be the side column's yardstick. */
+  position: relative;
+  container-type: size;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   gap: 12px 16px;
@@ -72,8 +78,9 @@
   align-content: start;
 }
 .station-head,
-.station-report {
-  grid-column: 1 / -1;
+.station-report,
+.station-center {
+  grid-column: 1;
 }
 .station-report:empty {
   display: none;
@@ -104,11 +111,29 @@
   gap: 12px;
   min-width: 0;
 }
+/* Level with the header and exactly as tall as Station's content box
+   (100cqh), so the column fits the window from the top and stays put while
+   the rest scrolls. 100vh ignored the top bar and the header above it: the
+   column scrolled on its own and the agent chat's composer sat under the
+   bottom edge. The open chat is what gives up height; the column itself
+   scrolls only when even that is not enough. */
 .station-side {
+  grid-column: 2;
+  grid-row: 1 / span 3;
   position: sticky;
   top: 0;
-  max-height: calc(100vh - 80px);
+  max-height: 100cqh;
   overflow-y: auto;
+}
+.station-side > .station-panel {
+  flex: 0 0 auto;
+}
+.station-side > .station-network.is-open {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.station-side > .station-network.is-open > .agent-panel.is-docked {
+  min-height: 260px;
 }
 
 .station-panel {
@@ -807,10 +832,21 @@
   .station {
     grid-template-columns: minmax(0, 1fr);
   }
+  .station-head,
+  .station-report,
+  .station-center,
+  .station-side {
+    grid-column: 1;
+    grid-row: auto;
+  }
   .station-side {
     position: static;
     max-height: none;
     overflow: visible;
+  }
+  /* Nothing to fit under in one column: the chat keeps its full height. */
+  .station-side > .station-network.is-open > .agent-panel.is-docked {
+    min-height: 420px;
   }
 }
 /* Phone: tighter. */
