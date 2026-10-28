@@ -95,6 +95,16 @@ describe("RunnersPanel", () => {
     expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
   });
 
+  // At 150% text on a phone the line is cut ("…1 個 r…"); whole on hover.
+  it("gives a runner's line its whole text on hover", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    render(<RunnersPanel />);
+    expect(await screen.findByText("Online · claude · 1 repo")).toHaveAttribute(
+      "title",
+      "Online · claude · 1 repo",
+    );
+  });
+
   it("names the hub's own runner in the reader's language", async () => {
     useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...desktop, name: "this machine" }] });
