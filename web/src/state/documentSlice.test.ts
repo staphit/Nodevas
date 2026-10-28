@@ -468,3 +468,51 @@ describe("automatic saving", () => {
     expect(useApp.getState().tabs[0]).toMatchObject({ content: "彈出視窗的版本", rev: "rev-3" });
   });
 });
+
+// Keeping my version over a conflict is a write like any save: its echo must
+// not cost a GET (UX sweep), whether it lands after the PUT's answer or
+// before it.
+describe("resolving a conflict with my version", () => {
+  const conflicted = (id: string) =>
+    tab(id, { dirty: true, content: "mine", conflict: { diskRev: "rev-disk", diskContent: "theirs" } });
+
+  it("ignores the disk-change broadcast its own write causes", async () => {
+    vi.mocked(api.putNode).mockResolvedValue({ ok: true, rev: "rev-mine" });
+    useApp.setState({ tabs: [conflicted("c")], activeTab: "c" });
+
+    await useApp.getState().resolveConflict("c", "mine");
+    await useApp.getState().notifyDiskChange("c");
+
+    expect(api.putNode).toHaveBeenCalledWith("c", "mine", "rev-disk");
+    expect(api.getNode).not.toHaveBeenCalled();
+    expect(useApp.getState().tabs[0]).toMatchObject({ rev: "rev-mine", dirty: false, diskChanged: false, conflict: null });
+
+    // The next write is somebody else's and is still read back.
+    vi.mocked(api.getNode).mockResolvedValue({ id: "c", content: "別人的版本", rev: "rev-9" });
+    await useApp.getState().notifyDiskChange("c");
+    expect(api.getNode).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores its echo when the echo beats the PUT's answer", async () => {
+    let finish!: (result: { ok: boolean; rev: string }) => void;
+    vi.mocked(api.putNode).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    useApp.setState({ tabs: [conflicted("d")], activeTab: "d" });
+
+    const resolving = useApp.getState().resolveConflict("d", "mine");
+    await vi.waitFor(() => expect(api.putNode).toHaveBeenCalledTimes(1));
+    const echo = useApp.getState().notifyDiskChange("d");
+    finish({ ok: true, rev: "rev-mine" });
+    await Promise.all([resolving, echo]);
+
+    expect(api.getNode).not.toHaveBeenCalled();
+    expect(useApp.getState().tabs[0]).toMatchObject({ rev: "rev-mine", dirty: false, diskChanged: false, conflict: null });
+
+    // The echo was consumed, so it cannot swallow the next real change.
+    vi.mocked(api.getNode).mockResolvedValue({ id: "d", content: "彈出視窗的版本", rev: "rev-3" });
+    await useApp.getState().notifyDiskChange("d");
+    expect(api.getNode).toHaveBeenCalledTimes(1);
+    expect(useApp.getState().tabs[0]).toMatchObject({ content: "彈出視窗的版本", rev: "rev-3" });
+  });
+});
