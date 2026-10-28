@@ -68,7 +68,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	issues := engine.Validate(body.Graph)
-	rev, err := httpx.StoreFor(c.Request, a.pm).SaveGraph(auth.ActorFrom(c.Request), body.Graph, body.BaseRev)
+	rev, synced, err := httpx.StoreFor(c.Request, a.pm).SaveGraphSynced(auth.ActorFrom(c.Request), body.Graph, body.BaseRev)
 	if err != nil {
 		if httpx.WriteDenied(c, err) {
 			return
@@ -82,6 +82,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	a.notifyRoom(c.Request, "graph-changed", "")
+	a.notifyNodeFiles(c.Request, synced)
 	c.JSON(200, map[string]any{"ok": true, "rev": rev, "issues": issues})
 }
 
@@ -151,7 +152,7 @@ func (a *API) postGraphOps(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	graph, rev, err := st.ApplyGraphOps(auth.ActorFrom(c.Request), body.Ops)
+	graph, rev, synced, err := st.ApplyGraphOpsSynced(auth.ActorFrom(c.Request), body.Ops)
 	if err != nil {
 		if httpx.WriteDenied(c, err) {
 			return
@@ -179,6 +180,7 @@ func (a *API) postGraphOps(c *gin.Context) {
 	} else {
 		a.notifyRoom(c.Request, "graph-changed", "")
 	}
+	a.notifyNodeFiles(c.Request, synced)
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":       true,
 		"graph":    graph,

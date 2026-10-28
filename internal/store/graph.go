@@ -28,38 +28,48 @@ func (s *Store) LoadGraph() (*engine.Graph, string, error) {
 // SaveGraph writes graph.yaml (optimistic-locked) and
 // refreshes every node file's frontmatter snapshot.
 func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string) (string, error) {
+	rev, _, err := s.SaveGraphSynced(actor, g, baseRev)
+	return rev, err
+}
+
+// SaveGraphSynced is SaveGraph that also names the nodes whose files it
+// rewrote. Those writes are the store's own, so the file watcher keeps quiet
+// about them; a caller with readers to tell has to do it, or an editor holding
+// one of those documents is left on a revision that no longer exists.
+func (s *Store) SaveGraphSynced(actor identity.Actor, g *engine.Graph, baseRev string) (string, []string, error) {
+	var synced []string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	engine.NormalizeLogicGates(g)
 	if err := ValidateGraphForStorage(g); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := s.checkRevision(s.GraphPath(), baseRev); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	currentGraph, _, err := s.loadGraphLocked()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for _, node := range currentGraph.Nodes {
 		if node != nil && g.NodeByID(node.ID) == nil {
-			return "", fmt.Errorf("cannot remove node %q through graph save; use the node delete endpoint", node.ID)
+			return "", nil, fmt.Errorf("cannot remove node %q through graph save; use the node delete endpoint", node.ID)
 		}
 	}
 	// Node types decide what agents may do, so an agent may neither redefine
 	// them nor retype a node into or out of a type it may not complete.
 	if err := checkNodeTypesEdit(actor, currentGraph.NodeTypes, g.NodeTypes); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := checkOfficeStyleEdit(actor, currentGraph.OfficeStyle, g.OfficeStyle); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// Roles and stages decide what agents may do, so the same holds for them.
 	if err := checkAgentRolesEdit(actor, currentGraph.AgentRoles, g.AgentRoles); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := checkWorkflowEdit(actor, "", currentGraph.Workflow, g.Workflow); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var createdByRun map[string]bool
 	if actor.HasRole() && actor.RunID != "" {
@@ -81,28 +91,29 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 		// the save leaves untouched needs no permission, and a new node
 		// (existing == nil) is anyone's to add.
 		if err := checkNodeWrite(actor, existing); err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if existing != nil {
 			if err := checkKindChange(actor, currentGraph, existing.Kind, n.Kind); err != nil {
-				return "", err
+				return "", nil, err
 			}
 		}
 		if err := s.checkNodeSaveRoles(actor, currentGraph, existing, n, createdByRun[n.ID]); err != nil {
-			return "", err
+			return "", nil, err
 		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {
-			return "", fmt.Errorf("sync node %s: %w", n.ID, err)
+			return "", nil, fmt.Errorf("sync node %s: %w", n.ID, err)
 		}
 		if update != nil {
 			updates = append(updates, *update)
+			synced = append(synced, n.ID)
 		}
 	}
 	// Marshalled after the node loop: it normalizes acceptance in place.
 	data, err := s.marshalGraph(g)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	updates = append(updates, fileUpdate{
 		path:          s.GraphPath(),
@@ -111,9 +122,9 @@ func (s *Store) SaveGraph(actor identity.Actor, g *engine.Graph, baseRev string)
 		expectedRev:   baseRev,
 	})
 	if err := s.applyUpdatesLocked(actor, updates); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return Rev(data), nil
+	return Rev(data), synced, nil
 }
 
 func (s *Store) prepareNodeFileUpdate(n *engine.Node) (*fileUpdate, error) {

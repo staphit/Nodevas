@@ -91,18 +91,25 @@ func (s *Store) createdByActorRunLocked(actor identity.Actor) createdByRunFunc {
 // user looking at a board that matches neither what they did nor what they
 // had.
 func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, error) {
+	graph, rev, _, err := s.ApplyGraphOpsSynced(actor, ops)
+	return graph, rev, err
+}
+
+// ApplyGraphOpsSynced is ApplyGraphOps that also names the nodes whose files
+// it rewrote; see SaveGraphSynced for why a caller needs them.
+func (s *Store) ApplyGraphOpsSynced(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, []string, error) {
 	if len(ops) == 0 {
-		return nil, "", fmt.Errorf("no operations given")
+		return nil, "", nil, fmt.Errorf("no operations given")
 	}
 	if len(ops) > maxGraphOps {
-		return nil, "", fmt.Errorf("too many operations in one request (maximum %d)", maxGraphOps)
+		return nil, "", nil, fmt.Errorf("too many operations in one request (maximum %d)", maxGraphOps)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	graph, _, err := s.loadGraphLocked()
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if graph.UI == nil {
 		graph.UI = &engine.UIState{}
@@ -111,18 +118,19 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 	createdBy := s.createdByActorRunLocked(actor)
 	for _, op := range ops {
 		if err := applyGraphOp(actor, graph, op, touched, createdBy); err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 	}
 	engine.NormalizeLogicGates(graph)
 	if err := ValidateGraphForStorage(graph); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	data, err := s.marshalGraph(graph)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	updates := make([]fileUpdate, 0, len(touched)+1)
+	var synced []string
 	// Node metadata lives in two places: graph.yaml and the document's
 	// frontmatter. Writing only one of them is how they drift apart.
 	for id := range touched {
@@ -132,17 +140,18 @@ func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Grap
 		}
 		update, err := s.prepareNodeFileUpdate(node)
 		if err != nil {
-			return nil, "", fmt.Errorf("sync node %s: %w", id, err)
+			return nil, "", nil, fmt.Errorf("sync node %s: %w", id, err)
 		}
 		if update != nil {
 			updates = append(updates, *update)
+			synced = append(synced, id)
 		}
 	}
 	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data})
 	if err := s.applyUpdatesLocked(actor, updates); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return graph, Rev(data), nil
+	return graph, Rev(data), synced, nil
 }
 
 func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool, createdBy createdByRunFunc) error {
