@@ -21,6 +21,7 @@ vi.mock("../SignIn", () => ({
 
 const switchProject = vi.fn(async () => {});
 const switchWorkspace = vi.fn(async () => {});
+const refreshProjects = vi.fn(async () => {});
 const toggleTheme = vi.fn();
 
 const runner = (over: Partial<Runner>): Runner =>
@@ -31,6 +32,7 @@ beforeEach(() => {
   auth.signOut.mockReset();
   switchProject.mockClear();
   switchWorkspace.mockClear();
+  refreshProjects.mockClear();
   toggleTheme.mockClear();
   useApp.setState({
     preferences: { ...readPreferences(), language: "en", projectMode: "info", agentWorkstation: false },
@@ -49,6 +51,7 @@ beforeEach(() => {
     theme: "dark",
     switchProject,
     switchWorkspace,
+    refreshProjects,
     toggleTheme,
   });
   // Nothing here reaches the hub: the lists are already loaded.
@@ -84,6 +87,40 @@ describe("ProjectMenu", () => {
     const prefs = useApp.getState().preferences;
     expect(prefs.projectMode).toBe("settings");
     expect(prefs.settingsSection).toBe("project");
+  });
+
+  // The list is fetched on open and switch, not on every node create; the
+  // open project's count is read off the graph on screen, as the explorer does.
+  it("counts the open project's nodes off the graph on screen", async () => {
+    const user = userEvent.setup();
+    useApp.setState({
+      graphProject: "beta",
+      graph: {
+        version: 1,
+        type: "workflow",
+        nodes: [{ id: "a" }, { id: "b" }],
+      } as unknown as Graph,
+    });
+    render(<ProjectMenu />);
+    await user.click(screen.getByRole("button", { name: "Project: Beta" }));
+    const beta = screen.getByRole("menuitemradio", { name: /Beta/ });
+    expect(beta).toHaveTextContent("2");
+    expect(beta).toHaveAttribute("title", "2 nodes");
+    // Another project's count is still the server's.
+    expect(screen.getByRole("menuitemradio", { name: /Alpha/ })).toHaveTextContent("3");
+  });
+
+  // Projects added on disk, and counts changed by another window, show up
+  // without a project switch or a reload.
+  it("refreshes the project list when it opens", async () => {
+    const user = userEvent.setup();
+    render(<ProjectMenu />);
+    expect(refreshProjects).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Project: Beta" }));
+    expect(refreshProjects).toHaveBeenCalledTimes(1);
+    // Closing is not another read.
+    await user.click(screen.getByRole("button", { name: "Project: Beta" }));
+    expect(refreshProjects).toHaveBeenCalledTimes(1);
   });
 
   it("switches workspace", async () => {
