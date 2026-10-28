@@ -1266,6 +1266,13 @@ button.danger:hover {
   .drawer .editor-stage {
     min-height: 55%;
   }
+  /* The acceptance criteria's desktop cap (28-roles.css) would make them a
+     scroller inside this one, with the new-criterion field at the bottom of
+     the inner box; here they take their own height and scroll with the rest. */
+  .drawer .acceptance {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 @keyframes drawer-sheet-in {
