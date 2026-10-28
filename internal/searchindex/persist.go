@@ -130,6 +130,11 @@ SELECT to_regclass('search_documents') IS NOT NULL
 			return
 		}
 		s.err = withTx(ctx, s.sql, func(tx *sql.Tx) error {
+			// The lock may be held by a migration running longer than the
+			// pool's lock_timeout; waiting it out is the point.
+			if _, err := tx.ExecContext(ctx, db.NoTimeouts); err != nil {
+				return fmt.Errorf("search schema: %w", err)
+			}
 			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, schemaLock); err != nil {
 				return fmt.Errorf("search schema lock: %w", err)
 			}

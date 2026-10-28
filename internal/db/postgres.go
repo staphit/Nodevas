@@ -75,6 +75,8 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	}
 	readConfig := writeConfig.Copy()
 	readConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	setDefaults(writeConfig.RuntimeParams, writerTimeouts)
+	setDefaults(readConfig.RuntimeParams, readerTimeouts)
 
 	writer := sql.OpenDB(rebindConnector{stdlib.GetConnector(*writeConfig)})
 	writer.SetMaxOpenConns(1)
@@ -103,6 +105,41 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	}
 	return database, nil
 }
+
+// writerTimeouts bound every session on the write pools (the main writer and
+// the search pool). The main writer is one connection: without these, one
+// lock wait or one transaction left open on a shared server would stall every
+// audit, session and run write in the process indefinitely. A lock wait fails
+// with lock_not_available (55P03), a runaway statement with query_canceled
+// (57014), and a session idle inside a transaction is closed by the server.
+var writerTimeouts = map[string]string{
+	"statement_timeout":                   "15s",
+	"lock_timeout":                        "5s",
+	"idle_in_transaction_session_timeout": "30s",
+}
+
+// readerTimeouts bound the read pool: reads take no locks worth waiting on,
+// but an analytics query over a large history must not hold a connection
+// forever.
+var readerTimeouts = map[string]string{
+	"statement_timeout": "30s",
+}
+
+// setDefaults sets each param the connection string did not: a value in the
+// URL (postgres://…?statement_timeout=60s) is the operator's and wins.
+func setDefaults(params, defaults map[string]string) {
+	for key, value := range defaults {
+		if _, set := params[key]; !set {
+			params[key] = value
+		}
+	}
+}
+
+// NoTimeouts lifts the pool's timeouts for the rest of one transaction. A
+// migration may wait for another process's migration lock longer than
+// lock_timeout, and a step over a large table may run longer than
+// statement_timeout; neither should fail a server's start.
+const NoTimeouts = `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0`
 
 // pingUntil retries a ping with a short backoff until it succeeds or wait has
 // passed. A zero wait is a single attempt.

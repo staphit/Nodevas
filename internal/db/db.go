@@ -205,9 +205,13 @@ type migration struct {
 // Every step, and the bookkeeping table itself, runs under the migration
 // advisory lock: two processes opening one empty database at once (serve and
 // a CLI command, two test binaries) would otherwise both run CREATE TABLE IF
-// NOT EXISTS, which is not safe against a concurrent CREATE TABLE.
+// NOT EXISTS, which is not safe against a concurrent CREATE TABLE. Each of
+// those transactions lifts the writer's timeouts (NoTimeouts).
 func (d *DB) migrate(ctx context.Context) error {
 	if err := d.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, NoTimeouts); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
 			return err
 		}
@@ -242,6 +246,9 @@ func (d *DB) migrate(ctx context.Context) error {
 		if err := d.inTx(ctx, func(tx *sql.Tx) error {
 			// Another process may have applied this step since the read
 			// above; the lock orders the two and the recheck skips it.
+			if _, err := tx.ExecContext(ctx, NoTimeouts); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, pgMigrationLock); err != nil {
 				return err
 			}
