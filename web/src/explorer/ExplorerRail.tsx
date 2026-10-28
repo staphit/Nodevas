@@ -5,6 +5,8 @@ import type { ExplorerTab } from "./explorerStore";
 export interface ExplorerRailProps {
   tab: ExplorerTab;
   onTab: (tab: ExplorerTab) => void;
+  /** Folds the explorer away; the rail shows a « for it when given. */
+  onCollapse?: () => void;
 }
 
 const svg = (children: ReactNode) => (
@@ -41,7 +43,7 @@ const ICONS: Record<ExplorerTab, ReactNode> = {
 export const EXPLORER_TABS: readonly ExplorerTab[] = ["nodes", "files", "git", "agent"];
 
 /** The four tabs: Nodes, Files, Git, Agent. */
-export default function ExplorerRail({ tab, onTab }: ExplorerRailProps) {
+export default function ExplorerRail({ tab, onTab, onCollapse }: ExplorerRailProps) {
   const { t } = useI18n();
   return (
     <div className="ex-rail" role="group" aria-label={t("explorer.tabs")}>
@@ -59,6 +61,19 @@ export default function ExplorerRail({ tab, onTab }: ExplorerRailProps) {
           <span aria-hidden="true">{t(`explorer.tab.${value}`)}</span>
         </button>
       ))}
+      {onCollapse && (
+        <button
+          type="button"
+          className="ex-rail-collapse"
+          aria-label={t("board.collapseExplorer")}
+          title={t("board.collapseExplorer")}
+          aria-expanded
+          aria-controls="project-explorer"
+          onClick={onCollapse}
+        >
+          «
+        </button>
+      )}
     </div>
   );
 }
