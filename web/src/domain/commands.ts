@@ -27,6 +27,7 @@ import type {
   StatusDefinition,
   Workflow,
 } from "../types";
+import { hasMessage, translate } from "../i18n";
 import { CommandError } from "./errors";
 import type { CustomLifecycleStatus, MilestoneType } from "./glossary";
 import * as acceptance from "./graph/acceptance";
@@ -361,64 +362,11 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
   }
 }
 
-const COMMAND_LABELS: Record<GraphCommandType, string> = {
-  "graph.applyImport": "匯入節點",
-  "node.updateMetadata": "修改節點資料",
-  "node.setStyle": "調整節點外觀",
-  "node.setEntryOverride": "設定起點標記",
-  "node.assignByName": "指派負責人",
-  "node.assignMany": "批次指派負責人",
-  "node.addDependency": "建立前置關係",
-  "node.setRequires": "修改前置條件",
-  "node.setLinks": "編輯節點連結",
-  "node.addRef": "新增參考",
-  "node.removeRef": "移除參考",
-  "node.setUserEmail": "修改成員信箱",
-  "node.setAcceptance": "修改驗收條件",
-  "node.setWorkflow": "覆寫目標階段",
-  "plan.upsert": "設定預期里程碑",
-  "plan.move": "調整預期里程碑日期",
-  "plan.remove": "刪除預期里程碑",
-  "plan.clearNode": "清除節點預期計畫",
-  "workflow.addLifecycleStatus": "新增實際狀態定義",
-  "workflow.updateLifecycleStatus": "修改實際狀態定義",
-  "workflow.removeLifecycleStatus": "刪除實際狀態定義",
-  "workflow.addMilestoneType": "新增里程碑類型",
-  "workflow.updateMilestoneType": "修改里程碑類型",
-  "workflow.removeMilestoneType": "刪除里程碑類型",
-  "workflow.addNodeType": "新增節點類型",
-  "workflow.updateNodeType": "修改節點類型",
-  "workflow.removeNodeType": "刪除節點類型",
-  "workflow.setStages": "修改工作流程階段",
-  "workflow.setAgentRoles": "修改代理角色",
-  "workflow.setOfficeStyle": "設定辦公室風格",
-  "canvas.moveNodes": "移動節點",
-  "canvas.setTimelineOrder": "調整時間軸順序",
-  "canvas.setGatePlacement": "移動條件閘",
-  "canvas.setWireVertices": "調整連線轉折點",
-  "canvas.removeWireVertex": "刪除連線轉折點",
-  "canvas.setEdgeStyle": "調整關係樣式",
-  "canvas.removeEdge": "刪除關係",
-  "canvas.upsertGroup": "編輯群組底圖",
-  "canvas.removeGroup": "刪除群組底圖",
-  "canvas.upsertAnnotation": "編輯註解",
-  "canvas.removeAnnotation": "刪除註解",
-  "canvas.saveView": "儲存檢視",
-  "canvas.removeView": "刪除檢視",
-  "canvas.createLogicGate": "新增邏輯閘",
-  "canvas.convertEdgesToLogicGate": "關係線轉為邏輯閘",
-  "canvas.moveLogicGate": "移動邏輯閘",
-  "canvas.connectLogicGateInput": "連接邏輯閘輸入",
-  "canvas.disconnectLogicGateInput": "移除邏輯閘輸入",
-  "canvas.setLogicGateOutput": "設定邏輯閘輸出",
-  "canvas.toggleLogicGateOutput": "調整邏輯閘輸出",
-  "canvas.setLogicGateOperator": "變更邏輯閘運算子",
-  "canvas.removeLogicGate": "刪除邏輯閘",
-};
 
-/** Undo label / operation description, in UI wording. */
+/** Undo label / operation description, in the reader's language. */
 export function describeGraphCommand(command: GraphCommand): string {
-  return COMMAND_LABELS[command.type] ?? command.type;
+  const key = `graphCommand.${command.type}`;
+  return hasMessage("en", key) ? translate(key) : command.type;
 }
 
 export interface CommandTarget {

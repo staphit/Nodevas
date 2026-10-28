@@ -90,7 +90,7 @@ describe("runGraphCommand", () => {
       operation: "node.updateMetadata",
     });
     expect(useApp.getState().canUndo).toBe(true);
-    expect(useApp.getState().undoLabel).toBe("修改節點資料");
+    expect(useApp.getState().undoLabel).toBe("Edit node details");
   });
 
   it("routes a write-access edit through ops", async () => {

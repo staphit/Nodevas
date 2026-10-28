@@ -10,6 +10,7 @@
 import { api, ConflictError, type GraphOp } from "../api";
 import { applyGraphCommand, commandTarget, describeGraphCommand } from "../domain";
 import { applyGraphOps } from "../domain/graph/ops";
+import { translate } from "../i18n";
 import { officeStyleErrorMessage } from "../nodeTypeErrors";
 import type { Graph } from "../types";
 import {
@@ -30,7 +31,8 @@ type SetGraphState = (
   partial: Partial<AppState> | ((state: AppState) => Partial<AppState>),
 ) => void;
 
-const CONFLICT_MESSAGE = "圖譜已被外部修改，已重新載入；請再套用一次變更。";
+/** Read when it is shown, so it follows the reader's language. */
+const conflictMessage = () => translate("graph.error.conflict");
 
 
 /**
@@ -58,7 +60,7 @@ function writeGraph(
     try {
       mutate(copy);
     } catch (e) {
-      const message = describeFailure(e, "無法套用變更");
+      const message = describeFailure(e, translate("graph.error.applyFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       set({ error: message });
       throw e;
@@ -72,15 +74,15 @@ function writeGraph(
     } catch (e) {
       if (e instanceof ConflictError) {
         await get().loadAll();
-        set({ error: CONFLICT_MESSAGE });
+        set({ error: conflictMessage() });
         get().settleOperation(scope, {
           status: "conflict",
           operation: name,
-          message: CONFLICT_MESSAGE,
+          message: conflictMessage(),
         });
         return;
       }
-      const message = describeFailure(e, "儲存圖譜失敗");
+      const message = describeFailure(e, translate("graph.error.saveFailed"));
       set((state) => ({
         graph: state.graph === copy ? previous : state.graph,
         error: message,
@@ -91,7 +93,7 @@ function writeGraph(
     try {
       await get().refreshState();
     } catch (e) {
-      set({ error: describeFailure(e, "更新狀態失敗") });
+      set({ error: describeFailure(e, translate("graph.error.refreshFailed")) });
     }
   });
   queues.graphSave = operation.catch(() => undefined);
@@ -168,16 +170,17 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     const scope = scopeForCommand(commandTarget(command));
     const name = command.type;
     const label = describeGraphCommand(command);
+    const failed = () => translate("operation.commandFailed", undefined, { action: label });
     const run = queues.graphSave.then(async (): Promise<CommandResult> => {
       const { graph, graphRev } = get();
-      if (!graph) return commandFailed(name, scope, "尚未載入專案。");
+      if (!graph) return commandFailed(name, scope, translate("graph.error.notLoaded"));
       get().beginOperation(scope, name);
       const previous = graph;
       const copy: Graph = structuredClone(graph);
       try {
         applyGraphCommand(copy, command);
       } catch (e) {
-        const message = describeFailure(e, `${label}失敗`);
+        const message = describeFailure(e, failed());
         get().settleOperation(scope, { status: "error", operation: name, message });
         return commandFailed(name, scope, message);
       }
@@ -229,11 +232,11 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           get().settleOperation(scope, {
             status: "conflict",
             operation: name,
-            message: CONFLICT_MESSAGE,
+            message: conflictMessage(),
           });
-          return commandFailed(name, scope, CONFLICT_MESSAGE, "conflict");
+          return commandFailed(name, scope, conflictMessage(), "conflict");
         }
-        const message = officeStyleErrorMessage(e) ?? describeFailure(e, `${label}失敗`);
+        const message = officeStyleErrorMessage(e) ?? describeFailure(e, failed());
         set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
         get().settleOperation(scope, { status: "error", operation: name, message });
         return commandFailed(name, scope, message);

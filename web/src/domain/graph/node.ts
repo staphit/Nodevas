@@ -15,6 +15,7 @@ import type {
   NodeKind,
   NodeStyle,
 } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 
 import {
@@ -215,7 +216,13 @@ export function addDependency(
   const edges = graph.edges ?? [];
   const gate = logicGateOwningEdge(graph, sourceId, targetId);
   if (gate) {
-    throw invalid(`關係線「${sourceId} → ${targetId}」由邏輯閘「${gate.id}」控制。`);
+    throw invalid(
+      translate("dependency.error.edgeOwnedByGate", undefined, {
+        source: sourceId,
+        target: targetId,
+        gate: gate.id,
+      }),
+    );
   }
   const error = dependencyConnectionError(edges, sourceId, targetId);
   if (error) throw invalid(error);
@@ -223,7 +230,12 @@ export function addDependency(
   if (!relation) {
     const owner = booleanLogicGateForOutput(graph, targetId);
     if (owner) {
-      throw invalid(`「${targetId}」由邏輯閘「${owner.id}」控制，請改為編輯該閘門。`);
+      throw invalid(
+        translate("dependency.error.targetOwnedByGate", undefined, {
+          target: targetId,
+          gate: owner.id,
+        }),
+      );
     }
     const chosen = options.operator ?? editableGateOperator(topLevelOp(target.requires));
     target.requires = appendRequirement(target.requires ?? "", sourceId, chosen);

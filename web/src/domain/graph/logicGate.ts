@@ -15,6 +15,7 @@ import type {
   LogicGate,
   LogicGateOperator,
 } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 import { edgeRelation, edgeStylePatch } from "./edgeStyle";
 import {
@@ -120,9 +121,9 @@ export function dependencyConnectionError(
   sourceId: string,
   targetId: string,
 ): string | null {
-  if (sourceId === targetId) return "不可連接節點自身。";
+  if (sourceId === targetId) return translate("dependency.error.self");
   if (edges.some((edge) => edge.from === sourceId && edge.to === targetId)) {
-    return "此關係已存在。";
+    return translate("dependency.error.duplicate");
   }
   const outgoing = new Map<string, string[]>();
   for (const edge of edges) {
@@ -132,7 +133,7 @@ export function dependencyConnectionError(
   const visited = new Set<string>();
   while (pending.length > 0) {
     const current = pending.pop()!;
-    if (current === sourceId) return "此連線會產生循環依賴。";
+    if (current === sourceId) return translate("dependency.error.cycle");
     if (visited.has(current)) continue;
     visited.add(current);
     pending.push(...(outgoing.get(current) ?? []));

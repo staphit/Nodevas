@@ -154,15 +154,15 @@ describe("node commands", () => {
     const g = graph();
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "a", targetId: "a" }),
-    ).toThrow(/自身/);
+    ).toThrow(/depend on itself/);
 
     applyGraphCommand(g, { type: "node.addDependency", sourceId: "b", targetId: "a" });
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "b", targetId: "a" }),
-    ).toThrow(/已存在/);
+    ).toThrow(/already exists/);
     expect(() =>
       applyGraphCommand(g, { type: "node.addDependency", sourceId: "a", targetId: "b" }),
-    ).toThrow(/循環/);
+    ).toThrow(/circular dependency/);
   });
 
   it("keeps existing edges when the expression could not be parsed", () => {
@@ -627,7 +627,7 @@ describe("bulk import", () => {
 describe("labels", () => {
   it("names every command for the undo stack", () => {
     expect(describeGraphCommand({ type: "plan.remove", nodeId: "a", milestoneType: "done" })).toBe(
-      "刪除預期里程碑",
+      "Delete planned milestone",
     );
   });
 });
@@ -667,9 +667,9 @@ describe("references", () => {
 
     applyGraphCommand(g, { type: "node.removeRef", nodeId: "a", ref: "b" });
     expect(g.nodes![0].refs).toBeUndefined();
-    expect(describeGraphCommand({ type: "node.addRef", nodeId: "a", ref: "b" })).toBe("新增參考");
+    expect(describeGraphCommand({ type: "node.addRef", nodeId: "a", ref: "b" })).toBe("Add reference");
     expect(describeGraphCommand({ type: "node.removeRef", nodeId: "a", ref: "b" })).toBe(
-      "移除參考",
+      "Remove reference",
     );
   });
 
@@ -719,7 +719,7 @@ describe("office style", () => {
     expect(g.officeStyle).toBe("study");
     applyGraphCommand(g, { type: "workflow.setOfficeStyle", style: null });
     expect(g).not.toHaveProperty("officeStyle");
-    expect(describeGraphCommand({ type: "workflow.setOfficeStyle", style: "cafe" })).toBe("設定辦公室風格");
+    expect(describeGraphCommand({ type: "workflow.setOfficeStyle", style: "cafe" })).toBe("Set office style");
   });
 
   it("is saved with the whole-file PUT: no graph op carries it", () => {
