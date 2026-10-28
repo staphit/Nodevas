@@ -6,6 +6,7 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
+import { useApp } from "../store";
 import { installPointerShims, resetBoardStore } from "./canvas/boardTestKit";
 import { LaneView } from "./LaneView";
 
@@ -117,5 +118,91 @@ describe("vertical timeline's date ruler beside an open drawer", () => {
     });
     for (const ruler of rulers()) expect(ruler.style.right).toBe("");
     unmount();
+  });
+});
+
+describe("horizontal timeline's node column beside an open drawer", () => {
+  beforeEach(() => {
+    // The board's scrollport, inside its 10px scrollbar: 340…1270.
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 930 });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 700 });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+  });
+
+  const renderHorizontal = (nodeAxis: "left" | "right") => {
+    useApp.setState({
+      preferences: {
+        ...useApp.getState().preferences,
+        timelineOrientation: "horizontal",
+        timelineNodeAxis: nodeAxis,
+      },
+    });
+    const stage = document.createElement("main");
+    stage.className = "stage";
+    document.body.appendChild(stage);
+    const view = render(<LaneView variant="timeline" {...paneProps} />, { container: stage });
+    const column = () => [
+      ...stage.querySelectorAll<HTMLElement>(
+        ".horizontal-corner, .horizontal-date-lead, .horizontal-node-head",
+      ),
+    ];
+    const openDrawer = async () => {
+      const drawer = document.createElement("div");
+      drawer.className = "drawer";
+      await act(async () => {
+        stage.appendChild(drawer);
+      });
+      return drawer;
+    };
+    return { stage, view, column, openDrawer };
+  };
+
+  // The sticky node column is a whole date cell wide (200–360px). Beside a
+  // 580px drawer at 1280px the board shows 360px, so the column left a sliver
+  // of the dates beside it. It narrows to a third of what the drawer leaves,
+  // names cut short with the full name on hover, and is a cell wide again
+  // once the drawer closes.
+  it("narrows to a third of the uncovered board, and widens again when it closes", async () => {
+    const { column, openDrawer, view } = renderHorizontal("left");
+    expect(column().length).toBe(3);
+    const full = column()[0].style.width;
+    expect(parseFloat(full)).toBeGreaterThanOrEqual(200);
+    for (const cell of column()) expect(cell.style.width).toBe(full);
+
+    const drawer = await openDrawer();
+    // The scrollport (930) less the drawer's reach into it (570), over three.
+    for (const cell of column()) expect(cell.style.width).toBe("120px");
+    const head = column().find((cell) => cell.classList.contains("horizontal-node-head"))!;
+    expect(head).toHaveAttribute("title", expect.stringContaining("a"));
+    expect(head.closest(".horizontal-timeline")).toHaveClass("node-column-compact");
+
+    await act(async () => {
+      drawer.remove();
+    });
+    for (const cell of column()) expect(cell.style.width).toBe(full);
+    expect(head.closest(".horizontal-timeline")).not.toHaveClass("node-column-compact");
+    view.unmount();
+  });
+
+  // On the right the column sticks to the board's right edge: all of it was
+  // under the drawer. It sticks beside the drawer instead, like the vertical
+  // timeline's date ruler.
+  it("sticks a right-hand node column beside the drawer", async () => {
+    const { stage, openDrawer, view } = renderHorizontal("right");
+    const sticky = () => [
+      ...stage.querySelectorAll<HTMLElement>(".horizontal-corner, .horizontal-node-head"),
+    ];
+    for (const cell of sticky()) expect(cell.style.right).toBe("");
+    const drawer = await openDrawer();
+    expect(sticky().length).toBe(2);
+    for (const cell of sticky()) expect(cell.style.right).toBe("570px");
+    await act(async () => {
+      drawer.remove();
+    });
+    for (const cell of sticky()) expect(cell.style.right).toBe("");
+    view.unmount();
   });
 });
