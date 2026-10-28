@@ -11,6 +11,12 @@ import { liveDocumentSink } from "./collab/useLiveDocument";
 import { reportError, useApp, usePreference } from "./store";
 import { resyncAfterReconnect } from "./state/reconnect";
 import { applyTextScale } from "./preferences/textScale";
+import {
+  EXPLORER_DEFAULT_W,
+  EXPLORER_MAX_W,
+  explorerMinWidth,
+  explorerWidthFor,
+} from "./explorerWidth";
 import { SidebarBackdrop } from "./components/Sidebar";
 import ExplorerShell from "./explorer/ExplorerShell";
 import { useExplorer } from "./explorer/explorerStore";
@@ -63,10 +69,6 @@ const PopoutEditor = lazyWithRetry(() =>
   })),
 );
 
-const EXPLORER_MIN_W = 200;
-const EXPLORER_MAX_W = 520;
-const EXPLORER_DEFAULT_W = 304;
-
 function MainApp() {
   const { language, t } = useI18n();
   const loadAll = useApp((s) => s.loadAll);
@@ -112,6 +114,10 @@ function MainApp() {
 
   const textScale = usePreference("textScale");
   useEffect(() => applyTextScale(textScale), [textScale]);
+  // Larger text needs a wider explorer to read; the stored width is kept and
+  // only drawn wider while the text size asks for it.
+  const explorerMin = explorerMinWidth(textScale);
+  const shownExplorerWidth = explorerWidthFor(explorerWidth, textScale);
 
   // Ctrl/⌘+Z steps back, Shift+Z (and Ctrl+Y, which Windows users reach for)
   // steps forward again. Text fields keep their own history, so anything
@@ -472,7 +478,7 @@ function MainApp() {
           style={
             explorerCollapsed
               ? undefined
-              : { width: explorerWidth, flexBasis: explorerWidth }
+              : { width: shownExplorerWidth, flexBasis: shownExplorerWidth }
           }
         >
           {!explorerCollapsed && <ExplorerShell />}
@@ -481,8 +487,8 @@ function MainApp() {
           <ResizeHandle
             className="explorer-resize"
             orientation="vertical"
-            value={explorerWidth}
-            min={EXPLORER_MIN_W}
+            value={shownExplorerWidth}
+            min={explorerMin}
             max={EXPLORER_MAX_W}
             step={12}
             largeStep={32}

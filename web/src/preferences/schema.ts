@@ -233,7 +233,8 @@ export const PREFERENCE_SCHEMA = {
 
   // explorer (sidebar)
   explorerWidth: numberPref("vised-explorer-width", "explorer", {
-    min: 200,
+    // EXPLORER_MIN_W (explorerWidth.ts): narrower, the rows stop reading.
+    min: 260,
     max: 520,
     fallback: 304,
   }),
