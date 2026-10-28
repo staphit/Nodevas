@@ -115,4 +115,20 @@ describe("toolbar beside an open drawer", () => {
     expect(rule).not.toBeNull();
     expect(rule![1]).toMatch(/padding-right:\s*calc\([^;]*var\(--drawer-cover\)/);
   });
+
+  // Beside a 580px drawer at 1280×800 the timeline toolbar has ~320px left.
+  // Wrapping kept every control there but took 4 rows at 150% text (~200px of
+  // a 366px pane), leaving about one lane row. It stays one row and scrolls
+  // sideways instead, as the phone strip does.
+  it("stays one row and scrolls sideways rather than wrapping", () => {
+    const title = /\.lane-wrap\[data-drawer-cover\]\s*>\s*\.board-title\s*\{([^}]*)\}/.exec(css);
+    expect(title![1]).toMatch(/flex-wrap:\s*nowrap/);
+    const strip =
+      /\.lane-wrap\[data-drawer-cover\]\s*>\s*\.board-title\s*>\s*\.board-title-controls\s*\{([^}]*)\}/.exec(css);
+    expect(strip).not.toBeNull();
+    expect(strip![1]).toMatch(/display:\s*flex/);
+    expect(strip![1]).toMatch(/min-width:\s*0/);
+    expect(strip![1]).toMatch(/overflow-x:\s*auto/);
+    expect(strip![1]).toMatch(/overflow-y:\s*hidden/);
+  });
 });
