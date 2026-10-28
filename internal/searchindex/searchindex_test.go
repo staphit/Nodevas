@@ -68,7 +68,11 @@ func writeGraph(t *testing.T, root string, nodes ...fixtureNode) {
 // newManager is the usual setup: a manager over a fresh PostgreSQL database.
 func newManager(t *testing.T) *Manager {
 	t.Helper()
-	return NewManagerWithDB(testpg.New(t))
+	m := NewManagerWithDB(testpg.New(t))
+	// Background index work must be over before the fixture directories are
+	// removed: Windows will not delete a file a walk still has open.
+	t.Cleanup(func() { _ = m.Close() })
+	return m
 }
 
 func ids(matches []Match) []string {
