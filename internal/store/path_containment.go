@@ -617,6 +617,10 @@ func (s *Store) removePath(path string) error {
 	return RemoveProjectPath(s.root, path)
 }
 
+// syncFile flushes a written file to the disk before it is renamed into
+// place. A var only so tests can stand in for a slow disk.
+var syncFile = (*os.File).Sync
+
 func writeProjectFileAtomic(rootPath, path string, data []byte, perm os.FileMode, markWrite func(string)) error {
 	rel, err := projectRelativePath(rootPath, path)
 	if err != nil {
@@ -658,7 +662,7 @@ func writeProjectFileAtomic(rootPath, path string, data []byte, perm os.FileMode
 	if _, err := file.Write(data); err != nil {
 		return discard(err)
 	}
-	if err := file.Sync(); err != nil {
+	if err := syncFile(file); err != nil {
 		return discard(err)
 	}
 	if err := file.Close(); err != nil {
