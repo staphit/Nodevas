@@ -24,6 +24,7 @@ import { TimelineGrid } from "./timeline/TimelineGrid";
 import { TimelineCards } from "./timeline/TimelineCards";
 import { GAP_H, HORIZONTAL_GAP_W, useTimelineLayout } from "./timeline/useTimelineLayout";
 import { useTimelineDays } from "./timeline/useTimelineDays";
+import { TIMELINE_CULL_MIN_LANES } from "./timeline/timelineCulling";
 import { useTimelineCellSize } from "./timeline/useTimelineCellSize";
 import { useMilestoneDrag } from "./timeline/useMilestoneDrag";
 import { usePlanMenu } from "./timeline/usePlanMenu";
@@ -440,9 +441,14 @@ export function LaneView({
     });
   // A large graph mounts only the cards near the view. Read after
   // useBoardViewport's opening scroll, which lands in the same commit.
+  // A large timeline does the same with its lanes (timelineCulling).
   const viewWindow = useViewWindow({
     boardRef,
-    enabled: isGraph && !collapsed && cols.length >= CULL_MIN_CARDS,
+    enabled:
+      !collapsed &&
+      (isGraph
+        ? cols.length >= CULL_MIN_CARDS
+        : timelineCols.length >= TIMELINE_CULL_MIN_LANES),
     zoom: viewScale,
     viewport: boardViewport,
   });
@@ -1441,6 +1447,8 @@ export function LaneView({
               timelineOrientation={timelineOrientation}
               timelineDateAxis={timelineDateAxis}
               timelineNodeAxis={timelineNodeAxis}
+              timelineVDateAxis={timelineVDateAxis}
+              viewWindow={viewWindow}
               timelineCellWidth={timelineCellWidth}
               timelineCellHeight={timelineCellHeight}
               setTimelineCellSize={setTimelineCellSize}

@@ -11,6 +11,8 @@ import { StatusShape } from "../../statusTheme";
 import type { GraphNode, Status, StatusDefinition } from "../../types";
 import { ResizeHandle } from "../InteractionPrimitives";
 import type { Col } from "../canvas/geometry";
+import type { ViewWindow } from "../canvas/viewportCulling";
+import { laneSlots, laneSpan } from "./timelineCulling";
 import {
   formatLocalizedMonthDay,
   formatLocalizedTime,
@@ -46,6 +48,13 @@ export interface TimelineGridProps {
   timelineOrientation: "vertical" | "horizontal";
   timelineDateAxis: "top" | "bottom";
   timelineNodeAxis: "left" | "right";
+  /** Where a vertical timeline's date ruler sits: on the left it comes first. */
+  timelineVDateAxis?: "left" | "right";
+  /**
+   * What part of the board is in view, when the timeline is large enough to
+   * mount only the lanes near it (timelineCulling); null draws every lane.
+   */
+  viewWindow?: ViewWindow;
   timelineCellWidth: number;
   timelineCellHeight: number;
   setTimelineCellSize: (dimension: "width" | "height", value: number) => void;
@@ -105,6 +114,8 @@ export function TimelineGrid({
   timelineOrientation,
   timelineDateAxis,
   timelineNodeAxis,
+  timelineVDateAxis = "right",
+  viewWindow = null,
   timelineCellWidth,
   timelineCellHeight,
   setTimelineCellSize,
@@ -143,12 +154,50 @@ export function TimelineGrid({
   updateTimelineOrderDrag,
 }: TimelineGridProps) {
   const { t, language } = useI18n();
+  // Lanes something holds stay mounted wherever the view goes: the one being
+  // reordered, the one whose milestone is being dragged (both hold the
+  // pointer), the selection and the open document.
+  const pinned = [
+    timelineOrderDrag?.id,
+    planDrag?.nodeId,
+    actualDrag?.nodeId,
+    selectedNodeId,
+    activeTab,
+  ].flatMap((id) => (id ? [timelineCols.findIndex((column) => column.node.id === id)] : []));
+  const laneSlotsFor = (vertical: boolean) =>
+    laneSlots(
+      timelineCols.length,
+      laneSpan(viewWindow, vertical ? "x" : "y"),
+      vertical
+        ? timelineVDateAxis === "left"
+          ? RULER_W
+          : 0
+        : timelineDateAxis === "bottom"
+          ? 0
+          : HORIZONTAL_HEADER_H,
+      vertical ? timelineCellWidth : timelineCellHeight,
+      pinned,
+    );
+  const columnSlots = timelineOrientation === "vertical" ? laneSlotsFor(true) : [];
+  const rowSlots = timelineOrientation === "horizontal" ? laneSlotsFor(false) : [];
   return (
     <>
         {timelineOrientation === "vertical" && (
           <>
             <div className="lane-head-row" style={{ width: boardW }}>
-              {timelineCols.map((c, index) => {
+              {columnSlots.map((slot) => {
+                if (slot.kind === "skip") {
+                  return (
+                    <div
+                      key={`skip-${slot.from}`}
+                      className="lane-skip"
+                      style={{ width: slot.count * timelineCellWidth }}
+                      aria-hidden="true"
+                    />
+                  );
+                }
+                const index = slot.index;
+                const c = timelineCols[index];
                 const st: Status = statuses[c.node.id] ?? "ready";
                 const assigned =
                   (c.node.assignee && userNames.get(c.node.assignee)) || t("timeline.unassigned");
@@ -238,7 +287,21 @@ export function TimelineGrid({
                     data-date={key}
                     className={`board-row${isToday ? " board-today" : ""}${isFuture ? " board-future" : ""}`}
                   >
-                    {timelineCols.map((c) => {
+                    {columnSlots.map((slot) => {
+                      if (slot.kind === "skip") {
+                        return (
+                          <div
+                            key={`skip-${slot.from}`}
+                            className="board-skip"
+                            style={{
+                              width: slot.count * timelineCellWidth,
+                              height: timelineCellHeight,
+                            }}
+                            aria-hidden="true"
+                          />
+                        );
+                      }
+                      const c = timelineCols[slot.index];
                       return (
                         <div
                           key={c.node.id}
@@ -406,7 +469,19 @@ export function TimelineGrid({
             </div>
 
             <div className="horizontal-node-rows">
-              {timelineCols.map((column, columnIndex) => {
+              {rowSlots.map((slot) => {
+                if (slot.kind === "skip") {
+                  return (
+                    <div
+                      key={`skip-${slot.from}`}
+                      className="horizontal-node-skip"
+                      style={{ height: slot.count * timelineCellHeight }}
+                      aria-hidden="true"
+                    />
+                  );
+                }
+                const columnIndex = slot.index;
+                const column = timelineCols[columnIndex];
                 const status: Status = statuses[column.node.id] ?? "ready";
                 const assigned =
                   (column.node.assignee &&

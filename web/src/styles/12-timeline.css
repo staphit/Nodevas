@@ -99,6 +99,24 @@
   background: var(--surface);
   border-bottom: 2px solid var(--border);
 }
+/* A large timeline mounts only the lanes near the view; each run of lanes
+   left out is one of these, as wide as the lanes it stands for, ruled like
+   them so a fast scroll that outruns the next frame still reads as grid. */
+.lane-skip,
+.board-skip {
+  flex-shrink: 0;
+}
+.board-skip {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(var(--col-w) - 1px),
+    color-mix(in srgb, var(--border) 55%, transparent) calc(var(--col-w) - 1px) var(--col-w)
+  );
+}
+.board-today .board-skip {
+  background-color: color-mix(in srgb, var(--st-progress-bg) 25%, transparent);
+}
 /* vertical timeline axis positions */
 .board-inner.timeline-vertical {
   display: flex;
