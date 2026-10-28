@@ -93,6 +93,25 @@
     --copilot-fab-clearance: 74px;
   }
 }
+/* The button floats over the stage's bottom-right corner. The graph's minimap
+   sits there whenever the graph reaches the bottom of the stage — the
+   timeline below it folded or gone — so it rides above the button then; with
+   an open timeline below, the graph ends well clear of it. */
+.app:has(> .copilot-fab) .lane-wrap.graph:not(:has(~ .lane-wrap.timeline:not(.pane-collapsed))) .graph-minimap {
+  bottom: calc(48px + 18px + 10px);
+}
+/* An open vertical timeline ends there too, and its date ruler is sticky at
+   the right edge: rows scroll out from under the button, the ruler never
+   does. The button stands left of the ruler (56px at 100%, and the board's
+   scrollbar) while such a timeline is open. */
+.app:has(.lane-wrap.timeline:not(.pane-collapsed) .board-inner.timeline-vertical:not(.vdate-left)) > .copilot-fab {
+  right: calc(max(18px, env(safe-area-inset-right, 0px)) + 56px + 16px);
+}
+/* Room below the timeline's last row, so whatever lies under the button can
+   be scrolled clear of it. */
+.app:has(> .copilot-fab) .lane-wrap.timeline .board {
+  padding-bottom: calc(48px + 18px);
+}
 /* The editor leaves room below its last line, so it can always be scrolled
    clear of the button. */
 .app:has(> .copilot-fab) .drawer .cm-content {
