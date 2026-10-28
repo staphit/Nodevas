@@ -166,7 +166,9 @@ export function CommandPalette() {
   const [view, setView] = useState<"list" | "help">("list");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  /** The query the shown results answer; until it is the current one, the
+   * search is still on its way and "no results" would be premature. */
+  const [answered, setAnswered] = useState("");
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -222,12 +224,11 @@ export function CommandPalette() {
     const normalized = query.trim();
     if (normalized.length < 2) {
       setResults([]);
-      setLoading(false);
+      setAnswered("");
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      setLoading(true);
       void api
         .search(normalized)
         .then((response) => {
@@ -237,7 +238,7 @@ export function CommandPalette() {
           if (!cancelled) reportError(error);
         })
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) setAnswered(normalized);
         });
     }, 180);
     return () => {
@@ -605,6 +606,9 @@ export function CommandPalette() {
   ]);
 
   const normalized = query.trim().toLowerCase();
+  // From the first keystroke of a searchable query until its answer: the
+  // debounce plus the request, ~190 ms that used to read "nothing found".
+  const searching = query.trim().length >= 2 && answered !== query.trim();
   // Commands stay reachable while typing: a query filters them instead of
   // replacing them with search results, which used to hide every command
   // after the second character.
@@ -781,8 +785,8 @@ export function CommandPalette() {
                   </button>
                 </div>
               ))}
-              {loading && <div className="command-palette-empty">{t("palette.searching")}</div>}
-              {!loading && normalized.length >= 2 && items.length === 0 && (
+              {searching && <div className="command-palette-empty">{t("palette.searching")}</div>}
+              {!searching && normalized.length >= 2 && items.length === 0 && (
                 <div className="command-palette-empty">{t("palette.noResults")}</div>
               )}
             </div>
