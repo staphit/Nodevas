@@ -681,6 +681,53 @@ describe("LaneView", () => {
     });
   });
 
+  describe("opening view", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    });
+
+    // The range starts two weeks before today, so a timeline left at scroll 0
+    // showed a fortnight of empty rows and none of the plan.
+    it("opens a vertical timeline on today", () => {
+      mockNarrowViewport(false);
+      mockBoardSize(948, 680);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const key = (offset: number) => {
+        const date = new Date(today);
+        date.setDate(date.getDate() + offset);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      };
+      useApp.getState().updateUIPreference("timelineOrientation", "vertical");
+      useApp.setState({
+        graph: {
+          version: 1,
+          nodes: [{ id: "a", title: "設計稿" }],
+          edges: [],
+          ui: {
+            plans: {
+              a: [
+                { date: key(0), status: "started" },
+                { date: key(2), status: "done" },
+              ],
+            },
+          },
+        },
+      });
+      const { container } = render(<LaneView variant="timeline" {...paneProps} />);
+      const board = container.querySelector<HTMLElement>(".board")!;
+      const inner = container.querySelector<HTMLElement>(".board-inner")!;
+      const step = parseFloat(inner.style.getPropertyValue("--step"));
+      const zoom = Number(inner.style.zoom || "1");
+      const rows = [...container.querySelectorAll<HTMLElement>(".board-rows > .board-row")];
+      const todayRow = rows.findIndex((row) => row.dataset.date === key(0));
+      expect(todayRow).toBeGreaterThan(0);
+      expect(board.scrollTop).toBe(todayRow * step * zoom);
+    });
+  });
+
   // The board unmounts whenever the app shows Station or Settings instead, so
   // coming back must not land on the opening scroll: the pan and the zoom are
   // where the user left them, like the open drawer is.

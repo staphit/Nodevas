@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CARD_H, CARD_W, type Col } from "../canvas/geometry";
+import { addLocalDays, CARD_H, CARD_W, type Col } from "../canvas/geometry";
+import type { TimelineRowItem } from "../timeline/TimelineGrid";
 import type { GraphNode } from "../../types";
-import { nearestFreeGraphCell } from "./boardGeometry";
+import { nearestFreeGraphCell, timelineOpeningScroll } from "./boardGeometry";
 
 function card(id: string, index: number, row: number): Col {
   return { node: { id, title: id } as GraphNode, index, row, width: CARD_W, height: CARD_H };
@@ -42,5 +43,87 @@ describe("nearestFreeGraphCell", () => {
     const cell = nearestFreeGraphCell({ col: 0, row: 0 }, [card("a", 0, 0)]);
     expect(cell.col).toBeGreaterThanOrEqual(0);
     expect(cell.row).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// The timeline's range starts two weeks before today (more with older
+// records), so a board left at scroll 0 opened on a fortnight of empty rows,
+// with today's plan some 1,900px further down.
+describe("timelineOpeningScroll", () => {
+  const start = new Date(2026, 9, 15);
+  const days = Array.from({ length: 21 }, (_, i) => addLocalDays(start, i));
+  const dayItems = (): TimelineRowItem[] =>
+    days.map((date, dayIndex) => ({ kind: "day", date, dayIndex }));
+  const base = {
+    todayKey: "2026-10-28",
+    daySize: 100,
+    gapSize: 20,
+    viewport: { width: 1000, height: 500 },
+    zoom: 1,
+  };
+
+  it("opens a vertical timeline on today", () => {
+    const scroll = timelineOpeningScroll({
+      ...base,
+      days,
+      rowItems: dayItems(),
+      contentDays: new Set(["2026-10-28", "2026-10-30"]),
+      orientation: "vertical",
+    });
+    // 10/28 is the 14th day of the range.
+    expect(scroll).toEqual({ left: 0, top: 1300 });
+  });
+
+  it("opens a horizontal timeline on today, scaled by the zoom", () => {
+    const scroll = timelineOpeningScroll({
+      ...base,
+      zoom: 0.5,
+      days,
+      rowItems: dayItems(),
+      contentDays: new Set(),
+      orientation: "horizontal",
+    });
+    expect(scroll).toEqual({ left: 650, top: 0 });
+  });
+
+  it("opens on the first planned day when nothing planned is in view from today", () => {
+    const scroll = timelineOpeningScroll({
+      ...base,
+      days,
+      rowItems: dayItems(),
+      contentDays: new Set(["2026-10-16", "2026-11-03"]),
+      orientation: "vertical",
+    });
+    expect(scroll.top).toBe(1900);
+  });
+
+  it("opens on the latest record when everything is behind today", () => {
+    const scroll = timelineOpeningScroll({
+      ...base,
+      days,
+      rowItems: dayItems(),
+      contentDays: new Set(["2026-10-16", "2026-10-20"]),
+      orientation: "vertical",
+    });
+    expect(scroll.top).toBe(500);
+  });
+
+  it("counts collapsed runs of empty days at the gap's size", () => {
+    // 10/15 and 10/27 kept, 10/16–10/26 folded into one gap, today kept.
+    const rowItems: TimelineRowItem[] = [
+      { kind: "day", date: days[0], dayIndex: 0 },
+      { kind: "gap", count: 11 },
+      { kind: "day", date: days[12], dayIndex: 12 },
+      { kind: "day", date: days[13], dayIndex: 13 },
+      { kind: "gap", count: 7 },
+    ];
+    const scroll = timelineOpeningScroll({
+      ...base,
+      days,
+      rowItems,
+      contentDays: new Set(["2026-10-15", "2026-10-27", "2026-10-28"]),
+      orientation: "vertical",
+    });
+    expect(scroll.top).toBe(100 + 20 + 100);
   });
 });
