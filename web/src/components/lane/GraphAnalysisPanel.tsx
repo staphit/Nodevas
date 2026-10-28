@@ -49,7 +49,11 @@ export function GraphAnalysisPanel({
   return (
     <section className="graph-analysis-panel" aria-label={t("analysis.aria")}>
       <div className="analysis-summary">
-        <b>{t("analysis.criticalPath", { days: String(analysis.criticalDays) })}</b>
+        <b>
+          {analysis.criticalDays === 1
+            ? t("analysis.criticalPathOne")
+            : t("analysis.criticalPath", { days: String(analysis.criticalDays) })}
+        </b>
         <span>{t("analysis.entry", { count: String(analysis.entryNodeIds.size) })}</span>
         <span>{t("analysis.overdue", { count: String(analysis.overdue.size) })}</span>
         <span>{t("analysis.violations", { count: String(analysis.violations.length) })}</span>

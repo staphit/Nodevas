@@ -16,6 +16,21 @@ import type { Issue } from "../../types";
 import { GraphAnalysisPanel } from "../lane/GraphAnalysisPanel";
 
 /**
+ * The part of a node an issue is about, named in the reader's language. The
+ * validator reports it by the file's own key — `requires`, `ui.plans`,
+ * `effects[2]` — which is no name for a reader; an entry in a list is named
+ * by its list. A key with no name yet is shown as it is rather than dropped.
+ */
+export function issueFieldLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  field: string,
+): string {
+  const key = `problems.field.${field.replace(/\[\d+\]$/, "")}`;
+  const label = t(key);
+  return label === key ? field : label;
+}
+
+/**
  * What the header's Problems button counts: the rows this panel lists as
  * problems. An "info" issue is a hint — a legacy type that behaves as Task —
  * shown at the bottom and never counted.
@@ -93,7 +108,7 @@ export function ProblemsPanel({
                   <IconWarning size={12} />
                   <span>
                     <b>{issue.nodeId ? nodeTitle(issue.nodeId) : t("board.problemsWholeGraph")}</b>
-                    {issue.field ? ` · ${issue.field}` : ""}
+                    {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
                     <small>{issue.msg}</small>
                   </span>
                 </>

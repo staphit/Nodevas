@@ -575,15 +575,17 @@
   background: var(--surface);
   outline: none;
 }
-/* With Problems open the minimap rides over the panel's foot, above it,
-   rather than stepping left onto the narrower board, where it covered cards
-   the opening had framed clear of its corner. The panel keeps room at its end
-   for it: the map's full height over the Copilot button's lift. */
+/* With Problems open there is no corner free for the minimap: stepped left
+   onto the narrower board it covered cards the opening had framed clear of
+   it, and over the panel's foot it covered the panel's own rows whenever the
+   pane was short (a 330px graph pane above an open timeline). It is not shown
+   while the panel is, and comes back with the board. The panel keeps room at
+   its end for the Copilot button: its 48px over its 18px lift. */
 .lane-body.problems-open .graph-minimap {
-  right: 14px;
+  display: none;
 }
 .lane-body.problems-open .problems-panel {
-  padding-bottom: calc(108px + 76px + 14px);
+  padding-bottom: calc(48px + 18px + 12px);
 }
 .problems-panel-head {
   display: flex;
@@ -703,9 +705,6 @@ button.problems-issue:focus-visible {
     z-index: 20;
     width: auto;
     border-left: 0;
-  }
-  .lane-body.problems-open .graph-minimap {
-    display: none;
   }
   .lane-body.problems-open .problems-panel {
     padding-bottom: 12px;
