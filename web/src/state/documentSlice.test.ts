@@ -436,4 +436,35 @@ describe("automatic saving", () => {
     expect(api.getNode).toHaveBeenCalledTimes(1);
     expect(useApp.getState().tabs[0].content).toBe("別人的版本");
   });
+
+  // The hub broadcasts `node-changed` before it writes the PUT's response, so
+  // the echo of our own save usually arrives while the save is still in
+  // flight. Taking it as foreign then, and remembering the revision only once
+  // the response lands, left a stale entry behind that swallowed the next
+  // real change: a pop-out window's edit never reached the main window, and
+  // the main window's next keystroke raised a version conflict.
+  it("still reads back another window's write when its own echo beat the save response", async () => {
+    let finish!: (result: { ok: boolean; rev: string }) => void;
+    vi.mocked(api.putNode).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    useApp.setState({
+      tabs: [tab("echo", { dirty: true, content: "draft" })],
+      activeTab: "echo",
+    });
+
+    const saving = useApp.getState().saveTab("echo");
+    await vi.waitFor(() => expect(api.putNode).toHaveBeenCalledTimes(1));
+    const echo = useApp.getState().notifyDiskChange("echo");
+    finish({ ok: true, rev: "rev-2" });
+    await Promise.all([saving, echo]);
+
+    expect(api.getNode).not.toHaveBeenCalled();
+    expect(useApp.getState().tabs[0]).toMatchObject({ rev: "rev-2", dirty: false, diskChanged: false });
+
+    vi.mocked(api.getNode).mockResolvedValue({ id: "echo", content: "彈出視窗的版本", rev: "rev-3" });
+    await useApp.getState().notifyDiskChange("echo");
+    expect(api.getNode).toHaveBeenCalledTimes(1);
+    expect(useApp.getState().tabs[0]).toMatchObject({ content: "彈出視窗的版本", rev: "rev-3" });
+  });
 });
