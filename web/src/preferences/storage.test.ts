@@ -30,7 +30,7 @@ describe("validation", () => {
 
   it("raises an explorer narrower than it can be read (200px wrapped its own heading)", () => {
     configurePreferenceStorage(fakeStorage({ "vised-explorer-width": "200" }));
-    expect(readPreference("explorerWidth")).toBe(260);
+    expect(readPreference("explorerWidth")).toBe(313);
   });
 
   it("falls back when the stored value is unusable", () => {
@@ -41,7 +41,7 @@ describe("validation", () => {
         "vised-explorer-expanded-projects": "{oops",
       }),
     );
-    expect(readPreference("explorerWidth")).toBe(304);
+    expect(readPreference("explorerWidth")).toBe(320);
     expect(readPreference("timelineOrientation")).toBe("vertical");
     expect(readPreference("explorerExpandedProjects")).toEqual([]);
   });
@@ -118,7 +118,7 @@ describe("reset", () => {
     writePreference("explorerWidth", 400);
     writePreference("editorFontSize", 20);
     const values = resetPreferences();
-    expect(values.explorerWidth).toBe(304);
+    expect(values.explorerWidth).toBe(320);
     expect(values.editorFontSize).toBe(14);
   });
 });

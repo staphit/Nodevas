@@ -1,19 +1,23 @@
 /**
- * The explorer's width range. Below about 260px its rows stop reading: the
- * heading wraps, and with the indent, file icon and status dot a node title
- * is left a few letters. Larger text needs more of it, so the minimum grows
- * with the text size (300px at 150%).
+ * The explorer's width range. The width dragged is the whole shell: the tab
+ * rail (explorer.css .ex-rail, 52px and its 1px border) and the panel beside
+ * it. Below about 260px the panel's rows stop reading: a project name is cut
+ * and its current-project badge wraps, and with the indent, file icon and
+ * status dot a node title is left a few letters. Larger text needs more of
+ * it, so the panel's minimum grows with the text size (300px at 150%).
  */
 export const EXPLORER_MIN_W = 260;
+export const EXPLORER_RAIL_W = 53;
 export const EXPLORER_MAX_W = 520;
-export const EXPLORER_DEFAULT_W = 304;
+export const EXPLORER_DEFAULT_W = 320;
 
-/** Extra minimum width per unit of text scale above 100%. */
+/** Extra minimum panel width per unit of text scale above 100%. */
 const MIN_W_PER_SCALE = 80;
 
+/** The narrowest the shell goes: the panel's minimum beside the rail. */
 export function explorerMinWidth(textScale: number): number {
   const extra = Math.max(0, textScale - 1) * MIN_W_PER_SCALE;
-  return Math.min(EXPLORER_MAX_W, Math.round(EXPLORER_MIN_W + extra));
+  return Math.min(EXPLORER_MAX_W, Math.round(EXPLORER_MIN_W + EXPLORER_RAIL_W + extra));
 }
 
 /** The width to draw: the stored one, widened when the text size needs it. */

@@ -233,10 +233,11 @@ export const PREFERENCE_SCHEMA = {
 
   // explorer (sidebar)
   explorerWidth: numberPref("vised-explorer-width", "explorer", {
-    // EXPLORER_MIN_W (explorerWidth.ts): narrower, the rows stop reading.
-    min: 260,
+    // explorerMinWidth (explorerWidth.ts): the panel's minimum beside the tab
+    // rail; narrower, the rows stop reading.
+    min: 313,
     max: 520,
-    fallback: 304,
+    fallback: 320,
   }),
   // On a phone the explorer is an overlay, so leaving it open by default would
   // hide the board behind it on first launch. Wide windows still open with it
