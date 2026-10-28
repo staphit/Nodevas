@@ -7,6 +7,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // React first, in a chunk of its own. Left to Rollup it lands in
+          // whichever chunk imports it first — the CodeMirror bindings — and
+          // index.html then modulepreloads the whole editor on first paint.
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) {
+            return "react";
+          }
           if (id.includes("/node_modules/@lezer/")) {
             return "editor-parser";
           }
