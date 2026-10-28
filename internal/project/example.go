@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -52,6 +53,7 @@ func (pm *ProjectManager) InstallExample(examples fs.FS, example string) (string
 		pm.EvictStores(dest)
 		_ = store.RemoveAllProjectPath(pm.Workspace(), dest)
 	}
+	shift := exampleDateShift(examples, example)
 	copied := 0
 	err = fs.WalkDir(examples, example, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -75,6 +77,9 @@ func (pm *ProjectManager) InstallExample(examples fs.FS, example string) (string
 		data, readErr := fs.ReadFile(examples, name)
 		if readErr != nil {
 			return readErr
+		}
+		if shift != 0 && datedExampleFile(rel) {
+			data = shiftDates(data, shift)
 		}
 		return store.WriteProjectFileAtomicMode(pm.Workspace(), target, data, 0o644)
 	})
@@ -108,4 +113,83 @@ func (pm *ProjectManager) freeExampleName(example string) (string, string, error
 		}
 	}
 	return "", "", fmt.Errorf("no free project name for example %q", example)
+}
+
+// An example's plan is written for the day it was made, and copied as it is
+// it opens with every step overdue. So a copy moves every date in its plan
+// (graph.yaml) and its run (run/*.json, run/*.jsonl) by the same number of
+// days: the earliest date in the plan becomes today, and the run the example
+// shows lands just before it. Node documents are prose and keep their text.
+
+// exampleDate matches one YYYY-MM-DD, alone or at the start of a timestamp.
+var exampleDate = regexp.MustCompile(`[0-9]{4}-[0-9]{2}-[0-9]{2}`)
+
+// exampleDateShift is how many days the example's dates move: from the
+// earliest date its graph.yaml holds to today. 0 when it holds none.
+func exampleDateShift(examples fs.FS, example string) int {
+	data, err := fs.ReadFile(examples, path.Join(example, "graph.yaml"))
+	if err != nil {
+		return 0
+	}
+	var earliest time.Time
+	eachDate(data, func(day time.Time) {
+		if earliest.IsZero() || day.Before(earliest) {
+			earliest = day
+		}
+	})
+	if earliest.IsZero() {
+		return 0
+	}
+	year, month, date := exampleNow().Date()
+	today := time.Date(year, month, date, 0, 0, 0, 0, time.UTC)
+	return int(today.Sub(earliest).Hours() / 24)
+}
+
+// datedExampleFile reports whether rel (relative to the example) holds
+// dates that move with the plan.
+func datedExampleFile(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if rel == "graph.yaml" {
+		return true
+	}
+	return path.Dir(rel) == "run" && (path.Ext(rel) == ".json" || path.Ext(rel) == ".jsonl")
+}
+
+// shiftDates moves every date in data by days.
+func shiftDates(data []byte, days int) []byte {
+	var out []byte
+	last := 0
+	for _, match := range exampleDate.FindAllIndex(data, -1) {
+		day, ok := parseExampleDate(data, match)
+		if !ok {
+			continue
+		}
+		out = append(out, data[last:match[0]]...)
+		out = append(out, day.AddDate(0, 0, days).Format(time.DateOnly)...)
+		last = match[1]
+	}
+	if out == nil {
+		return data
+	}
+	return append(out, data[last:]...)
+}
+
+// eachDate calls visit with every date in data.
+func eachDate(data []byte, visit func(time.Time)) {
+	for _, match := range exampleDate.FindAllIndex(data, -1) {
+		if day, ok := parseExampleDate(data, match); ok {
+			visit(day)
+		}
+	}
+}
+
+// parseExampleDate reads the date at match, which must not be part of a
+// longer run of digits.
+func parseExampleDate(data []byte, match []int) (time.Time, bool) {
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+	if match[0] > 0 && isDigit(data[match[0]-1]) || match[1] < len(data) && isDigit(data[match[1]]) {
+		return time.Time{}, false
+	}
+	day, err := time.Parse(time.DateOnly, string(data[match[0]:match[1]]))
+	return day, err == nil
 }
