@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"nodevas/internal/runner"
+	"nodevas/internal/runnerwire"
 )
 
 // gitCommands answers `git rev-parse --show-toplevel` with the directory it
@@ -104,9 +105,10 @@ func TestPrepareLocalRunnerWritesTokenAndReposOnce(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "local-runners", "w.json")
 	repo := t.TempDir()
-	var seen []string
+	var seen, names []string
 	mint := func(_ context.Context, existing, name string) (string, bool, error) {
 		seen = append(seen, existing)
+		names = append(names, name)
 		if existing != "" {
 			return existing, false, nil
 		}
@@ -120,6 +122,12 @@ func TestPrepareLocalRunnerWritesTokenAndReposOnce(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != "" || seen[1] != cliTestToken {
 		t.Fatalf("mint saw %q: the stored token is not offered back", seen)
+	}
+	// The web translates the local runner by this fixed id.
+	for _, name := range names {
+		if name != runnerwire.LocalRunnerName {
+			t.Fatalf("local runner registered as %q, not the fixed id %q", name, runnerwire.LocalRunnerName)
+		}
 	}
 	cfg, err := runner.LoadConfig(path)
 	if err != nil {
