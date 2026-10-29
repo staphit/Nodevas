@@ -1,5 +1,5 @@
 import type { StatusDefinition } from "../types";
-import { csrfToken, getProjectOverride, notifyUnauthorized, req, UnauthorizedError } from "./http";
+import { csrfToken, getProjectOverride, notifyUnauthorized, req, requestLanguage, UnauthorizedError } from "./http";
 import { verifyProjectsResponse, type ProjectsResponse } from "./verify";
 
 /** File formats a document can be saved as, beyond the stored Markdown. */
@@ -198,6 +198,7 @@ export const workspaceApi = {
   exportDocument: async (request: ExportRequest): Promise<ExportedFile> => {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "Accept-Language": requestLanguage(),
     };
     const token = csrfToken();
     if (token) headers["X-CSRF-Token"] = token;

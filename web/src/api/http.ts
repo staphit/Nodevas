@@ -1,7 +1,7 @@
 import { markServerReachable, markServerUnreachable } from "./connectivity";
 import type { Verifier } from "./verify";
 import { LANGUAGE_OPTIONS, translate } from "../i18n";
-import type { Language } from "../preferences";
+import { readPreference, type Language } from "../preferences";
 
 /** Optimistic-lock failure: server refused to overwrite a newer disk version. */
 export class ConflictError extends Error {
@@ -117,6 +117,20 @@ export function csrfToken(): string {
 
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * The app's language, sent as Accept-Language: the hub words its refusals and
+ * the titles it makes up (a duplicate's "X copy") for it. Left to the browser,
+ * a zh-TW browser with the app set to English got "Beta（副本）" back.
+ */
+export function requestLanguage(): Language {
+  return readPreference("language");
+}
+
+/** Sets Accept-Language to the app's language unless the caller chose one. */
+export function setRequestLanguage(headers: Headers): void {
+  if (!headers.has("Accept-Language")) headers.set("Accept-Language", requestLanguage());
+}
+
 /** What a reverse proxy answers when the hub behind it is down. */
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
 
@@ -168,6 +182,7 @@ export function getProjectOverride(): string {
  */
 export async function send(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
+  setRequestLanguage(headers);
   if (projectOverride && !headers.has("X-Nodevas-Project")) {
     headers.set("X-Nodevas-Project", projectOverride);
   }
@@ -269,6 +284,7 @@ export async function req<T>(
  */
 export async function authPost<T>(url: string, body: unknown): Promise<T> {
   const headers = new Headers({ "Content-Type": "application/json" });
+  setRequestLanguage(headers);
   // Sent when present; before the first sign-in there is no CSRF cookie yet.
   const token = csrfToken();
   if (token) headers.set("X-CSRF-Token", token);
