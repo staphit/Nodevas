@@ -56,8 +56,24 @@ export interface CardEvents {
   ) => void;
 }
 
+/**
+ * How much a card says at the scale the board is drawn at (zoom × node
+ * scale): everything, "compact" below 0.8 — no meta line or menu button —
+ * and "minimal" below 0.6, its colour and its name. LaneView sets it on
+ * .board-inner as data-lod for 04-board.css; the cards leave out what it
+ * hides rather than mount it for the stylesheet to hide, since a pan that
+ * far out brings in a strip of dozens of cards per frame.
+ */
+export type CardDetail = "compact" | "minimal" | undefined;
+
+export function cardDetailAt(viewScale: number): CardDetail {
+  return viewScale >= 0.8 ? undefined : viewScale >= 0.6 ? "compact" : "minimal";
+}
+
 export interface GraphCardProps {
   node: GraphNode;
+  /** What the card leaves out at the board's scale (cardDetailAt). */
+  detail?: CardDetail;
   left: number;
   top: number;
   width: number;
@@ -119,6 +135,7 @@ export function paintLiftedCards(
 
 export const GraphCard = memo(function GraphCard({
   node: n,
+  detail,
   left,
   top,
   width,
@@ -185,27 +202,31 @@ export const GraphCard = memo(function GraphCard({
         title={tooltip}
       >
         <span className="col-card-head">
-          {hasStatus && <StatusShape status={status} definitions={customStatuses} />}
-          <span className="col-card-title">{title}</span>
-          <RunCardBadge nodeId={n.id} />
-          <AutopilotCardBadge nodeId={n.id} />
-        </span>
-        <span className="col-card-meta">
-          <NodeTypeChip type={nodeType} />
-          {/* A 152px card's second line has no room for both the label and a
-              marker: with one there the label goes, so the name still shows. */}
-          <span
-            className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
-            data-assignee-prefix={markerKind ? undefined : t("canvas.assigneePrefix")}
-          >
-            {/* "Unassigned" beside a marker took the line's room and was cut;
-                the short form fits, and the tooltip says it in full. */}
-            {!n.assignee && markerKind ? t("canvas.unassignedShort") : assigned}
-          </span>
-          {markerKind && (
-            <span className={`col-card-marker ${markerKind}`}>{markerLabel}</span>
+          {hasStatus && detail !== "minimal" && (
+            <StatusShape status={status} definitions={customStatuses} />
           )}
+          <span className="col-card-title">{title}</span>
+          {detail !== "minimal" && <RunCardBadge nodeId={n.id} />}
+          {detail !== "minimal" && <AutopilotCardBadge nodeId={n.id} />}
         </span>
+        {!detail && (
+          <span className="col-card-meta">
+            <NodeTypeChip type={nodeType} />
+            {/* A 152px card's second line has no room for both the label and a
+                marker: with one there the label goes, so the name still shows. */}
+            <span
+              className={`col-card-assignee${n.assignee ? "" : " unassigned"}`}
+              data-assignee-prefix={markerKind ? undefined : t("canvas.assigneePrefix")}
+            >
+              {/* "Unassigned" beside a marker took the line's room and was cut;
+                  the short form fits, and the tooltip says it in full. */}
+              {!n.assignee && markerKind ? t("canvas.unassignedShort") : assigned}
+            </span>
+            {markerKind && (
+              <span className={`col-card-marker ${markerKind}`}>{markerLabel}</span>
+            )}
+          </span>
+        )}
         {agentName !== undefined && (
           <span className="col-card-agent" title={`${agentName} (${agentKind})`}>
             ● {agentName}
@@ -216,20 +237,24 @@ export const GraphCard = memo(function GraphCard({
           over the card's corner rather than a child, so no control sits
           inside the card's own button. Shown on hover, focus or
           selection (04-board.css), and stopped before the board can read
-          its press as the start of a pan or a marquee. */}
-      <button
-        type="button"
-        className="col-card-more"
-        style={{ left: left + width, top }}
-        aria-label={t("board.nodeMenu.more", { title })}
-        title={t("board.nodeMenu.more", { title })}
-        aria-haspopup="menu"
-        onPointerDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
-        onClick={(event) => events.moreClick(event, n.id)}
-      >
-        ⋯
-      </button>
+          its press as the start of a pan or a marquee. Not drawn at a
+          reduced level of detail, where the keyboard menu and a right
+          click (or a long press) are how the menu opens. */}
+      {!detail && (
+        <button
+          type="button"
+          className="col-card-more"
+          style={{ left: left + width, top }}
+          aria-label={t("board.nodeMenu.more", { title })}
+          title={t("board.nodeMenu.more", { title })}
+          aria-haspopup="menu"
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          onClick={(event) => events.moreClick(event, n.id)}
+        >
+          ⋯
+        </button>
+      )}
       {selected && (
         // Sibling of the card: a clipped shape would otherwise clip
         // its own handles away.

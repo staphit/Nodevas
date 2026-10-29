@@ -46,6 +46,7 @@ import { useCanvasPan } from "./canvas/useCanvasPan";
 import { useConnectionDrag } from "./canvas/useConnectionDrag";
 import { useMarquee } from "./canvas/useMarquee";
 import { useViewWindow } from "./canvas/useViewWindow";
+import { cardDetailAt } from "./canvas/GraphCard";
 import {
   boardViewKey,
   recallBoardView,
@@ -1459,12 +1460,9 @@ export function LaneView({
   // attribute on .board-inner is a single selector invalidation however many
   // cards are up, and both factors of the scale are quantized (zoom to 0.1,
   // node scale to 0.05), so the levels cannot flicker at a boundary.
-  const lod =
-    !isGraph || viewScale >= 0.8
-      ? undefined
-      : viewScale >= 0.6
-        ? "compact"
-        : "minimal";
+  // The cards leave out what the level hides (cardDetailAt), so a pan that far
+  // out mounts only what is drawn.
+  const lod = isGraph ? cardDetailAt(viewScale) : undefined;
   const gridVars = {
     // Cards ride the board's CSS zoom, which the node scale is folded into, so
     // their text would grow with the box unless it is divided back out first.
@@ -1812,6 +1810,7 @@ export function LaneView({
               centerX={centerX}
               rowTop={rowTop}
               viewWindow={viewWindow}
+              cardDetail={lod}
               snapEnabled={snapGuidesEnabled}
               snapBoxes={snapBoxes}
               // One gesture runs at a time, so whichever is live owns the lines.

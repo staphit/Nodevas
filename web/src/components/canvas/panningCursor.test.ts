@@ -8,7 +8,10 @@ import { describe, expect, it } from "vitest";
 // 5600 of them on a 2000-card board at 50%, a 25–40ms frame at each end of
 // every pan. The cursor is inherited, so the board sets it once and only the
 // cards, which set their own, are told to take it.
-const css = readFileSync(resolve(process.cwd(), "src/styles/12-timeline.css"), "utf8");
+const css = readFileSync(resolve(process.cwd(), "src/styles/12-timeline.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
 
 describe("panning cursor", () => {
   it("does not restyle every element on the board when a pan starts or ends", () => {
