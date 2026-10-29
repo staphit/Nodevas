@@ -166,6 +166,9 @@ func childEnv() []string {
 // or saying it is the parent. An agent the runner starts sets its own.
 var outerAgentEnv = []string{
 	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+	// Claude Code's channel to the session (a socket and its token).
+	"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SSE_PORT", "CLAUDE_PID",
 	"CODEX_THREAD_ID", "CODEX_SANDBOX",
 	"OPENCODE_SESSION_ID", "OPENCODE",
 	"GEMINI_SESSION_ID", "GEMINI_CLI",
