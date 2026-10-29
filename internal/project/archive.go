@@ -203,7 +203,9 @@ func writeProjectFiles(
 	}
 	graph, err := engine.ParseGraph(graphData)
 	if err != nil {
-		return locale.Errorf("parse graph.yaml: %w", "解析 graph.yaml：%w", err)
+		// The reader's file to fix, as on the board: 422 naming the line (a
+		// bundle names the project it is in).
+		return store.GraphUnreadable(graphData, err)
 	}
 	// Custom lifecycle states shared across the workspace are stripped from
 	// graph.yaml on write — they live once in <workspace>/.vised/workflow.json

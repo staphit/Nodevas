@@ -31,6 +31,11 @@ var yamlLine = regexp.MustCompile(`\bline (\d+)\b`)
 // zero-based and only a scanner error has one added before it is printed.
 var yamlParserLine = regexp.MustCompile(`\byaml: line (\d+): (?:did not find expected (?:<stream-start>|<document start>|node content|key|'-' indicator|',' or '\]'|',' or '\}')|found (?:duplicate %YAML directive|duplicate %TAG directive|incompatible YAML document|undefined tag handle))`)
 
+// GraphUnreadable is the refusal for graph.yaml holding data, which failed to
+// parse or validate with cause: for a reader of the file other than the
+// store's own (an export reading it straight from disk).
+func GraphUnreadable(data []byte, cause error) error { return graphUnreadable(data, cause) }
+
 func graphUnreadable(data []byte, cause error) *GraphUnreadableError {
 	// The parser's own words stay, for whoever fixes the file; the
 	// "graph.yaml: " they start with is already said by the sentence.
