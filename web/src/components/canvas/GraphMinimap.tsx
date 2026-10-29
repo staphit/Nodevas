@@ -88,15 +88,23 @@ export function GraphMinimap({
     [cols, selectedGraphNodeIDs, boardW, svgH, graphOffsetX, graphOffsetY],
   );
   // The frame follows the board's scroll by itself, one style write a frame,
-  // so a pan renders neither the board nor the map.
-  const frameRef = useRef<HTMLSpanElement>(null);
+  // so a pan renders neither the board nor the map. It rides a track the
+  // map's own size, moved by a transform: percentages of the track are
+  // percentages of the map, and a transform needs no layout. Placed by
+  // left/top it dirtied the map's layout every pan frame, and the next scroll
+  // read laid the whole document out again with every dot on it. Both
+  // offsets are read before the write, so this frame forces nothing either.
+  const trackRef = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const board = boardRef.current;
-    const frame = frameRef.current;
-    if (!board || !frame) return;
+    const track = trackRef.current;
+    if (!board || !track) return;
     const place = () => {
-      frame.style.left = `${(board.scrollLeft / zoom / boardW) * 100}%`;
-      frame.style.top = `${(board.scrollTop / zoom / svgH) * 100}%`;
+      const left = board.scrollLeft;
+      const top = board.scrollTop;
+      track.style.transform = `translate(${(left / zoom / boardW) * 100}%, ${
+        (top / zoom / svgH) * 100
+      }%)`;
     };
     place();
     let pending = 0;
@@ -131,14 +139,15 @@ export function GraphMinimap({
       }}
     >
       {dots}
-      <span
-        ref={frameRef}
-        className="graph-minimap-viewport"
-        style={{
-          width: `${Math.min(100, (boardViewport.width / zoom / boardW) * 100)}%`,
-          height: `${Math.min(100, (boardViewport.height / zoom / svgH) * 100)}%`,
-        }}
-      />
+      <span ref={trackRef} className="graph-minimap-track">
+        <span
+          className="graph-minimap-viewport"
+          style={{
+            width: `${Math.min(100, (boardViewport.width / zoom / boardW) * 100)}%`,
+            height: `${Math.min(100, (boardViewport.height / zoom / svgH) * 100)}%`,
+          }}
+        />
+      </span>
     </div>
   );
 }

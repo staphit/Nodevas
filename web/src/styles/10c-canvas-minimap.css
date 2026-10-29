@@ -31,7 +31,16 @@
 .graph-minimap-node.selected {
   background: var(--accent);
 }
+/* The viewport frame's carrier: the map's size, so a translate in percent of
+   it is percent of the map, and moving it needs no layout (GraphMinimap). */
+.graph-minimap-track {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
 .graph-minimap-viewport {
+  left: 0;
+  top: 0;
   border: 1px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 11%, transparent);
 }

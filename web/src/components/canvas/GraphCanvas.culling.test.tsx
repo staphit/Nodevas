@@ -210,7 +210,7 @@ describe("viewport culling", () => {
       </Profiler>,
     );
     const board = container.querySelector<HTMLElement>(".board")!;
-    const frame = container.querySelector<HTMLElement>(".graph-minimap-viewport")!;
+    const frame = container.querySelector<HTMLElement>(".graph-minimap-track")!;
     // From a known spot well inside a window step, not wherever the opening
     // framed the cards, so the small pan below cannot cross a step.
     act(() => {
@@ -219,7 +219,7 @@ describe("viewport culling", () => {
       fireEvent.scroll(board);
     });
     act(() => frames.flush());
-    const before = { left: frame.style.left, top: frame.style.top };
+    const before = frame.style.transform;
     commits = 0;
 
     act(() => {
@@ -230,8 +230,7 @@ describe("viewport culling", () => {
     act(() => frames.flush());
 
     expect(commits).toBe(0);
-    expect(frame.style.left).not.toBe(before.left);
-    expect(frame.style.top).not.toBe(before.top);
+    expect(frame.style.transform).not.toBe(before);
   });
 
   it("draws a wire whose ends are both off screen when it crosses the view", () => {
