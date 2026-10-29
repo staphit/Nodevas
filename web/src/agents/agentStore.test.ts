@@ -354,6 +354,74 @@ describe("agent-notify", () => {
     Object.defineProperty(document, "hidden", { value: false, configurable: true });
   });
 
+  it("formats toast and system notification text per ask kind", async () => {
+    const shown: { title: string; body: string | undefined }[] = [];
+    class FakeNotification {
+      static permission = "granted";
+      onclick: (() => void) | null = null;
+      constructor(title: string, options?: NotificationOptions) {
+        shown.push({ title, body: options?.body });
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+
+    mockFetch({
+      "GET /api/agents/asks": () => ({
+        asks: [
+          {
+            id: "ask-question",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "question",
+            question: "Which port to bind?",
+            status: "pending",
+            createdAt: 1,
+          },
+          {
+            id: "ask-perm",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "permission",
+            tool: "Bash",
+            toolInput: "npm test",
+            question: "Allow Bash?",
+            status: "pending",
+            createdAt: 2,
+          },
+        ],
+      }),
+    });
+    useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" }, toasts: [] });
+
+    await useAgents.getState().handleAsk("ask-question");
+    await useAgents.getState().handleAsk("ask-perm");
+
+    const toasts = useAgents.getState().toasts;
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toMatchObject({
+      from: "api-claude asks",
+      body: "Which port to bind?",
+    });
+    expect(toasts[1]).toMatchObject({
+      from: "api-claude wants to run Bash",
+      body: "npm test",
+    });
+
+    expect(shown).toEqual([
+      { title: "api-claude asks", body: "Which port to bind?" },
+      { title: "api-claude wants to run Bash", body: "npm test" },
+    ]);
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+  });
+
   it("excerpt collapses whitespace", () => {
     expect(excerpt("a\n\n  b")).toBe("a b");
   });
