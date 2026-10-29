@@ -34,6 +34,14 @@ type SetGraphState = (
 /** Read when it is shown, so it follows the reader's language. */
 const conflictMessage = () => translate("graph.error.conflict");
 
+/**
+ * graph.yaml on disk does not parse or validate. The hub refuses every write
+ * over it (a PUT answers 409, and the reload after it 422), so a write is not
+ * sent and a refused one is not called a conflict: applying it again could
+ * never work, and the reader has a file to fix instead.
+ */
+const unreadableMessage = () => translate("graph.error.unreadable");
+
 
 /**
  * Internal whole-graph write [A-04 / plan §10.7].
@@ -54,6 +62,10 @@ function writeGraph(
   const operation = queues.graphSave.then(async () => {
     const { graph, graphRev } = get();
     if (!graph) return;
+    if (get().graphUnreadable !== null) {
+      get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+      throw new Error(unreadableMessage());
+    }
     get().beginOperation(scope, name);
     const previous = graph;
     const copy: Graph = structuredClone(graph);
@@ -74,6 +86,12 @@ function writeGraph(
     } catch (e) {
       if (e instanceof ConflictError) {
         await get().loadAll();
+        if (get().graphUnreadable !== null) {
+          // The board says why; the write only reports that it was refused.
+          set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
+          get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+          throw new Error(unreadableMessage(), { cause: e });
+        }
         set({ error: conflictMessage() });
         get().settleOperation(scope, {
           status: "conflict",
@@ -194,6 +212,10 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     const run = queues.graphSave.then(async (): Promise<CommandResult> => {
       const { graph, graphRev } = get();
       if (!graph) return commandFailed(name, scope, translate("graph.error.notLoaded"));
+      if (get().graphUnreadable !== null) {
+        get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+        return commandFailed(name, scope, unreadableMessage());
+      }
       get().beginOperation(scope, name);
       const previous = graph;
       const copy: Graph = structuredClone(graph);
@@ -249,6 +271,11 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // Someone else wrote graph.yaml. Reload rather than clobber, and let
           // the caller decide whether to re-apply.
           await get().loadAll().catch(() => undefined);
+          if (get().graphUnreadable !== null) {
+            set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
+            get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+            return commandFailed(name, scope, unreadableMessage());
+          }
           get().settleOperation(scope, {
             status: "conflict",
             operation: name,

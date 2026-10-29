@@ -4,6 +4,8 @@
 
 import { AuditPanel } from "../audit/AuditPanel";
 import { BackupModal } from "../components/BackupModal";
+import { InlineNotice } from "../components/InteractionPrimitives";
+import { splitUnreadableGraph } from "../components/lane/UnreadableGraphState";
 import { NotifySettingsModal } from "../components/NotifySettingsModal";
 import { ProjectSettings } from "../components/ProjectSettings";
 import { useSignOut, useTeamServer, useViewer } from "../components/SignIn";
@@ -62,8 +64,40 @@ export function GeneralSection({ row, toggleRow, leave }: SectionProps) {
 }
 
 export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const activeProject = useApp((s) => s.activeProject);
+  const graphUnreadable = useApp((s) => s.graphUnreadable);
+  const unreadable = graphUnreadable === null ? null : splitUnreadableGraph(graphUnreadable);
+  return (
+    <section className="settings-page-pane settings-card" aria-label={t("settingsPage.page.project")}>
+      <h2>
+        {t("settingsPage.page.project")}
+        {activeProject && <small>{activeProject}</small>}
+      </h2>
+      {unreadable ? (
+        // Every one of these lives in graph.yaml, and a change over a file
+        // that cannot be read is refused; the reason, with its line, instead.
+        <InlineNotice kind="error">
+          {t("settingsPage.graphUnreadable")}{" "}
+          {unreadable.sentence ? `graph.yaml: ${unreadable.sentence}` : unreadable.detail}
+        </InlineNotice>
+      ) : (
+        <ProjectGraphRows row={row} toggleRow={toggleRow} go={go} leave={leave} />
+      )}
+      <SettingsDisclosure
+        label={t("settingsPage.part.backup")}
+        open={row === "backup"}
+        onToggle={() => toggleRow("backup")}
+      >
+        <BackupModal onClose={leave} />
+      </SettingsDisclosure>
+    </section>
+  );
+}
+
+/** The parts of This project that graph.yaml holds. */
+function ProjectGraphRows({ row, toggleRow, go }: SectionProps) {
+  const { t, language } = useI18n();
   const graph = useApp((s) => s.graph);
   const statuses = (graph?.ui?.customStatuses ?? []).map((status) => status.label);
   const plans = graph?.ui?.planStatuses ?? [];
@@ -73,11 +107,7 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
     .filter((type) => !isBuiltinKind(type.id))
     .map((type) => type.label ?? type.id);
   return (
-    <section className="settings-page-pane settings-card" aria-label={t("settingsPage.page.project")}>
-      <h2>
-        {t("settingsPage.page.project")}
-        {activeProject && <small>{activeProject}</small>}
-      </h2>
+    <>
       <SettingsDisclosure
         label={t("settings.workflow")}
         value={listValue(statuses) || t("settingsPage.builtInOnly")}
@@ -122,14 +152,7 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
       >
         <ProjectSettings tab="people" onInvite={() => go("account", "server")} />
       </SettingsDisclosure>
-      <SettingsDisclosure
-        label={t("settingsPage.part.backup")}
-        open={row === "backup"}
-        onToggle={() => toggleRow("backup")}
-      >
-        <BackupModal onClose={leave} />
-      </SettingsDisclosure>
-    </section>
+    </>
   );
 }
 
