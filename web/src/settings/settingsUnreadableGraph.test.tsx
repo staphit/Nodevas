@@ -44,6 +44,19 @@ describe("This project while graph.yaml can't be read", () => {
     expect(screen.queryByRole("button", { name: /Lifecycle/ })).not.toBeInTheDocument();
   });
 
+  // The hub's sentence reads on its own ("Line 2 has an error. ..."); the
+  // notice already names graph.yaml, so the file is not put before it again.
+  it("gives the hub's sentence as it is worded", () => {
+    useApp.setState({
+      graphUnreadable:
+        "graph.yaml: Line 2 has an error. Fix the file, then reload. (yaml: line 2: did not find expected ',' or ']')",
+    });
+    render(<ProjectSection {...sectionProps} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Line 2 has an error. Fix the file, then reload.");
+    expect(alert).not.toHaveTextContent("graph.yaml: Line");
+  });
+
   it("keeps the editors for a graph that reads", () => {
     useApp.setState({ graphUnreadable: null, graph: { version: 1, nodes: [], edges: [], ui: {} } });
     render(<ProjectSection {...sectionProps} />);
