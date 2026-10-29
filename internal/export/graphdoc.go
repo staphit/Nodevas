@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/engine/dsl"
 	"nodevas/internal/locale"
 )
 
@@ -103,6 +104,41 @@ func mermaidLabel(text string, words graphWords) string {
 	return label
 }
 
+// dependencyEdges is the project's wiring as the board draws it: every edge
+// between two known nodes, plus a required edge for each dependency named only
+// in a node's `requires`. A hand-written graph.yaml may state a dependency in
+// the expression without the edge; the node still waits on it, so the export
+// must not lose it. known reports whether an id is a node worth listing.
+func dependencyEdges(graph *engine.Graph, known func(string) bool) []*engine.Edge {
+	edges := make([]*engine.Edge, 0, len(graph.Edges))
+	wired := make(map[string]bool, len(graph.Edges))
+	for _, edge := range graph.Edges {
+		if edge == nil || !known(edge.From) || !known(edge.To) {
+			continue
+		}
+		edges = append(edges, edge)
+		wired[edge.From+"->"+edge.To] = true
+	}
+	for _, node := range graph.Nodes {
+		if node == nil || !known(node.ID) {
+			continue
+		}
+		expr, err := node.RequiresExpr()
+		if err != nil || expr == nil {
+			continue
+		}
+		for _, from := range dsl.NodeRefs(expr) {
+			key := from + "->" + node.ID
+			if from == node.ID || wired[key] || !known(from) {
+				continue
+			}
+			edges = append(edges, &engine.Edge{From: from, To: node.ID, Relation: engine.RelationRequired})
+			wired[key] = true
+		}
+	}
+	return edges
+}
+
 // RelationSection renders the project's wiring as a Markdown section in
 // language, or "" when the project has no edges worth drawing.
 func RelationSection(graph *engine.Graph, level int, language locale.Language) string {
@@ -119,13 +155,7 @@ func RelationSection(graph *engine.Graph, level int, language locale.Language) s
 		titles[node.ID] = nodeTitle(node)
 		order = append(order, node.ID)
 	}
-	edges := make([]*engine.Edge, 0, len(graph.Edges))
-	for _, edge := range graph.Edges {
-		if edge == nil || titles[edge.From] == "" || titles[edge.To] == "" {
-			continue
-		}
-		edges = append(edges, edge)
-	}
+	edges := dependencyEdges(graph, func(id string) bool { return titles[id] != "" })
 	if len(edges) == 0 {
 		return ""
 	}
@@ -218,15 +248,12 @@ func NodeRelationLines(graph *engine.Graph, nodeID string, level int, language l
 		}
 	}
 	var before, after []string
-	for _, edge := range graph.Edges {
-		if edge == nil {
-			continue
-		}
+	for _, edge := range dependencyEdges(graph, func(id string) bool { return titles[id] != "" }) {
 		suffix := relationSuffix(edge, words)
-		if edge.To == nodeID && titles[edge.From] != "" {
+		if edge.To == nodeID {
 			before = append(before, titles[edge.From]+suffix)
 		}
-		if edge.From == nodeID && titles[edge.To] != "" {
+		if edge.From == nodeID {
 			after = append(after, titles[edge.To]+suffix)
 		}
 	}
