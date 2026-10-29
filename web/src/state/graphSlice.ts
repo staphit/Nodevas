@@ -10,16 +10,19 @@
 import { api, ConflictError, RequestError, type GraphOp } from "../api";
 import { applyGraphCommand, commandTarget, describeGraphCommand } from "../domain";
 import { applyGraphOps } from "../domain/graph/ops";
-import { translate } from "../i18n";
+import { LANGUAGE_OPTIONS, translate } from "../i18n";
 import { officeStyleErrorMessage } from "../nodeTypeErrors";
 import type { Graph } from "../types";
 import {
   commandFailed,
   commandSucceeded,
   describeFailure,
+  IDLE_OPERATION,
   operationScope,
+  withOperation,
   type CommandResult,
   type OperationScope,
+  type OperationState,
 } from "./operations";
 import { graphCommandToOps, graphOpsNeedServerGraph } from "./graphOps";
 import { coalesceRequest } from "./coalesce";
@@ -41,6 +44,30 @@ const conflictMessage = () => translate("graph.error.conflict");
  * never work, and the reader has a file to fix instead.
  */
 const unreadableMessage = () => translate("graph.error.unreadable");
+
+/**
+ * Once graph.yaml reads again, the refusals it caused no longer hold: a panel
+ * or the status line must not keep asking the reader to fix a fixed file.
+ * Matched in every language, since the reader may have switched since. Other
+ * errors are left as they are.
+ */
+function withoutUnreadableRefusals(
+  state: AppState,
+): Pick<AppState, "operations" | "lastOperation"> {
+  const refusals = new Set(
+    LANGUAGE_OPTIONS.map((language) => translate("graph.error.unreadable", language)),
+  );
+  const refused = (entry: OperationState | null) =>
+    entry?.status === "error" && refusals.has(entry.message ?? "");
+  let operations = state.operations;
+  for (const [scope, entry] of Object.entries(state.operations)) {
+    if (refused(entry)) operations = withOperation(operations, scope, IDLE_OPERATION);
+  }
+  return {
+    operations,
+    lastOperation: refused(state.lastOperation) ? null : state.lastOperation,
+  };
+}
 
 
 /**
@@ -167,16 +194,17 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         }
         // Dropped when a project switch happened while this was in flight.
         if (generation !== generations.load) return;
-        set({
+        set((state) => ({
+          ...(state.graphUnreadable !== null ? withoutUnreadableRefusals(state) : {}),
           graphUnreadable: null,
           graph: normalizeGraph(g.graph),
           // The generation check above means no switch happened in flight, so
           // the read was answered for the project that is active now.
-          graphProject: get().activeProject,
+          graphProject: state.activeProject,
           graphRev: g.rev,
           issues: g.issues ?? [],
           error: null,
-        });
+        }));
         // Where the node files sit is disk state rather than part of the graph,
         // so it is fetched alongside rather than inside the graph response. A
         // failure here only costs the folder grouping, never the graph.

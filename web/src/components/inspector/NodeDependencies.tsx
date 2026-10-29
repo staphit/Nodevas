@@ -56,6 +56,11 @@ export function NodeDependencies({ id }: { id: string }) {
     setNotice(null);
     setAdding(new Set());
   }, [id]);
+  // An edit refused while graph.yaml could not be read no longer holds once
+  // it reads again.
+  useEffect(() => {
+    if (!readOnly) setNotice((current) => (current?.kind === "error" ? null : current));
+  }, [readOnly]);
 
   const nodeTitle = (nodeId: string | undefined) =>
     (nodeId && graph?.nodes?.find((node) => node.id === nodeId)?.title) || nodeId || "";
