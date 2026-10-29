@@ -277,17 +277,27 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
 });
 
 /**
+ * The hub's own sentence around the parser's or the validator's words
+ * (store/graph_unreadable.go): "line 3 has an error. Fix the file, then
+ * reload. (yaml: ...)", "檔案有錯誤。修正檔案後重新載入。（node ...）". The
+ * banner gives its own advice, so only the bracketed words are kept.
+ */
+const HUB_GRAPH_FRAME = /^(?:line \d+ has an error|the file has an error|第 \d+ 行有錯誤|檔案有錯誤)[\s\S]*?[.。] ?[(（]([\s\S]*)[)）]$/;
+
+/**
  * The hub refuses to open a project whose graph.yaml does not parse, and says
- * so in the YAML parser's English ('load project "x": graph.yaml: yaml:
- * unmarshal errors: line 16: ...'). The reader gets that in their language,
- * keeping the line to fix. A file that parses but fails validation ('graph.yaml:
- * node "c" has invalid priority "zzz"') is readable: the reader gets the
- * reason, which names the node and field to fix. Null for any other failure.
+ * so with the YAML parser's English kept ('load project "x": graph.yaml: line
+ * 16 has an error. Fix the file, then reload. (yaml: unmarshal errors: line
+ * 16: ...)'). The reader gets that in their language, keeping the line to fix.
+ * A file that parses but fails validation ('graph.yaml: ... (node "c" has
+ * invalid priority "zzz")') is readable: the reader gets the reason, which
+ * names the node and field to fix. Null for any other failure.
  */
 function unreadableGraphMessage(error: unknown, label: string, language: Language): string | null {
   if (!(error instanceof RequestError)) return null;
-  const reason = /(?:^|: )graph\.yaml: ([\s\S]*)$/.exec(error.message)?.[1].trim();
-  if (reason === undefined) return null;
+  const said = /(?:^|[:：] ?)graph\.yaml: ([\s\S]*)$/.exec(error.message)?.[1].trim();
+  if (said === undefined) return null;
+  const reason = (HUB_GRAPH_FRAME.exec(said)?.[1] ?? said).trim();
   // engine.ParseGraph: the decoder's own "yaml: ..." and its one other refusal.
   if (!reason || /^yaml: |^multiple YAML documents/.test(reason)) {
     const line = /\bline (\d+)\b/.exec(reason)?.[1];
