@@ -599,6 +599,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
+		PermissionRelay:  cfg.PermissionRelay,
 	}
 	cmd, err := ad.Command(job, runEnv)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,12 @@ const ClaudeApproveTool = NodevasMCPTools + "__approve_tool"
 
 // ClaudeMCPTimeoutEnv is Claude Code's MCP tool-call timeout, in ms.
 const ClaudeMCPTimeoutEnv = "MCP_TOOL_TIMEOUT"
+
+// claudeRelayMCPTimeoutMs is ClaudeMCPTimeoutEnv in a run with
+// permissionRelay: past the hub's longest wait for a person (ask_user's ten
+// minutes; a permission ask's five) plus the long poll's slack, so the CLI
+// never cuts a call that is still waiting for an answer.
+const claudeRelayMCPTimeoutMs = 11 * 60 * 1000
 
 func (Claude) Kind() string { return "claude" }
 
@@ -92,15 +99,37 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		args = append(args, "--setting-sources", "user")
 		args = append(args, "--disallowedTools", ClaudeReadOnlyDeny)
 	}
+	// permissionRelay: what would need a yes goes to the hub's approve_tool,
+	// which waits for a person. It is consulted only after the deny rules
+	// above and the permission mode, so it never widens them; plan and
+	// dontAsk never ask at all.
+	relay := env.PermissionRelay && PermissionRelayApplies("claude", mode, false)
+	if relay {
+		args = append(args, "--permission-prompt-tool", ClaudeApproveTool)
+	}
 	args = append(args, "--allowedTools", NodevasMCPTools)
+	if relay {
+		args = append(args, ClaudeApproveTool)
+	}
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	// On stdin, not as an argument: no command-line length limit and no
 	// cmd.exe quoting for a prompt full of quotes and percent signs.
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = jobEnv(job)
+	var extra []string
+	if relay && !claudeMCPTimeoutAtLeast(claudeRelayMCPTimeoutMs) {
+		extra = append(extra, ClaudeMCPTimeoutEnv+"="+strconv.Itoa(claudeRelayMCPTimeoutMs))
+	}
+	cmd.Env = jobEnv(job, extra...)
 	return cmd, nil
+}
+
+// claudeMCPTimeoutAtLeast reports whether the runner's own environment
+// already gives MCP tool calls at least ms; the owner's longer setting wins.
+func claudeMCPTimeoutAtLeast(ms int) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(ClaudeMCPTimeoutEnv)))
+	return err == nil && n >= ms
 }
 
 // childEnv is the runner's environment minus what an agent must not have:
