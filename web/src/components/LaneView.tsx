@@ -274,7 +274,10 @@ export function LaneView({
   // the right-hand side, so one opening closes the other: Problems closes the
   // drawer here, and picking a problem (which opens the drawer) closes
   // Problems below.
+  // While graph.yaml does not read there is nothing to list (the panel is not
+  // drawn), so the button counts nothing and opens nothing.
   const toggleProblems = (update: (open: boolean) => boolean) => {
+    if (unreadable) return;
     const next = update(problemsOpen);
     if (next && useApp.getState().activeTab !== null) closeDrawer();
     setProblemsOpen(next);
@@ -1616,8 +1619,8 @@ export function LaneView({
           />
         }
         activeFilters={activeFilterCount(viewFilter)}
-        problemCount={problemCount(analysis, issues)}
-        problemsOpen={problemsOpen}
+        problemCount={unreadable ? 0 : problemCount(analysis, issues)}
+        problemsOpen={problemsOpen && !unreadable}
         setProblemsOpen={toggleProblems}
         problemsButtonRef={problemsButtonRef}
         fitGraph={fitGraph}
