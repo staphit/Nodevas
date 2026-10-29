@@ -13,13 +13,15 @@ import type {
   EdgeLine,
   EdgeRelation,
   Graph,
+  GraphEdge,
   SavedView,
 } from "../../types";
 import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 import { DEFAULT_LINE, edgeRelation, edgeStylePatch } from "./edgeStyle";
-import { edgeWireKey, gateWireKey } from "./keys";
+import { edgeWireKey, gateWireKey, parseEdgeWireKey } from "./keys";
 import { booleanLogicGateForOutput, logicGateOwningEdge } from "./logicGate";
+import { requiresNodeRefs } from "./requires";
 
 export interface CanvasPoint {
   x: number;
@@ -112,11 +114,37 @@ export function setGatePlacement(
   layout.gates[targetId] = { x: round2(point.x), y: round2(point.y) };
 }
 
+/**
+ * The stored edge from→to. A dependency named only in the target's `requires`
+ * (a hand-written graph.yaml) has a wire on the board but no edge: styling or
+ * bending that wire writes the explicit edge it stands for first, as the hub
+ * does with the same op (internal/store/graph_ops.go). Undefined when nothing
+ * names the pair.
+ */
+function edgeForWire(graph: Graph, from: string, to: string): GraphEdge | undefined {
+  const stored = graph.edges?.find((edge) => edge.from === from && edge.to === to);
+  if (stored) return stored;
+  const target = graph.nodes?.find((node) => node.id === to);
+  if (
+    from === to ||
+    !target ||
+    !graph.nodes?.some((node) => node.id === from) ||
+    !requiresNodeRefs(target.requires).includes(from)
+  ) {
+    return undefined;
+  }
+  const materialised: GraphEdge = { from, to };
+  graph.edges = [...(graph.edges ?? []), materialised];
+  return materialised;
+}
+
 export function setWireVertices(
   graph: Graph,
   wireKey: string,
   vertices: CanvasPoint[],
 ): void {
+  const endpoints = parseEdgeWireKey(wireKey);
+  if (endpoints && vertices.length > 0) edgeForWire(graph, endpoints.from, endpoints.to);
   const layout = ui(graph);
   layout.wireVertices = layout.wireVertices ?? {};
   if (vertices.length === 0) {
@@ -146,9 +174,7 @@ export function setEdgeStyle(
   patch: { relation?: EdgeRelation; line?: EdgeLine },
 ): void {
   for (const target of edges) {
-    const edge = graph.edges?.find(
-      (candidate) => candidate.from === target.from && candidate.to === target.to,
-    );
+    const edge = edgeForWire(graph, target.from, target.to);
     if (!edge) continue;
     if (patch.relation !== undefined) {
       const owner = logicGateOwningEdge(graph, target.from, target.to);
