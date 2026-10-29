@@ -244,4 +244,39 @@ describe("viewport culling", () => {
     expect(wire(across.from, across.to)).not.toBeNull();
     expect(wire(far.from, far.to)).toBeNull();
   });
+
+  // Each pointer move used to measure the board to report where the pointer
+  // is, after the frame before had written to it: a forced layout of every
+  // mounted card, on every frame the culled cards changed.
+  it("drag-pans across culling steps without calling getBoundingClientRect on pan frames", () => {
+    const { board } = renderBoard(gridGraph(1000));
+    const rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect");
+
+    act(() => {
+      fireEvent.pointerDown(board, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        clientX: 500,
+        clientY: 300,
+      });
+    });
+    rectSpy.mockClear();
+
+    for (let step = 1; step <= 6; step++) {
+      act(() => {
+        fireEvent.pointerMove(board, {
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: 500 - step * 120,
+          clientY: 300 - step * 80,
+        });
+        fireEvent.scroll(board);
+      });
+      act(() => frames.flush());
+    }
+
+    expect(rectSpy).not.toHaveBeenCalled();
+    rectSpy.mockRestore();
+  });
 });
