@@ -138,7 +138,8 @@ func TestPermissionAskOverHTTP(t *testing.T) {
 	if rec := call(t, router, "alice", http.MethodPost, "/api/agents/asks/"+ask.ID+"/answer", `{"decision":"approve_run"}`); rec.Code != http.StatusOK {
 		t.Fatalf("approve_run = %d: %s", rec.Code, rec.Body)
 	}
-	if got := decidedAsk(t, asked); got.Status != agents.AskApproved || got.Answer != agents.DecisionApproveRun {
+	if got := decidedAsk(t, asked); got.Status != agents.AskApproved || got.Answer != agents.DecisionApproveRun ||
+		got.Decision != agents.DecisionApproveRun {
 		t.Fatalf("allowed for the run = %+v", got)
 	}
 	rec := call(t, router, "alice-agent", http.MethodPost, "/api/agents/asks", body)
@@ -148,5 +149,28 @@ func TestPermissionAskOverHTTP(t *testing.T) {
 	decodeJSON(t, rec, &again)
 	if rec.Code != http.StatusOK || again.Ask.Status != agents.AskApproved || again.Ask.Note != agents.AllowedForRunNote {
 		t.Fatalf("the next Bash prompt = %d %+v", rec.Code, again.Ask)
+	}
+}
+
+// The runner's own relays (agy gate, OpenCode ACP) ask as "run:<agent>" with
+// timeoutSeconds 300, and tell allow-for-this-run by ask.decision.
+func TestRunnerRelayPermissionAsk(t *testing.T) {
+	router := runRouter(t)
+	ask, asked := askOverHTTP(t, router, `{"sessionId":"run-7","sessionName":"app-agy-r7","actor":"run:agy","agent":"agy",`+
+		`"question":"Allow run_command?","kind":"permission","tool":"run_command","toolInput":"ls","timeoutSeconds":300}`)
+	if got := time.Duration(ask.ExpiresAt-ask.CreatedAt) * time.Millisecond; got != 300*time.Second || ask.RunID != "run-7" {
+		t.Fatalf("relay ask = %+v (waits %v)", ask, got)
+	}
+	rec := call(t, router, "root", http.MethodPost, "/api/agents/asks/"+ask.ID+"/answer", `{"decision":"approve_run"}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"decision":"approve_run"`) {
+		t.Fatalf("answer = %d %s", rec.Code, rec.Body)
+	}
+	select {
+	case rec := <-asked:
+		if !strings.Contains(rec.Body.String(), `"decision":"approve_run"`) {
+			t.Fatalf("the relay's long poll = %s", rec.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the relay's long poll did not return")
 	}
 }
