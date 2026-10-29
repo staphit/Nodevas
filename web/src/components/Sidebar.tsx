@@ -457,7 +457,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => transfer.markdownImportInputRef.current?.click()}
-            disabled={transfer.markdownImportBusy || !activeProject}
+            disabled={transfer.markdownImportBusy || transfer.nodeImportBlocked || !activeProject}
             title={t("sidebar.importMdTitle")}
           >
             <IconImport size={13} />
