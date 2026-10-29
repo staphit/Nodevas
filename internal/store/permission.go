@@ -12,6 +12,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // ErrNodeWriteDenied is returned when an agent tries to modify a node whose
@@ -99,9 +100,25 @@ func normalizeWriteAccess(v string) string {
 type ErrNodeTypeDenied struct {
 	NodeID, Type, Code, Msg string
 	Status                  int
+	// said is the refusal in both languages; Msg, when set, is what Error
+	// says around it.
+	said *locale.Message
 }
 
-func (e *ErrNodeTypeDenied) Error() string { return e.Msg }
+func (e *ErrNodeTypeDenied) Error() string {
+	if e.Msg == "" && e.said != nil {
+		return e.said.Error()
+	}
+	return e.Msg
+}
+
+// Unwrap is the refusal in both languages, for the reader of a response.
+func (e *ErrNodeTypeDenied) Unwrap() error {
+	if e.said == nil {
+		return nil
+	}
+	return e.said
+}
 
 // Node-type error codes, shared with the web client.
 const (
@@ -129,7 +146,7 @@ func checkNodeTypesEdit(actor identity.Actor, before, after []engine.NodeTypeDef
 	}
 	return &ErrNodeTypeDenied{
 		Code: CodeNodeTypesAgentEdit, Status: http.StatusForbidden,
-		Msg: "agents may not change the project's node types",
+		said: locale.Say("agents may not change the project's node types", "agent 不能更改專案的節點類型"),
 	}
 }
 
@@ -141,7 +158,7 @@ func checkOfficeStyleEdit(actor identity.Actor, before, after string) error {
 	}
 	return &ErrNodeTypeDenied{
 		Code: CodeOfficeStyleAgentEdit, Status: http.StatusForbidden,
-		Msg: "agents may not change the project's office style",
+		said: locale.Say("agents may not change the project's office style", "agent 不能更改專案的辦公室風格"),
 	}
 }
 
@@ -188,7 +205,8 @@ func checkKindChange(actor identity.Actor, g *engine.Graph, oldKind, newKind str
 		if restrictedForAgents(t) {
 			return &ErrNodeTypeDenied{
 				Type: t.ID, Code: CodeNodeTypePeopleOnly, Status: http.StatusForbidden,
-				Msg: fmt.Sprintf("agents may not change a node to or from a %s node", typeName(t)),
+				said: locale.Say("agents may not change a node to or from a %s node",
+					"agent 不能把節點改成 %s 節點，也不能從 %s 節點改掉", typeName(t), typeName(t)),
 			}
 		}
 	}
@@ -217,7 +235,8 @@ func checkStatusWrite(actor identity.Actor, g *engine.Graph, n *engine.Node, sta
 		(t.Completion == engine.CompletionPeople && engine.Settled(status, custom)) {
 		return &ErrNodeTypeDenied{
 			NodeID: n.ID, Type: t.ID, Code: CodeNodeTypePeopleOnly, Status: http.StatusForbidden,
-			Msg: fmt.Sprintf("node %q is a %s node: only a person can complete it", n.ID, typeName(t)),
+			said: locale.Say("node %q is a %s node: only a person can complete it",
+				"節點「%s」是 %s 節點：只有人可以完成它", n.ID, typeName(t)),
 		}
 	}
 	return nil
@@ -226,13 +245,13 @@ func checkStatusWrite(actor identity.Actor, g *engine.Graph, n *engine.Node, sta
 func noStatusError(nodeID string, t engine.NodeType) error {
 	return &ErrNodeTypeDenied{
 		NodeID: nodeID, Type: t.ID, Code: CodeNodeTypeNoStatus, Status: http.StatusBadRequest,
-		Msg: fmt.Sprintf("node %q is a %s node: it has no status", nodeID, typeName(t)),
+		said: locale.Say("node %q is a %s node: it has no status", "節點「%s」是 %s 節點：它沒有狀態", nodeID, typeName(t)),
 	}
 }
 
 func unknownNodeTypeError(nodeID, kind string) error {
 	return &ErrNodeTypeDenied{
 		NodeID: nodeID, Type: kind, Code: CodeUnknownNodeType, Status: http.StatusBadRequest,
-		Msg: fmt.Sprintf("unknown node type %q", kind),
+		said: locale.Say("unknown node type %q", "不明的節點類型「%s」", kind),
 	}
 }

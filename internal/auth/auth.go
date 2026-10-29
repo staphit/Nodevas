@@ -12,6 +12,8 @@ import (
 	"nodevas/internal/identity"
 	"strings"
 	"sync"
+
+	"nodevas/internal/locale"
 )
 
 // Authenticator identifies the actor behind a request.
@@ -32,17 +34,18 @@ type Authenticator interface {
 
 var (
 	// ErrUnauthenticated is returned when a request carries no valid identity.
-	ErrUnauthenticated = errors.New("authentication required")
+	ErrUnauthenticated = locale.Errorf("authentication required", "需要登入")
 	// ErrCSRF is returned when an unsafe request has no matching CSRF token.
-	ErrCSRF = errors.New("missing or invalid CSRF token")
+	ErrCSRF = locale.Errorf("missing or invalid CSRF token", "缺少 CSRF 權杖或權杖無效")
 	// ErrAdminRequired is returned when a member attempts a server-wide
 	// administrative operation.
-	ErrAdminRequired = errors.New("administrator access required")
+	ErrAdminRequired = locale.Errorf("administrator access required", "需要管理員權限")
 	// ErrUnknownAgentRole is returned when a request declares an agent role
 	// this server does not know. It surfaces as a 401 via withAuth, so the
 	// message must tell the client what to send instead.
-	ErrUnknownAgentRole = errors.New(
-		"unknown " + AgentRoleHeaderName + ": send \"worker\" or \"orchestrator\", or omit the header for a human session")
+	ErrUnknownAgentRole = locale.Errorf(
+		"unknown %s: send \"worker\" or \"orchestrator\", or omit the header for a human session",
+		"不明的 %s：請送出 \"worker\" 或 \"orchestrator\"，人的工作階段則不要帶這個標頭", AgentRoleHeaderName)
 )
 
 // AgentRoleHeaderName declares which class of agent a request acts as. It is
@@ -58,7 +61,8 @@ const RoleHeaderName = "X-Nodevas-Role"
 
 // ErrInvalidRole is returned for a RoleHeaderName value that is not a
 // well-formed role id.
-var ErrInvalidRole = errors.New("invalid " + RoleHeaderName + ": send a built-in role or custom-role-<id>")
+var ErrInvalidRole = locale.Errorf("invalid %s: send a built-in role or custom-role-<id>",
+	"%s 無效：請送出內建角色或 custom-role-<id>", RoleHeaderName)
 
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
@@ -323,9 +327,9 @@ func RequestIsSecure(r *http.Request) bool {
 var (
 	// ErrBadCredentials is deliberately the same for an unknown user and a
 	// wrong password: the difference is not the caller's business.
-	ErrBadCredentials = errors.New("invalid user name or password")
+	ErrBadCredentials = locale.Errorf("invalid user name or password", "使用者名稱或密碼錯誤")
 	// ErrTooManyLogins is returned while an account is throttled.
-	ErrTooManyLogins = errors.New("too many failed sign-ins, try again later")
+	ErrTooManyLogins = locale.Errorf("too many failed sign-ins, try again later", "登入失敗次數太多，請稍後再試")
 )
 
 // WithActor returns a context carrying the actor, which ActorFrom reads back.

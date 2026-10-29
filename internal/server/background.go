@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"fmt"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/safego"
 )
 
@@ -48,6 +48,6 @@ func (s *Server) waitBackground(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("background work still running (%d): %w", s.backgroundRunning.Load(), ctx.Err())
+		return locale.Errorf("background work still running (%d): %w", "背景工作仍在進行（%d）：%w", s.backgroundRunning.Load(), ctx.Err())
 	}
 }

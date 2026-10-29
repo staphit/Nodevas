@@ -24,6 +24,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/copilot"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/logging"
 )
 
@@ -86,7 +87,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 func fail(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, copilot.ErrNotFound):
-		httpx.Err(c, http.StatusNotFound, errors.New("not found"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("not found", "找不到"))
 	case errors.Is(err, copilot.ErrInvalid), errors.Is(err, copilot.ErrInvalidSettings):
 		httpx.Err(c, http.StatusBadRequest, err)
 	case errors.Is(err, copilot.ErrBusy):
@@ -94,7 +95,7 @@ func fail(c *gin.Context, err error) {
 	case errors.Is(err, copilot.ErrUnavailable):
 		// The reason is the operator's configuration, not a secret, and the
 		// panel shows it so the person knows whom to ask.
-		httpx.Coded(c, http.StatusServiceUnavailable, "copilot_unavailable", errors.New("service unavailable"),
+		httpx.Coded(c, http.StatusServiceUnavailable, "copilot_unavailable", locale.Errorf("service unavailable", "服務無法使用"),
 			map[string]any{"reason": strings.TrimPrefix(err.Error(), copilot.ErrUnavailable.Error()+": ")})
 	case errors.Is(err, copilot.ErrBridge):
 		httpx.Err(c, http.StatusBadGateway, err)

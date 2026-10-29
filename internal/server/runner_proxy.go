@@ -7,7 +7,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"path"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -193,7 +193,7 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	target := "/api/" + strings.TrimPrefix(r.URL.Path, runnerwire.ProxyPathPrefix)
 	if !runnerProxyAllows(r.Method, target) {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("this route is not available to agents on a runner"), nil)
+			locale.Errorf("this route is not available to agents on a runner", "runner 上的 agent 不能使用這個路由"), nil)
 		return
 	}
 	// The run the request comes from decides its role (spec 2.1). A run that
@@ -210,7 +210,7 @@ func (s *Server) serveRunnerProxy(c *gin.Context, runner runnerwire.Runner) {
 	}
 	handler := s.BuiltHandler()
 	if handler == nil {
-		httpx.Err(c, http.StatusServiceUnavailable, errors.New("server is starting"))
+		httpx.Err(c, http.StatusServiceUnavailable, locale.Errorf("server is starting", "伺服器啟動中"))
 		return
 	}
 	token := runners.BearerToken(r)

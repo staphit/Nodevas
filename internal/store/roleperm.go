@@ -19,6 +19,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // Role and stage error codes, shared with the web client.
@@ -37,13 +38,29 @@ const (
 type ErrRoleDenied struct {
 	NodeID, Role, Code, Msg string
 	Status                  int
+	// said is the refusal in both languages; Msg, when set, is what Error
+	// says instead.
+	said *locale.Message
 }
 
-func (e *ErrRoleDenied) Error() string { return e.Msg }
+func (e *ErrRoleDenied) Error() string {
+	if e.Msg == "" && e.said != nil {
+		return e.said.Error()
+	}
+	return e.Msg
+}
 
-func roleDenied(nodeID, role, format string, args ...any) error {
+// Unwrap is the refusal in both languages, for the reader of a response.
+func (e *ErrRoleDenied) Unwrap() error {
+	if e.said == nil {
+		return nil
+	}
+	return e.said
+}
+
+func roleDenied(nodeID, role, english, chinese string, args ...any) error {
 	return &ErrRoleDenied{NodeID: nodeID, Role: role, Code: CodeRoleDenied, Status: http.StatusForbidden,
-		Msg: fmt.Sprintf(format, args...)}
+		said: locale.Say(english, chinese, args...)}
 }
 
 // isSystemActor reports whether actor is the hub acting on its own behalf.
@@ -58,7 +75,8 @@ func actorRole(actor identity.Actor, g *engine.Graph) (engine.AgentRole, bool, e
 	role, found := g.RoleOf(actor.AgentRole)
 	if !found {
 		return engine.AgentRole{}, false, &ErrRoleDenied{Role: actor.AgentRole, Code: CodeUnknownRole,
-			Status: http.StatusForbidden, Msg: fmt.Sprintf("unknown agent role %q in this project", actor.AgentRole)}
+			Status: http.StatusForbidden, said: locale.Say("unknown agent role %q in this project",
+				"這個專案沒有 agent 角色「%s」", actor.AgentRole)}
 	}
 	return role, true, nil
 }
@@ -109,22 +127,22 @@ func checkRole(actor identity.Actor, g *engine.Graph, c engine.Capability, n *en
 		if n != nil && actor.RunNodeID != "" && n.ID == actor.RunNodeID && executorBodyTypes[typeID] && role.MayWriteType(typeID) {
 			return nil
 		}
-		return roleDenied(nodeID, role.ID, "role %s may only write the body of the scene or event it was dispatched on", role.ID)
+		return roleDenied(nodeID, role.ID, "role %s may only write the body of the scene or event it was dispatched on", "角色 %s 只能寫它被派發的場景或事件的內文", role.ID)
 	}
 	if !role.HasCap(c) {
-		return roleDenied(nodeID, role.ID, "role %s may not %s (needs the %s capability)", role.ID, capVerb(c), c)
+		return roleDenied(nodeID, role.ID, "role %s may not %s (needs the %s capability)", "角色 %s 不能%s（需要 %s 能力）", role.ID, capVerb(c), c)
 	}
 	switch c {
 	case engine.CapBody, engine.CapClaim, engine.CapStatus, engine.CapCreate:
 		if n != nil && !role.MayWriteType(typeID) {
-			return roleDenied(nodeID, role.ID, "role %s may not %s a %s node", role.ID, capVerb(c), typeID)
+			return roleDenied(nodeID, role.ID, "role %s may not %s a %s node", "角色 %[1]s 不能對 %[3]s 節點%[2]s", role.ID, capVerb(c), typeID)
 		}
 	}
 	if slot == engine.RoleExecutor && actor.RunID != "" && n != nil {
 		switch c {
 		case engine.CapBody, engine.CapClaim, engine.CapStatus:
 			if n.ID != actor.RunNodeID {
-				return roleDenied(nodeID, role.ID, "role %s works only node %q, the node its run was dispatched on", role.ID, actor.RunNodeID)
+				return roleDenied(nodeID, role.ID, "role %s works only node %q, the node its run was dispatched on", "角色 %s 只能處理節點「%s」，也就是它被派發的節點", role.ID, actor.RunNodeID)
 			}
 		}
 	}
@@ -134,7 +152,7 @@ func checkRole(actor identity.Actor, g *engine.Graph, c engine.Capability, n *en
 			if actor.RunNodeID != "" {
 				want = engine.GoalTag(actor.RunNodeID)
 			}
-			return roleDenied(nodeID, role.ID, "role qa creates fix nodes only under its own goal (tag %s)", want)
+			return roleDenied(nodeID, role.ID, "role qa creates fix nodes only under its own goal (tag %s)", "qa 角色只能在自己的目標下建立修正節點（標籤 %s）", want)
 		}
 	}
 	return nil
@@ -169,7 +187,7 @@ func checkRoleLink(actor identity.Actor, g *engine.Graph, n *engine.Node, refOnl
 		if n != nil {
 			nodeID = n.ID
 		}
-		return roleDenied(nodeID, role.ID, "role %s may link references only, not dependencies", role.ID)
+		return roleDenied(nodeID, role.ID, "role %s may link references only, not dependencies", "角色 %s 只能連結參照，不能連結相依", role.ID)
 	}
 	return nil
 }
@@ -179,31 +197,31 @@ func checkRoleDelete(actor identity.Actor, nodeID string) error {
 	if !actor.HasRole() {
 		return nil
 	}
-	return roleDenied(nodeID, actor.AgentRole, "role %s may not delete nodes; ask a person", actor.AgentRole)
+	return roleDenied(nodeID, actor.AgentRole, "role %s may not delete nodes; ask a person", "角色 %s 不能刪除節點；請找人處理", actor.AgentRole)
 }
 
-func capVerb(c engine.Capability) string {
+func capVerb(c engine.Capability) *locale.Message {
 	switch c {
 	case engine.CapRead:
-		return "read the board"
+		return locale.Say("read the board", "讀取看板")
 	case engine.CapClaim:
-		return "claim or release"
+		return locale.Say("claim or release", "認領或釋出")
 	case engine.CapStatus:
-		return "set the status of"
+		return locale.Say("set the status of", "設定狀態")
 	case engine.CapBody:
-		return "write the body of"
+		return locale.Say("write the body of", "撰寫內文")
 	case engine.CapCreate:
-		return "create"
+		return locale.Say("create", "建立")
 	case engine.CapLink:
-		return "link"
+		return locale.Say("link", "連結")
 	case engine.CapMeta:
-		return "edit the metadata of"
+		return locale.Say("edit the metadata of", "編輯中繼資料")
 	case engine.CapAcceptance:
-		return "write acceptance criteria"
+		return locale.Say("write acceptance criteria", "撰寫驗收條件")
 	case engine.CapMessage:
-		return "message"
+		return locale.Say("message", "傳訊息")
 	}
-	return string(c)
+	return locale.Say("%s", "%s", string(c))
 }
 
 // acceptanceAttribution is the By an agent's acceptance write records.
@@ -269,33 +287,35 @@ func checkAcceptanceWrite(actor identity.Actor, g *engine.Graph, n *engine.Node,
 	}
 	if after != nil && !g.AcceptanceAllowed(n) {
 		return &ErrNodeTypeDenied{NodeID: nodeID, Type: g.TypeOf(n).ID, Code: CodeNodeTypeForbidsAgent, Status: http.StatusBadRequest,
-			Msg: fmt.Sprintf("node %q is a %s node: it takes no acceptance criteria", nodeID, typeName(g.TypeOf(n)))}
+			said: locale.Say("node %q is a %s node: it takes no acceptance criteria",
+				"節點「%s」是 %s 節點：不能有驗收條件", nodeID, typeName(g.TypeOf(n)))}
 	}
 	if isSystemActor(actor) || !actor.IsAgent() {
 		return nil
 	}
 	if !actor.HasRole() {
-		return roleDenied(nodeID, "", "acceptance criteria are written by a person or a planner/QA run, not by this agent")
+		return roleDenied(nodeID, "", "acceptance criteria are written by a person or a planner/QA run, not by this agent", "驗收條件由人或 planner／QA 執行撰寫，不是這個 agent")
 	}
 	role, _, err := actorRole(actor, g)
 	if err != nil {
 		return err
 	}
 	if !role.HasCap(engine.CapAcceptance) {
-		return roleDenied(nodeID, role.ID, "role %s may not write acceptance criteria (they are written before the work, by the planner or QA)", role.ID)
+		return roleDenied(nodeID, role.ID, "role %s may not write acceptance criteria (they are written before the work, by the planner or QA)", "角色 %s 不能撰寫驗收條件（由 planner 或 QA 在工作前撰寫）", role.ID)
 	}
 	typeID := g.TypeOf(n).ID
 	if !role.MayAcceptType(typeID) && !(role.Slot() == engine.RoleQA && createdByRun) {
-		return roleDenied(nodeID, role.ID, "role %s may not write acceptance criteria on a %s node", role.ID, typeID)
+		return roleDenied(nodeID, role.ID, "role %s may not write acceptance criteria on a %s node", "角色 %s 不能在 %s 節點上撰寫驗收條件", role.ID, typeID)
 	}
 	if before != nil && before.Locked {
 		return &ErrRoleDenied{NodeID: nodeID, Role: role.ID, Code: CodeAcceptanceLocked, Status: http.StatusConflict,
-			Msg: fmt.Sprintf("node %q: the acceptance criteria are locked (an Executor was dispatched); ask a person to change them", nodeID)}
+			said: locale.Say("node %q: the acceptance criteria are locked (an Executor was dispatched); ask a person to change them",
+				"節點「%s」：驗收條件已鎖定（已派發 Executor）；請找人修改", nodeID)}
 	}
 	wasLocked := before != nil && before.Locked
 	isLocked := after != nil && after.Locked
 	if wasLocked != isLocked {
-		return roleDenied(nodeID, role.ID, "only the hub locks acceptance criteria")
+		return roleDenied(nodeID, role.ID, "only the hub locks acceptance criteria", "只有 hub 可以鎖定驗收條件")
 	}
 	return nil
 }
@@ -345,22 +365,24 @@ func checkStatusGate(actor identity.Actor, g *engine.Graph, n *engine.Node, stat
 	if wf != nil && !ok && g.AcceptanceAllowed(n) && g.TypeOf(n).AgentMode == engine.AgentAutopilot &&
 		(wf.Stages.GoalQA || wf.Stages.GoalReview) {
 		return &ErrRoleDenied{NodeID: n.ID, Code: CodeStageGatePending, Status: http.StatusConflict,
-			Msg: fmt.Sprintf("node %q: the autopilot marks this goal done after its QA verification or review; report your work and stop", n.ID)}
+			said: locale.Say("node %q: the autopilot marks this goal done after its QA verification or review; report your work and stop",
+				"節點「%s」：autopilot 會在 QA 驗證或審查後把這個目標標為完成；請回報你的工作並停止", n.ID)}
 	}
 	if !wf.Staged() || (!ok && !g.AcceptanceAllowed(n)) {
 		return nil
 	}
-	next := "the tests are verified"
+	next := locale.Say("the tests are verified", "測試驗證通過")
 	switch {
 	case wf.Stages.Reviewer:
-		next = "review"
+		next = locale.Say("review", "審查")
 	case wf.Stages.CI:
-		next = "CI passes"
+		next = locale.Say("CI passes", "CI 通過")
 	case wf.Judge == engine.JudgeChecklist:
-		next = "the checklist is judged"
+		next = locale.Say("the checklist is judged", "檢查清單評審完成")
 	}
 	return &ErrRoleDenied{NodeID: n.ID, Role: roleID, Code: CodeStageGatePending, Status: http.StatusConflict,
-		Msg: fmt.Sprintf("node %q: the server marks this done after %s; report your work and stop", n.ID, next)}
+		said: locale.Say("node %q: the server marks this done after %s; report your work and stop",
+			"節點「%s」：伺服器會在%s後標為完成；請回報你的工作並停止", n.ID, next)}
 }
 
 // checkAgentRolesEdit refuses an agent that changes the project's roles.
@@ -369,7 +391,7 @@ func checkAgentRolesEdit(actor identity.Actor, before, after []engine.AgentRoleD
 		return nil
 	}
 	return &ErrRoleDenied{Code: CodeRolesAgentEdit, Status: http.StatusForbidden,
-		Msg: "agents may not change the project's agent roles"}
+		said: locale.Say("agents may not change the project's agent roles", "agent 不能更改專案的 agent 角色")}
 }
 
 func agentRoleDefsEqual(a, b []engine.AgentRoleDef) bool {
@@ -385,11 +407,11 @@ func checkWorkflowEdit(actor identity.Actor, nodeID string, before, after *engin
 	if !actor.IsAgent() || reflect.DeepEqual(before, after) {
 		return nil
 	}
-	msg := "agents may not change the project's workflow stages"
+	said := locale.Say("agents may not change the project's workflow stages", "agent 不能更改專案的工作流程階段")
 	if nodeID != "" {
-		msg = fmt.Sprintf("agents may not change the workflow stages of %q", nodeID)
+		said = locale.Say("agents may not change the workflow stages of %q", "agent 不能更改「%s」的工作流程階段", nodeID)
 	}
-	return &ErrRoleDenied{NodeID: nodeID, Code: CodeWorkflowAgentEdit, Status: http.StatusForbidden, Msg: msg}
+	return &ErrRoleDenied{NodeID: nodeID, Code: CodeWorkflowAgentEdit, Status: http.StatusForbidden, said: said}
 }
 
 // ---------- acceptance writes ----------
@@ -399,7 +421,7 @@ func checkWorkflowEdit(actor identity.Actor, nodeID string, before, after *engin
 // new items get the next free aN id. Returns the new graph revision.
 func (s *Store) SetAcceptance(actor identity.Actor, nodeID string, items []engine.AcceptanceItem, baseRev string) (string, error) {
 	if !engine.ValidNodeID(nodeID) {
-		return "", fmt.Errorf("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -414,7 +436,7 @@ func (s *Store) SetAcceptance(actor identity.Actor, nodeID string, items []engin
 	}
 	n := g.NodeByID(nodeID)
 	if n == nil {
-		return "", fmt.Errorf("node %q not found", nodeID)
+		return "", locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
 	}
 	if err := checkNodeWrite(actor, n); err != nil {
 		return "", err
@@ -457,7 +479,7 @@ func (s *Store) LockAcceptance(nodeID string) error {
 	}
 	n := g.NodeByID(nodeID)
 	if n == nil {
-		return fmt.Errorf("node %q not found", nodeID)
+		return locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
 	}
 	if !g.AcceptanceAllowed(n) || (n.Acceptance != nil && n.Acceptance.Locked) {
 		return nil
@@ -501,11 +523,11 @@ const MaxEvidenceNoteBytes = 2 << 10
 // guard, judge checks) on a node's journal. Replay ignores it for status.
 func (s *Store) AppendEvidence(nodeID, kind, summary string) error {
 	if !engine.ValidNodeID(nodeID) {
-		return fmt.Errorf("invalid node id")
+		return locale.Errorf("invalid node id", "節點代號無效")
 	}
 	kind = strings.TrimSpace(kind)
 	if kind == "" || len(kind) > 32 {
-		return fmt.Errorf("evidence needs a short kind")
+		return locale.Errorf("evidence needs a short kind", "佐證需要簡短的種類")
 	}
 	if len(summary) > MaxEvidenceNoteBytes {
 		summary = summary[:MaxEvidenceNoteBytes]
@@ -517,7 +539,7 @@ func (s *Store) AppendEvidence(nodeID, kind, summary string) error {
 		return err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return fmt.Errorf("node %q not found", nodeID)
+		return locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	line, err := engine.AppendJournalLine(engine.HistoryEvent{

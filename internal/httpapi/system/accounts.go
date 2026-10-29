@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // The server's accounts, for its administrators, from the web UI: what
@@ -108,13 +109,13 @@ const inviteMailTimeout = 15 * time.Second
 const maxAccountBody = 4 << 10
 
 var (
-	errNoAccounts = errors.New("this server does not use accounts; add people on a networked server")
-	errAdminOnly  = errors.New("only a server administrator can manage accounts")
-	errNoSuchUser = errors.New("no such account")
-	errSelfRemove = errors.New("you cannot remove your own account; ask another administrator")
-	errSelfDemote = errors.New("you cannot change your own role; ask another administrator")
-	errNeedsEmail = errors.New("an email address is required: it is how the person signs in")
-	errInviteRole = errors.New("role must be admin or member")
+	errNoAccounts = locale.Errorf("this server does not use accounts; add people on a networked server", "這個伺服器不使用帳號；請在網路伺服器上加入成員")
+	errAdminOnly  = locale.Errorf("only a server administrator can manage accounts", "只有伺服器管理員可以管理帳號")
+	errNoSuchUser = locale.Errorf("no such account", "沒有這個帳號")
+	errSelfRemove = locale.Errorf("you cannot remove your own account; ask another administrator", "你不能移除自己的帳號；請找另一位管理員")
+	errSelfDemote = locale.Errorf("you cannot change your own role; ask another administrator", "你不能更改自己的角色；請找另一位管理員")
+	errNeedsEmail = locale.Errorf("an email address is required: it is how the person signs in", "需要電子郵件地址：對方用它登入")
+	errInviteRole = locale.Errorf("role must be admin or member", "角色須為 admin 或 member")
 )
 
 // UseUsers enables the account routes. Without it (loopback) they answer 404.
@@ -245,7 +246,7 @@ func (a *API) postAccount(c *gin.Context) {
 	id, _, found := a.users.FindAccount(ctx, strings.TrimSpace(body.Name))
 	created, readBack := a.findAccount(ctx, id)
 	if !found || !readBack {
-		httpx.Err(c, http.StatusInternalServerError, errors.New("the account was created but could not be read back"))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("the account was created but could not be read back", "帳號已建立，但無法讀回"))
 		return
 	}
 

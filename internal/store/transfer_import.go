@@ -3,8 +3,6 @@
 package store
 
 import (
-	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -21,7 +19,7 @@ import (
 // transfer.
 func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) (*nodeTransferResult, error) {
 	if payload == nil || len(payload.nodes) == 0 {
-		return nil, errors.New("nothing to import")
+		return nil, locale.Errorf("nothing to import", "沒有可匯入的內容")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,7 +172,7 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		document := rewriteNodeLinks(payload.documents[source.ID], sourceProject, result.IDs)
 		nodeFile, err := engine.ParseNodeFile(rewriteAttachmentLinks(document, source.ID, node.ID))
 		if err != nil {
-			return nil, fmt.Errorf("node %q: %w", source.ID, err)
+			return nil, locale.Errorf("node %q: %w", "節點「%s」：%w", source.ID, err)
 		}
 		engine.SyncFrontmatter(nodeFile, node)
 		data, err := engine.ComposeNodeFile(nodeFile)

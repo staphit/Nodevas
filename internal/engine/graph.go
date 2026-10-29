@@ -4,7 +4,6 @@ package engine
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 var nodeIDPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
@@ -313,14 +313,14 @@ func ParseGraph(data []byte) (*Graph, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&g); err != nil {
-		return nil, fmt.Errorf("graph.yaml: %w", err)
+		return nil, locale.Errorf("graph.yaml: %w", "graph.yaml：%w", err)
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("graph.yaml: multiple YAML documents are not supported")
+			return nil, locale.Errorf("graph.yaml: multiple YAML documents are not supported", "graph.yaml：不支援多個 YAML 文件")
 		}
-		return nil, fmt.Errorf("graph.yaml: %w", err)
+		return nil, locale.Errorf("graph.yaml: %w", "graph.yaml：%w", err)
 	}
 	NormalizeLogicGates(&g)
 	return &g, nil

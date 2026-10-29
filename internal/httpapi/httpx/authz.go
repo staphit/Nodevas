@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/auth"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -15,7 +16,7 @@ import (
 // identity.Local's administrator role.
 func RequireAdmin(c *gin.Context) {
 	if err := auth.RequireAdmin(c.Request); err != nil {
-		Err(c, http.StatusForbidden, errors.New("administrator access required"))
+		Err(c, http.StatusForbidden, locale.Errorf("administrator access required", "需要管理員權限"))
 		return
 	}
 	c.Next()

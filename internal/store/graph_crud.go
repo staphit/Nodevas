@@ -60,18 +60,18 @@ func (s *Store) nextNodeIDsLocked(g *engine.Graph, n int) ([]string, error) {
 		ids = append(ids, id)
 	}
 	if len(ids) < n {
-		return nil, errors.New("automatic node id space exhausted")
+		return nil, locale.Errorf("automatic node id space exhausted", "自動節點代號已用盡")
 	}
 	return ids, nil
 }
 
 func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (string, error) {
 	if n == nil {
-		return "", errors.New("node is required")
+		return "", locale.Errorf("node is required", "需要指定節點")
 	}
 	nf, err := engine.ParseNodeFile([]byte(body))
 	if err != nil {
-		return "", fmt.Errorf("node file: %w", err)
+		return "", locale.Errorf("node file: %w", "節點檔案：%w", err)
 	}
 	hydrateNodeFromMeta(n, nf.Meta)
 	n.Kind = engine.NormalizeNodeKind(n.Kind)
@@ -117,7 +117,7 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 		}
 	}
 	if !engine.ValidNodeID(n.ID) {
-		return "", fmt.Errorf("invalid node id %q", n.ID)
+		return "", locale.Errorf("invalid node id %q", "節點代號「%s」無效", n.ID)
 	}
 	engine.SyncFrontmatter(nf, n)
 	out, err := engine.ComposeNodeFile(nf)
@@ -125,10 +125,10 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 		return "", err
 	}
 	if g.NodeByID(n.ID) != nil {
-		return "", fmt.Errorf("node %q already exists", n.ID)
+		return "", locale.Errorf("node %q already exists", "節點「%s」已存在", n.ID)
 	}
 	if _, err := s.statPath(s.NodePath(n.ID)); err == nil {
-		return "", fmt.Errorf("node file %q already exists", n.ID)
+		return "", locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", n.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
@@ -168,7 +168,7 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 // language of whoever asked for it.
 func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language locale.Language) (string, error) {
 	if !engine.ValidNodeID(sourceID) {
-		return "", fmt.Errorf("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,7 +183,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language lo
 	}
 	source := g.NodeByID(sourceID)
 	if source == nil {
-		return "", fmt.Errorf("node %q not found", sourceID)
+		return "", locale.Errorf("node %q not found", "找不到節點「%s」", sourceID)
 	}
 	if err := checkRole(actor, g, engine.CapCreate, source); err != nil {
 		return "", err
@@ -337,7 +337,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language lo
 	}
 	sourceAttachments := s.NodeFilesDir(sourceID)
 	if err := ValidateProjectPath(s.root, sourceAttachments, true); err != nil {
-		return "", fmt.Errorf("duplicate attachment source: %w", err)
+		return "", locale.Errorf("duplicate attachment source: %w", "複製附件來源：%w", err)
 	}
 	attachments, err := readDuplicateAttachments(sourceAttachments)
 	if err != nil {
@@ -346,7 +346,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language lo
 	if len(attachments) > 0 {
 		destination := s.NodeFilesDir(duplicate.ID)
 		if err := ValidateProjectPath(s.root, destination, true); err != nil {
-			return "", fmt.Errorf("duplicate attachment destination is not a regular directory: %w", err)
+			return "", locale.Errorf("duplicate attachment destination is not a regular directory: %w", "複製附件的目的地不是一般資料夾：%w", err)
 		}
 		if err := requireSafeDuplicateAttachmentDir(destination); err != nil {
 			return "", err
@@ -428,8 +428,7 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 		}
 		for _, ref := range dsl.NodeRefs(expr) {
 			if removing[ref] {
-				return fmt.Errorf(
-					"node %q is required by %q; remove that dependency first", ref, node.ID)
+				return locale.Errorf("node %q is required by %q; remove that dependency first", "節點「%s」是「%s」的前置條件；請先移除這個相依", ref, node.ID)
 			}
 		}
 	}
@@ -439,15 +438,13 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 	for _, gate := range g.UI.LogicGates {
 		for _, output := range gate.OutputNodes() {
 			if removing[output] {
-				return fmt.Errorf(
-					"node %q is the output of logic gate %q; delete that gate first",
+				return locale.Errorf("node %q is the output of logic gate %q; delete that gate first", "節點「%s」是邏輯閘「%s」的輸出；請先刪除這個閘",
 					output, gate.ID)
 			}
 		}
 		for _, input := range gate.Inputs {
 			if removing[input] {
-				return fmt.Errorf(
-					"node %q is an input of logic gate %q; delete that gate first",
+				return locale.Errorf("node %q is an input of logic gate %q; delete that gate first", "節點「%s」是邏輯閘「%s」的輸入；請先刪除這個閘",
 					input, gate.ID)
 			}
 		}
@@ -566,13 +563,13 @@ func (s *Store) DeleteNode(actor identity.Actor, id string) (DeleteNodeOutcome, 
 func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutcome, error) {
 	var zero DeleteNodesOutcome
 	if len(ids) == 0 {
-		return zero, fmt.Errorf("no node ids given")
+		return zero, locale.Errorf("no node ids given", "沒有提供節點代號")
 	}
 	removing := make(map[string]bool, len(ids))
 	unique := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if !engine.ValidNodeID(id) {
-			return zero, fmt.Errorf("invalid node id")
+			return zero, locale.Errorf("invalid node id", "節點代號無效")
 		}
 		if removing[id] {
 			continue
@@ -605,7 +602,7 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 	}
 	for _, id := range unique {
 		if !found[id] {
-			return zero, fmt.Errorf("node %q not found", id)
+			return zero, locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 	}
 
@@ -683,7 +680,7 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		cleanup()
 		for _, item := range queued {
 			if markerErr := s.removePath(item.path); markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
-				err = errors.Join(err, fmt.Errorf("remove uncommitted delete cleanup marker: %w", markerErr))
+				err = errors.Join(err, locale.Errorf("remove uncommitted delete cleanup marker: %w", "移除未提交的刪除清理標記：%w", markerErr))
 			}
 		}
 		return zero, err

@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/safego"
@@ -76,7 +77,7 @@ func (a *API) registerLinks(api *gin.RouterGroup) {
 }
 
 // ErrStepUpRequired refuses a request that needs a fresh step-up.
-var ErrStepUpRequired = errors.New("verify it's you first (step-up), then try again")
+var ErrStepUpRequired = locale.Errorf("verify it's you first (step-up), then try again", "請先驗證身分（step-up），再試一次")
 
 const linkMailTimeout = 30 * time.Second
 
@@ -106,7 +107,7 @@ func (a *API) freshStepUp(c *gin.Context) bool {
 func person(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() || strings.TrimSpace(actor.ID) == "" {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("only a signed-in person can link a device"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("only a signed-in person can link a device", "只有已登入的人可以連結裝置"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -115,7 +116,7 @@ func person(c *gin.Context) (identity.Actor, bool) {
 func admin(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() || !actor.IsAdmin() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("only an administrator can manage the runner access token"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("only an administrator can manage the runner access token", "只有管理員可以管理 runner 存取權杖"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -139,14 +140,14 @@ func (a *API) createLink(c *gin.Context) {
 	if a.link.Owner != nil {
 		account, ok := a.link.Owner(c.Request.Context(), actor.ID)
 		if !ok {
-			httpx.Err(c, http.StatusUnauthorized, errors.New("this account no longer exists"))
+			httpx.Err(c, http.StatusUnauthorized, locale.Errorf("this account no longer exists", "這個帳號已不存在"))
 			return
 		}
 		revision = account.Revision
 	}
 	clientID, clientSecret, err := a.link.Access.Get()
 	if err != nil {
-		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("runner access token: %w", err))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("runner access token: %w", "runner 存取權杖：%w", err))
 		return
 	}
 	// The service token passes the Cloudflare edge for the whole hostname, so

@@ -26,7 +26,22 @@ var readerPackages = []string{
 // machineErrors are the errors made in readerPackages that no person reads,
 // keyed "file:function" (the function, or the variable an error is declared
 // as), with why.
-var machineErrors = map[string]string{}
+var machineErrors = map[string]string{
+	// Said to the runner, a program, about what it sent.
+	"runners/llm.go:Deliver":           "a runner's malformed model answer",
+	"runners/registry.go:ValidateInfo": "a runner's malformed hello",
+	// Someone else's words, passed on as they were written.
+	"gitrepo/gitrepo.go:run":           "git's own output",
+	"remote/git.go:redact":             "git's own output, secrets redacted",
+	"httpapi/explorer/repos.go:browse": "the runner's own refusal",
+	"auth/access.go:fetchKeys":         "the Cloudflare key endpoint's status",
+	// Said to the operator who starts the server, in its log.
+	"auth/auth.go:SetTrustedProxyCIDRs":         "startup configuration",
+	"server/server.go:ErrWildcardNeedsHostName": "startup configuration",
+	// Never reaches a reader: a sign-in with a bad hash is refused as a
+	// wrong password.
+	"auth/users.go:verifyPassword": "stored hash check",
+}
 
 // verbs are fmt's verbs: a format that is only verbs and punctuation ("%w:
 // %s") wraps words made elsewhere and says nothing of its own.

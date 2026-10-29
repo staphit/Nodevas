@@ -1,7 +1,6 @@
 package runs
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -51,7 +51,7 @@ func (a *API) merge(c *gin.Context) {
 	// A merge lands code. An agent approving its own (or another agent's)
 	// work is exactly the loop the approval exists to break.
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot approve merges"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot approve merges", "agent 不能核准合併"), nil)
 		return
 	}
 	r, ok := a.visible(c)
@@ -64,7 +64,7 @@ func (a *API) merge(c *gin.Context) {
 	}
 	body.HeadSHA = strings.TrimSpace(body.HeadSHA)
 	if !validHeadSHA(body.HeadSHA) {
-		invalid(c, "headSha must be the PR head commit you are approving")
+		invalid(c, "headSha must be the PR head commit you are approving", "headSha 須為你要核准的 PR head 提交")
 		return
 	}
 	updated, err := a.d.Merge(c.Request.Context(), r.ID,
@@ -95,7 +95,7 @@ func (a *API) setBudget(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	// A budget is a brake on agents; an agent must not be able to release it.
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot change budgets"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot change budgets", "agent 不能更改預算"), nil)
 		return
 	}
 	var body runnerwire.Budget

@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -81,12 +81,12 @@ func validName(s string) bool {
 
 // ValidateAgentModel checks one agent/model pair. requireModel is false where
 // "" means the runner's default model (a dispatch); rules name one.
-func ValidateAgentModel(am runnerwire.AgentModel, what string, requireModel bool) error {
+func ValidateAgentModel(am runnerwire.AgentModel, what *locale.Message, requireModel bool) error {
 	if strings.TrimSpace(am.Agent) == "" || !validName(am.Agent) {
-		return invalidf("%s: agent must be 1 to %d characters", what, MaxRouteName)
+		return invalidf("%s: agent must be 1 to %d characters", "%s：agent 須為 1 到 %d 個字元", what, MaxRouteName)
 	}
 	if (requireModel && strings.TrimSpace(am.Model) == "") || !validName(am.Model) {
-		return invalidf("%s: model must be 1 to %d characters", what, MaxRouteName)
+		return invalidf("%s: model must be 1 to %d characters", "%s：model 須為 1 到 %d 個字元", what, MaxRouteName)
 	}
 	return nil
 }
@@ -94,10 +94,10 @@ func ValidateAgentModel(am runnerwire.AgentModel, what string, requireModel bool
 // ValidateChain checks a fallback chain.
 func ValidateChain(chain []runnerwire.AgentModel, requireModel bool) error {
 	if len(chain) > runnerwire.MaxFallbacks {
-		return invalidf("at most %d fallbacks", runnerwire.MaxFallbacks)
+		return invalidf("at most %d fallbacks", "最多 %d 個備援", runnerwire.MaxFallbacks)
 	}
 	for i, am := range chain {
-		if err := ValidateAgentModel(am, fmt.Sprintf("fallback %d", i+1), requireModel); err != nil {
+		if err := ValidateAgentModel(am, locale.Say("fallback %d", "第 %d 個備援", i+1), requireModel); err != nil {
 			return err
 		}
 	}
@@ -109,34 +109,34 @@ func ValidateChain(chain []runnerwire.AgentModel, requireModel bool) error {
 // and no Human is implement only.
 func ValidatePipeline(p runnerwire.Pipeline, requireModel bool) error {
 	if p.MaxRounds < 1 || p.MaxRounds > runnerwire.MaxPipelineRounds {
-		return invalidf("pipeline maxRounds must be 1 to %d", runnerwire.MaxPipelineRounds)
+		return invalidf("pipeline maxRounds must be 1 to %d", "管線 maxRounds 須為 1 到 %d", runnerwire.MaxPipelineRounds)
 	}
-	if err := ValidateAgentModel(p.Implement, "pipeline implement", requireModel); err != nil {
+	if err := ValidateAgentModel(p.Implement, locale.Say("pipeline implement", "管線 implement"), requireModel); err != nil {
 		return err
 	}
 	if (p.Tester != runnerwire.AgentModel{}) {
-		if err := ValidateAgentModel(p.Tester, "pipeline tester", requireModel); err != nil {
+		if err := ValidateAgentModel(p.Tester, locale.Say("pipeline tester", "管線 tester"), requireModel); err != nil {
 			return err
 		}
 	}
 	if len(p.Reviewers) > runnerwire.MaxReviewers {
-		return invalidf("a pipeline has at most %d reviewers", runnerwire.MaxReviewers)
+		return invalidf("a pipeline has at most %d reviewers", "管線最多 %d 位 reviewer", runnerwire.MaxReviewers)
 	}
 	for i, am := range p.Reviewers {
-		if err := ValidateAgentModel(am, fmt.Sprintf("pipeline reviewer %d", i+1), requireModel); err != nil {
+		if err := ValidateAgentModel(am, locale.Say("pipeline reviewer %d", "管線第 %d 位 reviewer", i+1), requireModel); err != nil {
 			return err
 		}
 	}
 	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
-		if err := ValidateAgentModel(p.Review, "pipeline review", requireModel); err != nil {
+		if err := ValidateAgentModel(p.Review, locale.Say("pipeline review", "管線 review"), requireModel); err != nil {
 			return err
 		}
 	}
 	if n := len(runnerwire.ReviewersOf(p)); p.Quorum < 0 || p.Quorum > n {
-		return invalidf("pipeline quorum must be 0 (all) to %d, the number of reviewers", n)
+		return invalidf("pipeline quorum must be 0 (all) to %d, the number of reviewers", "管線 quorum 須為 0（全部）到 %d（reviewer 人數）", n)
 	}
 	if p.HumanAnyEditor && !p.Human {
-		return invalidf("pipeline humanAnyEditor needs human review")
+		return invalidf("pipeline humanAnyEditor needs human review", "管線 humanAnyEditor 需要人工審查")
 	}
 	return nil
 }
@@ -152,21 +152,21 @@ func ResolvePipeline(info *runnerwire.Info, p runnerwire.Pipeline, implementMode
 	if p.Tester.Agent != "" {
 		model, err := ResolveAgentModel(info, p.Tester)
 		if err != nil {
-			return runnerwire.Pipeline{}, fmt.Errorf("tester: %w", err)
+			return runnerwire.Pipeline{}, locale.Errorf("tester: %w", "tester：%w", err)
 		}
 		out.Tester = runnerwire.AgentModel{Agent: p.Tester.Agent, Model: model}
 	}
 	if len(p.Reviewers) == 0 && (p.Review != runnerwire.AgentModel{}) {
 		model, err := ResolveAgentModel(info, p.Review)
 		if err != nil {
-			return runnerwire.Pipeline{}, fmt.Errorf("review: %w", err)
+			return runnerwire.Pipeline{}, locale.Errorf("review: %w", "review：%w", err)
 		}
 		out.Review = runnerwire.AgentModel{Agent: p.Review.Agent, Model: model}
 	}
 	for i, am := range p.Reviewers {
 		model, err := ResolveAgentModel(info, am)
 		if err != nil {
-			return runnerwire.Pipeline{}, fmt.Errorf("reviewer %d: %w", i+1, err)
+			return runnerwire.Pipeline{}, locale.Errorf("reviewer %d: %w", "第 %d 位 reviewer：%w", i+1, err)
 		}
 		out.Reviewers = append(out.Reviewers, runnerwire.AgentModel{Agent: am.Agent, Model: model})
 	}
@@ -177,12 +177,12 @@ func ResolvePipeline(info *runnerwire.Info, p runnerwire.Pipeline, implementMode
 // returns the rules to store.
 func ValidateRouting(rules []runnerwire.RouteRule) ([]runnerwire.RouteRule, error) {
 	if len(rules) > runnerwire.MaxRouteRules {
-		return nil, invalidf("at most %d rules", runnerwire.MaxRouteRules)
+		return nil, invalidf("at most %d rules", "最多 %d 條規則", runnerwire.MaxRouteRules)
 	}
 	out := make([]runnerwire.RouteRule, 0, len(rules))
 	seen := map[string]bool{}
 	for i, rule := range rules {
-		at := fmt.Sprintf("rule %d", i+1)
+		at := locale.Say("rule %d", "第 %d 條規則", i+1)
 		rule.ID = strings.TrimSpace(rule.ID)
 		if rule.ID == "" {
 			id, err := newID()
@@ -192,49 +192,49 @@ func ValidateRouting(rules []runnerwire.RouteRule) ([]runnerwire.RouteRule, erro
 			rule.ID = id
 		}
 		if !validName(rule.ID) || seen[rule.ID] {
-			return nil, invalidf("%s: id must be unique and at most %d characters", at, MaxRouteName)
+			return nil, invalidf("%s: id must be unique and at most %d characters", "%s：id 須不重複且最多 %d 個字元", at, MaxRouteName)
 		}
 		seen[rule.ID] = true
 		if !routeMatches[rule.Match] {
-			return nil, invalidf("%s: match must be tag, kind, role, project or default", at)
+			return nil, invalidf("%s: match must be tag, kind, role, project or default", "%s：match 須為 tag、kind、role、project 或 default", at)
 		}
 		rule.Project = strings.TrimSpace(rule.Project)
 		if len(rule.Project) > maxRouteProject || !utf8.ValidString(rule.Project) || strings.ContainsAny(rule.Project, "\x00\r\n") {
-			return nil, invalidf("%s: project is not a valid project name", at)
+			return nil, invalidf("%s: project is not a valid project name", "%s：專案不是有效的專案名稱", at)
 		}
 		rule.Value = strings.TrimSpace(rule.Value)
 		switch rule.Match {
 		case runnerwire.RouteTag, runnerwire.RouteKind:
 			if rule.Value == "" || !validName(rule.Value) {
-				return nil, invalidf("%s: a %s rule needs a value of at most %d characters", at, rule.Match, MaxRouteName)
+				return nil, invalidf("%s: a %s rule needs a value of at most %d characters", "%s：%s 規則需要最多 %d 個字元的值", at, rule.Match, MaxRouteName)
 			}
 		case runnerwire.RouteRole:
 			if !engine.ValidRoleID(rule.Value) {
-				return nil, invalidf("%s: a role rule needs a role (planner, qa, tester, executor, reviewer, researcher or custom-role-<id>)", at)
+				return nil, invalidf("%s: a role rule needs a role (planner, qa, tester, executor, reviewer, researcher or custom-role-<id>)", "%s：role 規則需要角色（planner、qa、tester、executor、reviewer、researcher 或 custom-role-<id>）", at)
 			}
 		case runnerwire.RouteProject:
 			if rule.Project == "" {
-				return nil, invalidf("%s: a project rule needs a project", at)
+				return nil, invalidf("%s: a project rule needs a project", "%s：project 規則需要專案", at)
 			}
 			rule.Value = ""
 		default:
 			rule.Value = ""
 		}
 		if !validName(rule.RunnerID) {
-			return nil, invalidf("%s: runnerId is at most %d characters", at, MaxRouteName)
+			return nil, invalidf("%s: runnerId is at most %d characters", "%s：runnerId 最多 %d 個字元", at, MaxRouteName)
 		}
-		if err := ValidateAgentModel(rule.Target, at+" target", true); err != nil {
+		if err := ValidateAgentModel(rule.Target, locale.Say("%s target", "%s 的目標", at), true); err != nil {
 			return nil, err
 		}
 		if err := ValidateChain(rule.Fallbacks, true); err != nil {
-			return nil, fmt.Errorf("%w (%s)", err, at)
+			return nil, locale.Errorf("%w (%s)", "%w（%s）", err, at)
 		}
 		if len(rule.Fallbacks) == 0 {
 			rule.Fallbacks = nil
 		}
 		if rule.Pipeline != nil {
 			if err := ValidatePipeline(*rule.Pipeline, true); err != nil {
-				return nil, fmt.Errorf("%w (%s)", err, at)
+				return nil, locale.Errorf("%w (%s)", "%w（%s）", err, at)
 			}
 		}
 		out = append(out, rule)
@@ -325,11 +325,11 @@ func nodeKind(kind string) string {
 // error is a reason for a person.
 func ResolveAgentModel(info *runnerwire.Info, am runnerwire.AgentModel) (string, error) {
 	if info == nil {
-		return "", fmt.Errorf("the runner has not connected yet, so its agents are unknown")
+		return "", locale.Errorf("the runner has not connected yet, so its agents are unknown", "runner 還沒連線，所以不知道它有哪些 agent")
 	}
 	i := slices.IndexFunc(info.Agents, func(agent runnerwire.Agent) bool { return agent.Kind == am.Agent })
 	if i < 0 || !info.Agents[i].Installed {
-		return "", fmt.Errorf("agent %q is not installed on the runner", am.Agent)
+		return "", locale.Errorf("agent %q is not installed on the runner", "runner 上沒有安裝 agent「%s」", am.Agent)
 	}
 	agent := info.Agents[i]
 	if am.Model == "" {
@@ -341,7 +341,7 @@ func ResolveAgentModel(info *runnerwire.Info, am runnerwire.AgentModel) (string,
 		return "default", nil
 	}
 	if !slices.ContainsFunc(agent.Models, func(m runnerwire.Model) bool { return m.ID == am.Model }) {
-		return "", fmt.Errorf("model %q is not offered by %s on the runner", am.Model, agent.Kind)
+		return "", locale.Errorf("model %q is not offered by %s on the runner", "runner 上的 %[2]s 沒有提供 model「%[1]s」", am.Model, agent.Kind)
 	}
 	return am.Model, nil
 }
@@ -373,7 +373,7 @@ func (s *Store) Routing(ctx context.Context, ownerID string) ([]runnerwire.Route
 // stored (with generated IDs).
 func (s *Store) SetRouting(ctx context.Context, ownerID string, rules []runnerwire.RouteRule) ([]runnerwire.RouteRule, error) {
 	if ownerID == "" {
-		return nil, invalidf("missing owner")
+		return nil, invalidf("missing owner", "缺少擁有者")
 	}
 	clean, err := ValidateRouting(rules)
 	if err != nil {

@@ -14,10 +14,10 @@ package runs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/safego"
 )
@@ -25,11 +25,11 @@ import (
 var (
 	// ErrTermGone is an interactive run whose terminal is no longer kept: it
 	// ended, and its output expired (or the hub restarted since).
-	ErrTermGone = errors.New("the run's terminal output is no longer kept")
+	ErrTermGone = locale.Errorf("the run's terminal output is no longer kept", "這次執行的終端機輸出已不再保留")
 	// ErrTermBusy is a terminal with as many viewers as it takes.
-	ErrTermBusy = errors.New("too many viewers on this terminal")
+	ErrTermBusy = locale.Errorf("too many viewers on this terminal", "這個終端機的觀看者太多")
 	// ErrTermClosed is a viewer the hub let go; see TermViewer.Reason.
-	ErrTermClosed = errors.New("terminal viewer closed")
+	ErrTermClosed = locale.Errorf("terminal viewer closed", "終端機觀看已關閉")
 )
 
 // Terminal limits.

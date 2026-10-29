@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // Agent roles: what an agent run may do on the board (spec: agent roles and
@@ -356,7 +357,7 @@ func ValidateAgentRoleDefs(defs []AgentRoleDef) error {
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("agent_roles: %s", strings.Join(problems, "; "))
+	return locale.Errorf("agent_roles: %s", "agent_roles：%s", strings.Join(problems, "; "))
 }
 
 // AgentRoleDefProblems lists each rule an agent_roles list breaks.

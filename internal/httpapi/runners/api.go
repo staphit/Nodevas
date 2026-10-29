@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/buildinfo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -126,7 +127,7 @@ func (a *API) create(c *gin.Context) {
 	// A runner acts as its owner; an agent minting one would hand itself a
 	// credential that outlives its session.
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot create runners"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot create runners", "agent 不能建立 runner"), nil)
 		return
 	}
 	runner, token, err := a.reg.Create(c.Request.Context(), actor, body.Name)
@@ -191,7 +192,7 @@ func readEnvelope(ctx context.Context, conn *websocket.Conn, timeout time.Durati
 		return runnerwire.Envelope{}, err
 	}
 	if kind != websocket.MessageText {
-		return runnerwire.Envelope{}, errors.New("binary message")
+		return runnerwire.Envelope{}, locale.Errorf("binary message", "二進位訊息")
 	}
 	var env runnerwire.Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -311,7 +312,7 @@ func (a *API) connect(c *gin.Context) {
 }
 
 // errMalformed is a run message missing the part its type requires.
-var errMalformed = errors.New("malformed run message")
+var errMalformed = locale.Errorf("malformed run message", "執行訊息格式錯誤")
 
 // runMessage applies one run message. The runner's ID comes from its
 // authenticated socket, never from the message: the dispatcher refuses any

@@ -5,13 +5,13 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 // ExportNodes snapshots a node selection so it can be recreated elsewhere.
@@ -73,7 +73,7 @@ func (s *Store) ExportNodes(ids []string, forMove bool) (*nodeTransferPayload, e
 	}
 	for _, id := range unique {
 		if !found[id] {
-			return nil, fmt.Errorf("node %q not found", id)
+			return nil, locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 	}
 	if forMove {

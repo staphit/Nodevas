@@ -11,6 +11,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 	"nodevas/internal/store"
@@ -33,7 +34,7 @@ func (a *API) submitVerdict(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.RunID == "" {
 		httpx.Coded(c, http.StatusForbidden, "VERDICT_NOT_A_RUN",
-			errors.New("only a review or QA run submits a verdict"), nil)
+			locale.Errorf("only a review or QA run submits a verdict", "只有審查或 QA 執行可以提交判定"), nil)
 		return
 	}
 	ctx := c.Request.Context()
@@ -48,7 +49,7 @@ func (a *API) submitVerdict(c *gin.Context) {
 		return
 	}
 	if rec.Status != runnerwire.RunRunning {
-		httpx.Coded(c, http.StatusConflict, "RUN_NOT_RUNNING", errors.New("this run is not running"), nil)
+		httpx.Coded(c, http.StatusConflict, "RUN_NOT_RUNNING", locale.Errorf("this run is not running", "這次執行沒有在進行"), nil)
 		return
 	}
 	var body verdictBody
@@ -101,7 +102,7 @@ func (a *API) verdictRole(rec runs.Record) string {
 // one), with whether later evidence contradicts it.
 func (a *API) verdicts(c *gin.Context) {
 	if auth.ActorFrom(c.Request).IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot read verdicts"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot read verdicts", "agent 不能讀取判定"), nil)
 		return
 	}
 	r, ok := a.visible(c)

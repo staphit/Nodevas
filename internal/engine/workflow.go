@@ -1,8 +1,9 @@
 package engine
 
 import (
-	"fmt"
 	"strings"
+
+	"nodevas/internal/locale"
 )
 
 // Workflow stages: which stages of the task and goal flows a project runs.
@@ -166,37 +167,37 @@ func ValidateWorkflow(w *Workflow) error {
 	if w.Preset != PresetCustom {
 		stages, ok := Presets[w.Preset]
 		if !ok {
-			return fmt.Errorf("workflow: unknown preset %q", w.Preset)
+			return locale.Errorf("workflow: unknown preset %q", "工作流程：不明的預設「%s」", w.Preset)
 		}
 		if stages != w.Stages {
-			return fmt.Errorf("workflow: stages do not match preset %q (use custom)", w.Preset)
+			return locale.Errorf("workflow: stages do not match preset %q (use custom)", "工作流程：階段與預設「%s」不符（請用 custom）", w.Preset)
 		}
 	}
 	if w.ReviewerSkipBelowLines < 0 || w.ReviewerSkipBelowLines > MaxReviewerSkipBelowLines {
-		return fmt.Errorf("workflow: reviewer_skip_below_lines must be 0..%d", MaxReviewerSkipBelowLines)
+		return locale.Errorf("workflow: reviewer_skip_below_lines must be 0..%d", "工作流程：reviewer_skip_below_lines 須介於 0..%d", MaxReviewerSkipBelowLines)
 	}
 	if w.MaxQARounds < 0 || w.MaxQARounds > MaxQARoundsLimit {
-		return fmt.Errorf("workflow: max_qa_rounds must be 1..%d", MaxQARoundsLimit)
+		return locale.Errorf("workflow: max_qa_rounds must be 1..%d", "工作流程：max_qa_rounds 須介於 1..%d", MaxQARoundsLimit)
 	}
 	if w.MaxTesterRounds < 0 || w.MaxTesterRounds > MaxTesterRoundsLimit {
-		return fmt.Errorf("workflow: max_tester_rounds must be 1..%d", MaxTesterRoundsLimit)
+		return locale.Errorf("workflow: max_tester_rounds must be 1..%d", "工作流程：max_tester_rounds 須介於 1..%d", MaxTesterRoundsLimit)
 	}
 	if w.MaxGreenTries < 0 || w.MaxGreenTries > MaxGreenTriesLimit {
-		return fmt.Errorf("workflow: max_green_tries must be 1..%d", MaxGreenTriesLimit)
+		return locale.Errorf("workflow: max_green_tries must be 1..%d", "工作流程：max_green_tries 須介於 1..%d", MaxGreenTriesLimit)
 	}
 	if len(w.TestGlobs) > MaxTestGlobs {
-		return fmt.Errorf("workflow: test_globs holds at most %d patterns", MaxTestGlobs)
+		return locale.Errorf("workflow: test_globs holds at most %d patterns", "工作流程：test_globs 最多 %d 個樣式", MaxTestGlobs)
 	}
 	for _, glob := range w.TestGlobs {
 		if strings.TrimSpace(glob) == "" || len(glob) > 200 || strings.HasPrefix(glob, "/") ||
 			strings.Contains(glob, `\`) || strings.Contains(glob, "..") || strings.Contains(glob, ":") {
-			return fmt.Errorf("workflow: test_globs has an invalid pattern %q (relative, slash-separated)", glob)
+			return locale.Errorf("workflow: test_globs has an invalid pattern %q (relative, slash-separated)", "工作流程：test_globs 有無效的樣式「%s」（須為相對路徑、以斜線分隔）", glob)
 		}
 	}
 	switch w.Judge {
 	case "", JudgeChecklist:
 	default:
-		return fmt.Errorf("workflow: unknown judge %q", w.Judge)
+		return locale.Errorf("workflow: unknown judge %q", "工作流程：不明的評審方式「%s」", w.Judge)
 	}
 	return nil
 }
@@ -215,10 +216,10 @@ func ValidateGraphWorkflows(g *Graph) error {
 			continue
 		}
 		if g.TypeOf(n).AgentMode != AgentAutopilot {
-			return fmt.Errorf("node %q: only an Autopilot type (a Goal) can override workflow stages", n.ID)
+			return locale.Errorf("node %q: only an Autopilot type (a Goal) can override workflow stages", "節點「%s」：只有 Autopilot 類型（目標）可以覆寫工作流程階段", n.ID)
 		}
 		if err := ValidateWorkflow(n.Workflow); err != nil {
-			return fmt.Errorf("node %q: %w", n.ID, err)
+			return locale.Errorf("node %q: %w", "節點「%s」：%w", n.ID, err)
 		}
 	}
 	return nil

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -20,18 +21,24 @@ import (
 
 // ErrNoLLMRunner: the person has no online runner that answers copilot model
 // calls.
-var ErrNoLLMRunner = errors.New("your runner is offline or has no copilot key: start `nodevas runner` on your PC " +
-	"(set one up with `nodevas runner set copilotProvider anthropic` and `nodevas runner copilot-key`)")
+var ErrNoLLMRunner = locale.Errorf("your runner is offline or has no copilot key: start `nodevas runner` on your PC "+
+	"(set one up with `nodevas runner set copilotProvider anthropic` and `nodevas runner copilot-key`)",
+	"你的 runner 離線或沒有 copilot 金鑰：請在你的電腦上啟動 `nodevas runner`"+
+		"（用 `nodevas runner set copilotProvider anthropic` 與 `nodevas runner copilot-key` 設定）")
 
 // ErrNoAdvisorRunner: the person has no online runner with an autopilot
 // advisor model (W7).
-var ErrNoAdvisorRunner = errors.New("no online runner of yours has an advisor model: set one with " +
-	"`nodevas runner set advisorProvider anthropic` (and advisorModel), then restart the runner")
+var ErrNoAdvisorRunner = locale.Errorf("no online runner of yours has an advisor model: set one with "+
+	"`nodevas runner set advisorProvider anthropic` (and advisorModel), then restart the runner",
+	"你在線上的 runner 都沒有顧問模型：請用 `nodevas runner set advisorProvider anthropic`"+
+		"（以及 advisorModel）設定，再重新啟動 runner")
 
 // ErrNoDecideRunner: the person has no online runner with a System One
 // advisor (W7).
-var ErrNoDecideRunner = errors.New("no online runner of yours has a System One advisor: run Laya (`laya-serve`) " +
-	"or use Jev, then `nodevas runner set advisorProvider systemone` and restart the runner")
+var ErrNoDecideRunner = locale.Errorf("no online runner of yours has a System One advisor: run Laya (`laya-serve`) "+
+	"or use Jev, then `nodevas runner set advisorProvider systemone` and restart the runner",
+	"你在線上的 runner 都沒有 System One 顧問：請執行 Laya（`laya-serve`）或使用 Jev，"+
+		"再執行 `nodevas runner set advisorProvider systemone` 並重新啟動 runner")
 
 // DefaultDecideTimeout bounds one System One decision end to end: the runner
 // gives the endpoint 10s.
@@ -39,7 +46,7 @@ const DefaultDecideTimeout = 15 * time.Second
 
 // ErrLLMRunnerGone: the runner a call was sent to disconnected before it
 // answered.
-var ErrLLMRunnerGone = errors.New("your runner disconnected before the model answered")
+var ErrLLMRunnerGone = locale.Errorf("your runner disconnected before the model answered", "你的 runner 在模型回答前就斷線了")
 
 // DefaultLLMTimeout bounds one model call end to end.
 const DefaultLLMTimeout = 10 * time.Minute
@@ -115,7 +122,7 @@ func (l *LLMRelay) TargetFor(ctx context.Context, accountID, purpose string) (ru
 				slices.Contains(info.Capabilities, runnerwire.CapDecide)
 		}
 	default:
-		return runnerwire.Runner{}, fmt.Errorf("%w: unknown model call purpose %q", ErrInvalid, purpose)
+		return runnerwire.Runner{}, locale.Errorf("%w: unknown model call purpose %q", "%w：不明的模型呼叫用途「%s」", ErrInvalid, purpose)
 	}
 	if accountID == "" {
 		return runnerwire.Runner{}, none
@@ -168,7 +175,7 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 	l.mu.Lock()
 	if _, taken := l.calls[req.ID]; taken {
 		l.mu.Unlock()
-		return runnerwire.LLMDone{}, fmt.Errorf("%w: model call id %q is in use", ErrInvalid, req.ID)
+		return runnerwire.LLMDone{}, locale.Errorf("%w: model call id %q is in use", "%w：模型呼叫代號「%s」已在使用中", ErrInvalid, req.ID)
 	}
 	l.calls[req.ID] = call
 	l.mu.Unlock()
@@ -185,7 +192,7 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 			}
 			return runnerwire.LLMDone{}, ErrNoLLMRunner
 		}
-		return runnerwire.LLMDone{}, fmt.Errorf("sending the model call to your runner: %w", err)
+		return runnerwire.LLMDone{}, locale.Errorf("sending the model call to your runner: %w", "傳送模型呼叫到你的 runner：%w", err)
 	}
 	cancelRemote := func() {
 		_ = l.reg.Send(runnerID, runnerwire.Envelope{Type: runnerwire.TypeLLMCancel, LLMID: req.ID})
@@ -210,7 +217,7 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 			return runnerwire.LLMDone{}, ctx.Err()
 		case <-deadline.C:
 			cancelRemote()
-			return runnerwire.LLMDone{}, fmt.Errorf("your runner did not answer within %s", timeout)
+			return runnerwire.LLMDone{}, locale.Errorf("your runner did not answer within %s", "你的 runner 沒有在 %s 內回應", timeout)
 		case <-offline.C:
 			if !l.reg.Online(runnerID) {
 				return runnerwire.LLMDone{}, ErrLLMRunnerGone
@@ -228,7 +235,7 @@ func (l *LLMRelay) Call(ctx context.Context, runnerID string, req runnerwire.LLM
 			}
 			if done != nil {
 				if done.Error != "" {
-					return *done, fmt.Errorf("your runner: %s", done.Error)
+					return *done, locale.Errorf("your runner: %s", "你的 runner：%s", done.Error)
 				}
 				return *done, nil
 			}
@@ -246,7 +253,7 @@ const decidePurpose = "decide"
 // rather than asks somewhere the hub did not expect.
 func (l *LLMRelay) Decide(ctx context.Context, accountID string, req runnerwire.DecisionRequest) (runnerwire.DecisionResponse, error) {
 	if len(req.State) > runnerwire.MaxDecideStateBytes || len(req.Questions) > runnerwire.MaxDecideQuestionsBytes {
-		return runnerwire.DecisionResponse{}, fmt.Errorf("%w: the decision is too large", ErrInvalid)
+		return runnerwire.DecisionResponse{}, locale.Errorf("%w: the decision is too large", "%w：決策內容太大", ErrInvalid)
 	}
 	runner, err := l.TargetFor(ctx, accountID, decidePurpose)
 	if err != nil {
@@ -274,7 +281,7 @@ func (l *LLMRelay) Decide(ctx context.Context, accountID string, req runnerwire.
 		if errors.Is(err, ErrOffline) {
 			return runnerwire.DecisionResponse{}, ErrNoDecideRunner
 		}
-		return runnerwire.DecisionResponse{}, fmt.Errorf("sending the decision to your runner: %w", err)
+		return runnerwire.DecisionResponse{}, locale.Errorf("sending the decision to your runner: %w", "傳送決策到你的 runner：%w", err)
 	}
 	timeout := l.Timeout
 	if timeout <= 0 || timeout > DefaultDecideTimeout {
@@ -287,7 +294,7 @@ func (l *LLMRelay) Decide(ctx context.Context, accountID string, req runnerwire.
 		case <-ctx.Done():
 			return runnerwire.DecisionResponse{}, ctx.Err()
 		case <-deadline.C:
-			return runnerwire.DecisionResponse{}, fmt.Errorf("your runner's System One advisor did not answer within %s", timeout)
+			return runnerwire.DecisionResponse{}, locale.Errorf("your runner's System One advisor did not answer within %s", "你的 runner 的 System One 顧問沒有在 %s 內回應", timeout)
 		case <-call.signal:
 			call.mu.Lock()
 			done := call.decided
@@ -296,7 +303,7 @@ func (l *LLMRelay) Decide(ctx context.Context, accountID string, req runnerwire.
 				continue
 			}
 			if done.Error != "" || done.Response == nil {
-				return runnerwire.DecisionResponse{}, fmt.Errorf("your runner: %s", firstNonEmpty(done.Error, "no decision"))
+				return runnerwire.DecisionResponse{}, locale.Errorf("your runner: %s", "你的 runner：%s", firstNonEmpty(done.Error, "no decision"))
 			}
 			return *done.Response, nil
 		}

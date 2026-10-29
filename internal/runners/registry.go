@@ -26,17 +26,18 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
 var (
 	// ErrNotFound covers a runner that does not exist, is revoked, or is not
 	// the caller's to see: a member probing IDs learns nothing either way.
-	ErrNotFound = errors.New("runner not found")
+	ErrNotFound = locale.Errorf("runner not found", "找不到 runner")
 	// ErrInvalid is a name or hello that breaks the limits.
-	ErrInvalid = errors.New("invalid runner request")
+	ErrInvalid = locale.Errorf("invalid runner request", "runner 請求無效")
 	// ErrUnauthenticated is a missing, malformed, unknown or revoked token.
-	ErrUnauthenticated = errors.New("runner token required")
+	ErrUnauthenticated = locale.Errorf("runner token required", "需要 runner 權杖")
 )
 
 // MaxNameRunes bounds a runner's display name.
@@ -62,7 +63,7 @@ type Conn interface {
 }
 
 // ErrOffline is Send to a runner with no live connection.
-var ErrOffline = errors.New("runner is offline")
+var ErrOffline = locale.Errorf("runner is offline", "runner 離線中")
 
 // Registry stores runners and their tokens and tracks which are connected.
 type Registry struct {
@@ -118,11 +119,11 @@ func newID() (string, error) {
 func CleanName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > MaxNameRunes {
-		return "", fmt.Errorf("%w: name must be 1-%d characters", ErrInvalid, MaxNameRunes)
+		return "", locale.Errorf("%w: name must be 1-%d characters", "%w：名稱須為 1 到 %d 個字元", ErrInvalid, MaxNameRunes)
 	}
 	for _, c := range name {
 		if !unicode.IsPrint(c) {
-			return "", fmt.Errorf("%w: name must be printable text", ErrInvalid)
+			return "", locale.Errorf("%w: name must be printable text", "%w：名稱須為可列印的文字", ErrInvalid)
 		}
 	}
 	return name, nil
@@ -136,7 +137,7 @@ func (r *Registry) Create(ctx context.Context, owner identity.Actor, name string
 		return runnerwire.Runner{}, "", err
 	}
 	if strings.TrimSpace(owner.ID) == "" {
-		return runnerwire.Runner{}, "", fmt.Errorf("%w: no owner", ErrInvalid)
+		return runnerwire.Runner{}, "", locale.Errorf("%w: no owner", "%w：沒有擁有者", ErrInvalid)
 	}
 	id, err := newID()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // Limits on one create_subgraph call. A planner's breakdown is a handful to a
@@ -80,6 +81,8 @@ type SubgraphResult struct {
 // offending part, e.g. "nodes[2].dependsOn[0]".
 type ErrInvalidSubgraph struct {
 	Field, Msg string
+	// said is Msg in both languages.
+	said error
 }
 
 func (e *ErrInvalidSubgraph) Error() string {
@@ -89,19 +92,23 @@ func (e *ErrInvalidSubgraph) Error() string {
 	return e.Field + ": " + e.Msg
 }
 
+// Unwrap is the refusal in both languages, for the reader of a response.
+func (e *ErrInvalidSubgraph) Unwrap() error { return e.said }
+
 // ErrSubgraphTooLarge is a request over the size limits.
 type ErrSubgraphTooLarge struct{ Msg string }
 
 func (e *ErrSubgraphTooLarge) Error() string { return e.Msg }
 
-func invalidSubgraph(field, format string, args ...any) error {
-	return &ErrInvalidSubgraph{Field: field, Msg: fmt.Sprintf(format, args...)}
+func invalidSubgraph(field, english, chinese string, args ...any) error {
+	said := locale.Errorf(english, chinese, args...)
+	return &ErrInvalidSubgraph{Field: field, Msg: said.Error(), said: said}
 }
 
 // checkSubgraphShape is everything about a request that needs no graph.
 func checkSubgraphShape(spec SubgraphSpec) error {
 	if len(spec.Nodes) == 0 {
-		return invalidSubgraph("nodes", "at least one node is required")
+		return invalidSubgraph("nodes", "at least one node is required", "至少需要一個節點")
 	}
 	if len(spec.Nodes) > maxSubgraphNodes {
 		return &ErrSubgraphTooLarge{Msg: fmt.Sprintf("too many nodes in one call (maximum %d)", maxSubgraphNodes)}
@@ -114,14 +121,14 @@ func checkSubgraphShape(spec SubgraphSpec) error {
 	for i, node := range spec.Nodes {
 		field := fmt.Sprintf("nodes[%d]", i)
 		if !subgraphKeyPattern.MatchString(node.Key) {
-			return invalidSubgraph(field+".key", "key %q must be 1-64 letters, digits, '_', '.' or '-'", node.Key)
+			return invalidSubgraph(field+".key", "key %q must be 1-64 letters, digits, '_', '.' or '-'", "key「%s」須為 1 到 64 個字母、數字、'_'、'.' 或 '-'", node.Key)
 		}
 		if keys[node.Key] {
-			return invalidSubgraph(field+".key", "duplicate key %q", node.Key)
+			return invalidSubgraph(field+".key", "duplicate key %q", "重複的 key「%s」", node.Key)
 		}
 		keys[node.Key] = true
 		if strings.TrimSpace(node.Title) == "" {
-			return invalidSubgraph(field+".title", "title is required")
+			return invalidSubgraph(field+".title", "title is required", "需要標題")
 		}
 		if len(node.Body) > maxSubgraphBodyBytes {
 			return &ErrSubgraphTooLarge{Msg: fmt.Sprintf("%s.body is over %d KiB", field, maxSubgraphBodyBytes>>10)}
@@ -168,11 +175,11 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	for i, in := range spec.Nodes {
 		field := fmt.Sprintf("nodes[%d]", i)
 		if existing[in.Key] {
-			return zero, invalidSubgraph(field+".key", "key %q is also an existing node id", in.Key)
+			return zero, invalidSubgraph(field+".key", "key %q is also an existing node id", "key「%s」也是既有的節點代號", in.Key)
 		}
 		nf, err := engine.ParseNodeFile([]byte(in.Body))
 		if err != nil {
-			return zero, invalidSubgraph(field+".body", "%v", err)
+			return zero, invalidSubgraph(field+".body", "%v", "%v", err)
 		}
 		n := &engine.Node{
 			Title: strings.TrimSpace(in.Title), Kind: in.Kind, Priority: in.Priority,
@@ -186,7 +193,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		}
 		if !g.KnownNodeKind(n.Kind) {
 			err := unknownNodeTypeError("", n.Kind).(*ErrNodeTypeDenied)
-			err.Msg = field + ".kind: " + err.Msg
+			err.Msg = field + ".kind: " + err.Error()
 			return zero, err
 		}
 		if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
@@ -199,7 +206,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		}
 		if len(in.Acceptance) > 0 {
 			if len(in.Acceptance) > engine.MaxAcceptanceItems {
-				return zero, invalidSubgraph(field+".acceptance", "at most %d criteria", engine.MaxAcceptanceItems)
+				return zero, invalidSubgraph(field+".acceptance", "at most %d criteria", "最多 %d 條條件", engine.MaxAcceptanceItems)
 			}
 			acceptance := &engine.Acceptance{By: acceptanceAttribution(actor)}
 			for _, text := range in.Acceptance {
@@ -233,7 +240,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		if existing[ref] {
 			return ref, nil
 		}
-		return "", invalidSubgraph(field, "%q is neither a key of this call nor an existing node id", ref)
+		return "", invalidSubgraph(field, "%q is neither a key of this call nor an existing node id", "「%s」既不是這次呼叫的 key，也不是既有的節點代號", ref)
 	}
 
 	// Errors only the result can show, measured against the board as it is,
@@ -257,7 +264,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 			if errors.As(err, &writeDenied) || errors.As(err, &typeDenied) || roleDeniedAs(err) {
 				return err
 			}
-			return invalidSubgraph(field, "%v", err)
+			return invalidSubgraph(field, "%v", "%v", err)
 		}
 		return nil
 	}
@@ -293,7 +300,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		}
 		if !existing[edge.To] {
 			return zero, invalidSubgraph(field+".to",
-				"%q is not an existing node id; wire new nodes to each other with dependsOn", edge.To)
+				"%q is not an existing node id; wire new nodes to each other with dependsOn", "「%s」不是既有的節點代號；新節點之間請用 dependsOn 連接", edge.To)
 		}
 		if err := apply(GraphOp{Kind: "add-edge", From: from, To: edge.To}, field); err != nil {
 			return zero, err
@@ -308,16 +315,16 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	for i, n := range nodes {
 		n.WriteAccess = access[i]
 		if err := validateNodeForStorage(n, userIDs); err != nil {
-			return zero, invalidSubgraph(fmt.Sprintf("nodes[%d] (key %s)", i, spec.Nodes[i].Key), "%v", err)
+			return zero, invalidSubgraph(fmt.Sprintf("nodes[%d] (key %s)", i, spec.Nodes[i].Key), "%v", "%v", err)
 		}
 	}
 	if err := ValidateGraphForStorage(g); err != nil {
-		return zero, invalidSubgraph("", "%v", err)
+		return zero, invalidSubgraph("", "%v", "%v", err)
 	}
 	after := engine.Validate(g)
 	for _, issue := range after {
 		if issue.Severity == "error" && !before[issue] {
-			return zero, invalidSubgraph("", "%s", subgraphIssueText(issue))
+			return zero, invalidSubgraph("", "%s", "%s", subgraphIssueText(issue))
 		}
 	}
 
@@ -330,7 +337,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 	for i, n := range nodes {
 		created[n.ID] = true
 		if _, err := s.statPath(s.NodePath(n.ID)); err == nil {
-			return zero, fmt.Errorf("node file %q already exists", n.ID)
+			return zero, locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", n.ID)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return zero, err
 		}
@@ -349,7 +356,7 @@ func (s *Store) CreateSubgraph(actor identity.Actor, spec SubgraphSpec) (Subgrap
 		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {
-			return zero, fmt.Errorf("sync node %s: %w", n.ID, err)
+			return zero, locale.Errorf("sync node %s: %w", "同步節點 %s：%w", n.ID, err)
 		}
 		if update != nil {
 			updates = append(updates, *update)

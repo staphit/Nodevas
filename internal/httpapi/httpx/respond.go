@@ -16,14 +16,14 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"nodevas/internal/locale"
 	"nodevas/internal/store"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // MaxRequestBody caps any JSON request body.
@@ -101,14 +101,14 @@ func DecodeJSONLimit(c *gin.Context, dst any, limit int64) bool {
 	if err := decoder.Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			Err(c, http.StatusRequestEntityTooLarge, errors.New("request body is too large"))
+			Err(c, http.StatusRequestEntityTooLarge, locale.Errorf("request body is too large", "請求內容太大"))
 		} else {
-			Err(c, http.StatusBadRequest, fmt.Errorf("invalid JSON body: %w", err))
+			Err(c, http.StatusBadRequest, locale.Errorf("invalid JSON body: %w", "JSON 內容無效：%w", err))
 		}
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		Err(c, http.StatusBadRequest, errors.New("request body must contain one JSON value"))
+		Err(c, http.StatusBadRequest, locale.Errorf("request body must contain one JSON value", "請求內容只能有一個 JSON 值"))
 		return false
 	}
 	return true

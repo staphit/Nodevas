@@ -6,8 +6,6 @@
 package server
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -18,6 +16,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -94,7 +93,7 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 	capability, ok := roleRouteCapability(r.Method, r.URL.Path)
 	if !ok {
 		httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
-			fmt.Errorf("role %s may not call %s %s", actor.AgentRole, r.Method, r.URL.Path), map[string]any{"role": actor.AgentRole})
+			locale.Errorf("role %s may not call %s %s", "角色 %s 不能呼叫 %s %s", actor.AgentRole, r.Method, r.URL.Path), map[string]any{"role": actor.AgentRole})
 		return
 	}
 	st := httpx.StoreFor(r, s.pm)
@@ -108,12 +107,12 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 		own, err := s.pm.StoreFor(proxied.runProject)
 		if err != nil || st == nil {
 			httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
-				fmt.Errorf("the run's project %q no longer exists", proxied.runProject), map[string]any{"role": actor.AgentRole})
+				locale.Errorf("the run's project %q no longer exists", "這次執行的專案「%s」已不存在", proxied.runProject), map[string]any{"role": actor.AgentRole})
 			return
 		}
 		if own.Root() != st.Root() {
 			httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
-				fmt.Errorf("role %s works only in its run's project %q", actor.AgentRole, proxied.runProject), map[string]any{"role": actor.AgentRole})
+				locale.Errorf("role %s works only in its run's project %q", "角色 %s 只能在其執行的專案「%s」中工作", actor.AgentRole, proxied.runProject), map[string]any{"role": actor.AgentRole})
 			return
 		}
 	}
@@ -129,7 +128,7 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 	role, found := g.RoleOf(actor.AgentRole)
 	if !found {
 		httpx.Coded(c, http.StatusForbidden, store.CodeUnknownRole,
-			fmt.Errorf("unknown agent role %q: this project does not define it", actor.AgentRole), map[string]any{"role": actor.AgentRole})
+			locale.Errorf("unknown agent role %q: this project does not define it", "不明的 agent 角色「%s」：這個專案沒有定義它", actor.AgentRole), map[string]any{"role": actor.AgentRole})
 		return
 	}
 	// The executor's body writes (its scene or event) and graph ops are
@@ -137,7 +136,7 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 	bodyByStore := capability == string(engine.CapBody) && role.Slot() == engine.RoleExecutor
 	if capability != roleCapOps && !bodyByStore && !role.HasCap(engine.Capability(capability)) {
 		httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
-			fmt.Errorf("role %s may not call %s %s (needs %s)", role.ID, r.Method, r.URL.Path, capability),
+			locale.Errorf("role %s may not call %s %s (needs %s)", "角色 %s 不能呼叫 %s %s（需要 %s）", role.ID, r.Method, r.URL.Path, capability),
 			map[string]any{"role": role.ID})
 		return
 	}
@@ -149,4 +148,4 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 }
 
 // errRunEnded refuses a request from a run that has finished.
-var errRunEnded = errors.New("this run has ended; its agent can no longer act on the board")
+var errRunEnded = locale.Errorf("this run has ended; its agent can no longer act on the board", "這次執行已結束；它的 agent 不能再操作看板")

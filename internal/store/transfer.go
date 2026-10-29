@@ -89,16 +89,16 @@ type nodeTransferResult struct {
 // uniqueNodeIDs validates a selection and drops repeats, keeping order.
 func uniqueNodeIDs(ids []string) ([]string, error) {
 	if len(ids) == 0 {
-		return nil, errors.New("no node ids given")
+		return nil, locale.Errorf("no node ids given", "沒有提供節點代號")
 	}
 	if len(ids) > maxTransferNodes {
-		return nil, fmt.Errorf("too many nodes in one transfer (maximum %d)", maxTransferNodes)
+		return nil, locale.Errorf("too many nodes in one transfer (maximum %d)", "單次轉移的節點太多（最多 %d 個）", maxTransferNodes)
 	}
 	seen := make(map[string]bool, len(ids))
 	unique := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if !engine.ValidNodeID(id) {
-			return nil, fmt.Errorf("invalid node id %q", id)
+			return nil, locale.Errorf("invalid node id %q", "節點代號「%s」無效", id)
 		}
 		if seen[id] {
 			continue
@@ -136,7 +136,7 @@ func (s *Store) readDirFiles(dir string) (map[string][]byte, error) {
 			continue
 		}
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
-			return nil, fmt.Errorf("unsafe attachment entry %q", entry.Name())
+			return nil, locale.Errorf("unsafe attachment entry %q", "附件項目「%s」不安全", entry.Name())
 		}
 		data, err := s.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Dir is the git directory inside a project folder.
@@ -48,7 +50,7 @@ const MinVersion = "2.32"
 
 // ErrUnavailable is returned when no git of MinVersion or newer is
 // installed.
-var ErrUnavailable = errors.New("git " + MinVersion + " or newer is not installed on this server")
+var ErrUnavailable = locale.Errorf("git %s or newer is not installed on this server", "這個伺服器沒有安裝 git %s 以上版本", MinVersion)
 
 // Person is a commit's author or committer.
 type Person struct {
@@ -343,7 +345,7 @@ func ValidSHA(s string) bool { return shaPattern.MatchString(s) }
 // Show is path's content at commit sha.
 func (r *Repo) Show(ctx context.Context, sha, path string) ([]byte, error) {
 	if !ValidSHA(sha) {
-		return nil, fmt.Errorf("invalid commit %q", sha)
+		return nil, locale.Errorf("invalid commit %q", "提交「%s」無效", sha)
 	}
 	return r.run(ctx, nil, nil, "show", sha+":"+filepath.ToSlash(path))
 }

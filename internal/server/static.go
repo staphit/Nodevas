@@ -3,7 +3,6 @@
 package server
 
 import (
-	"errors"
 	"io/fs"
 	"log"
 	"net/http"
@@ -13,13 +12,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // notFound answers unmatched routes: JSON under /api/, the SPA everywhere else
 // so client-side routes still load index.html.
 func (s *Server) notFound(c *gin.Context) {
 	if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-		httpx.Err(c, http.StatusNotFound, errors.New("api endpoint not found"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("api endpoint not found", "找不到 API 端點"))
 		return
 	}
 	s.serveStatic(c)

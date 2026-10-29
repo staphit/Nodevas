@@ -7,7 +7,6 @@
 package explorer
 
 import (
-	"errors"
 	"net/http"
 	"path/filepath"
 
@@ -18,6 +17,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runners"
 	"nodevas/internal/runs"
@@ -45,7 +45,7 @@ func New(o Options) *API { return &API{o: o} }
 func person(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("the Explorer is for people, not agents"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("the Explorer is for people, not agents", "Explorer 是給人用的，不是給 agent"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -56,12 +56,12 @@ func person(c *gin.Context) (identity.Actor, bool) {
 func (a *API) project(c *gin.Context) (*store.Store, string, bool) {
 	st := httpx.StoreFor(c.Request, a.o.PM)
 	if a.o.PM == nil || st == nil {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return nil, "", false
 	}
 	rel, err := filepath.Rel(a.o.PM.Workspace(), st.Root())
 	if err != nil {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return nil, "", false
 	}
 	return st, filepath.ToSlash(rel), true

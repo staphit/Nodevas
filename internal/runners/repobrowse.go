@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -17,11 +18,11 @@ import (
 
 // Repo relay refusals.
 var (
-	ErrRepoNotFound   = errors.New("runner or repo not found")
-	ErrRunnerOffline  = errors.New("the runner is offline")
-	ErrRepoBrowseOff  = errors.New("repo browsing is off on this runner")
-	ErrRepoTimeout    = errors.New("the runner did not answer in time")
-	ErrRepoRunnerGone = errors.New("the runner disconnected before it answered")
+	ErrRepoNotFound   = locale.Errorf("runner or repo not found", "找不到 runner 或 repo")
+	ErrRunnerOffline  = locale.Errorf("the runner is offline", "runner 離線中")
+	ErrRepoBrowseOff  = locale.Errorf("repo browsing is off on this runner", "這個 runner 關閉了 repo 瀏覽")
+	ErrRepoTimeout    = locale.Errorf("the runner did not answer in time", "runner 沒有及時回應")
+	ErrRepoRunnerGone = locale.Errorf("the runner disconnected before it answered", "runner 在回應前就斷線了")
 )
 
 // DefaultRepoTimeout bounds one browse call.

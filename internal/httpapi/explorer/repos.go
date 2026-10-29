@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
@@ -74,18 +75,18 @@ func (a *API) browse(c *gin.Context, req runnerwire.RepoRequest, answer func(run
 		return
 	}
 	if a.o.Repo == nil {
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("runner or repo not found"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("runner or repo not found", "找不到 runner 或 repo"), nil)
 		return
 	}
 	req.RepoID = c.Param("repo")
 	if len(req.Path) > runnerwire.MaxRepoPathBytes {
-		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", errors.New("the path is too long"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", locale.Errorf("the path is too long", "路徑太長"), nil)
 		return
 	}
 	done, err := a.o.Repo.Browse(c.Request.Context(), actor.ID, c.Param("runner"), req)
 	switch {
 	case errors.Is(err, runners.ErrRepoNotFound):
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("runner or repo not found"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("runner or repo not found", "找不到 runner 或 repo"), nil)
 		return
 	case errors.Is(err, runners.ErrRunnerOffline), errors.Is(err, runners.ErrRepoRunnerGone):
 		httpx.Coded(c, http.StatusServiceUnavailable, "RUNNER_OFFLINE", err, nil)
@@ -160,7 +161,7 @@ func (a *API) repoLog(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > runnerwire.MaxRepoLogEntries {
-			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("limit is between 1 and 100"), nil)
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("limit is between 1 and 100", "limit 須介於 1 到 100"), nil)
 			return
 		}
 		limit = n
@@ -180,7 +181,7 @@ func (a *API) repoDiff(c *gin.Context) {
 	}
 	ref := strings.TrimSpace(c.Query("ref"))
 	if !runnerwire.ValidRepoRef(ref) {
-		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", errors.New("ref is empty (the worktree) or a full commit id"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", locale.Errorf("ref is empty (the worktree) or a full commit id", "ref 須為空（工作樹）或完整的提交代號"), nil)
 		return
 	}
 	a.browse(c, runnerwire.RepoRequest{Op: runnerwire.RepoOpDiff, Ref: ref}, func(d runnerwire.RepoDone) any {

@@ -29,6 +29,7 @@ import (
 	dochtml "nodevas/internal/document/html"
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 type NodePageInfo struct {
@@ -91,22 +92,22 @@ func decodeNodePagesManifest(nodeID string, data []byte) (nodePagesManifest, err
 		return manifest, nil
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return manifest, fmt.Errorf("node pages manifest: %w", err)
+		return manifest, locale.Errorf("node pages manifest: %w", "節點頁面清單：%w", err)
 	}
 	if len(manifest.Pages) > maxNodePages {
-		return manifest, fmt.Errorf("node %q has too many pages", nodeID)
+		return manifest, locale.Errorf("node %q has too many pages", "節點「%s」的頁面太多", nodeID)
 	}
 	seen := map[string]bool{}
 	for index, page := range manifest.Pages {
 		if !engine.ValidNodeID(page.ID) || seen[page.ID] {
-			return manifest, fmt.Errorf("node %q has invalid or duplicate page id %q", nodeID, page.ID)
+			return manifest, locale.Errorf("node %q has invalid or duplicate page id %q", "節點「%s」的頁面代號「%s」無效或重複", nodeID, page.ID)
 		}
 		if title := strings.TrimSpace(page.Title); title == "" || len(title) > 256 {
-			return manifest, fmt.Errorf("node %q page %q has invalid title", nodeID, page.ID)
+			return manifest, locale.Errorf("node %q page %q has invalid title", "節點「%s」的頁面「%s」標題無效", nodeID, page.ID)
 		}
 		format, err := NormalizePageFormat(page.Format)
 		if err != nil {
-			return manifest, fmt.Errorf("node %q page %q: %w", nodeID, page.ID, err)
+			return manifest, locale.Errorf("node %q page %q: %w", "節點「%s」的頁面「%s」：%w", nodeID, page.ID, err)
 		}
 		manifest.Pages[index].Format = format
 		seen[page.ID] = true
@@ -138,7 +139,7 @@ func (s *Store) checkNodePageFilesIn(nodeID, dir string, pages []NodePageInfo) e
 	}
 	entries, _, err := readProjectDirEntries(s.root, dir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("node %q pages: %w", nodeID, err)
+		return locale.Errorf("node %q pages: %w", "節點「%s」的頁面：%w", nodeID, err)
 	}
 	byName := make(map[string]os.DirEntry, len(entries))
 	for _, entry := range entries {
@@ -150,18 +151,18 @@ func (s *Store) checkNodePageFilesIn(nodeID, dir string, pages []NodePageInfo) e
 		if !listed {
 			info, statErr := s.statPath(filepath.Join(dir, name))
 			if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-				return fmt.Errorf("node %q page %q: %w", nodeID, page.ID, statErr)
+				return locale.Errorf("node %q page %q: %w", "節點「%s」的頁面「%s」：%w", nodeID, page.ID, statErr)
 			}
 			if statErr == nil && !info.Mode().IsRegular() {
-				return fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
+				return locale.Errorf("node %q page %q is not a regular file", "節點「%s」的頁面「%s」不是一般檔案", nodeID, page.ID)
 			}
 			continue
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("node %q page %q: %w: %q is a symbolic link", nodeID, page.ID, ErrUnsafeProjectPath, name)
+			return locale.Errorf("node %q page %q: %w: %q is a symbolic link", "節點「%s」的頁面「%s」：%w：「%s」是符號連結", nodeID, page.ID, ErrUnsafeProjectPath, name)
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("node %q page %q is not a regular file", nodeID, page.ID)
+			return locale.Errorf("node %q page %q is not a regular file", "節點「%s」的頁面「%s」不是一般檔案", nodeID, page.ID)
 		}
 	}
 	return nil
@@ -179,7 +180,7 @@ func marshalNodePagesManifest(manifest nodePagesManifest) ([]byte, error) {
 // manifest's bytes are unchanged; see pages_cache.go.
 func (s *Store) ListNodePages(nodeID string) ([]NodePageInfo, error) {
 	if !engine.ValidNodeID(nodeID) {
-		return nil, fmt.Errorf("invalid node id")
+		return nil, locale.Errorf("invalid node id", "節點代號無效")
 	}
 	// Read before the manifest: an invalidation from here on leaves what
 	// this call remembers already stale.
@@ -226,7 +227,7 @@ func (s *Store) listNodePagesManifest(nodeID string) ([]byte, error) {
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found in graph", nodeID)
+		return nil, locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
 	}
 	var data []byte
 	err = settledRead(func() (err error) {
@@ -241,11 +242,11 @@ func (s *Store) listNodePagesManifest(nodeID string) ([]byte, error) {
 func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format string) (NodePageInfo, string, string, error) {
 	var zero NodePageInfo
 	if !engine.ValidNodeID(nodeID) {
-		return zero, "", "", fmt.Errorf("invalid node id")
+		return zero, "", "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	title = strings.TrimSpace(title)
 	if title == "" || len(title) > 256 {
-		return zero, "", "", fmt.Errorf("page title must contain 1 to 256 characters")
+		return zero, "", "", locale.Errorf("page title must contain 1 to 256 characters", "頁面標題須為 1 到 256 個字元")
 	}
 	format, err := NormalizePageFormat(format)
 	if err != nil {
@@ -258,7 +259,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 		return zero, "", "", err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return zero, "", "", fmt.Errorf("node %q not found in graph", nodeID)
+		return zero, "", "", locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return zero, "", "", err
@@ -271,7 +272,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 		return zero, "", "", err
 	}
 	if len(manifest.Pages) >= maxNodePages {
-		return zero, "", "", fmt.Errorf("node pages reached the maximum of %d", maxNodePages)
+		return zero, "", "", locale.Errorf("node pages reached the maximum of %d", "節點頁面已達上限 %d 頁", maxNodePages)
 	}
 	used := make(map[string]bool, len(manifest.Pages))
 	for _, page := range manifest.Pages {
@@ -286,7 +287,7 @@ func (s *Store) CreateNodePage(actor identity.Actor, nodeID, title, format strin
 		}
 	}
 	if pageID == "" {
-		return zero, "", "", fmt.Errorf("unable to assign page id")
+		return zero, "", "", locale.Errorf("unable to assign page id", "無法指派頁面代號")
 	}
 	page := NodePageInfo{ID: pageID, Title: title, Format: format}
 	manifest.Pages = append(manifest.Pages, page)
@@ -318,7 +319,7 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 	var zero NodePageInfo
 	format, ok := PageFormatFromFilename(filename)
 	if !ok {
-		return zero, "", "", fmt.Errorf("unsupported file type %q", filepath.Ext(filename))
+		return zero, "", "", locale.Errorf("unsupported file type %q", "不支援的檔案類型「%s」", filepath.Ext(filename))
 	}
 	if strings.TrimSpace(title) == "" {
 		base := filepath.Base(filename)
@@ -349,7 +350,7 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 // the old one, which is kept as a history snapshot.
 func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target string) ([]NodePageInfo, string, string, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
-		return nil, "", "", fmt.Errorf("invalid node or page id")
+		return nil, "", "", locale.Errorf("invalid node or page id", "節點或頁面代號無效")
 	}
 	target, err := NormalizePageFormat(target)
 	if err != nil {
@@ -369,7 +370,7 @@ func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target str
 		}
 	}
 	if index < 0 {
-		return nil, "", "", fmt.Errorf("page %q not found for node %q", pageID, nodeID)
+		return nil, "", "", locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
 	}
 	page := manifest.Pages[index]
 	oldPath := s.NodePagePath(nodeID, pageID, page.Format)
@@ -407,7 +408,7 @@ func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target str
 	}
 	s.markSelfWrite(oldPath)
 	if err := s.removePath(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, "", "", fmt.Errorf("page converted but the old file remains: %w", err)
+		return nil, "", "", locale.Errorf("page converted but the old file remains: %w", "頁面已轉換，但舊檔案仍在：%w", err)
 	}
 	history.wrote(actor, "convert page", []string{oldPath})
 	history.commitSoon()
@@ -423,7 +424,7 @@ func (s *Store) ConvertNodePage(actor identity.Actor, nodeID, pageID, target str
 func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, string, error) {
 	var zero NodePageInfo
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
-		return zero, "", "", fmt.Errorf("invalid node or page id")
+		return zero, "", "", locale.Errorf("invalid node or page id", "節點或頁面代號無效")
 	}
 	// A read: shared with other readers and with saves of other pages. The
 	// page's own lock keeps it from opening the file in the middle of a save
@@ -435,7 +436,7 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 		return zero, "", "", err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return zero, "", "", fmt.Errorf("node %q not found in graph", nodeID)
+		return zero, "", "", locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
 	}
 	manifest, err := s.parseNodePagesManifest(nodeID)
 	if err != nil {
@@ -443,7 +444,7 @@ func (s *Store) LoadNodePage(nodeID, pageID string) (NodePageInfo, string, strin
 	}
 	page, found := findManifestPage(manifest, pageID)
 	if !found {
-		return zero, "", "", fmt.Errorf("page %q not found for node %q", pageID, nodeID)
+		return zero, "", "", locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
 	}
 	path := s.NodePagePath(nodeID, pageID, page.Format)
 	unlock := s.lockPath(path)
@@ -472,10 +473,10 @@ func findManifestPage(manifest nodePagesManifest, pageID string) (NodePageInfo, 
 
 func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, baseRev string) (string, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
-		return "", fmt.Errorf("invalid node or page id")
+		return "", locale.Errorf("invalid node or page id", "節點或頁面代號無效")
 	}
 	if len(content) > maxPageBytes {
-		return "", fmt.Errorf("page content is too large")
+		return "", locale.Errorf("page content is too large", "頁面內容太大")
 	}
 	// Shared, not exclusive: readers and saves of other pages go on while
 	// this one writes; the page's own lock below orders saves of this page
@@ -487,7 +488,7 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 		return "", err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return "", fmt.Errorf("node %q not found in graph", nodeID)
+		return "", locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return "", err
@@ -501,7 +502,7 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	}
 	page, found := findManifestPage(manifest, pageID)
 	if !found {
-		return "", fmt.Errorf("page %q not found for node %q", pageID, nodeID)
+		return "", locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
 	}
 	data, err := s.encodePageContent(nodeID, page.Format, content)
 	if err != nil {
@@ -524,11 +525,11 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 // UpdateNodePage changes page metadata without changing its stable ID or content.
 func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title string, targetIndex *int) ([]NodePageInfo, error) {
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
-		return nil, fmt.Errorf("invalid node or page id")
+		return nil, locale.Errorf("invalid node or page id", "節點或頁面代號無效")
 	}
 	title = strings.TrimSpace(title)
 	if title == "" || len(title) > 256 {
-		return nil, fmt.Errorf("page title must contain 1 to 256 characters")
+		return nil, locale.Errorf("page title must contain 1 to 256 characters", "頁面標題須為 1 到 256 個字元")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -537,7 +538,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found in graph", nodeID)
+		return nil, locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return nil, err
@@ -558,7 +559,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 		}
 	}
 	if currentIndex < 0 {
-		return nil, fmt.Errorf("page %q not found for node %q", pageID, nodeID)
+		return nil, locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
 	}
 	if targetIndex != nil && len(manifest.Pages) > 1 {
 		index := *targetIndex
@@ -595,7 +596,7 @@ func (s *Store) UpdateNodePage(actor identity.Actor, nodeID, pageID, title strin
 func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (DeleteNodePageOutcome, error) {
 	var zero DeleteNodePageOutcome
 	if !engine.ValidNodeID(nodeID) || !engine.ValidNodeID(pageID) {
-		return zero, fmt.Errorf("invalid node or page id")
+		return zero, locale.Errorf("invalid node or page id", "節點或頁面代號無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -625,7 +626,7 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 		}
 	}
 	if index < 0 {
-		return zero, fmt.Errorf("page %q not found for node %q", pageID, nodeID)
+		return zero, locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
 	}
 	content, err := s.ReadFile(s.NodePagePath(nodeID, pageID, page.Format))
 	if err != nil {
@@ -674,7 +675,7 @@ func (s *Store) DeleteNodePage(actor identity.Actor, nodeID, pageID string) (Del
 		_ = s.removePath(trashPath)
 		for _, item := range queued {
 			if markerErr := s.removePath(item.path); markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
-				err = errors.Join(err, fmt.Errorf("remove uncommitted delete cleanup marker: %w", markerErr))
+				err = errors.Join(err, locale.Errorf("remove uncommitted delete cleanup marker: %w", "移除未提交的刪除清理標記：%w", markerErr))
 			}
 		}
 		return zero, err
@@ -717,7 +718,7 @@ func NormalizePageFormat(format string) (string, error) {
 		return PageFormatMarkdown, nil
 	}
 	if _, ok := pageFormatExtension[trimmed]; !ok {
-		return "", fmt.Errorf("unsupported page format %q", format)
+		return "", locale.Errorf("unsupported page format %q", "不支援的頁面格式「%s」", format)
 	}
 	return trimmed, nil
 }
@@ -788,7 +789,7 @@ func (s *Store) readDOCXPage(nodeID string, data []byte) (*document.Doc, error) 
 		}
 		filename, err := url.PathUnescape(path.Base(mediaURL))
 		if err != nil {
-			return "", fmt.Errorf("decode attachment URL: %w", err)
+			return "", locale.Errorf("decode attachment URL: %w", "解讀附件網址：%w", err)
 		}
 		pending[filename] = pendingPageMedia{name: filename, data: data}
 		return mediaURL, nil
@@ -898,7 +899,7 @@ func (s *Store) convertPageContent(nodeID, title, from, to string, data []byte) 
 			Assets: s.DocumentAssets(),
 		})
 	}
-	return nil, fmt.Errorf("unsupported page format %q", to)
+	return nil, locale.Errorf("unsupported page format %q", "不支援的頁面格式「%s」", to)
 }
 
 // Node attachments live next to the node document in nodes/<id>.files/.

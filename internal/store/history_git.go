@@ -24,6 +24,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/gitrepo"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/safego"
 )
 
@@ -42,7 +43,7 @@ const importChunk = 200
 
 // errProjectGone is a project folder that was deleted or moved away while a
 // commit was waiting. There is nothing left to record.
-var errProjectGone = errors.New("project folder is gone")
+var errProjectGone = locale.Errorf("project folder is gone", "專案資料夾已不存在")
 
 // gitHistory batches saves into commits: at most one per window per project,
 // plus one at once for a restore, a delete or a conversion.
@@ -338,7 +339,7 @@ func (g *gitHistory) commitSegmentsLocked(ctx context.Context, repo *gitrepo.Rep
 		}
 		message := commitMessage(titles, nil, outside, coAuthors)
 		if _, err := repo.CommitChanges(ctx, seg.changes, message, author, seg.at); err != nil {
-			return fmt.Errorf("record earlier versions: %w", err)
+			return locale.Errorf("record earlier versions: %w", "記錄先前版本：%w", err)
 		}
 	}
 	return nil
@@ -404,7 +405,7 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	}
 	paths, err := g.s.historyTrackedFiles()
 	if err != nil {
-		return fmt.Errorf("list tracked files: %w", err)
+		return locale.Errorf("list tracked files: %w", "列出追蹤的檔案：%w", err)
 	}
 	authors := append([]gitrepo.Person(nil), pending.authors...)
 	for _, person := range pending.carried {
@@ -414,7 +415,7 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	}
 	author, coAuthors := splitAuthors(authors)
 	if _, err := repo.CommitTracked(ctx, paths, commitMessage(titles, pending.kinds, "", coAuthors), author, time.Now()); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return locale.Errorf("commit: %w", "提交：%w", err)
 	}
 	// A commit every few minutes leaves loose objects behind; --auto packs
 	// them once there are enough, and does nothing until then.
@@ -504,10 +505,10 @@ func (g *gitHistory) readyLocked(ctx context.Context) (*gitrepo.Repo, error) {
 	}
 	repo, err := gitrepo.Open(ctx, g.s.root)
 	if err != nil {
-		return nil, fmt.Errorf("open repository: %w", err)
+		return nil, locale.Errorf("open repository: %w", "開啟儲存庫：%w", err)
 	}
 	if err := g.importCopies(ctx, repo); err != nil {
-		return nil, fmt.Errorf("import .vised/history: %w", err)
+		return nil, locale.Errorf("import .vised/history: %w", "匯入 .vised/history：%w", err)
 	}
 	g.repo = repo
 	g.opened.Store(repo)
@@ -753,7 +754,7 @@ func (g *gitHistory) read(rel, version string) ([]byte, error) {
 		return nil, err
 	}
 	if !gitrepo.ValidSHA(version) {
-		return nil, fmt.Errorf("invalid version name")
+		return nil, locale.Errorf("invalid version name", "版本名稱無效")
 	}
 	ctx := context.Background()
 	repo, err := g.ready(ctx)
@@ -774,7 +775,7 @@ func (g *gitHistory) read(rel, version string) ([]byte, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("version %.12s of %s: %w", version, rel, err)
+	return nil, locale.Errorf("version %.12s of %s: %w", "%[2]s 的版本 %.12[1]s：%[3]v", version, rel, err)
 }
 
 func (g *gitHistory) restoreTarget(rel string) (string, error) {
@@ -804,7 +805,7 @@ func (g *gitHistory) actualRel(rel string) (string, error) {
 	}
 	actual, ok := g.rel(abs)
 	if !ok {
-		return "", fmt.Errorf("history not tracked for %q", rel)
+		return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 	}
 	return actual, nil
 }

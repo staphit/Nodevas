@@ -8,7 +8,6 @@ package station
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/autopilot"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runs"
 )
@@ -44,7 +44,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 func (a *API) building(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot read the building"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot read the building", "agent 不能讀取大樓"), nil)
 		return
 	}
 	readable := func(dir string) bool { return a.access == nil || a.access(c.Request, dir) }

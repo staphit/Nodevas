@@ -4,14 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
-	"errors"
-	"fmt"
 	"io"
 	"path"
 	"strconv"
 	"strings"
 
 	"nodevas/internal/document"
+	"nodevas/internal/locale"
 )
 
 // MediaSink stores an image pulled out of a document and returns the URL the
@@ -34,7 +33,7 @@ const (
 func ReadDOCX(data []byte, sink MediaSink) (*document.Doc, error) {
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("not a readable .docx: %w", err)
+		return nil, locale.Errorf("not a readable .docx: %w", "不是可讀取的 .docx：%w", err)
 	}
 	if err := validateDOCXArchive(archive.File); err != nil {
 		return nil, err
@@ -45,7 +44,7 @@ func ReadDOCX(data []byte, sink MediaSink) (*document.Doc, error) {
 	}
 	main, ok := files["word/document.xml"]
 	if !ok {
-		return nil, errors.New("not a Word document: word/document.xml is missing")
+		return nil, locale.Errorf("not a Word document: word/document.xml is missing", "不是 Word 文件：缺少 word/document.xml")
 	}
 	body, err := readZipEntry(main)
 	if err != nil {
@@ -73,17 +72,17 @@ func ReadDOCX(data []byte, sink MediaSink) (*document.Doc, error) {
 
 func validateDOCXArchive(files []*zip.File) error {
 	if len(files) > maxDOCXEntries {
-		return fmt.Errorf("DOCX has too many entries: %d (limit %d)", len(files), maxDOCXEntries)
+		return locale.Errorf("DOCX has too many entries: %d (limit %d)", "DOCX 的項目太多：%d 個（上限 %d）", len(files), maxDOCXEntries)
 	}
 	var total uint64
 	images := 0
 	for _, file := range files {
 		size := file.UncompressedSize64
 		if size > maxDOCXPartBytes {
-			return fmt.Errorf("%s is too large", file.Name)
+			return locale.Errorf("%s is too large", "%s 太大", file.Name)
 		}
 		if size > uint64(maxDOCXTotalUncompressedBytes)-total {
-			return fmt.Errorf("DOCX expands beyond %d bytes", maxDOCXTotalUncompressedBytes)
+			return locale.Errorf("DOCX expands beyond %d bytes", "DOCX 解開後超過 %d 位元組", maxDOCXTotalUncompressedBytes)
 		}
 		total += size
 
@@ -91,10 +90,10 @@ func validateDOCXArchive(files []*zip.File) error {
 		if strings.HasPrefix(clean, "word/media/") && clean != "word/media" {
 			images++
 			if images > maxDOCXImages {
-				return fmt.Errorf("DOCX has too many images: %d (limit %d)", images, maxDOCXImages)
+				return locale.Errorf("DOCX has too many images: %d (limit %d)", "DOCX 的圖片太多：%d 張（上限 %d）", images, maxDOCXImages)
 			}
 			if size > maxDOCXImageBytes {
-				return fmt.Errorf("%s image is too large", file.Name)
+				return locale.Errorf("%s image is too large", "%s 圖片太大", file.Name)
 			}
 		}
 	}
@@ -103,7 +102,7 @@ func validateDOCXArchive(files []*zip.File) error {
 
 func readZipEntry(file *zip.File) ([]byte, error) {
 	if file.UncompressedSize64 > maxDOCXPartBytes {
-		return nil, fmt.Errorf("%s is too large", file.Name)
+		return nil, locale.Errorf("%s is too large", "%s 太大", file.Name)
 	}
 	entry, err := file.Open()
 	if err != nil {
@@ -115,7 +114,7 @@ func readZipEntry(file *zip.File) ([]byte, error) {
 		return nil, err
 	}
 	if len(data) > maxDOCXPartBytes {
-		return nil, fmt.Errorf("%s is too large", file.Name)
+		return nil, locale.Errorf("%s is too large", "%s 太大", file.Name)
 	}
 	return data, nil
 }
@@ -298,7 +297,7 @@ func (r *docxReader) parse(raw []byte) (*document.Doc, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read document.xml: %w", err)
+			return nil, locale.Errorf("read document.xml: %w", "讀取 document.xml：%w", err)
 		}
 		start, ok := token.(xml.StartElement)
 		if !ok {
@@ -565,7 +564,7 @@ func (r *docxReader) readDrawing(decoder *xml.Decoder, closing string) (*documen
 		return nil, nil
 	}
 	if r.imageSeq >= maxDOCXImages {
-		return nil, fmt.Errorf("DOCX references too many images")
+		return nil, locale.Errorf("DOCX references too many images", "DOCX 參照的圖片太多")
 	}
 	name := path.Base(relation.target)
 	fileName := path.Clean("word/" + relation.target)
@@ -574,7 +573,7 @@ func (r *docxReader) readDrawing(decoder *xml.Decoder, closing string) (*documen
 		return nil, nil
 	}
 	if file.UncompressedSize64 > maxDOCXImageBytes {
-		return nil, fmt.Errorf("%s image is too large", file.Name)
+		return nil, locale.Errorf("%s image is too large", "%s 圖片太大", file.Name)
 	}
 	data, ok := r.imageData[fileName]
 	if !ok {
@@ -584,7 +583,7 @@ func (r *docxReader) readDrawing(decoder *xml.Decoder, closing string) (*documen
 			return nil, err
 		}
 		if len(data) > maxDOCXImageBytes {
-			return nil, fmt.Errorf("%s image is too large", file.Name)
+			return nil, locale.Errorf("%s image is too large", "%s 圖片太大", file.Name)
 		}
 		r.imageData[fileName] = data
 	}

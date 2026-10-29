@@ -17,12 +17,11 @@
 package store
 
 import (
-	"errors"
-	"fmt"
 	"sort"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // maxGraphOpsBatch bounds the calls one commit takes, so one batch's
@@ -30,7 +29,7 @@ import (
 const maxGraphOpsBatch = 64
 
 // errGraphOpsAbandoned answers the calls of a batch whose leader panicked.
-var errGraphOpsAbandoned = errors.New("graph change was not applied: the commit it was part of failed")
+var errGraphOpsAbandoned = locale.Errorf("graph change was not applied: the commit it was part of failed", "圖的變更沒有套用：所屬的提交失敗了")
 
 // graphOpsCall is one ApplyGraphOps call, from queueing to its answer.
 type graphOpsCall struct {
@@ -165,7 +164,7 @@ func (s *Store) applyGraphOpsBatchLocked(batch []*graphOpsCall) {
 		}
 		update, err := s.prepareNodeFileUpdate(node)
 		if err != nil {
-			fail(accepted, fmt.Errorf("sync node %s: %w", id, err))
+			fail(accepted, locale.Errorf("sync node %s: %w", "同步節點 %s：%w", id, err))
 			return
 		}
 		if update != nil {

@@ -5,7 +5,6 @@ package project
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 
 	"nodevas/demo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 )
 
@@ -31,7 +31,7 @@ func (a *API) PostProjectExample(c *gin.Context) {
 	}
 	example := strings.TrimSpace(body.Example)
 	if example == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("body must be {example}"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("body must be {example}", "內容須為 {example}"))
 		return
 	}
 	name, err := a.pm.InstallExample(demo.ExamplesFor(body.Language), example)

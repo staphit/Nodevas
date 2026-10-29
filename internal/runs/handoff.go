@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -181,7 +182,7 @@ func (d *Dispatcher) RetryNow(ctx context.Context, id, who string) (Record, erro
 		return Record{}, err
 	}
 	if r.Status != runnerwire.RunQueued || r.RetryAt == "" {
-		return r, fmt.Errorf("%w: the run is not waiting for a usage limit to reset", ErrPrecondition)
+		return r, locale.Errorf("%w: the run is not waiting for a usage limit to reset", "%w：這次執行沒有在等用量上限重置", ErrPrecondition)
 	}
 	return d.release(ctx, r, "retried now by "+who)
 }
@@ -214,7 +215,7 @@ func (d *Dispatcher) release(ctx context.Context, r Record, why string) (Record,
 		if err != nil {
 			return r, err
 		}
-		return latest, fmt.Errorf("%w: the run is no longer waiting", ErrTransition)
+		return latest, locale.Errorf("%w: the run is no longer waiting", "%w：這次執行已不再等待", ErrTransition)
 	}
 	if r.RetryOf != "" {
 		if prev, err := d.store.Get(ctx, r.RetryOf); err == nil {

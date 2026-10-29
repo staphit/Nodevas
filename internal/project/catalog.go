@@ -3,7 +3,6 @@ package project
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"nodevas/internal/store"
 	"os"
 	"path/filepath"
@@ -285,7 +284,7 @@ func (pm *ProjectManager) loadDetachedProjects() (map[string]bool, error) {
 	}
 	var names []string
 	if err := json.Unmarshal(data, &names); err != nil {
-		return nil, fmt.Errorf("read detached project list: %w", err)
+		return nil, locale.Errorf("read detached project list: %w", "讀取已卸離的專案清單：%w", err)
 	}
 	for _, name := range names {
 		if name != "." && ValidProjectPath(name) {
@@ -426,15 +425,15 @@ func (pm *ProjectManager) Resolve(name string) (string, error) {
 		return pm.workspace, nil
 	}
 	if !ValidProjectPath(name) {
-		return "", fmt.Errorf("invalid project name %q", name)
+		return "", locale.Errorf("invalid project name %q", "專案名稱「%s」無效", name)
 	}
 	candidate := filepath.Join(pm.workspace, filepath.FromSlash(name))
 	rel, err := filepath.Rel(pm.workspace, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("project %q resolves outside the workspace", name)
+		return "", locale.Errorf("project %q resolves outside the workspace", "專案「%s」指向工作區之外", name)
 	}
 	if _, err := store.StatProjectPath(pm.workspace, candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("project %q: %w", name, err)
+		return "", locale.Errorf("project %q: %w", "專案「%s」：%w", name, err)
 	}
 	return candidate, nil
 }

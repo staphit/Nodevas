@@ -1,13 +1,13 @@
 package runs
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -33,7 +33,7 @@ func (a *API) roleSettings(c *gin.Context) {
 func (a *API) setRoleSettings(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot change role settings"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot change role settings", "agent 不能更改角色設定"), nil)
 		return
 	}
 	var body runnerwire.RoleSettingsResponse

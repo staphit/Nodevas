@@ -21,13 +21,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"math/big"
 	"strings"
 	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/secrets"
 )
 
@@ -45,19 +45,19 @@ var (
 	// ErrTOTPAlreadyEnabled refuses a second enrollment over a working one:
 	// replacing the factor is disable (which needs a current code) and then
 	// enroll.
-	ErrTOTPAlreadyEnabled = errors.New("two-factor authentication is already on for this account; turn it off first to enroll a new authenticator")
+	ErrTOTPAlreadyEnabled = locale.Errorf("two-factor authentication is already on for this account; turn it off first to enroll a new authenticator", "這個帳號已開啟雙重驗證；要登記新的驗證器請先關閉")
 	// ErrTOTPNotEnabled is a disable, a recovery-code reset or a code check on
 	// an account without a confirmed authenticator.
-	ErrTOTPNotEnabled = errors.New("two-factor authentication is not on for this account")
+	ErrTOTPNotEnabled = locale.Errorf("two-factor authentication is not on for this account", "這個帳號沒有開啟雙重驗證")
 	// ErrTOTPNoEnrollment is a confirmation with no enrollment begun.
-	ErrTOTPNoEnrollment = errors.New("no authenticator enrollment is in progress; start again")
+	ErrTOTPNoEnrollment = locale.Errorf("no authenticator enrollment is in progress; start again", "沒有進行中的驗證器登記；請重新開始")
 	// ErrTOTPCode is a wrong, reused or out-of-window authenticator or
 	// recovery code.
-	ErrTOTPCode = errors.New("that authenticator code is wrong, expired or already used")
+	ErrTOTPCode = locale.Errorf("that authenticator code is wrong, expired or already used", "驗證器代碼錯誤、已過期或已使用")
 	// ErrTOTPUnreadable means the stored secret could not be opened — the
 	// machine key changed or the row was edited. It fails closed; an
 	// administrator clears it with `nodevas account totp-reset`.
-	ErrTOTPUnreadable = errors.New("this account's authenticator secret cannot be read on this server; ask an administrator to reset two-factor authentication")
+	ErrTOTPUnreadable = locale.Errorf("this account's authenticator secret cannot be read on this server; ask an administrator to reset two-factor authentication", "這個伺服器無法讀取這個帳號的驗證器密鑰；請管理員重設雙重驗證")
 )
 
 // TOTPState is what an account's own settings page may know about its
@@ -98,7 +98,7 @@ func (u *UserStore) sealTOTP(userID string, secret []byte) (string, error) {
 	}
 	blob, err := secrets.Seal(keyPath, secret, totpAAD(userID))
 	if err != nil {
-		return "", fmt.Errorf("seal authenticator secret: %w", err)
+		return "", locale.Errorf("seal authenticator secret: %w", "加密驗證器密鑰：%w", err)
 	}
 	return base64.StdEncoding.EncodeToString(blob), nil
 }
@@ -137,7 +137,7 @@ func readTOTPRow(ctx context.Context, q interface {
 		return totpRow{}, false, nil
 	}
 	if err != nil {
-		return totpRow{}, false, fmt.Errorf("read authenticator: %w", err)
+		return totpRow{}, false, locale.Errorf("read authenticator: %w", "讀取驗證器：%w", err)
 	}
 	return row, true, nil
 }
@@ -170,7 +170,7 @@ func (u *UserStore) TOTPStatus(ctx context.Context, userID string) (TOTPState, e
 		if err := u.database.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM account_recovery_codes WHERE user_id = ? AND used_at = ''`,
 			userID).Scan(&state.RecoveryCodesLeft); err != nil {
-			return TOTPState{}, fmt.Errorf("count recovery codes: %w", err)
+			return TOTPState{}, locale.Errorf("count recovery codes: %w", "計算復原碼：%w", err)
 		}
 	}
 	return state, nil
@@ -180,7 +180,7 @@ func (u *UserStore) TOTPStatus(ctx context.Context, userID string) (TOTPState, e
 // it. A previous unconfirmed one is replaced; a confirmed one is refused.
 func (u *UserStore) beginTOTP(ctx context.Context, userID string) ([]byte, error) {
 	if !u.ready() {
-		return nil, errors.New("no account database")
+		return nil, locale.Errorf("no account database", "沒有帳號資料庫")
 	}
 	secret, err := newTOTPSecret()
 	if err != nil {
@@ -204,7 +204,7 @@ VALUES (?, ?, ?, '', 0)
 ON CONFLICT (user_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at,
     enabled_at = '', last_counter = 0`, userID, sealed, db.Now())
 		if err != nil {
-			return fmt.Errorf("store authenticator: %w", err)
+			return locale.Errorf("store authenticator: %w", "儲存驗證器：%w", err)
 		}
 		return nil
 	})
@@ -220,7 +220,7 @@ ON CONFLICT (user_id) DO UPDATE SET secret = excluded.secret, created_at = exclu
 // same code cannot then sign in.
 func (u *UserStore) confirmTOTP(ctx context.Context, userID, code string, now time.Time) ([]string, error) {
 	if !u.ready() {
-		return nil, errors.New("no account database")
+		return nil, locale.Errorf("no account database", "沒有帳號資料庫")
 	}
 	codes, hashes, err := newRecoveryCodes(userID)
 	if err != nil {
@@ -248,7 +248,7 @@ func (u *UserStore) confirmTOTP(ctx context.Context, userID, code string, now ti
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE account_totp SET enabled_at = ?, last_counter = ? WHERE user_id = ? AND enabled_at = ''`,
 			db.Now(), int64(counter), userID); err != nil { // #nosec G115 -- a time step fits int64 for billions of years.
-			return fmt.Errorf("enable authenticator: %w", err)
+			return locale.Errorf("enable authenticator: %w", "啟用驗證器：%w", err)
 		}
 		return replaceRecoveryCodes(ctx, tx, userID, hashes)
 	})
@@ -286,11 +286,11 @@ func (u *UserStore) verifyTOTPCode(ctx context.Context, userID, code string, now
 		`UPDATE account_totp SET last_counter = ? WHERE user_id = ? AND enabled_at != '' AND last_counter < ?`,
 		step, userID, step)
 	if err != nil {
-		return false, fmt.Errorf("record authenticator step: %w", err)
+		return false, locale.Errorf("record authenticator step: %w", "記錄驗證器時間步：%w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("record authenticator step: %w", err)
+		return false, locale.Errorf("record authenticator step: %w", "記錄驗證器時間步：%w", err)
 	}
 	return changed == 1, nil
 }
@@ -316,11 +316,11 @@ func (u *UserStore) useRecoveryCode(ctx context.Context, userID, code string) (i
 		`UPDATE account_recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at = ''`,
 		db.Now(), userID, recoveryDigest(userID, normalized))
 	if err != nil {
-		return 0, false, fmt.Errorf("spend recovery code: %w", err)
+		return 0, false, locale.Errorf("spend recovery code: %w", "使用復原碼：%w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return 0, false, fmt.Errorf("spend recovery code: %w", err)
+		return 0, false, locale.Errorf("spend recovery code: %w", "使用復原碼：%w", err)
 	}
 	if changed != 1 {
 		return 0, false, nil
@@ -329,7 +329,7 @@ func (u *UserStore) useRecoveryCode(ctx context.Context, userID, code string) (i
 	if err := u.database.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM account_recovery_codes WHERE user_id = ? AND used_at = ''`,
 		userID).Scan(&left); err != nil {
-		return 0, true, fmt.Errorf("count recovery codes: %w", err)
+		return 0, true, locale.Errorf("count recovery codes: %w", "計算復原碼：%w", err)
 	}
 	return left, true, nil
 }
@@ -422,24 +422,24 @@ var ErrNoSuchAccountToReset = errNoAccount
 
 func deleteTOTPRows(ctx context.Context, tx *sql.Tx, userID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_recovery_codes WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("delete recovery codes: %w", err)
+		return locale.Errorf("delete recovery codes: %w", "刪除復原碼：%w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_totp WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("delete authenticator: %w", err)
+		return locale.Errorf("delete authenticator: %w", "刪除驗證器：%w", err)
 	}
 	return nil
 }
 
 func replaceRecoveryCodes(ctx context.Context, tx *sql.Tx, userID string, hashes []string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_recovery_codes WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("replace recovery codes: %w", err)
+		return locale.Errorf("replace recovery codes: %w", "更換復原碼：%w", err)
 	}
 	now := db.Now()
 	for _, hash := range hashes {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO account_recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)`,
 			userID, hash, now); err != nil {
-			return fmt.Errorf("store recovery code: %w", err)
+			return locale.Errorf("store recovery code: %w", "儲存復原碼：%w", err)
 		}
 	}
 	return nil

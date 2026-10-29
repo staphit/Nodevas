@@ -33,6 +33,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 	"nodevas/internal/safego"
@@ -102,7 +103,7 @@ func (b *bucket) wait(ctx context.Context, n int) error {
 func (a *API) terminal(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot open run terminals"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot open run terminals", "agent 不能開啟執行終端機"), nil)
 		return
 	}
 	r, ok := a.visible(c)
@@ -110,7 +111,7 @@ func (a *API) terminal(c *gin.Context) {
 		return
 	}
 	if r.Mode != runnerwire.ModeInteractive {
-		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", errors.New("this run is not interactive"), nil)
+		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", locale.Errorf("this run is not interactive", "這次執行不是互動式的"), nil)
 		return
 	}
 	canType := mayType(actor, r)

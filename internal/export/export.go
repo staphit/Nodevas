@@ -1,8 +1,6 @@
 package export
 
 import (
-	"errors"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -10,6 +8,7 @@ import (
 	"nodevas/internal/document"
 	"nodevas/internal/document/html"
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -58,14 +57,14 @@ func BuildMarkdown(st *store.Store, request Request) (string, string, error) {
 	case "project":
 		return exportProject(st, graph, request)
 	default:
-		return "", "", fmt.Errorf("unsupported scope %q", request.Scope)
+		return "", "", locale.Errorf("unsupported scope %q", "不支援的範圍「%s」", request.Scope)
 	}
 }
 
 func exportPage(st *store.Store, graph *engine.Graph, request Request) (string, string, error) {
 	node := graph.NodeByID(request.NodeID)
 	if node == nil {
-		return "", "", fmt.Errorf("node %q not found", request.NodeID)
+		return "", "", locale.Errorf("node %q not found", "找不到節點「%s」", request.NodeID)
 	}
 	if isMainPage(request.PageID) {
 		body, err := nodeBody(st, node.ID, request)
@@ -81,7 +80,7 @@ func exportPage(st *store.Store, graph *engine.Graph, request Request) (string, 
 	}
 	page, ok := FindPage(pages, request.PageID)
 	if !ok {
-		return "", "", fmt.Errorf("page %q not found", request.PageID)
+		return "", "", locale.Errorf("page %q not found", "找不到頁面「%s」", request.PageID)
 	}
 	body, err := pageBody(st, node.ID, page.ID, request)
 	if err != nil {
@@ -94,7 +93,7 @@ func exportPage(st *store.Store, graph *engine.Graph, request Request) (string, 
 func exportNode(st *store.Store, graph *engine.Graph, request Request) (string, string, error) {
 	node := graph.NodeByID(request.NodeID)
 	if node == nil {
-		return "", "", fmt.Errorf("node %q not found", request.NodeID)
+		return "", "", locale.Errorf("node %q not found", "找不到節點「%s」", request.NodeID)
 	}
 	title := nodeTitle(node)
 	sections, err := nodeSections(st, node, request, 1)
@@ -122,7 +121,7 @@ func exportProject(st *store.Store, graph *engine.Graph, request Request) (strin
 		for _, section := range rendered {
 			total += len(section)
 			if total > maxExportMarkdown {
-				return "", "", errors.New("project is too large to export as one document")
+				return "", "", locale.Errorf("project is too large to export as one document", "專案太大，無法匯出成單一文件")
 			}
 			sections = append(sections, section)
 		}

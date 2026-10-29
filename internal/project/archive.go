@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -47,7 +48,7 @@ func (pm *ProjectManager) ActiveProject() (ProjectInfo, error) {
 			return project, nil
 		}
 	}
-	return ProjectInfo{}, fmt.Errorf("active project is not in the workspace")
+	return ProjectInfo{}, locale.Errorf("active project is not in the workspace", "目前的專案不在工作區內")
 }
 
 func addArchiveFile(writer *zip.Writer, name string, data []byte) error {
@@ -75,13 +76,13 @@ type archiveWriter struct {
 
 func (a *archiveWriter) add(name string, data []byte) error {
 	if a.files >= maxProjectArchiveFiles {
-		return fmt.Errorf("project has too many files to export")
+		return locale.Errorf("project has too many files to export", "專案的檔案太多，無法匯出")
 	}
 	if int64(len(data)) > maxProjectArchiveFileBytes {
-		return fmt.Errorf("project file %q is too large", name)
+		return locale.Errorf("project file %q is too large", "專案檔案「%s」太大", name)
 	}
 	if a.bytes+int64(len(data)) > maxProjectExtractedBytes {
-		return fmt.Errorf("project exceeds the archive size limit")
+		return locale.Errorf("project exceeds the archive size limit", "專案超過封存檔的大小上限")
 	}
 	a.files++
 	a.bytes += int64(len(data))
@@ -198,11 +199,11 @@ func writeProjectFiles(
 
 	graphData, err := store.ReadProjectFile(project.Path, filepath.Join(project.Path, "graph.yaml"))
 	if err != nil {
-		return fmt.Errorf("read graph.yaml: %w", err)
+		return locale.Errorf("read graph.yaml: %w", "讀取 graph.yaml：%w", err)
 	}
 	graph, err := engine.ParseGraph(graphData)
 	if err != nil {
-		return fmt.Errorf("parse graph.yaml: %w", err)
+		return locale.Errorf("parse graph.yaml: %w", "解析 graph.yaml：%w", err)
 	}
 	// Custom lifecycle states shared across the workspace are stripped from
 	// graph.yaml on write — they live once in <workspace>/.vised/workflow.json
@@ -225,7 +226,7 @@ func writeProjectFiles(
 		merged.UI = &ui
 		graphData, err = engine.MarshalGraph(&merged)
 		if err != nil {
-			return fmt.Errorf("write graph.yaml: %w", err)
+			return locale.Errorf("write graph.yaml: %w", "寫入 graph.yaml：%w", err)
 		}
 		graph = &merged
 	}
@@ -235,7 +236,7 @@ func writeProjectFiles(
 
 	nodesDir := filepath.Join(project.Path, "nodes")
 	if err := store.ValidateProjectTree(project.Path, nodesDir); err != nil {
-		return fmt.Errorf("validate project nodes: %w", err)
+		return locale.Errorf("validate project nodes: %w", "檢查專案節點：%w", err)
 	}
 	// Node documents can sit in folders, and the archive keeps that layout so
 	// an exported project comes back organised the way it left.
@@ -243,7 +244,7 @@ func writeProjectFiles(
 	if err := store.WalkNodeDocuments(project.Path, func(id, folder, absolute string) error {
 		data, readErr := store.ReadProjectFile(project.Path, absolute)
 		if readErr != nil {
-			return fmt.Errorf("read node %q: %w", id, readErr)
+			return locale.Errorf("read node %q: %w", "讀取節點「%s」：%w", id, readErr)
 		}
 		return add(path.Join("nodes", folder, id+".md"), data)
 	}); err != nil {
@@ -260,11 +261,11 @@ func writeProjectFiles(
 		if os.IsNotExist(readDirErr) {
 			pageEntries = nil
 		} else if readDirErr != nil {
-			return fmt.Errorf("read pages for node %q: %w", node.ID, readDirErr)
+			return locale.Errorf("read pages for node %q: %w", "讀取節點「%s」的頁面：%w", node.ID, readDirErr)
 		}
 		for _, pageEntry := range pageEntries {
 			if pageEntry.Type()&os.ModeSymlink != 0 {
-				return fmt.Errorf("unsafe page entry %q for node %q", pageEntry.Name(), node.ID)
+				return locale.Errorf("unsafe page entry %q for node %q", "節點「%[2]s」的頁面項目「%[1]s」不安全", pageEntry.Name(), node.ID)
 			}
 			if pageEntry.IsDir() {
 				continue
@@ -281,7 +282,7 @@ func writeProjectFiles(
 			}
 			data, readErr := store.ReadProjectFile(project.Path, filepath.Join(pageDir, name))
 			if readErr != nil {
-				return fmt.Errorf("read page file %q: %w", name, readErr)
+				return locale.Errorf("read page file %q: %w", "讀取頁面檔案「%s」：%w", name, readErr)
 			}
 			if err := add(
 				path.Join("nodes", pageDirName, name),
@@ -298,11 +299,11 @@ func writeProjectFiles(
 			continue
 		}
 		if readDirErr != nil {
-			return fmt.Errorf("read attachments for node %q: %w", node.ID, readDirErr)
+			return locale.Errorf("read attachments for node %q: %w", "讀取節點「%s」的附件：%w", node.ID, readDirErr)
 		}
 		for _, fileEntry := range fileEntries {
 			if fileEntry.Type()&os.ModeSymlink != 0 {
-				return fmt.Errorf("unsafe attachment entry %q for node %q", fileEntry.Name(), node.ID)
+				return locale.Errorf("unsafe attachment entry %q for node %q", "節點「%[2]s」的附件項目「%[1]s」不安全", fileEntry.Name(), node.ID)
 			}
 			if fileEntry.IsDir() {
 				continue
@@ -313,7 +314,7 @@ func writeProjectFiles(
 			}
 			data, readErr := store.ReadProjectFile(project.Path, filepath.Join(fileDir, name))
 			if readErr != nil {
-				return fmt.Errorf("read attachment %q for node %q: %w", name, node.ID, readErr)
+				return locale.Errorf("read attachment %q for node %q: %w", "讀取節點「%[2]s」的附件「%[1]s」：%[3]v", name, node.ID, readErr)
 			}
 			if err := add(path.Join("nodes", fileDirName, name), data); err != nil {
 				return err
@@ -348,7 +349,7 @@ func readProjectJournal(root string) ([]byte, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read run journal: %w", err)
+			return nil, locale.Errorf("read run journal: %w", "讀取執行日誌：%w", err)
 		}
 		if len(data) == 0 {
 			continue
@@ -387,19 +388,19 @@ func archiveRoot(reader *zip.Reader) (string, error) {
 		switch {
 		case clean == "graph.yaml":
 			if found && root != "" {
-				return "", fmt.Errorf("archive contains multiple graph.yaml files")
+				return "", locale.Errorf("archive contains multiple graph.yaml files", "封存檔含有多個 graph.yaml")
 			}
 			root, found = "", true
 		case strings.HasSuffix(clean, "/graph.yaml") && strings.Count(clean, "/") == 1:
 			candidate := strings.TrimSuffix(clean, "/graph.yaml")
 			if found && root != candidate {
-				return "", fmt.Errorf("archive contains multiple graph.yaml files")
+				return "", locale.Errorf("archive contains multiple graph.yaml files", "封存檔含有多個 graph.yaml")
 			}
 			root, found = candidate, true
 		}
 	}
 	if !found {
-		return "", fmt.Errorf("archive does not contain graph.yaml")
+		return "", locale.Errorf("archive does not contain graph.yaml", "封存檔沒有 graph.yaml")
 	}
 	return root, nil
 }
@@ -463,7 +464,7 @@ func ExtractProjectArchive(reader *zip.Reader, destination string) (ProjectArchi
 		return ProjectArchiveManifest{}, err
 	}
 	if len(reader.File) > maxProjectArchiveFiles {
-		return ProjectArchiveManifest{}, fmt.Errorf("archive has too many files")
+		return ProjectArchiveManifest{}, locale.Errorf("archive has too many files", "封存檔的檔案太多")
 	}
 	seen := make(map[string]struct{}, len(reader.File))
 	var total int64
@@ -477,21 +478,21 @@ func ExtractProjectArchive(reader *zip.Reader, destination string) (ProjectArchi
 			continue
 		}
 		if entry.Mode()&os.ModeSymlink != 0 {
-			return ProjectArchiveManifest{}, fmt.Errorf("archive contains a symbolic link")
+			return ProjectArchiveManifest{}, locale.Errorf("archive contains a symbolic link", "封存檔含有符號連結")
 		}
 		if !allowedProjectArchivePath(name) {
-			return ProjectArchiveManifest{}, fmt.Errorf("unsupported archive path %q", name)
+			return ProjectArchiveManifest{}, locale.Errorf("unsupported archive path %q", "不支援的封存檔路徑「%s」", name)
 		}
 		if _, exists := seen[name]; exists {
-			return ProjectArchiveManifest{}, fmt.Errorf("duplicate archive path %q", name)
+			return ProjectArchiveManifest{}, locale.Errorf("duplicate archive path %q", "重複的封存檔路徑「%s」", name)
 		}
 		seen[name] = struct{}{}
 		if entry.UncompressedSize64 > maxProjectArchiveFileBytes {
-			return ProjectArchiveManifest{}, fmt.Errorf("archive file %q is too large", name)
+			return ProjectArchiveManifest{}, locale.Errorf("archive file %q is too large", "封存檔中的檔案「%s」太大", name)
 		}
 		total += int64(entry.UncompressedSize64)
 		if total > maxProjectExtractedBytes {
-			return ProjectArchiveManifest{}, fmt.Errorf("archive expands beyond the size limit")
+			return ProjectArchiveManifest{}, locale.Errorf("archive expands beyond the size limit", "封存檔解開後超過大小上限")
 		}
 
 		source, err := entry.Open()
@@ -507,14 +508,14 @@ func ExtractProjectArchive(reader *zip.Reader, destination string) (ProjectArchi
 			return ProjectArchiveManifest{}, closeErr
 		}
 		if len(data) > maxProjectArchiveFileBytes {
-			return ProjectArchiveManifest{}, fmt.Errorf("archive file %q is too large", name)
+			return ProjectArchiveManifest{}, locale.Errorf("archive file %q is too large", "封存檔中的檔案「%s」太大", name)
 		}
 		if name == "manifest.json" {
 			if len(data) > 64<<10 {
-				return ProjectArchiveManifest{}, fmt.Errorf("manifest is too large")
+				return ProjectArchiveManifest{}, locale.Errorf("manifest is too large", "清單檔太大")
 			}
 			if err := json.Unmarshal(data, &manifest); err != nil {
-				return ProjectArchiveManifest{}, fmt.Errorf("invalid manifest: %w", err)
+				return ProjectArchiveManifest{}, locale.Errorf("invalid manifest: %w", "清單檔無效：%w", err)
 			}
 			continue
 		}
@@ -530,8 +531,7 @@ func ExtractProjectArchive(reader *zip.Reader, destination string) (ProjectArchi
 	if manifest.Format != "" &&
 		(manifest.Format != ProjectArchiveFormat ||
 			manifest.Version != ProjectArchiveVersion) {
-		return ProjectArchiveManifest{}, fmt.Errorf(
-			"unsupported project archive %q version %d",
+		return ProjectArchiveManifest{}, locale.Errorf("unsupported project archive %q version %d", "不支援的專案封存檔「%s」版本 %d",
 			manifest.Format,
 			manifest.Version,
 		)
@@ -541,22 +541,22 @@ func ExtractProjectArchive(reader *zip.Reader, destination string) (ProjectArchi
 
 func ValidateImportedProject(root string) error {
 	if err := store.ValidateProjectTree(root, root); err != nil {
-		return fmt.Errorf("validate imported project tree: %w", err)
+		return locale.Errorf("validate imported project tree: %w", "檢查匯入的專案結構：%w", err)
 	}
 	graphData, err := store.ReadProjectFile(root, filepath.Join(root, "graph.yaml"))
 	if err != nil {
-		return fmt.Errorf("read imported graph: %w", err)
+		return locale.Errorf("read imported graph: %w", "讀取匯入的圖：%w", err)
 	}
 	graph, err := engine.ParseGraph(graphData)
 	if err != nil {
-		return fmt.Errorf("parse imported graph: %w", err)
+		return locale.Errorf("parse imported graph: %w", "解析匯入的圖：%w", err)
 	}
 	if err := store.ValidateGraphForStorage(graph); err != nil {
 		return err
 	}
 	for _, issue := range engine.Validate(graph) {
 		if issue.Severity == "error" {
-			return fmt.Errorf("invalid imported graph: %s", issue.Msg)
+			return locale.Errorf("invalid imported graph: %s", "匯入的圖無效：%s", issue.Msg)
 		}
 	}
 	st := store.NewStore(root)
@@ -564,21 +564,20 @@ func ValidateImportedProject(root string) error {
 	// number of folders deep.
 	for nodeID := range store.ListNodePayloadDirs(root, ".pages") {
 		if graph.NodeByID(nodeID) == nil {
-			return fmt.Errorf("pages reference unknown node %q", nodeID)
+			return locale.Errorf("pages reference unknown node %q", "頁面參照了不明的節點「%s」", nodeID)
 		}
 		if _, err := store.StatProjectPath(root, st.NodePagesManifestPath(nodeID)); err != nil {
-			return fmt.Errorf("read pages manifest for node %q: %w", nodeID, err)
+			return locale.Errorf("read pages manifest for node %q: %w", "讀取節點「%s」的頁面清單：%w", nodeID, err)
 		}
 		pageManifest, err := st.LoadNodePagesManifest(nodeID)
 		if err != nil {
-			return fmt.Errorf("validate pages for node %q: %w", nodeID, err)
+			return locale.Errorf("validate pages for node %q: %w", "檢查節點「%s」的頁面：%w", nodeID, err)
 		}
 		expectedPages := make(map[string]bool, len(pageManifest.Pages))
 		for _, page := range pageManifest.Pages {
 			expectedPages[page.ID] = true
 			if _, err := store.StatProjectPath(root, st.NodePagePath(nodeID, page.ID, page.Format)); err != nil {
-				return fmt.Errorf(
-					"read page %q for node %q: %w",
+				return locale.Errorf("read page %q for node %q: %w", "讀取節點「%[2]s」的頁面「%[1]s」：%[3]v",
 					page.ID,
 					nodeID,
 					err,
@@ -595,8 +594,7 @@ func ValidateImportedProject(root string) error {
 			}
 			pageID := strings.TrimSuffix(pageFile.Name(), filepath.Ext(pageFile.Name()))
 			if !expectedPages[pageID] {
-				return fmt.Errorf(
-					"page file %q is missing from node %q manifest",
+				return locale.Errorf("page file %q is missing from node %q manifest", "節點「%[2]s」的清單中缺少頁面檔案「%[1]s」",
 					pageFile.Name(),
 					nodeID,
 				)
@@ -605,15 +603,15 @@ func ValidateImportedProject(root string) error {
 	}
 	for nodeID, dir := range store.ListNodePayloadDirs(root, ".files") {
 		if graph.NodeByID(nodeID) == nil {
-			return fmt.Errorf("attachments reference unknown node %q", nodeID)
+			return locale.Errorf("attachments reference unknown node %q", "附件參照了不明的節點「%s」", nodeID)
 		}
 		files, readErr := store.ReadProjectDir(root, dir)
 		if readErr != nil {
-			return fmt.Errorf("read attachments for node %q: %w", nodeID, readErr)
+			return locale.Errorf("read attachments for node %q: %w", "讀取節點「%s」的附件：%w", nodeID, readErr)
 		}
 		for _, file := range files {
 			if file.IsDir() || file.Type()&os.ModeSymlink != 0 || store.SanitizeAttachmentName(file.Name()) != file.Name() {
-				return fmt.Errorf("invalid attachment %q for node %q", file.Name(), nodeID)
+				return locale.Errorf("invalid attachment %q for node %q", "節點「%[2]s」的附件「%[1]s」無效", file.Name(), nodeID)
 			}
 		}
 	}
@@ -621,7 +619,7 @@ func ValidateImportedProject(root string) error {
 	journalPath := filepath.Join(root, "run", "journal.jsonl")
 	if journal, err := store.ReadProjectFile(root, journalPath); err == nil {
 		if _, err := engine.StateFromJournalChecked(journal); err != nil {
-			return fmt.Errorf("invalid imported journal: %w", err)
+			return locale.Errorf("invalid imported journal: %w", "匯入的日誌無效：%w", err)
 		}
 	} else if !os.IsNotExist(err) {
 		return err
@@ -652,7 +650,7 @@ func (pm *ProjectManager) availableProjectName(base string) (string, string, err
 			name = fmt.Sprintf("%s-%d", base, index)
 		}
 		if !ValidProjectPath(name) {
-			return "", "", fmt.Errorf("invalid imported project name %q", name)
+			return "", "", locale.Errorf("invalid imported project name %q", "匯入的專案名稱「%s」無效", name)
 		}
 		destination, err := pm.Resolve(name)
 		if err != nil {
@@ -664,7 +662,7 @@ func (pm *ProjectManager) availableProjectName(base string) (string, string, err
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("could not allocate a unique project name")
+	return "", "", locale.Errorf("could not allocate a unique project name", "無法配置不重複的專案名稱")
 }
 
 // InstallError carries the HTTP status the caller should report for a failed
@@ -734,7 +732,7 @@ func (pm *ProjectManager) resolveImportParent(parent string) (string, error) {
 	}
 	if !ValidProjectPath(parent) {
 		return "", &InstallError{
-			http.StatusBadRequest, fmt.Errorf("invalid destination folder %q", parent),
+			http.StatusBadRequest, locale.Errorf("invalid destination folder %q", "目的資料夾「%s」無效", parent),
 		}
 	}
 	dir, err := pm.Resolve(parent)
@@ -743,7 +741,7 @@ func (pm *ProjectManager) resolveImportParent(parent string) (string, error) {
 	}
 	if info, err := store.StatProjectPath(pm.workspace, dir); err != nil || !info.IsDir() {
 		return "", &InstallError{
-			http.StatusBadRequest, fmt.Errorf("destination folder %q does not exist", parent),
+			http.StatusBadRequest, locale.Errorf("destination folder %q does not exist", "目的資料夾「%s」不存在", parent),
 		}
 	}
 	return parent, nil
@@ -775,19 +773,19 @@ func (pm *ProjectManager) InstallArchiveMode(
 	if parentPath != "" && mode == ImportModeRoot {
 		return "", "", &InstallError{
 			http.StatusBadRequest,
-			fmt.Errorf("a workspace import cannot be placed under %q", parentPath),
+			locale.Errorf("a workspace import cannot be placed under %q", "工作區匯入不能放在「%s」底下", parentPath),
 		}
 	}
 	if len(data) > MaxProjectArchiveBytes {
 		return "", "", &InstallError{
 			http.StatusRequestEntityTooLarge,
-			fmt.Errorf("project archive is too large"),
+			locale.Errorf("project archive is too large", "專案封存檔太大"),
 		}
 	}
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", "", &InstallError{
-			http.StatusBadRequest, fmt.Errorf("invalid ZIP archive: %w", err),
+			http.StatusBadRequest, locale.Errorf("invalid ZIP archive: %w", "ZIP 封存檔無效：%w", err),
 		}
 	}
 
@@ -823,7 +821,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 			dir := filepath.Join(temp, filepath.FromSlash(bundleMemberPrefix(project)))
 			if err := ValidateImportedProject(dir); err != nil {
 				return "", "", &InstallError{
-					http.StatusBadRequest, fmt.Errorf("project %q: %w", project, err),
+					http.StatusBadRequest, locale.Errorf("project %q: %w", "專案「%s」：%w", project, err),
 				}
 			}
 		}
@@ -854,7 +852,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 	if baseName == "." || len(baseName) > 100 || !ProjectNamePattern.MatchString(baseName) {
 		if requestedName != "" {
 			return "", "", &InstallError{
-				http.StatusBadRequest, fmt.Errorf("invalid project name %q", baseName),
+				http.StatusBadRequest, locale.Errorf("invalid project name %q", "專案名稱「%s」無效", baseName),
 			}
 		}
 		baseName = fallbackImportName(fallbackFilename)
@@ -874,7 +872,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 	}
 	if err := store.RenameProjectPath(pm.workspace, temp, pm.workspace, destination); err != nil {
 		return "", "", &InstallError{
-			http.StatusInternalServerError, fmt.Errorf("install imported project: %w", err),
+			http.StatusInternalServerError, locale.Errorf("install imported project: %w", "安裝匯入的專案：%w", err),
 		}
 	}
 	keepTemp = true
@@ -885,7 +883,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 	if err := pm.OpenForCaller(activateName); err != nil {
 		_ = store.RemoveAllProjectPath(pm.workspace, destination)
 		return "", "", &InstallError{
-			http.StatusInternalServerError, fmt.Errorf("activate imported project: %w", err),
+			http.StatusInternalServerError, locale.Errorf("activate imported project: %w", "開啟匯入的專案：%w", err),
 		}
 	}
 	pm.hub.Broadcast("project-changed", activateName)
@@ -933,7 +931,7 @@ func (pm *ProjectManager) installBundleAtRoot(
 		if err := store.RenameProjectPath(pm.workspace, origin, pm.workspace, destination); err != nil {
 			return abandon(
 				http.StatusInternalServerError,
-				fmt.Errorf("install imported project %q: %w", entry.Name(), err),
+				locale.Errorf("install imported project %q: %w", "安裝匯入的專案「%s」：%w", entry.Name(), err),
 			)
 		}
 		placed[entry.Name()] = name
@@ -948,7 +946,7 @@ func (pm *ProjectManager) installBundleAtRoot(
 	if !ok {
 		return abandon(
 			http.StatusBadRequest,
-			fmt.Errorf("project bundle does not contain %q", head),
+			locale.Errorf("project bundle does not contain %q", "專案套件沒有「%s」", head),
 		)
 	}
 	if nested {
@@ -961,7 +959,7 @@ func (pm *ProjectManager) installBundleAtRoot(
 	if err := pm.OpenForCaller(activateName); err != nil {
 		return abandon(
 			http.StatusInternalServerError,
-			fmt.Errorf("activate imported project: %w", err),
+			locale.Errorf("activate imported project: %w", "開啟匯入的專案：%w", err),
 		)
 	}
 	pm.hub.Broadcast("project-changed", activateName)
@@ -1051,7 +1049,7 @@ func (pm *ProjectManager) ExportScope(name string) (ExportScopeResult, error) {
 			}
 		}
 		if !found {
-			return ExportScopeResult{}, fmt.Errorf("active project is not in the workspace")
+			return ExportScopeResult{}, locale.Errorf("active project is not in the workspace", "目前的專案不在工作區內")
 		}
 	} else {
 		for _, project := range projects {
@@ -1072,7 +1070,7 @@ func (pm *ProjectManager) ExportScope(name string) (ExportScopeResult, error) {
 			found = true
 		}
 		if !found {
-			return ExportScopeResult{}, fmt.Errorf("project %q is not in the workspace", name)
+			return ExportScopeResult{}, locale.Errorf("project %q is not in the workspace", "專案「%s」不在工作區內", name)
 		}
 	}
 
@@ -1108,7 +1106,7 @@ func (pm *ProjectManager) ExportScope(name string) (ExportScopeResult, error) {
 		scope.members = append(scope.members, bundleMember{rel: rel, info: project})
 	}
 	if len(scope.members) == 0 {
-		return ExportScopeResult{}, fmt.Errorf("%q contains no projects to export", root.Label)
+		return ExportScopeResult{}, locale.Errorf("%q contains no projects to export", "「%s」沒有可匯出的專案", root.Label)
 	}
 	return scope, nil
 }
@@ -1160,7 +1158,7 @@ func BuildProjectBundle(destination io.Writer, scope ExportScopeResult) error {
 		if err := writeProjectFiles(
 			archive, bundleMemberPrefix(member.rel), member.info, scope.shared,
 		); err != nil {
-			return fmt.Errorf("export %q: %w", member.rel, err)
+			return locale.Errorf("export %q: %w", "匯出「%s」：%w", member.rel, err)
 		}
 	}
 
@@ -1204,16 +1202,13 @@ func DetectProjectBundle(reader *zip.Reader) (string, ProjectBundleManifest, boo
 			continue
 		}
 		if manifest.Format != ProjectArchiveFormat {
-			return "", ProjectBundleManifest{}, false, fmt.Errorf(
-				"unsupported project bundle %q", manifest.Format)
+			return "", ProjectBundleManifest{}, false, locale.Errorf("unsupported project bundle %q", "不支援的專案套件「%s」", manifest.Format)
 		}
 		if manifest.Version < ProjectBundleVersion {
-			return "", ProjectBundleManifest{}, false, fmt.Errorf(
-				"unsupported project bundle version %d", manifest.Version)
+			return "", ProjectBundleManifest{}, false, locale.Errorf("unsupported project bundle version %d", "不支援的專案套件版本 %d", manifest.Version)
 		}
 		if manifest.Version > ProjectBundleVersion {
-			return "", ProjectBundleManifest{}, false, fmt.Errorf(
-				"project bundle version %d is newer than this build supports",
+			return "", ProjectBundleManifest{}, false, locale.Errorf("project bundle version %d is newer than this build supports", "專案套件版本 %d 比這個版本支援的還新",
 				manifest.Version)
 		}
 		if err := validateBundleManifest(&manifest); err != nil {
@@ -1227,19 +1222,19 @@ func DetectProjectBundle(reader *zip.Reader) (string, ProjectBundleManifest, boo
 
 func validateBundleManifest(manifest *ProjectBundleManifest) error {
 	if len(manifest.Projects) == 0 {
-		return fmt.Errorf("project bundle lists no projects")
+		return locale.Errorf("project bundle lists no projects", "專案套件沒有列出任何專案")
 	}
 	if len(manifest.Projects)+len(manifest.Folders) > maxProjectArchiveFiles {
-		return fmt.Errorf("project bundle lists too many entries")
+		return locale.Errorf("project bundle lists too many entries", "專案套件列出的項目太多")
 	}
 	seen := make(map[string]bool, len(manifest.Projects)+len(manifest.Folders))
 	for _, group := range [][]string{manifest.Projects, manifest.Folders} {
 		for _, entry := range group {
 			if entry != "." && !ValidProjectPath(entry) {
-				return fmt.Errorf("invalid project bundle path %q", entry)
+				return locale.Errorf("invalid project bundle path %q", "專案套件路徑「%s」無效", entry)
 			}
 			if seen[entry] {
-				return fmt.Errorf("duplicate project bundle path %q", entry)
+				return locale.Errorf("duplicate project bundle path %q", "重複的專案套件路徑「%s」", entry)
 			}
 			seen[entry] = true
 		}
@@ -1271,7 +1266,7 @@ func ExtractProjectBundle(
 	destination string,
 ) error {
 	if len(reader.File) > maxProjectArchiveFiles {
-		return fmt.Errorf("archive has too many files")
+		return locale.Errorf("archive has too many files", "封存檔的檔案太多")
 	}
 	prefixes := make([]string, 0, len(manifest.Projects))
 	for _, project := range manifest.Projects {
@@ -1290,25 +1285,25 @@ func ExtractProjectBundle(
 			continue
 		}
 		if entry.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("archive contains a symbolic link")
+			return locale.Errorf("archive contains a symbolic link", "封存檔含有符號連結")
 		}
 		if name == "manifest.json" {
 			continue
 		}
 		inner, ok := bundleEntryPath(prefixes, name)
 		if !ok || !allowedProjectArchivePath(inner) {
-			return fmt.Errorf("unsupported archive path %q", name)
+			return locale.Errorf("unsupported archive path %q", "不支援的封存檔路徑「%s」", name)
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("duplicate archive path %q", name)
+			return locale.Errorf("duplicate archive path %q", "重複的封存檔路徑「%s」", name)
 		}
 		seen[name] = struct{}{}
 		if entry.UncompressedSize64 > maxProjectArchiveFileBytes {
-			return fmt.Errorf("archive file %q is too large", name)
+			return locale.Errorf("archive file %q is too large", "封存檔中的檔案「%s」太大", name)
 		}
 		total += int64(entry.UncompressedSize64)
 		if total > maxProjectExtractedBytes {
-			return fmt.Errorf("archive expands beyond the size limit")
+			return locale.Errorf("archive expands beyond the size limit", "封存檔解開後超過大小上限")
 		}
 
 		source, err := entry.Open()
@@ -1324,7 +1319,7 @@ func ExtractProjectBundle(
 			return closeErr
 		}
 		if len(data) > maxProjectArchiveFileBytes {
-			return fmt.Errorf("archive file %q is too large", name)
+			return locale.Errorf("archive file %q is too large", "封存檔中的檔案「%s」太大", name)
 		}
 		target := filepath.Join(destination, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -1338,7 +1333,7 @@ func ExtractProjectBundle(
 	for _, project := range manifest.Projects {
 		dir := filepath.Join(destination, filepath.FromSlash(bundleMemberPrefix(project)))
 		if _, err := os.Stat(filepath.Join(dir, "graph.yaml")); err != nil {
-			return fmt.Errorf("project %q is missing graph.yaml", project)
+			return locale.Errorf("project %q is missing graph.yaml", "專案「%s」缺少 graph.yaml", project)
 		}
 	}
 	for _, folder := range manifest.Folders {

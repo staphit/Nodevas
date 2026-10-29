@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/members"
 	"nodevas/internal/project"
 )
@@ -110,14 +110,14 @@ func (s *Server) withProjectAccess(c *gin.Context) {
 	access := s.members.Access(auth.ActorFrom(r), project.Key(st.Root()))
 	if !access.CanRead() {
 		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
-			errors.New("you are not a member of this project"), nil)
+			locale.Errorf("you are not a member of this project", "你不是這個專案的成員"), nil)
 		c.Abort()
 		return
 	}
 	writes := (isUnsafeMethod(r.Method) && !readOnlyPosts[r.URL.Path]) || stateChangingGET(r)
 	if writes && !access.CanWrite() {
 		httpx.Coded(c, http.StatusForbidden, "PROJECT_READ_ONLY",
-			errors.New("you can view this project but not change it"), nil)
+			locale.Errorf("you can view this project but not change it", "你可以檢視這個專案，但不能修改"), nil)
 		c.Abort()
 		return
 	}

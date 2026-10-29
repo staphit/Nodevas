@@ -3,7 +3,6 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/project"
@@ -13,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // GetSearch searches project names, node metadata, Markdown, and subpages
@@ -24,7 +25,7 @@ func (a *API) GetSearch(c *gin.Context) {
 		return
 	}
 	if len(query) > 256 {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("search query is too long"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("search query is too long", "搜尋字串太長"))
 		return
 	}
 	if c.Request.URL.Query().Get("mode") == "ranked" {
@@ -86,7 +87,7 @@ func (a *API) getRankedSearch(c *gin.Context, query string) {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > maxRankedLimit {
 			httpx.Err(c, http.StatusBadRequest,
-				fmt.Errorf("limit must be a whole number between 1 and %d", maxRankedLimit))
+				locale.Errorf("limit must be a whole number between 1 and %d", "limit 須為 1 到 %d 的整數", maxRankedLimit))
 			return
 		}
 		limit = parsed

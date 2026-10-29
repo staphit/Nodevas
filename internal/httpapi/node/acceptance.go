@@ -9,6 +9,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -25,7 +26,7 @@ func (a *API) postAcceptance(c *gin.Context) {
 		return
 	}
 	if len(body.Items) > engine.MaxAcceptanceItems {
-		httpx.Err(c, http.StatusBadRequest, errors.New("too many acceptance criteria"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("too many acceptance criteria", "驗收條件太多"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)

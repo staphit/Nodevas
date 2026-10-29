@@ -6,7 +6,6 @@ package analytics
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -22,6 +21,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
@@ -63,7 +63,7 @@ func invalid(c *gin.Context, err error) {
 func person(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agent analytics is for people, not agents"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agent analytics is for people, not agents", "agent 分析是給人看的，不是給 agent"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -73,12 +73,12 @@ func person(c *gin.Context) (identity.Actor, bool) {
 func (a *API) projectName(c *gin.Context) (string, bool) {
 	st := httpx.StoreFor(c.Request, a.o.PM)
 	if a.o.PM == nil || st == nil {
-		invalid(c, errors.New("no project selected"))
+		invalid(c, locale.Errorf("no project selected", "沒有選擇專案"))
 		return "", false
 	}
 	rel, err := filepath.Rel(a.o.PM.Workspace(), st.Root())
 	if err != nil {
-		invalid(c, errors.New("no project selected"))
+		invalid(c, locale.Errorf("no project selected", "沒有選擇專案"))
 		return "", false
 	}
 	return filepath.ToSlash(rel), true
@@ -92,7 +92,7 @@ func days(c *gin.Context) (int, bool) {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 || n > analytics.MaxDays {
-		invalid(c, errors.New("days is between 1 and 365"))
+		invalid(c, locale.Errorf("days is between 1 and 365", "天數須介於 1 到 365"))
 		return 0, false
 	}
 	return n, true
@@ -201,7 +201,7 @@ func owner(c *gin.Context, actor identity.Actor) (string, bool) {
 		return actor.ID, true
 	}
 	if !actor.IsAdmin() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("only an administrator reads another person's scorecards"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("only an administrator reads another person's scorecards", "只有管理員可以讀取別人的評分卡"), nil)
 		return "", false
 	}
 	return other, true
@@ -220,7 +220,7 @@ func (a *API) scorecards(c *gin.Context) {
 	switch track {
 	case "", analytics.TrackAll, analytics.TrackCode, analytics.TrackStory:
 	default:
-		invalid(c, errors.New("track is all, code or story"))
+		invalid(c, locale.Errorf("track is all, code or story", "track 須為 all、code 或 story"))
 		return
 	}
 	who, ok := owner(c, actor)
@@ -316,7 +316,7 @@ func (a *API) routePicks(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > analytics.MaxPicksListed {
-			invalid(c, fmt.Errorf("limit is between 1 and %d", analytics.MaxPicksListed))
+			invalid(c, locale.Errorf("limit is between 1 and %d", "limit 須介於 1 到 %d", analytics.MaxPicksListed))
 			return
 		}
 		limit = n
@@ -354,10 +354,10 @@ func (a *API) apply(c *gin.Context) {
 	switch body.Change.Type {
 	case analytics.ChangeRoutingRuleTarget, analytics.ChangeRoleBudget, analytics.ChangeAutoRouting:
 	case analytics.ChangeOpenSettings:
-		invalid(c, errors.New("this suggestion opens a setting; there is nothing to apply"))
+		invalid(c, locale.Errorf("this suggestion opens a setting; there is nothing to apply", "這個建議是開啟設定；沒有可套用的內容"))
 		return
 	default:
-		invalid(c, errors.New("unknown change type"))
+		invalid(c, locale.Errorf("unknown change type", "不明的變更類型"))
 		return
 	}
 	name, ok := a.projectName(c)
@@ -388,7 +388,7 @@ func (a *API) apply(c *gin.Context) {
 	}
 	if match == nil || match.Change == nil || !reflect.DeepEqual(*match.Change, body.Change) {
 		httpx.Coded(c, http.StatusConflict, "STALE_SUGGESTION",
-			errors.New("this suggestion changed; review it again"), map[string]any{"suggestion": match})
+			locale.Errorf("this suggestion changed; review it again", "這個建議已變更；請重新檢視"), map[string]any{"suggestion": match})
 		return
 	}
 	change := body.Change
@@ -431,7 +431,7 @@ func (e *staleError) Error() string { return e.msg }
 // through the store's full validation.
 func (a *API) retarget(c *gin.Context, owner string, change analytics.Change) error {
 	if change.From == nil || change.To == nil || change.RuleID == "" {
-		return fmt.Errorf("%w: a retarget names its rule, from and to", analytics.ErrInvalid)
+		return locale.Errorf("%w: a retarget names its rule, from and to", "%w：改派需指定規則、來源與目標", analytics.ErrInvalid)
 	}
 	ctx := c.Request.Context()
 	rules, err := a.o.Runs.Routing(ctx, owner)
@@ -460,7 +460,7 @@ func (a *API) retarget(c *gin.Context, owner string, change analytics.Change) er
 // other limits.
 func (a *API) roleBudget(c *gin.Context, owner string, change analytics.Change) error {
 	if !engine.ValidRoleID(change.Role) || change.DailyCostUSD <= 0 {
-		return fmt.Errorf("%w: a role budget names a role and a cost", analytics.ErrInvalid)
+		return locale.Errorf("%w: a role budget names a role and a cost", "%w：角色預算需指定角色與金額", analytics.ErrInvalid)
 	}
 	ctx := c.Request.Context()
 	settings, err := a.o.Runs.RoleSettings(ctx, owner)
@@ -494,7 +494,7 @@ func (a *API) dismiss(c *gin.Context) {
 	}
 	if err := analytics.Dismiss(c.Request.Context(), a.o.DB, actor.ID, strings.TrimSpace(body.Key), a.o.Now()); err != nil {
 		if errors.Is(err, analytics.ErrInvalid) {
-			invalid(c, errors.New("key is required"))
+			invalid(c, locale.Errorf("key is required", "需要提供 key"))
 			return
 		}
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -509,7 +509,7 @@ func admin(c *gin.Context) bool {
 		return false
 	}
 	if err := auth.RequireAdmin(c.Request); err != nil {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("administrator access required"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("administrator access required", "需要管理員權限"), nil)
 		return false
 	}
 	return true
@@ -539,7 +539,7 @@ func (a *API) putRetention(c *gin.Context) {
 		return
 	}
 	if body.Days == nil || !analytics.ValidRetentionDays(*body.Days) {
-		invalid(c, fmt.Errorf("days is 0 (forever) or %d to %d", analytics.MinRetentionDays, analytics.MaxRetentionDays))
+		invalid(c, locale.Errorf("days is 0 (forever) or %d to %d", "天數須為 0（永久）或 %d 到 %d", analytics.MinRetentionDays, analytics.MaxRetentionDays))
 		return
 	}
 	if err := a.o.DB.SetSetting(c.Request.Context(), analytics.RetentionSettingKey, strconv.Itoa(*body.Days)); err != nil {

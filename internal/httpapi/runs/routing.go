@@ -10,6 +10,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -34,7 +35,7 @@ func (a *API) routing(c *gin.Context) {
 func (a *API) setRouting(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot change routing"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot change routing", "agent 不能更改路由"), nil)
 		return
 	}
 	var body runnerwire.RoutingConfig
@@ -59,7 +60,7 @@ func (a *API) route(c *gin.Context) {
 	}
 	nodeID := strings.TrimSpace(c.Query("nodeId"))
 	if !engine.ValidNodeID(nodeID) {
-		invalid(c, "nodeId is not a valid node id")
+		invalid(c, "nodeId is not a valid node id", "nodeId 不是有效的節點代號")
 		return
 	}
 	graph, _, err := st.LoadGraph()
@@ -77,7 +78,7 @@ func (a *API) route(c *gin.Context) {
 		role = engine.RoleExecutor
 	}
 	if !engine.ValidRoleID(role) {
-		invalid(c, "role is not a valid role id")
+		invalid(c, "role is not a valid role id", "role 不是有效的角色代號")
 		return
 	}
 	actor := auth.ActorFrom(c.Request)

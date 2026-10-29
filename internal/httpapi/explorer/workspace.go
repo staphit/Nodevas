@@ -10,6 +10,7 @@ import (
 
 	"nodevas/internal/gitrepo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -44,10 +45,10 @@ func (a *API) workspaceFile(c *gin.Context) {
 		httpx.Coded(c, http.StatusForbidden, "HIDDEN_FILE", err, nil)
 		return
 	case errors.Is(err, store.ErrBadPath):
-		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", errors.New("the path is not a file inside the project"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", locale.Errorf("the path is not a file inside the project", "這個路徑不是專案內的檔案"), nil)
 		return
 	case errors.Is(err, os.ErrNotExist):
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such file"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such file", "沒有這個檔案"), nil)
 		return
 	case err != nil:
 		httpx.Err(c, http.StatusInternalServerError, err)
@@ -84,7 +85,7 @@ func (a *API) workspaceCommit(c *gin.Context) {
 	}
 	sha := strings.TrimSpace(c.Query("sha"))
 	if !gitrepo.ValidSHA(sha) {
-		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", errors.New("sha is a full commit id"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "BAD_PATH", locale.Errorf("sha is a full commit id", "sha 須為完整的提交代號"), nil)
 		return
 	}
 	out, err := st.HistoryCommitPatch(c.Request.Context(), sha)

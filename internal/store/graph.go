@@ -5,12 +5,12 @@ package store
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"os"
 	"reflect"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // ---------- graph ----------
@@ -62,7 +62,7 @@ func (s *Store) SaveGraphSynced(actor identity.Actor, g *engine.Graph, baseRev s
 	}
 	for _, node := range currentGraph.Nodes {
 		if node != nil && g.NodeByID(node.ID) == nil {
-			return "", nil, fmt.Errorf("cannot remove node %q through graph save; use the node delete endpoint", node.ID)
+			return "", nil, locale.Errorf("cannot remove node %q through graph save; use the node delete endpoint", "不能透過儲存圖來移除節點「%s」；請改用刪除節點", node.ID)
 		}
 	}
 	// Node types decide what agents may do, so an agent may neither redefine
@@ -112,7 +112,7 @@ func (s *Store) SaveGraphSynced(actor identity.Actor, g *engine.Graph, baseRev s
 		}
 		update, err := s.prepareNodeFileUpdate(n)
 		if err != nil {
-			return "", nil, fmt.Errorf("sync node %s: %w", n.ID, err)
+			return "", nil, locale.Errorf("sync node %s: %w", "同步節點 %s：%w", n.ID, err)
 		}
 		if update != nil {
 			updates = append(updates, *update)
@@ -184,7 +184,7 @@ func (s *Store) prepareNodeFileUpdate(n *engine.Node) (*fileUpdate, error) {
 // fails its changed-while-reading check, reads again (settledRead).
 func (s *Store) LoadNodeContent(id string) (string, string, error) {
 	if !engine.ValidNodeID(id) {
-		return "", "", fmt.Errorf("invalid node id")
+		return "", "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	var data []byte
 	err := settledRead(func() (err error) {
@@ -205,7 +205,7 @@ func (s *Store) LoadNodeContent(id string) (string, string, error) {
 // lets an auto-saving editor stay in step without a GET after every save.
 func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev string) (string, string, error) {
 	if !engine.ValidNodeID(id) {
-		return "", "", fmt.Errorf("invalid node id")
+		return "", "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,7 +218,7 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	}
 	n := g.NodeByID(id)
 	if n == nil {
-		return "", "", fmt.Errorf("node %q not found in graph", id)
+		return "", "", locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", id)
 	}
 	if err := checkNodeWrite(actor, n); err != nil {
 		return "", "", err
@@ -228,7 +228,7 @@ func (s *Store) SaveNodeContent(actor identity.Actor, id, content, baseRev strin
 	}
 	nf, err := engine.ParseNodeFile([]byte(content))
 	if err != nil {
-		return "", "", fmt.Errorf("node file: %w", err)
+		return "", "", locale.Errorf("node file: %w", "節點檔案：%w", err)
 	}
 	engine.SyncFrontmatter(nf, n)
 	out, err := engine.ComposeNodeFile(nf)

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Status is one path a commit changes: 'A' added, 'M' modified, 'D' deleted.
@@ -280,11 +282,11 @@ func cleanPath(path string) (string, error) {
 	path = filepath.ToSlash(path)
 	if path == "" || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\"") ||
 		strings.ContainsAny(path, "\n\r\x00\\") {
-		return "", fmt.Errorf("unsupported path %q", path)
+		return "", locale.Errorf("unsupported path %q", "不支援的路徑「%s」", path)
 	}
 	for _, part := range strings.Split(path, "/") {
 		if part == "" || part == "." || part == ".." {
-			return "", fmt.Errorf("unsupported path %q", path)
+			return "", locale.Errorf("unsupported path %q", "不支援的路徑「%s」", path)
 		}
 	}
 	return path, nil

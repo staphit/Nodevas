@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -470,7 +471,7 @@ type Reviewer struct{ ID, Name string }
 func (d *Dispatcher) HumanReview(ctx context.Context, id string, who Reviewer, verdict, comment string) (PipelineRecord, error) {
 	comment = strings.TrimSpace(comment)
 	if verdict == runnerwire.VerdictChanges && comment == "" {
-		return PipelineRecord{}, invalidf("say what to change: a review asking for changes needs a comment")
+		return PipelineRecord{}, invalidf("say what to change: a review asking for changes needs a comment", "請說明要改什麼：要求修改的審查需要留言")
 	}
 	unlock := lockPipeline(id)
 	defer unlock()
@@ -479,14 +480,14 @@ func (d *Dispatcher) HumanReview(ctx context.Context, id string, who Reviewer, v
 		return PipelineRecord{}, err
 	}
 	if p.Status != runnerwire.PipelineWaitingHuman {
-		return PipelineRecord{}, fmt.Errorf("%w: the pipeline is not waiting for a person's review", ErrPrecondition)
+		return PipelineRecord{}, locale.Errorf("%w: the pipeline is not waiting for a person's review", "%w：管線沒有在等人審查", ErrPrecondition)
 	}
 	runs, err := d.store.PipelineRuns(ctx, id)
 	if err != nil {
 		return PipelineRecord{}, err
 	}
 	if len(runs) == 0 {
-		return PipelineRecord{}, fmt.Errorf("%w: the pipeline has no runs", ErrPrecondition)
+		return PipelineRecord{}, locale.Errorf("%w: the pipeline has no runs", "%w：管線沒有任何執行", ErrPrecondition)
 	}
 	last := runs[len(runs)-1]
 	if err := d.store.HumanVote(ctx, p.ID, p.Round, who.ID, who.Name, verdict, comment); err != nil {

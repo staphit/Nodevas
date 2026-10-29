@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -77,61 +77,61 @@ type VerdictInput struct {
 }
 
 // ErrVerdictRole: the run's role may not give a verdict.
-var ErrVerdictRole = errors.New("only a reviewer or QA run may submit a verdict")
+var ErrVerdictRole = locale.Errorf("only a reviewer or QA run may submit a verdict", "只有 reviewer 或 QA 執行可以提交判定")
 
 // ValidateVerdict checks a submitted verdict against the fixed reasons and
 // the outcome's severity rules, and cleans its note.
 func ValidateVerdict(in *VerdictInput) error {
 	if in == nil {
-		return fmt.Errorf("%w: no verdict", ErrInvalid)
+		return locale.Errorf("%w: no verdict", "%w：沒有判定", ErrInvalid)
 	}
 	in.Outcome = strings.TrimSpace(in.Outcome)
 	in.Severity = strings.TrimSpace(in.Severity)
 	switch in.Outcome {
 	case VerdictOutcomePass, VerdictOutcomeFail:
 	default:
-		return fmt.Errorf("%w: outcome must be pass or fail", ErrInvalid)
+		return locale.Errorf("%w: outcome must be pass or fail", "%w：結果須為 pass 或 fail", ErrInvalid)
 	}
 	rank, ok := severityRank[in.Severity]
 	if !ok {
-		return fmt.Errorf("%w: severity must be one of none, low, medium, high, critical", ErrInvalid)
+		return locale.Errorf("%w: severity must be one of none, low, medium, high, critical", "%w：嚴重度須為 none、low、medium、high、critical 其中之一", ErrInvalid)
 	}
 	if len(in.Reasons) > MaxVerdictReasons {
-		return fmt.Errorf("%w: at most %d reasons", ErrInvalid, MaxVerdictReasons)
+		return locale.Errorf("%w: at most %d reasons", "%w：最多 %d 個理由", ErrInvalid, MaxVerdictReasons)
 	}
 	seen := map[string]bool{}
 	for _, reason := range in.Reasons {
 		if !slices.Contains(VerdictReasons, reason) {
-			return fmt.Errorf("%w: unknown reason %q", ErrInvalid, reason)
+			return locale.Errorf("%w: unknown reason %q", "%w：不明的理由「%s」", ErrInvalid, reason)
 		}
 		if seen[reason] {
-			return fmt.Errorf("%w: reason %q given twice", ErrInvalid, reason)
+			return locale.Errorf("%w: reason %q given twice", "%w：理由「%s」重複", ErrInvalid, reason)
 		}
 		seen[reason] = true
 	}
 	switch in.Outcome {
 	case VerdictOutcomePass:
 		if rank > severityRank[SeverityLow] {
-			return fmt.Errorf("%w: a pass has severity none or low", ErrInvalid)
+			return locale.Errorf("%w: a pass has severity none or low", "%w：通過的嚴重度須為 none 或 low", ErrInvalid)
 		}
 		for _, reason := range in.Reasons {
 			if !passReasons[reason] {
-				return fmt.Errorf("%w: a pass may only note style, flaky or other", ErrInvalid)
+				return locale.Errorf("%w: a pass may only note style, flaky or other", "%w：通過只能註記 style、flaky 或 other", ErrInvalid)
 			}
 		}
 	case VerdictOutcomeFail:
 		if len(in.Reasons) == 0 {
-			return fmt.Errorf("%w: a fail needs at least one reason", ErrInvalid)
+			return locale.Errorf("%w: a fail needs at least one reason", "%w：不通過至少需要一個理由", ErrInvalid)
 		}
 		if rank < severityRank[SeverityLow] {
-			return fmt.Errorf("%w: a fail has severity low or higher", ErrInvalid)
+			return locale.Errorf("%w: a fail has severity low or higher", "%w：不通過的嚴重度須為 low 以上", ErrInvalid)
 		}
 	}
 	if len(in.Note) > MaxVerdictNote {
-		return fmt.Errorf("%w: note over %d bytes", ErrInvalid, MaxVerdictNote)
+		return locale.Errorf("%w: note over %d bytes", "%w：備註超過 %d 位元組", ErrInvalid, MaxVerdictNote)
 	}
 	if !utf8.ValidString(in.Note) {
-		return fmt.Errorf("%w: note is not valid text", ErrInvalid)
+		return locale.Errorf("%w: note is not valid text", "%w：備註不是有效的文字", ErrInvalid)
 	}
 	in.Note = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) && r != '\n' && r != '\t' {

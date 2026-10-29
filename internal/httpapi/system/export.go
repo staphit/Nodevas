@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/document"
 	"nodevas/internal/document/docx"
 	dochtml "nodevas/internal/document/html"
+	"nodevas/internal/locale"
 )
 
 func (a *API) postExport(c *gin.Context) {
@@ -27,7 +28,7 @@ func (a *API) postExport(c *gin.Context) {
 	}
 	spec, ok := export.Formats[strings.ToLower(strings.TrimSpace(request.Format))]
 	if !ok {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("unsupported format %q", request.Format))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("unsupported format %q", "不支援的格式「%s」", request.Format))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)

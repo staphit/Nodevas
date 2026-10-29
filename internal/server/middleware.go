@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/logging"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -87,7 +87,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	// whole graph is as bad as a write.
 	if !s.allowsHost(r.Host) {
 		httpx.Err(c, http.StatusForbidden,
-			errors.New("this server does not answer on Host "+strconv.Quote(r.Host)))
+			locale.Errorf("this server does not answer on Host %q", "這個伺服器不回應 Host「%s」", r.Host))
 		return
 	}
 
@@ -97,7 +97,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	// would wave it through.
 	if underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r)) {
 		if origin := r.Header.Get("Origin"); origin != "" && !s.isAllowedOrigin(origin, r.Host) {
-			httpx.Err(c, http.StatusForbidden, errors.New("cross-origin API request rejected"))
+			httpx.Err(c, http.StatusForbidden, locale.Errorf("cross-origin API request rejected", "拒絕跨來源的 API 請求"))
 			return
 		}
 		// Origin can be absent on a top-level cross-site form submission,
@@ -106,7 +106,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 		// what Origin cannot. It is missing entirely on non-browser clients
 		// (agents, curl), which are not subject to CSRF in the first place.
 		if !allowsFetchSite(r.Header.Get("Sec-Fetch-Site")) {
-			httpx.Err(c, http.StatusForbidden, errors.New("cross-site API request rejected"))
+			httpx.Err(c, http.StatusForbidden, locale.Errorf("cross-site API request rejected", "拒絕跨網站的 API 請求"))
 			return
 		}
 	}
@@ -126,7 +126,7 @@ func (s *Server) secureHTTP(c *gin.Context) {
 				httpx.Err(
 					c,
 					http.StatusUnsupportedMediaType,
-					errors.New("Content-Type must be application/json (or multipart/form-data for uploads)"),
+					locale.Errorf("Content-Type must be application/json (or multipart/form-data for uploads)", "Content-Type 須為 application/json（上傳時為 multipart/form-data）"),
 				)
 				return
 			}
@@ -240,7 +240,7 @@ const runnerPathPrefix = "/api/runner/"
 func (s *Server) withRunnerAuth(c *gin.Context) {
 	r := c.Request
 	if s.runners == nil {
-		httpx.Err(c, http.StatusNotFound, errors.New("runners are not enabled on this server"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("runners are not enabled on this server", "這個伺服器沒有啟用 runner"))
 		return
 	}
 	runner, err := s.runners.Authenticate(r.Context(), runners.BearerToken(r))

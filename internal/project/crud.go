@@ -4,12 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"nodevas/internal/locale"
 )
 
 // Project creation, import, move, and removal.
@@ -164,7 +165,7 @@ func copyDirTree(srcRoot, dstRoot, src, dst string, copied *int) error {
 			continue
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("source contains symbolic link %q", relativeDisplayPath(srcRoot, filepath.Join(src, name)))
+			return locale.Errorf("source contains symbolic link %q", "來源含有符號連結「%s」", relativeDisplayPath(srcRoot, filepath.Join(src, name)))
 		}
 		from := filepath.Join(src, name)
 		to := filepath.Join(dst, name)
@@ -175,7 +176,7 @@ func copyDirTree(srcRoot, dstRoot, src, dst string, copied *int) error {
 			continue
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("source contains non-regular file %q", relativeDisplayPath(srcRoot, from))
+			return locale.Errorf("source contains non-regular file %q", "來源含有非一般檔案「%s」", relativeDisplayPath(srcRoot, from))
 		}
 		*copied++
 		if *copied > MaxImportPathFiles {
@@ -202,10 +203,10 @@ func relativeDisplayPath(root, path string) string {
 
 func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, error) {
 	if name == "." {
-		return "", fmt.Errorf("the workspace root project cannot be removed")
+		return "", locale.Errorf("the workspace root project cannot be removed", "工作區根目錄的專案不能移除")
 	}
 	if !ValidProjectPath(name) {
-		return "", fmt.Errorf("invalid project name %q", name)
+		return "", locale.Errorf("invalid project name %q", "專案名稱「%s」無效", name)
 	}
 
 	pm.importMu.Lock()
@@ -230,7 +231,7 @@ func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, 
 		}
 	}
 	if target == nil {
-		return "", fmt.Errorf("project %q is not imported", name)
+		return "", locale.Errorf("project %q is not imported", "專案「%s」不是匯入的專案", name)
 	}
 
 	removes := func(projectName string) bool {
@@ -245,10 +246,10 @@ func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, 
 			}
 		}
 		if replacement == "" {
-			return "", fmt.Errorf("create or import another project before removing the last project")
+			return "", locale.Errorf("create or import another project before removing the last project", "移除最後一個專案前，請先建立或匯入另一個專案")
 		}
 		if err := pm.Activate(replacement, false, "", ""); err != nil {
-			return "", fmt.Errorf("switch project before removal: %w", err)
+			return "", locale.Errorf("switch project before removal: %w", "移除前切換專案：%w", err)
 		}
 		active = replacement
 	}
@@ -267,18 +268,18 @@ func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, 
 		rel, err := filepath.Rel(workspace, targetDir)
 		if err != nil || rel == "." || rel == ".." ||
 			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("refusing to delete project outside the workspace")
+			return "", locale.Errorf("refusing to delete project outside the workspace", "拒絕刪除工作區之外的專案")
 		}
 		info, err := store.StatProjectPath(pm.workspace, targetDir)
 		if err != nil {
 			return "", err
 		}
 		if !info.IsDir() {
-			return "", fmt.Errorf("project target is not a regular directory")
+			return "", locale.Errorf("project target is not a regular directory", "專案目標不是一般資料夾")
 		}
 		pm.EvictStores(targetDir)
 		if err := store.RemoveAllProjectPath(pm.workspace, targetDir); err != nil {
-			return "", fmt.Errorf("delete project files: %w", err)
+			return "", locale.Errorf("delete project files: %w", "刪除專案檔案：%w", err)
 		}
 		for detachedName := range detached {
 			if removes(detachedName) {
@@ -289,7 +290,7 @@ func (pm *ProjectManager) RemoveProject(name string, deleteFiles bool) (string, 
 		detached[name] = true
 	}
 	if err := pm.saveDetachedProjects(detached); err != nil {
-		return "", fmt.Errorf("save detached project list: %w", err)
+		return "", locale.Errorf("save detached project list: %w", "儲存已卸離的專案清單：%w", err)
 	}
 	return active, nil
 }

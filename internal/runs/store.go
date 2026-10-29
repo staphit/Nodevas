@@ -23,6 +23,7 @@ import (
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/usage"
 )
@@ -30,12 +31,12 @@ import (
 var (
 	// ErrNotFound covers a run that does not exist or is not the caller's to
 	// see or touch.
-	ErrNotFound = errors.New("run not found")
+	ErrNotFound = locale.Errorf("run not found", "找不到執行")
 	// ErrTransition is a status change the lifecycle does not allow from the
 	// run's current status, e.g. accepting a run that was already cancelled.
-	ErrTransition = errors.New("run status change not allowed")
+	ErrTransition = locale.Errorf("run status change not allowed", "不允許這個執行狀態變更")
 	// ErrInvalid is a request that breaks the limits.
-	ErrInvalid = errors.New("invalid run request")
+	ErrInvalid = locale.Errorf("invalid run request", "執行請求無效")
 )
 
 // MaxErrorBytes caps runs.error: a reason, not a log.
@@ -261,27 +262,27 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	}
 	for _, field := range required {
 		if strings.TrimSpace(field) == "" {
-			return Record{}, fmt.Errorf("%w: missing field", ErrInvalid)
+			return Record{}, locale.Errorf("%w: missing field", "%w：缺少欄位", ErrInvalid)
 		}
 	}
 	if in.Role != "" && !engine.ValidRoleID(in.Role) {
-		return Record{}, fmt.Errorf("%w: role %q", ErrInvalid, in.Role)
+		return Record{}, locale.Errorf("%w: role %q", "%w：角色「%s」", ErrInvalid, in.Role)
 	}
 	if len(in.Override) > MaxOverrideBytes {
-		return Record{}, fmt.Errorf("%w: override over %d bytes", ErrInvalid, MaxOverrideBytes)
+		return Record{}, locale.Errorf("%w: override over %d bytes", "%w：覆寫理由超過 %d 位元組", ErrInvalid, MaxOverrideBytes)
 	}
 	jobRoles, err := encodeJobRoles(in.JobRoles)
 	if err != nil {
 		return Record{}, err
 	}
 	if in.Mode != runnerwire.ModeHeadless && in.Mode != runnerwire.ModeInteractive {
-		return Record{}, fmt.Errorf("%w: unknown mode", ErrInvalid)
+		return Record{}, locale.Errorf("%w: unknown mode", "%w：不明的模式", ErrInvalid)
 	}
 	if len(in.JobPrompt) > runnerwire.MaxPromptBytes {
-		return Record{}, fmt.Errorf("%w: prompt over %d bytes", ErrInvalid, runnerwire.MaxPromptBytes)
+		return Record{}, locale.Errorf("%w: prompt over %d bytes", "%w：提示超過 %d 位元組", ErrInvalid, runnerwire.MaxPromptBytes)
 	}
 	if !jobKinds[in.Kind] {
-		return Record{}, fmt.Errorf("%w: job kind %q", ErrInvalid, in.Kind)
+		return Record{}, locale.Errorf("%w: job kind %q", "%w：工作種類「%s」", ErrInvalid, in.Kind)
 	}
 	fallbacks, err := encodeChain(in.Fallbacks)
 	if err != nil {
@@ -292,7 +293,7 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	handoffBranch := ""
 	if in.JobHandoffBranch != "" {
 		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || (in.Kind != runnerwire.JobImplement && in.Kind != runnerwire.JobTest) {
-			return Record{}, fmt.Errorf("%w: handoff branch %q", ErrInvalid, in.JobHandoffBranch)
+			return Record{}, locale.Errorf("%w: handoff branch %q", "%w：交接分支「%s」", ErrInvalid, in.JobHandoffBranch)
 		}
 		handoffBranch = in.JobHandoffBranch
 	}
@@ -716,7 +717,7 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 		if getErr != nil {
 			return Record{}, getErr
 		}
-		return latest, fmt.Errorf("%w: %s changed under us", ErrTransition, id)
+		return latest, locale.Errorf("%w: %s changed under us", "%w：%s 在處理期間被變更", ErrTransition, id)
 	}
 	return s.Get(ctx, id)
 }
@@ -726,7 +727,7 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	switch result.Status {
 	case runnerwire.RunSucceeded, runnerwire.RunFailed, runnerwire.RunCancelled:
 	default:
-		return Record{}, fmt.Errorf("%w: finish status %q", ErrInvalid, result.Status)
+		return Record{}, locale.Errorf("%w: finish status %q", "%w：結束狀態「%s」", ErrInvalid, result.Status)
 	}
 	exit := result.ExitCode
 	failureKind := ""

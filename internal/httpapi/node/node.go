@@ -5,12 +5,10 @@ package node
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
-	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"os"
 	"strings"
@@ -18,12 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 func (a *API) getNode(c *gin.Context) {
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, 400, errors.New("invalid node id"))
+		httpx.Err(c, 400, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	content, rev, err := httpx.StoreFor(c.Request, a.pm).LoadNodeContent(id)
@@ -41,7 +40,7 @@ func (a *API) getNode(c *gin.Context) {
 func (a *API) putNode(c *gin.Context) {
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, 400, errors.New("invalid node id"))
+		httpx.Err(c, 400, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	var body struct {
@@ -150,11 +149,11 @@ func (a *API) postNodesDelete(c *gin.Context) {
 		return
 	}
 	if len(body.IDs) == 0 {
-		httpx.Err(c, http.StatusBadRequest, errors.New("ids is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("ids is required", "需要提供 ids"))
 		return
 	}
 	if len(body.IDs) > store.MaxGraphNodes {
-		httpx.Err(c, http.StatusBadRequest, errors.New("too many nodes in one request"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("too many nodes in one request", "單次請求的節點太多"))
 		return
 	}
 	outcome, err := httpx.StoreFor(c.Request, a.pm).DeleteNodes(auth.ActorFrom(c.Request), body.IDs)
@@ -204,11 +203,11 @@ func (a *API) postStatus(c *gin.Context) {
 		return
 	}
 	if len(body.By) > 128 || len(body.Note) > 4096 {
-		httpx.Err(c, 400, errors.New("by or note is too long"))
+		httpx.Err(c, 400, locale.Errorf("by or note is too long", "by 或 note 太長"))
 		return
 	}
 	if len(body.Owner) > 128 || len(body.RequestID) > maxRequestID {
-		httpx.Err(c, 400, errors.New("owner or requestId is too long"))
+		httpx.Err(c, 400, locale.Errorf("owner or requestId is too long", "owner 或 requestId 太長"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
@@ -246,11 +245,11 @@ func (a *API) postEventMove(c *gin.Context) {
 		return
 	}
 	if body.ID == "" || body.T == "" {
-		httpx.Err(c, 400, errors.New("body must be {id, t, by?, note?}"))
+		httpx.Err(c, 400, locale.Errorf("body must be {id, t, by?, note?}", "內容須為 {id, t, by?, note?}"))
 		return
 	}
 	if len(body.ID) > 128 || len(body.By) > 128 || len(body.Note) > 4096 {
-		httpx.Err(c, 400, errors.New("event fields are too long"))
+		httpx.Err(c, 400, locale.Errorf("event fields are too long", "事件欄位太長"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
@@ -296,11 +295,11 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		mode = "copy"
 	}
 	if mode != "copy" && mode != "cut" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("unknown transfer mode %q", mode))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("unknown transfer mode %q", "不明的轉移方式「%s」", mode))
 		return
 	}
 	if strings.TrimSpace(body.Target) == "" {
-		httpx.Err(c, http.StatusBadRequest, errors.New("target is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("target is required", "需要提供目標"))
 		return
 	}
 	source := httpx.StoreFor(c.Request, a.pm)

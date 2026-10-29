@@ -5,7 +5,6 @@ package project
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -41,7 +40,7 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		return
 	}
 	if body.Name == "" {
-		httpx.Err(c, 400, fmt.Errorf("body must be {name, create?, template?, language?}"))
+		httpx.Err(c, 400, locale.Errorf("body must be {name, create?, template?, language?}", "內容須為 {name, create?, template?, language?}"))
 		return
 	}
 	language := body.Language
@@ -52,7 +51,7 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		// Registered outside the administrators' group (routes.go).
 		if body.Create {
 			if err := auth.RequireAdmin(c.Request); err != nil {
-				httpx.Err(c, http.StatusForbidden, errors.New("administrator access required"))
+				httpx.Err(c, http.StatusForbidden, locale.Errorf("administrator access required", "需要管理員權限"))
 				return
 			}
 		}
@@ -353,7 +352,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 	}
 	if a.pm.IsRemote() && strings.TrimSpace(body.NewWorkspace) != "" {
 		httpx.Err(c, http.StatusForbidden,
-			fmt.Errorf("cross-workspace moves are unavailable on a remote server"))
+			locale.Errorf("cross-workspace moves are unavailable on a remote server", "遠端伺服器不能跨工作區搬移"))
 		return
 	}
 	targetWorkspace := a.pm.Workspace()
@@ -525,7 +524,7 @@ func (a *API) PostProjectRemove(c *gin.Context) {
 		return
 	}
 	if body.Name == "" || (body.Mode != "detach" && body.Mode != "disk") {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("body must be {name, mode: detach|disk}"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("body must be {name, mode: detach|disk}", "內容須為 {name, mode: detach|disk}"))
 		return
 	}
 	// Resolved before the directory goes, for the member list to follow it.

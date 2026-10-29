@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
-	"nodevas/internal/locale"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // postFSOpen opens an existing directory in the operating system”s file
@@ -198,6 +199,6 @@ func (a *API) refuseHostFilesystem(c *gin.Context) bool {
 		return false
 	}
 	httpx.Err(c, http.StatusForbidden,
-		errors.New("browsing the server filesystem is disabled on a networked server"))
+		locale.Errorf("browsing the server filesystem is disabled on a networked server", "網路伺服器停用了瀏覽伺服器檔案系統"))
 	return true
 }

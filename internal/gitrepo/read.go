@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Read side for the Explorer's Git tab: the project's own commits and one
@@ -43,7 +45,7 @@ func (r *Repo) RecentCommits(ctx context.Context, limit int) ([]Commit, error) {
 // External diff drivers and textconv filters never run.
 func (r *Repo) CommitPatch(ctx context.Context, sha string, max int) (patch string, truncated bool, err error) {
 	if !ValidSHA(sha) {
-		return "", false, fmt.Errorf("invalid commit %q", sha)
+		return "", false, locale.Errorf("invalid commit %q", "提交「%s」無效", sha)
 	}
 	if max <= 0 {
 		max = MaxPatchBytes
@@ -68,7 +70,7 @@ func (r *Repo) CommitPatch(ctx context.Context, sha string, max int) (patch stri
 		if len(msg) > 500 {
 			msg = msg[:500]
 		}
-		return "", false, fmt.Errorf("git show: %w: %s", err, msg)
+		return "", false, locale.Errorf("git show: %w: %s", "git show：%w：%s", err, msg)
 	}
 	return string(out.buf), out.over, nil
 }

@@ -10,13 +10,13 @@
 package usage
 
 import (
-	"errors"
-	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"nodevas/internal/locale"
 )
 
 // PricesAsOf is the date the built-in prices were taken from the vendors'
@@ -211,10 +211,11 @@ func (p Price) Cost(t Tokens) float64 {
 }
 
 // ErrInvalid marks a request the caller can fix.
-var ErrInvalid = errors.New("invalid argument")
+var ErrInvalid = locale.Errorf("invalid argument", "參數無效")
 
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+// invalidf is an ErrInvalid saying why, in both languages.
+func invalidf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrInvalid}, args...)...)
 }
 
 // ValidModelName reports whether s may name a model: text, short, no control
@@ -234,24 +235,24 @@ func ValidModelName(s string) bool {
 // ValidatePrices checks a custom price table.
 func ValidatePrices(prices []Price) error {
 	if len(prices) > MaxCustomPrices {
-		return invalidf("at most %d prices", MaxCustomPrices)
+		return invalidf("at most %d prices", "最多 %d 個價格", MaxCustomPrices)
 	}
 	seen := make(map[string]bool, len(prices))
 	for _, p := range prices {
 		model := normalizeModel(p.Model)
 		if !ValidModelName(model) {
-			return invalidf("a price's model is empty, too long or not text")
+			return invalidf("a price's model is empty, too long or not text", "價格的 model 是空的、太長或不是文字")
 		}
 		if strings.Count(model, "*") > 1 {
-			return invalidf("model %q: at most one *", p.Model)
+			return invalidf("model %q: at most one *", "model「%s」：最多一個 *", p.Model)
 		}
 		if seen[model] {
-			return invalidf("model %q is priced twice", p.Model)
+			return invalidf("model %q is priced twice", "model「%s」重複定價", p.Model)
 		}
 		seen[model] = true
 		for _, v := range []float64{p.InputPerMTok, p.OutputPerMTok, p.CacheReadPerMTok, p.CacheWritePerMTok} {
 			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > MaxPricePerMTok {
-				return invalidf("model %q: prices are between 0 and %.0f USD per million tokens", p.Model, MaxPricePerMTok)
+				return invalidf("model %q: prices are between 0 and %.0f USD per million tokens", "model「%s」：價格須介於每百萬 token 0 到 %.0f 美元", p.Model, MaxPricePerMTok)
 			}
 		}
 	}

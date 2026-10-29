@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -25,7 +26,7 @@ const MaxRoleConcurrent = 64
 // ValidateRoleSettings checks a whole role settings list.
 func ValidateRoleSettings(settings []runnerwire.RoleSettings) ([]runnerwire.RoleSettings, error) {
 	if len(settings) > MaxRoleSettings {
-		return nil, invalidf("at most %d role settings", MaxRoleSettings)
+		return nil, invalidf("at most %d role settings", "最多 %d 個角色設定", MaxRoleSettings)
 	}
 	out := make([]runnerwire.RoleSettings, 0, len(settings))
 	seen := map[string]bool{}
@@ -33,18 +34,18 @@ func ValidateRoleSettings(settings []runnerwire.RoleSettings) ([]runnerwire.Role
 		setting.Role = strings.TrimSpace(setting.Role)
 		setting.Project = strings.TrimSpace(setting.Project)
 		if !engine.ValidRoleID(setting.Role) {
-			return nil, invalidf("role setting %d: %q is not a role", i+1, setting.Role)
+			return nil, invalidf("role setting %d: %q is not a role", "第 %d 個角色設定：「%s」不是角色", i+1, setting.Role)
 		}
 		if len(setting.Project) > maxRouteProject || !utf8.ValidString(setting.Project) || strings.ContainsAny(setting.Project, "\x00\r\n") {
-			return nil, invalidf("role setting %d: project is not a valid project name", i+1)
+			return nil, invalidf("role setting %d: project is not a valid project name", "第 %d 個角色設定：專案不是有效的專案名稱", i+1)
 		}
 		key := setting.Project + "\x00" + setting.Role
 		if seen[key] {
-			return nil, invalidf("role setting %d: %s is set twice for this project", i+1, setting.Role)
+			return nil, invalidf("role setting %d: %s is set twice for this project", "第 %d 個角色設定：%s 在這個專案設定了兩次", i+1, setting.Role)
 		}
 		seen[key] = true
 		if setting.MaxConcurrent < 0 || setting.MaxConcurrent > MaxRoleConcurrent {
-			return nil, invalidf("role setting %d: maxConcurrent must be 0 (no limit) to %d", i+1, MaxRoleConcurrent)
+			return nil, invalidf("role setting %d: maxConcurrent must be 0 (no limit) to %d", "第 %d 個角色設定：maxConcurrent 須為 0（不限）到 %d", i+1, MaxRoleConcurrent)
 		}
 		if err := ValidateBudget(runnerwire.Budget{DailyRuns: setting.DailyRuns, DailyCostUSD: setting.DailyCostUSD,
 			DailyTokens: setting.DailyTokens}); err != nil {
@@ -82,7 +83,7 @@ FROM run_role_settings WHERE owner_id = ? ORDER BY project, role`, ownerID)
 // stored.
 func (s *Store) SetRoleSettings(ctx context.Context, ownerID string, settings []runnerwire.RoleSettings) ([]runnerwire.RoleSettings, error) {
 	if ownerID == "" {
-		return nil, invalidf("missing owner")
+		return nil, invalidf("missing owner", "缺少擁有者")
 	}
 	clean, err := ValidateRoleSettings(settings)
 	if err != nil {
@@ -201,6 +202,11 @@ func (s *Store) RoleBudgetStatus(ctx context.Context, ownerID, role string) (run
 // RoleBudgetMessage says, for a person, why a run in role is refused.
 func RoleBudgetMessage(role string, st runnerwire.BudgetStatus) string {
 	return "role " + role + ": " + BudgetMessage(st)
+}
+
+// RoleBudgetSay is RoleBudgetMessage in either language.
+func RoleBudgetSay(role string, st runnerwire.BudgetStatus) error {
+	return locale.Errorf("role %s: %w", "角色 %s：%w", role, BudgetSay(st))
 }
 
 // SetOnApproved sets the hook a staged pipeline calls when it is approved:

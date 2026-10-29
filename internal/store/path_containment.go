@@ -4,34 +4,35 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"nodevas/internal/locale"
 )
 
 // ErrUnsafeProjectPath marks a project path that is outside its trusted root,
 // crosses a symbolic link, or changes identity while it is being opened.
-var ErrUnsafeProjectPath = errors.New("unsafe project path")
+var ErrUnsafeProjectPath = locale.Errorf("unsafe project path", "專案路徑不安全")
 
 func projectRelativePath(root, target string) (string, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
-		return "", fmt.Errorf("%w: project root: %v", ErrUnsafeProjectPath, err)
+		return "", locale.Errorf("%w: project root: %v", "%w：專案根目錄：%v", ErrUnsafeProjectPath, err)
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(rootAbs, target)
 	}
 	targetAbs, err := filepath.Abs(target)
 	if err != nil {
-		return "", fmt.Errorf("%w: target: %v", ErrUnsafeProjectPath, err)
+		return "", locale.Errorf("%w: target: %v", "%w：目標：%v", ErrUnsafeProjectPath, err)
 	}
 	rel, err := filepath.Rel(rootAbs, targetAbs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%w: %q is outside project root", ErrUnsafeProjectPath, target)
+		return "", locale.Errorf("%w: %q is outside project root", "%w：「%s」在專案根目錄之外", ErrUnsafeProjectPath, target)
 	}
 	return rel, nil
 }
@@ -60,10 +61,10 @@ func validateProjectPath(root *os.Root, rel string, allowMissing bool) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %q is a symbolic link", ErrUnsafeProjectPath, current)
+			return locale.Errorf("%w: %q is a symbolic link", "%w：「%s」是符號連結", ErrUnsafeProjectPath, current)
 		}
 		if index < len(parts)-1 && !info.IsDir() {
-			return fmt.Errorf("%w: %q is not a directory", ErrUnsafeProjectPath, current)
+			return locale.Errorf("%w: %q is not a directory", "%w：「%s」不是資料夾", ErrUnsafeProjectPath, current)
 		}
 	}
 	return nil
@@ -80,7 +81,7 @@ func openProjectRoot(root string) (*os.Root, error) {
 		if err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: project root is not a directory", ErrUnsafeProjectPath)
+		return nil, locale.Errorf("%w: project root is not a directory", "%w：專案根目錄不是資料夾", ErrUnsafeProjectPath)
 	}
 	return opened, nil
 }
@@ -109,7 +110,7 @@ func syncProjectDirectory(root *os.Root, rel string) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%w: %q is not a directory", ErrUnsafeProjectPath, rel)
+		return locale.Errorf("%w: %q is not a directory", "%w：「%s」不是資料夾", ErrUnsafeProjectPath, rel)
 	}
 	if err := dir.Sync(); err != nil && runtime.GOOS != "windows" {
 		return err
@@ -164,7 +165,7 @@ func openProjectFile(rootPath, path string) (*os.Root, *os.File, fs.FileInfo, st
 		if err != nil {
 			return fail(err)
 		}
-		return fail(fmt.Errorf("%w: %q is not a stable regular file", ErrUnsafeProjectPath, rel))
+		return fail(locale.Errorf("%w: %q is not a stable regular file", "%w：「%s」不是穩定的一般檔案", ErrUnsafeProjectPath, rel))
 	}
 	return root, file, info, rel, nil
 }
@@ -198,7 +199,7 @@ func ReadProjectFile(rootPath, path string) ([]byte, error) {
 // allocation denial of service.
 func ReadProjectFileLimit(rootPath, path string, maxBytes int64) ([]byte, error) {
 	if maxBytes < 0 {
-		return nil, fmt.Errorf("invalid project file limit %d", maxBytes)
+		return nil, locale.Errorf("invalid project file limit %d", "專案檔案限制 %d 無效", maxBytes)
 	}
 	root, file, before, rel, err := openProjectFile(rootPath, path)
 	if err != nil {
@@ -207,14 +208,14 @@ func ReadProjectFileLimit(rootPath, path string, maxBytes int64) ([]byte, error)
 	defer root.Close()
 	defer file.Close()
 	if before.Size() < 0 || before.Size() > maxBytes {
-		return nil, fmt.Errorf("project file %q exceeds %d bytes", rel, maxBytes)
+		return nil, locale.Errorf("project file %q exceeds %d bytes", "專案檔案「%s」超過 %d 位元組", rel, maxBytes)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, fmt.Errorf("project file %q exceeds %d bytes", rel, maxBytes)
+		return nil, locale.Errorf("project file %q exceeds %d bytes", "專案檔案「%s」超過 %d 位元組", rel, maxBytes)
 	}
 	after, err := file.Stat()
 	if err != nil {
@@ -227,7 +228,7 @@ func ReadProjectFileLimit(rootPath, path string, maxBytes int64) ([]byte, error)
 	if pathAfter.Mode()&os.ModeSymlink != 0 || !pathAfter.Mode().IsRegular() ||
 		!os.SameFile(before, after) || !os.SameFile(before, pathAfter) ||
 		before.Size() != after.Size() || int64(len(data)) != before.Size() {
-		return nil, fmt.Errorf("%w: %q changed while reading", ErrUnsafeProjectPath, rel)
+		return nil, locale.Errorf("%w: %q changed while reading", "%w：讀取期間「%s」有變動", ErrUnsafeProjectPath, rel)
 	}
 	return data, nil
 }
@@ -243,7 +244,7 @@ func readProjectDir(rootPath, path string) ([]os.DirEntry, error) {
 	}
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("%w: %q is a symbolic link", ErrUnsafeProjectPath, filepath.Join(rel, entry.Name()))
+			return nil, locale.Errorf("%w: %q is a symbolic link", "%w：「%s」是符號連結", ErrUnsafeProjectPath, filepath.Join(rel, entry.Name()))
 		}
 	}
 	return entries, nil
@@ -275,7 +276,7 @@ func readProjectDirEntries(rootPath, path string) ([]os.DirEntry, string, error)
 		if err != nil {
 			return nil, "", err
 		}
-		return nil, "", fmt.Errorf("%w: %q is not a directory", ErrUnsafeProjectPath, rel)
+		return nil, "", locale.Errorf("%w: %q is not a directory", "%w：「%s」不是資料夾", ErrUnsafeProjectPath, rel)
 	}
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
@@ -286,7 +287,7 @@ func readProjectDirEntries(rootPath, path string) ([]os.DirEntry, string, error)
 		if err != nil {
 			return nil, "", err
 		}
-		return nil, "", fmt.Errorf("%w: directory %q changed while reading", ErrUnsafeProjectPath, rel)
+		return nil, "", locale.Errorf("%w: directory %q changed while reading", "%w：讀取期間資料夾「%s」有變動", ErrUnsafeProjectPath, rel)
 	}
 	return entries, rel, nil
 }
@@ -323,7 +324,7 @@ func ValidateProjectTree(rootPath, path string) error {
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %q is a symbolic link", ErrUnsafeProjectPath, current)
+			return locale.Errorf("%w: %q is a symbolic link", "%w：「%s」是符號連結", ErrUnsafeProjectPath, current)
 		}
 		return nil
 	})
@@ -386,7 +387,7 @@ func createProjectFileExclusive(rootPath, path string, perm os.FileMode) (*os.Fi
 		if err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: %q is not a stable regular file", ErrUnsafeProjectPath, rel)
+		return nil, locale.Errorf("%w: %q is not a stable regular file", "%w：「%s」不是穩定的一般檔案", ErrUnsafeProjectPath, rel)
 	}
 	return file, nil
 }
@@ -429,7 +430,7 @@ func openProjectFileAppend(rootPath, path string, perm os.FileMode) (*os.File, e
 		if err != nil {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: %q is not a stable regular file", ErrUnsafeProjectPath, rel)
+		return nil, locale.Errorf("%w: %q is not a stable regular file", "%w：「%s」不是穩定的一般檔案", ErrUnsafeProjectPath, rel)
 	}
 	return file, nil
 }
@@ -462,7 +463,7 @@ func MkdirAllProjectPath(rootPath, path string, perm os.FileMode) error {
 // swap in the workspace.
 func MkdirTempProjectPath(rootPath, dir, prefix string, perm os.FileMode) (string, error) {
 	if prefix != filepath.Base(prefix) {
-		return "", fmt.Errorf("%w: invalid temporary directory prefix", ErrUnsafeProjectPath)
+		return "", locale.Errorf("%w: invalid temporary directory prefix", "%w：暫存資料夾前綴無效", ErrUnsafeProjectPath)
 	}
 	rel, err := projectRelativePath(rootPath, dir)
 	if err != nil {
@@ -485,7 +486,7 @@ func MkdirTempProjectPath(rootPath, dir, prefix string, perm os.FileMode) (strin
 	for attempt := 0; attempt < 100; attempt++ {
 		var random [8]byte
 		if _, err := rand.Read(random[:]); err != nil {
-			return "", fmt.Errorf("create temporary directory name: %w", err)
+			return "", locale.Errorf("create temporary directory name: %w", "建立暫存資料夾名稱：%w", err)
 		}
 		child := filepath.Join(rel, prefix+hex.EncodeToString(random[:]))
 		if err := root.Mkdir(child, perm); errors.Is(err, os.ErrExist) {
@@ -499,7 +500,7 @@ func MkdirTempProjectPath(rootPath, dir, prefix string, perm os.FileMode) (strin
 		}
 		return filepath.Join(rootPath, child), nil
 	}
-	return "", fmt.Errorf("create temporary directory: exhausted random names")
+	return "", locale.Errorf("create temporary directory: exhausted random names", "建立暫存資料夾：隨機名稱已用盡")
 }
 
 // RemoveProjectPath removes one existing non-symlink path beneath root.
@@ -533,7 +534,7 @@ func RemoveAllProjectPath(rootPath, path string) error {
 		return err
 	}
 	if rel == "." {
-		return fmt.Errorf("%w: refusing to remove project root", ErrUnsafeProjectPath)
+		return locale.Errorf("%w: refusing to remove project root", "%w：拒絕移除專案根目錄", ErrUnsafeProjectPath)
 	}
 	root, err := openProjectRoot(rootPath)
 	if err != nil {
@@ -647,7 +648,7 @@ func writeProjectFileAtomic(rootPath, path string, data []byte, perm os.FileMode
 
 	var random [4]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return fmt.Errorf("create temporary filename: %w", err)
+		return locale.Errorf("create temporary filename: %w", "建立暫存檔名：%w", err)
 	}
 	tmpRel := filepath.Join(parent, TmpPrefix+hex.EncodeToString(random[:])+"-"+filepath.Base(rel))
 	file, err := root.OpenFile(tmpRel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)

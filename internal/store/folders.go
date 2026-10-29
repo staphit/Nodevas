@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -41,10 +40,10 @@ const (
 )
 
 var (
-	ErrFolderName     = errors.New("invalid folder name")
+	ErrFolderName     = locale.Errorf("invalid folder name", "資料夾名稱無效")
 	ErrFolderExists   = locale.Errorf("folder already exists", "資料夾已存在")
-	ErrFolderMissing  = errors.New("folder not found")
-	ErrFolderIntoSelf = errors.New("cannot move a folder into itself")
+	ErrFolderMissing  = locale.Errorf("folder not found", "找不到資料夾")
+	ErrFolderIntoSelf = locale.Errorf("cannot move a folder into itself", "不能把資料夾搬進自己裡面")
 )
 
 // windowsReserved are names Windows refuses to create regardless of extension.
@@ -549,7 +548,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 	moved := false
 	for _, id := range ids {
 		if !engine.ValidNodeID(id) {
-			return fmt.Errorf("invalid node id %q", id)
+			return locale.Errorf("invalid node id %q", "節點代號「%s」無效", id)
 		}
 		from := nodeFolder(s.root, id)
 		if from == clean {
@@ -559,7 +558,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 		targetDir := s.folderAbs(clean)
 		// The document must exist; the payload directories are optional.
 		if _, err := s.statPath(filepath.Join(sourceDir, id+".md")); err != nil {
-			return fmt.Errorf("node %q not found", id)
+			return locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 		for _, name := range []string{id + ".md", id + ".pages", id + ".files"} {
 			source := filepath.Join(sourceDir, name)

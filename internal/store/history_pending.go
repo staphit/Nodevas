@@ -3,11 +3,11 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"nodevas/internal/gitrepo"
+	"nodevas/internal/locale"
 )
 
 // The workspace's history as the Explorer's Git tab shows it.
@@ -48,10 +48,10 @@ const (
 )
 
 // ErrNoGitHistory: the workspace keeps history as file copies.
-var ErrNoGitHistory = errors.New("this workspace keeps history as file copies, not git")
+var ErrNoGitHistory = locale.Errorf("this workspace keeps history as file copies, not git", "這個工作區以檔案副本保存歷史，不是 git")
 
 // ErrCommitNotFound: the workspace history has no such commit.
-var ErrCommitNotFound = errors.New("no such commit in the workspace history")
+var ErrCommitNotFound = locale.Errorf("no such commit in the workspace history", "工作區歷史中沒有這個提交")
 
 // historyRepo is the git history's repository, or ErrNoGitHistory.
 func (s *Store) historyRepo(ctx context.Context) (*gitrepo.Repo, error) {
@@ -151,7 +151,7 @@ func pendingMark(xy string) string {
 // HistoryCommitPatch is one workspace commit's patch.
 func (s *Store) HistoryCommitPatch(ctx context.Context, sha string) (WorkspaceCommitPatch, error) {
 	if !gitrepo.ValidSHA(sha) {
-		return WorkspaceCommitPatch{}, fmt.Errorf("%w: a commit is its full id", ErrBadPath)
+		return WorkspaceCommitPatch{}, locale.Errorf("%w: a commit is its full id", "%w：提交需用完整代號", ErrBadPath)
 	}
 	repo, err := s.historyRepo(ctx)
 	if err != nil {

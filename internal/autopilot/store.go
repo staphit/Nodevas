@@ -7,36 +7,38 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
 
 var (
 	// ErrNotFound is an autopilot run that does not exist.
-	ErrNotFound = errors.New("autopilot not found")
+	ErrNotFound = locale.Errorf("autopilot not found", "找不到 autopilot")
 	// ErrInvalid wraps a request the caller got wrong.
-	ErrInvalid = errors.New("invalid autopilot request")
+	ErrInvalid = locale.Errorf("invalid autopilot request", "autopilot 請求無效")
 	// ErrConflict is a goal that already has a live autopilot, or an action
 	// its state does not allow.
-	ErrConflict = errors.New("autopilot conflict")
+	ErrConflict = locale.Errorf("autopilot conflict", "autopilot 衝突")
 	// ErrNodeType is a goal whose node type agents may not work (a Review,
 	// a Decision, a Note…).
-	ErrNodeType = errors.New("node type forbids agents")
+	ErrNodeType = locale.Errorf("node type forbids agents", "節點類型不允許 agent")
 )
 
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+// invalidf is an ErrInvalid saying why, in both languages.
+func invalidf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrInvalid}, args...)...)
 }
 
-func conflictf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrConflict, fmt.Sprintf(format, args...))
+// conflictf is an ErrConflict saying why, in both languages.
+func conflictf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrConflict}, args...)...)
 }
 
 // Record is a stored autopilot run: the API's view plus what only the hub
@@ -158,7 +160,7 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 		return Record{}, err
 	}
 	if live > 0 {
-		return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
+		return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first", "這個目標已有 autopilot 在執行；請先暫停或取消")
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO autopilot_runs (`+runColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -166,7 +168,7 @@ func (s *Store) Create(ctx context.Context, r Record, tasks []runnerwire.TaskIns
 		r.SteppedUpAt, r.CreatedAt, r.UpdatedAt, r.FinishedAt,
 		stages, r.GoalPhase, int64(r.QARound), r.QARunID); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first")
+			return Record{}, conflictf("this goal already has an autopilot running; pause or cancel it first", "這個目標已有 autopilot 在執行；請先暫停或取消")
 		}
 		return Record{}, err
 	}

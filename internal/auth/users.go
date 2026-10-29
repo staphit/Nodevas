@@ -16,6 +16,7 @@ import (
 
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // Passwords are hashed with argon2id. The parameters follow the OWASP
@@ -133,7 +134,7 @@ type rowScanner interface {
 // turned into an account: a value the scan cannot convert, or a role nobody can
 // interpret. Unlike a read that failed, it is about one row, so a caller that
 // must not say whether a row exists has to tell the two apart.
-var errUnreadableAccount = errors.New("unreadable account")
+var errUnreadableAccount = locale.Errorf("unreadable account", "帳號無法讀取")
 
 func scanAccount(row rowScanner) (UserRecord, error) {
 	var user UserRecord
@@ -149,7 +150,7 @@ func scanAccount(row rowScanner) (UserRecord, error) {
 	case identity.RoleAdmin, identity.RoleMember:
 		user.Role = identity.Role(role)
 	default:
-		return UserRecord{}, fmt.Errorf("%w: user %q has invalid role %q", errUnreadableAccount, user.Name, role)
+		return UserRecord{}, locale.Errorf("%w: user %q has invalid role %q", "%w：使用者「%s」的角色「%s」無效", errUnreadableAccount, user.Name, role)
 	}
 	return user, nil
 }
@@ -172,7 +173,7 @@ func (u *UserStore) accounts(ctx context.Context, where accountFilter, limit int
 	rows, err := u.database.QueryContext(ctx,
 		`SELECT `+accountColumns+` FROM accounts`+string(where)+orderByCreation+` LIMIT ?`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("read accounts: %w", err)
+		return nil, locale.Errorf("read accounts: %w", "讀取帳號：%w", err)
 	}
 	defer rows.Close()
 	var users []UserRecord
@@ -184,7 +185,7 @@ func (u *UserStore) accounts(ctx context.Context, where accountFilter, limit int
 		users = append(users, user)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read accounts: %w", err)
+		return nil, locale.Errorf("read accounts: %w", "讀取帳號：%w", err)
 	}
 	return users, nil
 }
@@ -301,13 +302,13 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 		address = normalized
 	}
 	if !userNamePattern.MatchString(name) {
-		return invalidAccount{fmt.Errorf("invalid user name %q", name)}
+		return invalidAccount{locale.Errorf("invalid user name %q", "使用者名稱「%s」無效", name)}
 	}
 	if err := validateNewPassword(password); err != nil {
 		return invalidAccount{err}
 	}
 	if role != "" && role != identity.RoleAdmin && role != identity.RoleMember {
-		return invalidAccount{fmt.Errorf("invalid role %q", role)}
+		return invalidAccount{locale.Errorf("invalid role %q", "角色「%s」無效", role)}
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
@@ -318,7 +319,7 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 		return err
 	}
 	if !u.ready() {
-		return errors.New("no account database")
+		return locale.Errorf("no account database", "沒有帳號資料庫")
 	}
 
 	return u.database.Tx(ctx, func(tx *sql.Tx) error {
@@ -326,7 +327,7 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 		// account is an admin" true when two are created at once.
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts`).Scan(&count); err != nil {
-			return fmt.Errorf("count accounts: %w", err)
+			return locale.Errorf("count accounts: %w", "計算帳號：%w", err)
 		}
 		var exists int
 		err := tx.QueryRowContext(ctx,
@@ -335,7 +336,7 @@ func (u *UserStore) AddWithEmail(ctx context.Context, name, password string, rol
 			return accountExists{name}
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("look up account: %w", err)
+			return locale.Errorf("look up account: %w", "查詢帳號：%w", err)
 		}
 		if count == 0 {
 			role = identity.RoleAdmin
@@ -362,7 +363,7 @@ func insertError(name string, err error) error {
 	if db.IsUniqueViolation(err, "") {
 		return accountExists{name}
 	}
-	return fmt.Errorf("create account: %w", err)
+	return locale.Errorf("create account: %w", "建立帳號：%w", err)
 }
 
 // ErrInvalidAccount and ErrAccountExists classify a refused AddWithEmail for
@@ -370,8 +371,8 @@ func insertError(name string, err error) error {
 // The messages are the ones the CLI has always printed; only errors.Is sees
 // the class.
 var (
-	ErrInvalidAccount = errors.New("invalid account")
-	ErrAccountExists  = errors.New("account already exists")
+	ErrInvalidAccount = locale.Errorf("invalid account", "帳號無效")
+	ErrAccountExists  = locale.Errorf("account already exists", "帳號已存在")
 )
 
 // invalidAccount is a validation failure, worded by the check that failed.
@@ -391,17 +392,17 @@ func (e accountExists) Is(target error) bool { return target == ErrAccountExists
 // their next request. The final administrator cannot be removed.
 func (u *UserStore) Remove(ctx context.Context, name string) error {
 	if !u.ready() {
-		return fmt.Errorf("user %q does not exist", name)
+		return locale.Errorf("user %q does not exist", "使用者「%s」不存在", name)
 	}
 	return u.database.Tx(ctx, func(tx *sql.Tx) error {
 		var id, role string
 		err := tx.QueryRowContext(ctx,
 			`SELECT id, role FROM accounts WHERE name = ? COLLATE NOCASE`, name).Scan(&id, &role)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %q does not exist", name)
+			return locale.Errorf("user %q does not exist", "使用者「%s」不存在", name)
 		}
 		if err != nil {
-			return fmt.Errorf("look up account: %w", err)
+			return locale.Errorf("look up account: %w", "查詢帳號：%w", err)
 		}
 		admins, err := adminCount(ctx, tx)
 		if err != nil {
@@ -414,7 +415,7 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 		// keeps actor_id as plain text on purpose, so deleting an account does
 		// not delete the record of what it did.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("delete account: %w", err)
+			return locale.Errorf("delete account: %w", "刪除帳號：%w", err)
 		}
 		// Its authenticator goes with it, so an account created later can
 		// never inherit a factor somebody else enrolled.
@@ -426,15 +427,15 @@ func (u *UserStore) Remove(ctx context.Context, name string) error {
 // that would leave the server without an administrator: removing the last
 // one, or making it a member. The CLI and the web UI say the same words.
 var (
-	ErrLastAdministrator     = errors.New("cannot remove the last administrator")
-	ErrLastAdministratorRole = errors.New("cannot demote the last administrator")
+	ErrLastAdministrator     = locale.Errorf("cannot remove the last administrator", "不能移除最後一位管理員")
+	ErrLastAdministratorRole = locale.Errorf("cannot demote the last administrator", "不能降級最後一位管理員")
 )
 
 func adminCount(ctx context.Context, tx *sql.Tx) (int, error) {
 	var admins int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM accounts WHERE role = ?`, string(identity.RoleAdmin)).Scan(&admins); err != nil {
-		return 0, fmt.Errorf("count administrators: %w", err)
+		return 0, locale.Errorf("count administrators: %w", "計算管理員：%w", err)
 	}
 	return admins, nil
 }
@@ -450,7 +451,7 @@ func (u *UserStore) SetPassword(ctx context.Context, name, password string) erro
 	}
 	if err := u.updateAccount(ctx, name, setPasswordHash, hash); err != nil {
 		if errors.Is(err, errNoAccount) {
-			return fmt.Errorf("user %q does not exist", name)
+			return locale.Errorf("user %q does not exist", "使用者「%s」不存在", name)
 		}
 		return err
 	}
@@ -466,7 +467,7 @@ func isEmailConflict(err error) bool {
 // errNoAccount says the name matched no row. Callers word it for their own
 // audience: the account commands and the email commands have always phrased a
 // missing account differently, and their output is documented.
-var errNoAccount = errors.New("no such account")
+var errNoAccount = locale.Errorf("no such account", "沒有這個帳號")
 
 // updateAccount writes one column set onto the named account.
 func (u *UserStore) updateAccount(ctx context.Context, name string, assignments accountAssignment, args ...any) error {
@@ -480,11 +481,11 @@ func (u *UserStore) updateAccount(ctx context.Context, name string, assignments 
 		return ErrEmailTaken
 	}
 	if err != nil {
-		return fmt.Errorf("update account: %w", err)
+		return locale.Errorf("update account: %w", "更新帳號：%w", err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update account: %w", err)
+		return locale.Errorf("update account: %w", "更新帳號：%w", err)
 	}
 	if changed == 0 {
 		return errNoAccount
@@ -495,20 +496,20 @@ func (u *UserStore) updateAccount(ctx context.Context, name string, assignments 
 // SetRole changes an account's role while preserving at least one admin.
 func (u *UserStore) SetRole(ctx context.Context, name string, role identity.Role) error {
 	if role != identity.RoleAdmin && role != identity.RoleMember {
-		return fmt.Errorf("invalid role %q", role)
+		return locale.Errorf("invalid role %q", "角色「%s」無效", role)
 	}
 	if !u.ready() {
-		return fmt.Errorf("user %q does not exist", name)
+		return locale.Errorf("user %q does not exist", "使用者「%s」不存在", name)
 	}
 	return u.database.Tx(ctx, func(tx *sql.Tx) error {
 		var id, current string
 		err := tx.QueryRowContext(ctx,
 			`SELECT id, role FROM accounts WHERE name = ? COLLATE NOCASE`, name).Scan(&id, &current)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %q does not exist", name)
+			return locale.Errorf("user %q does not exist", "使用者「%s」不存在", name)
 		}
 		if err != nil {
-			return fmt.Errorf("look up account: %w", err)
+			return locale.Errorf("look up account: %w", "查詢帳號：%w", err)
 		}
 		admins, err := adminCount(ctx, tx)
 		if err != nil {
@@ -519,7 +520,7 @@ func (u *UserStore) SetRole(ctx context.Context, name string, role identity.Role
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE accounts SET role = ? WHERE id = ?`, string(role), id); err != nil {
-			return fmt.Errorf("update role: %w", err)
+			return locale.Errorf("update role: %w", "更新角色：%w", err)
 		}
 		return nil
 	})
@@ -648,10 +649,10 @@ func validLoginInput(name, password string) bool {
 
 func validateNewPassword(password string) error {
 	if len([]rune(password)) < minPasswordLength {
-		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
+		return locale.Errorf("password must be at least %d characters", "密碼至少需要 %d 個字元", minPasswordLength)
 	}
 	if len(password) > maxLoginPasswordBytes {
-		return fmt.Errorf("password must be at most %d bytes", maxLoginPasswordBytes)
+		return locale.Errorf("password must be at most %d bytes", "密碼最多 %d 位元組", maxLoginPasswordBytes)
 	}
 	return nil
 }

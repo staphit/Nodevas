@@ -15,6 +15,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 // getGraph returns the graph, its rev, computed statuses, and issues.
@@ -58,7 +59,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	if body.Graph == nil {
-		httpx.Err(c, 400, errors.New("body must be {graph, baseRev?}"))
+		httpx.Err(c, 400, locale.Errorf("body must be {graph, baseRev?}", "內容須為 {graph, baseRev?}"))
 		return
 	}
 	if err := store.ValidateGraphForStorage(body.Graph); err != nil {
@@ -122,7 +123,7 @@ func (a *API) postDSLCheck(c *gin.Context) {
 		return
 	}
 	if len(body.Expr) > 64<<10 {
-		httpx.Err(c, 400, errors.New("expression is too long"))
+		httpx.Err(c, 400, locale.Errorf("expression is too long", "運算式太長"))
 		return
 	}
 	expr, perr := dsl.Parse(body.Expr)

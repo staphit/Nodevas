@@ -2,11 +2,11 @@ package autopilot
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 )
@@ -73,7 +73,7 @@ func registeredSystemOneAdvisor() Advisor {
 }
 
 // errNoAgent is a task nothing can implement: no installed agent anywhere.
-var errNoAgent = errors.New("no installed agent on the owner's runners can take this task")
+var errNoAgent = locale.Errorf("no installed agent on the owner's runners can take this task", "擁有者的 runner 上沒有已安裝的 agent 能接這個任務")
 
 // rulesAdvisor is the default: the policy's own chain, else the owner's
 // routing rules (as the dispatch dialog pre-fills them), else the first

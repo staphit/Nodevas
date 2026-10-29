@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"math"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -825,7 +825,7 @@ func (s *Server) chargePreAuth(c *gin.Context) bool {
 	if ok, retrySec := s.abuse.AllowPreAuth(ip, time.Now()); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
+		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
 		c.Abort()
 		return false
 	}
@@ -926,7 +926,7 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
+		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
 		c.Abort()
 		return
 	}
@@ -976,7 +976,7 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	}
 	s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, 1)
 	c.Header("Retry-After", "1")
-	httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
+	httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("server is busy", "伺服器忙碌中"))
 	c.Abort()
 }
 

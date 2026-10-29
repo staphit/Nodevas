@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"mime"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // NotifySettings configures deadline reminder emails. Stored per workspace in
@@ -229,7 +229,7 @@ func ParseDeadline(value string) (time.Time, error) {
 	if t, err := time.ParseInLocation("2006-01-02", value, time.Local); err == nil {
 		return t.Add(24 * time.Hour), nil
 	}
-	return time.Time{}, fmt.Errorf("invalid deadline %q", value)
+	return time.Time{}, locale.Errorf("invalid deadline %q", "截止時間「%s」無效", value)
 }
 
 // Run scans once a minute until stop is closed.
@@ -390,8 +390,8 @@ var sendMailFn = SendMail
 // than around its callers: /api/notify/test reaches it directly, so a limiter
 // on the Notifier would leave the one path an authenticated caller can trigger
 // on demand unbounded.
-var ErrMailBusy = errors.New("another notification email is already being sent")
-var ErrMailRateLimited = errors.New("notification test rate limit exceeded")
+var ErrMailBusy = locale.Errorf("another notification email is already being sent", "已有另一封通知信正在寄送")
+var ErrMailRateLimited = locale.Errorf("notification test rate limit exceeded", "通知測試次數超過上限")
 var smtpSendMu = make(chan struct{}, 1)
 
 const (
@@ -510,10 +510,10 @@ func SendMail(settings NotifySettings, to, subject, body string) error {
 	host := strings.TrimSpace(settings.SMTPHost)
 	user := strings.TrimSpace(settings.SMTPUser)
 	if settings.SMTPPort < 1 || settings.SMTPPort > 65535 {
-		return errors.New("invalid SMTP port")
+		return locale.Errorf("invalid SMTP port", "SMTP 連接埠無效")
 	}
 	if !settings.allowPrivateSMTP && !allowedSMTPPort(settings.SMTPPort) {
-		return errors.New("remote SMTP port must be 25, 465, 587, or 2525")
+		return locale.Errorf("remote SMTP port must be 25, 465, 587, or 2525", "遠端 SMTP 連接埠須為 25、465、587 或 2525")
 	}
 	if err := validateSMTPField("from", from); err != nil {
 		return err
@@ -589,7 +589,7 @@ func SendMail(settings NotifySettings, to, subject, body string) error {
 		// make. A loopback install is often wired to an internal relay that
 		// never learned STARTTLS; refusing to send would break it for a risk
 		// that stays on the same machine.
-		return errors.New("SMTP server does not advertise STARTTLS")
+		return locale.Errorf("SMTP server does not advertise STARTTLS", "SMTP 伺服器沒有提供 STARTTLS")
 	} else {
 		log.Printf("notify: %s does not offer STARTTLS; sending in the clear", host)
 	}
@@ -598,31 +598,31 @@ func SendMail(settings NotifySettings, to, subject, body string) error {
 
 func validateSMTPField(name, value string) error {
 	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("SMTP %s is required", name)
+		return locale.Errorf("SMTP %s is required", "需要 SMTP %s", name)
 	}
 	if strings.ContainsAny(value, "\r\n") {
-		return fmt.Errorf("SMTP %s contains a line break", name)
+		return locale.Errorf("SMTP %s contains a line break", "SMTP %s 含有換行", name)
 	}
 	return nil
 }
 
 func resolveSMTPHost(host string, allowPrivate bool) ([]net.IP, error) {
 	if host == "" || strings.ContainsAny(host, "\r\n\t /\\") {
-		return nil, errors.New("invalid SMTP host")
+		return nil, locale.Errorf("invalid SMTP host", "SMTP 主機無效")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 {
-		return nil, fmt.Errorf("resolve SMTP host %q: %w", host, err)
+		return nil, locale.Errorf("resolve SMTP host %q: %w", "解析 SMTP 主機「%s」：%w", host, err)
 	}
 	for _, ip := range ips {
 		if !allowPrivate && blockedSMTPIP(ip) {
-			return nil, fmt.Errorf("SMTP host %q resolves to a private or local address", host)
+			return nil, locale.Errorf("SMTP host %q resolves to a private or local address", "SMTP 主機「%s」解析到私有或本機位址", host)
 		}
 		if !ip.IsGlobalUnicast() && !(allowPrivate &&
 			(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())) {
-			return nil, fmt.Errorf("SMTP host %q resolves to a non-unicast address", host)
+			return nil, locale.Errorf("SMTP host %q resolves to a non-unicast address", "SMTP 主機「%s」解析到非單播位址", host)
 		}
 	}
 	return ips, nil
@@ -652,7 +652,7 @@ func dialSMTPIPs(ips []net.IP, port int) (net.Conn, error) {
 		lastErr = err
 	}
 	if lastErr == nil {
-		return nil, errors.New("no usable SMTP address")
+		return nil, locale.Errorf("no usable SMTP address", "沒有可用的 SMTP 位址")
 	}
 	return nil, lastErr
 }
@@ -660,7 +660,7 @@ func dialSMTPIPs(ips []net.IP, port int) (net.Conn, error) {
 func smtpDeliver(client *smtp.Client, auth smtp.Auth, from, to, msg string) error {
 	if auth != nil {
 		if ok, _ := client.Extension("AUTH"); !ok {
-			return errors.New("SMTP server does not advertise AUTH")
+			return locale.Errorf("SMTP server does not advertise AUTH", "SMTP 伺服器沒有提供 AUTH")
 		}
 		if err := client.Auth(auth); err != nil {
 			return err
@@ -698,7 +698,7 @@ func (n *Notifier) Settings() NotifySettings {
 
 // ErrSMTPPasswordRequired means the caller tried to move an existing password
 // to a different relay identity without entering a password for that relay.
-var ErrSMTPPasswordRequired = errors.New("SMTP password must be re-entered when host, port, or user changes")
+var ErrSMTPPasswordRequired = locale.Errorf("SMTP password must be re-entered when host, port, or user changes", "主機、連接埠或使用者變更時須重新輸入 SMTP 密碼")
 
 // SaveSettings stores the settings. An empty SMTPPass keeps the stored one only
 // when host, port and user are unchanged. A credential can never follow an

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"nodevas/internal/locale"
 )
 
 // Node types: what a node is, which decides how it behaves and how it looks.
@@ -264,7 +266,7 @@ func ValidateNodeTypeDefs(defs []NodeTypeDef) error {
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("node_types: %s", strings.Join(problems, "; "))
+	return locale.Errorf("node_types: %s", "node_types：%s", strings.Join(problems, "; "))
 }
 
 // NodeTypeDefProblems lists each rule a node_types list breaks.

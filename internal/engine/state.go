@@ -7,6 +7,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Status is a node's lifecycle state.
@@ -107,7 +109,7 @@ func NewRunState(now time.Time) *RunState {
 func ParseRunState(data []byte) (*RunState, error) {
 	var rs RunState
 	if err := json.Unmarshal(data, &rs); err != nil {
-		return nil, fmt.Errorf("state.json: %w", err)
+		return nil, locale.Errorf("state.json: %w", "state.json：%w", err)
 	}
 	if rs.Nodes == nil {
 		rs.Nodes = map[string]*NodeState{}
@@ -125,14 +127,14 @@ func MarshalRunState(rs *RunState) ([]byte, error) {
 // A missing state is treated as ready.
 func (rs *RunState) SetStatus(nodeID string, to Status, by string, now time.Time) error {
 	if !ValidStatus(to) {
-		return fmt.Errorf("invalid status %q", to)
+		return locale.Errorf("invalid status %q", "狀態「%s」無效", to)
 	}
 	from := StatusReady
 	if st := rs.Nodes[nodeID]; st != nil && st.Status.explicit() {
 		from = st.Status
 	}
 	if !CanTransition(from, to) {
-		return fmt.Errorf("invalid status transition %s -> %s", from, to)
+		return locale.Errorf("invalid status transition %s -> %s", "無效的狀態轉換 %s -> %s", from, to)
 	}
 	ts := now.UTC().Format(time.RFC3339)
 	rs.Nodes[nodeID] = &NodeState{Status: to, At: ts, By: by}
@@ -190,7 +192,7 @@ func ResumeJournal(base *RunState, data []byte) (*RunState, error) {
 			if isTornTail {
 				break
 			}
-			return rs, fmt.Errorf("journal line %d: %w", index+1, err)
+			return rs, locale.Errorf("journal line %d: %w", "日誌第 %d 行：%w", index+1, err)
 		}
 		switch {
 		case ev.Event == "status" && ev.Node != "" && ev.ID != "":

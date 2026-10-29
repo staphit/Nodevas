@@ -5,7 +5,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"nodevas/internal/gitrepo"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // historyBackend is one way of keeping version history. The store calls the
@@ -64,7 +64,7 @@ func ParseHistoryMode(value string) (HistoryMode, error) {
 	case HistoryAuto, HistoryFiles, HistoryGit:
 		return mode, nil
 	default:
-		return "", fmt.Errorf("history mode %q: want auto, files or git", value)
+		return "", locale.Errorf("history mode %q: want auto, files or git", "歷史模式「%s」無效：應為 auto、files 或 git", value)
 	}
 }
 

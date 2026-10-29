@@ -11,12 +11,13 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/logging"
 )
 
 // errAccessRequired is all a refused caller learns: which check failed is the
 // server log's business, not a probe's.
-var errAccessRequired = errors.New("cloudflare access required")
+var errAccessRequired = locale.Errorf("cloudflare access required", "需要 Cloudflare Access")
 
 // How often the log says the same thing about one caller. A grant is one line
 // per identity and address per half hour: enough to see a new device or a new

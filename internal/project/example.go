@@ -2,7 +2,6 @@ package project
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -11,11 +10,12 @@ import (
 	"strconv"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
 // ErrUnknownExample is returned for an example name the binary does not carry.
-var ErrUnknownExample = errors.New("unknown example")
+var ErrUnknownExample = locale.Errorf("unknown example", "不明的範例")
 
 // exampleNow is the clock an example's dates are moved to. A var so tests can
 // pin today.
@@ -35,10 +35,10 @@ const maxExampleNameTries = 100
 // first. It returns the project name it created.
 func (pm *ProjectManager) InstallExample(examples fs.FS, example string) (string, error) {
 	if examples == nil || example == "" || example == "." || !fs.ValidPath(example) || path.Dir(example) != "." {
-		return "", fmt.Errorf("%w %q", ErrUnknownExample, example)
+		return "", locale.Errorf("%w %q", "%w「%s」", ErrUnknownExample, example)
 	}
 	if info, err := fs.Stat(examples, path.Join(example, "graph.yaml")); err != nil || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%w %q", ErrUnknownExample, example)
+		return "", locale.Errorf("%w %q", "%w「%s」", ErrUnknownExample, example)
 	}
 
 	defer pm.LockImport()()
@@ -68,11 +68,11 @@ func (pm *ProjectManager) InstallExample(examples fs.FS, example string) (string
 			return store.MkdirAllProjectPath(pm.Workspace(), target, 0o755)
 		}
 		if !entry.Type().IsRegular() {
-			return fmt.Errorf("example %q contains non-regular file %q", example, name)
+			return locale.Errorf("example %q contains non-regular file %q", "範例「%s」含有非一般檔案「%s」", example, name)
 		}
 		copied++
 		if copied > MaxImportPathFiles {
-			return fmt.Errorf("example %q has more than %d files", example, MaxImportPathFiles)
+			return locale.Errorf("example %q has more than %d files", "範例「%s」的檔案超過 %d 個", example, MaxImportPathFiles)
 		}
 		data, readErr := fs.ReadFile(examples, name)
 		if readErr != nil {
@@ -85,11 +85,11 @@ func (pm *ProjectManager) InstallExample(examples fs.FS, example string) (string
 	})
 	if err != nil {
 		cleanup()
-		return "", fmt.Errorf("copy example %q: %w", example, err)
+		return "", locale.Errorf("copy example %q: %w", "複製範例「%s」：%w", example, err)
 	}
 	if err := pm.OpenForCaller(name); err != nil {
 		cleanup()
-		return "", fmt.Errorf("open example %q: %w", example, err)
+		return "", locale.Errorf("open example %q: %w", "開啟範例「%s」：%w", example, err)
 	}
 	return name, nil
 }
@@ -112,7 +112,7 @@ func (pm *ProjectManager) freeExampleName(example string) (string, string, error
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("no free project name for example %q", example)
+	return "", "", locale.Errorf("no free project name for example %q", "範例「%s」沒有可用的專案名稱", example)
 }
 
 // An example's plan is written for the day it was made, and copied as it is

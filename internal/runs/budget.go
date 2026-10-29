@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -34,15 +34,15 @@ const (
 func ValidateBudget(b runnerwire.Budget) error {
 	switch {
 	case b.DailyRuns < 0 || b.DailyCostUSD < 0 || b.DailyTokens < 0:
-		return invalidf("budget limits cannot be negative")
+		return invalidf("budget limits cannot be negative", "預算上限不能是負數")
 	case math.IsNaN(b.DailyCostUSD) || math.IsInf(b.DailyCostUSD, 0):
-		return invalidf("dailyCostUsd is not a number")
+		return invalidf("dailyCostUsd is not a number", "dailyCostUsd 不是數字")
 	case b.DailyRuns > MaxDailyRuns:
-		return invalidf("dailyRuns is at most %d", MaxDailyRuns)
+		return invalidf("dailyRuns is at most %d", "dailyRuns 最多 %d", MaxDailyRuns)
 	case b.DailyCostUSD > MaxDailyCostUSD:
-		return invalidf("dailyCostUsd is at most %.0f", MaxDailyCostUSD)
+		return invalidf("dailyCostUsd is at most %.0f", "dailyCostUsd 最多 %.0f", MaxDailyCostUSD)
 	case b.DailyTokens > MaxDailyTokens:
-		return invalidf("dailyTokens is at most %d", MaxDailyTokens)
+		return invalidf("dailyTokens is at most %d", "dailyTokens 最多 %d", MaxDailyTokens)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func (s *Store) Budget(ctx context.Context, ownerID string) (runnerwire.Budget, 
 // SetBudget replaces an owner's budget.
 func (s *Store) SetBudget(ctx context.Context, ownerID string, b runnerwire.Budget) error {
 	if ownerID == "" {
-		return invalidf("missing owner")
+		return invalidf("missing owner", "缺少擁有者")
 	}
 	if err := ValidateBudget(b); err != nil {
 		return err
@@ -124,17 +124,29 @@ func exceeded(st runnerwire.BudgetStatus) string {
 	return ""
 }
 
-// BudgetMessage says, for a person, why a new run is refused.
+// BudgetMessage says, in English, why a new run is refused: a stored reason.
 func BudgetMessage(st runnerwire.BudgetStatus) string {
-	switch st.Exceeded {
-	case ExceededRuns:
-		return fmt.Sprintf("daily run budget reached: %d of %d runs today (UTC)", st.Used.Runs, st.Budget.DailyRuns)
-	case ExceededCost:
-		return fmt.Sprintf("daily cost budget reached: $%.2f of $%.2f today (UTC)", st.Used.CostUSD, st.Budget.DailyCostUSD)
-	case ExceededTokens:
-		return fmt.Sprintf("daily token budget reached: %d of %d tokens today (UTC)", st.Used.Tokens, st.Budget.DailyTokens)
+	if said := BudgetSay(st); said != nil {
+		return said.Error()
 	}
 	return ""
+}
+
+// BudgetSay says, for a person in either language, why a new run is refused;
+// nil when no budget is exceeded.
+func BudgetSay(st runnerwire.BudgetStatus) *locale.Message {
+	switch st.Exceeded {
+	case ExceededRuns:
+		return locale.Say("daily run budget reached: %d of %d runs today (UTC)",
+			"已達每日執行預算：今天（UTC）已執行 %d 次，上限 %d 次", st.Used.Runs, st.Budget.DailyRuns)
+	case ExceededCost:
+		return locale.Say("daily cost budget reached: $%.2f of $%.2f today (UTC)",
+			"已達每日費用預算：今天（UTC）已花費 $%.2f，上限 $%.2f", st.Used.CostUSD, st.Budget.DailyCostUSD)
+	case ExceededTokens:
+		return locale.Say("daily token budget reached: %d of %d tokens today (UTC)",
+			"已達每日 token 預算：今天（UTC）已用 %d 個，上限 %d 個", st.Used.Tokens, st.Budget.DailyTokens)
+	}
+	return nil
 }
 
 // addBudgetRow counts one run (usage, cost_usd, cost_settled) toward a

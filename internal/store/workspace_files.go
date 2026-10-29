@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"nodevas/internal/locale"
 )
 
 // Workspace files for the Explorer's Files tab: the project root's files,
@@ -28,8 +30,8 @@ const (
 
 // Workspace file errors.
 var (
-	ErrBadPath    = errors.New("bad path")
-	ErrHiddenFile = errors.New("this file is hidden because it may hold secrets")
+	ErrBadPath    = locale.Errorf("bad path", "路徑無效")
+	ErrHiddenFile = locale.Errorf("this file is hidden because it may hold secrets", "這個檔案可能含有機密，因此隱藏")
 )
 
 // WorkspaceEntry is one file or directory under the project root.
@@ -215,7 +217,7 @@ func workspaceVisible(rel string) error {
 	segs := strings.Split(rel, "/")
 	for _, seg := range segs[:len(segs)-1] {
 		if strings.HasPrefix(seg, ".") && !SecretName(seg) {
-			return fmt.Errorf("%w: inside a hidden directory", ErrBadPath)
+			return locale.Errorf("%w: inside a hidden directory", "%w：位於隱藏資料夾內", ErrBadPath)
 		}
 	}
 	if secretRel(rel) {

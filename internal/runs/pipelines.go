@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -96,7 +97,7 @@ type NewPipeline struct {
 // CreatePipeline records a running pipeline at round 1.
 func (s *Store) CreatePipeline(ctx context.Context, in NewPipeline) (PipelineRecord, error) {
 	if in.OwnerID == "" || in.CreatedBy == "" || in.Project == "" || in.NodeID == "" {
-		return PipelineRecord{}, invalidf("missing pipeline field")
+		return PipelineRecord{}, invalidf("missing pipeline field", "缺少管線欄位")
 	}
 	if err := ValidatePipeline(in.Pipeline, false); err != nil {
 		return PipelineRecord{}, err
@@ -213,7 +214,7 @@ func (s *Store) EndPipeline(ctx context.Context, id, status, reason string) (boo
 	case runnerwire.PipelineApproved, runnerwire.PipelineChangesLeft,
 		runnerwire.PipelineFailed, runnerwire.PipelineCancelled:
 	default:
-		return false, invalidf("pipeline status %q", status)
+		return false, invalidf("pipeline status %q", "管線狀態「%s」", status)
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE run_pipelines SET status = ?, reason = ?, awaiting = '', updated_at = ? WHERE id = ? AND status = ?`,
@@ -230,7 +231,7 @@ func (s *Store) EndPipeline(ctx context.Context, id, status, reason string) (boo
 // reported twice starts one review, not two.
 func (s *Store) ClaimPR(ctx context.Context, id, branch, prURL string) (bool, error) {
 	if prURL == "" {
-		return false, invalidf("missing pull request")
+		return false, invalidf("missing pull request", "缺少 pull request")
 	}
 	result, err := s.db.ExecContext(ctx, `
 UPDATE run_pipelines SET branch = ?, pr_url = ?, updated_at = ?
@@ -259,7 +260,7 @@ func (s *Store) NextRound(ctx context.Context, id string, round int) (bool, erro
 // PipelineRuns returns a pipeline's runs, oldest first.
 func (s *Store) PipelineRuns(ctx context.Context, id string) ([]Record, error) {
 	if id == "" {
-		return nil, fmt.Errorf("%w: missing pipeline", ErrInvalid)
+		return nil, locale.Errorf("%w: missing pipeline", "%w：缺少管線", ErrInvalid)
 	}
 	return s.query(ctx, `SELECT `+runColumns+` FROM runs WHERE pipeline_id = ? ORDER BY created_at, id`, id)
 }
@@ -311,10 +312,10 @@ func (s *Store) SettleVote(ctx context.Context, runID, verdict string) (bool, er
 	switch verdict {
 	case runnerwire.VerdictApprove, runnerwire.VerdictChanges, runnerwire.VerdictAbstain:
 	default:
-		return false, invalidf("verdict %q", verdict)
+		return false, invalidf("verdict %q", "判定「%s」", verdict)
 	}
 	if runID == "" {
-		return false, invalidf("missing run")
+		return false, invalidf("missing run", "缺少執行")
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE review_votes SET verdict = ?, updated_at = ? WHERE run_id = ? AND verdict = ''`,
@@ -331,7 +332,7 @@ func (s *Store) SettleVote(ctx context.Context, runID, verdict string) (bool, er
 // verdict settles the reviewer's seat. A vote already settled stays.
 func (s *Store) MoveVote(ctx context.Context, fromRunID, toRunID string) error {
 	if fromRunID == "" || toRunID == "" {
-		return invalidf("missing run")
+		return invalidf("missing run", "缺少執行")
 	}
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE review_votes SET run_id = ?, updated_at = ? WHERE run_id = ? AND verdict = ''`,
@@ -345,7 +346,7 @@ func (s *Store) HumanVote(ctx context.Context, pipelineID string, round int, act
 	switch verdict {
 	case runnerwire.VerdictApprove, runnerwire.VerdictChanges:
 	default:
-		return invalidf("verdict must be %q or %q", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
+		return invalidf("verdict must be %q or %q", "判定須為「%s」或「%s」", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
 	}
 	now := s.stamp()
 	result, err := s.db.ExecContext(ctx, `
@@ -362,7 +363,7 @@ ON CONFLICT (pipeline_id, round, reviewer) DO NOTHING`,
 		return err
 	}
 	if n != 1 {
-		return fmt.Errorf("%w: this round already has a person's review", ErrPrecondition)
+		return locale.Errorf("%w: this round already has a person's review", "%w：這一輪已經有人審查過", ErrPrecondition)
 	}
 	return nil
 }
@@ -464,7 +465,7 @@ WHERE id = ? AND status = ? AND round = ? AND awaiting = ''`,
 // and the stages that follow work on that one.
 func (s *Store) SetPipelinePR(ctx context.Context, id, branch, prURL string) (bool, error) {
 	if prURL == "" {
-		return false, invalidf("missing pull request")
+		return false, invalidf("missing pull request", "缺少 pull request")
 	}
 	result, err := s.db.ExecContext(ctx, `
 UPDATE run_pipelines SET branch = ?, pr_url = ?, updated_at = ? WHERE id = ? AND status = ?`,

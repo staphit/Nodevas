@@ -16,6 +16,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 var historyVersionPattern = regexp.MustCompile(
@@ -209,7 +210,7 @@ func (s *Store) WriteVersioned(path string, data []byte) error {
 func (s *Store) writeVersionedLocked(actor identity.Actor, kind, path string, data []byte) error {
 	backend := s.history()
 	if err := backend.beforeOverwrite(path, nil, true); err != nil {
-		return fmt.Errorf("snapshot %s: %w", filepath.Base(path), err)
+		return locale.Errorf("snapshot %s: %w", "快照 %s：%w", filepath.Base(path), err)
 	}
 	if err := s.WriteAtomic(path, data); err != nil {
 		return err
@@ -361,7 +362,7 @@ func (s *Store) readHistoryFile(rel, version string) ([]byte, error) {
 	}
 	if !historyVersionPattern.MatchString(version) ||
 		filepath.Ext(version) != filepath.Ext(filepath.FromSlash(rel)) {
-		return nil, fmt.Errorf("invalid version name")
+		return nil, locale.Errorf("invalid version name", "版本名稱無效")
 	}
 	return s.ReadFile(filepath.Join(dir, version))
 }
@@ -377,28 +378,28 @@ func (s *Store) historyDir(rel string) (string, error) {
 	}
 	const nodePrefix = "nodes/"
 	if !strings.HasPrefix(rel, nodePrefix) {
-		return "", fmt.Errorf("history not tracked for %q", rel)
+		return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 	}
 	tail := strings.TrimPrefix(rel, nodePrefix)
 	switch strings.Count(tail, "/") {
 	case 0:
 		if !strings.HasSuffix(tail, ".md") ||
 			!engine.ValidNodeID(strings.TrimSuffix(tail, ".md")) {
-			return "", fmt.Errorf("history not tracked for %q", rel)
+			return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 		}
 	case 1:
 		dir, filename, _ := strings.Cut(tail, "/")
 		nodeID, ok := strings.CutSuffix(dir, ".pages")
 		if !ok || !engine.ValidNodeID(nodeID) {
-			return "", fmt.Errorf("history not tracked for %q", rel)
+			return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 		}
 		extension := path.Ext(filename)
 		if !historyPageExtensions[extension] ||
 			!engine.ValidNodeID(strings.TrimSuffix(filename, extension)) {
-			return "", fmt.Errorf("history not tracked for %q", rel)
+			return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 		}
 	default:
-		return "", fmt.Errorf("history not tracked for %q", rel)
+		return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 	}
 	return filepath.Join(s.root, DataDir, "history", filepath.FromSlash(rel)), nil
 }
@@ -510,7 +511,7 @@ func (s *Store) RestoreTrash(actor identity.Actor, file string) (string, error) 
 		return s.restoreTrashedNodePage(actor, file)
 	}
 	if strings.ContainsAny(file, `/\`) || filepath.Base(file) != file || !strings.HasSuffix(file, ".md") {
-		return "", fmt.Errorf("invalid trash file")
+		return "", locale.Errorf("invalid trash file", "垃圾桶檔案無效")
 	}
 	src := filepath.Join(s.root, DataDir, "trash", file)
 	data, err := s.ReadFile(src)
@@ -529,7 +530,7 @@ func (s *Store) RestoreTrash(actor identity.Actor, file string) (string, error) 
 		}
 	}
 	if !engine.ValidNodeID(id) {
-		return "", fmt.Errorf("cannot determine node id for %q", file)
+		return "", locale.Errorf("cannot determine node id for %q", "無法判斷「%s」的節點代號", file)
 	}
 
 	s.mu.Lock()
@@ -539,10 +540,10 @@ func (s *Store) RestoreTrash(actor identity.Actor, file string) (string, error) 
 		return "", err
 	}
 	if g.NodeByID(id) != nil {
-		return "", fmt.Errorf("node %q already exists", id)
+		return "", locale.Errorf("node %q already exists", "節點「%s」已存在", id)
 	}
 	if _, err := s.statPath(s.NodePath(id)); err == nil {
-		return "", fmt.Errorf("node file %q already exists", id)
+		return "", locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", id)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
@@ -573,7 +574,7 @@ func (s *Store) RestoreTrash(actor identity.Actor, file string) (string, error) 
 		return "", err
 	}
 	if err := s.removePath(src); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("node restored but trash cleanup failed: %w", err)
+		return "", locale.Errorf("node restored but trash cleanup failed: %w", "節點已還原，但清理垃圾桶失敗：%w", err)
 	}
 	return id, nil
 }
@@ -583,7 +584,7 @@ func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (strin
 	if !strings.HasPrefix(clean, "pages/") ||
 		strings.Count(clean, "/") != 1 ||
 		!strings.HasSuffix(clean, ".json") {
-		return "", fmt.Errorf("invalid page trash file")
+		return "", locale.Errorf("invalid page trash file", "頁面垃圾桶檔案無效")
 	}
 	src := filepath.Join(s.root, DataDir, "trash", filepath.FromSlash(clean))
 	data, err := s.ReadFile(src)
@@ -592,14 +593,14 @@ func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (strin
 	}
 	var page trashedNodePage
 	if err := json.Unmarshal(data, &page); err != nil {
-		return "", fmt.Errorf("invalid page trash record: %w", err)
+		return "", locale.Errorf("invalid page trash record: %w", "頁面垃圾桶紀錄無效：%w", err)
 	}
 	if !engine.ValidNodeID(page.NodeID) || !engine.ValidNodeID(page.PageID) {
-		return "", fmt.Errorf("invalid page trash record")
+		return "", locale.Errorf("invalid page trash record", "頁面垃圾桶紀錄無效")
 	}
 	title := strings.TrimSpace(page.Title)
 	if title == "" || len(title) > 256 {
-		return "", fmt.Errorf("invalid page title")
+		return "", locale.Errorf("invalid page title", "頁面標題無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -608,7 +609,7 @@ func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (strin
 		return "", err
 	}
 	if g.NodeByID(page.NodeID) == nil {
-		return "", fmt.Errorf("parent node %q no longer exists", page.NodeID)
+		return "", locale.Errorf("parent node %q no longer exists", "上層節點「%s」已不存在", page.NodeID)
 	}
 	manifest, err := s.LoadNodePagesManifest(page.NodeID)
 	if err != nil {
@@ -616,11 +617,11 @@ func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (strin
 	}
 	for _, current := range manifest.Pages {
 		if current.ID == page.PageID {
-			return "", fmt.Errorf("page %q already exists", page.PageID)
+			return "", locale.Errorf("page %q already exists", "頁面「%s」已存在", page.PageID)
 		}
 	}
 	if len(manifest.Pages) >= maxNodePages {
-		return "", fmt.Errorf("node pages reached the maximum of %d", maxNodePages)
+		return "", locale.Errorf("node pages reached the maximum of %d", "節點頁面已達上限 %d 頁", maxNodePages)
 	}
 	format, err := NormalizePageFormat(page.Format)
 	if err != nil {
@@ -647,7 +648,7 @@ func (s *Store) restoreTrashedNodePage(actor identity.Actor, file string) (strin
 		return "", err
 	}
 	if err := s.removePath(src); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("page restored but trash cleanup failed: %w", err)
+		return "", locale.Errorf("page restored but trash cleanup failed: %w", "頁面已還原，但清理垃圾桶失敗：%w", err)
 	}
 	return page.NodeID, nil
 }

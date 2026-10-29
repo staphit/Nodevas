@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -400,13 +399,13 @@ func (s *Store) applyUpdatesForLocked(actors []identity.Actor, updates []fileUpd
 				s.forgetHistoryMark(previous.path)
 				if previous.existed {
 					if rollbackErr := s.WriteAtomic(previous.path, previous.before); rollbackErr != nil {
-						combinedErr = errors.Join(combinedErr, fmt.Errorf("rollback %s: %w", previous.path, rollbackErr))
+						combinedErr = errors.Join(combinedErr, locale.Errorf("rollback %s: %w", "復原 %s：%w", previous.path, rollbackErr))
 					}
 				} else {
 					s.markSelfWrite(previous.path)
 					if rollbackErr := s.removePath(previous.path); rollbackErr != nil &&
 						!errors.Is(rollbackErr, os.ErrNotExist) {
-						combinedErr = errors.Join(combinedErr, fmt.Errorf("rollback %s: %w", previous.path, rollbackErr))
+						combinedErr = errors.Join(combinedErr, locale.Errorf("rollback %s: %w", "復原 %s：%w", previous.path, rollbackErr))
 					}
 				}
 			}
@@ -449,14 +448,14 @@ func (s *Store) checkRevision(path, baseRev string) error {
 
 func (s *Store) SaveDraft(id, content string) error {
 	if !engine.ValidNodeID(id) {
-		return fmt.Errorf("invalid node id")
+		return locale.Errorf("invalid node id", "節點代號無效")
 	}
 	return s.WriteAtomic(s.draftPath(id), []byte(content))
 }
 
 func (s *Store) LoadDraft(id string) (string, error) {
 	if !engine.ValidNodeID(id) {
-		return "", fmt.Errorf("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	data, err := s.ReadFile(s.draftPath(id))
 	if err != nil {
@@ -467,7 +466,7 @@ func (s *Store) LoadDraft(id string) (string, error) {
 
 func (s *Store) DeleteDraft(id string) error {
 	if !engine.ValidNodeID(id) {
-		return fmt.Errorf("invalid node id")
+		return locale.Errorf("invalid node id", "節點代號無效")
 	}
 	err := s.removePath(s.draftPath(id))
 	if err != nil && !os.IsNotExist(err) {
@@ -536,7 +535,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found", nodeID)
+		return nil, locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
 	}
 	// A type without status (Note) takes none from anybody, including the
 	// actor-less Autopilot and Copilot writers that come through here.
@@ -556,7 +555,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 			}
 		}
 		if !defined {
-			return nil, fmt.Errorf("custom status %q is not defined in this project or workspace", status)
+			return nil, locale.Errorf("custom status %q is not defined in this project or workspace", "這個專案或工作區沒有定義自訂狀態「%s」", status)
 		}
 	}
 	node := g.NodeByID(nodeID)
@@ -568,7 +567,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 
 	from := before[nodeID]
 	if !engine.CanTransition(from, status) {
-		return nil, fmt.Errorf("invalid status transition %s -> %s", from, status)
+		return nil, locale.Errorf("invalid status transition %s -> %s", "無效的狀態轉換 %s -> %s", from, status)
 	}
 	if err := rs.SetStatus(nodeID, status, by, time.Now()); err != nil {
 		return nil, err
@@ -603,7 +602,7 @@ func (s *Store) setStatusLocked(nodeID string, status engine.Status, by, note st
 func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*engine.RunState, error) {
 	movedAt, err := time.Parse(time.RFC3339, newT)
 	if err != nil {
-		return nil, fmt.Errorf("invalid event time: %w", err)
+		return nil, locale.Errorf("invalid event time: %w", "事件時間無效：%w", err)
 	}
 	newT = movedAt.UTC().Format(time.RFC3339)
 	s.mu.Lock()
@@ -622,7 +621,7 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 		}
 	}
 	if target == nil {
-		return nil, fmt.Errorf("event %q not found", id)
+		return nil, locale.Errorf("event %q not found", "找不到事件「%s」", id)
 	}
 	g, _, err := s.graphViewLocked()
 	if err != nil {
@@ -700,7 +699,7 @@ func (s *Store) MoveEvent(actor identity.Actor, id, newT, by, note string) (*eng
 // ...Locked convention and is spelled this way in transfer.go too).
 func (s *Store) appendJournal(line []byte) error {
 	if len(line) == 0 || len(line) > maxJournalLineBytes {
-		return fmt.Errorf("journal event exceeds %d bytes", maxJournalLineBytes)
+		return locale.Errorf("journal event exceeds %d bytes", "日誌事件超過 %d 位元組", maxJournalLineBytes)
 	}
 	if err := MkdirAllProjectPath(s.root, filepath.Dir(s.JournalPath()), 0o755); err != nil {
 		return err
@@ -720,7 +719,7 @@ func (s *Store) appendJournal(line []byte) error {
 		return err
 	}
 	if size > int64(maxJournalBytes-len(line)) {
-		return fmt.Errorf("run journal reached its %d-byte safety limit", maxJournalBytes)
+		return locale.Errorf("run journal reached its %d-byte safety limit", "執行日誌已達 %d 位元組的安全上限", maxJournalBytes)
 	}
 	s.markSelfWrite(s.JournalPath())
 	f, err := openProjectFileAppend(s.root, s.JournalPath(), 0o644)

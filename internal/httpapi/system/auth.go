@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // authMode describes how the server identifies callers, so the UI can show a
@@ -44,7 +46,7 @@ func (a *API) getAuthStatus(c *gin.Context) {
 func (a *API) postLogin(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	var body struct {
@@ -176,7 +178,7 @@ func refusedSignIn(reason, method string, refusal auth.SignInRefusal) audit.Even
 func (a *API) postRequestOTP(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	if a.mailer == nil {
@@ -391,7 +393,7 @@ func (a *API) postLogout(c *gin.Context) {
 		if cookie, err := c.Request.Cookie(auth.SessionCookieName); err == nil {
 			if err := accounts.Logout(cookie.Value); err != nil {
 				httpx.Err(c, http.StatusInternalServerError,
-					fmt.Errorf("sign out could not be persisted: %w", err))
+					locale.Errorf("sign out could not be persisted: %w", "登出無法儲存：%w", err))
 				return
 			}
 			// The session is gone, but who it belonged to is still on the

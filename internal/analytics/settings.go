@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // Settings are an owner's analytics settings for one project ("" the
@@ -30,7 +30,7 @@ const (
 )
 
 // ErrInvalid marks settings the caller can fix.
-var ErrInvalid = errors.New("invalid argument")
+var ErrInvalid = locale.Errorf("invalid argument", "參數無效")
 
 // DefaultSettings are the settings with no row stored.
 func DefaultSettings(project string) Settings {
@@ -81,17 +81,17 @@ SELECT auto_routing, exploration_pct, required_tiers FROM analytics_settings WHE
 // tier names.
 func ValidateSettings(s Settings) error {
 	if s.ExplorationPct < 0 || s.ExplorationPct > MaxExplorationPct {
-		return fmt.Errorf("%w: explorationPct is 0 to %d", ErrInvalid, MaxExplorationPct)
+		return locale.Errorf("%w: explorationPct is 0 to %d", "%w：explorationPct 須介於 0 到 %d", ErrInvalid, MaxExplorationPct)
 	}
 	if len(s.RequiredTiers) > maxRequiredTiers {
-		return fmt.Errorf("%w: at most %d required tiers", ErrInvalid, maxRequiredTiers)
+		return locale.Errorf("%w: at most %d required tiers", "%w：最多 %d 個必要等級", ErrInvalid, maxRequiredTiers)
 	}
 	for role, tier := range s.RequiredTiers {
 		if !engine.ValidRoleID(role) {
-			return fmt.Errorf("%w: unknown role %q", ErrInvalid, role)
+			return locale.Errorf("%w: unknown role %q", "%w：不明的角色「%s」", ErrInvalid, role)
 		}
 		if TierRank(tier) < 0 {
-			return fmt.Errorf("%w: tier %q is not senior, mid or probation", ErrInvalid, tier)
+			return locale.Errorf("%w: tier %q is not senior, mid or probation", "%w：等級「%s」不是 senior、mid 或 probation", ErrInvalid, tier)
 		}
 	}
 	return nil
@@ -100,7 +100,7 @@ func ValidateSettings(s Settings) error {
 // SaveSettings validates and stores owner's settings for s.Project.
 func SaveSettings(ctx context.Context, database *db.DB, ownerID string, s Settings) error {
 	if ownerID == "" {
-		return fmt.Errorf("%w: no owner", ErrInvalid)
+		return locale.Errorf("%w: no owner", "%w：沒有擁有者", ErrInvalid)
 	}
 	if err := ValidateSettings(s); err != nil {
 		return err

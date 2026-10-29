@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"net/http"
 	"runtime"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 )
 
 // Liveness and metrics for an operator: GET /api/healthz for the
@@ -108,7 +108,7 @@ func (s *Server) metrics(c *gin.Context) {
 	if !auth.DirectLoopback(r) {
 		actor := auth.ActorFrom(r)
 		if !actor.IsAdmin() || actor.IsAgent() {
-			httpx.Err(c, http.StatusForbidden, errors.New("metrics are for administrators"))
+			httpx.Err(c, http.StatusForbidden, locale.Errorf("metrics are for administrators", "指標只給管理員看"))
 			return
 		}
 	}

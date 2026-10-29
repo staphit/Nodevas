@@ -90,13 +90,13 @@ func (s *Store) stamp() string {
 // refused rather than guessed between.
 func ValidateReport(r *SessionReport) error {
 	if strings.TrimSpace(r.Project) == "" || strings.TrimSpace(r.SessionID) == "" {
-		return invalidf("project and session are required")
+		return invalidf("project and session are required", "需要提供專案與工作階段")
 	}
 	if len(r.Models) == 0 {
-		return invalidf("no models reported")
+		return invalidf("no models reported", "沒有回報任何 model")
 	}
 	if len(r.Models) > MaxModelsPerReport {
-		return invalidf("at most %d models per report", MaxModelsPerReport)
+		return invalidf("at most %d models per report", "每次回報最多 %d 個 model", MaxModelsPerReport)
 	}
 	seen := make(map[string]bool, len(r.Models))
 	for i := range r.Models {
@@ -106,19 +106,19 @@ func ValidateReport(r *SessionReport) error {
 			m.Model = UnknownModel
 		}
 		if !ValidModelName(m.Model) {
-			return invalidf("a model name is too long or not text")
+			return invalidf("a model name is too long or not text", "model 名稱太長或不是文字")
 		}
 		if seen[m.Model] {
-			return invalidf("model %q is reported twice", m.Model)
+			return invalidf("model %q is reported twice", "model「%s」重複回報", m.Model)
 		}
 		seen[m.Model] = true
 		for _, n := range []int64{m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens} {
 			if n < 0 || n > MaxTokens {
-				return invalidf("token counts are between 0 and %d", MaxTokens)
+				return invalidf("token counts are between 0 and %d", "token 數須介於 0 到 %d", MaxTokens)
 			}
 		}
 		if math.IsNaN(m.CostUSD) || math.IsInf(m.CostUSD, 0) || m.CostUSD < 0 || m.CostUSD > MaxCostUSD {
-			return invalidf("costUsd is between 0 and %.0f", MaxCostUSD)
+			return invalidf("costUsd is between 0 and %.0f", "costUsd 須介於 0 到 %.0f", MaxCostUSD)
 		}
 	}
 	return nil

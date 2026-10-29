@@ -2,9 +2,9 @@ package project
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 )
 
@@ -60,9 +60,9 @@ type Current interface {
 
 var (
 	// ErrNotReadable refuses opening a project the caller may not read.
-	ErrNotReadable = errors.New("no such project")
+	ErrNotReadable = locale.Errorf("no such project", "沒有這個專案")
 	// ErrAgentSwitch refuses an agent moving its person's current project.
-	ErrAgentSwitch = errors.New("an agent works in the project its requests name; it cannot change its person's current project")
+	ErrAgentSwitch = locale.Errorf("an agent works in the project its requests name; it cannot change its person's current project", "agent 在請求指定的專案中工作；不能更改其所屬的人目前的專案")
 )
 
 // UseCurrent turns on per-account current projects.

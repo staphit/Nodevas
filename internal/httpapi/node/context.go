@@ -2,12 +2,12 @@ package node
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 )
 
 // getDocuments returns revisions without transferring document bodies or UI state.
@@ -48,7 +48,7 @@ const maxReferencedBy = 50
 func (a *API) getNodeContext(c *gin.Context) {
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, 400, errors.New("invalid node id"))
+		httpx.Err(c, 400, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
@@ -59,7 +59,7 @@ func (a *API) getNodeContext(c *gin.Context) {
 	}
 	n := g.NodeByID(id)
 	if n == nil {
-		httpx.Err(c, 404, fmt.Errorf("no node %q in this project", id))
+		httpx.Err(c, 404, locale.Errorf("no node %q in this project", "這個專案沒有節點「%s」", id))
 		return
 	}
 	content, rev, err := st.LoadNodeContent(id)

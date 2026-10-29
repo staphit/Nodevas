@@ -3,7 +3,6 @@ package explorer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"nodevas/internal/agents"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
 	"nodevas/internal/usage"
@@ -365,7 +365,7 @@ func (a *API) sessionActions(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > maxActionsList {
-			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("limit is between 1 and 1000"), nil)
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("limit is between 1 and 1000", "limit 須介於 1 到 1000"), nil)
 			return
 		}
 		limit = n

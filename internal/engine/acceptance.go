@@ -1,11 +1,12 @@
 package engine
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"nodevas/internal/locale"
 )
 
 // Acceptance criteria on dispatch and Autopilot nodes. They live in
@@ -48,7 +49,7 @@ func ValidateNodeAcceptance(g *Graph, n *Node) error {
 		return nil
 	}
 	if !g.AcceptanceAllowed(n) {
-		return fmt.Errorf("node %q: type %q cannot carry acceptance criteria", n.ID, g.TypeOf(n).ID)
+		return locale.Errorf("node %q: type %q cannot carry acceptance criteria", "節點「%s」：類型「%s」不能有驗收條件", n.ID, g.TypeOf(n).ID)
 	}
 	return ValidateAcceptanceItems(n.Acceptance.Items)
 }
@@ -56,26 +57,26 @@ func ValidateNodeAcceptance(g *Graph, n *Node) error {
 // ValidateAcceptanceItems checks the count, ids and texts of a list.
 func ValidateAcceptanceItems(items []AcceptanceItem) error {
 	if len(items) > MaxAcceptanceItems {
-		return fmt.Errorf("acceptance: at most %d criteria", MaxAcceptanceItems)
+		return locale.Errorf("acceptance: at most %d criteria", "驗收條件：最多 %d 條", MaxAcceptanceItems)
 	}
 	seen := map[string]bool{}
 	for _, item := range items {
 		if !acceptanceIDPattern.MatchString(item.ID) {
-			return fmt.Errorf("acceptance: invalid criterion id %q (a1…a999)", item.ID)
+			return locale.Errorf("acceptance: invalid criterion id %q (a1…a999)", "驗收條件：條件代號「%s」無效（a1…a999）", item.ID)
 		}
 		if seen[item.ID] {
-			return fmt.Errorf("acceptance: duplicate criterion id %q", item.ID)
+			return locale.Errorf("acceptance: duplicate criterion id %q", "驗收條件：重複的條件代號「%s」", item.ID)
 		}
 		seen[item.ID] = true
 		text := strings.TrimSpace(item.Text)
 		if text == "" {
-			return fmt.Errorf("acceptance: criterion %s is empty", item.ID)
+			return locale.Errorf("acceptance: criterion %s is empty", "驗收條件：條件 %s 是空的", item.ID)
 		}
 		if strings.ContainsAny(item.Text, "\r\n") {
-			return fmt.Errorf("acceptance: criterion %s must be one line", item.ID)
+			return locale.Errorf("acceptance: criterion %s must be one line", "驗收條件：條件 %s 必須是單行", item.ID)
 		}
 		if utf8.RuneCountInString(item.Text) > MaxAcceptanceItemRunes {
-			return fmt.Errorf("acceptance: criterion %s is longer than %d characters", item.ID, MaxAcceptanceItemRunes)
+			return locale.Errorf("acceptance: criterion %s is longer than %d characters", "驗收條件：條件 %s 超過 %d 個字元", item.ID, MaxAcceptanceItemRunes)
 		}
 	}
 	return nil

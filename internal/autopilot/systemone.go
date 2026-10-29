@@ -3,7 +3,6 @@ package autopilot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -134,7 +134,7 @@ func buildSystemOneDecision(in ChooseInput, candidates []advisorCandidate) (syst
 // Choose asks the owner's System One endpoint who should implement the task.
 func (a *SystemOneAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, error) {
 	if a == nil || a.relay == nil {
-		return Choice{}, errors.New("no System One advisor is reachable from this server")
+		return Choice{}, locale.Errorf("no System One advisor is reachable from this server", "這個伺服器連不到任何 System One 顧問")
 	}
 	candidates := advisorCandidates(in.Agents)
 	if len(candidates) == 0 {
@@ -163,7 +163,7 @@ func (a *SystemOneAdvisor) Choose(ctx context.Context, in ChooseInput) (Choice, 
 func (d systemOneDecision) choice(resp runnerwire.DecisionResponse) (Choice, error) {
 	answer, ok := resp.Answers["implementer"]
 	if !ok {
-		return Choice{}, fmt.Errorf("%w: no implementer answer", ErrAdvisorAnswer)
+		return Choice{}, locale.Errorf("%w: no implementer answer", "%w：沒有實作者的回答", ErrAdvisorAnswer)
 	}
 	var order []rankedOption
 	for key, p := range answer.Probabilities {
@@ -173,7 +173,7 @@ func (d systemOneDecision) choice(resp runnerwire.DecisionResponse) (Choice, err
 	}
 	if len(order) == 0 {
 		if _, known := d.options[answer.Choice]; !known {
-			return Choice{}, fmt.Errorf("%w: it chose %q, not one of the options", ErrAdvisorAnswer, answer.Choice)
+			return Choice{}, locale.Errorf("%w: it chose %q, not one of the options", "%w：它選了「%s」，不是選項之一", ErrAdvisorAnswer, answer.Choice)
 		}
 		order = append(order, rankedOption{answer.Choice, 1})
 	}

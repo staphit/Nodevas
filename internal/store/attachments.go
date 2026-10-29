@@ -5,11 +5,11 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // SaveAttachment streams an upload into nodes/<id>.files/, under the name the
@@ -22,7 +22,7 @@ import (
 // the partial file with it, so a caller never has to clean up after this.
 func (s *Store) SaveAttachment(nodeID, filename string, body io.Reader) (string, error) {
 	if !engine.ValidNodeID(nodeID) {
-		return "", errors.New("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	s.mediaMu.Lock()
 	defer s.mediaMu.Unlock()
@@ -38,7 +38,7 @@ func (s *Store) SaveAttachment(nodeID, filename string, body io.Reader) (string,
 	}
 	discard := func(cause error) (string, error) {
 		if err := s.removePath(target); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", errors.Join(cause, fmt.Errorf("remove %s: %w", target, err))
+			return "", errors.Join(cause, locale.Errorf("remove %s: %w", "移除 %s：%w", target, err))
 		}
 		return "", cause
 	}

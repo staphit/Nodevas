@@ -5,7 +5,6 @@ package runs
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -92,12 +92,24 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.POST("/verdicts", a.submitVerdict)
 }
 
-func notFound(c *gin.Context, what string) {
-	httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New(what+" not found"), nil)
+// missing is what notFound says is not there, in both languages.
+var missing = map[string]*locale.Message{
+	"run":      locale.Say("run not found", "找不到執行"),
+	"node":     locale.Say("node not found", "找不到節點"),
+	"runner":   locale.Say("runner not found", "找不到 runner"),
+	"pipeline": locale.Say("pipeline not found", "找不到管線"),
 }
 
-func invalid(c *gin.Context, format string, args ...any) {
-	httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", fmt.Errorf(format, args...), nil)
+func notFound(c *gin.Context, what string) {
+	said, ok := missing[what]
+	if !ok {
+		said = locale.Say("%s not found", "找不到 %s", what)
+	}
+	httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", said, nil)
+}
+
+func invalid(c *gin.Context, english, chinese string, args ...any) {
+	httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf(english, chinese, args...), nil)
 }
 
 func fail(c *gin.Context, err error) {
@@ -132,7 +144,7 @@ func (a *API) requestProject(c *gin.Context) (*store.Store, string, bool) {
 	st := httpx.StoreFor(c.Request, a.pm)
 	name := ProjectName(a.pm, st)
 	if st == nil || name == "" {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return nil, "", false
 	}
 	return st, name, true
@@ -149,7 +161,7 @@ func (a *API) create(c *gin.Context) {
 	// A run executes on someone's machine. An agent dispatching agents is a
 	// loop nobody approved, so only a person may.
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot dispatch runs"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot dispatch runs", "agent 不能派發執行"), nil)
 		return
 	}
 	var body runnerwire.CreateRunRequest
@@ -205,15 +217,15 @@ func startFailed(c *gin.Context, err error) {
 		if refused.Reason != "" {
 			code = refused.Reason
 		}
-		httpx.Coded(c, http.StatusConflict, code, errors.New(refused.Msg), nil)
+		httpx.Coded(c, http.StatusConflict, code, refused, nil)
 	case runs.StartBudget:
 		httpx.Coded(c, http.StatusTooManyRequests, CodeBudgetExceeded,
-			errors.New(refused.Msg), map[string]any{"exceeded": refused.Budget.Exceeded})
+			refused, map[string]any{"exceeded": refused.Budget.Exceeded})
 	case runs.StartNodeType:
-		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, errors.New(refused.Msg),
+		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, refused,
 			map[string]any{"nodeType": refused.NodeType, "agentMode": refused.AgentMode})
 	default:
-		invalid(c, "%s", refused.Msg)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", refused, nil)
 	}
 }
 
@@ -319,7 +331,7 @@ func (a *API) list(c *gin.Context) {
 	case "1", "true":
 		filter.Active = true
 	default:
-		invalid(c, "active must be 1 or 0")
+		invalid(c, "active must be 1 or 0", "active 須為 1 或 0")
 		return
 	}
 	if !actor.IsAdmin() {
@@ -395,12 +407,12 @@ func (a *API) events(c *gin.Context) {
 	}
 	after, err := queryInt(c, "after", 0)
 	if err != nil || after < 0 {
-		invalid(c, "after must be a non-negative integer")
+		invalid(c, "after must be a non-negative integer", "after 須為非負整數")
 		return
 	}
 	limit, err := queryInt(c, "limit", runs.DefaultEventPage)
 	if err != nil || limit <= 0 {
-		invalid(c, "limit must be a positive integer")
+		invalid(c, "limit must be a positive integer", "limit 須為正整數")
 		return
 	}
 	events, more, err := a.d.Store().Events(c.Request.Context(), r.ID, after, int(min(limit, runs.MaxEventPage)))
@@ -482,7 +494,7 @@ func (a *API) cancel(c *gin.Context) {
 func (a *API) retryNow(c *gin.Context) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot retry runs"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot retry runs", "agent 不能重試執行"), nil)
 		return
 	}
 	r, ok := a.visible(c)

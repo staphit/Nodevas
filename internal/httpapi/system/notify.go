@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
-	"nodevas/internal/locale"
 	"nodevas/internal/notify"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -30,7 +31,7 @@ func (a *API) authorizeNotifyManagement(c *gin.Context) (identity.Actor, bool) {
 		return identity.Actor{}, false
 	}
 	if !actor.IsAdmin() {
-		httpx.Err(c, http.StatusForbidden, errors.New("notification administration requires an owner or administrator"))
+		httpx.Err(c, http.StatusForbidden, locale.Errorf("notification administration requires an owner or administrator", "管理通知需要擁有者或管理員"))
 		return identity.Actor{}, false
 	}
 	return actor, true

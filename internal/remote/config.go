@@ -4,13 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/store"
 )
@@ -65,7 +64,7 @@ func NewManager(pm *project.ProjectManager) *RemoteManager {
 	}
 }
 
-var ErrFolderRemote = errors.New("folder backup is unavailable on a remotely accessible server")
+var ErrFolderRemote = locale.Errorf("folder backup is unavailable on a remotely accessible server", "可從遠端存取的伺服器不能使用資料夾備份")
 
 // ConfigPath is the per-workspace config file in the app config directory,
 // keyed by a hash of the workspace Path so two workspaces never clash.
@@ -212,6 +211,6 @@ func (m *RemoteManager) BuildRemote(cfg Config) (RemoteStore, error) {
 		}
 		return Remote, nil
 	default:
-		return nil, fmt.Errorf("unknown remote backend %q", cfg.Kind)
+		return nil, locale.Errorf("unknown remote backend %q", "不明的遠端備份方式「%s」", cfg.Kind)
 	}
 }

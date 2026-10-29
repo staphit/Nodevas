@@ -13,6 +13,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/safego"
 )
@@ -73,7 +74,7 @@ func stepUpStatus(accounts *auth.SessionAuth, r *http.Request) runnerwire.StepUp
 func (a *API) stepUpAccounts(c *gin.Context) (*auth.SessionAuth, bool) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts, so there is nothing to step up"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts, so there is nothing to step up", "這個伺服器不使用帳號，所以沒有身分需要驗證"))
 		return nil, false
 	}
 	if auth.ActorFrom(c.Request).IsAgent() {

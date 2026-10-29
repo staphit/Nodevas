@@ -12,6 +12,7 @@ import (
 
 	"nodevas/internal/agents"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/usage"
 )
 
@@ -39,7 +40,7 @@ func (a *API) UseRunUsage(record func(ctx context.Context, runID string, models 
 
 func (a *API) postSessionUsage(c *gin.Context) {
 	if a.usage == nil {
-		httpx.Coded(c, http.StatusServiceUnavailable, "UNAVAILABLE", errors.New("usage is not recorded on this server"), nil)
+		httpx.Coded(c, http.StatusServiceUnavailable, "UNAVAILABLE", locale.Errorf("usage is not recorded on this server", "這個伺服器沒有記錄用量"), nil)
 		return
 	}
 	sessionID := strings.TrimSpace(c.Param("id"))
@@ -51,23 +52,23 @@ func (a *API) postSessionUsage(c *gin.Context) {
 	if !httpx.DecodeJSONLimit(c, &body, maxUsageBody) {
 		return
 	}
-	invalid := func(msg string) {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New(msg), nil)
+	invalid := func(english, chinese string) {
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf(english, chinese), nil)
 	}
 	if sessionID == "" || len(sessionID) > 256 {
-		invalid("session id is missing or too long")
+		invalid("session id is missing or too long", "工作階段代號缺少或太長")
 		return
 	}
 	name := a.projectName(c.Request)
 	if name == "" {
-		invalid("no project selected")
+		invalid("no project selected", "沒有選擇專案")
 		return
 	}
 	projectKey := a.projectKey(c.Request)
 	actorID, _ := resolveActor(c.Request, body.Actor)
 	session, found := a.hub.SessionByID(projectKey, sessionID)
 	if !found {
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such session; heartbeat first"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such session; heartbeat first", "沒有這個工作階段；請先送出心跳"), nil)
 		return
 	}
 	// A session ID is bound to the actor that registered it, as in Touch.
@@ -80,7 +81,7 @@ func (a *API) postSessionUsage(c *gin.Context) {
 		agent = strings.TrimSpace(body.Agent)
 	}
 	if len(agent) > 64 {
-		invalid("agent is too long")
+		invalid("agent is too long", "agent 太長")
 		return
 	}
 	err := a.usage.RecordSession(c.Request.Context(), usage.SessionReport{

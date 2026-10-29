@@ -135,7 +135,7 @@ type ProjectManager struct {
 func DefaultCatalogRoot() (string, error) {
 	configRoot, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("user config directory: %w", err)
+		return "", locale.Errorf("user config directory: %w", "使用者設定資料夾：%w", err)
 	}
 	return filepath.Join(configRoot, "nodevas"), nil
 }
@@ -164,19 +164,19 @@ func NewManagerAt(
 		return nil, err
 	}
 	if _, err := os.Stat(abs); err != nil {
-		return nil, fmt.Errorf("workspace: %w", err)
+		return nil, locale.Errorf("workspace: %w", "工作區：%w", err)
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return nil, fmt.Errorf("workspace: %w", err)
+		return nil, locale.Errorf("workspace: %w", "工作區：%w", err)
 	}
 	info, err := os.Stat(real)
 	if err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("workspace is not a directory")
+		return nil, locale.Errorf("workspace is not a directory", "工作區不是資料夾")
 	}
 	catalogRoot, err = filepath.Abs(catalogRoot)
 	if err != nil {
-		return nil, fmt.Errorf("workspace catalog: %w", err)
+		return nil, locale.Errorf("workspace catalog: %w", "工作區清單：%w", err)
 	}
 	pm := &ProjectManager{workspace: real, catalogRoot: catalogRoot, hub: hub}
 	roots, err := pm.LoadWorkspaceRoots()
@@ -386,12 +386,12 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template, lan
 		}
 	}
 	if _, err := store.StatProjectPath(pm.workspace, filepath.Join(dir, "graph.yaml")); err != nil {
-		return fmt.Errorf("project %q has no graph.yaml", name)
+		return locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 	}
 
 	st := pm.cachedStore(dir)
 	if _, _, err := st.LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
 	stop, err := pm.watchStore(st)
 	if err != nil {
@@ -434,7 +434,7 @@ func (pm *ProjectManager) OpenForCaller(name string) error {
 		return err
 	}
 	if _, _, err := st.LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
 	pm.warmSearch(st.Root())
 	return nil
@@ -471,7 +471,7 @@ func (pm *ProjectManager) Create(name, template, language string) error {
 		return err
 	}
 	if _, _, err := pm.cachedStore(dir).LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
 	return nil
 }
@@ -494,7 +494,7 @@ func (pm *ProjectManager) createLocked(name, dir, template, language string, wor
 		}
 		// A plain grouping folder is an acceptable parent too.
 		if info, parentErr := store.StatProjectPath(pm.workspace, parentDir); parentErr != nil || !info.IsDir() {
-			return fmt.Errorf("parent %q does not exist", parent)
+			return locale.Errorf("parent %q does not exist", "上層「%s」不存在", parent)
 		}
 	}
 	if err := store.MkdirAllProjectPath(pm.workspace, filepath.Join(dir, "nodes"), 0o755); err != nil {
@@ -729,12 +729,12 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 	graphInfo, err := store.StatProjectPath(dir, filepath.Join(dir, "graph.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("project %q has no graph.yaml", name)
+			return nil, locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 		}
 		return nil, err
 	}
 	if !graphInfo.Mode().IsRegular() {
-		return nil, fmt.Errorf("project %q has no regular graph.yaml", name)
+		return nil, locale.Errorf("project %q has no regular graph.yaml", "專案「%s」沒有一般的 graph.yaml", name)
 	}
 	pm.lookups.remember(workspace, name, dir)
 	return pm.cachedStore(dir), nil
@@ -753,7 +753,7 @@ func (pm *ProjectManager) ListedStore(name string) (*store.Store, error) {
 		return nil, err
 	}
 	if projectIsDetached(name, detached) {
-		return nil, fmt.Errorf("project %q is not in the workspace", name)
+		return nil, locale.Errorf("project %q is not in the workspace", "專案「%s」不在工作區內", name)
 	}
 	return st, nil
 }
@@ -826,7 +826,7 @@ func (pm *ProjectManager) FlushHistory(ctx context.Context) error {
 	var errs []error
 	for _, st := range pm.cachedStores() {
 		if err := st.FlushHistory(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("history for %s: %w", st.Root(), err))
+			errs = append(errs, locale.Errorf("history for %s: %w", "%s 的歷史紀錄：%w", st.Root(), err))
 		}
 	}
 	return errors.Join(errs...)

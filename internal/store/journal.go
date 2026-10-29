@@ -13,12 +13,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // journalCompactBytes is the soft threshold: crossing it triggers a checkpoint
@@ -157,7 +157,7 @@ func (s *Store) compactJournalLocked() error {
 	// Bytes that reduce to no events at all are not something we understand
 	// well enough to rotate away — leave them where they are.
 	if len(rs.History) == 0 {
-		return fmt.Errorf("journal holds no replayable events; refusing to rotate")
+		return locale.Errorf("journal holds no replayable events; refusing to rotate", "日誌沒有可重播的事件；拒絕輪替")
 	}
 
 	sum := sha256.Sum256(journal)

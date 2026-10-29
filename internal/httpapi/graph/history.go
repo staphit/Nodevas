@@ -6,19 +6,20 @@ import (
 	"errors"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
-	"nodevas/internal/locale"
 	"nodevas/internal/store"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // getHistory lists snapshots for ?path=graph.yaml or ?path=nodes/<id>.md.
 func (a *API) getHistory(c *gin.Context) {
 	rel := c.Request.URL.Query().Get("path")
 	if len(rel) > 256 {
-		httpx.Err(c, 400, errors.New("history path is too long"))
+		httpx.Err(c, 400, locale.Errorf("history path is too long", "歷史紀錄路徑太長"))
 		return
 	}
 	versions, err := httpx.StoreFor(c.Request, a.pm).ListHistory(rel)
@@ -33,7 +34,7 @@ func (a *API) getHistoryVersion(c *gin.Context) {
 	rel := c.Request.URL.Query().Get("path")
 	version := c.Request.URL.Query().Get("version")
 	if len(rel) > 256 || len(version) > 256 {
-		httpx.Err(c, 400, errors.New("history path is too long"))
+		httpx.Err(c, 400, locale.Errorf("history path is too long", "歷史紀錄路徑太長"))
 		return
 	}
 	data, err := httpx.StoreFor(c.Request, a.pm).ReadHistory(rel, version)
@@ -124,7 +125,7 @@ func (a *API) postTrashRestore(c *gin.Context) {
 		return
 	}
 	if len(body.File) > 255 {
-		httpx.Err(c, 400, errors.New("trash filename is too long"))
+		httpx.Err(c, 400, locale.Errorf("trash filename is too long", "垃圾桶檔名太長"))
 		return
 	}
 	id, err := httpx.StoreFor(c.Request, a.pm).RestoreTrash(auth.ActorFrom(c.Request), body.File)
