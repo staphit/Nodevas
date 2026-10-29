@@ -53,6 +53,10 @@ type Link struct {
 	Revision string
 	Name     string
 	Created  time.Time
+	// Language is what the browser that made the link reads: the notice
+	// that it was redeemed goes out in it, the redeeming runner being a
+	// program that says nothing of its owner's language.
+	Language locale.Language
 }
 
 type pendingLink struct {
@@ -111,8 +115,8 @@ func (l *Links) pruneLocked(now time.Time) {
 }
 
 // Issue makes a code for owner under name (already checked with CleanName).
-// The code is returned only here.
-func (l *Links) Issue(owner identity.Actor, revision, name string) (string, time.Time, error) {
+// The code is returned only here. language is the maker's (Link.Language).
+func (l *Links) Issue(owner identity.Actor, revision, name string, language locale.Language) (string, time.Time, error) {
 	if strings.TrimSpace(owner.ID) == "" {
 		return "", time.Time{}, ErrInvalid
 	}
@@ -138,7 +142,7 @@ func (l *Links) Issue(owner identity.Actor, revision, name string) (string, time
 	expires := now.Add(l.ttl)
 	l.pending = append(l.pending, &pendingLink{
 		hash:    sha256.Sum256([]byte(code)),
-		link:    Link{Owner: owner, Revision: revision, Name: name, Created: now},
+		link:    Link{Owner: owner, Revision: revision, Name: name, Created: now, Language: language},
 		expires: expires,
 	})
 	return code, expires, nil

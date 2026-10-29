@@ -1,6 +1,7 @@
 package system
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,10 @@ func TestEveryAccountMailSpeaksItsRecipientsLanguage(t *testing.T) {
 				t.Errorf("%s subject for %s reads %q", mail.name, language, mail.subject)
 			}
 			for _, line := range strings.Split(mail.body, "\n") {
-				if strings.TrimSpace(line) == "" || strings.Trim(line, "—") == "" {
+				// A line holding only what the mail carries (the passcode on
+				// its own line) is in no language.
+				if strings.TrimSpace(line) == "" || strings.Trim(line, "—") == "" ||
+					slices.Contains(mail.keep, strings.TrimSpace(line)) {
 					continue
 				}
 				if hasChinese(line) != chinese {

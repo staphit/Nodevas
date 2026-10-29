@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -15,11 +16,11 @@ func TestLinksAreSingleUseAndExpire(t *testing.T) {
 	l.SetClock(func() time.Time { return now })
 	bea := identity.Actor{ID: "u-bea", Name: "bea"}
 
-	code, expires, err := l.Issue(bea, "rev1", "laptop")
+	code, expires, err := l.Issue(bea, "rev1", "laptop", locale.English)
 	if err != nil || len(code) < 40 || !expires.Equal(now.Add(runnerwire.LinkTTLSeconds*time.Second)) {
 		t.Fatalf("issue = %q %v %v", code, expires, err)
 	}
-	other, _, _ := l.Issue(bea, "rev1", "desk")
+	other, _, _ := l.Issue(bea, "rev1", "desk", locale.English)
 	if other == code {
 		t.Fatal("two links share a code")
 	}
@@ -44,16 +45,16 @@ func TestLinksCapAndThrottle(t *testing.T) {
 	bea := identity.Actor{ID: "u-bea"}
 	var last string
 	for i := 0; i < runnerwire.MaxLinksPerUser; i++ {
-		code, _, err := l.Issue(bea, "", "laptop")
+		code, _, err := l.Issue(bea, "", "laptop", locale.English)
 		if err != nil {
 			t.Fatal(err)
 		}
 		last = code
 	}
-	if _, _, err := l.Issue(bea, "", "laptop"); !errors.Is(err, ErrTooManyLinks) {
+	if _, _, err := l.Issue(bea, "", "laptop", locale.English); !errors.Is(err, ErrTooManyLinks) {
 		t.Fatalf("over the cap = %v", err)
 	}
-	if _, _, err := l.Issue(identity.Actor{}, "", "x"); err == nil {
+	if _, _, err := l.Issue(identity.Actor{}, "", "x", locale.English); err == nil {
 		t.Fatal("a link without an owner")
 	}
 	for i := 0; i < linkFailureLimit; i++ {

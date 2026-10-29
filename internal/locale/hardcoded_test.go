@@ -27,7 +27,7 @@ var writtenInOneLanguage = map[string]string{
 	"httpapi/system/auth.go:otpBody":           "sign-in code mail",
 	"httpapi/system/stepup.go:stepUpSubject":   "step-up code mail",
 	"httpapi/system/stepup.go:stepUpBody":      "step-up code mail",
-	"httpapi/runners/link.go:mailRedeem":       "new-device mail",
+	"httpapi/runners/link.go:redeemMail":       "new-device mail",
 	// Written into a new project once, picked by its creator's language.
 	"project/project.go:eisenhowerTitles": "template titles per language",
 }

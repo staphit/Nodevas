@@ -134,15 +134,16 @@ func (a *API) postStepUpRequest(c *gin.Context) {
 	// Like a sign-in passcode's: the row now, the line once the relay has
 	// answered.
 	sent := a.recordAuthLater(c, requested)
-	safego.Go("step-up mail", func() { a.deliverStepUp(challenge, sent) })
+	language := httpx.Language(c.Request)
+	safego.Go("step-up mail", func() { a.deliverStepUp(challenge, language, sent) })
 	c.JSON(http.StatusAccepted, map[string]any{"ok": true, "method": auth.StepUpMethodEmail})
 }
 
 // deliverStepUp is deliverPasscode for a step-up passcode.
-func (a *API) deliverStepUp(challenge auth.Challenge, sent func(error)) {
+func (a *API) deliverStepUp(challenge auth.Challenge, language locale.Language, sent func(error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 	defer cancel()
-	sent(a.mailer.Send(ctx, challenge.Email, stepUpSubject, stepUpBody(challenge)))
+	sent(a.mailer.Send(ctx, challenge.Email, stepUpSubject(language), stepUpBody(challenge, language)))
 }
 
 // postStepUp verifies a step-up passcode and marks the session stepped up.
@@ -218,12 +219,30 @@ func stepUpMethodFor(proved string) string {
 	return proved
 }
 
-const stepUpSubject = "Nodevas 派工驗證碼"
+// stepUpSubject is the step-up passcode mail's subject in language.
+func stepUpSubject(language locale.Language) string {
+	if language == locale.Chinese {
+		return "Nodevas 派工驗證碼"
+	}
+	return "Your Nodevas step-up code"
+}
 
 // stepUpBody is the step-up mail: like the sign-in one, plain text, and it
 // says what the passcode unlocks so an unexpected one reads as the alarm it
 // is.
-func stepUpBody(challenge auth.Challenge) string {
+func stepUpBody(challenge auth.Challenge, language locale.Language) string {
+	if language != locale.Chinese {
+		return strings.Join([]string{
+			"Your Nodevas step-up code:",
+			"",
+			"    " + challenge.Code,
+			"",
+			fmt.Sprintf("It works once, until %s.", challenge.Expires.Format("15:04")),
+			"Once entered, work this browser sends out for a while can be accepted by runners on their own.",
+			"",
+			"If you did not ask for it, someone is using your sign-in: sign in again now (it signs out other devices) and let your administrator know.",
+		}, "\n")
+	}
 	return strings.Join([]string{
 		"你的 Nodevas 派工驗證碼（step-up）：",
 		"",

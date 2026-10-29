@@ -251,7 +251,7 @@ func (a *API) postAccount(c *gin.Context) {
 	}
 
 	address := signInURL(c.Request)
-	status := a.mailInvitation(created, actor, address)
+	status := a.mailInvitation(created, actor, address, httpx.Language(c.Request))
 	a.recordAccountEvent(c, audit.ActionAccountInvite, actor, created.ID, map[string]any{
 		"account": created.Name, "role": string(created.Role),
 		"emailSent": status == inviteSent, "delivery": status,
@@ -282,42 +282,56 @@ func inviteRole(value string) (identity.Role, bool) {
 // relay, unlike a sign-in passcode: an administrator asked, the answer is
 // about an account they just made, and "it did not go out" is exactly what
 // they need to hear. The relay's own words go to the log, not the client.
-func (a *API) mailInvitation(account accountView, inviter identity.Actor, address string) string {
+//
+// The invitee has no browser here yet to say what they read, so it is
+// written in the inviting administrator's language: the one person known to
+// share a workplace with them.
+func (a *API) mailInvitation(account accountView, inviter identity.Actor, address string, language locale.Language) string {
 	if a.mailer == nil {
 		return inviteUnconfigured
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inviteMailTimeout)
 	defer cancel()
-	if err := a.mailer.Send(ctx, account.Email, inviteSubject, inviteText(account, inviter, address)); err != nil {
+	if err := a.mailer.Send(ctx, account.Email, inviteSubject(language), inviteText(account, inviter, address, language)); err != nil {
 		log.Printf("invitation to account %s was not sent: %v", account.ID, err)
 		return inviteFailed
 	}
 	return inviteSent
 }
 
-const inviteSubject = "You're invited to Nodevas / Nodevas 邀請"
+// inviteSubject is the invitation's subject in language.
+func inviteSubject(language locale.Language) string {
+	if language == locale.Chinese {
+		return "Nodevas 邀請"
+	}
+	return "You're invited to Nodevas"
+}
 
 // inviteText is plain text, as every mail this server sends: there is no link
 // to sign in with, only the address of the server, so nothing in it is worth
 // stealing and nothing in it can be made to look like a sign-in button.
-func inviteText(account accountView, inviter identity.Actor, address string) string {
-	role := "member"
+func inviteText(account accountView, inviter identity.Actor, address string, language locale.Language) string {
+	if language != locale.Chinese {
+		role := "member"
+		if account.Role == identity.RoleAdmin {
+			role = "administrator"
+		}
+		return strings.Join([]string{
+			fmt.Sprintf("%s added you to a Nodevas server as %s %q.", inviter.Name, role, account.Name),
+			"",
+			"To sign in:",
+			"  1. Open " + address,
+			"  2. Enter this email address: " + account.Email,
+			"  3. Type the one-time passcode that is then emailed to you.",
+			"",
+			"There is no password. If you did not expect this, ignore this mail and tell " + inviter.Name + ".",
+		}, "\n")
+	}
 	roleZH := "成員"
 	if account.Role == identity.RoleAdmin {
-		role, roleZH = "administrator", "管理員"
+		roleZH = "管理員"
 	}
 	return strings.Join([]string{
-		fmt.Sprintf("%s added you to a Nodevas server as %s %q.", inviter.Name, role, account.Name),
-		"",
-		"To sign in:",
-		"  1. Open " + address,
-		"  2. Enter this email address: " + account.Email,
-		"  3. Type the one-time passcode that is then emailed to you.",
-		"",
-		"There is no password. If you did not expect this, ignore this mail and tell " + inviter.Name + ".",
-		"",
-		"——",
-		"",
 		fmt.Sprintf("%s 已把你加入一台 Nodevas 伺服器，帳號為 %q，角色是%s。", inviter.Name, account.Name, roleZH),
 		"",
 		"登入方式：",
