@@ -32,7 +32,8 @@ export function AskCard({
   }, [isPending]);
 
   const timeoutMs = kind === "permission" ? 5 * 60 * 1000 : 10 * 60 * 1000;
-  const remainingMs = Math.max(0, ask.createdAt + timeoutMs - now);
+  const expiresAt = ask.expiresAt ?? ask.createdAt + timeoutMs;
+  const remainingMs = Math.max(0, expiresAt - now);
   const remainingSec = Math.floor(remainingMs / 1000);
   const minutes = Math.floor(remainingSec / 60);
   const seconds = remainingSec % 60;
