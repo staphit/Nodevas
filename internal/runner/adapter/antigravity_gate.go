@@ -129,8 +129,8 @@ const antigravityAllow = `{"decision":"allow"}`
 // AntigravityGateMain is `nodevas runner agy-gate [--read-only] [--relay]`
 // on one payload. With --relay it asks through the run's door in the
 // runner's proxy, read from RunMCPEnv (the run's `nodevas mcp` arguments,
-// which agy hands its hooks in their environment); without them it is the
-// plain gate.
+// which agy hands its hooks in their environment), naming the run's node from
+// RunNodeEnv; without them it is the plain gate.
 func AntigravityGateMain(args []string, payload []byte) string {
 	readOnly, relay := false, false
 	for _, arg := range args {
@@ -146,7 +146,7 @@ func AntigravityGateMain(args []string, payload []byte) string {
 		var mcpArgs []string
 		if json.Unmarshal([]byte(os.Getenv(RunMCPEnv)), &mcpArgs) == nil {
 			if hub, ok := HubAskerFromMCPArgs(mcpArgs); ok {
-				hub.Agent = "antigravity"
+				hub.Agent, hub.NodeID = "antigravity", strings.TrimSpace(os.Getenv(RunNodeEnv))
 				asker = hub
 			}
 		}

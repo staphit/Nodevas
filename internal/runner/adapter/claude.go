@@ -138,7 +138,7 @@ func claudeMCPTimeoutAtLeast(ms int) bool {
 //     refuses to start "inside" another one);
 //   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
 //     secret, the copilot and advisor keys. jobEnv adds back the few a run
-//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP);
+//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP, NODEVAS_RUN_NODE);
 //   - GitHub tokens: the runner pushes and opens pull requests itself, an
 //     agent never needs them.
 //

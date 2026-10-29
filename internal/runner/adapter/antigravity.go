@@ -56,6 +56,9 @@ const DefaultAntigravityMode = "accept-edits"
 // it is set.
 const RunMCPEnv = "NODEVAS_RUN_MCP"
 
+// RunNodeEnv carries a run's node id to the agent's hooks (the agy gate).
+const RunNodeEnv = "NODEVAS_RUN_NODE"
+
 // antigravityRootDir is the customization root inside the run's temp dir.
 const antigravityRootDir = "agyroot"
 
@@ -109,7 +112,7 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	extra, err := antigravityEnv(env)
+	extra, err := antigravityEnv(job, env)
 	if err != nil {
 		return nil, err
 	}
@@ -137,13 +140,15 @@ func antigravityModeArgs(mode string) ([]string, error) {
 	return nil, fmt.Errorf("antigravity: unknown mode %q (want one of %s)", mode, strings.Join(AntigravityModes, ", "))
 }
 
-// antigravityEnv is what the agy process gets on top of jobEnv.
-func antigravityEnv(env RunEnv) ([]string, error) {
+// antigravityEnv is what the agy process gets on top of jobEnv: the run's MCP
+// arguments and its node, which agy hands its hooks too (the gate's asks name
+// the node).
+func antigravityEnv(job runnerwire.Job, env RunEnv) ([]string, error) {
 	args, err := json.Marshal(env.MCP.Args)
 	if err != nil {
 		return nil, err
 	}
-	return []string{RunMCPEnv + "=" + string(args)}, nil
+	return []string{RunMCPEnv + "=" + string(args), RunNodeEnv + "=" + job.NodeID}, nil
 }
 
 // writeAntigravityRoot writes the run's customization root, which defines the

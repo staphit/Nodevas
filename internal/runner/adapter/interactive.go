@@ -326,7 +326,7 @@ func (Antigravity) InteractiveCommand(job runnerwire.Job, env RunEnv) (*exec.Cmd
 	if inFile {
 		args = append(args, "--add-dir="+env.TempDir)
 	}
-	extra, err := antigravityEnv(env)
+	extra, err := antigravityEnv(job, env)
 	if err != nil {
 		return nil, err
 	}
