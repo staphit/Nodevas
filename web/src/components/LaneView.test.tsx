@@ -189,6 +189,40 @@ describe("LaneView", () => {
     expect(inner).not.toHaveAttribute("data-lod");
   });
 
+  // What a level hides is not mounted either: on a large board far out,
+  // every card on screen still built its status shape, run badges, meta line
+  // and menu button only for the stylesheet to hide them, and each strip of
+  // cards a pan brought in paid for all of it in one frame.
+  it("leaves out of each card what its level of detail hides", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const card = () => container.querySelector<HTMLElement>(".col-card[data-node-id]")!;
+    const parts = () => ({
+      meta: card().querySelector(".col-card-meta") !== null,
+      more: card().nextElementSibling?.classList.contains("col-card-more") === true,
+      head: [...card().querySelector(".col-card-head")!.children].map((child) =>
+        child.getAttribute("class"),
+      ),
+    });
+
+    const full = parts();
+    expect(full.meta).toBe(true);
+    expect(full.more).toBe(true);
+    expect(full.head.length).toBeGreaterThan(1);
+
+    await user.click(screen.getByRole("button", { name: "更多關係圖工具" }));
+    const [node] = screen.getAllByRole("slider");
+
+    fireEvent.change(node, { target: { value: "0.7" } });
+    expect(parts()).toEqual({ meta: false, more: false, head: full.head });
+
+    fireEvent.change(node, { target: { value: "0.5" } });
+    expect(parts()).toEqual({ meta: false, more: false, head: ["col-card-title"] });
+
+    fireEvent.change(node, { target: { value: "1" } });
+    expect(parts()).toEqual(full);
+  });
+
   it("puts the minimap behind its toolbar toggle", async () => {
     const user = userEvent.setup();
     const { container } = render(<LaneView variant="graph" {...paneProps} />);
