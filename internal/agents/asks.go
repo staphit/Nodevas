@@ -95,12 +95,41 @@ type Ask struct {
 	DecidedBy string `json:"decidedBy,omitempty"`
 	Note      string `json:"note,omitempty"`
 	// Answer is the person's text answer to a question or the option they
-	// picked of a choice.
-	Answer    string `json:"answer,omitempty"`
+	// picked of a choice; DecisionApproveRun on a permission prompt allowed
+	// for the rest of its run.
+	Answer string `json:"answer,omitempty"`
+	// Decision is the decision that settled the ask: approve, approve_run,
+	// deny or answer; empty while pending or once expired. Derived from
+	// Status and Answer (MarshalJSON fills it), so it is never stored.
+	Decision  string `json:"decision,omitempty"`
 	CreatedAt int64  `json:"createdAt"`
 	// ExpiresAt is when a pending ask stops waiting (unix ms).
 	ExpiresAt int64 `json:"expiresAt,omitempty"`
 	DecidedAt int64 `json:"decidedAt,omitempty"`
+}
+
+// DecisionOf is the decision that settled a: approve, approve_run, deny or
+// answer, or "" while it is pending or once it expired.
+func DecisionOf(a Ask) string {
+	switch a.Status {
+	case AskApproved:
+		if a.Answer == DecisionApproveRun {
+			return DecisionApproveRun
+		}
+		return DecisionApprove
+	case AskDenied:
+		return DecisionDeny
+	case AskAnswered:
+		return DecisionAnswer
+	}
+	return ""
+}
+
+// MarshalJSON writes the ask with its decision.
+func (a Ask) MarshalJSON() ([]byte, error) {
+	type plain Ask
+	a.Decision = DecisionOf(a)
+	return json.Marshal(plain(a))
 }
 
 // AskInput is the payload for creating a human-in-the-loop prompt.
