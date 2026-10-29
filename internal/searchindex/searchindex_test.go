@@ -764,3 +764,17 @@ func TestFreshnessStampReadsAsATime(t *testing.T) {
 		t.Fatal("a node with no files must have an empty stamp")
 	}
 }
+
+func TestStoredBodyKeepsOnlyPageHeaders(t *testing.T) {
+	body := "main text" + pageBreak + "p1\tPlan\nlong plan text" + pageBreak + "p2\nmore text"
+	got := pageHeaders(body)
+	if strings.Contains(got, "long plan text") || strings.Contains(got, "main text") {
+		t.Fatalf("pageHeaders kept page text: %q", got)
+	}
+	if titles := extractPageTitles(got); len(titles) != 1 || titles[0] != "Plan" {
+		t.Fatalf("titles from headers = %v, want [Plan]", titles)
+	}
+	if pageHeaders("no pages here") != "" {
+		t.Fatal("a body without subpages should keep nothing")
+	}
+}
