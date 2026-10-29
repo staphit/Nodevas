@@ -316,6 +316,26 @@ describe("the run's agent session", () => {
     expect(world.actors[0].sessionId).toBe("s");
   });
 
+  it("gives an actor the raised-hand asking-user pose for permission asks matching runId", () => {
+    const run = makeRun({ id: RUN_ID });
+    const world = office({
+      runs: [run],
+      asks: [
+        makeAsk({
+          id: "perm1",
+          sessionId: "unknown-session",
+          runId: RUN_ID,
+          kind: "permission",
+          tool: "Bash",
+          status: "pending",
+        }),
+      ],
+    });
+    expect(world.actors[0].pose).toBe("asking-user");
+    expect(world.actors[0].area).toBe("meeting");
+    expect(world.actors[0].actions).toContainEqual({ kind: "ask", askId: "perm1", sessionId: "unknown-session" });
+  });
+
   it("lets a bubble pop after the window, and ignores held or rejected mail as speech", () => {
     const run = makeRun({ id: RUN_ID });
     const session = makeSession({ id: "s", runId: RUN_ID, name: "n" });
