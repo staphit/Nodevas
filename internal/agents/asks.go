@@ -27,11 +27,21 @@ const (
 	AskKindApproval = "approval"
 	AskKindQuestion = "question"
 	AskKindChoice   = "choice"
+	// AskKindPermission is an agent CLI's tool-permission prompt, relayed by
+	// the runner: allowed once, allowed for the rest of the run, or denied.
+	AskKindPermission = "permission"
 
 	// The decisions a person answers an ask with (AnswerInput.Decision).
 	DecisionApprove = "approve"
 	DecisionDeny    = "deny"
 	DecisionAnswer  = "answer"
+	// DecisionApproveRun allows a permission prompt and every later prompt
+	// for the same tool in the same run (Ask.Answer records it).
+	DecisionApproveRun = "approve_run"
+
+	// AllowedForRunNote is the note on a permission prompt the hub allowed
+	// without asking, because the person had allowed its tool for the run.
+	AllowedForRunNote = "allowed for this run"
 
 	// A choice offers MinAskOptions..MaxAskOptions options of at most
 	// MaxAskOptionRunes characters each.
@@ -41,7 +51,18 @@ const (
 	// MaxAskAnswerRunes caps a person's text answer.
 	MaxAskAnswerRunes = 4000
 
+	// MaxAskToolRunes caps a permission prompt's tool name, and
+	// MaxAskToolInputBytes its input (longer input is cut).
+	MaxAskToolRunes      = 200
+	MaxAskToolInputBytes = 4096
+	// maxPendingPermissions bounds one session's waiting permission
+	// prompts: one per tool call its CLI runs in parallel.
+	maxPendingPermissions = 8
+
 	MaxAskTimeout = 10 * time.Minute
+	// PermissionAskTimeout is how long a permission prompt waits at most;
+	// one nobody answers expires, and the tool call is denied.
+	PermissionAskTimeout = 5 * time.Minute
 
 	// AskEvent is emitted with the Ask when one is created, answered or
 	// expires.
@@ -135,8 +156,23 @@ func shapeAsk(in AskInput) (askShape, error) {
 	}
 	switch shape.kind {
 	case AskKindApproval, AskKindQuestion, AskKindChoice:
+	case AskKindPermission:
+		shape.tool = strings.TrimSpace(in.Tool)
+		switch {
+		case shape.tool == "":
+			return askShape{}, fmt.Errorf("%w: a permission ask names its tool", ErrInvalid)
+		case utf8.RuneCountInString(shape.tool) > MaxAskToolRunes:
+			return askShape{}, fmt.Errorf("%w: tool exceeds %d characters", ErrInvalid, MaxAskToolRunes)
+		case len(in.Options) > 0:
+			return askShape{}, fmt.Errorf("%w: options belong to kind choice", ErrInvalid)
+		}
+		shape.toolInput = capBytes(strings.TrimSpace(in.ToolInput), MaxAskToolInputBytes)
+		if shape.question == "" {
+			shape.question = fmt.Sprintf("Allow %s?", shape.tool)
+		}
+		return shape, nil
 	default:
-		return askShape{}, fmt.Errorf("%w: kind must be approval, question or choice", ErrInvalid)
+		return askShape{}, fmt.Errorf("%w: kind must be approval, question, choice or permission", ErrInvalid)
 	}
 	if strings.TrimSpace(in.Tool) != "" || strings.TrimSpace(in.ToolInput) != "" {
 		return askShape{}, fmt.Errorf("%w: tool and toolInput belong to permission asks", ErrInvalid)
@@ -171,6 +207,9 @@ func shapeAsk(in AskInput) (askShape, error) {
 // longest wait when timeout is unset or longer.
 func askTimeout(kind string, timeout time.Duration) time.Duration {
 	limit := MaxAskTimeout
+	if kind == AskKindPermission {
+		limit = PermissionAskTimeout
+	}
 	if timeout <= 0 || timeout > limit {
 		return limit
 	}
@@ -222,6 +261,25 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	runID := strings.TrimSpace(in.RunID)
 	if runID == "" {
 		runID = h.sessionRunID(project, sessionID)
+	}
+	if shape.kind == AskKindPermission && runID != "" {
+		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool); decidedBy != "" {
+			return h.allowForRun(ctx, Ask{
+				ID:          newID(),
+				Project:     project,
+				SessionID:   sessionID,
+				SessionName: sessionName,
+				ActorID:     actorID,
+				Agent:       strings.TrimSpace(in.Agent),
+				Kind:        shape.kind,
+				Question:    question,
+				AboutMsgID:  aboutMsgID,
+				NodeID:      strings.TrimSpace(in.NodeID),
+				RunID:       runID,
+				Tool:        shape.tool,
+				ToolInput:   shape.toolInput,
+			}, decidedBy)
+		}
 	}
 	now := h.nowMillis()
 	ask := Ask{
@@ -313,32 +371,136 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 	return false
 }
 
+// insertPendingAsk stores a new pending ask. A session waits on one
+// question (approval, question or choice) at a time. Permission prompts are
+// counted apart: the CLI raises them for its own tool calls, possibly while
+// ask_user waits or several at once for parallel calls, so they never wait
+// behind a question; maxPendingPermissions bounds them instead.
 func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
+	permission := ask.Kind == AskKindPermission
+	limit := 1
+	if permission {
+		limit = maxPendingPermissions
+	}
 	if h.database == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		count := 0
 		for _, existing := range h.memAsks {
-			if existing.Project == ask.Project && existing.SessionID == ask.SessionID && existing.Status == AskPending {
-				return ErrAskBusy
+			if existing.Project == ask.Project && existing.SessionID == ask.SessionID && existing.Status == AskPending &&
+				(existing.Kind == AskKindPermission) == permission {
+				count++
 			}
+		}
+		if count >= limit {
+			return ErrAskBusy
 		}
 		copied := ask
 		h.memAsks[ask.ID] = &copied
 		return nil
 	}
+	kindFilter := `kind != 'permission'`
+	if permission {
+		kindFilter = `kind = 'permission'`
+	}
 	return h.database.Tx(ctx, func(tx *sql.Tx) error {
 		var count int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM agent_asks
-			 WHERE project = ? AND session_id = ? AND status = 'pending'
-		`, ask.Project, ask.SessionID).Scan(&count); err != nil {
+			 WHERE project = ? AND session_id = ? AND status = 'pending' AND `+kindFilter,
+			ask.Project, ask.SessionID).Scan(&count); err != nil {
 			return err
 		}
-		if count > 0 {
+		if count >= limit {
 			return ErrAskBusy
 		}
 		return insertAsk(ctx, tx, ask)
 	})
+}
+
+// runAllowedBy is who allowed tool for the rest of run (an approve_run
+// permission ask of that run and tool), or "" when nobody did.
+func (h *Hub) runAllowedBy(ctx context.Context, project, runID, tool string) string {
+	if h.database == nil {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, a := range h.memAsks {
+			if a.Project == project && a.RunID == runID && a.Tool == tool && a.Kind == AskKindPermission &&
+				a.Status == AskApproved && a.Answer == DecisionApproveRun {
+				return a.DecidedBy
+			}
+		}
+		return ""
+	}
+	var decidedBy string
+	if err := h.database.QueryRowContext(ctx, `
+		SELECT decided_by FROM agent_asks
+		 WHERE project = ? AND run_id = ? AND tool = ? AND kind = 'permission'
+		   AND status = 'approved' AND answer = ?
+		 ORDER BY decided_at LIMIT 1
+	`, project, runID, tool, DecisionApproveRun).Scan(&decidedBy); err != nil {
+		return ""
+	}
+	return decidedBy
+}
+
+// allowForRun records ask as allowed without asking, on decidedBy's earlier
+// "allow for this run", and returns it.
+func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, error) {
+	now := h.nowMillis()
+	ask.Status = AskApproved
+	ask.Answer = DecisionApproveRun
+	ask.Note = AllowedForRunNote
+	ask.DecidedBy = decidedBy
+	ask.CreatedAt = now
+	ask.DecidedAt = now
+	if h.database == nil {
+		h.mu.Lock()
+		copied := ask
+		h.memAsks[ask.ID] = &copied
+		h.mu.Unlock()
+	} else if err := h.database.Tx(ctx, func(tx *sql.Tx) error { return insertAsk(ctx, tx, ask) }); err != nil {
+		return Ask{}, err
+	}
+	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(ask.Question, 200))
+	h.emit(ask.Project, AskEvent, ask)
+	return ask, nil
+}
+
+// releaseRunPrompts allows the permission prompts of run and tool still
+// waiting, now that decidedBy allowed the tool for the run.
+func (h *Hub) releaseRunPrompts(ctx context.Context, project, runID, tool, decidedBy string) {
+	var ids []string
+	if h.database == nil {
+		h.mu.Lock()
+		for _, a := range h.memAsks {
+			if a.Project == project && a.RunID == runID && a.Tool == tool && a.Kind == AskKindPermission && a.Status == AskPending {
+				ids = append(ids, a.ID)
+			}
+		}
+		h.mu.Unlock()
+	} else {
+		rows, err := h.database.QueryContext(ctx, `
+			SELECT id FROM agent_asks
+			 WHERE project = ? AND run_id = ? AND tool = ? AND kind = 'permission' AND status = 'pending'
+		`, project, runID, tool)
+		if err != nil {
+			return
+		}
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		_ = rows.Close()
+	}
+	for _, id := range ids {
+		updated, _, decided, err := h.decideAsk(ctx, project, id, AskApproved, DecisionApproveRun, AllowedForRunNote, decidedBy, false)
+		if err == nil && decided {
+			h.deliverDecision(ctx, updated, false, decidedBy)
+		}
+	}
 }
 
 // insertAsk writes ask as it is.
@@ -435,6 +597,8 @@ func normalizeDecision(decision string) string {
 		return DecisionDeny
 	case DecisionAnswer, AskAnswered:
 		return DecisionAnswer
+	case DecisionApproveRun:
+		return DecisionApproveRun
 	}
 	return ""
 }
@@ -444,6 +608,16 @@ func normalizeDecision(decision string) string {
 func resolveDecision(ask Ask, decision, answer string) (status, answerOut string, err error) {
 	answer = strings.TrimSpace(answer)
 	switch ask.Kind {
+	case AskKindPermission:
+		switch decision {
+		case DecisionApprove:
+			return AskApproved, "", nil
+		case DecisionApproveRun:
+			return AskApproved, DecisionApproveRun, nil
+		case DecisionDeny:
+			return AskDenied, "", nil
+		}
+		return "", "", fmt.Errorf("%w: a permission prompt is decided approve, approve_run or deny", ErrInvalid)
 	case AskKindQuestion, AskKindChoice:
 		switch decision {
 		case DecisionDeny:
@@ -500,7 +674,7 @@ func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerIn
 	askID = strings.TrimSpace(askID)
 	decision := normalizeDecision(in.Decision)
 	if decision == "" {
-		return Ask{}, fmt.Errorf("%w: decision must be approve, deny or answer", ErrInvalid)
+		return Ask{}, fmt.Errorf("%w: decision must be approve, deny, answer or approve_run", ErrInvalid)
 	}
 	note := strings.TrimSpace(in.Note)
 	if viewer.Agent {
@@ -517,18 +691,24 @@ func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerIn
 	if !viewer.Admin && !strings.EqualFold(existing.ActorID, decidedBy) {
 		return Ask{}, ErrNotFound
 	}
-	if existing.Status != AskPending && existing.Status != AskExpired {
+	// A permission prompt that expired was denied to the CLI already; a
+	// late answer to it could change nothing.
+	lateAllowed := existing.Kind != AskKindPermission
+	if existing.Status != AskPending && (existing.Status != AskExpired || !lateAllowed) {
 		return existing, nil
 	}
 	status, answer, err := resolveDecision(existing, decision, in.Answer)
 	if err != nil {
 		return Ask{}, err
 	}
-	updated, wasExpired, decided, err := h.decideAsk(ctx, project, askID, status, answer, note, decidedBy)
+	updated, wasExpired, decided, err := h.decideAsk(ctx, project, askID, status, answer, note, decidedBy, lateAllowed)
 	if err != nil || !decided {
 		return updated, err
 	}
 	h.deliverDecision(ctx, updated, wasExpired, decidedBy)
+	if answer == DecisionApproveRun && updated.RunID != "" {
+		h.releaseRunPrompts(ctx, project, updated.RunID, updated.Tool, decidedBy)
+	}
 	return updated, nil
 }
 
@@ -546,9 +726,10 @@ func (h *Hub) lookupAsk(ctx context.Context, project, askID string) (Ask, error)
 	return *a, nil
 }
 
-// decideAsk moves a pending or expired ask to status. decided is false when
-// somebody else decided it first; the ask is then returned as they left it.
-func (h *Hub) decideAsk(ctx context.Context, project, askID, status, answer, note, decidedBy string) (updated Ask, wasExpired, decided bool, err error) {
+// decideAsk moves a pending ask, or with lateAllowed an expired one, to
+// status. decided is false when it was neither (somebody else decided it
+// first); the ask is then returned as they left it.
+func (h *Hub) decideAsk(ctx context.Context, project, askID, status, answer, note, decidedBy string, lateAllowed bool) (updated Ask, wasExpired, decided bool, err error) {
 	now := h.nowMillis()
 	if h.database == nil {
 		h.mu.Lock()
@@ -557,7 +738,7 @@ func (h *Hub) decideAsk(ctx context.Context, project, askID, status, answer, not
 		if !ok || a.Project != project {
 			return Ask{}, false, false, ErrNotFound
 		}
-		if a.Status != AskPending && a.Status != AskExpired {
+		if a.Status != AskPending && (a.Status != AskExpired || !lateAllowed) {
 			return *a, false, false, nil
 		}
 		wasExpired = a.Status == AskExpired
@@ -575,7 +756,7 @@ func (h *Hub) decideAsk(ctx context.Context, project, askID, status, answer, not
 		`, project, askID).Scan(&previous); err != nil {
 			return err
 		}
-		if previous != AskPending && previous != AskExpired {
+		if previous != AskPending && (previous != AskExpired || !lateAllowed) {
 			return nil
 		}
 		_, err := tx.ExecContext(ctx, `
@@ -595,8 +776,8 @@ func (h *Hub) decideAsk(ctx context.Context, project, askID, status, answer, not
 	if err != nil {
 		return Ask{}, false, false, err
 	}
-	decided = previous == AskPending || previous == AskExpired
-	return updated, previous == AskExpired, decided, nil
+	decided = previous == AskPending || (previous == AskExpired && lateAllowed)
+	return updated, decided && previous == AskExpired, decided, nil
 }
 
 // deliverDecision hands a decided ask to its waiting tool call, or as mail
