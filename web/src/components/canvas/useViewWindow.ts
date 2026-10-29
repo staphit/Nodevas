@@ -4,6 +4,12 @@
  * while the board scrolls, and whenever the zoom or the board's size changes.
  * The state only changes when the snapped window does, so most frames of a pan
  * render nothing at all.
+ *
+ * A pan frame reads nothing but the scroll position, and reads it in the
+ * scroll event, before any frame callback has written to the page: the size
+ * is the measured one handed in (useBoardViewport's ResizeObserver). Read in
+ * the frame, after the minimap had moved its frame, or reading clientWidth,
+ * it was a forced layout of every mounted card whenever the cards changed.
  */
 
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
@@ -34,23 +40,28 @@ export function useViewWindow({
     if (!enabled) return;
     const board = boardRef.current;
     if (!board) return;
-    const read = () => {
-      const next = viewWindowFor(
-        { left: board.scrollLeft, top: board.scrollTop },
-        { width: board.clientWidth, height: board.clientHeight },
-        zoomRef.current,
-      );
+    // Measured once per run of this effect, never per frame. Before the
+    // viewport has been measured the board is asked directly, so the first
+    // render is culled rather than drawing every card.
+    const size =
+      viewport.width > 0 && viewport.height > 0
+        ? { width: viewport.width, height: viewport.height }
+        : { width: board.clientWidth, height: board.clientHeight };
+    let scroll = { left: board.scrollLeft, top: board.scrollTop };
+    const apply = () => {
+      const next = viewWindowFor(scroll, size, zoomRef.current);
       if (sameViewWindow(viewRef.current, next)) return;
       viewRef.current = next;
       setView(next);
     };
-    read();
+    apply();
     let frame = 0;
     const onScroll = () => {
+      scroll = { left: board.scrollLeft, top: board.scrollTop };
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        read();
+        apply();
       });
     };
     board.addEventListener("scroll", onScroll, { passive: true });

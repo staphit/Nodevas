@@ -17,6 +17,9 @@ import {
 import type { Rect } from "../canvas/geometry";
 import { openingScroll } from "./boardGeometry";
 
+/** A pan is recorded once its scroll events stop for this long. */
+const PAN_SETTLE_MS = 150;
+
 export function useBoardViewport({
   boardRef,
   collapsed,
@@ -150,33 +153,77 @@ ${timelineOrientation ?? ""}`;
     timelineOrientation,
   ]);
 
-  // Written as the board scrolls and as the zoom changes, so whatever unmounts
+  // Recorded once a pan settles and as the zoom changes, so whatever unmounts
   // the board finds it already recorded. Only once the opening scroll above has
   // landed for this project: before that the scroll is the browser's 0,0, and
   // recording it would overwrite the view the opening is about to restore.
+  //
+  // A scroll event only notes that the view moved and what it was showing:
+  // reading the scroll position there made every pan frame ask for an
+  // up-to-date layout, a forced layout of every mounted card whenever the
+  // frame before had written anything. The position is read when the
+  // scrolling settles, or before the view is left (a project switch, an
+  // unmount), whichever comes first.
   const scaleRef = useRef({ zoom, userZoom });
   scaleRef.current = { zoom, userZoom };
-  const record = () => {
-    const board = boardRef.current;
-    const key = boardViewKey(activeProject);
-    if (!board || !isGraph || collapsed || graphViewportKeyRef.current !== key) return;
+  const write = (
+    board: HTMLDivElement,
+    key: string,
+    scale: { zoom: number; userZoom: number },
+  ) => {
     rememberBoardView(key, {
-      zoom: scaleRef.current.userZoom,
-      scale: scaleRef.current.zoom,
+      zoom: scale.userZoom,
+      scale: scale.zoom,
       left: board.scrollLeft,
       top: board.scrollTop,
     });
   };
+  const record = () => {
+    const board = boardRef.current;
+    const key = boardViewKey(activeProject);
+    if (!board || !isGraph || collapsed || graphViewportKeyRef.current !== key) return;
+    write(board, key, scaleRef.current);
+  };
   const recordRef = useRef(record);
   recordRef.current = record;
+  /** A pan not yet recorded: the board, the view it belongs to and its scale. */
+  const pendingRef = useRef<{
+    board: HTMLDivElement;
+    key: string;
+    scale: { zoom: number; userZoom: number };
+  } | null>(null);
+  const flushPending = () => {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    // A board already taken out of the page has no scroll left to read.
+    if (pending && pending.board.isConnected) write(pending.board, pending.key, pending.scale);
+  };
+  const flushRef = useRef(flushPending);
+  flushRef.current = flushPending;
   useEffect(() => {
     const board = boardRef.current;
     if (!board || !isGraph || collapsed) return;
-    const onScroll = () => recordRef.current();
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      const key = graphViewportKeyRef.current;
+      if (key === "") return;
+      pendingRef.current = { board, key, scale: scaleRef.current };
+      clearTimeout(settle);
+      settle = setTimeout(() => flushRef.current(), PAN_SETTLE_MS);
+    };
     board.addEventListener("scroll", onScroll, { passive: true });
-    return () => board.removeEventListener("scroll", onScroll);
+    return () => {
+      board.removeEventListener("scroll", onScroll);
+      clearTimeout(settle);
+    };
   }, [boardRef, collapsed, isGraph]);
+  // Before the view changes hands — another project, a collapse, the board
+  // unmounting — the pan it was left at is read while the board still shows
+  // it: a commit runs its layout cleanups before any of its layout effects,
+  // so this comes before the opening above scrolls to the next view.
+  useLayoutEffect(() => () => flushRef.current(), [activeProject, collapsed, isGraph]);
   useEffect(() => {
+    pendingRef.current = null;
     recordRef.current();
   }, [zoom, userZoom, activeProject, boardViewport.width, boardViewport.height]);
 
