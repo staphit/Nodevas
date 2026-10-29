@@ -189,6 +189,24 @@ describe("a board whose graph.yaml cannot be read", () => {
     expect(screen.getByText("Design")).toBeTruthy();
   });
 
+  // The count was the last readable graph's; the panel it opens is not shown
+  // while the file is broken, so the button said "Problems 6" over nothing.
+  it("counts no problems while the file cannot be read", async () => {
+    useApp.setState({
+      graph: VALID,
+      graphRev: "rev-1",
+      issues: [{ severity: "warning", nodeId: "a", msg: "no owner" }],
+    });
+    render(<LaneView variant="graph" {...paneProps} />);
+    const label = (count: number) => translate("board.problemsLabel", "en", { count: String(count) });
+    expect(screen.getByRole("button", { name: label(1) })).toBeTruthy();
+    await load();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    const problems = screen.getByRole("button", { name: label(0) });
+    fireEvent.click(problems);
+    expect(problems.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("leaves any other load failure to the error bar", async () => {
     vi.mocked(api.getGraph).mockRejectedValue(new RequestError(500, "disk on fire"));
     render(<LaneView variant="graph" {...paneProps} />);
