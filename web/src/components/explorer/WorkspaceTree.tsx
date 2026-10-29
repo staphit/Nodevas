@@ -21,7 +21,7 @@ import {
   IconTrash,
 } from "../../icons";
 import { useI18n } from "../../i18n";
-import { reportError } from "../../store";
+import { reportError, useApp } from "../../store";
 import { StatusShape } from "../../statusTheme";
 import { NODE_DRAG_TYPE, NodeFolderTree } from "./NodeFolderTree";
 import type { ProjectDropEdge } from "./useProjectDrag";
@@ -198,6 +198,9 @@ export function WorkspaceTree({
   restoreTrash,
 }: WorkspaceTreeProps) {
   const { t } = useI18n();
+  // graph.yaml does not parse or validate: the node list comes from it, so
+  // the tree says it can't be listed rather than that there are none.
+  const graphUnreadable = useApp((s) => s.graphUnreadable !== null);
   return (
     <div className="workspace-tree" role="tree" aria-label={t("explorer.treeLabel")}>
       {workspaceRoots.map((root) => {
@@ -534,10 +537,17 @@ export function WorkspaceTree({
                       <IconFolder size={13} />
                     )}
                     <span>{t("explorer.nodes")}</span>
-                    <span className="tree-count">{activeNodes.length}</span>
+                    {!graphUnreadable && <span className="tree-count">{activeNodes.length}</span>}
                   </button>
 
-                  {nodesExpanded && (
+                  {nodesExpanded && graphUnreadable && (
+                    <div className="tree-folder-row tree-empty-row" role="status">
+                      <span className="tree-indent" />
+                      <span>{t("explorer.nodesUnavailable")}</span>
+                    </div>
+                  )}
+
+                  {nodesExpanded && !graphUnreadable && (
                     <NodeFolderTree
                       folders={nodeFolders}
                       folderOf={nodeFolderOf}
