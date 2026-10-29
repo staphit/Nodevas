@@ -3,6 +3,7 @@
 // Everything goes through t(); product names (Claude, Codex…) are not
 // translated.
 
+import { askQuestionText } from "../agents/AskCard";
 import { excerpt } from "../agents/agentStore";
 import { formatList } from "../i18n";
 import { runnerDisplayName } from "../runners/runnerName";
@@ -118,7 +119,7 @@ export function actorLabel(t: Translate, actor: Actor, room: string): string {
         }),
   ];
   if (actor.role) parts.push(roleSentence(t, actor.role));
-  if (actor.ask) parts.push(t("game.actor.asks", { question: excerpt(actor.ask.question, 80) }));
+  if (actor.ask) parts.push(t("game.actor.asks", { question: excerpt(askQuestionText(t, actor.ask, who), 80) }));
   if (actor.heldMail.length) parts.push(t("game.actor.held", { count: actor.heldMail.length }));
   if (actor.bubble) parts.push(t("game.actor.says", { text: excerpt(actor.bubble.body, 80) }));
   if (actor.swappedFrom) {

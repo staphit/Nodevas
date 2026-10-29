@@ -2,6 +2,21 @@ import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import type { AgentAsk, AgentAskAnswerRequest } from "../api";
 import { useI18n } from "../i18n";
 
+export function askQuestionText(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  ask: Pick<AgentAsk, "kind" | "question" | "agent" | "sessionName" | "sessionId" | "tool">,
+  fallbackAgent?: string,
+): string {
+  if (ask.kind === "permission") {
+    const agent = ask.sessionName || ask.agent || ask.sessionId || fallbackAgent || "agent";
+    return t("agents.ask.permissionQuestion", {
+      agent,
+      tool: ask.tool || "tool",
+    });
+  }
+  return ask.question;
+}
+
 export function AskCard({
   ask,
   submitting,
@@ -117,7 +132,7 @@ export function AskCard({
         )}
       </div>
 
-      <p className="copilot-permission-summary">{ask.question}</p>
+      <p className="copilot-permission-summary">{askQuestionText(t, ask)}</p>
 
       {kind === "permission" && ask.toolInput && (
         <details className="copilot-tool-detail">
