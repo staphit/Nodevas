@@ -459,7 +459,7 @@ export function WorkspaceTree({
                     event.preventDefault();
                     void reorderProject(project.name, neighbour.name, up);
                   }}
-                  disabled={Boolean(switchingProject) && !project.isFolder}
+                  disabled={switching && !project.isFolder}
                   aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                   title={
                     project.isFolder
@@ -507,7 +507,7 @@ export function WorkspaceTree({
                       onClick={() =>
                         void openProject(project.name).catch(reportError)
                       }
-                      disabled={Boolean(switchingProject)}
+                      disabled={switching}
                       title={t("explorer.openProjectToViewNodes")}
                     >
                       <span className="tree-indent" />

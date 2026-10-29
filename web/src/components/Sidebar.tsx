@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   IconCompass,
   IconFolder,
@@ -304,15 +304,36 @@ export function Sidebar() {
     updateUIPreference("explorerWorkspaceExpanded", !workspaceExpanded);
   };
 
+  // A switch takes a few hundred ms. A click that lands meanwhile is queued,
+  // not dropped: the last click wins, and a project overtaken before its turn
+  // is never opened. Refs, because the clicks arrive between renders.
+  const projectSwitchUnderWay = useRef<string | null>(null);
+  const queuedProjectSwitch = useRef<string | null>(null);
   const openProject = async (name: string) => {
-    if (switchingProject) return;
     const next = new Set(expandedProjects);
     next.add(name);
     persistExpandedProjects(next);
     setSwitchingProject(name);
+    if (projectSwitchUnderWay.current !== null) {
+      queuedProjectSwitch.current = name === projectSwitchUnderWay.current ? null : name;
+      return;
+    }
+    let target: string | null = name;
     try {
-      await switchProject(name);
+      while (target !== null) {
+        projectSwitchUnderWay.current = target;
+        queuedProjectSwitch.current = null;
+        try {
+          await switchProject(target);
+        } catch (error) {
+          // A switch the reader has already moved on from has nothing to say.
+          if (queuedProjectSwitch.current === null) throw error;
+        }
+        target = queuedProjectSwitch.current;
+      }
     } finally {
+      projectSwitchUnderWay.current = null;
+      queuedProjectSwitch.current = null;
       setSwitchingProject(null);
     }
   };
