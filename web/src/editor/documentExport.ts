@@ -6,12 +6,18 @@
  * one renderer on the machine that already has the document's fonts.
  */
 
-import { api, type ExportRequest } from "../api";
+import { api, type ExportedFile, type ExportRequest } from "../api";
 import { translate } from "../i18n";
 
 /** Downloads one export; resolves with the file name the server chose. */
 export async function downloadExport(request: ExportRequest): Promise<string> {
   const file = await api.exportDocument(request);
+  saveExportedFile(file);
+  return file.name;
+}
+
+/** Hands a file the hub sent to the browser's downloads. */
+export function saveExportedFile(file: ExportedFile): void {
   const url = URL.createObjectURL(file.blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -21,7 +27,6 @@ export async function downloadExport(request: ExportRequest): Promise<string> {
   anchor.remove();
   // Revoking straight away cancels the download in some browsers.
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return file.name;
 }
 
 /**

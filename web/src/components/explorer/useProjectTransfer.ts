@@ -8,7 +8,7 @@
 
 import { createElement, useRef, useState } from "react";
 import { api, type ExportFormat } from "../../api";
-import { downloadExport, printExport } from "../../editor/documentExport";
+import { downloadExport, printExport, saveExportedFile } from "../../editor/documentExport";
 import { IconExport } from "../../icons";
 import { confirmAction } from "../ConfirmDialog";
 import { useI18n } from "../../i18n";
@@ -94,7 +94,11 @@ export function useProjectTransfer({
 
   // A folder, or a project with sub-projects, comes back as a bundle holding
   // the whole subtree; the server decides, the caller only names the root.
+  // The archive is fetched, not followed as a link, so a refusal (a graph.yaml
+  // that does not read) replaces the "Exporting …" notice instead of leaving
+  // it up for good.
   const exportProjectArchive = async (target?: { name: string; label: string }) => {
+    if (projectTransferBusy) return;
     const label = target?.label || projectLabel;
     const confirmed = await confirmExport(
       target?.name === "."
@@ -102,13 +106,19 @@ export function useProjectTransfer({
         : t("explorer.confirmExport.archive", { target: label }),
     );
     if (!confirmed) return;
-    const anchor = document.createElement("a");
-    anchor.href = api.projectExportURL(target?.name);
-    anchor.download = "";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    setProjectTransferBusy(true);
     setProjectTransferNotice(t("explorer.exportingArchive", { target: label }));
+    try {
+      const file = await api.exportProjectArchive(target?.name);
+      saveExportedFile(file);
+      setProjectTransferNotice(t("explorer.exportedFile", { name: file.name }));
+    } catch (error) {
+      setProjectTransferNotice(
+        t("explorer.archiveExportFailed", { error: (error as Error).message }),
+      );
+    } finally {
+      setProjectTransferBusy(false);
+    }
   };
 
   const closeTransferMenus = () => {

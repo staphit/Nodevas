@@ -50,6 +50,43 @@ export function fileNameFromDisposition(header: string | null): string {
   return plain ? plain[1].trim() : "";
 }
 
+/** The headers a file export sends that req() would have sent: the reader's
+ * language, the CSRF token and the project this tab is looking at. */
+function exportHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra, "Accept-Language": requestLanguage() };
+  const token = csrfToken();
+  if (token) headers["X-CSRF-Token"] = token;
+  const project = getProjectOverride();
+  if (project) headers["X-Nodevas-Project"] = project;
+  return headers;
+}
+
+/** A file reply, or the hub's refusal as an Error carrying its own words, with
+ * the 401 handling req() would have applied. */
+async function exportedFile(response: Response, fallbackName: string): Promise<ExportedFile> {
+  if (response.status === 401) {
+    notifyUnauthorized();
+    throw new UnauthorizedError();
+  }
+  if (!response.ok) {
+    let message = `${response.status}`;
+    try {
+      const body = await response.json();
+      if (body.error) message = body.error;
+    } catch {
+      /* keep the status */
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const name = fileNameFromDisposition(response.headers.get("Content-Disposition")) || fallbackName;
+  return { blob, name };
+}
+
+function projectExportPath(project?: string): string {
+  return `/api/projects/export?${exportQuery(project ? { project } : {})}`;
+}
+
 export const workspaceApi = {
   getTrash: () =>
     req<{
@@ -194,48 +231,29 @@ export const workspaceApi = {
       body,
     });
   },
-  /** A plain link (the archive streams to disk), so it cannot carry an
-   * Accept-Language header: the app's language rides in the query. */
-  projectExportURL: (project?: string) =>
-    `/api/projects/export?${exportQuery(project ? { project } : {})}`,
+  /** Where a project archive is downloaded from. The app's language rides in
+   * the query as well as the header, so the link alone is enough. */
+  projectExportURL: (project?: string) => projectExportPath(project),
   /** Not routed through req(): the reply is a file, not JSON. The CSRF header
    * and the 401 handling req() would have applied are repeated here from the
    * same helpers, so an export behaves like every other call. */
   exportDocument: async (request: ExportRequest): Promise<ExportedFile> => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "Accept-Language": requestLanguage(),
-    };
-    const token = csrfToken();
-    if (token) headers["X-CSRF-Token"] = token;
-    const project = getProjectOverride();
-    if (project) headers["X-Nodevas-Project"] = project;
     // The language is named in the query as well as the header, like the
-    // archive link; the body stays to the fields the hub decodes strictly.
+    // archive; the body stays to the fields the hub decodes strictly.
     const response = await fetch(`/api/export?${exportQuery({})}`, {
       method: "POST",
-      headers,
+      headers: exportHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(request),
     });
-    if (response.status === 401) {
-      notifyUnauthorized();
-      throw new UnauthorizedError();
-    }
-    if (!response.ok) {
-      let message = `${response.status}`;
-      try {
-        const body = await response.json();
-        if (body.error) message = body.error;
-      } catch {
-        /* keep the status */
-      }
-      throw new Error(message);
-    }
-    const blob = await response.blob();
-    const name =
-      fileNameFromDisposition(response.headers.get("Content-Disposition")) ||
-      `document.${request.format}`;
-    return { blob, name };
+    return exportedFile(response, `document.${request.format}`);
+  },
+  /** A project, folder or (project ".") whole-workspace archive. Fetched
+   * rather than followed as a link: the hub builds the archive before it
+   * answers, and a refusal (a graph.yaml that does not read, too many exports
+   * at once) has to reach the reader instead of vanishing into a download. */
+  exportProjectArchive: async (project?: string): Promise<ExportedFile> => {
+    const response = await fetch(projectExportPath(project), { headers: exportHeaders() });
+    return exportedFile(response, `${project && project !== "." ? project.split("/").at(-1) : "workspace"}.veproj`);
   },
   search: (query: string) =>
     req<{
