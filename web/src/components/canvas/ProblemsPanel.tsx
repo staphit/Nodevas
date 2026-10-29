@@ -109,7 +109,9 @@ export function ProblemsPanel({
                   <span>
                     <span className="problems-issue-title">
                       <b>{issue.nodeId ? nodeTitle(issue.nodeId) : t("board.problemsWholeGraph")}</b>
-                      {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
+                      {/* No break before the dot: a wrapped name would put it at
+                          the start of the field's line. */}
+                      {issue.field ? ` · ${issueFieldLabel(t, issue.field)}` : ""}
                     </span>
                     <small>{issue.msg}</small>
                   </span>
