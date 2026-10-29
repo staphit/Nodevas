@@ -79,7 +79,7 @@ export function ProjectSection({ row, toggleRow, go, leave }: SectionProps) {
         // that cannot be read is refused; the reason, with its line, instead.
         <InlineNotice kind="error">
           {t("settingsPage.graphUnreadable")}{" "}
-          {unreadable.sentence ? `graph.yaml: ${unreadable.sentence}` : unreadable.detail}
+          {unreadable.sentence ?? unreadable.detail}
         </InlineNotice>
       ) : (
         <ProjectGraphRows row={row} toggleRow={toggleRow} go={go} leave={leave} />
