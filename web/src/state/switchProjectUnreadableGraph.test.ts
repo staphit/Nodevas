@@ -184,3 +184,28 @@ describe("the hub's own worded graph.yaml refusal (422)", () => {
     expect(error.message).toBe("無法開啟「Disk project」，graph.yaml 有問題：節點「c」的優先度「zzz」無效。修正檔案後再切換一次。");
   });
 });
+
+// What the zh-TW hub actually sends: project.go's "載入專案「%s」：%w" around
+// graph_unreadable.go's own sentence, both with the full-width colon.
+const HUB_PARSE_ZH_FULLWIDTH =
+  "載入專案「Disk project」：graph.yaml：第 3 行有錯誤。修正檔案後重新載入。（yaml: line 3: did not find expected '-' indicator）";
+const HUB_INVALID_ZH_FULLWIDTH =
+  '載入專案「Disk project」：graph.yaml：檔案有錯誤。修正檔案後重新載入。（node "c" has invalid priority "zzz"）';
+
+describe("the zh-TW hub's refusal, worded with full-width colons", () => {
+  it("reads a parse error as the line to fix, in the app's own words", async () => {
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_PARSE_ZH_FULLWIDTH));
+    const error = await switchFailure();
+    expect(error.message).toBe(
+      translate("workspace.error.graphUnreadableLine", "zh-TW", { name: "Disk project", line: "3" }),
+    );
+    expect(error.message).not.toMatch(/載入專案|indicator/);
+    expect(useApp.getState().lastOperation?.message).toBe(translate("workspace.error.switchFailed", "zh-TW"));
+  });
+
+  it("gives a validation reason, localized, with the advice once", async () => {
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_INVALID_ZH_FULLWIDTH));
+    const error = await switchFailure();
+    expect(error.message).toBe("無法開啟「Disk project」，graph.yaml 有問題：節點「c」的優先度「zzz」無效。修正檔案後再切換一次。");
+  });
+});
