@@ -37,7 +37,7 @@ describe("AskCard by kind", () => {
     await user.click(screen.getByRole("button", { name: /Approve/ }));
     expect(onAnswer).toHaveBeenCalledWith({ decision: "approve", note: "take backup first" });
 
-    const card = screen.getByRole("group");
+    const card = screen.getByRole("group", { name: /asks for approval/ });
     card.focus();
     fireEvent.keyDown(card, { key: "2" });
     expect(onAnswer).toHaveBeenCalledWith({ decision: "deny", note: "take backup first" });
@@ -132,7 +132,7 @@ describe("AskCard by kind", () => {
     await user.click(screen.getByRole("button", { name: /Deny/ }));
     expect(onAnswer).toHaveBeenCalledWith({ decision: "deny" });
 
-    const card = screen.getByRole("group");
+    const card = screen.getByRole("group", { name: /tool permission/ });
     card.focus();
     fireEvent.keyDown(card, { key: "1" });
     fireEvent.keyDown(card, { key: "2" });

@@ -89,7 +89,7 @@ describe("AgentPanel", () => {
     fireEvent.change(noteInput, { target: { value: "After backup" } });
     fireEvent.click(screen.getByRole("button", { name: /Approve/i }));
 
-    expect(answerAsk).toHaveBeenCalledWith("ask-1", "approved", "After backup");
+    expect(answerAsk).toHaveBeenCalledWith("ask-1", { decision: "approve", note: "After backup" });
   });
 
   it("marks the roster as the connect intro while nobody is connected", () => {

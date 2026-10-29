@@ -168,6 +168,28 @@
   font: inherit;
   font-size: calc(12px * var(--font-scale, 1));
 }
+.agent-ask-textarea {
+  resize: vertical;
+  min-height: 52px;
+}
+.agent-ask-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.agent-ask-result {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-ask-result-answer,
+.agent-ask-result-note {
+  margin: 2px 0 0;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
 
 .agent-roster-section {
   max-height: 200px;
