@@ -165,7 +165,17 @@ export function actionLabel(t: Translate, target: ClickTarget, titleOf: TitleOf,
     case "session":
       return t("game.action.session");
     case "ask":
-      return t("game.action.ask");
+      switch (target.askKind) {
+        case "approval":
+          return t("game.action.askApproval");
+        case "choice":
+          return t("game.action.askChoice");
+        case "permission":
+          return t("game.action.askPermission");
+        case "question":
+        default:
+          return t("game.action.ask");
+      }
     case "held-message":
       return t("game.action.held");
     case "pr":
