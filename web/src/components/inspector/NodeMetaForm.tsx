@@ -45,6 +45,8 @@ export function NodeTitleField({
   const { t } = useI18n();
   const title = useApp((state) => nodeById(state.graph, id)?.title ?? "");
   const updateNodeMetadata = useApp((state) => state.updateNodeMetadata);
+  // graph.yaml cannot be read: the hub refuses the write, so the field reads.
+  const readOnly = useApp((state) => state.graphUnreadable !== null);
   return (
     <input
       key={`${id}:${title}`}
@@ -52,10 +54,19 @@ export function NodeTitleField({
       className={className}
       defaultValue={title}
       placeholder={id}
+      readOnly={readOnly}
       aria-label={t("node.meta.title")}
       onBlur={(event) => {
-        if (event.target.value === title) return;
-        reportCommand(updateNodeMetadata(id, { title: event.target.value }));
+        const field = event.currentTarget;
+        const attempted = field.value;
+        if (readOnly || attempted === title) return;
+        void updateNodeMetadata(id, { title: attempted }).then((result) => {
+          if (result.ok) return;
+          reportError(new Error(result.message));
+          // Refused: the field shows the title the file still holds, not
+          // text that was never saved — unless it has been edited again since.
+          if (field.value === attempted) field.value = title;
+        });
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter") event.currentTarget.blur();

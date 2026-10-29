@@ -43,6 +43,9 @@ export function NodeDependencies({ id }: { id: string }) {
   const openTab = useApp((state) => state.openTab);
   const openNodeLink = useApp((state) => state.openNodeLink);
   const activeProject = useApp((state) => state.activeProject);
+  // graph.yaml cannot be read: the hub refuses every edit here, so the tab
+  // only reads. Opening a related node still works.
+  const readOnly = useApp((state) => state.graphUnreadable !== null);
   const logicGates = graph?.ui?.logicGates ?? NO_GATES;
   const [notice, setNotice] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   // Added but not yet answered: the server materialises a dependency before
@@ -215,6 +218,7 @@ export function NodeDependencies({ id }: { id: string }) {
                     className="node-dependency-remove"
                     aria-label={t("drawer.deps.remove", { title: nodeTitle(edge.from) })}
                     title={t("drawer.deps.remove", { title: nodeTitle(edge.from) })}
+                    disabled={readOnly}
                     onClick={() => removeDependency(edge.from)}
                   >
                     <IconClose size={12} />
@@ -235,7 +239,7 @@ export function NodeDependencies({ id }: { id: string }) {
             <select
               value={conditionSource}
               aria-label={t("drawer.deps.pick")}
-              disabled={choices.length === 0}
+              disabled={readOnly || choices.length === 0}
               onChange={(event) => setConditionSource(event.target.value)}
             >
               {choices.length === 0 ? (
@@ -248,7 +252,7 @@ export function NodeDependencies({ id }: { id: string }) {
                 ))
               )}
             </select>
-            <button type="submit" disabled={!conditionSource}>
+            <button type="submit" disabled={readOnly || !conditionSource}>
               <IconPlus size={13} />
               {t("drawer.deps.add")}
             </button>
@@ -279,6 +283,7 @@ export function NodeDependencies({ id }: { id: string }) {
       <ReferencesSection
         graph={graph}
         id={id}
+        readOnly={readOnly}
         onOpen={open}
         onError={(text) => setNotice({ text, kind: "error" })}
       />
@@ -299,6 +304,7 @@ export function NodeDependencies({ id }: { id: string }) {
               <span className="lane-context-label">{t("nodeMenu.existingGate")}</span>
               <select
                 value={controllingLogicGate?.id ?? ""}
+                disabled={readOnly}
                 onChange={(event) => wiring.assignExistingLogicGateToNode(id, event.target.value)}
               >
                 <option value="">{t("nodeMenu.noStandaloneGate")}</option>
@@ -324,6 +330,7 @@ export function NodeDependencies({ id }: { id: string }) {
                   <span className="lane-context-label">{t("nodeMenu.conditionMode")}</span>
                   <select
                     value={conditionOperator}
+                    disabled={readOnly}
                     onChange={(event) => conditions.changeGateOperator(id, event.target.value)}
                   >
                     <option value="and">{t("nodeMenu.and")}</option>
@@ -344,6 +351,7 @@ export function NodeDependencies({ id }: { id: string }) {
                       <select
                         value={edgeRelation(edge)}
                         aria-label={t("nodeMenu.relationAria", { title: nodeTitle(edge.from) })}
+                        disabled={readOnly}
                         onChange={(event) =>
                           conditions.setDependencyRelation(
                             id,
@@ -366,6 +374,7 @@ export function NodeDependencies({ id }: { id: string }) {
                 <span className="lane-context-label">{t("nodeMenu.newRelation")}</span>
                 <select
                   value={conditionRelation}
+                  disabled={readOnly}
                   onChange={(event) => setConditionRelation(event.target.value as EdgeRelation)}
                 >
                   <option value="">{t("nodeMenu.required")}</option>
@@ -395,11 +404,13 @@ const byTitle = (a: GraphNode, b: GraphNode) =>
 function ReferencesSection({
   graph,
   id,
+  readOnly,
   onOpen,
   onError,
 }: {
   graph: Graph | null;
   id: string;
+  readOnly: boolean;
   onOpen: (nodeId: string) => void;
   onError: (message: string) => void;
 }) {
@@ -465,6 +476,7 @@ function ReferencesSection({
                   className="node-dependency-remove"
                   aria-label={t("drawer.refs.remove", { title })}
                   title={t("drawer.refs.remove", { title })}
+                  disabled={readOnly}
                   onClick={() => run({ type: "node.removeRef", ref })}
                 >
                   <IconClose size={12} />
@@ -484,7 +496,7 @@ function ReferencesSection({
         <select
           value={pick}
           aria-label={t("drawer.refs.pick")}
-          disabled={!firstChoice}
+          disabled={readOnly || !firstChoice}
           onChange={(event) => setPick(event.target.value)}
         >
           {!firstChoice && <option value="">{t("nodeMenu.noSources")}</option>}
@@ -507,7 +519,7 @@ function ReferencesSection({
             </optgroup>
           )}
         </select>
-        <button type="submit" disabled={!pick}>
+        <button type="submit" disabled={readOnly || !pick}>
           <IconPlus size={13} />
           {t("drawer.refs.add")}
         </button>

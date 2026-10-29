@@ -1015,10 +1015,13 @@ export function TabBody({
               </button>
             </>
           )}
-          <span className="tab-footer-hint">
-            {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
-            <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
-          </span>
+          {/* Nothing saves while graph.yaml cannot be read; the banner says so. */}
+          {!graphUnreadable && (
+            <span className="tab-footer-hint">
+              {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
+              <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
+            </span>
+          )}
         </div>
       </div>
 

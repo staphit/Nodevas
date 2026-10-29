@@ -20,6 +20,9 @@ export function NodeTypeMenu({ id }: { id: string }) {
   const nodeTypes = useNodeTypes();
   const current = useNodeType({ nodeId: id });
   const updateNodeMetadata = useApp((s) => s.updateNodeMetadata);
+  // graph.yaml cannot be read: the hub refuses a type change, so the menu
+  // stays shut.
+  const readOnly = useApp((s) => s.graphUnreadable !== null);
   const unknownKind = useApp((s) => {
     const kind = s.graph?.nodes?.find((node) => node.id === id)?.kind;
     const normalized = normalizeKind(kind);
@@ -33,6 +36,7 @@ export function NodeTypeMenu({ id }: { id: string }) {
       label={t("drawer.nodeType", { type: label })}
       trigger={<NodeTypeChip type={current} />}
       triggerClassName="drawer-head-button drawer-type-button"
+      disabled={readOnly}
       triggerTitle={
         unknownHint
           ? `${t("drawer.nodeType", { type: label })}\n${unknownHint}`
