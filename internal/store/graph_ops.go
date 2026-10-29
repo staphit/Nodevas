@@ -281,8 +281,10 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		}
 		kept := graph.Edges[:0:0]
 		removedRequired := false
+		wired := false
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.From == op.From && edge.To == op.To {
+				wired = true
 				removedRequired = removedRequired || edge.Blocks()
 				continue
 			}
@@ -299,6 +301,14 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if !hasIncoming {
 			delete(graph.UI.Gates, op.To)
 			delete(graph.UI.WireVertices, "gate:"+op.To)
+		}
+		// No wire at all: a hand-written graph.yaml named the dependency only
+		// in `requires`, and the board drew its wire from the expression.
+		// Removing that wire removes the condition it stood for. A condition
+		// that does not parse names nothing the board could have drawn, so it
+		// is left alone as before.
+		if !wired && nodeRequiresRef(target, op.From) {
+			removedRequired = true
 		}
 		if removedRequired {
 			changed, err := pruneNodeRequirement(target, op.From)
@@ -516,6 +526,13 @@ func appendNodeRequirement(node *engine.Node, sourceID string) (bool, error) {
 		node.Requires = (&dsl.Binary{Op: "and", L: expr, R: ref}).String()
 	}
 	return true, nil
+}
+
+// nodeRequiresRef reports whether the node's requires expression parses and
+// names sourceID.
+func nodeRequiresRef(node *engine.Node, sourceID string) bool {
+	expr, parseErr := dsl.Parse(node.Requires)
+	return parseErr == nil && expr != nil && containsNodeRef(expr, sourceID)
 }
 
 func pruneNodeRequirement(node *engine.Node, sourceID string) (bool, error) {

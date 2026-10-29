@@ -63,6 +63,7 @@ import { useBoardShortcuts } from "./canvas/useBoardShortcuts";
 import { useNodeCreation } from "./canvas/useNodeCreation";
 import { useRevealOpenedCard } from "./canvas/useRevealOpenedCard";
 import { useNodeConditions } from "./canvas/useNodeConditions";
+import { withRequiresProjection } from "./canvas/requiresProjection";
 import { useCanvasDecorations } from "./canvas/useCanvasDecorations";
 import { useGraphViews } from "./canvas/useGraphViews";
 import { useBoardColumns } from "./canvas/useBoardColumns";
@@ -189,7 +190,10 @@ export function LaneView({
 }: PaneProps & { variant: "graph" | "timeline" }) {
   const { t, language } = useI18n();
   const isGraph = variant === "graph";
-  const graph = useApp((s) => s.graph);
+  // Read through the requires projection: a hand-written graph.yaml can name
+  // a prerequisite in `requires` without drawing its wire, and the board must
+  // still show it, count it and offer to remove it.
+  const graph = withRequiresProjection(useApp((s) => s.graph));
   const statuses = useApp((s) => s.statuses);
   const runState = useApp((s) => s.runState);
   const issues = useApp((s) => s.issues);
