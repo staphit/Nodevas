@@ -10,7 +10,14 @@ export interface ConfirmOptions {
   tone?: "default" | "danger";
   /** Replaces the warning glyph, for confirmations that are not warnings. */
   icon?: ReactNode;
+  /** A notice about something already done: one button, nothing to cancel. */
+  notice?: boolean;
 }
+
+export type NoticeOptions = Pick<ConfirmOptions, "title" | "description" | "icon"> & {
+  /** The one button; "OK" when left out. */
+  closeLabel?: string;
+};
 
 type ConfirmRequest = ConfirmOptions & {
   resolve: (value: boolean) => void;
@@ -21,6 +28,15 @@ let showConfirm: ((request: ConfirmRequest) => void) | null = null;
 export function confirmAction(options: ConfirmOptions): Promise<boolean> {
   if (!showConfirm) return Promise.resolve(false);
   return new Promise((resolve) => showConfirm?.({ ...options, resolve }));
+}
+
+/**
+ * Tells the user something that has already happened. There is no choice to
+ * make, so there is one button (and Escape, and the corner close), never a
+ * Cancel beside a Confirm.
+ */
+export async function showNotice({ closeLabel, ...options }: NoticeOptions): Promise<void> {
+  await confirmAction({ ...options, notice: true, confirmLabel: closeLabel });
 }
 
 export function ConfirmDialogHost() {
@@ -111,16 +127,18 @@ export function ConfirmDialogHost() {
           </button>
         </header>
         <footer>
-          <button type="button" onClick={() => close(false)}>
-            {request.cancelLabel ?? t("common.cancel")}
-          </button>
+          {!request.notice && (
+            <button type="button" onClick={() => close(false)}>
+              {request.cancelLabel ?? t("common.cancel")}
+            </button>
+          )}
           <button
             ref={confirmRef}
             type="button"
             className={request.tone === "danger" ? "danger" : "primary"}
             onClick={() => close(true)}
           >
-            {request.confirmLabel ?? t("common.confirm")}
+            {request.confirmLabel ?? t(request.notice ? "common.ok" : "common.confirm")}
           </button>
         </footer>
       </section>

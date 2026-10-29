@@ -18,7 +18,7 @@ import { translate } from "../../i18n";
 import { useApp } from "../../store";
 import type { NodeClipboard } from "../../state/types";
 import type { Graph } from "../../types";
-import { confirmAction } from "../ConfirmDialog";
+import { confirmAction, showNotice } from "../ConfirmDialog";
 import { pickProject } from "../ProjectPickerDialog";
 
 const modeLabel = (mode: NodeTransferMode) =>
@@ -44,11 +44,9 @@ function describeSelection(labels: string[]): string {
 /** Shows what a completed transfer could not bring along. */
 async function reportWarnings(result: NodeTransferResult): Promise<void> {
   if (!result.warnings?.length) return;
-  await confirmAction({
+  await showNotice({
     title: translate("batch.transferWarningsTitle"),
     description: result.warnings.join("\n"),
-    confirmLabel: translate("common.confirm"),
-    cancelLabel: translate("common.close"),
   });
 }
 
