@@ -12,6 +12,7 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -107,6 +108,7 @@ func (si *searchIndex) search(project ProjectInfo, normalized string) ([]SearchR
 		out = append(out, SearchResult{
 			Project: project.Name,
 			NodeID:  match.NodeID,
+			PageID:  match.PageID,
 			Title:   match.Title,
 			Snippet: searchSnippet(match.Text, normalized),
 			Kind:    "node",
@@ -129,6 +131,7 @@ func (si *searchIndex) rank(project ProjectInfo, query string, limit int) ([]Sea
 		out = append(out, SearchResult{
 			Project: project.Name,
 			NodeID:  match.NodeID,
+			PageID:  match.PageID,
 			Title:   match.Title,
 			Snippet: searchindex.Excerpt(match.Text, tokens, searchindex.ExcerptWidth),
 			Kind:    "node",
@@ -224,6 +227,25 @@ func (pm *ProjectManager) AwaitSearchIndex(projectPath string, within time.Durat
 	return !pm.getSearchIndex().indexes().Warming(projectPath, within)
 }
 
+type searchManifestPage struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func readSearchManifestPages(root, pageDir string) []searchManifestPage {
+	data, err := store.ReadProjectFileLimit(root, filepath.Join(pageDir, "pages.json"), searchPageContentLimit)
+	if err != nil {
+		return nil
+	}
+	var manifest struct {
+		Pages []searchManifestPage `json:"pages"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return nil
+	}
+	return manifest.Pages
+}
+
 // searchWhileIndexing answers a search of a project whose first index build
 // is still running, which takes seconds for a large one: it matches what the
 // cached graph holds (titles, kinds, tags, assignees) and reads no file. Body
@@ -239,6 +261,7 @@ func (pm *ProjectManager) searchWhileIndexing(project ProjectInfo, normalized st
 	for _, user := range graph.Users {
 		userNames[user.ID] = user.Name
 	}
+	pageDirs := store.ListNodePayloadDirs(project.Path, ".pages")
 	results := make([]SearchResult, 0)
 	for _, node := range graph.Nodes {
 		if node == nil {
@@ -253,6 +276,26 @@ func (pm *ProjectManager) searchWhileIndexing(project ProjectInfo, normalized st
 				Snippet: searchSnippet(metadata, normalized),
 				Kind:    "node",
 			})
+			continue
+		}
+		pageDir, ok := pageDirs[node.ID]
+		if !ok {
+			continue
+		}
+		for _, page := range readSearchManifestPages(project.Path, pageDir) {
+			title := strings.TrimSpace(page.Title)
+			if page.ID != "" && title != "" && strings.Contains(strings.ToLower(title), normalized) {
+				haystack := metadata + "\n" + title
+				results = append(results, SearchResult{
+					Project: project.Name,
+					NodeID:  node.ID,
+					PageID:  page.ID,
+					Title:   node.Title,
+					Snippet: searchSnippet(haystack, normalized),
+					Kind:    "node",
+				})
+				break
+			}
 		}
 	}
 	return results
@@ -360,17 +403,58 @@ func SearchProjectNodesDirect(project ProjectInfo, normalized string) []SearchRe
 		}
 		metadata := nodeSearchMetadata(node, userNames)
 		content := readSearchTextDirect(project.Path, store.NodeDocPath(project.Path, node.ID))
+		mainHaystack := metadata + "\n" + content
+		if strings.Contains(strings.ToLower(mainHaystack), normalized) {
+			results = append(results, SearchResult{
+				Project: project.Name,
+				NodeID:  node.ID,
+				Title:   node.Title,
+				Snippet: searchSnippet(mainHaystack, normalized),
+				Kind:    "node",
+			})
+			continue
+		}
 		var pageContent strings.Builder
+		matchedPageID := ""
+		matchedPageHaystack := ""
 		pageDir := store.NodePagesPath(project.Path, node.ID)
 		if entries, err := store.ReadProjectDir(project.Path, pageDir); err == nil {
+			manifestPages := readSearchManifestPages(project.Path, pageDir)
+			orderByID := make(map[string]int, len(manifestPages))
+			titlesByID := make(map[string]string, len(manifestPages))
+			for idx, p := range manifestPages {
+				if p.ID != "" {
+					orderByID[p.ID] = idx
+					titlesByID[p.ID] = strings.TrimSpace(p.Title)
+				}
+			}
+			textEntries := make([]os.DirEntry, 0, len(entries))
 			for _, entry := range entries {
-				if entry.IsDir() {
+				if entry.IsDir() || entry.Name() == "pages.json" {
 					continue
 				}
 				format, ok := store.PageFormatFromFilename(entry.Name())
 				if !ok || !store.PageFormatIsText(format) {
 					continue
 				}
+				textEntries = append(textEntries, entry)
+			}
+			if len(orderByID) > 0 {
+				sort.SliceStable(textEntries, func(i, j int) bool {
+					idI := strings.TrimSuffix(textEntries[i].Name(), filepath.Ext(textEntries[i].Name()))
+					idJ := strings.TrimSuffix(textEntries[j].Name(), filepath.Ext(textEntries[j].Name()))
+					oi, okI := orderByID[idI]
+					oj, okJ := orderByID[idJ]
+					if okI != okJ {
+						return okI
+					}
+					if okI && okJ {
+						return oi < oj
+					}
+					return false
+				})
+			}
+			for _, entry := range textEntries {
 				data, err := store.ReadProjectFileLimit(project.Path, filepath.Join(pageDir, entry.Name()), int64(searchPageContentLimit))
 				if err != nil {
 					continue
@@ -379,14 +463,37 @@ func SearchProjectNodesDirect(project ProjectInfo, normalized string) []SearchRe
 				if len(data) > remaining {
 					data = data[:remaining]
 				}
+				pageID := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+				pageText := string(data)
+				if pageTitle := titlesByID[pageID]; pageTitle != "" && !strings.Contains(strings.ToLower(pageText), strings.ToLower(pageTitle)) {
+					pageText = pageTitle + "\n" + pageText
+				}
+				if matchedPageID == "" {
+					candidate := metadata + "\n" + pageText
+					if strings.Contains(strings.ToLower(candidate), normalized) {
+						matchedPageID = pageID
+						matchedPageHaystack = candidate
+					}
+				}
 				pageContent.WriteByte('\n')
-				pageContent.Write(data)
+				pageContent.WriteString(pageText)
 				if pageContent.Len() >= searchPageContentLimit {
 					break
 				}
 			}
 		}
-		haystack := metadata + "\n" + content + pageContent.String()
+		if matchedPageID != "" {
+			results = append(results, SearchResult{
+				Project: project.Name,
+				NodeID:  node.ID,
+				PageID:  matchedPageID,
+				Title:   node.Title,
+				Snippet: searchSnippet(matchedPageHaystack, normalized),
+				Kind:    "node",
+			})
+			continue
+		}
+		haystack := mainHaystack + pageContent.String()
 		if strings.Contains(strings.ToLower(haystack), normalized) {
 			results = append(results, SearchResult{
 				Project: project.Name,
