@@ -37,7 +37,13 @@ func TestUnreadableGraphNamesTheLineTheMistakeIsOn(t *testing.T) {
 		{"unclosed flow sequence", "version: 1\nnodes:\n  - id: a\n    title: [Build\n    kind: task\n", 4},
 		{"unclosed flow sequence at the end", "version: 1\nnodes:\n  - id: [broken\n", 3},
 		{"unclosed flow mapping", "version: 1\nnodes:\n  - id: a\n    title: {Build\n    kind: task\n", 4},
-		{"misaligned key", "version: 1\nnodes:\n  - id: a\n   title: x\n", 3},
+		// A key indented less than its siblings: yaml.v3 prints where the list
+		// or mapping it broke starts, but the mistake is the key's own line.
+		{"misaligned key", "version: 1\nnodes:\n  - id: a\n   title: x\n", 4},
+		{"under-indented key in a list item", "version: 1\nnodes:\n    - id: n0001\n      title: T\n     bad: x\n", 5},
+		{"under-indented key further down", "version: 1\nnodes:\n    - id: a\n      title: A\n    - id: b\n      title: B\n\n      # note\n      kind: task\n     oops: 1\n    - id: c\n", 10},
+		{"list item inside a mapping", "version: 1\nui:\n  a: 1\n  - b\n", 4},
+		{"misaligned key with CRLF", "version: 1\r\nnodes:\r\n    - id: a\r\n      title: A\r\n     oops: 1\r\n", 5},
 		{"bracket on the first line", "version: [1\n", 1},
 		{"bracket left open at the end", "version: 1\nnodes: [\n", 2},
 		// Scanner and decoding errors already count from one.
