@@ -44,6 +44,37 @@ async function parkDirtyTabs(get: () => AppState): Promise<void> {
   }
 }
 
+/**
+ * Project switches this browser has under way. The hub's active project moves
+ * in the middle of one, and the project list read meanwhile must not take
+ * that for another tab's switch.
+ */
+let switchesInFlight = 0;
+
+/**
+ * Another tab moved the hub's active project and this one is following it,
+ * which is a switch whose server half already happened: requests now reach
+ * the new project. The old project's tabs close at once (a pending autosave
+ * finds no tab, so it cannot write their text into the new project) and
+ * their unsaved text is parked as drafts in the project it was written for.
+ */
+function followProjectSwitch(
+  set: Parameters<AppSlice<WorkspaceSlice>>[0],
+  get: () => AppState,
+  from: string,
+): void {
+  const unsaved = get().tabs.filter((tab) => tab.dirty);
+  clearUndo();
+  invalidateGenerations();
+  set({ tabs: [], pageDocs: {}, activeTab: null, operations: {} });
+  for (const tab of unsaved) {
+    void api.putDraft(tab.id, tab.content, from).catch(() => undefined);
+  }
+  // Loads already in flight were answered for the old generation and are
+  // dropped; this one is for the project now on screen.
+  void Promise.all([get().loadAll(), get().refreshTrash()]).catch(() => undefined);
+}
+
 export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
   workspace: "",
   workspaces: [],
@@ -85,12 +116,20 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       const current = get();
       const projects = p.projects ?? [];
       const workspaces = p.workspaces ?? [];
+      const override = getProjectOverride();
+      const followed =
+        !override &&
+        switchesInFlight === 0 &&
+        current.activeProject !== "" &&
+        Boolean(p.active) &&
+        p.active !== current.activeProject;
       set({
         workspace: p.workspace,
         workspaces: sameJSON(current.workspaces, workspaces) ? current.workspaces : workspaces,
-        activeProject: getProjectOverride() || p.active,
+        activeProject: override || p.active,
         projects: sameJSON(current.projects, projects) ? current.projects : projects,
       });
+      if (followed) followProjectSwitch(set, get, current.activeProject);
       // The manual order belongs to the workspace the list just came from, so it
       // is refreshed with the list rather than on its own schedule. A workspace
       // that never had one is not an error, it simply has no manual order.
@@ -221,16 +260,22 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
     // Parked before the server moves: once it has switched, a draft put for
     // the old project would land in the new one.
     await parkDirtyTabs(get);
-    const result = await api.openExample(example, get().preferences.language);
-    // The server has switched already; this does the browser's half — tabs,
-    // undo and badges cleared, everything reloaded — as any switch does.
-    await get().switchProject(result.name);
-    return result.name;
+    switchesInFlight += 1;
+    try {
+      const result = await api.openExample(example, get().preferences.language);
+      // The server has switched already; this does the browser's half — tabs,
+      // undo and badges cleared, everything reloaded — as any switch does.
+      await get().switchProject(result.name);
+      return result.name;
+    } finally {
+      switchesInFlight -= 1;
+    }
   },
 
   switchProject: async (name, create = false, template = "") => {
     const scope = operationScope.workspace();
     get().beginOperation(scope, "workspace.switchProject");
+    switchesInFlight += 1;
     try {
       await parkDirtyTabs(get);
       try {
@@ -272,6 +317,8 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
       });
       if (unreadable) throw new Error(unreadable, { cause: e });
       throw e;
+    } finally {
+      switchesInFlight -= 1;
     }
   },
 });
