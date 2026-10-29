@@ -83,6 +83,12 @@ type Config struct {
 	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
 	// (adapter.AntigravityModes).
 	AntigravityMode string `json:"antigravityMode,omitempty"`
+	// PermissionRelay sends a headless run's tool-permission prompts to
+	// Nodevas, where a person allows or denies them, instead of refusing
+	// them: Claude Code (--permission-prompt-tool), the Antigravity CLI (its
+	// gate) and OpenCode over ACP. Off by default; the runner's own limits
+	// (read-only runs, plan modes, the gate's denials) stay either way.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
 	// offers are taken without asking at the terminal. nil means off. W1's
 	// boolean form is migrated on load.
@@ -339,10 +345,17 @@ func (c *Config) PermissionModeFor(kind string) string {
 	return c.ClaudePermissionMode()
 }
 
+// RelaysPermissions reports whether a headless run of an agent kind, under
+// this runner's settings, sends its permission prompts to Nodevas
+// (permissionRelay and adapter.PermissionRelayApplies).
+func (c *Config) RelaysPermissions(kind string) bool {
+	return c.PermissionRelay && adapter.PermissionRelayApplies(kind, c.PermissionModeFor(kind), c.OpenCodeProtocol == "acp")
+}
+
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"autoAccept", "interactive", "repoBrowse",
+	"permissionRelay", "autoAccept", "interactive", "repoBrowse",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
@@ -492,6 +505,16 @@ func (c *Config) Set(key string, values []string) error {
 			return err
 		}
 		c.AntigravityMode = mode
+	case "permissionRelay":
+		if reset {
+			c.PermissionRelay = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("permissionRelay must be true or false")
+		}
+		c.PermissionRelay = on
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil

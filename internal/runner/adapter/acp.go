@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,10 +23,12 @@ import (
 // What ACP adds over a CLI's own output format: one event shape for every
 // agent that speaks it, and session/request_permission, which asks the
 // runner instead of rejecting the call and ending the run the way a headless
-// CLI does. The runner answers every such request with a rejection for now
-// (acpDecide); the agent gets the refusal as the tool's result and goes on.
-// The CLI's own permission rules stay the boundary: what they deny is never
-// offered to the model and never asked about.
+// CLI does. Without permissionRelay the runner answers every such request
+// with a rejection (acpDecide); the agent gets the refusal as the tool's
+// result and goes on. With it, the request is parked and asked about in
+// Nodevas (acpSession.relay), and answered when a person has. The CLI's own
+// permission rules stay the boundary: what they deny is never offered to the
+// model and never asked about.
 
 // Conversational is an adapter whose CLI is spoken to over stdin while it
 // runs, instead of handed its prompt up front.
@@ -95,6 +98,15 @@ type acpSession struct {
 	chunk     strings.Builder
 
 	tools map[string]*acpTool
+
+	// asker answers permission requests (permissionRelay); nil rejects them.
+	asker PermissionAsker
+	// ctx ends with the session: a person's answer no longer matters then.
+	ctx    context.Context
+	cancel context.CancelFunc
+	// deferred are events from answers that arrived between lines; the next
+	// Parse returns them first.
+	deferred []runnerwire.RunEvent
 }
 
 // acpTool is what the runner knows of one tool call so far.
@@ -108,8 +120,9 @@ func newACPSession(agent, cwd, prompt string, mcp []acpMCPServer) *acpSession {
 	if mcp == nil {
 		mcp = []acpMCPServer{}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &acpSession{agent: agent, cwd: cwd, prompt: prompt, mcp: mcp,
-		pending: map[int]string{}, tools: map[string]*acpTool{}}
+		pending: map[int]string{}, tools: map[string]*acpTool{}, ctx: ctx, cancel: cancel}
 }
 
 type rpcMessage struct {
@@ -192,8 +205,19 @@ func (s *acpSession) request(method string, params any) {
 	s.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 }
 
+// End is the runner's word that the agent has exited: permission requests
+// still waiting for a person stop waiting, and stdin is closed.
+func (s *acpSession) End() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finish()
+}
+
 // finish closes stdin, which ends the agent; s.mu is held.
 func (s *acpSession) finish() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.closed || s.out == nil {
 		s.closed = true
 		return
@@ -214,18 +238,19 @@ func (s *acpSession) Parse(line []byte) []runnerwire.RunEvent {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	events := s.deferred
+	s.deferred = nil
 	switch {
 	case msg.Method != "" && len(msg.ID) > 0:
-		return s.agentRequest(msg)
+		return append(events, s.agentRequest(msg)...)
 	case msg.Method != "":
 		if msg.Method == "session/update" {
-			return s.update(msg.Params)
+			return append(events, s.update(msg.Params)...)
 		}
-		return nil
 	case len(msg.ID) > 0:
-		return s.response(msg)
+		return append(events, s.response(msg)...)
 	}
-	return nil
+	return events
 }
 
 // response is the answer to one of the runner's requests.
@@ -345,41 +370,104 @@ func (s *acpSession) agentRequest(msg rpcMessage) []runnerwire.RunEvent {
 	}
 	var p struct {
 		ToolCall acpToolUpdate `json:"toolCall"`
-		Options  []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
+		Options  []acpOption   `json:"options"`
 	}
 	_ = json.Unmarshal(msg.Params, &p)
 	events := s.flushChunk()
 	events = append(events, s.toolSeen(p.ToolCall, true)...)
-	kind := acpDecide(p.ToolCall)
+	title := p.ToolCall.Title
+	if title == "" {
+		title = p.ToolCall.ToolCallID
+	}
+	if s.asker != nil && !s.closed {
+		tool := p.ToolCall.Kind
+		if t := s.tools[p.ToolCall.ToolCallID]; t != nil && t.name != "" {
+			tool = t.name
+		}
+		if tool == "" {
+			tool = title
+		}
+		input := title
+		if hasJSON(p.ToolCall.RawInput) {
+			input = compactJSON(p.ToolCall.RawInput)
+		}
+		// Parked: the person answers in their own time, and the agent's
+		// output keeps being read meanwhile.
+		go s.relay(msg.ID, p.Options, title, PermissionRequest{Tool: tool, Input: input})
+		return append(events, runnerwire.RunEvent{Type: runnerwire.EventLog,
+			Text: clip(s.agent + " asks to run " + title + "; waiting for an answer in Nodevas")})
+	}
+	s.answerPermission(msg.ID, p.Options, acpDecide(p.ToolCall))
+	return append(events, runnerwire.RunEvent{Type: runnerwire.EventLog,
+		Text: clip(s.agent + " asked to run " + title + "; the runner refused (headless: nobody to ask)")})
+}
+
+// acpOption is one of a permission request's choices.
+type acpOption struct {
+	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
+}
+
+// relay asks the person about a parked permission request and answers it:
+// allow_once, allow_always for a tool allowed for the rest of the run, or
+// reject_once, which is also the answer to no answer at all. Once the
+// session is over nothing is sent.
+func (s *acpSession) relay(id json.RawMessage, options []acpOption, title string, req PermissionRequest) {
+	decision := s.asker.AskPermission(s.ctx, req)
+	kind, text := "reject_once", "denied in Nodevas"
+	if decision.Allow {
+		kind, text = "allow_once", "allowed in Nodevas"
+		if decision.ForRun {
+			kind, text = "allow_always", "allowed in Nodevas for the rest of the run"
+		}
+	} else if decision.Reason != "" {
+		text += ": " + decision.Reason
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	if kind == "allow_always" && !hasOption(options, kind) {
+		kind = "allow_once"
+	}
+	s.answerPermission(id, options, kind)
+	s.deferred = append(s.deferred, runnerwire.RunEvent{Type: runnerwire.EventLog,
+		Text: clip(s.agent + " asked to run " + title + "; " + text)})
+}
+
+// answerPermission answers a permission request with the option of kind;
+// s.mu is held. No such option: cancelled, the answer that grants nothing.
+func (s *acpSession) answerPermission(id json.RawMessage, options []acpOption, kind string) {
 	optionID := ""
-	for _, o := range p.Options {
+	for _, o := range options {
 		if o.Kind == kind {
 			optionID = o.OptionID
 			break
 		}
 	}
-	title := p.ToolCall.Title
-	if title == "" {
-		title = p.ToolCall.ToolCallID
-	}
 	if optionID == "" {
-		// No such option: cancelled is the answer that grants nothing.
-		s.send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
+		s.send(map[string]any{"jsonrpc": "2.0", "id": id,
 			"result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}})
-	} else {
-		s.send(map[string]any{"jsonrpc": "2.0", "id": msg.ID,
-			"result": map[string]any{"outcome": map[string]string{"outcome": "selected", "optionId": optionID}}})
+		return
 	}
-	return append(events, runnerwire.RunEvent{Type: runnerwire.EventLog,
-		Text: clip(s.agent + " asked to run " + title + "; the runner refused (headless: nobody to ask)")})
+	s.send(map[string]any{"jsonrpc": "2.0", "id": id,
+		"result": map[string]any{"outcome": map[string]string{"outcome": "selected", "optionId": optionID}}})
 }
 
-// acpDecide is the runner's answer to a permission request: the kind of the
-// option it picks. Always a one-off rejection for now; the agent's own rules
-// already allow what the owner's setting allows without asking.
+func hasOption(options []acpOption, kind string) bool {
+	for _, o := range options {
+		if o.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// acpDecide is the runner's answer to a permission request it does not
+// relay: the kind of the option it picks. Always a one-off rejection; the
+// agent's own rules already allow what the owner's setting allows without
+// asking.
 func acpDecide(acpToolUpdate) string { return "reject_once" }
 
 type acpToolUpdate struct {

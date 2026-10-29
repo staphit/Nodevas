@@ -599,6 +599,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
+		PermissionRelay:  cfg.PermissionRelay,
 	}
 	cmd, err := ad.Command(job, runEnv)
 	if err != nil {
@@ -656,6 +657,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		waitErr = <-done
 	}
 	stdout.flush()
+	if ender, ok := conv.(interface{ End() }); ok {
+		// Permission requests still waiting for a person stop waiting.
+		ender.End()
+	}
 
 	outcome := parser.Outcome()
 	exitCode := -1
@@ -728,6 +733,14 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 
 // permissionText says how freely the agent may act, for the run's log.
 func permissionText(cfg *Config, kind string) string {
+	text := modeText(cfg, kind)
+	if cfg.RelaysPermissions(kind) {
+		text += ", permission prompts relayed to Nodevas"
+	}
+	return text
+}
+
+func modeText(cfg *Config, kind string) string {
 	switch kind {
 	case "codex":
 		text := "sandbox " + cfg.CodexSandboxMode()

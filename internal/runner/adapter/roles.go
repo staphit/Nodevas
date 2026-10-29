@@ -69,8 +69,7 @@ func header(b *strings.Builder, role string, job runnerwire.Job) {
 func testerPrompt(job runnerwire.Job, branch string) string {
 	var b strings.Builder
 	header(&b, "Tester", job)
-	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. Nobody is watching this terminal; "+
-		"there is no one to answer questions here.\n\n", branch)
+	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. "+headlessAskNote+"\n\n", branch)
 	b.WriteString("Your job: write tests only, from the acceptance criteria below. Another agent implements the " +
 		"task afterwards and must make your tests pass without changing them.\n\n")
 	b.WriteString("Rules for this run:\n")
@@ -102,8 +101,7 @@ func testerPrompt(job runnerwire.Job, branch string) string {
 func stagedExecutorPrompt(job runnerwire.Job, branch string) string {
 	var b strings.Builder
 	header(&b, "Executor", job)
-	fmt.Fprintf(&b, ", in a git worktree on branch %s of pull request %s. Nobody is watching this terminal; "+
-		"there is no one to answer questions here.\n\n", branch, job.PRURL)
+	fmt.Fprintf(&b, ", in a git worktree on branch %s of pull request %s. "+headlessAskNote+"\n\n", branch, job.PRURL)
 	b.WriteString("Your job: make the failing tests on this branch pass by implementing the task.\n\n")
 	b.WriteString("Rules for this run:\n")
 	fmt.Fprintf(&b, "1. First call the nodevas MCP tool claim_task with id %q, then read the task with get_node, "+
@@ -161,8 +159,7 @@ const plannerAcceptanceRule = "Every task you create must carry `acceptance`: 2 
 func qaAcceptancePrompt(job runnerwire.Job) string {
 	var b strings.Builder
 	header(&b, "QA", job)
-	b.WriteString(", in a read-only checkout of the repository. Nobody is watching this terminal; " +
-		"there is no one to answer questions here.\n\n")
+	b.WriteString(", in a read-only checkout of the repository. " + headlessAskNote + "\n\n")
 	b.WriteString("Your job: write this goal's acceptance criteria, before anyone breaks it down.\n\n")
 	b.WriteString("Rules for this run:\n")
 	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push.\n")
@@ -209,7 +206,7 @@ func qaVerifyPrompt(job runnerwire.Job) string {
 	var b strings.Builder
 	header(&b, "QA", job)
 	b.WriteString(", in a read-only checkout of the repository with every task of the goal merged. " +
-		"Nobody is watching this terminal; there is no one to answer questions here.\n\n")
+		headlessAskNote + "\n\n")
 	b.WriteString("Your job: verify the finished goal against its acceptance criteria.\n\n")
 	b.WriteString("Rules for this run:\n")
 	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push.\n")
@@ -245,7 +242,7 @@ func fence(content string) string {
 func judgePrompt(job runnerwire.Job) string {
 	var b strings.Builder
 	header(&b, "judge", job)
-	b.WriteString(". Nobody is watching this terminal; there is no one to answer questions here.\n\n")
+	b.WriteString(". " + headlessAskNote + "\n\n")
 	b.WriteString("Your job: judge the writing against its checklist. You do not write or edit it.\n\n")
 	b.WriteString("Rules for this run:\n")
 	b.WriteString("1. Do not modify, create or delete any file or node, and do not change any status.\n")
