@@ -103,3 +103,58 @@ func hasCJK(text string) bool {
 	}
 	return false
 }
+
+// A dependency written only in `requires`, with no edge, is still a
+// dependency: the board draws it and the node waits on it, so the exported
+// graph draws and lists it too, and the waiting node is no start node.
+func TestRelationSectionCountsRequiresOnlyDependencies(t *testing.T) {
+	graph := &engine.Graph{
+		Version: 1,
+		Nodes: []*engine.Node{
+			{ID: "node-0006", Title: "Docs"},
+			{ID: "node-0007", Title: "Build"},
+			{ID: "node-0008", Title: "Deploy", Requires: "node-0007 and node-0006"},
+			{ID: "node-0009", Title: "Monitor", Requires: "node-0008"},
+			{ID: "node-0010", Title: "Release", Requires: "node-0008 and node-0009"},
+		},
+		Edges: []*engine.Edge{
+			{From: "node-0007", To: "node-0008"},
+			{From: "node-0006", To: "node-0008"},
+			{From: "node-0008", To: "node-0010"},
+		},
+	}
+	section := RelationSection(graph, 2, locale.English)
+	for _, want := range []string{
+		"n_node-0008 --> n_node-0009",
+		"n_node-0009 --> n_node-0010",
+		"**Start nodes**: Build, Docs\n",
+		"- **Monitor**\n  - Requires: Deploy\n  - Next: Release",
+		"- **Release**\n  - Requires: Deploy, Monitor",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("section is missing %q:\n%s", want, section)
+		}
+	}
+	if strings.Count(section, "n_node-0008 --> n_node-0010") != 1 {
+		t.Errorf("an edge also named in requires is drawn once:\n%s", section)
+	}
+
+	lines := NodeRelationLines(graph, "node-0009", 2, locale.English)
+	for _, want := range []string{"- Requires: Deploy", "- Next: Release"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("node lines are missing %q:\n%s", want, lines)
+		}
+	}
+
+	// A project wired only through requires still gets its graph section.
+	bare := &engine.Graph{
+		Version: 1,
+		Nodes: []*engine.Node{
+			{ID: "a", Title: "A"},
+			{ID: "b", Title: "B", Requires: "a"},
+		},
+	}
+	if got := RelationSection(bare, 2, locale.English); !strings.Contains(got, "n_a --> n_b") {
+		t.Errorf("requires-only project lost its graph:\n%s", got)
+	}
+}
