@@ -67,3 +67,41 @@ func TestAgentsGetNoRunnerSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A runner started from inside another agent's terminal (Claude Code, Codex,
+// …) must not hand that agent's session on: the run's `nodevas mcp` would
+// adopt the outer session id ("claude:<outer id>") and the run's asks and
+// heartbeats would land on the wrong session. The outer agent's own settings
+// (CLAUDE_CODE_USE_BEDROCK) stay.
+func TestAgentsGetNoOuterAgentSession(t *testing.T) {
+	outer := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID",
+		"CODEX_SANDBOX", "OPENCODE_SESSION_ID", "OPENCODE", "GEMINI_SESSION_ID", "GEMINI_CLI",
+		"COPILOT_AGENT_SESSION_ID", "GROK_SESSION_ID", "CURSOR_TRACE_ID", "CURSOR_AGENT", "NODEVAS_SESSION_ID"}
+	for _, name := range outer {
+		t.Setenv(name, "outer-"+name)
+	}
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+	for _, kind := range []string{"claude", "codex", "gemini", "opencode", "antigravity"} {
+		env := RunEnv{Binary: "/usr/bin/" + Binary(kind), Workdir: t.TempDir(), Branch: "b", TempDir: t.TempDir(),
+			MCP: MCPServer{Command: "/usr/bin/nodevas", Args: []string{"mcp"}}}
+		job := runnerwire.Job{RunID: "run-7", NodeID: "n-1", Prompt: "p", Agent: kind}
+		cmd, err := For(kind).Command(job, env)
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		icmd, err := For(kind).(Interactive).InteractiveCommand(job, env)
+		if err != nil {
+			t.Fatalf("%s interactive: %v", kind, err)
+		}
+		for mode, e := range map[string][]string{"headless": cmd.Env, "interactive": icmd.Env} {
+			for _, name := range outer {
+				if v, ok := envValue(e, name); ok {
+					t.Errorf("%s %s: %s=%q reached the agent", kind, mode, name, v)
+				}
+			}
+			if v, _ := envValue(e, "CLAUDE_CODE_USE_BEDROCK"); v != "1" {
+				t.Errorf("%s %s: CLAUDE_CODE_USE_BEDROCK = %q", kind, mode, v)
+			}
+		}
+	}
+}
