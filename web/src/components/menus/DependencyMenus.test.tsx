@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { useApp } from "../../store";
 import type { Graph, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { EdgeMenu } from "./EdgeMenu";
 import { GraphMenu } from "./GraphMenu";
@@ -192,6 +193,36 @@ describe("EdgeMenu dependencies", () => {
     expect(advanced.open).toBe(true);
     expect(advanced.querySelector("summary .dependency-badge")?.textContent).toBe("Optional");
     expect(screen.getByText("Convert to logic gate")).toBeTruthy();
+  });
+
+  it("reports a failing style update through the app error store", async () => {
+    useApp.setState({ error: null });
+    const globalReportError = vi.fn();
+    vi.stubGlobal("reportError", globalReportError);
+    try {
+      const setEdgeStyles = vi.fn(async () => {
+        throw new Error("wire save failed");
+      });
+      const setContextMenu = vi.fn();
+      const graph = { nodes: [], edges: [{ from: "design", to: "ship" }] } as unknown as Graph;
+      render(
+        <EdgeMenu
+          contextMenu={{ kind: "edge", edges: [{ from: "design", to: "ship" }], x: 0, y: 0 }}
+          graph={graph}
+          nodeTitle={nodeTitle}
+          setEdgeStyles={setEdgeStyles}
+          convertEdgesToLogicGate={vi.fn()}
+          setContextMenu={setContextMenu}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole("menuitemradio", { name: "Dashed" }));
+      expect(useApp.getState().error).toBe("wire save failed");
+      expect(globalReportError).not.toHaveBeenCalled();
+      expect(setContextMenu).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
