@@ -130,19 +130,25 @@ export function AskCard({
         <div className="agent-ask-result">
           <span className={`copilot-badge agent-ask-status-${ask.status}`}>
             {ask.status === "approved"
-              ? t("agents.ask.statusApproved")
+              ? kind === "permission"
+                ? ask.decision === "approve_run" ||
+                  ask.answer === "approve_run" ||
+                  ask.note === "allowed for this run"
+                  ? t("agents.ask.statusAllowedRun")
+                  : t("agents.ask.statusAllowed")
+                : t("agents.ask.statusApproved")
               : ask.status === "denied"
                 ? t("agents.ask.statusDenied")
                 : ask.status === "answered"
                   ? t("agents.ask.statusAnswered")
                   : t("agents.ask.expired")}
           </span>
-          {ask.answer && (
+          {ask.answer && kind !== "permission" && (
             <p className="agent-ask-result-answer">
               {t("agents.ask.resultAnswer", { answer: ask.answer })}
             </p>
           )}
-          {ask.note && (
+          {ask.note && ask.note !== "allowed for this run" && (
             <p className="agent-ask-result-note">
               {t("agents.ask.resultNote", { note: ask.note })}
             </p>
