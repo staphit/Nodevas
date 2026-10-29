@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -14,7 +15,8 @@ import (
 // so it answers 422 and says which line to look at in the reader's language.
 // Nothing is written over the file while it stands.
 type GraphUnreadableError struct {
-	// Line is the line the parser blames, or 0 when it names none.
+	// Line is the line the mistake is on, counted from one as an editor
+	// counts, or 0 when the parser names none.
 	Line    int
 	message *locale.Message
 	cause   error
@@ -24,10 +26,16 @@ type GraphUnreadableError struct {
 // error, "yaml: unmarshal errors:\n  line 16: ..." for a type error.
 var yamlLine = regexp.MustCompile(`\bline (\d+)\b`)
 
-func graphUnreadable(cause error) *GraphUnreadableError {
+// yamlParserLine is a syntax error yaml.v3's parser (not its scanner) found.
+// Those name the line counting from zero: the parser keeps its marks
+// zero-based and only a scanner error has one added before it is printed.
+var yamlParserLine = regexp.MustCompile(`\byaml: line (\d+): (?:did not find expected (?:<stream-start>|<document start>|node content|key|'-' indicator|',' or '\]'|',' or '\}')|found (?:duplicate %YAML directive|duplicate %TAG directive|incompatible YAML document|undefined tag handle))`)
+
+func graphUnreadable(data []byte, cause error) *GraphUnreadableError {
 	// The parser's own words stay, for whoever fixes the file; the
 	// "graph.yaml: " they start with is already said by the sentence.
 	detail := strings.TrimPrefix(cause.Error(), "graph.yaml: ")
+	detail = editorLine(data, detail)
 	e := &GraphUnreadableError{cause: cause}
 	if match := yamlLine.FindStringSubmatch(detail); match != nil {
 		e.Line, _ = strconv.Atoi(match[1])
@@ -46,6 +54,25 @@ func graphUnreadable(cause error) *GraphUnreadableError {
 			detail)
 	}
 	return e
+}
+
+// editorLine rewrites a parser error's zero-based line in detail as the line
+// an editor shows. Where the parser blames the end of the file (an unclosed
+// bracket it read to the end for), that is the file's last line.
+func editorLine(data []byte, detail string) string {
+	match := yamlParserLine.FindStringSubmatchIndex(detail)
+	if match == nil {
+		return detail
+	}
+	line, err := strconv.Atoi(detail[match[2]:match[3]])
+	if err != nil {
+		return detail
+	}
+	line++
+	if last := bytes.Count(bytes.TrimRight(data, "\r\n"), []byte("\n")) + 1; line > last {
+		line = last
+	}
+	return detail[:match[2]] + strconv.Itoa(line) + detail[match[3]:]
 }
 
 func (e *GraphUnreadableError) Error() string { return e.message.Error() }

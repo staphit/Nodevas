@@ -134,10 +134,10 @@ func (s *Store) currentGraphLocked() (*cachedGraph, error) {
 	}
 	g, err := engine.ParseGraph(data)
 	if err != nil {
-		return nil, graphUnreadable(err)
+		return nil, graphUnreadable(data, err)
 	}
 	if err := ValidateGraphForStorage(g); err != nil {
-		return nil, graphUnreadable(err)
+		return nil, graphUnreadable(data, err)
 	}
 	mergeSharedStatuses(g, shared)
 	entry := &cachedGraph{
