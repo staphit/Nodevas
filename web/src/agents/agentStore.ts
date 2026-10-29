@@ -427,10 +427,31 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
       /* fall through: nothing to show */
     }
     if (!ask || ask.status !== "pending" || !canManageSession(ask, get().viewer)) return;
-    const from = ask.sessionName || ask.agent || ask.sessionId;
-    const body = excerpt(ask.question);
-    get().pushToast({ messageId: `ask:${askId}`, from, body });
-    showSystemNotification(translate("agents.ask.notifyTitle", undefined, { session: from }), body,
+    const sessionName = ask.sessionName || ask.agent || ask.sessionId;
+    let toastFrom = sessionName;
+    let notifyTitle = translate("agents.ask.notifyTitle", undefined, { session: sessionName });
+    let bodyText = ask.question;
+
+    if (ask.kind === "question") {
+      toastFrom = translate("agents.ask.notifyQuestionTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "choice") {
+      toastFrom = translate("agents.ask.notifyChoiceTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "permission") {
+      toastFrom = translate("agents.ask.notifyPermissionTitle", undefined, {
+        session: sessionName,
+        tool: ask.tool || "tool",
+      });
+      notifyTitle = toastFrom;
+      if (ask.toolInput) {
+        bodyText = ask.toolInput;
+      }
+    }
+
+    const body = excerpt(bodyText);
+    get().pushToast({ messageId: `ask:${askId}`, from: toastFrom, body });
+    showSystemNotification(notifyTitle, body,
       `agent-ask-${askId}`, () => get().setOpen(true));
   },
 
