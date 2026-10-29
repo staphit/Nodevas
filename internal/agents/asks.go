@@ -303,11 +303,8 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		ExpiresAt:   now + timeout.Milliseconds(),
 	}
 
-	if err := h.insertPendingAsk(ctx, ask); err != nil {
-		return Ask{}, err
-	}
-	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(question, 200))
-
+	// Waiting before the ask exists: an answer that lands the moment it is
+	// stored (a run-wide allow releasing it) must find the waiter.
 	waitCh := make(chan Ask, 1)
 	h.mu.Lock()
 	h.askWaiters[ask.ID] = waitCh
@@ -317,6 +314,11 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		delete(h.askWaiters, ask.ID)
 		h.mu.Unlock()
 	}()
+
+	if err := h.insertPendingAsk(ctx, ask); err != nil {
+		return Ask{}, err
+	}
+	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(question, 200))
 
 	h.emit(project, AskEvent, ask)
 
