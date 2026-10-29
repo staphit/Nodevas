@@ -371,7 +371,9 @@ export function Sidebar() {
             <span className="explorer-workspace-label">{workspaceName}</span>
           </div>
           <span className="explorer-project-count">
-            {t("sidebar.projectCount", { count: String(projects.length) })}
+            {projects.length === 1
+              ? t("sidebar.projectCountOne")
+              : t("sidebar.projectCount", { count: String(projects.length) })}
           </span>
           {/* Folding the explorer lives with the explorer; the board's header
               has the matching » to bring it back. */}
