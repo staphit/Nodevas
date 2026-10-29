@@ -138,6 +138,9 @@ func runnerUsage(w io.Writer) {
                                              opencodeProtocol (run|acp; acp is experimental);
                                              Antigravity CLI (agy): antigravityMode (plan|accept-edits|
                                              auto|full; full skips every permission);
+                                             permissionRelay (true|false, default false: Claude Code,
+                                             Antigravity (accept-edits) and OpenCode over ACP (edit)
+                                             ask you in Nodevas for a permission instead of refusing);
                                              pull requests: autoPR (true|false), prDraft (true|false),
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
@@ -397,6 +400,12 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	setting("opencodeProtocol", cfg.OpenCodeProtocolOrDefault())
 	fmt.Fprintln(w, "antigravity runs:")
 	setting("antigravityMode", cfg.AntigravityModeOrDefault())
+	fmt.Fprintln(w, "permission prompts:")
+	relay := "headless runs refuse what needs a permission (the default)"
+	if cfg.PermissionRelay {
+		relay = "Claude Code, Antigravity and OpenCode ACP runs ask you in Nodevas instead of refusing"
+	}
+	setting("permissionRelay", fmt.Sprintf("%t (%s)", cfg.PermissionRelay, relay))
 	labels := "(none)"
 	if templates := cfg.PRLabelTemplates(); len(templates) > 0 {
 		labels = strings.Join(templates, ", ")

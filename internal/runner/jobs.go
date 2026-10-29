@@ -728,6 +728,14 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 
 // permissionText says how freely the agent may act, for the run's log.
 func permissionText(cfg *Config, kind string) string {
+	text := modeText(cfg, kind)
+	if cfg.RelaysPermissions(kind) {
+		text += ", permission prompts relayed to Nodevas"
+	}
+	return text
+}
+
+func modeText(cfg *Config, kind string) string {
 	switch kind {
 	case "codex":
 		text := "sandbox " + cfg.CodexSandboxMode()

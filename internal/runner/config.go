@@ -345,10 +345,17 @@ func (c *Config) PermissionModeFor(kind string) string {
 	return c.ClaudePermissionMode()
 }
 
+// RelaysPermissions reports whether a headless run of an agent kind, under
+// this runner's settings, sends its permission prompts to Nodevas
+// (permissionRelay and adapter.PermissionRelayApplies).
+func (c *Config) RelaysPermissions(kind string) bool {
+	return c.PermissionRelay && adapter.PermissionRelayApplies(kind, c.PermissionModeFor(kind), c.OpenCodeProtocol == "acp")
+}
+
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"autoAccept", "interactive", "repoBrowse",
+	"permissionRelay", "autoAccept", "interactive", "repoBrowse",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
@@ -498,6 +505,16 @@ func (c *Config) Set(key string, values []string) error {
 			return err
 		}
 		c.AntigravityMode = mode
+	case "permissionRelay":
+		if reset {
+			c.PermissionRelay = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("permissionRelay must be true or false")
+		}
+		c.PermissionRelay = on
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
