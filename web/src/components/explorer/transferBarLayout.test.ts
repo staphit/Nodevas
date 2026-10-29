@@ -84,3 +84,15 @@ describe("explorer tools layout", () => {
     expect(rule(".explorer-create-actions button")).toMatch(/white-space:\s*normal/);
   });
 });
+
+describe("project transfer notice", () => {
+  it("shows the whole reason, wrapped, rather than an ellipsis", () => {
+    // An export that fails says why ("Document export failed: graph.yaml:
+    // line 2 has an error. Fix the file, then reload."); cut to one line in a
+    // 234px sidebar the reason was lost, with no tooltip to get it back.
+    expectNeverClipped(".project-transfer-notice");
+    const body = rule(".project-transfer-notice");
+    expect(body).not.toMatch(/white-space:\s*nowrap/);
+    expect(body).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+});
