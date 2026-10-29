@@ -206,10 +206,11 @@ func TestUnreadableGraphNamesTheLineInTheReadersLanguage(t *testing.T) {
 				[]byte("version: 1\nnodes:\n  - id: [broken\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			// The line yaml.v3 reports for this file.
-			line := "line 2 "
+			// The line the unclosed bracket is on (yaml.v3 itself says 2,
+			// counting its parser errors from zero).
+			line := "line 3 "
 			if strings.HasPrefix(language, "zh") {
-				line = "第 2 行"
+				line = "第 3 行"
 			}
 			for _, request := range []struct{ method, path, body string }{
 				{http.MethodGet, "/api/graph", ""},
