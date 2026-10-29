@@ -284,4 +284,47 @@ describe("RunnersPanel", () => {
     expect(list).toHaveBeenCalledTimes(2);
     expect(useRunners.getState().runners).toEqual([desktop]);
   });
+
+  it("renders permission relay toggle bound to runner config, off by default with help text", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+
+    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
+    expect(toggle).not.toBeChecked();
+    expect(
+      screen.getByText("Off by default. Only applies to Claude Code, Antigravity and OpenCode ACP."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders permission relay toggle checked when enabled on runner config", async () => {
+    const relayRunner: Runner = {
+      ...desktop,
+      info: { ...desktop.info!, permissionRelay: true },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [relayRunner] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+
+    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
+    expect(toggle).toBeChecked();
+  });
+
+  it("toggles permission relay when clicked", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+
+    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+  });
 });
