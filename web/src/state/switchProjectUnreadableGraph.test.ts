@@ -135,3 +135,52 @@ describe("switching to a project whose graph.yaml fails validation", () => {
     expect(useApp.getState().lastOperation?.message).toBe(translate("workspace.error.switchFailed", "zh-TW"));
   });
 });
+
+// The hub now words the refusal itself, for the request's language, keeping
+// the parser's or the validator's words in brackets (store/graph_unreadable.go).
+// The banner still says it once, in the app's frame, with the advice once.
+const HUB_PARSE_EN =
+  'load project "Disk project": graph.yaml: line 3 has an error. Fix the file, then reload. (yaml: line 3: did not find expected node content)';
+const HUB_PARSE_ZH =
+  'load project "Disk project": graph.yaml: 第 3 行有錯誤。修正檔案後重新載入。（yaml: line 3: did not find expected node content）';
+const HUB_INVALID_EN =
+  'load project "Disk project": graph.yaml: the file has an error. Fix it, then reload. (node "c" has invalid priority "zzz")';
+const HUB_INVALID_ZH =
+  'load project "Disk project": graph.yaml: 檔案有錯誤。修正檔案後重新載入。（node "c" has invalid priority "zzz"）';
+
+describe("the hub's own worded graph.yaml refusal (422)", () => {
+  it("reads a parse error as the line to fix, in English", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_PARSE_EN));
+    const error = await switchFailure();
+    expect(error.message).toBe(
+      translate("workspace.error.graphUnreadableLine", "en", { name: "Disk project", line: "3" }),
+    );
+  });
+
+  it("reads a parse error as the line to fix, in Chinese", async () => {
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_PARSE_ZH));
+    const error = await switchFailure();
+    expect(error.message).toBe(
+      translate("workspace.error.graphUnreadableLine", "zh-TW", { name: "Disk project", line: "3" }),
+    );
+  });
+
+  it("gives a validation reason in English, with the advice once", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_INVALID_EN));
+    const error = await switchFailure();
+    expect(error.message).toBe(
+      translate("workspace.error.graphInvalid", "en", {
+        name: "Disk project",
+        reason: 'node "c" has invalid priority "zzz"',
+      }),
+    );
+  });
+
+  it("gives a validation reason in Chinese, localized, with the advice once", async () => {
+    vi.mocked(api.openProject).mockRejectedValue(new RequestError(422, HUB_INVALID_ZH));
+    const error = await switchFailure();
+    expect(error.message).toBe("無法開啟「Disk project」，graph.yaml 有問題：節點「c」的優先度「zzz」無效。修正檔案後再切換一次。");
+  });
+});
