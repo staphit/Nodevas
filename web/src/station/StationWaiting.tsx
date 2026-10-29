@@ -55,19 +55,33 @@ export function StationWaiting() {
           text: t("budget.exceeded", { limit: t(`budget.limit.${item.limit}`) }),
           primary: { label: t("budget.adjust"), run: () => openSettings("budget") },
         };
-      case "ask":
+      case "ask": {
+        const isPermission = item.ask.kind === "permission";
+        const agentName = item.ask.sessionName || agentWho(item.ask.agent ?? "", "");
+        const text = isPermission
+          ? t("station.waiting.permissionAsk", {
+              agent: agentName,
+              tool: item.ask.tool || "tool",
+            })
+          : t("station.waiting.ask", {
+              agent: agentName,
+              question: excerpt(item.ask.question),
+            });
+        const sub = isPermission && item.ask.toolInput
+          ? excerpt(item.ask.toolInput)
+          : item.ask.nodeId
+            ? titleOf(item.ask.nodeId)
+            : undefined;
         return {
-          text: t("station.waiting.ask", {
-            agent: item.ask.sessionName || agentWho(item.ask.agent ?? "", ""),
-            question: excerpt(item.ask.question),
-          }),
-          sub: item.ask.nodeId ? titleOf(item.ask.nodeId) : undefined,
+          text,
+          sub,
           nodeId: item.ask.nodeId || undefined,
           primary: {
             label: t("station.waiting.answer"),
             run: () => dispatch({ kind: "ask", askId: item.ask.id, sessionId: item.ask.sessionId }),
           },
         };
+      }
       case "held":
         return {
           text: t("station.waiting.held", { from: item.message.from, to: item.message.to }),
