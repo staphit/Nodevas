@@ -107,4 +107,17 @@ describe("Sidebar tools", () => {
     const { container } = render(<Sidebar />);
     expect(container.querySelectorAll('input[type="file"]').length).toBeGreaterThanOrEqual(3);
   });
+
+  // Creating nodes writes graph.yaml, the file the reader has to fix; the
+  // Import menu's Markdown and JSON Canvas items stand down for that, and so
+  // does the big button in front of them.
+  it("disables Import MD while graph.yaml cannot be read", async () => {
+    const user = userEvent.setup();
+    useApp.setState({ graphUnreadable: "graph.yaml: line 41 has an error." });
+    render(<Sidebar />);
+    await user.click(screen.getByRole("button", { name: "More project actions" }));
+    expect(screen.getByRole("button", { name: /Import MD/ })).toBeDisabled();
+    useApp.setState({ graphUnreadable: null });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Import MD/ })).toBeEnabled());
+  });
 });
