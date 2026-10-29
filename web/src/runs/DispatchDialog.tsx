@@ -359,9 +359,13 @@ export function DispatchDialog({
           ? typeRefusal
           : caught instanceof AuthError && caught.status === 403
           ? t("runs.permissionDenied", { message: text })
-          : // On this route a 409 only ever means the runner cannot take runs.
+          : // A 409 is a failed precondition: an old runner, but also a repo
+            // with no test command for the Tester stage. The hub's reason says
+            // which, in the reader's language; the generic line is for a reply
+            // without one.
             caught instanceof ConflictError
-            ? t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
+            ? caught.serverMessage ||
+              t(mode === "interactive" ? "terminal.runnerCannotInteract" : "runs.runnerCannotRun")
             : overBudget
               ? t("runs.overBudget", { message: text })
               : text,
