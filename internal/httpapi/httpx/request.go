@@ -9,9 +9,14 @@ import (
 	"strings"
 )
 
-// Language is the interface language the request's reader uses. The browser
-// sends it as Accept-Language; a caller that sends none reads English.
+// Language is the interface language the request's reader uses. The app
+// sends it as Accept-Language, and also as ?language= where it cannot set a
+// header (a plain download link); the query wins, being the app's setting
+// rather than the browser's. A caller that sends neither reads English.
 func Language(r *http.Request) locale.Language {
+	if named := strings.TrimSpace(r.URL.Query().Get("language")); named != "" {
+		return locale.FromTag(named)
+	}
 	return locale.FromTag(r.Header.Get("Accept-Language"))
 }
 
