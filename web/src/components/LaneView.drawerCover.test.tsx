@@ -3,6 +3,8 @@
  * orientation switch, ?, ⋯) clear of an open node drawer: the pane is told
  * how far the drawer reaches into its toolbar.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -204,5 +206,37 @@ describe("horizontal timeline's node column beside an open drawer", () => {
     });
     for (const cell of sticky()) expect(cell.style.right).toBe("");
     view.unmount();
+  });
+});
+
+// The notice that stands in for the board while graph.yaml cannot be read
+// was centred in the whole pane, so an open drawer covered its right half and
+// all of its Reload button. It centres in what the drawer leaves visible.
+describe.each(["graph", "timeline"] as const)("%s pane's unreadable-graph notice beside an open drawer", (variant) => {
+  it("sits in the pane, which carries the drawer's reach", async () => {
+    useApp.setState({ graphUnreadable: "graph.yaml: line 41 has an error. Fix the file, then reload." });
+    const stage = document.createElement("main");
+    stage.className = "stage";
+    document.body.appendChild(stage);
+    const { unmount } = render(<LaneView variant={variant} {...paneProps} />, { container: stage });
+    const drawer = document.createElement("div");
+    drawer.className = "drawer";
+    await act(async () => {
+      stage.appendChild(drawer);
+    });
+    const pane = stage.querySelector<HTMLElement>(".lane-wrap")!;
+    expect(pane.querySelector(".lane-body > .board-unreadable")).not.toBeNull();
+    expect(pane.style.getPropertyValue("--drawer-cover")).toBe("580px");
+    unmount();
+  });
+
+  it("keeps its card and Reload clear of the drawer (stylesheet contract)", () => {
+    // jsdom applies no CSS, so the rule is read from the stylesheet.
+    const css = readFileSync(resolve(process.cwd(), "src/styles/10d-canvas-chrome.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+    const rule = /\.lane-wrap\[data-drawer-cover\]\s+\.board-unreadable\s*\{([^}]*)\}/.exec(css);
+    expect(rule?.[1]).toMatch(/padding-right:\s*var\(--drawer-cover\)/);
   });
 });
