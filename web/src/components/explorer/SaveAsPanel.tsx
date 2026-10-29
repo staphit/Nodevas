@@ -11,7 +11,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
-import { projectNameTaken } from "./projectNameTaken";
+import { projectNameClash, projectNameClashMessage } from "./projectNameTaken";
 
 export function useSaveAs({
   activeProject,
@@ -67,8 +67,9 @@ export function useSaveAs({
       ? activeProject.slice(0, activeProject.lastIndexOf("/"))
       : "";
     const fullName = parent ? `${parent}/${name}` : name;
-    if (projectNameTaken(projectByName.keys(), fullName)) {
-      setSaveAsError(t("explorer.saveAsDuplicate"));
+    const clash = projectNameClash(projectByName.keys(), fullName);
+    if (clash !== null) {
+      setSaveAsError(projectNameClashMessage(clash, fullName, t("explorer.saveAsDuplicate"), t));
       return;
     }
 

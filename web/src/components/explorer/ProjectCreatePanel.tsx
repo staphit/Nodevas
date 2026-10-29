@@ -12,7 +12,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
-import { projectNameTaken } from "./projectNameTaken";
+import { projectNameClash, projectNameClashMessage } from "./projectNameTaken";
 
 /** `parent` is the containing project/folder path; "" means the workspace root. */
 export type ProjectCreateTarget = { mode: "project" | "folder"; parent: string };
@@ -79,8 +79,9 @@ export function useProjectCreate({
       projectCreateTarget.parent && projectCreateTarget.parent !== "."
         ? `${projectCreateTarget.parent}/${label}`
         : label;
-    if (projectNameTaken(projectByName.keys(), fullName)) {
-      setProjectCreateError(t("explorer.createDuplicate"));
+    const clash = projectNameClash(projectByName.keys(), fullName);
+    if (clash !== null) {
+      setProjectCreateError(projectNameClashMessage(clash, fullName, t("explorer.createDuplicate"), t));
       return;
     }
 
