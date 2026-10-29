@@ -5837,7 +5837,7 @@ const messages: Record<Language, MessageCatalog> = {
     "agents.ask.permissionQuestion": "{agent} 想要執行 {tool}",
     "agents.ask.answerPlaceholder": "你的回答…",
     "agents.ask.send": "送出",
-    "agents.ask.dismiss": "關閉",
+    "agents.ask.dismiss": "不回答",
     "agents.ask.allow": "允許",
     "agents.ask.allowRun": "本次執行一律允許",
     "agents.ask.toolInput": "輸入",
