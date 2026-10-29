@@ -464,11 +464,14 @@ export function WorkspaceTree({
                   }}
                   disabled={switching && !project.isFolder}
                   aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                  title={
+                  // The name leads: it is cut with an ellipsis when long, and
+                  // this is the tooltip over the row's tags, padding and focus.
+                  title={`${project.label}
+${
                     project.isFolder
                       ? t("explorer.folderProjectTitle")
                       : t("explorer.projectSelectionTitle")
-                  }
+                  }`}
                 >
                   <span className="project-tree-name">{project.label}</span>
                   {project.isFolder && (
