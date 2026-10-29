@@ -208,7 +208,7 @@ func TestUnreadableGraphNamesTheLineInTheReadersLanguage(t *testing.T) {
 			}
 			// The line the unclosed bracket is on (yaml.v3 itself says 2,
 			// counting its parser errors from zero).
-			line := "line 3 "
+			line := "Line 3 "
 			if strings.HasPrefix(language, "zh") {
 				line = "第 3 行"
 			}

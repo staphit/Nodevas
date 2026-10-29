@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"nodevas/internal/locale"
@@ -60,5 +61,29 @@ func TestUnreadableGraphNamesTheLineTheMistakeIsOn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The sentence reads as one: the client shows it without its "graph.yaml: "
+// lead, so the English starts with a capital, and the Chinese follows the
+// file name with a full-width colon like every other Chinese sentence.
+func TestUnreadableGraphSentenceReadsWellInBothLanguages(t *testing.T) {
+	for _, data := range []string{
+		"version: 1\nnodes:\n  - id: [broken\n",
+		"version: 1\nnodes:\n  - id: a\n  - id: a\n",
+	} {
+		refusal := unreadable(t, data)
+		english := locale.Render(refusal, locale.English)
+		said, ok := strings.CutPrefix(english, "graph.yaml: ")
+		if !ok {
+			t.Fatalf("English %q does not lead with the file", english)
+		}
+		if said == "" || said[0] < 'A' || said[0] > 'Z' {
+			t.Fatalf("English sentence starts in lowercase: %q", said)
+		}
+		chinese := locale.Render(refusal, locale.Chinese)
+		if !strings.HasPrefix(chinese, "graph.yaml：") {
+			t.Fatalf("Chinese %q does not lead with graph.yaml and a full-width colon", chinese)
+		}
 	}
 }
