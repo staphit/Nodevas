@@ -14,6 +14,7 @@ import type { PageDoc, PageSaveResult } from "../../state/types";
 import { useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 import type { EditorMode } from "./editorExtensions";
+import { useNodeDetailView } from "./openNodeDetail";
 
 /** What the editor passes around: the node id is filled in on the way to the store. */
 type PageDocInput = PageDoc | Omit<PageDoc, "nodeId"> | null;
@@ -241,6 +242,15 @@ export function useNodePages({
       void selectPage(initialPageID);
     }
   }, [initialPageID, pages, pagesLoading, selectPage]);
+
+  // A search jump asks for the subpage that holds its match; the panel
+  // showing the node opens it once its pages are listed.
+  const pageRequest = useNodeDetailView((s) => s.pageRequest);
+  useEffect(() => {
+    if (pageRequest?.nodeId !== id || pagesLoading) return;
+    useNodeDetailView.getState().clearPageRequest();
+    if (pages.some((page) => page.id === pageRequest.pageId)) void selectPage(pageRequest.pageId);
+  }, [pageRequest, id, pages, pagesLoading, selectPage]);
 
   const createPage = useCallback(async () => {
     const title = pageTitle.trim();

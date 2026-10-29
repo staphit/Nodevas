@@ -29,6 +29,7 @@ import { openSettings, type SettingsSection } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
 import { setProjectMode } from "../station/projectMode";
 import { confirmAction } from "./ConfirmDialog";
+import { openPageHoldingMatch } from "./drawer/openNodeDetail";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
 import { useTeamServer, useViewer } from "./SignIn";
 import { COMMAND_PALETTE_EVENT, replayTour, type CommandPaletteView } from "./topbar/actions";
@@ -675,6 +676,8 @@ export function CommandPalette() {
     // As with following a link: the board shows wherever the reader was, so
     // the jump scrolls it to the node too.
     revealNode(item.nodeId);
+    // A hit only a subpage holds opens that subpage, not the main page.
+    if (item.resultKind === "node") await openPageHoldingMatch(item.nodeId, item.title, query);
   };
 
   if (!open) return null;
