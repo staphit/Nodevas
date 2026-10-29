@@ -31,7 +31,12 @@ func TestRunErrorSpeaksTheReadersLanguage(t *testing.T) {
 		{refused + " (and nobody is at the runner's terminal to accept)",
 			"自動接受需要最近在 hub 上驗證過身分；repo visual-editor 不在這個 runner 的自動接受清單上；" +
 				"agent claude 不在這個 runner 的自動接受清單上（而且 runner 的終端機前沒有人可以接受）"},
+		{"cancelled by bea", "被 bea 取消"},
+		{"paused everything: cancelled by bea", "全部暫停：被 bea 取消"},
+		{"cancelled by a person", "被人取消"},
+		{"the pipeline failed", "管線失敗了"},
 		{"not now", "not now"},
+		{"declined at the runner; not now", "declined at the runner; not now"},
 	}
 
 	f := newRunsFixture(t)

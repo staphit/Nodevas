@@ -74,7 +74,7 @@ func (a *API) merge(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusAccepted, updated.Run)
+	c.JSON(http.StatusAccepted, forReader(c, updated.Run))
 }
 
 // budget returns the caller's budget and what runs on their runners used

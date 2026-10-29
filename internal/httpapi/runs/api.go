@@ -187,7 +187,7 @@ func (a *API) create(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, record.Run)
+	c.JSON(http.StatusCreated, forReader(c, record.Run))
 }
 
 // startFailed answers a refused or failed run start.
@@ -332,10 +332,16 @@ func (a *API) list(c *gin.Context) {
 	}
 	out := runnerwire.RunListResponse{Runs: make([]runnerwire.Run, 0, len(records))}
 	for _, r := range records {
-		out.Runs = append(out.Runs, r.Run)
+		out.Runs = append(out.Runs, forReader(c, r.Run))
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, out)
+}
+
+// forReader is run as its reader sees it: its error in their language.
+func forReader(c *gin.Context, run runnerwire.Run) runnerwire.Run {
+	run.Error = runs.RenderError(run.Error, httpx.Language(c.Request))
+	return run
 }
 
 // visible loads the run named in the path, if the caller may see it in the
@@ -379,7 +385,7 @@ func (a *API) get(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, r.Run)
+	c.JSON(http.StatusOK, forReader(c, r.Run))
 }
 
 func (a *API) events(c *gin.Context) {
@@ -466,7 +472,7 @@ func (a *API) cancel(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, updated.Run)
+	c.JSON(http.StatusOK, forReader(c, updated.Run))
 }
 
 // retryNow ends a run's wait for its agent's usage limit to reset: the run
@@ -493,5 +499,5 @@ func (a *API) retryNow(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, updated.Run)
+	c.JSON(http.StatusOK, forReader(c, updated.Run))
 }
