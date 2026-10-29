@@ -164,7 +164,13 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         // failure here only costs the folder grouping, never the graph.
         await get().refreshNodeFolders().catch(() => undefined);
       }),
-      get().refreshState(),
+      // The run state is read against the graph: while graph.yaml cannot be
+      // read the hub refuses it with the same 422, which the board says.
+      get()
+        .refreshState()
+        .catch((e) => {
+          if (!(e instanceof RequestError) || e.status !== 422) throw e;
+        }),
     ]);
   },
 
