@@ -448,3 +448,23 @@
   max-height: min(40vh, calc(180px * var(--font-scale, 1)));
   overflow: auto;
 }
+/* Too little of the board shows beside the drawer to hold the card (a phone's
+   sheet leaves ~110px above it): the card goes full width across the foot of
+   the board, over the drawer, as a band no taller than it needs. At the foot
+   it keeps clear of the drawer's head — its title, menu and close button, and
+   a sheet's drag handle — and covers only the end of the read-only node. A
+   band taller than the pane scrolls, so Reload is always reachable. */
+.board-unreadable[data-above-drawer] {
+  top: auto;
+  bottom: 0;
+  max-height: 100%;
+  z-index: calc(var(--z-drawer, 40) + 1);
+  box-shadow: 0 -10px 24px var(--shadow);
+}
+.board-unreadable[data-above-drawer] .board-unreadable-state {
+  width: min(calc(100% - 16px), calc(640px * var(--font-scale, 1)));
+  margin: 8px auto;
+}
+.board-unreadable[data-above-drawer] .board-unreadable-detail {
+  max-height: min(24vh, calc(120px * var(--font-scale, 1)));
+}

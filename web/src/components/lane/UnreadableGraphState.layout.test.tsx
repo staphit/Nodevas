@@ -10,7 +10,8 @@
  * On a 500px phone the node drawer is a sheet over the bottom 76% of the
  * window: ~110px of board showed above it, too little for the card, so it lay
  * under the sheet. Where the visible board cannot hold the card it goes full
- * width across the top of the board, over the drawer.
+ * width across the foot of the board, over the drawer, clear of the drawer's
+ * head and its close button.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -102,7 +103,7 @@ describe("the notice in the visible part of the board", () => {
       this: HTMLElement,
     ) {
       // The notice fills the pane only while it is in it; over the drawer it
-      // is a band at the top, so the pane is what is measured.
+      // is a band at the foot, so the pane is what is measured.
       if (this.classList.contains("lane-body")) return paneRect;
       if (this.classList.contains("drawer")) return drawerRect;
       return realRect.call(this);
@@ -186,7 +187,7 @@ describe("the notice in the visible part of the board", () => {
     unmount();
   });
 
-  it("goes full width across the top of the board, over a phone's sheet", async () => {
+  it("goes full width across the foot of the board, over a phone's sheet", async () => {
     // 500×800 phone; the sheet is 76vh (608px): 110px of board shows above it.
     paneRect = new DOMRect(0, 82, 500, 718);
     drawerRect = new DOMRect(0, 192, 500, 608);
@@ -266,10 +267,11 @@ describe("the notice's stylesheet contract", () => {
     expect(body).toMatch(/overflow:\s*auto/);
   });
 
-  it("over the drawer, is a band across the top of the board that scrolls when taller", () => {
+  it("over the drawer, is a band across the foot of the board that scrolls when taller", () => {
     const band = rule(/\.board-unreadable\[data-above-drawer\]/);
     expect(band).toMatch(/z-index:\s*calc\(var\(--z-drawer,\s*40\)\s*\+\s*1\)/);
-    expect(band).toMatch(/bottom:\s*auto/);
+    expect(band).toMatch(/top:\s*auto/);
+    expect(band).toMatch(/bottom:\s*0/);
     expect(band).toMatch(/max-height:\s*100%/);
     const card = rule(/\.board-unreadable\[data-above-drawer\] \.board-unreadable-state/);
     expect(card).toMatch(/width:\s*min\(calc\(100% - \d+px\)/);

@@ -30,9 +30,15 @@ const height = (area: Area) => Math.max(0, area.bottom - area.top);
 /**
  * `board` with each overlay cut off it, in viewport coordinates. An overlay
  * is removed by moving whichever one edge keeps the most of the board — the
- * right edge for a side drawer, the bottom for a sheet.
+ * right edge for a side drawer, the bottom for a sheet. A cut that would leave
+ * less than `least` is not taken; with a least of 0 every cut is, and what is
+ * left can be a sliver or nothing.
  */
-export function visibleArea(board: Area, overlays: readonly Area[]): Area {
+export function visibleArea(
+  board: Area,
+  overlays: readonly Area[],
+  least: { width: number; height: number } = { width: MIN_VISIBLE_W, height: MIN_VISIBLE_H },
+): Area {
   let visible = { ...board };
   for (const overlay of overlays) {
     const covered = {
@@ -51,7 +57,7 @@ export function visibleArea(board: Area, overlays: readonly Area[]): Area {
     const best = cuts.reduce((kept, cut) =>
       width(cut) * height(cut) > width(kept) * height(kept) ? cut : kept,
     );
-    if (width(best) >= MIN_VISIBLE_W && height(best) >= MIN_VISIBLE_H) visible = best;
+    if (width(best) >= least.width && height(best) >= least.height) visible = best;
   }
   return visible;
 }
