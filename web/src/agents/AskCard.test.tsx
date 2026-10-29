@@ -240,4 +240,17 @@ describe("AskCard by kind", () => {
     rerender(<AskCard ask={permAsk} onAnswer={vi.fn()} />);
     expect(screen.getByText("antigravity wants to run run_command")).toBeInTheDocument();
   });
+
+  it("renders 不回答 for dismiss button in zh-TW", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    const questionAsk: AgentAsk = {
+      ...baseAsk,
+      id: "ask-q-zh",
+      kind: "question",
+      question: "Which database port?",
+    };
+    render(<AskCard ask={questionAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "不回答" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "關閉" })).toBeNull();
+  });
 });
