@@ -403,6 +403,23 @@ func splitBodyPages(body string) (string, []bodyPage) {
 	return parts[0], pages
 }
 
+// pageHeaders keeps a stored body's subpage markers and headers (id and
+// title) and drops every text, so extractPageTitles still reads it.
+func pageHeaders(body string) string {
+	_, pages := splitBodyPages(body)
+	var out strings.Builder
+	for _, p := range pages {
+		out.WriteString(pageBreak)
+		out.WriteString(p.id)
+		if p.title != "" {
+			out.WriteByte('\t')
+			out.WriteString(p.title)
+		}
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
 func extractPageTitles(body string) []string {
 	_, pages := splitBodyPages(body)
 	if len(pages) == 0 {

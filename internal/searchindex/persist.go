@@ -296,6 +296,9 @@ WHERE project = ?`, project)
 		if err := rows.Scan(&doc.nodeID, &doc.title, &doc.path, &doc.stamp, &doc.meta, &doc.body); err != nil {
 			return nil, fmt.Errorf("scan search_documents: %w", err)
 		}
+		// Only the subpage titles are wanted here; holding every body of a
+		// large project at once would cost megabytes per node.
+		doc.body = pageHeaders(doc.body)
 		out[doc.nodeID] = doc
 	}
 	if err := rows.Err(); err != nil {
