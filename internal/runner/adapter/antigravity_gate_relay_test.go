@@ -298,3 +298,31 @@ func TestAntigravityRelayGrantsCommandsToTheGate(t *testing.T) {
 		}
 	}
 }
+
+// The gate's asks name the run's node, so the card and Station link to it:
+// the run's agy process carries it in RunNodeEnv, which agy hands its hooks.
+func TestAntigravityGateAsksNameTheNode(t *testing.T) {
+	t.Setenv(RunNodeEnv, "stale")
+	job := runnerwire.Job{RunID: "run-1", NodeID: "node-7", Prompt: "do it"}
+	env := RunEnv{Binary: "agy", Workdir: t.TempDir(), Branch: "b", TempDir: t.TempDir(),
+		MCP: MCPServer{Command: "/opt/nodevas", Args: []string{"mcp"}}, PermissionRelay: true}
+	cmd, err := (Antigravity{}).Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node, _ := envValue(cmd.Env, RunNodeEnv); node != "node-7" || countEnv(cmd.Env, RunNodeEnv) != 1 {
+		t.Errorf("%s = %q (%d entries)", RunNodeEnv, node, countEnv(cmd.Env, RunNodeEnv))
+	}
+
+	hub, srv := newFakeHub(t, `{"id":"a1","status":"approved"}`)
+	args, _ := json.Marshal(testMCPArgs(srv.URL))
+	t.Setenv(RunMCPEnv, string(args))
+	t.Setenv(RunNodeEnv, "node-7")
+	shell := []byte(`{"toolCall":{"name":"run_command","args":{"CommandLine":"git status"}}}`)
+	if out := AntigravityGateMain([]string{AntigravityGateRelayFlag}, shell); !strings.Contains(out, `"allow"`) {
+		t.Fatalf("relay: %s", out)
+	}
+	if ask := hub.last(); ask["nodeId"] != "node-7" || ask["agent"] != "antigravity" {
+		t.Errorf("ask = %v", ask)
+	}
+}
