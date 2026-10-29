@@ -359,6 +359,67 @@ describe("agent-notify", () => {
   });
 });
 
+describe("answerAsk", () => {
+  it("sends {decision, note, answer} for structured answers", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-q/answer": () => ({ ok: true, ask: { id: "ask-q", status: "answered" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-q", {
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-q/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+  });
+
+  it("sends approve_run for permission asks", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-p/answer": () => ({ ok: true, ask: { id: "ask-p", status: "approved" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-p", {
+      decision: "approve_run",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-p/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "approve_run",
+    });
+  });
+
+  it("supports legacy approval calls (approved/denied) mapping to approve/deny", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-app/answer": () => ({ ok: true, ask: { id: "ask-app", status: "approved" } }),
+      "POST /api/agents/asks/ask-den/answer": () => ({ ok: true, ask: { id: "ask-den", status: "denied" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-app", "approved", "LGTM");
+    const call1 = calls.find((c) => c.url.includes("/asks/ask-app/answer"));
+    expect(call1!.body).toEqual({
+      decision: "approve",
+      note: "LGTM",
+    });
+
+    await useAgents.getState().answerAsk("ask-den", "denied");
+    const call2 = calls.find((c) => c.url.includes("/asks/ask-den/answer"));
+    expect(call2!.body).toEqual({
+      decision: "deny",
+    });
+  });
+});
+
 describe("file download URL", () => {
   it("carries the project override in the query", () => {
     expect(agentsApi.agentMessageFileURL("m 1", "a b.md")).toBe(
