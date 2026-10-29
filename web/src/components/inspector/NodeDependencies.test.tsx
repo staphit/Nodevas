@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
@@ -138,6 +138,25 @@ describe("NodeDependencies", () => {
     await user.click(screen.getByRole("button", { name: "新增" }));
     const offered = within(screen.getByLabelText("選擇前置節點")).getAllByRole("option").map((option) => option.textContent);
     expect(offered).toEqual(["文件"]);
+  });
+
+  // The add went out just as graph.yaml stopped reading, so the hub refused
+  // it. Once the file reads again that refusal no longer holds and must not
+  // keep telling the reader to fix a file that is already fixed.
+  it("drops the refusal notice once graph.yaml reads again", async () => {
+    const user = userEvent.setup();
+    const refusal = "graph.yaml 無法讀取，所以沒有做任何變更。修正檔案後重新載入。";
+    updateNode.mockImplementationOnce(async () => {
+      useApp.setState({ graphUnreadable: "line 2" });
+      return { ok: false, status: "error", message: refusal } as never;
+    });
+    useApp.setState({ graphUnreadable: null });
+    render(<NodeDependencies id="design" />);
+    await user.click(screen.getByRole("button", { name: "新增" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+
+    act(() => useApp.setState({ graphUnreadable: null }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("does not offer a prerequisite the expression already names", () => {
