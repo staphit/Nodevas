@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { translate } from "./i18n";
+import { SOURCE_SCAN_TIMEOUT } from "./sourceScan";
 
 // Traditional Chinese text takes full-width punctuation (，；？！：（）) between
 // CJK words. Half-width ,;?!() next to a CJK character reads as a typo; code,
@@ -84,7 +85,7 @@ describe("zh-TW punctuation", () => {
         .map((value) => `${path}: ${value}`),
     );
     expect(hits).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 
   // `${t("x")} (Ctrl K)` reads 「搜尋 (Ctrl K)」 in zh-TW: a hint is put
   // beside translated text through common.withHint, which picks （） there.
@@ -101,7 +102,7 @@ describe("zh-TW punctuation", () => {
         .map(({ at, line }) => `${at}: ${line.trim()}`),
     );
     expect(hits).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 
   it("puts a hint beside a label with the reader's parentheses", () => {
     expect(translate("common.withHint", "en", { label: "Search", hint: "Ctrl/⌘ K" })).toBe("Search (Ctrl/⌘ K)");

@@ -11,6 +11,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { SOURCE_SCAN_TIMEOUT } from "./sourceScan";
 
 const SRC = join(__dirname);
 
@@ -142,7 +143,7 @@ describe("no hard-coded Chinese outside the catalog", () => {
     expect(offenders).toEqual([]);
     // It parses the whole tree synchronously: under a full parallel run that
     // is seconds, so the default 5 s timed out now and then.
-  }, 30_000);
+  }, SOURCE_SCAN_TIMEOUT);
 
   it("allows nothing without a reason", () => {
     for (const entry of ALLOWED) expect(entry.reason.length).toBeGreaterThan(10);

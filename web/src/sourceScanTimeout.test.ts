@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SOURCE_SCAN_TIMEOUT } from "./sourceScan";
 
 // A test that walks the whole of web/src reads hundreds of files
 // synchronously. Alone that is well under a second; under a full parallel
@@ -30,5 +31,5 @@ describe("tests that walk the source tree", () => {
         return /isDirectory\(\)/.test(text) && !/\bSOURCE_SCAN_TIMEOUT\)/.test(text);
       });
     expect(offenders).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 });

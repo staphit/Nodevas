@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatLocalizedDateTime, formatLocalizedTime } from "./i18n";
 import { formatClock } from "./stepup/StepUpDialog";
+import { SOURCE_SCAN_TIMEOUT } from "./sourceScan";
 
 // One moment read two ways — 上午02:42 in the timeline, 凌晨2:42 in a run's
 // details — looks like two moments. Every time of day goes through one helper
@@ -58,5 +59,5 @@ describe("time of day", () => {
     // The one place: the shared options in i18n.ts.
     expect(offenders).toHaveLength(1);
     expect(offenders[0]).toMatch(/^i18n\.ts:/);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 });

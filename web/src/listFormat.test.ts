@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatList } from "./i18n";
+import { SOURCE_SCAN_TIMEOUT } from "./sourceScan";
 
 // A list read out in Traditional Chinese is separated with 、, not the
 // half-width ", " an English list takes.
@@ -49,5 +50,5 @@ describe("lists shown to a reader", () => {
           .map(({ at, line }) => `${at}: ${line.trim()}`),
       );
     expect(offenders).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 });

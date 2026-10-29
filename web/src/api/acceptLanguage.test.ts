@@ -6,6 +6,7 @@ import { auditApi } from "./audit";
 import { streamTurn } from "./copilot";
 import { authPost, req } from "./http";
 import { workspaceApi } from "./workspace";
+import { SOURCE_SCAN_TIMEOUT } from "../sourceScan";
 
 // The hub words its refusals and the titles it makes up (a duplicate's
 // "X copy") for the request's Accept-Language. The browser sends its own
@@ -99,5 +100,5 @@ describe("requests made outside req()", () => {
     };
     walk(root);
     expect(offenders).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT);
 });
