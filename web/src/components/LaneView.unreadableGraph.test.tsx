@@ -94,6 +94,17 @@ describe("a board whose graph.yaml cannot be read", () => {
     expect(screen.getByRole("alert")).toBeTruthy();
   });
 
+  // The run state is read against the graph, so the hub refuses it with the
+  // same 422; the board has said why, and the load still settles.
+  it("does not hand the run state's matching refusal to the error bar", async () => {
+    vi.mocked(api.getState).mockRejectedValue(new RequestError(422, HUB_PARSE_EN));
+    render(<LaneView variant="graph" {...paneProps} />);
+    await act(async () => {
+      await expect(useApp.getState().loadAll()).resolves.toBeUndefined();
+    });
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
   it("covers a board that was open when the file broke", async () => {
     useApp.setState({ graph: VALID, graphRev: "rev-1" });
     render(<LaneView variant="graph" {...paneProps} />);
