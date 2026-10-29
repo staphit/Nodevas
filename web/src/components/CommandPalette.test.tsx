@@ -193,7 +193,7 @@ describe("CommandPalette: a hit inside a subpage", () => {
     }
   });
 
-  it("stays on the main page when the search result names no subpage", async () => {
+  it("requests the main page when the search result names no subpage", async () => {
     const openTab = vi.fn(async (id: string) => {
       useApp.setState({ tabs: [nodeTab(id, "# 設計說明")], activeTab: id });
     });
@@ -210,7 +210,8 @@ describe("CommandPalette: a hit inside a subpage", () => {
       await user.click(await screen.findByRole("option", { name: /設計/ }));
       expect(openTab).toHaveBeenCalledWith("design");
       expect(listSpy).not.toHaveBeenCalled();
-      expect(useNodeDetailView.getState().pageRequest).toBeNull();
+      // The drawer may be on a subpage: the main-page hit has to bring it back.
+      expect(useNodeDetailView.getState().pageRequest).toMatchObject({ nodeId: "design", pageId: "main" });
     } finally {
       searchSpy.mockRestore();
       listSpy.mockRestore();

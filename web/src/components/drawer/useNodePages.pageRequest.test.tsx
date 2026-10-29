@@ -49,6 +49,17 @@ it("opens the requested page on a panel that already shows the node", async () =
   expect(pages.result.current.activePageID).toBe("notes");
 });
 
+it("returns to the main page when the request names main", async () => {
+  const pages = renderHook(() => usePages("a"));
+  await act(async () => {});
+  await act(async () => useNodeDetailView.getState().requestPage("a", "notes"));
+  expect(pages.result.current.activePageID).toBe("notes");
+  await act(async () => useNodeDetailView.getState().requestPage("a", "main"));
+  expect(pages.result.current.activePageID).toBeNull();
+  expect(pages.result.current.pageDoc).toBeNull();
+  expect(useNodeDetailView.getState().pageRequest).toBeNull();
+});
+
 it("leaves a request for another node alone", async () => {
   act(() => useNodeDetailView.getState().requestPage("b", "cast"));
   const pages = renderHook(() => usePages("a"));
