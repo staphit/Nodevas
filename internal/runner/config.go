@@ -83,6 +83,12 @@ type Config struct {
 	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
 	// (adapter.AntigravityModes).
 	AntigravityMode string `json:"antigravityMode,omitempty"`
+	// PermissionRelay sends a headless run's tool-permission prompts to
+	// Nodevas, where a person allows or denies them, instead of refusing
+	// them: Claude Code (--permission-prompt-tool), the Antigravity CLI (its
+	// gate) and OpenCode over ACP. Off by default; the runner's own limits
+	// (read-only runs, plan modes, the gate's denials) stay either way.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
 	// offers are taken without asking at the terminal. nil means off. W1's
 	// boolean form is migrated on load.
