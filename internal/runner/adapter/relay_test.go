@@ -147,7 +147,13 @@ func TestHubAskerFailsClosed(t *testing.T) {
 	}
 
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		// Read the body first: only then does the server notice the
+		// client hanging up.
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
 	}))
 	defer slow.Close()
 	asker, _ = HubAskerFromMCPArgs(testMCPArgs(slow.URL))
