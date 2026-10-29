@@ -422,8 +422,11 @@ export function TimelineGrid({
                 only a corner of its own can cover them where the node column
                 sits (the node heads outrank the header for the same reason).
                 It overlaps the header's lead by a negative margin. */}
+            {/* Beside an open drawer at large text the label can run out of
+                lines; the whole of it is on hover. */}
             <div
               className="horizontal-corner"
+              title={t("timeline.corner")}
               style={{
                 width: nodeColumnWidth,
                 height: HORIZONTAL_HEADER_H,
