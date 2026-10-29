@@ -6,6 +6,12 @@
  * (boardVisibleArea), as wide as that allows up to a reading width that grows
  * with the text, and below a width the text needs it puts Reload under the
  * words instead of beside them.
+ *
+ * On a 500px phone the node drawer is a sheet over the bottom 76% of the
+ * window: ~110px of board showed above it, too little for the card, so it lay
+ * under the sheet. Where the visible board cannot hold the card it goes full
+ * width across the foot of the board, over the drawer, clear of the drawer's
+ * head and its close button.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -14,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import { insetsWithin } from "./boardVisibleArea";
-import { noticeLayout, UnreadableGraphState } from "./UnreadableGraphState";
+import { noticeAboveDrawer, noticeLayout, UnreadableGraphState } from "./UnreadableGraphState";
 
 const MESSAGE =
   "graph.yaml: line 3 has an error. Fix the file, then reload. (yaml: line 3: did not find expected node content)";
@@ -54,17 +60,52 @@ describe("noticeLayout", () => {
   });
 });
 
+describe("noticeAboveDrawer", () => {
+  const pane = { left: 340, top: 82, right: 1280, bottom: 800 };
+
+  it("stays in the board where the drawer leaves room for the card", () => {
+    // 1280×800, 580px drawer: 360px of board shows, at 100% and 150% text.
+    const beside = { ...pane, right: 700 };
+    expect(noticeAboveDrawer(pane, beside, 1)).toBe(false);
+    expect(noticeAboveDrawer(pane, beside, 1.5)).toBe(false);
+  });
+
+  it("goes over the drawer when what shows is too short for the card", () => {
+    // 500×800 phone, 76vh sheet: 110px of board shows above it.
+    const phone = { left: 0, top: 82, right: 500, bottom: 800 };
+    expect(noticeAboveDrawer(phone, { ...phone, bottom: 192 }, 1)).toBe(true);
+    // The sheet dragged down to 300px leaves room.
+    expect(noticeAboveDrawer(phone, { ...phone, bottom: 500 }, 1)).toBe(false);
+  });
+
+  it("goes over the drawer when what shows is too narrow, sooner with larger text", () => {
+    const strip = { ...pane, right: 600 };
+    expect(noticeAboveDrawer(pane, strip, 1)).toBe(false);
+    expect(noticeAboveDrawer(pane, strip, 1.5)).toBe(true);
+    expect(noticeAboveDrawer(pane, { ...pane, right: 440 }, 1)).toBe(true);
+  });
+
+  it("never goes over anything when nothing covers the board", () => {
+    const small = { left: 0, top: 0, right: 180, bottom: 120 };
+    expect(noticeAboveDrawer(small, small, 1)).toBe(false);
+  });
+});
+
 describe("the notice in the visible part of the board", () => {
-  let paneWidth = 940;
+  let paneRect = new DOMRect(340, 82, 940, 718);
+  let drawerRect = new DOMRect(700, 46, 580, 754);
   beforeEach(() => {
-    paneWidth = 940;
+    paneRect = new DOMRect(340, 82, 940, 718);
+    drawerRect = new DOMRect(700, 46, 580, 754);
     useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
     const realRect = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
       this: HTMLElement,
     ) {
-      if (this.classList.contains("board-unreadable")) return new DOMRect(340, 82, paneWidth, 718);
-      if (this.classList.contains("drawer")) return new DOMRect(700, 46, 580, 754);
+      // The notice fills the pane only while it is in it; over the drawer it
+      // is a band at the foot, so the pane is what is measured.
+      if (this.classList.contains("lane-body")) return paneRect;
+      if (this.classList.contains("drawer")) return drawerRect;
       return realRect.call(this);
     });
   });
@@ -102,6 +143,7 @@ describe("the notice in the visible part of the board", () => {
     const { notice, unmount } = mount();
     expect(notice().style.getPropertyValue("--notice-right")).toBe("0px");
     expect(notice().dataset.layout).toBe("row");
+    expect(notice().hasAttribute("data-above-drawer")).toBe(false);
     unmount();
   });
 
@@ -114,6 +156,7 @@ describe("the notice in the visible part of the board", () => {
     expect(notice().style.getPropertyValue("--notice-right")).toBe("580px");
     expect(notice().style.getPropertyValue("--notice-left")).toBe("0px");
     expect(notice().dataset.layout).toBe("stacked");
+    expect(notice().hasAttribute("data-above-drawer")).toBe(false);
     await act(async () => {
       drawer.remove();
     });
@@ -123,13 +166,71 @@ describe("the notice in the visible part of the board", () => {
   });
 
   it("stacks in a narrow pane once the text is 150%", async () => {
-    paneWidth = 600;
+    paneRect = new DOMRect(340, 82, 600, 718);
     const { notice, unmount } = mount();
     expect(notice().dataset.layout).toBe("row");
     await act(async () => {
       document.documentElement.style.setProperty("--font-scale", "1.5");
     });
     expect(notice().dataset.layout).toBe("stacked");
+    unmount();
+  });
+
+  it("stays beside an open drawer at 1280 wide with 150% text", async () => {
+    document.documentElement.style.setProperty("--font-scale", "1.5");
+    const { notice, openDrawer, unmount } = mount();
+    await act(async () => {
+      openDrawer();
+    });
+    expect(notice().style.getPropertyValue("--notice-right")).toBe("580px");
+    expect(notice().hasAttribute("data-above-drawer")).toBe(false);
+    unmount();
+  });
+
+  it("goes full width across the foot of the board, over a phone's sheet", async () => {
+    // 500×800 phone; the sheet is 76vh (608px): 110px of board shows above it.
+    paneRect = new DOMRect(0, 82, 500, 718);
+    drawerRect = new DOMRect(0, 192, 500, 608);
+    const { notice, openDrawer, unmount } = mount();
+    let drawer!: HTMLElement;
+    await act(async () => {
+      drawer = openDrawer();
+    });
+    expect(notice().hasAttribute("data-above-drawer")).toBe(true);
+    for (const side of ["top", "right", "bottom", "left"]) {
+      expect(notice().style.getPropertyValue(`--notice-${side}`)).toBe("0px");
+    }
+    expect(notice().dataset.layout).toBe("stacked");
+    expect(notice().querySelector("button")?.textContent).toBe("Reload");
+
+    // Dragged down to 300px, the sheet leaves room: the card sits above it.
+    drawerRect = new DOMRect(0, 500, 500, 300);
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(notice().hasAttribute("data-above-drawer")).toBe(false);
+    expect(notice().style.getPropertyValue("--notice-bottom")).toBe("300px");
+
+    drawerRect = new DOMRect(0, 192, 500, 608);
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(notice().hasAttribute("data-above-drawer")).toBe(true);
+    await act(async () => {
+      drawer.remove();
+    });
+    expect(notice().hasAttribute("data-above-drawer")).toBe(false);
+    unmount();
+  });
+
+  it("goes over a drawer dragged so wide that the strip beside it is too narrow", async () => {
+    drawerRect = new DOMRect(500, 46, 780, 754);
+    const { notice, openDrawer, unmount } = mount();
+    await act(async () => {
+      openDrawer();
+    });
+    expect(notice().hasAttribute("data-above-drawer")).toBe(true);
+    expect(notice().style.getPropertyValue("--notice-right")).toBe("0px");
     unmount();
   });
 });
@@ -164,5 +265,15 @@ describe("the notice's stylesheet contract", () => {
     const body = rule(/\.board-unreadable-detail/);
     expect(body).toMatch(/max-height:/);
     expect(body).toMatch(/overflow:\s*auto/);
+  });
+
+  it("over the drawer, is a band across the foot of the board that scrolls when taller", () => {
+    const band = rule(/\.board-unreadable\[data-above-drawer\]/);
+    expect(band).toMatch(/z-index:\s*calc\(var\(--z-drawer,\s*40\)\s*\+\s*1\)/);
+    expect(band).toMatch(/top:\s*auto/);
+    expect(band).toMatch(/bottom:\s*0/);
+    expect(band).toMatch(/max-height:\s*100%/);
+    const card = rule(/\.board-unreadable\[data-above-drawer\] \.board-unreadable-state/);
+    expect(card).toMatch(/width:\s*min\(calc\(100% - \d+px\)/);
   });
 });

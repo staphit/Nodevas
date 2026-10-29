@@ -36,6 +36,29 @@ export function noticeLayout(visibleWidth: number, fontScale: number): NoticeLay
   return visibleWidth < SIDE_BY_SIDE_MIN * fontScale ? "stacked" : "row";
 }
 
+/**
+ * The least visible board (in px at 100% text, scaled with the text) the card
+ * is laid out in: a short sentence and Reload under it. Less than that — a
+ * phone's sheet leaves ~110px above it at 500×800, a drawer dragged wide a
+ * strip — and the card goes full width across the foot of the board, over the
+ * drawer, rather than under it or squeezed into what is left.
+ */
+const IN_BOARD_MIN_W = 220;
+const IN_BOARD_MIN_H = 200;
+
+export function noticeAboveDrawer(whole: Area, visible: Area, fontScale: number): boolean {
+  const covered =
+    visible.left !== whole.left ||
+    visible.top !== whole.top ||
+    visible.right !== whole.right ||
+    visible.bottom !== whole.bottom;
+  if (!covered) return false;
+  return (
+    visible.right - visible.left < IN_BOARD_MIN_W * fontScale ||
+    visible.bottom - visible.top < IN_BOARD_MIN_H * fontScale
+  );
+}
+
 function fontScale(root: HTMLElement): number {
   const scale = Number.parseFloat(root.style.getPropertyValue("--font-scale"));
   return Number.isFinite(scale) && scale > 0 ? scale : 1;
@@ -44,6 +67,7 @@ function fontScale(root: HTMLElement): number {
 interface NoticeFrame {
   insets: Area;
   layout: NoticeLayout;
+  aboveDrawer: boolean;
 }
 
 const NO_INSETS: Area = { left: 0, top: 0, right: 0, bottom: 0 };
@@ -55,33 +79,40 @@ const NO_INSETS: Area = { left: 0, top: 0, right: 0, bottom: 0 };
  * wider, the window, and the text size.
  */
 function useNoticeFrame(ref: RefObject<HTMLElement | null>): NoticeFrame {
-  const [frame, setFrame] = useState<NoticeFrame>({ insets: NO_INSETS, layout: "row" });
+  const [frame, setFrame] = useState<NoticeFrame>({ insets: NO_INSETS, layout: "row", aboveDrawer: false });
   useLayoutEffect(() => {
     const notice = ref.current;
     if (!notice) return;
     const doc = notice.ownerDocument;
     const root = doc.documentElement;
     const stage = notice.closest(".lane-wrap")?.parentElement ?? doc.body;
+    // The pane the notice is laid over: over the drawer the notice is only a
+    // band at its foot, so its own rect is not the board's.
+    const pane = notice.parentElement ?? notice;
     const measure = () => {
-      const rect = notice.getBoundingClientRect();
+      const rect = pane.getBoundingClientRect();
       const whole: Area = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-      const visible = visibleArea(whole, boardOverlayRects(notice));
-      const insets = insetsWithin(whole, visible);
-      const layout = noticeLayout(visible.right - visible.left, fontScale(root));
+      const visible = visibleArea(whole, boardOverlayRects(notice), { width: 0, height: 0 });
+      const scale = fontScale(root);
+      const aboveDrawer = noticeAboveDrawer(whole, visible, scale);
+      const shown = aboveDrawer ? whole : visible;
+      const insets = insetsWithin(whole, shown);
+      const layout = noticeLayout(shown.right - shown.left, scale);
       setFrame((current) =>
+        current.aboveDrawer === aboveDrawer &&
         current.layout === layout &&
         current.insets.left === insets.left &&
         current.insets.top === insets.top &&
         current.insets.right === insets.right &&
         current.insets.bottom === insets.bottom
           ? current
-          : { insets, layout },
+          : { insets, layout, aboveDrawer },
       );
     };
     const sizes = new ResizeObserver(measure);
     const watch = () => {
       sizes.disconnect();
-      sizes.observe(notice);
+      sizes.observe(pane);
       for (const overlay of stage.querySelectorAll<HTMLElement>(".drawer, [data-board-overlay]")) {
         sizes.observe(overlay);
       }
@@ -112,14 +143,15 @@ function useNoticeFrame(ref: RefObject<HTMLElement | null>): NoticeFrame {
  * file the reader has to fix. It goes away by itself on the next load that
  * reads (the watcher's graph-changed), or from its own button. It lies over
  * the board rather than replacing it, so the board keeps its scroll, and is
- * laid out in the part of it that shows beside an open drawer.
+ * laid out in the part of it that shows beside an open drawer — or, where
+ * that is too small to hold it, across the foot of the board over the drawer.
  */
 export function UnreadableGraphState({ message }: { message: string }) {
   const { t } = useI18n();
   const loadAll = useApp((s) => s.loadAll);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { insets, layout } = useNoticeFrame(ref);
+  const { insets, layout, aboveDrawer } = useNoticeFrame(ref);
   const { sentence, detail } = splitUnreadableGraph(message);
   const reload = () => {
     setBusy(true);
@@ -132,6 +164,7 @@ export function UnreadableGraphState({ message }: { message: string }) {
       ref={ref}
       className="board-unreadable"
       data-layout={layout}
+      data-above-drawer={aboveDrawer ? "" : undefined}
       style={
         {
           "--notice-left": `${insets.left}px`,
