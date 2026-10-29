@@ -85,7 +85,8 @@ export interface BoardToolbarProps {
   /** Node creation */
   openNodeCreationMenu: (menu: Extract<LaneContextMenu, { kind: "graph" }>) => void;
   viewportCreationAnchor: () => Extract<LaneContextMenu, { kind: "graph" }>;
-  /** False while graph.yaml cannot be read: a new node would write over it. */
+  /** False while graph.yaml cannot be read: a new node, or aligning every
+   * node, would write over it. */
   canCreate?: boolean;
 
   /** Timeline layout */
@@ -227,7 +228,7 @@ export function BoardToolbar({
       id: "align-all",
       label: t("board.alignAll"),
       title: t("board.alignAllTitle"),
-      disabled: !canAlignToGrid,
+      disabled: !canAlignToGrid || !canCreate,
       onSelect: alignAllToGrid,
     },
     {

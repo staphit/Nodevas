@@ -367,6 +367,9 @@ export function TabBody({
   const requestLock = useApp((s) => s.requestLock);
   const releaseLock = useApp((s) => s.releaseLock);
   const heldByOther = Boolean(lock && !lock.mine);
+  // graph.yaml does not parse or validate: the hub refuses the node's writes
+  // until it is fixed, so the panel reads rather than invite edits that fail.
+  const graphUnreadable = useApp((s) => s.graphUnreadable !== null);
 
   useEffect(() => {
     requestLock(id);
@@ -513,6 +516,7 @@ export function TabBody({
   // is what the CRDT is for. What is still single-writer is the file, and that
   // is the leader's job, so everyone else simply never saves.
   const saveBlocked =
+    graphUnreadable ||
     (liveDoc.ready ? !liveDoc.isLeader : heldByOther) ||
     Boolean(activePageID ? pageDoc?.conflict : tab?.conflict);
 
@@ -810,16 +814,24 @@ export function TabBody({
         </div>
       )}
 
+      {graphUnreadable && (
+        <div className="banner banner-warn" role="status">
+          <span>{t("drawer.graphUnreadable")}</span>
+        </div>
+      )}
+
       {/* The row a node is worked from: where it stands, whose it is, and
           handing it to an agent. */}
-      <div className="drawer-action-row">
-        <LifecyclePanel id={id} />
-        <AssigneeField id={id} />
-        {/* Agents exist only once the workstation is on. */}
-        {workstation && (
-          <DispatchControl id={id} onShowRuns={() => setDrawerView("activity")} />
-        )}
-      </div>
+      {!graphUnreadable && (
+        <div className="drawer-action-row">
+          <LifecyclePanel id={id} />
+          <AssigneeField id={id} />
+          {/* Agents exist only once the workstation is on. */}
+          {workstation && (
+            <DispatchControl id={id} onShowRuns={() => setDrawerView("activity")} />
+          )}
+        </div>
+      )}
 
       <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
         {(
@@ -857,8 +869,8 @@ export function TabBody({
 
       <div className="node-content-view" hidden={drawerView !== "content"}>
         {/* What the work must satisfy, above the work itself. */}
-        <AcceptanceCriteria id={id} />
-        <GoalStagesOverride id={id} />
+        {!graphUnreadable && <AcceptanceCriteria id={id} />}
+        {!graphUnreadable && <GoalStagesOverride id={id} />}
         <div className="editor-file-row">
           <SubpageMenu pages={subpages} onPopout={popoutPage} />
           <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
@@ -959,7 +971,7 @@ export function TabBody({
             value={liveEditing ? (liveMountText.current ?? "") : editorBody}
             height="100%"
             theme={theme}
-            readOnly={(liveDoc.ready ? false : heldByOther) || pageBusy}
+            readOnly={graphUnreadable || (liveDoc.ready ? false : heldByOther) || pageBusy}
             extensions={editorExtensions}
             onCreateEditor={syncEditorView}
             onChange={onEditorChange}
@@ -1010,17 +1022,19 @@ export function TabBody({
         </div>
       </div>
 
-      <details
-        className="drawer-more-props"
-        open={morePropsOpen}
-        onToggle={(event) => setMorePropsOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <span>{t("drawer.moreProperties")}</span>
-          <span className="drawer-more-props-hint">{t("drawer.morePropertiesHint")}</span>
-        </summary>
-        {morePropsOpen && <NodeMetaForm id={id} />}
-      </details>
+      {!graphUnreadable && (
+        <details
+          className="drawer-more-props"
+          open={morePropsOpen}
+          onToggle={(event) => setMorePropsOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <span>{t("drawer.moreProperties")}</span>
+            <span className="drawer-more-props-hint">{t("drawer.morePropertiesHint")}</span>
+          </summary>
+          {morePropsOpen && <NodeMetaForm id={id} />}
+        </details>
+      )}
     </div>
   );
 }

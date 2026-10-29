@@ -334,6 +334,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   },
 
   createNode: async (node, options = {}) => {
+    if (get().graphUnreadable !== null) throw new Error(unreadableMessage());
     const created = await api.createNode(node);
     const id = created.id;
     pushUndo({ kind: "create-node", ids: [id] });

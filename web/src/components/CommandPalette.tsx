@@ -137,6 +137,9 @@ export function CommandPalette() {
   const refreshProjects = useApp((state) => state.refreshProjects);
   const refreshTrash = useApp((state) => state.refreshTrash);
   const activeProject = useApp((state) => state.activeProject);
+  // graph.yaml does not parse or validate: a new node would be refused, as
+  // the board says, so none is offered here either.
+  const graphReadable = useApp((state) => state.graphUnreadable === null);
   const activeTab = useApp((state) => state.activeTab);
   const theme = useApp((state) => state.theme);
   const paneOpen = useApp((state) => state.paneOpen);
@@ -252,7 +255,7 @@ export function CommandPalette() {
   }, [query]);
 
   const commands = useMemo<Command[]>(() => {
-    const list: Command[] = [
+    const create: Command[] = [
       {
         key: "new-node",
         title: t("palette.newNode"),
@@ -277,6 +280,9 @@ export function CommandPalette() {
           },
         };
       }),
+    ];
+    const list: Command[] = [
+      ...(graphReadable ? create : []),
       {
         key: "toggle-graph",
         title: paneOpen.graph ? t("palette.hideGraph") : t("palette.showGraph"),
@@ -579,6 +585,7 @@ export function CommandPalette() {
     activeTab,
     canCreateProjects,
     createNode,
+    graphReadable,
     nodeTypes,
     explorerCollapsed,
     projects,
