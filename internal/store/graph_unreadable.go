@@ -40,17 +40,19 @@ func graphUnreadable(data []byte, cause error) *GraphUnreadableError {
 	if match := yamlLine.FindStringSubmatch(detail); match != nil {
 		e.Line, _ = strconv.Atoi(match[1])
 	}
-	// "graph.yaml: " and the parser's "line N" stay in both languages: the
-	// client recognizes an unreadable graph by them when a switch fails.
+	// The sentence leads with the file it is about; the client shows what
+	// follows on its own, so that starts a sentence: a capital in English,
+	// and in Chinese the full-width colon every Chinese sentence uses. The
+	// parser's "line N" stays as it wrote it.
 	if e.Line > 0 {
 		e.message = locale.Say(
-			"graph.yaml: line %d has an error. Fix the file, then reload. (%s)",
-			"graph.yaml: 第 %d 行有錯誤。修正檔案後重新載入。（%s）",
+			"graph.yaml: Line %d has an error. Fix the file, then reload. (%s)",
+			"graph.yaml：第 %d 行有錯誤。修正檔案後重新載入。（%s）",
 			e.Line, detail)
 	} else {
 		e.message = locale.Say(
-			"graph.yaml: the file has an error. Fix it, then reload. (%s)",
-			"graph.yaml: 檔案有錯誤。修正檔案後重新載入。（%s）",
+			"graph.yaml: The file has an error. Fix it, then reload. (%s)",
+			"graph.yaml：檔案有錯誤。修正檔案後重新載入。（%s）",
 			detail)
 	}
 	return e
