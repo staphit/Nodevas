@@ -131,7 +131,7 @@ describe("ProblemsPanel", () => {
     const name = screen.getByText("Bravo");
     const heading = name.parentElement!;
     expect(heading).toHaveClass("problems-issue-title");
-    expect(heading.textContent).toBe("Bravo · 前置條件");
+    expect(heading.textContent?.replace(/ /g, " ")).toBe("Bravo · 前置條件");
 
     const css = readFileSync(resolve(process.cwd(), "src/styles/10a-canvas-tools.css"), "utf8").replace(
       /\/\*[\s\S]*?\*\//g,
@@ -145,6 +145,27 @@ describe("ProblemsPanel", () => {
         .join(";");
     expect(rulesFor(".problems-issue b")).not.toMatch(/display:\s*block/);
     expect(rulesFor(".problems-issue-title")).toMatch(/display:\s*block/);
+  });
+
+  // One block was not enough: a name that ends near the panel's edge still
+  // broke at the space before the dot (a 29-character name at 320px), and
+  // the field's line began "· 前置條件". The dot holds on to the name.
+  it("never starts a line with the dot when a long name wraps", () => {
+    render(
+      <ProblemsPanel
+        analysis={empty}
+        issues={[{ severity: "error", nodeId: "b", field: "requires", msg: "未知的節點" }]}
+        nodeTitle={() => "Focus block architecture revi"}
+        onPick={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    const heading = screen.getByText("Focus block architecture revi").parentElement!;
+    const text = heading.textContent ?? "";
+    const dot = text.indexOf("·");
+    expect(dot).toBeGreaterThan(0);
+    // No break opportunity right before the dot.
+    expect(text[dot - 1]).toBe(" ");
   });
 
   it("says one day, not one days, for a one-day critical path", () => {
