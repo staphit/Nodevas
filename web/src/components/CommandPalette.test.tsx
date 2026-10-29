@@ -192,3 +192,48 @@ describe("CommandPalette: while a search is on its way", () => {
     }
   });
 });
+
+describe("CommandPalette: Enter before the results arrive", () => {
+  it("opens the first result once it lands", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    let answer: (value: Awaited<ReturnType<typeof api.search>>) => void = () => {};
+    const searchSpy = vi
+      .spyOn(api, "search")
+      .mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    try {
+      open();
+      search("Zulu card");
+      // Straight away: the debounce has not even sent the search yet.
+      fireEvent.keyDown(screen.getByRole("textbox", { name: /^Search/ }), { key: "Enter" });
+      expect(openTab).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(searchSpy).toHaveBeenCalledWith("Zulu card"));
+      await act(async () => {
+        answer({ results: [{ project: "beta", nodeId: "zulu", title: "Zulu card", kind: "node" }] });
+      });
+      await vi.waitFor(() => expect(openTab).toHaveBeenCalledWith("zulu"));
+      expect(openTab).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+
+  it("forgets the Enter when the query changes before the answer", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "zulu", title: "Zulu card", kind: "node" }],
+    });
+    try {
+      open();
+      search("Zulu card");
+      fireEvent.keyDown(screen.getByRole("textbox", { name: /^Search/ }), { key: "Enter" });
+      search("Zulu car");
+      await screen.findByRole("option", { name: /Zulu card/ });
+      expect(openTab).not.toHaveBeenCalled();
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+});
