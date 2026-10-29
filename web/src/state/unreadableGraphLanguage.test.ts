@@ -25,11 +25,15 @@ const HUB_PARSE_EN =
   "graph.yaml: line 3 has an error. Fix the file, then reload. (yaml: line 3: did not find expected node content)";
 
 beforeEach(() => {
+  // The language is set apart from the rest: setting it is itself a change.
+  useApp.setState({
+    preferences: { ...readPreferences(), language: "zh-TW" },
+    graphUnreadable: null,
+  });
   vi.clearAllMocks();
   vi.mocked(api.getState).mockRejectedValue(new RequestError(422, HUB_PARSE_EN));
   vi.mocked(api.getGraph).mockRejectedValue(new RequestError(422, HUB_PARSE_EN));
   useApp.setState({
-    preferences: { ...readPreferences(), language: "zh-TW" },
     graph: null,
     graphUnreadable: HUB_PARSE_ZH,
     activeProject: "Alpha",

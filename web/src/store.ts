@@ -57,6 +57,15 @@ connectLanguageSource({
   set: (language) => useApp.getState().updateUIPreference("language", language),
 });
 
+// Why graph.yaml cannot be read is the hub's sentence, worded in the language
+// the request asked in; a reader who changes language asks again rather than
+// keep reading the old one until Reload.
+useApp.subscribe((state, previous) => {
+  if (state.preferences.language === previous.preferences.language) return;
+  if (state.graphUnreadable === null) return;
+  void state.loadAll().catch(() => undefined);
+});
+
 // Undo depth lives outside the store (it holds graph snapshots); mirror just
 // the summary the UI needs [A-05].
 observeUndo(() => useApp.setState(undoMirror()));
