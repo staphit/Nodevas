@@ -6,7 +6,7 @@ import { useApp } from "../store";
 import { PopoutEditor } from "./PopoutEditor";
 
 vi.mock("./Drawer", () => ({ TabBody: () => null }));
-vi.mock("./popoutLiveUpdates", () => ({ usePopoutLiveUpdates: () => {} }));
+vi.mock("../collab/popoutLiveUpdates", () => ({ usePopoutLiveUpdates: () => {} }));
 
 // A subpage popped out into its own window showed its internal id
 // ("p-3f9c…") under the node's title, where the drawer shows the page's name.

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { api } from "../api";
 import { IconClose, IconDoc } from "../icons";
 import { nodeById, useApp, usePreference } from "../store";
 import { applyTextScale } from "../preferences/textScale";
@@ -8,7 +7,8 @@ import { useI18n } from "../i18n";
 import { ConfirmDialogHost } from "./ConfirmDialog";
 import { TabBody } from "./Drawer";
 import { NodeTitleField } from "./inspector/NodeMetaForm";
-import { usePopoutLiveUpdates } from "./popoutLiveUpdates";
+import { usePopoutLiveUpdates } from "../collab/popoutLiveUpdates";
+import { readNodePageTitle } from "./drawer/useNodePages";
 
 export function PopoutEditor() {
   const { t } = useI18n();
@@ -70,10 +70,9 @@ export function PopoutEditor() {
   useEffect(() => {
     if (!nodeID || pageID === "main") return;
     let cancelled = false;
-    void api
-      .listNodePages(nodeID)
-      .then(({ pages }) => {
-        if (!cancelled) setPageTitle(pages.find((page) => page.id === pageID)?.title ?? "");
+    void readNodePageTitle(nodeID, pageID)
+      .then((title) => {
+        if (!cancelled) setPageTitle(title);
       })
       .catch(() => {
         // The header only loses the name; TabBody reports a page it cannot open.

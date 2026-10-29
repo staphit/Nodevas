@@ -57,6 +57,12 @@ export type NodePages = {
   removePage: () => Promise<void>;
 };
 
+/** A subpage's title, as the page menu names it; blank when the node has no such page. */
+export async function readNodePageTitle(nodeID: string, pageID: string): Promise<string> {
+  const { pages } = await api.listNodePages(nodeID);
+  return pages.find((page) => page.id === pageID)?.title ?? "";
+}
+
 /** The node's subpages: which one is open, and every edit to the set of them. */
 export function useNodePages({
   nodeId: id,
