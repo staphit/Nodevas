@@ -62,7 +62,10 @@ export interface CardEvents {
  * and "minimal" below 0.6, its colour and its name. LaneView sets it on
  * .board-inner as data-lod for 04-board.css; the cards leave out what it
  * hides rather than mount it for the stylesheet to hide, since a pan that
- * far out brings in a strip of dozens of cards per frame.
+ * far out brings in a strip of dozens of cards per frame. The run and
+ * autopilot badges are the exception: they stay mounted, the stylesheet
+ * hides them at minimal, and a phone's board starts there with the panel
+ * behind a badge still reachable.
  */
 export type CardDetail = "compact" | "minimal" | undefined;
 
@@ -206,8 +209,8 @@ export const GraphCard = memo(function GraphCard({
             <StatusShape status={status} definitions={customStatuses} />
           )}
           <span className="col-card-title">{title}</span>
-          {detail !== "minimal" && <RunCardBadge nodeId={n.id} />}
-          {detail !== "minimal" && <AutopilotCardBadge nodeId={n.id} />}
+          <RunCardBadge nodeId={n.id} />
+          <AutopilotCardBadge nodeId={n.id} />
         </span>
         {!detail && (
           <span className="col-card-meta">
