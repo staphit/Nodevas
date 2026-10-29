@@ -342,7 +342,7 @@ const HUB_GRAPH_FRAME = /^[^(\uFF08]*[.\u3002] ?[(\uFF08]([\s\S]*)[)\uFF09]$/;
  */
 function unreadableGraphMessage(error: unknown, label: string, language: Language): string | null {
   if (!(error instanceof RequestError)) return null;
-  const said = /(?:^|[:\uFF1A] ?)graph\.yaml[:：] ?([\s\S]*)$/.exec(error.message)?.[1].trim();
+  const said = /(?:^|[:\uFF1A] ?)graph\.yaml[:\uFF1A] ?([\s\S]*)$/.exec(error.message)?.[1].trim();
   if (said === undefined) return null;
   const reason = (HUB_GRAPH_FRAME.exec(said)?.[1] ?? said).trim();
   // engine.ParseGraph: the decoder's own "yaml: ..." and its one other refusal.

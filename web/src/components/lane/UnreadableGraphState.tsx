@@ -16,7 +16,7 @@ export function splitUnreadableGraph(message: string): {
   sentence: string | null;
   detail: string;
 } {
-  const said = /(?:^|[:\uFF1A] ?)graph\.yaml[:：] ?([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
+  const said = /(?:^|[:\uFF1A] ?)graph\.yaml[:\uFF1A] ?([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
   const framed = HUB_FRAME.exec(said);
   if (framed) return { sentence: framed[1].trim(), detail: framed[2].trim() };
   return { sentence: null, detail: said };
