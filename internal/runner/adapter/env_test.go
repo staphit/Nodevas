@@ -76,7 +76,10 @@ func TestAgentsGetNoRunnerSecrets(t *testing.T) {
 func TestAgentsGetNoOuterAgentSession(t *testing.T) {
 	outer := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID",
 		"CODEX_SANDBOX", "OPENCODE_SESSION_ID", "OPENCODE", "GEMINI_SESSION_ID", "GEMINI_CLI",
-		"COPILOT_AGENT_SESSION_ID", "GROK_SESSION_ID", "CURSOR_TRACE_ID", "CURSOR_AGENT", "NODEVAS_SESSION_ID"}
+		"COPILOT_AGENT_SESSION_ID", "GROK_SESSION_ID", "CURSOR_TRACE_ID", "CURSOR_AGENT", "NODEVAS_SESSION_ID",
+		// Claude Code's channel to its session: a child would talk to it.
+		"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+		"CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SSE_PORT", "CLAUDE_PID"}
 	for _, name := range outer {
 		t.Setenv(name, "outer-"+name)
 	}
