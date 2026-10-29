@@ -89,15 +89,23 @@ type BuildingWaiting struct {
 	Total   int `json:"total"`
 }
 
-// BuildingAsk is an agent's question waiting on the viewer.
+// BuildingAsk is an agent's question, or its CLI's permission prompt,
+// waiting on the viewer.
 type BuildingAsk struct {
 	ID          string `json:"id"`
 	SessionID   string `json:"sessionId"`
 	SessionName string `json:"sessionName"`
 	Agent       string `json:"agent"`
-	Question    string `json:"question"`
-	NodeID      string `json:"nodeId"`
-	CreatedAt   int64  `json:"createdAt"`
+	// Kind is approval, question, choice or permission.
+	Kind     string   `json:"kind"`
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+	// Tool is a permission prompt's tool.
+	Tool      string `json:"tool,omitempty"`
+	RunID     string `json:"runId,omitempty"`
+	NodeID    string `json:"nodeId"`
+	CreatedAt int64  `json:"createdAt"`
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
 // BuildingReview is an autopilot task waiting for a person's review.

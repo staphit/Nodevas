@@ -234,9 +234,14 @@ func Assemble(ctx context.Context, src Sources, actor identity.Actor, readable f
 		}
 		bp.Waiting.Asks++
 		if len(bp.Asks) < maxAsks {
+			kind := a.Kind
+			if kind == "" {
+				kind = agents.AskKindApproval
+			}
 			bp.Asks = append(bp.Asks, BuildingAsk{
-				ID: a.ID, SessionID: a.SessionID, SessionName: a.SessionName, Agent: a.Agent,
-				Question: excerpt(a.Question, maxTextRunes), NodeID: a.NodeID, CreatedAt: a.CreatedAt,
+				ID: a.ID, SessionID: a.SessionID, SessionName: a.SessionName, Agent: a.Agent, Kind: kind,
+				Question: excerpt(a.Question, maxTextRunes), Options: a.Options, Tool: a.Tool, RunID: a.RunID,
+				NodeID: a.NodeID, CreatedAt: a.CreatedAt, ExpiresAt: a.ExpiresAt,
 			})
 		}
 	}

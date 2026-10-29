@@ -326,6 +326,10 @@ func (h *Hub) SetProjectResolver(resolve func(name string) (string, error)) {
 type Event struct {
 	Type string `json:"type"` // graph-changed | node-changed | state-changed | presence | locks | awareness | graph-drag | graph-ops
 	ID   string `json:"id,omitempty"`
+	// agent-ask: the new ask's kind (approval, question, choice,
+	// permission) and the run asking, if any.
+	Kind  string `json:"kind,omitempty"`
+	RunID string `json:"runId,omitempty"`
 
 	Project string          `json:"project,omitempty"`
 	Peers   []Peer          `json:"peers,omitempty"`
@@ -442,14 +446,20 @@ func (h *Hub) BroadcastActor(actorID, evType, id string) {
 // the popout editor) do not send a subscription, and going silent on them
 // would look like the server stopped noticing their edits.
 func (h *Hub) BroadcastRoom(room, evType, id string) {
+	h.BroadcastRoomEvent(room, Event{Type: evType, ID: id})
+}
+
+// BroadcastRoomEvent is BroadcastRoom for an event with more than an id;
+// an empty room reaches every client, as Broadcast does.
+func (h *Hub) BroadcastRoomEvent(room string, event Event) {
 	if h == nil {
 		return
 	}
 	if room == "" {
-		h.Broadcast(evType, id)
+		h.send(event, func(*wsClient) bool { return true })
 		return
 	}
-	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
+	h.send(event, func(client *wsClient) bool {
 		client.mu.Lock()
 		defer client.mu.Unlock()
 		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))

@@ -204,12 +204,12 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		// A new question waits on somebody: it also travels as its own event
 		// naming the ask, so the person who can answer is told. Its answer or
 		// expiry is only a panel reload.
+		// It names the ask's kind and run too, so the toast can say what
+		// is asked ("wants to run Bash") before the browser fetches it.
 		if ask, ok := payload.(agents.Ask); ok && eventType == agents.AskEvent && ask.Status == agents.AskPending {
-			if projectRoot == "" {
-				s.hub.Broadcast(agents.AskEvent, ask.ID)
-			} else {
-				s.hub.BroadcastRoom(projectRoot, agents.AskEvent, ask.ID)
-			}
+			s.hub.BroadcastRoomEvent(projectRoot, realtime.Event{
+				Type: agents.AskEvent, ID: ask.ID, Kind: ask.Kind, RunID: ask.RunID,
+			})
 		}
 		// An external session's changes are news for one node: the event
 		// names it, so only a browser showing that node refetches.
