@@ -670,6 +670,13 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* ...and the content view keeps a floor while it is open. Without one its
+   fixed rows (criteria, path, toolbar, save row) took what the properties
+   left, and at 150% text on a 800px screen the editor came down to one line;
+   the properties are the scroller, so they are the ones that give way. */
+.tab-body:has(> .drawer-more-props[open]) > .node-content-view {
+  min-height: 55%;
+}
 .drawer-more-props[open] > summary {
   position: sticky;
   top: 0;
