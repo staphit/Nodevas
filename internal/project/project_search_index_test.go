@@ -180,6 +180,62 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 	}
 }
 
+func TestSearchProjectNodesReturnsSubpagePageID(t *testing.T) {
+	root := writeSearchProject(t, &engine.Node{ID: "design", Title: "遊戲設計"})
+	writeNodeBody(t, root, "design", "main page overview")
+	pageDir := filepath.Join(root, "nodes", "design.pages")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "cast.md"), []byte("小明是唯一的角色"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "world.md"), []byte("世界觀設定"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "pages.json"), []byte(`{"pages":[{"id":"cast","title":"角色名冊"},{"id":"world","title":"世界觀"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info := ProjectInfo{Name: "main", Path: root}
+	index := newTestSearchIndex(t)
+
+	for _, query := range []string{"小明", "overview", "角色名冊"} {
+		wantPage := "cast"
+		if query == "overview" {
+			wantPage = ""
+		}
+		indexed, err := index.search(info, query)
+		if err != nil {
+			t.Fatalf("search %q: %v", query, err)
+		}
+		if len(indexed) != 1 || indexed[0].PageID != wantPage {
+			t.Fatalf("index.search(%q) = %+v, want pageId=%q", query, indexed, wantPage)
+		}
+		ranked, err := index.rank(info, query, 10)
+		if err != nil {
+			t.Fatalf("rank %q: %v", query, err)
+		}
+		if len(ranked) != 1 || ranked[0].PageID != wantPage {
+			t.Fatalf("index.rank(%q) = %+v, want pageId=%q", query, ranked, wantPage)
+		}
+		direct := SearchProjectNodesDirect(info, query)
+		if len(direct) != 1 || direct[0].PageID != wantPage {
+			t.Fatalf("SearchProjectNodesDirect(%q) = %+v, want pageId=%q", query, direct, wantPage)
+		}
+	}
+
+	pm, err := NewManagerAt(filepath.Dir(root), nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pm.Close)
+	cold := pm.searchWhileIndexing(info, "角色名冊")
+	if len(cold) != 1 || cold[0].NodeID != "design" || cold[0].PageID != "cast" {
+		t.Fatalf("searchWhileIndexing(\"角色名冊\") = %+v, want design/cast", cold)
+	}
+}
+
 func BenchmarkSearchWarmIndex(b *testing.B) {
 	root, project := benchmarkProject(b)
 	index := newTestSearchIndex(b)

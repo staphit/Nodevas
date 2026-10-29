@@ -31,6 +31,7 @@ import (
 type SearchResult struct {
 	Project string `json:"project"`
 	NodeID  string `json:"nodeId,omitempty"`
+	PageID  string `json:"pageId,omitempty"`
 	Title   string `json:"title"`
 	Snippet string `json:"snippet,omitempty"`
 	Kind    string `json:"kind"`
