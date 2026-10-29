@@ -19,6 +19,31 @@ interface PanState {
   y: number;
   scrollLeft: number;
   scrollTop: number;
+  /**
+   * Measured once, when the pan starts: where `.board-inner` was on screen
+   * and how far the board can scroll. A pan frame works from these and the
+   * scroll it wrote itself, never from a fresh measurement — a read after
+   * the last frame's writes is a forced layout of every card on the board.
+   */
+  inner: { left: number; top: number } | null;
+  maxLeft: number;
+  maxTop: number;
+  /** The scroll this pan last wrote. */
+  left: number;
+  top: number;
+}
+
+/** How far a board can scroll; unbounded where it has no layout to say. */
+function scrollRange(board: HTMLElement) {
+  const { scrollWidth, scrollHeight, clientWidth, clientHeight } = board;
+  return {
+    maxLeft: scrollWidth > 0 ? Math.max(0, scrollWidth - clientWidth) : Infinity,
+    maxTop: scrollHeight > 0 ? Math.max(0, scrollHeight - clientHeight) : Infinity,
+  };
+}
+
+function clampScroll(value: number, max: number): number {
+  return Math.min(Math.max(0, value), max);
 }
 
 /**
@@ -30,6 +55,8 @@ interface PinchState {
   pointerIds: [number, number];
   startDistance: number;
   startZoom: number;
+  /** The board's place on screen, measured once when the pinch starts. */
+  rect: { left: number; top: number };
 }
 
 /** Two touches closer together than this have no reliable direction. */
@@ -104,14 +131,19 @@ export function useCanvasPan({
     board.scrollTop = (board.scrollTop + centerY) * ratio - centerY;
   }, [boardRef, viewScale]);
 
-  const zoomAt = (nextZoom: number, clientX?: number, clientY?: number) => {
+  const zoomAt = (
+    nextZoom: number,
+    clientX?: number,
+    clientY?: number,
+    measured?: { left: number; top: number },
+  ) => {
     const board = boardRef.current;
     if (!board) return;
     const current = zoomRef.current;
     const next = clampZoom(nextZoom);
     if (next === current) return;
     const drawnAt = viewScaleRef.current;
-    const rect = board.getBoundingClientRect();
+    const rect = measured ?? board.getBoundingClientRect();
     const viewportX = (clientX ?? rect.left + board.clientWidth / 2) - rect.left;
     const viewportY = (clientY ?? rect.top + board.clientHeight / 2) - rect.top;
     zoomAnchorRef.current = {
@@ -189,10 +221,12 @@ export function useCanvasPan({
       const startDistance = distance(first[1], second[1]);
       if (panRef.current) releasePan(board, panRef.current.pointerId);
       if (startDistance >= MIN_PINCH_DISTANCE_PX) {
+        const rect = board.getBoundingClientRect();
         pinchRef.current = {
           pointerIds: [first[0], second[0]],
           startDistance,
           startZoom: zoomRef.current,
+          rect: { left: rect.left, top: rect.top },
         };
       }
       return true;
@@ -202,12 +236,19 @@ export function useCanvasPan({
     if (pointersRef.current.size > 2) return true;
 
     board.setPointerCapture(event.pointerId);
+    const scrollLeft = board.scrollLeft;
+    const scrollTop = board.scrollTop;
+    const inner = board.querySelector<HTMLElement>(".board-inner")?.getBoundingClientRect();
     panRef.current = {
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      scrollLeft: board.scrollLeft,
-      scrollTop: board.scrollTop,
+      scrollLeft,
+      scrollTop,
+      inner: inner ? { left: inner.left, top: inner.top } : null,
+      ...scrollRange(board),
+      left: scrollLeft,
+      top: scrollTop,
     };
     return true;
   };
@@ -233,6 +274,7 @@ export function useCanvasPan({
         pinch.startZoom * (spread / pinch.startDistance),
         (a.x + b.x) / 2,
         (a.y + b.y) / 2,
+        pinch.rect,
       );
       return true;
     }
@@ -242,8 +284,12 @@ export function useCanvasPan({
     const dx = event.clientX - pan.x;
     const dy = event.clientY - pan.y;
     if (!panning && Math.abs(dx) + Math.abs(dy) > 3) setPanning(true);
-    event.currentTarget.scrollLeft = pan.scrollLeft - dx;
-    event.currentTarget.scrollTop = pan.scrollTop - dy;
+    // Clamped as the browser clamps it, so the scroll kept here is the
+    // board's own and pointFromClient can go on without measuring.
+    pan.left = clampScroll(pan.scrollLeft - dx, pan.maxLeft);
+    pan.top = clampScroll(pan.scrollTop - dy, pan.maxTop);
+    event.currentTarget.scrollLeft = pan.left;
+    event.currentTarget.scrollTop = pan.top;
     return true;
   };
 
@@ -274,6 +320,19 @@ export function useCanvasPan({
   };
 
   const pointFromClient = (clientX: number, clientY: number): Point | null => {
+    // Mid-pan the content has moved by exactly the scroll the pan wrote.
+    const pan = panRef.current;
+    if (pan?.inner) {
+      return contentPointFromClient(
+        clientX,
+        clientY,
+        {
+          left: pan.inner.left - (pan.left - pan.scrollLeft),
+          top: pan.inner.top - (pan.top - pan.scrollTop),
+        },
+        viewScale,
+      );
+    }
     const inner = boardRef.current?.querySelector<HTMLElement>(".board-inner");
     if (!inner) return null;
     return contentPointFromClient(

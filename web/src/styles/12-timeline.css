@@ -1424,8 +1424,10 @@
   cursor: grab;
   touch-action: none;
 }
+/* Inherited from the board, so a pan's start and end restyle the board and
+   its cards — which set a cursor of their own — not every element on it. */
 .board.panning,
-.board.panning * {
+.board.panning .col-card {
   cursor: grabbing !important;
   user-select: none !important;
 }

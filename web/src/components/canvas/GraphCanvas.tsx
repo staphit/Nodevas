@@ -27,7 +27,7 @@ import type { CommandResult } from "../../state/operations";
 import { CanvasDecoration } from "./CanvasDecoration";
 import { SnapGuides } from "./SnapGuides";
 import type { SnapBox, SnapGuide } from "./snapping";
-import { GraphCard, type CardEvents } from "./GraphCard";
+import { GraphCard, type CardDetail, type CardEvents } from "./GraphCard";
 import { PeerOverlay } from "./PeerOverlay";
 import { GateWiring, gateLayout, type Gate, type GateLayout } from "./GateWiring";
 import { ReferenceLines, setHoveredReferenceCard } from "./ReferenceLines";
@@ -91,6 +91,8 @@ export interface GraphCanvasProps {
    * null or left out, every card and wire is drawn.
    */
   viewWindow?: ViewWindow;
+  /** What every card leaves out at the board's scale (cardDetailAt). */
+  cardDetail?: CardDetail;
 
   // Alignment. The boxes are shared by every gesture that can snap; the guides
   // are whatever the gesture currently running has landed on.
@@ -165,6 +167,7 @@ export function GraphCanvas({
   centerX,
   rowTop,
   viewWindow = null,
+  cardDetail,
   snapEnabled,
   snapBoxes,
   snapGuides,
@@ -831,6 +834,7 @@ export function GraphCanvas({
           <GraphCard
             key={n.id}
             node={n}
+            detail={cardDetail}
             left={centerX(c) - liveWidth / 2}
             top={rowTop(c.row) + ROW_H / 2 - liveHeight / 2}
             width={liveWidth}
