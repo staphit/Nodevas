@@ -399,6 +399,13 @@
   align-items: flex-start;
   justify-content: center;
 }
+/* An open drawer lies over the pane's right side (useDrawerCover measures the
+   reach): the card centres, and wraps, in what is left, so its text and its
+   Reload button are not under the drawer. The background still fills the
+   pane. On a phone the drawer is a sheet and the reach is never set. */
+.lane-wrap[data-drawer-cover] .board-unreadable {
+  padding-right: var(--drawer-cover);
+}
 .board-unreadable-state {
   border-style: solid;
   border-color: var(--st-failed-fg);
