@@ -366,6 +366,76 @@ func TestSubpagesAreIndexedAndRefreshed(t *testing.T) {
 	eventually(t, manager, root, "beacon", nil, time.Second)
 }
 
+func TestSubpageSearchReturnsMatchingPageID(t *testing.T) {
+	database := testpg.New(t)
+	root := writeProject(t,
+		fixtureNode{
+			id: "design", title: "設計", body: "# 設計說明\n\n**粗體**與共用詞",
+			pages: map[string]string{
+				"pages.json": `{"pages":[{"id":"notes","title":"Notes"},{"id":"cast","title":"角色設定"},{"id":" appendix","title":"***"}]}`,
+				"notes.md":   "# Notes\n\n筆記內容",
+				"cast.md":    "# 角色設定\n\n主角：小明與共用詞",
+				"sym.md":     "符號附錄內容",
+			},
+		},
+		fixtureNode{
+			id: "plain", title: "Plain", body: "main body",
+			pages: map[string]string{
+				"one.md": "subpage lantern",
+			},
+		},
+	)
+	// Rewrite pages.json with valid page id "sym" whose title is symbol-only "***"
+	// so rankTokens("") is empty and RankContext exercises its fallback title scan.
+	if err := os.WriteFile(
+		filepath.Join(root, "nodes", "design.pages", "pages.json"),
+		[]byte(`{"pages":[{"id":"notes","title":"Notes"},{"id":"cast","title":"角色設定"},{"id":"sym","title":"***"}]}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	first := NewManagerWithDB(database)
+	t.Cleanup(func() { _ = first.Close() })
+	second := NewManagerWithDB(database)
+	t.Cleanup(func() { _ = second.Close() })
+
+	for _, manager := range []*Manager{first, second} {
+		// Subpage-only hit in a node with pages.json.
+		matches := search(t, manager, root, "小明")
+		if len(matches) != 1 || matches[0].NodeID != "design" || matches[0].PageID != "cast" {
+			t.Fatalf("search 小明 = %+v, want design/cast", matches)
+		}
+		// Subpage-only hit in a node without pages.json.
+		matches = search(t, manager, root, "lantern")
+		if len(matches) != 1 || matches[0].NodeID != "plain" || matches[0].PageID != "one" {
+			t.Fatalf("search lantern = %+v, want plain/one", matches)
+		}
+		// Hits in the main body, node title, or shared by both stay on the main page (PageID "").
+		for _, q := range []string{"粗體", "設計", "共用詞"} {
+			matches = search(t, manager, root, q)
+			if len(matches) != 1 || matches[0].NodeID != "design" || matches[0].PageID != "" {
+				t.Fatalf("search %q = %+v, want design with empty PageID", q, matches)
+			}
+		}
+		// Ranked phrase hit in a subpage.
+		ranked := rank(t, manager, root, "小明")
+		if len(ranked) == 0 || ranked[0].NodeID != "design" || ranked[0].PageID != "cast" {
+			t.Fatalf("rank 小明 = %+v, want design/cast", ranked)
+		}
+		// Ranked terms hit in a subpage.
+		ranked = rank(t, manager, root, "主角小明的名字是什麼？")
+		if len(ranked) == 0 || ranked[0].NodeID != "design" || ranked[0].PageID != "cast" {
+			t.Fatalf("rank question = %+v, want design/cast", ranked)
+		}
+		// Ranked exact-title fallback scan for a subpage title with no rank tokens.
+		ranked = rank(t, manager, root, "***")
+		if len(ranked) != 1 || ranked[0].NodeID != "design" || ranked[0].PageID != "sym" || ranked[0].Match != MatchTitle {
+			t.Fatalf("rank *** = %+v, want design/sym MatchTitle", ranked)
+		}
+	}
+}
+
 // ---------- tokenisation ----------
 
 func TestCJKSubstringIsFoundMidWord(t *testing.T) {

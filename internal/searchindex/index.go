@@ -44,6 +44,7 @@ const (
 // the file.
 type Match struct {
 	NodeID string
+	PageID string
 	Title  string
 	Text   string
 }
@@ -655,6 +656,7 @@ func (ix *projectIndex) reconcile(ctx context.Context) (bool, error) {
 // terms did not reach scores 0.
 type Ranked struct {
 	NodeID string
+	PageID string
 	Title  string
 	Text   string
 	Match  string
