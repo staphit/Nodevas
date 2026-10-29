@@ -11,7 +11,13 @@ import { useSaveAs } from "./SaveAsPanel";
 
 // Windows file names ignore case, and so does the hub's "already exists"
 // check there: "MAIN" beside "main" got past the form, reached the server and
-// came back as its refusal. The form says so itself, whatever the case.
+// came back as its refusal. The form says so itself, whatever the case, and
+// when only the case differs it says that case does not count, naming the
+// project that holds the name; "already exists" beside a list that shows no
+// "MAIN" read as a bug.
+
+const OTHER_CASE_EN = "“main” is already here. Project names ignore letter case, as folder names do on Windows and macOS.";
+const OTHER_CASE_ZH = "這個位置已經有「main」。專案名稱不分大小寫，和 Windows 與 macOS 的資料夾名稱一樣。";
 
 const main: ProjectEntry = { name: "main", label: "main", depth: 0, path: "/ws/main", nodes: 1 };
 const projectByName = new Map([["main", main]]);
@@ -46,7 +52,7 @@ describe("a project name taken in another case", () => {
     act(() => result.current.setProjectName("MAIN"));
     await act(() => result.current.createProject(event));
     expect(switchProject).not.toHaveBeenCalled();
-    expect(result.current.projectCreateError).toBe("A project with the same name already exists here.");
+    expect(result.current.projectCreateError).toBe(OTHER_CASE_EN);
   });
 
   it("is refused by Save as", async () => {
@@ -55,7 +61,7 @@ describe("a project name taken in another case", () => {
     act(() => result.current.setSaveAsName("Main"));
     await act(() => result.current.saveProjectAs(event));
     expect(switchProject).not.toHaveBeenCalled();
-    expect(result.current.saveAsError).toBe("A project with the same name already exists here.");
+    expect(result.current.saveAsError).toBe(OTHER_CASE_EN);
   });
 
   it("is refused by rename when another project holds it", async () => {
@@ -78,7 +84,24 @@ describe("a project name taken in another case", () => {
     act(() => result.current.setProjectRenameValue("Main"));
     await act(() => result.current.renameProject(event));
     expect(moveProject).not.toHaveBeenCalled();
-    expect(result.current.projectRenameError).not.toBeNull();
+    expect(result.current.projectRenameError).toBe(OTHER_CASE_EN);
     moveProject.mockRestore();
+  });
+
+  it("is explained to a Chinese reader in Chinese", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    const { result } = renderHook(() => useProjectCreate(common));
+    act(() => result.current.beginProjectCreate({ mode: "project", parent: "" }));
+    act(() => result.current.setProjectName("MAIN"));
+    await act(() => result.current.createProject(event));
+    expect(result.current.projectCreateError).toBe(OTHER_CASE_ZH);
+  });
+
+  it("leaves the plain duplicate message for the very same name", async () => {
+    const { result } = renderHook(() => useProjectCreate(common));
+    act(() => result.current.beginProjectCreate({ mode: "project", parent: "" }));
+    act(() => result.current.setProjectName("main"));
+    await act(() => result.current.createProject(event));
+    expect(result.current.projectCreateError).toBe("A project with the same name already exists here.");
   });
 });
