@@ -278,11 +278,11 @@ export const createWorkspaceSlice: AppSlice<WorkspaceSlice> = (set, get) => ({
 
 /**
  * The hub's own sentence around the parser's or the validator's words
- * (store/graph_unreadable.go): "line 3 has an error. Fix the file, then
- * reload. (yaml: ...)", "檔案有錯誤。修正檔案後重新載入。（node ...）". The
- * banner gives its own advice, so only the bracketed words are kept.
+ * (store/graph_unreadable.go), in either language: "line 3 has an error. Fix
+ * the file, then reload. (yaml: ...)". The banner gives its own advice, so
+ * only the bracketed words after the last sentence are kept.
  */
-const HUB_GRAPH_FRAME = /^(?:line \d+ has an error|the file has an error|第 \d+ 行有錯誤|檔案有錯誤)[\s\S]*?[.。] ?[(（]([\s\S]*)[)）]$/;
+const HUB_GRAPH_FRAME = /^[^(\uFF08]*[.\u3002] ?[(\uFF08]([\s\S]*)[)\uFF09]$/;
 
 /**
  * The hub refuses to open a project whose graph.yaml does not parse, and says
@@ -295,7 +295,7 @@ const HUB_GRAPH_FRAME = /^(?:line \d+ has an error|the file has an error|第 \d+
  */
 function unreadableGraphMessage(error: unknown, label: string, language: Language): string | null {
   if (!(error instanceof RequestError)) return null;
-  const said = /(?:^|[:：] ?)graph\.yaml: ([\s\S]*)$/.exec(error.message)?.[1].trim();
+  const said = /(?:^|[:\uFF1A] ?)graph\.yaml: ([\s\S]*)$/.exec(error.message)?.[1].trim();
   if (said === undefined) return null;
   const reason = (HUB_GRAPH_FRAME.exec(said)?.[1] ?? said).trim();
   // engine.ParseGraph: the decoder's own "yaml: ..." and its one other refusal.
