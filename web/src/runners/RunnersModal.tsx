@@ -31,6 +31,9 @@ export const AUTOACCEPT_COMMANDS = [
   "nodevas runner autoaccept repo|agent|mode add|remove …",
 ];
 
+/** The runner CLI command to toggle relaying permission prompts to Nodevas. */
+export const PERMISSION_RELAY_COMMAND = "nodevas runner set permissionRelay true (or false)";
+
 function PolicyChips({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) return <span className="runner-empty-inline">{empty}</span>;
   return (
@@ -232,7 +235,6 @@ function RunnerCard({ runner }: { runner: Runner }) {
   const { t } = useI18n();
   const revoke = useRunners((s) => s.revoke);
   const revoking = useRunners((s) => Boolean(s.revoking[runner.id]));
-  const setPermissionRelay = useRunners((s) => s.setPermissionRelay);
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const info = runner.info;
@@ -336,18 +338,18 @@ function RunnerCard({ runner }: { runner: Runner }) {
           )}
 
           <div className="runner-section runner-permission-relay" data-testid={`runner-relay-${runner.id}`}>
-            <span className="runner-section-label">{t("runners.settings")}</span>
-            <label className="settings-switch">
-              <input
-                type="checkbox"
-                role="switch"
-                checked={Boolean(info?.permissionRelay)}
-                aria-label={t("runners.permissionRelay")}
-                onChange={(e) => void setPermissionRelay(runner.id, e.target.checked)}
-              />
-              <span>{t("runners.permissionRelay")}</span>
-            </label>
-            <span className="runner-hint">{t("runners.permissionRelayHelp")}</span>
+            <span className="runner-section-label">
+              {t("runners.permissionRelayStatus", { status: "\0" }).split("\0")[0]}
+              <span className={`runner-policy-state${info?.permissionRelay ? " on" : ""}`}>
+                {info?.permissionRelay ? t("runners.permissionRelayOn") : t("runners.permissionRelayOff")}
+              </span>
+              {t("runners.permissionRelayStatus", { status: "\0" }).split("\0")[1]}
+            </span>
+            <span className="runner-hint">
+              {t("runners.permissionRelayHelp", { command: "\0" }).split("\0")[0]}
+              <code>{PERMISSION_RELAY_COMMAND}</code>
+              {t("runners.permissionRelayHelp", { command: "\0" }).split("\0")[1]}
+            </span>
           </div>
 
           {/* Revoking is rare and final: it waits in the details, not on
