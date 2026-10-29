@@ -1673,9 +1673,7 @@ export function LaneView({
       )}
       {/* The clipboard outlives the selection that filled it. */}
       {isGraph && !collapsed && !unreadable && selectedIDs.length <= 1 && <NodeClipboardNotice strip />}
-      {collapsed ? null : graphUnreadable !== null ? (
-        <UnreadableGraphState message={graphUnreadable} />
-      ) : (
+      {collapsed ? null : (
       <div className={`lane-body${isGraph && problemsOpen ? " problems-open" : ""}`}>
       <div
         ref={boardRef}
@@ -1732,9 +1730,11 @@ export function LaneView({
               aria-hidden
             />
           )}
-          {!isGraph && emptyHint}
+          {/* Unreadable: the scroll container stays, so a fixed file brings the
+              board back where it was left, but nothing is drawn on it. */}
+          {!isGraph && !unreadable && emptyHint}
           {/* ---------- timeline: lane header + expected/actual lifecycle cards ---------- */}
-          {!isGraph && (
+          {!isGraph && !unreadable && (
             <TimelineGrid
               timelineOrientation={timelineOrientation}
               timelineDateAxis={timelineDateAxis}
@@ -1781,7 +1781,7 @@ export function LaneView({
               updateTimelineOrderDrag={updateTimelineOrderDrag}
             />
           )}
-          {isGraph && (
+          {isGraph && !unreadable && (
             <GraphCanvas
               graph={graph}
               cols={cols}
@@ -1844,10 +1844,11 @@ export function LaneView({
               setGraphNotice={setGraphNotice}
             />
           )}
-          {isGraph && emptyHint}
+          {isGraph && !unreadable && emptyHint}
         </div>
       </div>
-      {isGraph && minimapVisible && cols.length > 0 && (
+      {graphUnreadable !== null && <UnreadableGraphState message={graphUnreadable} />}
+      {isGraph && !unreadable && minimapVisible && cols.length > 0 && (
         <GraphMinimap
           cols={cols}
           selectedGraphNodeIDs={selectedGraphNodeIDs}
@@ -1863,7 +1864,7 @@ export function LaneView({
           mapRef={minimapRef}
         />
       )}
-      {isGraph && problemsOpen && (
+      {isGraph && !unreadable && problemsOpen && (
         <ProblemsPanel
           analysis={analysis}
           issues={localizedIssues}

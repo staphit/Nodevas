@@ -25,7 +25,8 @@ export function splitUnreadableGraph(message: string): {
  * In place of the board while graph.yaml cannot be read: the reason, how to
  * get out of it, and no way to create a node — a write would go over the
  * file the reader has to fix. It goes away by itself on the next load that
- * reads (the watcher's graph-changed), or from its own button.
+ * reads (the watcher's graph-changed), or from its own button. It lies over
+ * the board rather than replacing it, so the board keeps its scroll.
  */
 export function UnreadableGraphState({ message }: { message: string }) {
   const { t } = useI18n();
@@ -39,7 +40,7 @@ export function UnreadableGraphState({ message }: { message: string }) {
       .finally(() => setBusy(false));
   };
   return (
-    <div className="board board-unreadable">
+    <div className="board-unreadable">
       <section className="ui-empty-state board-unreadable-state" role="alert">
         <span className="ui-empty-state-mark" aria-hidden="true" />
         <div>

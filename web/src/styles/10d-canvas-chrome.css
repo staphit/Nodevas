@@ -390,6 +390,11 @@
    The parser's words can be one long unbroken line; they wrap rather than
    widen the card past the pane. */
 .board-unreadable {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  overflow: auto;
+  background: var(--bg);
   display: flex;
   align-items: flex-start;
   justify-content: center;
