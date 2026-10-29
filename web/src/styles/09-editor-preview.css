@@ -382,8 +382,9 @@
    far edge so a failure and its retry button never move. */
 .tab-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   padding: 4px 12px;
   font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
@@ -391,20 +392,38 @@
   flex-shrink: 0;
   background: var(--surface-2);
 }
+/* Offline the row holds a badge, a retry note, a button and the hint. Those
+   three keep to one line each; when the row is too narrow it wraps, and the
+   hint is the part that gives way, onto its own line. */
+.tab-footer .operation-status {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+.tab-footer .operation-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tab-footer .tab-footer-hint {
   margin-left: auto;
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
-  white-space: nowrap;
+  min-width: 0;
 }
 .tab-footer .tab-footer-retry {
+  flex: 0 0 auto;
   color: var(--text-2);
   white-space: nowrap;
 }
 .tab-footer button {
+  flex: 0 0 auto;
   font-size: calc(11px * var(--font-scale, 1));
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
 /* ---------- detached document editor ---------- */
