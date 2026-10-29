@@ -236,7 +236,9 @@ describe.each(["graph", "timeline"] as const)("%s pane's unreadable-graph notice
       /\/\*[\s\S]*?\*\//g,
       "",
     );
-    const rule = /\.lane-wrap\[data-drawer-cover\]\s+\.board-unreadable\s*\{([^}]*)\}/.exec(css);
-    expect(rule?.[1]).toMatch(/padding-right:\s*var\(--drawer-cover\)/);
+    // The card measures what the drawer leaves visible itself
+    // (UnreadableGraphState.layout.test.tsx) and pads to it.
+    const rule = /\n\.board-unreadable\s*\{([^}]*)\}/.exec(css);
+    expect(rule?.[1]).toMatch(/padding:[^;]*var\(--notice-right/);
   });
 });
