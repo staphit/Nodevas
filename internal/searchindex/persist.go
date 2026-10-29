@@ -115,7 +115,72 @@ type storedDoc struct {
 
 // text is the haystack as the old in-memory index held it: the graph metadata
 // line, a newline, then the markdown and the text subpages.
-func (d *storedDoc) text() string { return d.meta + "\n" + d.body }
+func (d *storedDoc) text() string { return d.meta + "\n" + plainBody(d.body) }
+
+// match checks whether lowered is a case-insensitive substring of the main
+// document or any subpage, returning the matching subpage id ("" for the main
+// document) and the text for excerpting.
+func (d *storedDoc) match(lowered string) (string, string, bool) {
+	mainBody, pages := splitBodyPages(d.body)
+	mainText := d.meta + "\n" + mainBody
+	if containsFold(mainText, lowered) {
+		return "", mainText, true
+	}
+	for _, p := range pages {
+		pageText := d.meta + "\n" + p.text
+		if containsFold(pageText, lowered) {
+			return p.id, pageText, true
+		}
+	}
+	if full := d.text(); containsFold(full, lowered) {
+		return "", full, true
+	}
+	return "", "", false
+}
+
+func (d *storedDoc) rankMatch(trimmed, lowered string, tokens []string) (string, string, string) {
+	mainBody, pages := splitBodyPages(d.body)
+	mainText := d.meta + "\n" + mainBody
+	if strings.EqualFold(strings.TrimSpace(d.title), trimmed) {
+		return "", mainText, MatchTitle
+	}
+	for _, p := range pages {
+		if p.title != "" && strings.EqualFold(strings.TrimSpace(p.title), trimmed) {
+			return p.id, d.meta + "\n" + p.text, MatchTitle
+		}
+	}
+	if pageID, text, ok := d.match(lowered); ok {
+		return pageID, text, MatchPhrase
+	}
+	if len(pages) > 0 && len(tokens) > 0 {
+		bestID := ""
+		bestText := mainText
+		bestHits := countTokenHits(mainText, tokens)
+		for _, p := range pages {
+			hits := countTokenHits(p.text, tokens)
+			if hits > bestHits {
+				bestHits = hits
+				bestID = p.id
+				bestText = d.meta + "\n" + p.text
+			}
+		}
+		if bestID != "" {
+			return bestID, bestText, MatchTerms
+		}
+	}
+	return "", d.text(), MatchTerms
+}
+
+func countTokenHits(text string, tokens []string) int {
+	lower := strings.ToLower(text)
+	hits := 0
+	for _, tok := range tokens {
+		if strings.Contains(lower, tok) {
+			hits++
+		}
+	}
+	return hits
+}
 
 // newDocStore wraps the workspace database.
 func newDocStore(database *db.DB) *docStore {
@@ -218,7 +283,7 @@ func withTx(ctx context.Context, handle *sql.DB, fn func(*sql.Tx) error) error {
 // so a rescan can decide per node whether anything has to be read at all.
 func (s *docStore) stored(ctx context.Context, project string) (map[string]*storedDoc, error) {
 	rows, err := s.reader().QueryContext(ctx, `
-SELECT node_id, title, path, modified_at, meta
+SELECT node_id, title, path, modified_at, meta, CASE WHEN position(E'\x1f' in body) > 0 THEN body ELSE '' END
 FROM search_documents
 WHERE project = ?`, project)
 	if err != nil {
@@ -228,7 +293,7 @@ WHERE project = ?`, project)
 	out := make(map[string]*storedDoc, 64)
 	for rows.Next() {
 		doc := &storedDoc{}
-		if err := rows.Scan(&doc.nodeID, &doc.title, &doc.path, &doc.stamp, &doc.meta); err != nil {
+		if err := rows.Scan(&doc.nodeID, &doc.title, &doc.path, &doc.stamp, &doc.meta, &doc.body); err != nil {
 			return nil, fmt.Errorf("scan search_documents: %w", err)
 		}
 		out[doc.nodeID] = doc
@@ -295,7 +360,7 @@ func (s *docStore) putMany(ctx context.Context, project string, batch []pendingW
 		var metaCount, bodyCount int
 		var metaCut, bodyCut bool
 		row.metaTokens, metaCount, metaCut = documentTokens(row.meta)
-		row.bodyTokens, bodyCount, bodyCut = documentTokens(row.body)
+		row.bodyTokens, bodyCount, bodyCut = documentTokens(plainBody(row.body))
 		row.count, row.oversize = metaCount+bodyCount, metaCut || bodyCut
 		rows = append(rows, row)
 	}

@@ -14,6 +14,7 @@ package searchindex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -103,15 +104,20 @@ func freshness(doc fileStamp, pages []fileStamp) string {
 // document is what memory keeps of a node: enough to tell that the row in the
 // database is still the right one.
 type document struct {
-	id    string
-	title string
-	meta  string
-	path  string
-	stamp string
+	id         string
+	title      string
+	meta       string
+	path       string
+	stamp      string
+	pageTitles []string
 }
 
 func (d *document) size() int64 {
-	return int64(len(d.id) + len(d.title) + len(d.meta) + len(d.path) + len(d.stamp))
+	n := int64(len(d.id) + len(d.title) + len(d.meta) + len(d.path) + len(d.stamp))
+	for _, t := range d.pageTitles {
+		n += int64(len(t))
+	}
+	return n
 }
 
 // projectIndex is one project's half of the index: the part that cannot be
@@ -182,7 +188,14 @@ func openIndex(ctx context.Context, docs *docStore, root string) (*projectIndex,
 		return nil, err
 	}
 	for id, doc := range stored {
-		ix.setDoc(&document{id: id, title: doc.title, meta: doc.meta, path: doc.path, stamp: doc.stamp})
+		ix.setDoc(&document{
+			id:         id,
+			title:      doc.title,
+			meta:       doc.meta,
+			path:       doc.path,
+			stamp:      doc.stamp,
+			pageTitles: extractPageTitles(doc.body),
+		})
 	}
 	if err := ix.refreshGraph(ctx); err != nil {
 		return nil, err
@@ -231,30 +244,177 @@ func metadataText(node *engine.Node, names map[string]string) string {
 	}, " ")
 }
 
+// pageBreak introduces a subpage inside a stored body: the marker, the page's
+// id (and optional tab-separated title), a newline, and then the page's text.
+const pageBreak = "\n\x1f"
+
+type bodyPage struct {
+	id    string
+	title string
+	text  string
+}
+
+func pageIDFromPath(path string) string {
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func cleanHeaderField(s string) string {
+	return strings.NewReplacer("\x1f", "", "\n", " ", "\r", " ", "\t", " ").Replace(strings.TrimSpace(s))
+}
+
+func firstHeading(text string) string {
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			return strings.TrimSpace(strings.TrimLeft(line, "#"))
+		}
+		return ""
+	}
+	return ""
+}
+
 // readBody reads a node's markdown and its text subpages. It never touches
 // graph.yaml, which is what makes a watcher-driven node update cheap.
 func readBody(root, id string) (string, fileStamp, []fileStamp) {
 	nodePath := store.NodeDocPath(root, id)
-	content := readCapped(root, nodePath, nodeContentLimit)
-	pages, _ := pageStamps(root, store.NodePagesPath(root, id))
+	content := strings.ReplaceAll(readCapped(root, nodePath, nodeContentLimit), "\x1f", "")
+	pageDir := store.NodePagesPath(root, id)
+	pages, _ := pageStamps(root, pageDir)
 	var body strings.Builder
 	body.WriteString(content)
+
+	titlesByID := map[string]string{}
+	orderByID := map[string]int{}
 	for _, page := range pages {
+		if filepath.Base(page.Path) != "pages.json" {
+			continue
+		}
+		if data, err := store.ReadProjectFileLimit(root, page.Path, pageContentLimit); err == nil {
+			var manifest struct {
+				Pages []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"pages"`
+			}
+			if json.Unmarshal(data, &manifest) == nil {
+				for idx, entry := range manifest.Pages {
+					if entry.ID != "" {
+						orderByID[entry.ID] = idx
+						titlesByID[entry.ID] = strings.TrimSpace(entry.Title)
+					}
+				}
+			}
+		}
+		break
+	}
+
+	textPages := make([]fileStamp, 0, len(pages))
+	for _, page := range pages {
+		if filepath.Base(page.Path) == "pages.json" {
+			continue
+		}
+		textPages = append(textPages, page)
+	}
+	if len(orderByID) > 0 {
+		sort.SliceStable(textPages, func(i, j int) bool {
+			oi, okI := orderByID[pageIDFromPath(textPages[i].Path)]
+			oj, okJ := orderByID[pageIDFromPath(textPages[j].Path)]
+			if okI != okJ {
+				return okI
+			}
+			if okI && okJ {
+				return oi < oj
+			}
+			return false
+		})
+	}
+
+	pageBytes := 0
+	for _, page := range textPages {
 		data, err := store.ReadProjectFileLimit(root, page.Path, pageContentLimit)
 		if err != nil {
 			continue
 		}
-		remaining := pageContentLimit - body.Len()
+		remaining := pageContentLimit - pageBytes
 		if len(data) > remaining {
 			data = data[:remaining]
 		}
+		pageBytes += len(data)
+		pageID := pageIDFromPath(page.Path)
+		pageText := strings.ReplaceAll(string(data), "\x1f", "")
+		pageTitle := titlesByID[pageID]
+		if pageTitle == "" {
+			pageTitle = firstHeading(pageText)
+		} else if !containsFold(pageText, strings.ToLower(pageTitle)) {
+			pageText = pageTitle + "\n" + pageText
+		}
+		body.WriteString(pageBreak)
+		body.WriteString(cleanHeaderField(pageID))
+		if pageTitle != "" {
+			body.WriteByte('\t')
+			body.WriteString(cleanHeaderField(pageTitle))
+		}
 		body.WriteByte('\n')
-		body.Write(data)
-		if body.Len() >= pageContentLimit {
+		body.WriteString(pageText)
+		if pageBytes >= pageContentLimit {
 			break
 		}
 	}
 	return body.String(), stampFile(root, nodePath), pages
+}
+
+func plainBody(body string) string {
+	if !strings.Contains(body, "\x1f") {
+		return body
+	}
+	parts := strings.Split(body, pageBreak)
+	var out strings.Builder
+	out.Grow(len(body))
+	out.WriteString(parts[0])
+	for _, part := range parts[1:] {
+		if _, text, ok := strings.Cut(part, "\n"); ok {
+			out.WriteByte('\n')
+			out.WriteString(text)
+		}
+	}
+	return out.String()
+}
+
+func splitBodyPages(body string) (string, []bodyPage) {
+	if !strings.Contains(body, "\x1f") {
+		return body, nil
+	}
+	parts := strings.Split(body, pageBreak)
+	pages := make([]bodyPage, 0, len(parts)-1)
+	for _, part := range parts[1:] {
+		header, text, ok := strings.Cut(part, "\n")
+		if !ok {
+			continue
+		}
+		id, title, _ := strings.Cut(header, "\t")
+		if id != "" {
+			pages = append(pages, bodyPage{id: id, title: title, text: text})
+		}
+	}
+	return parts[0], pages
+}
+
+func extractPageTitles(body string) []string {
+	_, pages := splitBodyPages(body)
+	if len(pages) == 0 {
+		return nil
+	}
+	titles := make([]string, 0, len(pages))
+	for _, p := range pages {
+		if p.title != "" {
+			titles = append(titles, p.title)
+		}
+	}
+	return titles
 }
 
 func readCapped(root, path string, limit int64) string {
@@ -288,11 +448,16 @@ func pageStamps(root, dir string) ([]fileStamp, error) {
 		if entry.IsDir() {
 			continue
 		}
-		format, ok := store.PageFormatFromFilename(entry.Name())
+		name := entry.Name()
+		if name == "pages.json" {
+			stamps = append(stamps, stampFile(root, filepath.Join(dir, name)))
+			continue
+		}
+		format, ok := store.PageFormatFromFilename(name)
 		if !ok || !store.PageFormatIsText(format) {
 			continue
 		}
-		stamps = append(stamps, stampFile(root, filepath.Join(dir, entry.Name())))
+		stamps = append(stamps, stampFile(root, filepath.Join(dir, name)))
 	}
 	return stamps, nil
 }
@@ -352,7 +517,7 @@ func (ix *projectIndex) flush(ctx context.Context) error {
 	ix.unmaintained += len(batch)
 	for _, write := range batch {
 		doc := write.doc
-		ix.setDoc(&document{id: doc.nodeID, title: doc.title, meta: doc.meta, path: doc.path, stamp: write.stamp})
+		ix.setDoc(&document{id: doc.nodeID, title: doc.title, meta: doc.meta, path: doc.path, stamp: write.stamp, pageTitles: extractPageTitles(doc.body)})
 	}
 	return nil
 }
@@ -381,20 +546,37 @@ func relativePath(root, path string) string {
 // whatever PostgreSQL has committed, so a query running while a reindex is
 // part way through sees each node either before or after its write.
 type indexView struct {
-	project string
-	store   *docStore
-	order   []string
-	titles  map[string]string
+	project    string
+	store      *docStore
+	order      []string
+	titles     map[string]string
+	pageTitles map[string][]string
 }
 
 // view snapshots the index for queries. order is shared rather than copied:
 // refreshGraph replaces the slice, it never writes into one.
 func (ix *projectIndex) view() *indexView {
 	titles := make(map[string]string, len(ix.docs))
+	pageTitles := make(map[string][]string, len(ix.docs))
 	for id, doc := range ix.docs {
 		titles[id] = doc.title
+		if len(doc.pageTitles) > 0 {
+			pageTitles[id] = doc.pageTitles
+		}
 	}
-	return &indexView{project: ix.project, store: ix.store, order: ix.order, titles: titles}
+	return &indexView{project: ix.project, store: ix.store, order: ix.order, titles: titles, pageTitles: pageTitles}
+}
+
+func (ix *indexView) matchesTitle(id, trimmed string) bool {
+	if title, ok := ix.titles[id]; ok && strings.EqualFold(strings.TrimSpace(title), trimmed) {
+		return true
+	}
+	for _, pt := range ix.pageTitles[id] {
+		if strings.EqualFold(strings.TrimSpace(pt), trimmed) {
+			return true
+		}
+	}
+	return false
 }
 
 // query returns every document whose stored text contains the (already
@@ -411,19 +593,24 @@ func (ix *indexView) query(ctx context.Context, lowered string) ([]Match, error)
 	if err != nil {
 		return nil, err
 	}
-	verified := make(map[string]*storedDoc, len(candidates))
+	type verifiedMatch struct {
+		title  string
+		pageID string
+		text   string
+	}
+	verified := make(map[string]verifiedMatch, len(candidates))
 	for _, doc := range candidates {
-		if containsFold(doc.text(), lowered) {
-			verified[doc.nodeID] = doc
+		if pageID, text, ok := doc.match(lowered); ok {
+			verified[doc.nodeID] = verifiedMatch{title: doc.title, pageID: pageID, text: text}
 		}
 	}
 	out := make([]Match, 0, len(verified))
 	for _, id := range ix.order {
-		doc, ok := verified[id]
+		m, ok := verified[id]
 		if !ok {
 			continue
 		}
-		out = append(out, Match{NodeID: id, Title: doc.title, Text: doc.text()})
+		out = append(out, Match{NodeID: id, PageID: m.pageID, Title: m.title, Text: m.text})
 	}
 	return out, nil
 }
@@ -570,9 +757,11 @@ func scanNodes(root string) map[string]*nodeFiles {
 		}
 		parent := filepath.Base(filepath.Dir(path))
 		if strings.HasSuffix(strings.ToLower(parent), ".pages") {
-			format, ok := store.PageFormatFromFilename(name)
-			if !ok || !store.PageFormatIsText(format) {
-				return nil
+			if name != "pages.json" {
+				format, ok := store.PageFormatFromFilename(name)
+				if !ok || !store.PageFormatIsText(format) {
+					return nil
+				}
 			}
 			id := parent[:len(parent)-len(".pages")]
 			node := at(id)
@@ -687,7 +876,8 @@ func matchTier(match string) int {
 func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranked, error) {
 	trimmed := strings.TrimSpace(query)
 	lowered := strings.ToLower(trimmed)
-	candidates, err := ix.store.rankedCandidates(ctx, ix.project, rankTokens(lowered), limit)
+	tokens := rankTokens(lowered)
+	candidates, err := ix.store.rankedCandidates(ctx, ix.project, tokens, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -703,8 +893,7 @@ func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranke
 	}
 	// An exact title always comes first, even when the terms did not fetch it.
 	for _, id := range ix.order {
-		title, known := ix.titles[id]
-		if !known || byID[id] != nil || !strings.EqualFold(strings.TrimSpace(title), trimmed) {
+		if byID[id] != nil || !ix.matchesTitle(id, trimmed) {
 			continue
 		}
 		stored, err := ix.store.document(ctx, ix.project, id)
@@ -717,15 +906,8 @@ func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranke
 	}
 	out := make([]Ranked, 0, len(byID))
 	for id, doc := range byID {
-		text := doc.text()
-		match := MatchTerms
-		switch {
-		case strings.EqualFold(strings.TrimSpace(doc.title), trimmed):
-			match = MatchTitle
-		case containsFold(text, lowered):
-			match = MatchPhrase
-		}
-		out = append(out, Ranked{NodeID: id, Title: doc.title, Text: text, Match: match, Score: doc.score})
+		pageID, text, match := doc.rankMatch(trimmed, lowered, tokens)
+		out = append(out, Ranked{NodeID: id, PageID: pageID, Title: doc.title, Text: text, Match: match, Score: doc.score})
 	}
 	sort.SliceStable(out, func(a, b int) bool {
 		if ta, tb := matchTier(out[a].Match), matchTier(out[b].Match); ta != tb {
