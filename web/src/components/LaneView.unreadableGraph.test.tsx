@@ -158,6 +158,26 @@ describe("a board whose graph.yaml cannot be read", () => {
     expect(screen.getByText("Design")).toBeTruthy();
   });
 
+  // The board was replaced while the file was broken, and the one drawn when
+  // it was fixed opened at scroll 0: the pan buffer's empty grid, the cards
+  // out of sight. The board stays where the reader left it.
+  it("comes back where the reader left the board", async () => {
+    useApp.setState({ graph: VALID, graphRev: "rev-1" });
+    const { container } = render(<LaneView variant="graph" {...paneProps} />);
+    const board = container.querySelector<HTMLElement>(".board")!;
+    board.scrollLeft = 480;
+    board.scrollTop = 320;
+    await load();
+    expect(screen.getByRole("alert")).toBeTruthy();
+
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: VALID, rev: "rev-2", issues: [], statuses: {} });
+    await load();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(container.querySelector(".board")).toBe(board);
+    expect(board.scrollLeft).toBe(480);
+    expect(board.scrollTop).toBe(320);
+  });
+
   it("reloads from its own button", async () => {
     render(<LaneView variant="graph" {...paneProps} />);
     await load();
