@@ -166,34 +166,26 @@ describe("CommandPalette: a hit inside a subpage", () => {
     };
   }
 
-  it("opens the subpage that holds the match, not the main page", async () => {
+  it("opens the subpage named by the search result without fetching subpages", async () => {
     const openTab = vi.fn(async (id: string) => {
       useApp.setState({ tabs: [nodeTab(id, ["# 設計說明", "", "**粗體**"].join("\n"))], activeTab: id });
     });
     useApp.setState({ openTab, revealRequest: null, tabs: [] });
     useNodeDetailView.setState({ pageRequest: null });
     const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
-      results: [{ project: "beta", nodeId: "design", title: "設計", snippet: "主角：小明", kind: "node" }],
+      results: [{ project: "beta", nodeId: "design", pageId: "cast", title: "設計", snippet: "主角：小明", kind: "node" }],
     });
-    const listSpy = vi.spyOn(api, "listNodePages").mockResolvedValue({
-      pages: [
-        { id: "notes", title: "Notes" },
-        { id: "cast", title: "角色設定" },
-      ],
-    });
-    const pageSpy = vi.spyOn(api, "getNodePage").mockImplementation(async (nodeId, pageId) => ({
-      nodeId, pageId, format: "md" as const, rev: "p1",
-      content: pageId === "cast" ? ["# 角色設定", "", "主角：小明"].join("\n") : "# Notes",
-    }));
+    const listSpy = vi.spyOn(api, "listNodePages").mockResolvedValue({ pages: [] });
+    const pageSpy = vi.spyOn(api, "getNodePage");
     try {
       const user = userEvent.setup();
       open();
       search("小明");
       await user.click(await screen.findByRole("option", { name: /設計/ }));
       expect(openTab).toHaveBeenCalledWith("design");
-      await vi.waitFor(() =>
-        expect(useNodeDetailView.getState().pageRequest).toMatchObject({ nodeId: "design", pageId: "cast" }),
-      );
+      expect(useNodeDetailView.getState().pageRequest).toMatchObject({ nodeId: "design", pageId: "cast" });
+      expect(listSpy).not.toHaveBeenCalled();
+      expect(pageSpy).not.toHaveBeenCalled();
     } finally {
       searchSpy.mockRestore();
       listSpy.mockRestore();
@@ -201,9 +193,9 @@ describe("CommandPalette: a hit inside a subpage", () => {
     }
   });
 
-  it("stays on the main page when the main page holds the match", async () => {
+  it("stays on the main page when the search result names no subpage", async () => {
     const openTab = vi.fn(async (id: string) => {
-      useApp.setState({ tabs: [nodeTab(id, "主角：小明")], activeTab: id });
+      useApp.setState({ tabs: [nodeTab(id, "# 設計說明")], activeTab: id });
     });
     useApp.setState({ openTab, revealRequest: null, tabs: [] });
     useNodeDetailView.setState({ pageRequest: null });

@@ -260,6 +260,7 @@ export const workspaceApi = {
       results: {
         project: string;
         nodeId?: string;
+        pageId?: string;
         title: string;
         snippet?: string;
         kind: "project" | "node";
