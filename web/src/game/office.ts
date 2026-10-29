@@ -165,11 +165,17 @@ export function seatedRuns(runs: Run[], now: number): Run[] {
   });
 }
 
-function pendingAskFor(asks: AgentAsk[], sessionId: string | undefined): AgentAsk | undefined {
-  if (!sessionId) return undefined;
+function pendingAskFor(
+  asks: AgentAsk[],
+  sessionId: string | undefined,
+  runId?: string,
+): AgentAsk | undefined {
   let newest: AgentAsk | undefined;
   for (const ask of asks) {
-    if (ask.status !== "pending" || ask.sessionId !== sessionId) continue;
+    if (ask.status !== "pending") continue;
+    const matchesSession = Boolean(sessionId && ask.sessionId === sessionId);
+    const matchesRun = Boolean(runId && ask.runId === runId);
+    if (!matchesSession && !matchesRun) continue;
     if (!newest || ask.createdAt > newest.createdAt) newest = ask;
   }
   return newest;
@@ -299,7 +305,7 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
     // else's): its state is unknown, so it never reads offline.
     const online = runnerOnline(runner);
     const session = join.byRun.get(run.id);
-    const ask = pendingAskFor(inputs.asks, session?.id);
+    const ask = pendingAskFor(inputs.asks, session?.id, run.id);
     const heldMail = heldFor(inputs.held, session);
     const target: ClickTarget = { kind: "run", runId: run.id, nodeId: run.nodeId };
     const actions: ClickTarget[] = [target, { kind: "node", nodeId: run.nodeId }];

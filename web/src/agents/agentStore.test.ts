@@ -354,8 +354,137 @@ describe("agent-notify", () => {
     Object.defineProperty(document, "hidden", { value: false, configurable: true });
   });
 
+  it("formats toast and system notification text per ask kind", async () => {
+    const shown: { title: string; body: string | undefined }[] = [];
+    class FakeNotification {
+      static permission = "granted";
+      onclick: (() => void) | null = null;
+      constructor(title: string, options?: NotificationOptions) {
+        shown.push({ title, body: options?.body });
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+
+    mockFetch({
+      "GET /api/agents/asks": () => ({
+        asks: [
+          {
+            id: "ask-question",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "question",
+            question: "Which port to bind?",
+            status: "pending",
+            createdAt: 1,
+          },
+          {
+            id: "ask-perm",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "permission",
+            tool: "Bash",
+            toolInput: "npm test",
+            question: "Allow Bash?",
+            status: "pending",
+            createdAt: 2,
+          },
+        ],
+      }),
+    });
+    useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" }, toasts: [] });
+
+    await useAgents.getState().handleAsk("ask-question");
+    await useAgents.getState().handleAsk("ask-perm");
+
+    const toasts = useAgents.getState().toasts;
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toMatchObject({
+      from: "api-claude asks",
+      body: "Which port to bind?",
+    });
+    expect(toasts[1]).toMatchObject({
+      from: "api-claude wants to run Bash",
+      body: "npm test",
+    });
+
+    expect(shown).toEqual([
+      { title: "api-claude asks", body: "Which port to bind?" },
+      { title: "api-claude wants to run Bash", body: "npm test" },
+    ]);
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+  });
+
   it("excerpt collapses whitespace", () => {
     expect(excerpt("a\n\n  b")).toBe("a b");
+  });
+});
+
+describe("answerAsk", () => {
+  it("sends {decision, note, answer} for structured answers", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-q/answer": () => ({ ok: true, ask: { id: "ask-q", status: "answered" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-q", {
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-q/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+  });
+
+  it("sends approve_run for permission asks", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-p/answer": () => ({ ok: true, ask: { id: "ask-p", status: "approved" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-p", {
+      decision: "approve_run",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-p/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "approve_run",
+    });
+  });
+
+  it("supports legacy approval calls (approved/denied) mapping to approve/deny", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-app/answer": () => ({ ok: true, ask: { id: "ask-app", status: "approved" } }),
+      "POST /api/agents/asks/ask-den/answer": () => ({ ok: true, ask: { id: "ask-den", status: "denied" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-app", "approved", "LGTM");
+    const call1 = calls.find((c) => c.url.includes("/asks/ask-app/answer"));
+    expect(call1!.body).toEqual({
+      decision: "approve",
+      note: "LGTM",
+    });
+
+    await useAgents.getState().answerAsk("ask-den", "denied");
+    const call2 = calls.find((c) => c.url.includes("/asks/ask-den/answer"));
+    expect(call2!.body).toEqual({
+      decision: "deny",
+    });
   });
 });
 

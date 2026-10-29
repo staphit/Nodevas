@@ -175,4 +175,31 @@ describe("StationWaiting", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("o"));
   });
+
+  it("lists permission asks and opens answer dialog", async () => {
+    useAgents.setState({
+      asks: [
+        {
+          id: "ask-p1",
+          project: "p",
+          sessionId: "s1",
+          sessionName: "laptop-claude",
+          actorId: "u1",
+          kind: "permission",
+          tool: "Bash",
+          toolInput: "npm test",
+          question: "Run command?",
+          status: "pending",
+          createdAt: 1,
+        },
+      ],
+    });
+    mount();
+
+    expect(screen.getByText("laptop-claude wants to run Bash")).toBeInTheDocument();
+    expect(screen.getByText("npm test")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Answer" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: /Allow for this run/ })).toBeInTheDocument();
+  });
 });

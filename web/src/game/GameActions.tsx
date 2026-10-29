@@ -210,8 +210,8 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
             onClose();
             void useApp.getState().openTab(nodeId).catch(reportError);
           }}
-          onAnswer={(decision, note) => {
-            void answerAsk(ask.id, decision, note).then(onClose);
+          onAnswer={(payload) => {
+            void answerAsk(ask.id, payload).then(onClose);
           }}
         />
       ) : (

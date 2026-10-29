@@ -55,6 +55,8 @@ export interface RunnerInfo {
   autoAccept?: AutoAcceptPolicy | null;
   /** How many runs it takes at once; absent from an older runner. */
   maxConcurrent?: number;
+  /** Relay permission prompts to Nodevas (Claude Code, Antigravity, OpenCode ACP). */
+  permissionRelay?: boolean;
 }
 
 export interface Runner {

@@ -71,6 +71,27 @@ export interface AgentMessage {
   decidedAt?: number;
 }
 
+export type AgentAskKind = "approval" | "question" | "choice" | "permission";
+export type AgentAskStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "answered"
+  | "expired";
+export type AgentAskDecision =
+  | "approve"
+  | "approved"
+  | "deny"
+  | "denied"
+  | "answer"
+  | "approve_run";
+
+export interface AgentAskAnswerRequest {
+  decision: AgentAskDecision;
+  note?: string;
+  answer?: string;
+}
+
 export interface AgentAsk {
   id: string;
   project: string;
@@ -81,11 +102,17 @@ export interface AgentAsk {
   question: string;
   aboutMsgId?: string;
   nodeId?: string;
-  status: "pending" | "approved" | "denied" | "expired";
+  status: AgentAskStatus;
   decidedBy?: string;
   note?: string;
   createdAt: number;
   decidedAt?: number;
+  kind?: AgentAskKind;
+  options?: string[];
+  answer?: string;
+  runId?: string;
+  tool?: string;
+  toolInput?: string;
 }
 
 export interface AgentRosterResponse {
@@ -152,12 +179,28 @@ export const agentsApi = {
     const qs = status ? `?status=${encodeURIComponent(status)}` : "";
     return req<{ asks: AgentAsk[] }>(`/api/agents/asks${qs}`);
   },
-  answerAgentAsk: (id: string, decision: "approved" | "denied", note?: string) =>
-    req<{ ok: boolean; ask: AgentAsk }>(
+  answerAgentAsk: (
+    id: string,
+    payload: AgentAskAnswerRequest | ("approved" | "denied" | "approve" | "deny"),
+    legacyNote?: string,
+  ) => {
+    let body: AgentAskAnswerRequest;
+    if (typeof payload === "string") {
+      const decision: AgentAskDecision =
+        payload === "approved" ? "approve" : payload === "denied" ? "deny" : payload;
+      body = {
+        decision,
+        ...(legacyNote !== undefined && legacyNote !== "" ? { note: legacyNote } : {}),
+      };
+    } else {
+      body = payload;
+    }
+    return req<{ ok: boolean; ask: AgentAsk }>(
       `/api/agents/asks/${encodeURIComponent(id)}/answer`,
       {
         method: "POST",
-        body: JSON.stringify({ decision, note: note ?? "" }),
+        body: JSON.stringify(body),
       },
-    ),
+    );
+  },
 };

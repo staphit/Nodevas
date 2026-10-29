@@ -3,6 +3,8 @@ import {
   api,
   type Actor,
   type AgentAsk,
+  type AgentAskAnswerRequest,
+  type AgentAskDecision,
   type AgentFileUpload,
   type AgentInbound,
   type AgentMessage,
@@ -142,7 +144,11 @@ export interface AgentStoreState {
   }) => Promise<boolean>;
   answerAsk: (
     askId: string,
-    decision: "approved" | "denied",
+    answer:
+      | AgentAskAnswerRequest
+      | AgentAskDecision
+      | "approved"
+      | "denied",
     note?: string,
   ) => Promise<void>;
   decideHeld: (messageId: string, decision: "approve" | "reject") => Promise<void>;
@@ -298,13 +304,27 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     }
   },
 
-  answerAsk: async (askId, decision, note) => {
+  answerAsk: async (askId, answer, legacyNote) => {
     set((s) => ({
       submittingAskIds: { ...s.submittingAskIds, [askId]: true },
       error: null,
     }));
     try {
-      await api.answerAgentAsk(askId, decision, note);
+      const payload: AgentAskAnswerRequest =
+        typeof answer === "string"
+          ? {
+              decision:
+                answer === "approved"
+                  ? "approve"
+                  : answer === "denied"
+                    ? "deny"
+                    : answer,
+              ...(legacyNote !== undefined && legacyNote !== ""
+                ? { note: legacyNote }
+                : {}),
+            }
+          : answer;
+      await api.answerAgentAsk(askId, payload);
       await get().refreshAll();
     } catch (err) {
       set({ error: errorText(err) });
@@ -407,10 +427,31 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
       /* fall through: nothing to show */
     }
     if (!ask || ask.status !== "pending" || !canManageSession(ask, get().viewer)) return;
-    const from = ask.sessionName || ask.agent || ask.sessionId;
-    const body = excerpt(ask.question);
-    get().pushToast({ messageId: `ask:${askId}`, from, body });
-    showSystemNotification(translate("agents.ask.notifyTitle", undefined, { session: from }), body,
+    const sessionName = ask.sessionName || ask.agent || ask.sessionId;
+    let toastFrom = sessionName;
+    let notifyTitle = translate("agents.ask.notifyTitle", undefined, { session: sessionName });
+    let bodyText = ask.question;
+
+    if (ask.kind === "question") {
+      toastFrom = translate("agents.ask.notifyQuestionTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "choice") {
+      toastFrom = translate("agents.ask.notifyChoiceTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "permission") {
+      toastFrom = translate("agents.ask.notifyPermissionTitle", undefined, {
+        session: sessionName,
+        tool: ask.tool || "tool",
+      });
+      notifyTitle = toastFrom;
+      if (ask.toolInput) {
+        bodyText = ask.toolInput;
+      }
+    }
+
+    const body = excerpt(bodyText);
+    get().pushToast({ messageId: `ask:${askId}`, from: toastFrom, body });
+    showSystemNotification(notifyTitle, body,
       `agent-ask-${askId}`, () => get().setOpen(true));
   },
 

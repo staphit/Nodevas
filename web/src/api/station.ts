@@ -65,10 +65,17 @@ export interface BuildingAsk {
   sessionId: string;
   sessionName: string;
   agent: string;
+  /** Kind is approval, question, choice or permission. */
+  kind?: string;
   /** At most 120 characters. */
   question: string;
+  options?: string[];
+  tool?: string;
+  toolInput?: string;
+  runId?: string;
   nodeId: string;
   createdAt: number;
+  expiresAt?: number;
 }
 
 export interface BuildingReview {

@@ -72,9 +72,12 @@ export function compactOffice(p: BuildingProject, now: number): CompactOffice {
   const active = p.runs.filter((run) => !runFinal(run.status));
   const askingRuns = new Set(
     p.sessions
-      .filter((session) => session.runId && p.asks.some((ask) => ask.sessionId === session.id))
+      .filter((session) => session.runId && p.asks.some((ask) => ask.sessionId === session.id || ask.runId === session.runId))
       .map((session) => session.runId),
   );
+  for (const ask of p.asks) {
+    if (ask.runId) askingRuns.add(ask.runId);
+  }
   const running = active.filter((run) => run.status === "running" && run.kind !== "plan");
   const planning = active.filter((run) => run.kind === "plan" && !sleeping(run));
   const waitingAtDoor = active.filter((run) => offered(run) && run.kind !== "plan");

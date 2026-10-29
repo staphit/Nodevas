@@ -300,7 +300,7 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
               submitting={submittingAskIds[ask.id]}
               canAnswer={canManageSession(ask, viewer)}
               onSelectNode={(nodeId) => void openTab(nodeId)}
-              onAnswer={(decision, note) => void answerAsk(ask.id, decision, note)}
+              onAnswer={(payload) => void answerAsk(ask.id, payload)}
             />
           ))}
         </section>

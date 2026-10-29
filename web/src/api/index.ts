@@ -118,6 +118,10 @@ export type {
 } from "./remote";
 export type {
   AgentAsk,
+  AgentAskAnswerRequest,
+  AgentAskDecision,
+  AgentAskKind,
+  AgentAskStatus,
   AgentFileUpload,
   AgentInbound,
   AgentMessage,
