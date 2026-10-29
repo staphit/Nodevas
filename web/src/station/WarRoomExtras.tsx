@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import type { AutopilotView } from "../api";
 import { AutopilotStatusChip } from "../autopilot/AutopilotPanel";
 import { analyzeGraph } from "../analysis";
+import { withRequiresProjection } from "../components/canvas/requiresProjection";
 import { useViewer } from "../components/SignIn";
 import { IconMore } from "../icons";
 import { formatList, useI18n } from "../i18n";
@@ -118,7 +119,9 @@ function Fold({ label, open, onToggle }: { label: string; open: boolean; onToggl
 /** The tasks waiting on others to finish, as one line until asked. */
 function WaitingTasks({ titleOf }: { titleOf: TitleOf }) {
   const { t } = useI18n();
-  const graph = useApp((s) => s.graph);
+  // Read as the board reads it: the wires plus every node a `requires`
+  // expression names, so the two never disagree about what waits on what.
+  const graph = withRequiresProjection(useApp((s) => s.graph));
   const statuses = useApp((s) => s.statuses);
   const [open, setOpen] = useState(false);
   const tasks = useMemo(
