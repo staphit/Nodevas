@@ -29,6 +29,12 @@ export interface ExportedFile {
  */
 export type ProjectImportMode = "root" | "folder";
 
+/** The query every export carries: the reader's language, so the hub can
+ * word the document (and its file name) for whoever will open it. */
+function exportQuery(params: Record<string, string>): string {
+  return new URLSearchParams({ ...params, language: requestLanguage() }).toString();
+}
+
 /** Reads the download name the server chose, including UTF-8 filenames. */
 export function fileNameFromDisposition(header: string | null): string {
   if (!header) return "";
@@ -188,10 +194,10 @@ export const workspaceApi = {
       body,
     });
   },
+  /** A plain link (the archive streams to disk), so it cannot carry an
+   * Accept-Language header: the app's language rides in the query. */
   projectExportURL: (project?: string) =>
-    project
-      ? `/api/projects/export?project=${encodeURIComponent(project)}`
-      : "/api/projects/export",
+    `/api/projects/export?${exportQuery(project ? { project } : {})}`,
   /** Not routed through req(): the reply is a file, not JSON. The CSRF header
    * and the 401 handling req() would have applied are repeated here from the
    * same helpers, so an export behaves like every other call. */
@@ -204,7 +210,9 @@ export const workspaceApi = {
     if (token) headers["X-CSRF-Token"] = token;
     const project = getProjectOverride();
     if (project) headers["X-Nodevas-Project"] = project;
-    const response = await fetch("/api/export", {
+    // The language is named in the query as well as the header, like the
+    // archive link; the body stays to the fields the hub decodes strictly.
+    const response = await fetch(`/api/export?${exportQuery({})}`, {
       method: "POST",
       headers,
       body: JSON.stringify(request),

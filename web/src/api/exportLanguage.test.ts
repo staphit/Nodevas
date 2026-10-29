@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 function stubFetch() {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("x", { status: 200 }));
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("x", { status: 200 }));
 }
 
 function queryLanguage(url: string): string | null {
