@@ -170,6 +170,9 @@ export function CommandPalette() {
    * search is still on its way and "no results" would be premature. */
   const [answered, setAnswered] = useState("");
   const [selected, setSelected] = useState(0);
+  /** The query Enter was pressed on before anything matched it: its first
+   * result opens once the search answers, instead of the key being lost. */
+  const [enterWaitsFor, setEnterWaitsFor] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -202,6 +205,7 @@ export function CommandPalette() {
       setQuery("");
       setResults([]);
       setSelected(0);
+      setEnterWaitsFor(null);
       setView("list");
       return;
     }
@@ -639,6 +643,15 @@ export function CommandPalette() {
 
   useEffect(() => setSelected(0), [query, results.length]);
 
+  useEffect(() => {
+    if (enterWaitsFor === null || searching) return;
+    setEnterWaitsFor(null);
+    if (enterWaitsFor !== query.trim()) return;
+    void choose(items[0]).catch(reportError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per answer;
+    // items and choose are this render's, the ones the answer filled.
+  }, [enterWaitsFor, searching]);
+
   const choose = async (item: PaletteItem | undefined) => {
     if (!item) return;
     if (item.kind === "action") {
@@ -725,7 +738,10 @@ export function CommandPalette() {
                 placeholder={t("palette.searchPlaceholder")}
                 aria-label={t("palette.search")}
                 title={t("palette.search")}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setEnterWaitsFor(null);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     event.preventDefault();
@@ -745,7 +761,12 @@ export function CommandPalette() {
                   }
                   if (event.key === "Enter") {
                     event.preventDefault();
-                    void choose(items[selected]).catch(reportError);
+                    const item = items[selected];
+                    if (!item && searching) {
+                      setEnterWaitsFor(query.trim());
+                      return;
+                    }
+                    void choose(item).catch(reportError);
                   }
                 }}
               />
