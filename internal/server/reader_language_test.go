@@ -187,6 +187,10 @@ func TestProjectNameTakenSpeaksTheReadersLanguage(t *testing.T) {
 			if chinese := strings.HasPrefix(language, "zh"); hasCJK(refusal.Error) != chinese {
 				t.Fatalf("refusal for %s reads %q", language, refusal.Error)
 			}
+			// Chinese quotes a name in 「」, not half-width ASCII quotes.
+			if strings.HasPrefix(language, "zh") && !strings.Contains(refusal.Error, "「main」") {
+				t.Fatalf("zh refusal %q does not quote the name in 「」", refusal.Error)
+			}
 		})
 	}
 }
