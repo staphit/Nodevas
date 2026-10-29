@@ -1,31 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { translate, type MessageValues } from "../i18n";
+import { translate } from "../i18n";
 import { actorLabel, type Translate } from "./labels";
 import type { Actor } from "./world";
 
-const tZh: Translate = (key: string, values?: MessageValues) => translate(key, "zh-TW", values);
-const tEn: Translate = (key: string, values?: MessageValues) => translate(key, "en", values);
+const tZh: Translate = (key, values) => translate(key, "zh-TW", values);
+const tEn: Translate = (key, values) => translate(key, "en", values);
 
 describe("actorLabel with asks", () => {
   it("renders localized sentence for permission ask instead of backend English question", () => {
-    const actorZh: Actor = {
+    const actorZh = {
       id: "a1",
+      kind: "session" as const,
+      model: "test",
+      project: "alpha",
+      area: "work" as const,
       agent: "antigravity",
-      pose: "asking-user",
+      pose: "asking-user" as const,
       ask: {
         id: "ask-1",
         project: "alpha",
         sessionId: "s1",
         sessionName: "antigravity",
         actorId: "u1",
-        kind: "permission",
+        kind: "permission" as const,
         tool: "run_command",
         question: "antigravity wants to run run_command: {cmd: 'ls'}",
-        status: "pending",
+        status: "pending" as const,
         createdAt: 1000,
       },
       heldMail: [],
-    };
+    } as unknown as Actor;
     const labelZh = actorLabel(tZh, actorZh, "辦公室");
     expect(labelZh).toContain("antigravity 想要執行 run_command");
     expect(labelZh).not.toContain("antigravity wants to run");
