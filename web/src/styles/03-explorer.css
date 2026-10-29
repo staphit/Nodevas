@@ -419,18 +419,18 @@
   cursor: wait;
   opacity: 0.5;
 }
+/* A failure's reason runs longer than the sidebar is wide; it wraps whole
+   rather than being cut, and a path or a word with no break still breaks. */
 .project-transfer-notice {
   margin: 7px 0 0;
   padding: 6px 8px;
-  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-2);
   background: var(--surface-2);
   font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .project-create-panel {
   position: relative;
