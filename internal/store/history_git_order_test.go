@@ -91,6 +91,14 @@ func TestWorkspaceGitListsNoDeletionAfterAnEarlierVersionCommit(t *testing.T) {
 	// in a commit of its own, at once.
 	saveNode(t, s, ann, "gamma", "second\n")
 	eventually(t, "the created version's commit", func() bool { return commitCount(t, root) > before })
+	// The branch moves before the work tree's index follows it, in the same
+	// background commit; read once that commit has finished (the window is an
+	// hour, so it is the only one in flight). Polling the count alone read
+	// the index in between under a loaded run.
+	s.historyMu.Lock()
+	g := s.historyImpl.(*gitHistory)
+	s.historyMu.Unlock()
+	g.inflight.Wait()
 
 	out, err := s.HistoryGit(context.Background())
 	if err != nil {
