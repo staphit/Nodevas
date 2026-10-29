@@ -16,7 +16,7 @@ const GRAPH: Graph = {
   nodes: [
     { id: "n0001", title: "One" },
     { id: "n0002", title: "Two", requires: "n0001" },
-    { id: "n0003", title: "Three", requires: "n0002 && n0001" },
+    { id: "n0003", title: "Three", requires: "n0002 and n0001" },
   ],
   edges: [{ from: "n0001", to: "n0002" }],
 } as Graph;

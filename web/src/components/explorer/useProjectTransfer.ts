@@ -15,6 +15,7 @@ import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
 import { isKnownKind, normalizeKind } from "../../domain/graph/nodeTypes";
+import { withRequiresProjection } from "../canvas/requiresProjection";
 import type { Graph, GraphNode } from "../../types";
 import type { ImportBundleChoice } from "./ImportBundleDialog";
 import { readBundleManifest, type BundleManifest } from "./projectArchive";
@@ -355,7 +356,8 @@ export function useProjectTransfer({
           };
         }),
       );
-      const edges = (graph.edges ?? []).map((edge, index) => ({
+      // The wires the board draws, including the ones only `requires` states.
+      const edges = (withRequiresProjection(graph).edges ?? []).map((edge, index) => ({
         id: `edge-${index + 1}`,
         fromNode: edge.from,
         toNode: edge.to,
