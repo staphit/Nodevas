@@ -107,9 +107,11 @@ export interface AgentAsk {
   note?: string;
   createdAt: number;
   decidedAt?: number;
+  expiresAt?: number;
   kind?: AgentAskKind;
   options?: string[];
   answer?: string;
+  decision?: AgentAskDecision;
   runId?: string;
   tool?: string;
   toolInput?: string;

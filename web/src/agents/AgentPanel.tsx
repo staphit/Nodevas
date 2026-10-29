@@ -124,6 +124,11 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
   const [promptHidden, setPromptHidden] = useState(promptDismissed);
 
   const pendingAsks = asks.filter((a) => a.status === "pending");
+  const settledAsks = asks
+    .filter((a) => a.status !== "pending")
+    .sort((a, b) => (b.decidedAt ?? b.createdAt) - (a.decidedAt ?? a.createdAt))
+    .slice(0, 5);
+  const visibleAsks = [...pendingAsks, ...settledAsks];
 
   useEffect(() => {
     if (!docked) inputRef.current?.focus();
@@ -291,9 +296,9 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
         </div>
       )}
 
-      {pendingAsks.length > 0 && (
+      {visibleAsks.length > 0 && (
         <section className="agent-asks-section" aria-label={t("agents.ask.section")}>
-          {pendingAsks.map((ask) => (
+          {visibleAsks.map((ask) => (
             <AskCard
               key={ask.id}
               ask={ask}

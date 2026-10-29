@@ -2,6 +2,21 @@ import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import type { AgentAsk, AgentAskAnswerRequest } from "../api";
 import { useI18n } from "../i18n";
 
+export function askQuestionText(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  ask: Pick<AgentAsk, "kind" | "question" | "agent" | "sessionName" | "sessionId" | "tool">,
+  fallbackAgent?: string,
+): string {
+  if (ask.kind === "permission") {
+    const agent = ask.sessionName || ask.agent || ask.sessionId || fallbackAgent || "agent";
+    return t("agents.ask.permissionQuestion", {
+      agent,
+      tool: ask.tool || "tool",
+    });
+  }
+  return ask.question;
+}
+
 export function AskCard({
   ask,
   submitting,
@@ -32,7 +47,8 @@ export function AskCard({
   }, [isPending]);
 
   const timeoutMs = kind === "permission" ? 5 * 60 * 1000 : 10 * 60 * 1000;
-  const remainingMs = Math.max(0, ask.createdAt + timeoutMs - now);
+  const expiresAt = ask.expiresAt ?? ask.createdAt + timeoutMs;
+  const remainingMs = Math.max(0, expiresAt - now);
   const remainingSec = Math.floor(remainingMs / 1000);
   const minutes = Math.floor(remainingSec / 60);
   const seconds = remainingSec % 60;
@@ -116,7 +132,7 @@ export function AskCard({
         )}
       </div>
 
-      <p className="copilot-permission-summary">{ask.question}</p>
+      <p className="copilot-permission-summary">{askQuestionText(t, ask)}</p>
 
       {kind === "permission" && ask.toolInput && (
         <details className="copilot-tool-detail">
@@ -129,19 +145,25 @@ export function AskCard({
         <div className="agent-ask-result">
           <span className={`copilot-badge agent-ask-status-${ask.status}`}>
             {ask.status === "approved"
-              ? t("agents.ask.statusApproved")
+              ? kind === "permission"
+                ? ask.decision === "approve_run" ||
+                  ask.answer === "approve_run" ||
+                  ask.note === "allowed for this run"
+                  ? t("agents.ask.statusAllowedRun")
+                  : t("agents.ask.statusAllowed")
+                : t("agents.ask.statusApproved")
               : ask.status === "denied"
                 ? t("agents.ask.statusDenied")
                 : ask.status === "answered"
                   ? t("agents.ask.statusAnswered")
                   : t("agents.ask.expired")}
           </span>
-          {ask.answer && (
+          {ask.answer && kind !== "permission" && (
             <p className="agent-ask-result-answer">
               {t("agents.ask.resultAnswer", { answer: ask.answer })}
             </p>
           )}
-          {ask.note && (
+          {ask.note && ask.note !== "allowed for this run" && (
             <p className="agent-ask-result-note">
               {t("agents.ask.resultNote", { note: ask.note })}
             </p>

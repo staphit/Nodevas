@@ -6,7 +6,7 @@
 // what it means, and the whole model is testable without React. Labels are
 // not here either: the drawing puts them through t().
 
-import type { AgentAsk, AgentMessage } from "../api/agents";
+import type { AgentAsk, AgentAskKind, AgentMessage } from "../api/agents";
 import type { OfficeStyle } from "../types";
 
 export type { OfficeStyle };
@@ -26,7 +26,7 @@ export type ClickTarget =
   | { kind: "session-diff"; sessionId: string; nodeId: string }
   /** A session that holds no node: there is only the session to show. */
   | { kind: "session"; sessionId: string }
-  | { kind: "ask"; askId: string; sessionId: string }
+  | { kind: "ask"; askId: string; sessionId?: string; askKind?: AgentAskKind }
   | { kind: "held-message"; messageId: string }
   | { kind: "pr"; runId: string; url: string }
   /** Another project's office: switch to it. */

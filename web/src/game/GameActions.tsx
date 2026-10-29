@@ -18,6 +18,7 @@ import {
 import { createPortal } from "react-dom";
 
 import type { SessionChange } from "../api/runs";
+import type { AgentAskKind } from "../api";
 import { AskCard } from "../agents/AskCard";
 import { useAgents } from "../agents/agentStore";
 import { openAutopilot } from "../autopilot/openAutopilot";
@@ -195,13 +196,30 @@ function GameDialogView({ dialog, onClose }: { dialog: Dialog; onClose: () => vo
   );
 }
 
+export function askDialogTitle(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  kind?: AgentAskKind,
+): string {
+  switch (kind) {
+    case "approval":
+      return t("game.action.askApproval");
+    case "choice":
+      return t("game.action.askChoice");
+    case "permission":
+      return t("game.action.askPermission");
+    case "question":
+    default:
+      return t("game.action.ask");
+  }
+}
+
 function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
   const { t } = useI18n();
   const ask = useAgents((s) => s.asks.find((item) => item.id === askId));
   const submitting = useAgents((s) => Boolean(s.submittingAskIds[askId]));
   const answerAsk = useAgents((s) => s.answerAsk);
   return (
-    <GameDialog title={t("game.action.ask")} onClose={onClose}>
+    <GameDialog title={askDialogTitle(t, ask?.kind)} onClose={onClose}>
       {ask && ask.status === "pending" ? (
         <AskCard
           ask={ask}

@@ -112,6 +112,57 @@ describe("AgentPanel", () => {
     expect(screen.queryByPlaceholderText("Optional note for the agent…")).not.toBeInTheDocument();
     expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
   });
+
+  it("shows settled asks with their results alongside pending asks", () => {
+    useAgents.setState({
+      asks: [
+        {
+          id: "ask-pending",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          question: "Pending approval?",
+          status: "pending",
+          createdAt: 1700000000000,
+        },
+        {
+          id: "ask-answered",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          kind: "question",
+          question: "Which port?",
+          status: "answered",
+          answer: "Port 5432",
+          createdAt: 1700000001000,
+        },
+        {
+          id: "ask-expired",
+          project: "alpha",
+          sessionId: "claude:1",
+          sessionName: "api-claude",
+          actorId: "alice",
+          agent: "claude",
+          kind: "permission",
+          tool: "Bash",
+          question: "Run command?",
+          status: "expired",
+          createdAt: 1700000002000,
+        },
+      ],
+    });
+
+    render(<AgentPanel onClose={vi.fn()} />);
+
+    expect(screen.getByText("Pending approval?")).toBeInTheDocument();
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+    expect(screen.getByText("Answer: Port 5432")).toBeInTheDocument();
+    expect(screen.getByText("Expired")).toBeInTheDocument();
+  });
 });
 
 describe("AgentPanel W1.5", () => {

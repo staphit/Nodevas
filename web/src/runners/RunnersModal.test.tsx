@@ -175,9 +175,12 @@ describe("RunnersPanel", () => {
     expect(text).toContain("OpenCode 1.x");
     const relaySection = screen.getByTestId(`runner-relay-${blocked.id}`);
     expect(relaySection).toHaveTextContent("轉發權限請求至 Nodevas：關閉");
-    expect(relaySection.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(relaySection.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
     expect(relaySection).toHaveTextContent(
-      "要修改請在那台機器上執行：nodevas runner set permissionRelay true (or false)；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
+      "要修改請在那台機器上執行：nodevas runner set permissionRelay true（或 false）；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
+    );
+    expect(relaySection).toHaveTextContent(
+      "由「nodevas serve --with-runner」啟動的 runner 會將設定保存在自己的設定檔中，因此請傳入該 runner 所使用的相同 --config。",
     );
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -302,9 +305,12 @@ describe("RunnersPanel", () => {
 
     const section = screen.getByTestId(`runner-relay-${desktop.id}`);
     expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: Off");
-    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
     expect(section).toHaveTextContent(
       "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs.",
+    );
+    expect(section).toHaveTextContent(
+      "A runner started by 'nodevas serve --with-runner' keeps its settings in its own config file, so pass the same --config as that runner uses.",
     );
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -323,7 +329,7 @@ describe("RunnersPanel", () => {
 
     const section = screen.getByTestId(`runner-relay-${desktop.id}`);
     expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: On");
-    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });

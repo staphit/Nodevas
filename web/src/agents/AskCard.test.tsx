@@ -162,6 +162,17 @@ describe("AskCard by kind", () => {
     expect(screen.getByText(/8:5|9:0/)).toBeInTheDocument();
   });
 
+  it("uses ask.expiresAt for countdown when present", () => {
+    const ask: AgentAsk = {
+      ...baseAsk,
+      createdAt: Date.now() - 600_000,
+      expiresAt: Date.now() + 120_000,
+    };
+    render(<AskCard ask={ask} onAnswer={vi.fn()} />);
+
+    expect(screen.getByText(/1:59|2:00/)).toBeInTheDocument();
+  });
+
   it("shows result and hides actions when answered or expired", () => {
     const answeredAsk: AgentAsk = {
       ...baseAsk,
@@ -185,5 +196,61 @@ describe("AskCard by kind", () => {
     rerender(<AskCard ask={expiredAsk} onAnswer={vi.fn()} />);
     expect(screen.getByText(/Expired/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+  });
+
+  it("renders permission ask settled result as Allowed or Allowed for this run", () => {
+    const allowedAsk: AgentAsk = {
+      ...baseAsk,
+      kind: "permission",
+      status: "approved",
+      decision: "approve",
+      tool: "Bash",
+    };
+    const { rerender } = render(<AskCard ask={allowedAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed")).toBeInTheDocument();
+
+    const allowedRunAsk: AgentAsk = {
+      ...baseAsk,
+      kind: "permission",
+      status: "approved",
+      decision: "approve_run",
+      tool: "Bash",
+    };
+    rerender(<AskCard ask={allowedRunAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed for this run")).toBeInTheDocument();
+  });
+
+  it("renders localized permission sentence instead of raw ask.question in zh-TW and en", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    const permAsk: AgentAsk = {
+      ...baseAsk,
+      id: "ask-p-zh",
+      kind: "permission",
+      agent: "antigravity",
+      sessionName: "antigravity",
+      tool: "run_command",
+      question: "antigravity wants to run run_command: {cmd: 'ls'}",
+    };
+    const { rerender } = render(<AskCard ask={permAsk} onAnswer={vi.fn()} />);
+
+    expect(screen.getByText("antigravity 想要執行 run_command")).toBeInTheDocument();
+    expect(screen.queryByText("antigravity wants to run run_command: {cmd: 'ls'}")).toBeNull();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    rerender(<AskCard ask={permAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByText("antigravity wants to run run_command")).toBeInTheDocument();
+  });
+
+  it("renders 不回答 for dismiss button in zh-TW", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    const questionAsk: AgentAsk = {
+      ...baseAsk,
+      id: "ask-q-zh",
+      kind: "question",
+      question: "Which database port?",
+    };
+    render(<AskCard ask={questionAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "不回答" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "關閉" })).toBeNull();
   });
 });
