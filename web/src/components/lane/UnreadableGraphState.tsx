@@ -6,7 +6,8 @@ import { reportError, useApp } from "../../store";
  * The hub's GET /api/graph refusal for a graph.yaml that does not parse or
  * validate (store/graph_unreadable.go): "graph.yaml: line 3 has an error. Fix
  * the file, then reload. (yaml: ...)", in the reader's language, sometimes
- * behind 'load project "x": '. Split into the hub's sentence, which already
+ * behind 'load project "x": ' (in zh-TW both colons are full-width:
+ * "載入專案「x」：graph.yaml：第 3 行…"). Split into the hub's sentence, which already
  * carries the advice, and the parser's or validator's own words.
  */
 const HUB_FRAME = /^([^(\uFF08]*[.\u3002]) ?[(\uFF08]([\s\S]*)[)\uFF09]$/;
@@ -15,7 +16,7 @@ export function splitUnreadableGraph(message: string): {
   sentence: string | null;
   detail: string;
 } {
-  const said = /(?:^|[:\uFF1A] ?)graph\.yaml: ([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
+  const said = /(?:^|[:\uFF1A] ?)graph\.yaml[:：] ?([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
   const framed = HUB_FRAME.exec(said);
   if (framed) return { sentence: framed[1].trim(), detail: framed[2].trim() };
   return { sentence: null, detail: said };
