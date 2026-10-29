@@ -29,7 +29,7 @@ import { openSettings, type SettingsSection } from "../settings/openSettings";
 import { useControl } from "../station/controlStore";
 import { setProjectMode } from "../station/projectMode";
 import { confirmAction } from "./ConfirmDialog";
-import { openPageHoldingMatch } from "./drawer/openNodeDetail";
+import { useNodeDetailView } from "./drawer/openNodeDetail";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
 import { useTeamServer, useViewer } from "./SignIn";
 import { COMMAND_PALETTE_EVENT, replayTour, type CommandPaletteView } from "./topbar/actions";
@@ -73,6 +73,7 @@ type PaletteItem =
       resultKind: SearchResult["kind"];
       project: string;
       nodeId?: string;
+      pageId?: string;
       title: string;
       snippet?: string;
     };
@@ -638,12 +639,13 @@ export function CommandPalette() {
       group: normalized ? t("palette.command") : t("palette.commands"),
     })),
     ...results.map((result, index) => ({
-      key: `${result.project}:${result.nodeId ?? ""}:${index}`,
+      key: `${result.project}:${result.nodeId ?? ""}:${result.pageId ?? ""}:${index}`,
       kind: "result" as const,
       group: t("palette.searchResults"),
       resultKind: result.kind,
       project: result.project,
       nodeId: result.nodeId,
+      pageId: result.pageId,
       title: result.title,
       snippet: result.snippet,
     })),
@@ -677,7 +679,9 @@ export function CommandPalette() {
     // the jump scrolls it to the node too.
     revealNode(item.nodeId);
     // A hit only a subpage holds opens that subpage, not the main page.
-    if (item.resultKind === "node") await openPageHoldingMatch(item.nodeId, item.title, query);
+    if (item.resultKind === "node" && item.pageId) {
+      useNodeDetailView.getState().requestPage(item.nodeId, item.pageId);
+    }
   };
 
   if (!open) return null;

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 
-import { findPageHoldingMatch } from "../../state/pageHoldingMatch";
 import { reportError, useApp } from "../../store";
 
 /** The three views of a node's detail panel. */
@@ -47,22 +46,6 @@ useApp.subscribe((state, previous) => {
     useNodeDetailView.getState().clearPageRequest();
   }
 });
-
-/**
- * Opens the subpage that holds a search hit, when the node's main page does
- * not. Search names no page, so a hit only a subpage holds used to land on
- * the main page, where the match is nowhere on screen. Called once the node's
- * tab is open: a hit on the title or the main page stays put. A failed read
- * leaves the main page, which is where the jump lands anyway.
- */
-export async function openPageHoldingMatch(nodeId: string, title: string, query: string): Promise<void> {
-  const needle = query.trim().toLowerCase();
-  if (!needle || title.toLowerCase().includes(needle)) return;
-  const tab = useApp.getState().tabs.find((entry) => entry.id === nodeId);
-  if (tab?.content.toLowerCase().includes(needle)) return;
-  const pageId = await findPageHoldingMatch(nodeId, needle).catch(() => null);
-  if (pageId) useNodeDetailView.getState().requestPage(nodeId, pageId);
-}
 
 /**
  * Opens a node's detail panel on one of its views — the board's
