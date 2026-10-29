@@ -255,11 +255,26 @@ func TestAnOversizedBoardIsSummarisedRatherThanDumped(t *testing.T) {
 }
 
 func TestACycleIsReportedAsAProblemToFix(t *testing.T) {
-	url, _ := liveServer(t)
+	url, pm := liveServer(t)
 	session := mcpSession(t, url, "")
+	// A link that would close a loop is refused, naming the loop, because a
+	// cycle can never become ready.
 	linked := call(t, session, "link_nodes", map[string]any{"from": "build", "to": "design"}, nil)
-	if linked.IsError {
-		t.Fatalf("the cycle-making link was refused: %q", errorText(linked))
+	if !linked.IsError || !strings.Contains(errorText(linked), "design -> build -> design") {
+		t.Fatalf("the cycle-making link = %q, want it refused naming the cycle", errorText(linked))
+	}
+
+	// One written by hand into graph.yaml is still reported, to be fixed.
+	st := pm.Store()
+	graph, rev, err := st.LoadGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph = graph.Clone()
+	graph.NodeByID("design").Requires = "build"
+	graph.Edges = append(graph.Edges, &engine.Edge{From: "build", To: "design"})
+	if _, err := st.SaveGraph(identity.Local, graph, rev); err != nil {
+		t.Fatalf("write a cycle by hand: %v", err)
 	}
 
 	var checked validateOutput
