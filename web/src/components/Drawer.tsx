@@ -515,6 +515,9 @@ export function TabBody({
   // While a session is live the soft lock stops meaning read-only: converging
   // is what the CRDT is for. What is still single-writer is the file, and that
   // is the leader's job, so everyone else simply never saves.
+  // Locked out: somebody else holds the lock and there is no session to
+  // converge through, so this window reads the document and cannot write it.
+  const lockedOut = heldByOther && !liveDoc.ready;
   const saveBlocked =
     graphUnreadable ||
     (liveDoc.ready ? !liveDoc.isLeader : heldByOther) ||
@@ -887,7 +890,9 @@ export function TabBody({
             <span className="editor-path-file mono" title={documentPath}>
               {documentPath}
             </span>
-            {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
+            {editorDirty && !lockedOut && (
+              <span className="editor-path-dirty">{t("drawer.editing")}</span>
+            )}
           </nav>
         </div>
 
@@ -913,15 +918,10 @@ export function TabBody({
 
         {markdownTools && !preview && <TableToolbar tables={tables} />}
 
-        <div className={`editor-stage${outlineOpen ? " with-outline" : ""}`}>
-        {outlineOpen && markdownTools && (
-          <DocumentOutline
-            source={editorBody}
-            activeLine={caretLine}
-            onJump={jumpToLine}
-          />
-        )}
-        {heldByOther && lock && (
+        {/* Above the stage, not in it: the stage lays the outline and the
+            editor out side by side, and a banner there takes the width the
+            document needs, down to nothing with large text. */}
+        {lockedOut && lock && (
           <div className="editor-lock-banner">
             <span>
               {t("drawer.otherUserEditing", { name: lock.actor.name || t("drawer.anotherUser") })}
@@ -939,6 +939,14 @@ export function TabBody({
               </span>
             ))}
           </div>
+        )}
+        <div className={`editor-stage${outlineOpen ? " with-outline" : ""}`}>
+        {outlineOpen && markdownTools && (
+          <DocumentOutline
+            source={editorBody}
+            activeLine={caretLine}
+            onJump={jumpToLine}
+          />
         )}
         {linkPickerOpen && (
           <NodeLinkPicker
@@ -971,7 +979,7 @@ export function TabBody({
             value={liveEditing ? (liveMountText.current ?? "") : editorBody}
             height="100%"
             theme={theme}
-            readOnly={graphUnreadable || (liveDoc.ready ? false : heldByOther) || pageBusy}
+            readOnly={graphUnreadable || lockedOut || pageBusy}
             extensions={editorExtensions}
             onCreateEditor={syncEditorView}
             onChange={onEditorChange}
@@ -1016,7 +1024,11 @@ export function TabBody({
             </>
           )}
           {/* Nothing saves while graph.yaml cannot be read; the banner says so. */}
-          {!graphUnreadable && (
+          {/* Nor while another window holds the lock: this one only reads. */}
+          {!graphUnreadable && lockedOut && (
+            <span className="tab-footer-hint">{t("drawer.readOnlyNoSave")}</span>
+          )}
+          {!graphUnreadable && !lockedOut && (
             <span className="tab-footer-hint">
               {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
               <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
