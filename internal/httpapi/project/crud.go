@@ -246,6 +246,10 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, locale.Errorf("new name %q is invalid", "新名稱 %q 無效", body.NewName))
 		return
 	}
+	if err := project.ReservedName(newBase); err != nil {
+		httpx.Err(c, http.StatusBadRequest, err)
+		return
+	}
 	parent := strings.Trim(strings.TrimSpace(body.NewParent), "/")
 	if parent == "." {
 		parent = ""
@@ -397,6 +401,10 @@ func (a *API) PostProjectMove(c *gin.Context) {
 	}
 	if newBase == "." || !project.ValidProjectPath(newBase) || strings.Contains(newBase, "/") {
 		httpx.Err(c, http.StatusBadRequest, locale.Errorf("new name %q is invalid", "新名稱 %q 無效", newBase))
+		return
+	}
+	if err := project.ReservedName(newBase); err != nil {
+		httpx.Err(c, http.StatusBadRequest, err)
 		return
 	}
 	newName := newBase

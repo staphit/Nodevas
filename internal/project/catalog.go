@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -419,6 +420,28 @@ func ValidProjectPath(name string) bool {
 	return true
 }
 
+// ReservedName refuses a project name Windows keeps for a device (CON, NUL,
+// AUX, COM1, ...): no folder can be called that there, and opening the path
+// fails as one outside the workspace, which names neither the reason nor
+// anything the reader should see. Elsewhere the names are ordinary.
+func ReservedName(name string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			continue
+		}
+		// The segment already passed ProjectNamePattern: what IsLocal still
+		// refuses in it is a device name.
+		if !filepath.IsLocal(segment) {
+			return locale.Errorf("%w: %q is reserved on Windows; pick another name",
+				"%w：「%s」是 Windows 保留的名稱，請換一個名稱", ErrInvalidName, segment)
+		}
+	}
+	return nil
+}
+
 // Resolve maps a project path to its directory, confined to the workspace.
 func (pm *ProjectManager) Resolve(name string) (string, error) {
 	if name == "." {
@@ -426,6 +449,9 @@ func (pm *ProjectManager) Resolve(name string) (string, error) {
 	}
 	if !ValidProjectPath(name) {
 		return "", locale.Errorf("invalid project name %q", "專案名稱「%s」無效", name)
+	}
+	if err := ReservedName(name); err != nil {
+		return "", err
 	}
 	candidate := filepath.Join(pm.workspace, filepath.FromSlash(name))
 	rel, err := filepath.Rel(pm.workspace, candidate)
