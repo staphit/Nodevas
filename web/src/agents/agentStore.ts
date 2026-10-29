@@ -3,6 +3,8 @@ import {
   api,
   type Actor,
   type AgentAsk,
+  type AgentAskAnswerRequest,
+  type AgentAskDecision,
   type AgentFileUpload,
   type AgentInbound,
   type AgentMessage,
@@ -142,7 +144,11 @@ export interface AgentStoreState {
   }) => Promise<boolean>;
   answerAsk: (
     askId: string,
-    decision: "approved" | "denied",
+    answer:
+      | AgentAskAnswerRequest
+      | AgentAskDecision
+      | "approved"
+      | "denied",
     note?: string,
   ) => Promise<void>;
   decideHeld: (messageId: string, decision: "approve" | "reject") => Promise<void>;
@@ -298,13 +304,27 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     }
   },
 
-  answerAsk: async (askId, decision, note) => {
+  answerAsk: async (askId, answer, legacyNote) => {
     set((s) => ({
       submittingAskIds: { ...s.submittingAskIds, [askId]: true },
       error: null,
     }));
     try {
-      await api.answerAgentAsk(askId, decision, note);
+      const payload: AgentAskAnswerRequest =
+        typeof answer === "string"
+          ? {
+              decision:
+                answer === "approved"
+                  ? "approve"
+                  : answer === "denied"
+                    ? "deny"
+                    : answer,
+              ...(legacyNote !== undefined && legacyNote !== ""
+                ? { note: legacyNote }
+                : {}),
+            }
+          : answer;
+      await api.answerAgentAsk(askId, payload);
       await get().refreshAll();
     } catch (err) {
       set({ error: errorText(err) });
