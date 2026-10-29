@@ -370,3 +370,15 @@ func TestAskRemoteTyping(t *testing.T) {
 		}
 	}
 }
+
+// The hello says whether the owner relays permission prompts, so the web can
+// show it; the hub never changes it.
+func TestBuildInfoReportsPermissionRelay(t *testing.T) {
+	cmds := &fakeCommands{}
+	if info := BuildInfo(context.Background(), cmds, &Config{}); info.PermissionRelay {
+		t.Fatal("relay reported on by default")
+	}
+	if info := BuildInfo(context.Background(), cmds, &Config{PermissionRelay: true}); !info.PermissionRelay {
+		t.Fatal("relay not reported when the owner turned it on")
+	}
+}
