@@ -28,6 +28,7 @@ import { localizedRelationLabel, useI18n } from "../../i18n";
 import { NodeTypeChip } from "../../nodeTypeTheme";
 import { reportError, useApp } from "../../store";
 import type { EdgeRelation, Graph, GraphNode, LogicGate } from "../../types";
+import { withRequiresProjection } from "../canvas/requiresProjection";
 import { advancedConditionKind, hasAdvancedCondition } from "../canvas/simpleDependency";
 import { useGraphWiring } from "../canvas/useGraphWiring";
 import { useNodeConditions } from "../canvas/useNodeConditions";
@@ -108,9 +109,10 @@ export function NodeDependencies({ id }: { id: string }) {
   // Not on offer: a node already wired in, one the expression names without
   // a wire yet, one just added whose answer is still on its way, and one that
   // already waits on this node (directly or further down), which would close
-  // a loop the add is refused for.
+  // a loop the add is refused for. "Waits on" is read the way the hub reads
+  // it: the wires plus every node a `requires` expression names, drawn or not.
   const targetRequires = conditionTarget?.requires;
-  const edges = graph?.edges;
+  const edges = withRequiresProjection(graph)?.edges;
   const choices = useMemo(() => {
     const named = new Set(requiresNodeRefs(targetRequires));
     const downstream = nodesWaitingOn(edges ?? [], id);
@@ -150,7 +152,7 @@ export function NodeDependencies({ id }: { id: string }) {
       .finally(settle);
   };
 
-  const outgoing = (graph?.edges ?? []).filter((edge) => edge.from === id);
+  const outgoing = (edges ?? []).filter((edge) => edge.from === id);
   const requires = conditionTarget?.requires?.trim() ?? "";
   const conditionKind = advancedConditionKind(requires);
   const advanced =
