@@ -78,6 +78,30 @@ describe("NodeDependencies", () => {
     expect(picker).toHaveValue("review");
   });
 
+  // A hand-written graph.yaml can say `requires: ship` with no wire drawn.
+  // The hub's dependency graph is the wires plus every requires reference,
+  // so 審查 already waits on 設計 through 上線 and adding it would be refused.
+  it("never offers a node that waits on this one through a requires-only link", () => {
+    const g = graph();
+    g.nodes!.find((node) => node.id === "review")!.requires = "ship";
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    const picker = screen.getByLabelText("選擇前置節點");
+    const offered = within(picker).getAllByRole("option").map((option) => option.textContent);
+    expect(offered).toEqual(["沒有可新增的節點"]);
+    expect(picker).toBeDisabled();
+  });
+
+  // 上線's only prerequisite is the requires reference: it is still a node
+  // this one blocks.
+  it("lists a requires-only dependent among what this node blocks", () => {
+    const g = graph();
+    g.nodes!.find((node) => node.id === "review")!.requires = "design";
+    useApp.setState({ graph: g });
+    render(<NodeDependencies id="design" />);
+    expect(screen.getByRole("button", { name: "審查" })).toBeInTheDocument();
+  });
+
   it("adds the prerequisite picked from the nodes not yet connected", async () => {
     const user = userEvent.setup();
     render(<NodeDependencies id="design" />);
