@@ -12,6 +12,7 @@ import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
 import type { ProjectMenuTarget } from "./ProjectContextMenu";
+import { projectNameTaken } from "./projectNameTaken";
 
 export function useProjectRename({
   projectByName,
@@ -84,7 +85,7 @@ export function useProjectRename({
     const separator = target.name.lastIndexOf("/");
     const parent = separator >= 0 ? target.name.slice(0, separator) : "";
     const nextName = parent ? `${parent}/${nextLabel}` : nextLabel;
-    if (projectByName.has(nextName) && nextName !== target.name) {
+    if (projectNameTaken(projectByName.keys(), nextName, target.name)) {
       setProjectRenameError(t("explorer.renameDuplicate"));
       return;
     }

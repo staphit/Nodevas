@@ -12,6 +12,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
+import { projectNameTaken } from "./projectNameTaken";
 
 /** `parent` is the containing project/folder path; "" means the workspace root. */
 export type ProjectCreateTarget = { mode: "project" | "folder"; parent: string };
@@ -78,7 +79,7 @@ export function useProjectCreate({
       projectCreateTarget.parent && projectCreateTarget.parent !== "."
         ? `${projectCreateTarget.parent}/${label}`
         : label;
-    if (projectByName.has(fullName)) {
+    if (projectNameTaken(projectByName.keys(), fullName)) {
       setProjectCreateError(t("explorer.createDuplicate"));
       return;
     }

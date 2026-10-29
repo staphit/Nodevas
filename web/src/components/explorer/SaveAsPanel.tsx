@@ -11,6 +11,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
+import { projectNameTaken } from "./projectNameTaken";
 
 export function useSaveAs({
   activeProject,
@@ -66,7 +67,7 @@ export function useSaveAs({
       ? activeProject.slice(0, activeProject.lastIndexOf("/"))
       : "";
     const fullName = parent ? `${parent}/${name}` : name;
-    if (projectByName.has(fullName)) {
+    if (projectNameTaken(projectByName.keys(), fullName)) {
       setSaveAsError(t("explorer.saveAsDuplicate"));
       return;
     }
