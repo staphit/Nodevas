@@ -62,6 +62,10 @@ type RunEnv struct {
 	// prompt the CLI would refuse headless goes to Nodevas for a person to
 	// answer, where the adapter can relay one (PermissionRelayApplies).
 	PermissionRelay bool
+	// Permissions answers relayed permission prompts in the runner's own
+	// process (OpenCode over ACP); nil asks the hub through the run's MCP
+	// door (HubAskerFromMCPArgs). Tests put a fake here.
+	Permissions PermissionAsker
 	// Version is the CLI's `--version` line as the runner detected it; ""
 	// when unknown. OpenCode reads it (1.x and 2.x take different commands).
 	Version string

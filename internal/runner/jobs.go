@@ -657,6 +657,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		waitErr = <-done
 	}
 	stdout.flush()
+	if ender, ok := conv.(interface{ End() }); ok {
+		// Permission requests still waiting for a person stop waiting.
+		ender.End()
+	}
 
 	outcome := parser.Outcome()
 	exitCode := -1
