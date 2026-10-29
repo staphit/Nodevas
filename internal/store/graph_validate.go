@@ -23,7 +23,9 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 		return locale.Errorf("graph is null", "圖是空值")
 	}
 	// Rewriting `requires` rebuilds the edge list, so labels and bend points of
-	// dropped edges are swept before validation.
+	// dropped edges are swept before validation. A bend on a dependency named
+	// only in `requires` is kept: its edge is written first.
+	materializeRequiresWires(g)
 	pruneEdgeDecorations(g)
 	if len(g.Nodes) > MaxGraphNodes {
 		return locale.Errorf("graph has too many nodes (maximum %d)", "圖的節點太多（最多 %d 個）", MaxGraphNodes)

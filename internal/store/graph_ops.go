@@ -235,6 +235,11 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 		}
 		target := graph.NodeByID(op.To)
+		if !dependsOn(graph, target, op.From) {
+			if err := refuseDependencyCycle(graph, op.From, op.To); err != nil {
+				return err
+			}
+		}
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.From == op.From && edge.To == op.To {
 				edge.Relation = engine.RelationRequired
@@ -291,6 +296,10 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			kept = append(kept, edge)
 		}
 		graph.Edges = kept
+		// The wire's bends and label go with it, so a later save cannot bring
+		// the edge back from a stale bend (see materializeRequiresWires).
+		delete(graph.UI.WireVertices, op.From+"->"+op.To)
+		delete(graph.UI.EdgeLabels, op.From+"->"+op.To)
 		hasIncoming := false
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.To == op.To {
@@ -330,7 +339,11 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 				break
 			}
 		}
-		if selected == nil {
+		// A dependency named only in `requires` is drawn as a wire all the
+		// same; styling it writes the explicit edge it stands for first.
+		requiresOnly := selected == nil && graph.NodeByID(op.From) != nil &&
+			nodeRequiresRef(graph.NodeByID(op.To), op.From)
+		if selected == nil && !requiresOnly {
 			return locale.Errorf("edge %s->%s not found", "找不到連線 %s->%s", op.From, op.To)
 		}
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
@@ -338,6 +351,13 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		}
 		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
 			return err
+		}
+		if requiresOnly {
+			if gateID := requiresWireGate(graph, op.From, op.To); gateID != "" {
+				return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
+			}
+			selected = &engine.Edge{From: op.From, To: op.To, Relation: engine.RelationRequired}
+			graph.Edges = append(graph.Edges, selected)
 		}
 		nextRelation := selected.Relation
 		if op.Relation != nil {
@@ -357,6 +377,11 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			if selected.Blocks() && nextRelation != engine.RelationRequired {
 				changed, err = pruneNodeRequirement(target, op.From)
 			} else if !selected.Blocks() && nextRelation == engine.RelationRequired {
+				if !dependsOn(graph, target, op.From) {
+					if err := refuseDependencyCycle(graph, op.From, op.To); err != nil {
+						return err
+					}
+				}
 				changed, err = appendNodeRequirement(target, op.From)
 			}
 			if err != nil {
