@@ -155,6 +155,10 @@ type Info struct {
 	// to pick an agent and model per task (W7; LLMPurposeAdvisor), set with
 	// CapLLMAdvisor; nil when it has none.
 	Advisor *LLMInfo `json:"advisor,omitempty"`
+	// PermissionRelay: the owner relays headless runs' tool-permission
+	// prompts to Nodevas (runner config permissionRelay). Shown only; the
+	// owner changes it on the runner.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 }
 
 // CapHeadless: the runner takes offers and runs agents non-interactively.

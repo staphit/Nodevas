@@ -366,6 +366,8 @@ func BuildInfo(ctx context.Context, cmds CommandRunner, cfg *Config) runnerwire.
 		AutoAccept:    autoAccept,
 		LLM:           llm,
 		Advisor:       advisorInfo(cfg),
+		// A nil cfg reports false.
+		PermissionRelay: cfg != nil && cfg.PermissionRelay,
 	}
 }
 
