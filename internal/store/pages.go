@@ -750,7 +750,11 @@ func starterPageContent(title, format string) string {
 		return title + "\n\n"
 	case PageFormatHTML:
 		escaped := html.EscapeString(title)
-		return "<!doctype html>\n<html lang=\"zh-Hant\">\n<head>\n" +
+		lang := document.LanguageOf(title)
+		if lang == "" {
+			lang = "en"
+		}
+		return "<!doctype html>\n<html lang=\"" + lang + "\">\n<head>\n" +
 			"<meta charset=\"utf-8\">\n<title>" + escaped + "</title>\n" +
 			"</head>\n<body>\n<h1>" + escaped + "</h1>\n\n</body>\n</html>\n"
 	default:

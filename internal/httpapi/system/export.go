@@ -41,7 +41,12 @@ func (a *API) postExport(c *gin.Context) {
 		httpx.Err(c, status, err)
 		return
 	}
-	options := document.Options{Title: title, Assets: st.DocumentAssets()}
+	// The document names its own language; one with no words to tell by
+	// takes the reader's.
+	options := document.Options{Title: title, Assets: st.DocumentAssets(), Language: "en"}
+	if httpx.Language(c.Request) == locale.Chinese {
+		options.Language = "zh-Hant"
+	}
 	var data []byte
 	switch strings.ToLower(request.Format) {
 	case "md":
