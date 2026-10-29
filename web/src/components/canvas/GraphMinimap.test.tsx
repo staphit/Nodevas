@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { GraphMinimap } from "./GraphMinimap";
@@ -67,5 +67,48 @@ describe("GraphMinimap", () => {
     expect(narrow.width).toBeLessThan(170);
     // Never so small that it stops being a map.
     expect(size(300, 200).width).toBeGreaterThanOrEqual(100);
+  });
+
+  // The frame follows every pan frame. Placed by left/top it dirtied the map's
+  // layout, and the next scroll read (its own, then the board's culling) laid
+  // out the whole document again with every dot on it: two forced layouts of
+  // ~2.7ms each per pan frame on a 2000-card board. A transform moves it
+  // without a layout, and the scroll position is read before anything is
+  // written, so nothing in the frame is forced.
+  it("follows a pan with a transform, never a layout property", () => {
+    const boardRef = createRef<HTMLDivElement>();
+    const board = document.createElement("div");
+    document.body.appendChild(board);
+    (boardRef as { current: HTMLDivElement | null }).current = board;
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback));
+    try {
+      const { container } = render(<GraphMinimap {...props({ boardRef, zoom: 2 })} />);
+      const frame = container.querySelector<HTMLElement>(".graph-minimap-viewport")!;
+      // The frame keeps the viewport's size; only where it sits moves.
+      expect(frame.style.width).toBe("12.5%");
+      expect(frame.style.height).toBe("15%");
+
+      act(() => {
+        board.scrollLeft = 800;
+        board.scrollTop = 400;
+        fireEvent.scroll(board);
+      });
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+
+      const mover = frame.closest<HTMLElement>(".graph-minimap-track")!;
+      expect(mover).not.toBeNull();
+      // 800 / 2 / 4000 and 400 / 2 / 2000 of the map, in its own size.
+      expect(mover.style.transform).toBe("translate(10%, 10%)");
+      for (const element of [mover, frame]) {
+        expect(element.style.left).toBe("");
+        expect(element.style.top).toBe("");
+      }
+    } finally {
+      raf.mockRestore();
+      board.remove();
+    }
   });
 });
