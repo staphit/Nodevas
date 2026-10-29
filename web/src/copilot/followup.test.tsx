@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useCopilot } from "./copilotStore";
@@ -69,6 +69,13 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+// The panel is a lazy chunk. Its first import is transformed on demand, which
+// under a full parallel run took longer than a findBy's one second; loading it
+// up front leaves the tests to time only what they check.
+beforeAll(async () => {
+  await import("./CopilotPanel");
+}, 30_000);
 
 describe("copilot follow-up", () => {
   it("shows the follow-up at once, and queues it to be spoken, when its conversation is open", async () => {

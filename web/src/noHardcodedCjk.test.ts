@@ -101,9 +101,13 @@ const LITERAL_KINDS = new Set<ts.SyntaxKind>([
 ]);
 
 function cjkLiterals(path: string): { line: number; text: string }[] {
+  const text = readFileSync(path, "utf8");
+  // A literal with CJK in it means CJK in the file: most files have none, and
+  // skipping their parse is most of this test's time.
+  if (!CJK.test(text)) return [];
   const source = ts.createSourceFile(
     path,
-    readFileSync(path, "utf8"),
+    text,
     ts.ScriptTarget.Latest,
     true,
     path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
@@ -136,7 +140,9 @@ describe("no hard-coded Chinese outside the catalog", () => {
       }
     }
     expect(offenders).toEqual([]);
-  });
+    // It parses the whole tree synchronously: under a full parallel run that
+    // is seconds, so the default 5 s timed out now and then.
+  }, 30_000);
 
   it("allows nothing without a reason", () => {
     for (const entry of ALLOWED) expect(entry.reason.length).toBeGreaterThan(10);

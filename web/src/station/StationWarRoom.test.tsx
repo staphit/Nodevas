@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type AutopilotRun, type AutopilotView, type Run } from "../api";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
@@ -172,6 +172,13 @@ function mount() {
     </GameActionsProvider>,
   );
 }
+
+// The room is a lazy chunk. Its first import is transformed on demand, which
+// under a full parallel run took longer than a findBy's one second; loading it
+// up front leaves the tests to time only what they check.
+beforeAll(async () => {
+  await import("../game/warroom/WarRoom");
+}, 30_000);
 
 /** A character in the war room, by the node it works on. */
 function desk(node: string) {

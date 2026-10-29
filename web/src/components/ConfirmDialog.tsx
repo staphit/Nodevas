@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { IconClose, IconWarning } from "../icons";
 import { useI18n } from "../i18n";
 
@@ -53,7 +53,10 @@ export function ConfirmDialogHost() {
     };
   }, []);
 
-  useEffect(() => {
+  // A layout effect: focus moves in the commit that shows the dialog. A
+  // passive one left a gap, after a background task opened it, in which the
+  // dialog was up and a keystroke still went to the page under it.
+  useLayoutEffect(() => {
     if (!request) return;
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     confirmRef.current?.focus();
