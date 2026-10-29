@@ -197,4 +197,26 @@ describe("AskCard by kind", () => {
     expect(screen.getByText(/Expired/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
   });
+
+  it("renders permission ask settled result as Allowed or Allowed for this run", () => {
+    const allowedAsk: AgentAsk = {
+      ...baseAsk,
+      kind: "permission",
+      status: "approved",
+      decision: "approve",
+      tool: "Bash",
+    };
+    const { rerender } = render(<AskCard ask={allowedAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed")).toBeInTheDocument();
+
+    const allowedRunAsk: AgentAsk = {
+      ...baseAsk,
+      kind: "permission",
+      status: "approved",
+      decision: "approve_run",
+      tool: "Bash",
+    };
+    rerender(<AskCard ask={allowedRunAsk} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed for this run")).toBeInTheDocument();
+  });
 });
