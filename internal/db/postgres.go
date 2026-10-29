@@ -1016,6 +1016,29 @@ CREATE TABLE analytics_dismissed (
 		name: "0029_search_gin_fastupdate",
 		stmt: SearchIndexTuning,
 	},
+	{
+		// An ask's kind (approval, question, choice, permission), a
+		// choice's options (a JSON array), the person's text answer, the
+		// run it came from, a permission prompt's tool and input, and when
+		// it expires. Rows from before read as approvals; "answered" is the
+		// status of a question or choice a person answered. Every statement
+		// tolerates a rerun.
+		name: "0030_agent_ask_kinds",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS kind       TEXT NOT NULL DEFAULT 'approval';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS options    TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS answer     TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_id     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool       TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool_input TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS expires_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_asks DROP CONSTRAINT IF EXISTS agent_asks_kind_check;
+ALTER TABLE agent_asks ADD CONSTRAINT agent_asks_kind_check CHECK (kind IN ('approval', 'question', 'choice', 'permission'));
+ALTER TABLE agent_asks DROP CONSTRAINT IF EXISTS agent_asks_status_check;
+ALTER TABLE agent_asks ADD CONSTRAINT agent_asks_status_check CHECK (status IN ('pending', 'approved', 'denied', 'answered', 'expired'));
+CREATE INDEX IF NOT EXISTS agent_asks_run ON agent_asks (project, run_id, tool, status) WHERE run_id != '';
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as
