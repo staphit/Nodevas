@@ -294,11 +294,16 @@
   font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
 }
+/* The corner is 48px tall: beside an open drawer at large text the column is
+   too narrow for one line ("Nodes / da…"), so the label takes a second. */
 .horizontal-corner-label {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .horizontal-date-lead {
   flex: 0 0 auto;
