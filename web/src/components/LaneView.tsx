@@ -16,6 +16,7 @@ import { useI18n } from "../i18n";
 import { localizeIssue } from "../issueMessages";
 import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
+import { UnreadableGraphState } from "./lane/UnreadableGraphState";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
 import { GraphBatchToolbar, NodeClipboardNotice } from "./GraphBatchToolbar";
@@ -207,6 +208,10 @@ export function LaneView({
   const activeTab = useApp((s) => s.activeTab);
   const activeProject = useApp((s) => s.activeProject);
   const graphProject = useApp((s) => s.graphProject);
+  // graph.yaml does not parse or validate: the board says why in place of
+  // the cards, and offers nothing that would write over the file.
+  const graphUnreadable = useApp((s) => s.graphUnreadable);
+  const unreadable = graphUnreadable !== null;
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
@@ -835,7 +840,7 @@ export function LaneView({
 
   useBoardShortcuts({
     isGraph,
-    collapsed: collapsed ?? false,
+    collapsed: (collapsed ?? false) || unreadable,
     keyboardActive: keyboardActive ?? false,
     graph,
     graphSelection,
@@ -1627,6 +1632,7 @@ export function LaneView({
         nodeTitle={nodeTitle}
         openNodeCreationMenu={openNodeCreationMenu}
         viewportCreationAnchor={viewportCreationAnchor}
+        canCreate={!unreadable}
         timelineOrientation={timelineOrientation}
         changeTimelineOrientation={changeTimelineOrientation}
         timelineDateAxis={timelineDateAxis}
@@ -1648,7 +1654,7 @@ export function LaneView({
         planNotice={planNotice}
       />
       {/* Two or more: one node has its own menu and its drawer. */}
-      {isGraph && !collapsed && selectedIDs.length > 1 && (
+      {isGraph && !collapsed && !unreadable && selectedIDs.length > 1 && (
         <GraphBatchToolbar
           graph={graph}
           customStatuses={customStatuses}
@@ -1666,8 +1672,10 @@ export function LaneView({
         />
       )}
       {/* The clipboard outlives the selection that filled it. */}
-      {isGraph && !collapsed && selectedIDs.length <= 1 && <NodeClipboardNotice strip />}
-      {collapsed ? null : (
+      {isGraph && !collapsed && !unreadable && selectedIDs.length <= 1 && <NodeClipboardNotice strip />}
+      {collapsed ? null : graphUnreadable !== null ? (
+        <UnreadableGraphState message={graphUnreadable} />
+      ) : (
       <div className={`lane-body${isGraph && problemsOpen ? " problems-open" : ""}`}>
       <div
         ref={boardRef}
@@ -1871,7 +1879,7 @@ export function LaneView({
       </div>
       )}
 
-      {contextMenu && (
+      {contextMenu && !unreadable && (
         <LaneContextMenuLayer
           contextMenu={contextMenu}
           setContextMenu={setContextMenu}

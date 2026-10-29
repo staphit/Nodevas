@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, RequestError } from "../api";
 import { translate } from "../i18n";
@@ -50,6 +50,7 @@ beforeEach(() => {
     preferences: { ...readPreferences(), language: "en" },
     graph: null,
     graphRev: "",
+    graphUnreadable: null,
     runState: EMPTY_RUN,
     statuses: {},
     issues: [],
@@ -140,7 +141,7 @@ describe("a board whose graph.yaml cannot be read", () => {
     expect(screen.getByRole("alert")).toBeTruthy();
 
     // The watcher's graph-changed reloads the graph (App.tsx).
-    vi.mocked(api.getGraph).mockResolvedValue({ graph: VALID, rev: "rev-2", issues: [] });
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: VALID, rev: "rev-2", issues: [], statuses: {} });
     await load();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText("Design")).toBeTruthy();
@@ -149,14 +150,11 @@ describe("a board whose graph.yaml cannot be read", () => {
   it("reloads from its own button", async () => {
     render(<LaneView variant="graph" {...paneProps} />);
     await load();
-    vi.mocked(api.getGraph).mockResolvedValue({ graph: VALID, rev: "rev-2", issues: [] });
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: VALID, rev: "rev-2", issues: [], statuses: {} });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: translate("lane.unreadableReload", "en") }));
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByText("Design")).toBeTruthy();
   });
 

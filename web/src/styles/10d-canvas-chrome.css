@@ -385,3 +385,33 @@
   backdrop-filter: none;
 }
 
+
+/* graph.yaml does not parse or validate: the reason in place of the board.
+   The parser's words can be one long unbroken line; they wrap rather than
+   widen the card past the pane. */
+.board-unreadable {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.board-unreadable-state {
+  border-style: solid;
+  border-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.board-unreadable-state .ui-empty-state-mark {
+  border-color: var(--st-failed-fg);
+}
+.board-unreadable-state p {
+  color: var(--text);
+}
+.board-unreadable-detail {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(10px * var(--font-scale, 1));
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

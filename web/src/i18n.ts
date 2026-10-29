@@ -3617,6 +3617,9 @@ const messages: Record<Language, MessageCatalog> = {
     "problems.field.ui.wire_vertices": "Wire bends",
     "problems.field.ui.groups": "Group areas",
     "problems.field.ui.annotations": "Canvas notes",
+    "lane.unreadableTitle": "This project's graph.yaml can't be opened",
+    "lane.unreadableAdvice": "Fix the file, then reload. The board comes back by itself once the file is valid.",
+    "lane.unreadableReload": "Reload",
   },
   "zh-TW": {
     "language.label": "語系",
@@ -7230,6 +7233,9 @@ const messages: Record<Language, MessageCatalog> = {
     "problems.field.ui.wire_vertices": "連線轉折點",
     "problems.field.ui.groups": "群組區域",
     "problems.field.ui.annotations": "畫布註解",
+    "lane.unreadableTitle": "無法開啟此專案的 graph.yaml",
+    "lane.unreadableAdvice": "修正檔案後重新載入。檔案有效後，看板會自動恢復。",
+    "lane.unreadableReload": "重新載入",
   },
 };
 

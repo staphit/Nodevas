@@ -85,6 +85,8 @@ export interface BoardToolbarProps {
   /** Node creation */
   openNodeCreationMenu: (menu: Extract<LaneContextMenu, { kind: "graph" }>) => void;
   viewportCreationAnchor: () => Extract<LaneContextMenu, { kind: "graph" }>;
+  /** False while graph.yaml cannot be read: a new node would write over it. */
+  canCreate?: boolean;
 
   /** Timeline layout */
   timelineOrientation: "vertical" | "horizontal";
@@ -139,6 +141,7 @@ export function BoardToolbar({
   nodeTitle,
   openNodeCreationMenu,
   viewportCreationAnchor,
+  canCreate = true,
   timelineOrientation,
   changeTimelineOrientation,
   timelineDateAxis,
@@ -363,7 +366,7 @@ export function BoardToolbar({
             {isGraph ? t("board.showGraph") : t("board.showTimeline")}
           </button>
         )}
-        {!collapsed && (
+        {!collapsed && canCreate && (
           // Split: the button makes a Task, the caret picks any other type —
           // the project's own included.
           <span className="board-new-node">

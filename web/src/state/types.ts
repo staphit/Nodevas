@@ -327,6 +327,12 @@ export interface GraphSlice {
   graphProject: string;
   graphRev: string;
   issues: Issue[];
+  /**
+   * The hub's reason while the active project's graph.yaml does not parse or
+   * validate (a 422 from GET /api/graph), null once it reads. The board shows
+   * it in place of the cards, so nobody is invited to write over the file.
+   */
+  graphUnreadable: string | null;
   loadAll: () => Promise<void>;
 
   // --- typed domain commands [A-04] ---------------------------------------

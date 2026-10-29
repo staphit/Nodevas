@@ -7,7 +7,7 @@
  * update can never survive a rejected write.
  */
 
-import { api, ConflictError, type GraphOp } from "../api";
+import { api, ConflictError, RequestError, type GraphOp } from "../api";
 import { applyGraphCommand, commandTarget, describeGraphCommand } from "../domain";
 import { applyGraphOps } from "../domain/graph/ops";
 import { translate } from "../i18n";
@@ -124,6 +124,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   graphProject: "",
   graphRev: "",
   issues: [],
+  graphUnreadable: null,
 
   // Reloading a project is two independent reads, and the second one is also
   // what a `state-changed` event asks for on its own. Going through the same
@@ -133,10 +134,23 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     await Promise.all([
       coalesceRequest("graph", async () => {
         const generation = ++generations.load;
-        const g = await api.getGraph();
+        let g;
+        try {
+          g = await api.getGraph();
+        } catch (e) {
+          // graph.yaml on disk does not parse or validate: the reader's file
+          // to fix. The board says so in place of the cards and the load
+          // settles, so the error bar does not say it again; the watcher's
+          // graph-changed reloads once the file is fixed.
+          if (!(e instanceof RequestError) || e.status !== 422) throw e;
+          if (generation !== generations.load) return;
+          set({ graphUnreadable: e.message, graphProject: get().activeProject });
+          return;
+        }
         // Dropped when a project switch happened while this was in flight.
         if (generation !== generations.load) return;
         set({
+          graphUnreadable: null,
           graph: normalizeGraph(g.graph),
           // The generation check above means no switch happened in flight, so
           // the read was answered for the project that is active now.
