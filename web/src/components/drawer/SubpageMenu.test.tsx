@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { translate } from "../../i18n";
 import { readPreferences } from "../../preferences";
 import { useApp } from "../../store";
 import { SubpageControls, SubpageMenu } from "./SubpageControls";
@@ -55,6 +56,18 @@ describe("SubpageMenu", () => {
     expect(document.querySelector("[aria-haspopup]")).toBeNull();
     await userEvent.click(within(tabs).getByRole("tab", { name: "Main page" }));
     expect(pages.selectPage).toHaveBeenCalledWith(null);
+  });
+
+  it("uses the language's parentheses in a tab hint", () => {
+    useApp.setState({
+      preferences: { ...useApp.getState().preferences, language: "zh-TW" },
+    });
+    const pages = fakePages({ pages: [{ id: "p1", title: "草稿", format: "html" }] });
+    render(<SubpageMenu pages={pages} onPopout={vi.fn()} />);
+    expect(screen.getByRole("tab", { name: "草稿" })).toHaveAttribute(
+      "title",
+      `草稿（${translate("format.html", "zh-TW")}）`,
+    );
   });
 
   it("adds a subpage and pops out from buttons beside the tabs", async () => {

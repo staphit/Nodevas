@@ -249,7 +249,9 @@ export function useNodePages({
   useEffect(() => {
     if (pageRequest?.nodeId !== id || pagesLoading) return;
     useNodeDetailView.getState().clearPageRequest();
-    if (pages.some((page) => page.id === pageRequest.pageId)) void selectPage(pageRequest.pageId);
+    // "main" is the tab whose id is null, not a page in the list.
+    if (pageRequest.pageId === "main") void selectPage(null);
+    else if (pages.some((page) => page.id === pageRequest.pageId)) void selectPage(pageRequest.pageId);
   }, [pageRequest, id, pages, pagesLoading, selectPage]);
 
   const createPage = useCallback(async () => {

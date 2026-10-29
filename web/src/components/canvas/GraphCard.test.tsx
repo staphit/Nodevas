@@ -1,10 +1,13 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
+import { useAutopilot } from "../../autopilot/autopilotStore";
+import { nodeTypeById } from "../../domain/graph/nodeTypes";
 import { translate } from "../../i18n";
 import { useApp } from "../../store";
 import { LaneView } from "../LaneView";
 import { installPointerShims, resetBoardStore } from "./boardTestKit";
+import { GraphCard, type CardEvents } from "./GraphCard";
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
@@ -33,6 +36,83 @@ beforeEach(() => {
   installPointerShims();
   vi.mocked(api.getState).mockResolvedValue({ state: { nodes: {}, history: [] }, statuses: {} });
   resetBoardStore([]);
+  useAutopilot.setState({ marks: {} });
+});
+
+const noop = () => undefined;
+const cardEvents: CardEvents = {
+  pointerDown: noop,
+  pointerMove: noop,
+  pointerUp: noop,
+  pointerCancel: noop,
+  pointerEnter: noop,
+  pointerLeave: noop,
+  lostPointerCapture: noop,
+  focus: noop,
+  blur: noop,
+  keyDown: noop,
+  contextMenu: noop,
+  moreClick: noop,
+  resizePointerDown: noop,
+  resizePointerMove: noop,
+  resizePointerUp: noop,
+  resizePointerCancel: noop,
+  resizeKeyDown: noop,
+};
+
+// A phone's board starts far enough out to draw its cards at the minimal
+// level: the card still wears its autopilot badge, as the panel the badge
+// opens is reachable from the same board.
+describe("GraphCard minimal detail", () => {
+  it("keeps the autopilot badge on a task with an autopilot mark", () => {
+    useApp.getState().updateUIPreference("language", "zh-TW");
+    useAutopilot.setState({
+      marks: {
+        task: {
+          autopilotId: "ap1",
+          goalNodeId: "goal",
+          state: "waiting_human",
+          stage: "human_review",
+        },
+      },
+    });
+
+    render(
+      <GraphCard
+        node={{ id: "task", title: "Task" }}
+        detail="minimal"
+        left={0}
+        top={0}
+        width={152}
+        height={72}
+        className="col-card status-ready"
+        cardBg={undefined}
+        borderColor={undefined}
+        typeColor={undefined}
+        textColor={undefined}
+        dragging={false}
+        hasStatus
+        status="ready"
+        customStatuses={[]}
+        nodeType={nodeTypeById(null, "task")}
+        assigned=""
+        markerKind={undefined}
+        markerLabel={undefined}
+        agentName={undefined}
+        agentKind={undefined}
+        ariaLabel="Task"
+        tooltip="Task"
+        selected={false}
+        events={cardEvents}
+      />,
+    );
+
+    const label = translate("autopilot.cardBadge", "zh-TW", {
+      state: translate("autopilot.state.waiting_human", "zh-TW"),
+      stage: translate("autopilot.stage.human_review", "zh-TW"),
+    });
+    expect(screen.getByLabelText(label)).toBeInTheDocument();
+  });
 });
 
 // A 152px card's second line holds the kind chip, the assignee and at most one

@@ -66,7 +66,7 @@ export function SubpageMenu({
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
               className={`content-page-tab${selected ? " active" : ""}`}
-              title={tab.hint ? `${tab.title} (${tab.hint})` : tab.title}
+              title={tab.hint ? t("subpage.tabHint", { title: tab.title, hint: tab.hint }) : tab.title}
               onClick={() => void selectPage(tab.id)}
             >
               <span className="content-page-current">{tab.title}</span>

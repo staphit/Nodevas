@@ -678,9 +678,10 @@ export function CommandPalette() {
     // As with following a link: the board shows wherever the reader was, so
     // the jump scrolls it to the node too.
     revealNode(item.nodeId);
-    // A hit only a subpage holds opens that subpage, not the main page.
-    if (item.resultKind === "node" && item.pageId) {
-      useNodeDetailView.getState().requestPage(item.nodeId, item.pageId);
+    // A hit opens the page it lives on. A main-page hit still asks for main,
+    // so the drawer leaves whatever subpage was open.
+    if (item.resultKind === "node") {
+      useNodeDetailView.getState().requestPage(item.nodeId, item.pageId || "main");
     }
   };
 
