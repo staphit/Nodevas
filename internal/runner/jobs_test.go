@@ -1124,3 +1124,36 @@ func TestMCPArgsServeTheRunToolset(t *testing.T) {
 		t.Fatalf("mcpArgs = %q, want %q", got, want)
 	}
 }
+
+// permissionRelay reaches the adapter: the Claude run asks the hub's
+// approve_tool, and its start line says so. Off (TestRunSucceeds' runner),
+// the arguments are today's.
+func TestRunRelaysPermissions(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.Config.PermissionRelay = true })
+	env.hub.hello()
+	env.hub.offer(testJob("run-relay", "ok: do the thing"))
+	env.hub.wait("run-relay", runnerwire.TypeFinish)
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-relay", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(args, "--permission-prompt-tool"); i < 0 || args[i+1] != adapter.ClaudeApproveTool {
+		t.Errorf("args = %q", args)
+	}
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-relay") {
+		events = append(events, msg.Events...)
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started claude") })
+	if started < 0 || !strings.Contains(events[started].Text, "permission prompts relayed to Nodevas") {
+		t.Errorf("no start line with the relay in %+v", events)
+	}
+
+	off := startJobRunner(t, nil)
+	off.hub.hello()
+	off.hub.offer(testJob("run-norelay", "ok: do the thing"))
+	off.hub.wait("run-norelay", runnerwire.TypeFinish)
+	if raw := off.recorded(t, "run-norelay", "args"); strings.Contains(raw, "--permission-prompt-tool") {
+		t.Errorf("relay off: args = %s", raw)
+	}
+}

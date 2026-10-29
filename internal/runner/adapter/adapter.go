@@ -58,6 +58,10 @@ type RunEnv struct {
 	// DisableMCP names MCP servers to switch off for the run (OpenCode: the
 	// owner's and the worktree's own; see OpenCodeMCPServers).
 	DisableMCP []string
+	// PermissionRelay is the runner's permissionRelay setting: a permission
+	// prompt the CLI would refuse headless goes to Nodevas for a person to
+	// answer, where the adapter can relay one (PermissionRelayApplies).
+	PermissionRelay bool
 	// Version is the CLI's `--version` line as the runner detected it; ""
 	// when unknown. OpenCode reads it (1.x and 2.x take different commands).
 	Version string

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -284,6 +285,76 @@ func TestClaudeReadOnlyKinds(t *testing.T) {
 				cmd.Args[i+3] != NodevasMCPTools || cmd.Args[i-2] != "--setting-sources" || cmd.Args[i-1] != "user" {
 				t.Fatalf("kind %q: args %q", kind, cmd.Args)
 			}
+		}
+	}
+}
+
+// With permissionRelay a prompt goes to the hub's approve_tool, which waits
+// for a person: the tool is allowed and the MCP timeout outlasts the wait.
+// The runner's own limits stay: a read-only run's deny list and the mode.
+func TestClaudeCommandPermissionRelay(t *testing.T) {
+	job := runnerwire.Job{RunID: "run-1", NodeID: "n-42", Prompt: "x"}
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: "/w", Branch: "b", TempDir: t.TempDir(),
+		AllowedTools: []string{"Edit"}}
+	off, err := Claude{}.Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(off.Args, " "); strings.Contains(args, "--permission-prompt-tool") {
+		t.Errorf("relay off: args = %s", args)
+	}
+	if _, ok := envValue(off.Env, ClaudeMCPTimeoutEnv); ok {
+		t.Errorf("relay off sets %s", ClaudeMCPTimeoutEnv)
+	}
+
+	env.PermissionRelay = true
+	on, err := Claude{}.Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := slices.Index(on.Args, "--permission-prompt-tool")
+	allowed := slices.Index(on.Args, "--allowedTools")
+	if prompt < 0 {
+		t.Fatalf("relay on: no --permission-prompt-tool in %q", on.Args)
+	}
+	if on.Args[prompt+1] != ClaudeApproveTool || allowed < prompt ||
+		!slices.Contains(on.Args[allowed:], ClaudeApproveTool) || !slices.Contains(on.Args[allowed:], "Edit") {
+		t.Errorf("relay on: args = %q", on.Args)
+	}
+	// Everything else is as it was.
+	stripped := slices.Clone(on.Args)
+	stripped = slices.Delete(stripped, prompt, prompt+2)
+	stripped = slices.DeleteFunc(stripped, func(a string) bool { return a == ClaudeApproveTool })
+	if !slices.Equal(stripped, off.Args) {
+		t.Errorf("relay changed more than the prompt tool:\n%q\n%q", stripped, off.Args)
+	}
+	timeout, ok := envValue(on.Env, ClaudeMCPTimeoutEnv)
+	if ms, err := strconv.Atoi(timeout); !ok || err != nil || ms < 330000 {
+		t.Errorf("%s = %q", ClaudeMCPTimeoutEnv, timeout)
+	}
+
+	// A review stays read-only: the deny list wins over any approval.
+	review := job
+	review.Kind = runnerwire.JobReview
+	cmd, err := Claude{}.Command(review, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deny := slices.Index(cmd.Args, "--disallowedTools")
+	if deny < 0 || cmd.Args[deny+1] != ClaudeReadOnlyDeny || !slices.Contains(cmd.Args, "--permission-prompt-tool") {
+		t.Errorf("review with relay: args = %q", cmd.Args)
+	}
+
+	// Plan and dontAsk never ask: no prompt tool, whatever the setting.
+	for _, mode := range []string{"plan", "dontAsk"} {
+		env.PermissionMode = mode
+		cmd, err := Claude{}.Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if args := strings.Join(cmd.Args, " "); strings.Contains(args, "--permission-prompt-tool") ||
+			!strings.Contains(args, "--permission-mode "+mode) {
+			t.Errorf("mode %s with relay: args = %s", mode, args)
 		}
 	}
 }

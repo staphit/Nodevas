@@ -38,6 +38,13 @@ const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
 // nodevas MCP server.
 const NodevasMCPTools = "mcp__nodevas"
 
+// ClaudeApproveTool is the --permission-prompt-tool of a run with
+// permissionRelay: the hub's approve_tool on the run's nodevas MCP server.
+const ClaudeApproveTool = NodevasMCPTools + "__approve_tool"
+
+// ClaudeMCPTimeoutEnv is Claude Code's MCP tool-call timeout, in ms.
+const ClaudeMCPTimeoutEnv = "MCP_TOOL_TIMEOUT"
+
 func (Claude) Kind() string { return "claude" }
 
 func (Claude) NewParser() Parser { return &claudeParser{} }
