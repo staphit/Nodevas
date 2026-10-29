@@ -173,8 +173,14 @@ describe("RunnersPanel", () => {
     expect(text).toContain("mcp(nodevas/*)");
     expect(text).toContain("nodevas setup-agent --runs-only --agents antigravity");
     expect(text).toContain("OpenCode 1.x");
-    expect(screen.getByRole("switch", { name: "轉發權限請求至 Nodevas" })).toBeInTheDocument();
-    expect(screen.getByText("預設關閉。僅適用於 Claude Code、Antigravity 與 OpenCode ACP。")).toBeInTheDocument();
+    const relaySection = screen.getByTestId(`runner-relay-${blocked.id}`);
+    expect(relaySection).toHaveTextContent("轉發權限請求至 Nodevas：關閉");
+    expect(relaySection.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(relaySection).toHaveTextContent(
+      "要修改請在那台機器上執行：nodevas runner set permissionRelay true (or false)；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
+    );
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("opens the add form when asked from outside, once", async () => {
@@ -287,21 +293,24 @@ describe("RunnersPanel", () => {
     expect(useRunners.getState().runners).toEqual([desktop]);
   });
 
-  it("renders permission relay toggle bound to runner config, off by default with help text", async () => {
+  it("renders permission relay read-only status Off by default with command help text and no toggle", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
 
     render(<RunnersPanel />);
     await screen.findByText("desktop");
     fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
 
-    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
-    expect(toggle).not.toBeChecked();
-    expect(
-      screen.getByText("Off by default. Only applies to Claude Code, Antigravity and OpenCode ACP."),
-    ).toBeInTheDocument();
+    const section = screen.getByTestId(`runner-relay-${desktop.id}`);
+    expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: Off");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(section).toHaveTextContent(
+      "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs.",
+    );
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("renders permission relay toggle checked when enabled on runner config", async () => {
+  it("renders permission relay read-only status On when enabled on runner config", async () => {
     const relayRunner: Runner = {
       ...desktop,
       info: { ...desktop.info!, permissionRelay: true },
@@ -312,21 +321,10 @@ describe("RunnersPanel", () => {
     await screen.findByText("desktop");
     fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
 
-    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
-    expect(toggle).toBeChecked();
-  });
-
-  it("toggles permission relay when clicked", async () => {
-    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
-
-    render(<RunnersPanel />);
-    await screen.findByText("desktop");
-    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
-
-    const toggle = screen.getByRole("switch", { name: "Relay permission prompts to Nodevas" });
-    expect(toggle).not.toBeChecked();
-
-    fireEvent.click(toggle);
-    expect(toggle).toBeChecked();
+    const section = screen.getByTestId(`runner-relay-${desktop.id}`);
+    expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: On");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true (or false)");
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
