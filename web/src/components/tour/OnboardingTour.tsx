@@ -25,6 +25,7 @@ const HIGHLIGHT_PAD = 8;
 const POPOVER_GAP = 12;
 const VIEWPORT_MARGIN = 8;
 const WELCOME_DELAY = 800;
+const WELCOME_RECHECK = 400;
 const POINTER_TRIGGER_DELAY = 300;
 const DRAWER_TRIGGER_DELAY = 400;
 
@@ -77,6 +78,18 @@ function userIsBusy(): boolean {
   if (active instanceof HTMLElement && active.isContentEditable) return true;
   if (active.matches("input, textarea, select")) return true;
   return active.closest('[role="menu"], [role="dialog"], form') !== null;
+}
+
+/**
+ * True while another modal dialog is open (the command palette, a confirm,
+ * the start screen). The invitation is a modal too; opening it over one would
+ * leave two at once, and 開始導覽 would spotlight a pane the other still covers.
+ */
+function otherModalOpen(): boolean {
+  for (const dialog of document.querySelectorAll('[role="dialog"][aria-modal="true"], [role="alertdialog"]')) {
+    if (!dialog.closest(".tour-welcome, .tour-popover")) return true;
+  }
+  return false;
 }
 
 function boxesEqual(a: Box | null, b: Box | null): boolean {
@@ -182,10 +195,18 @@ export function OnboardingTour() {
       return;
     }
     if (startScreenVisible) return;
-    const timer = window.setTimeout(() => {
+    // Another dialog opened meanwhile (Ctrl+K within the delay): ask again
+    // shortly, once it has closed, rather than stacking a second modal on it.
+    let timer = 0;
+    const invite = () => {
+      if (otherModalOpen()) {
+        timer = window.setTimeout(invite, WELCOME_RECHECK);
+        return;
+      }
       promptedRef.current = true;
       setWelcomeOpen(true);
-    }, WELCOME_DELAY);
+    };
+    timer = window.setTimeout(invite, WELCOME_DELAY);
     return () => window.clearTimeout(timer);
   }, [tourPrompt, startScreenVisible]);
 
