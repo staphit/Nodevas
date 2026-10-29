@@ -40,6 +40,10 @@ type Request struct {
 	// Content is the unsaved editor buffer for NodeID/PageID; nil means
 	// "read the file from disk".
 	Content *string `json:"content,omitempty"`
+	// Language is the reader's: the words the export adds itself (the graph
+	// section, an untitled heading) are written in it. The handler sets it
+	// from the request; it is never read from the body.
+	Language locale.Language `json:"-"`
 }
 
 // ---------- assembling the source markdown ----------
@@ -72,7 +76,7 @@ func exportPage(st *store.Store, graph *engine.Graph, request Request) (string, 
 			return "", "", err
 		}
 		title := nodeTitle(node)
-		return exportSection(title, body, 1), title, nil
+		return exportSection(title, body, 1, request.Language), title, nil
 	}
 	pages, err := st.ListNodePages(node.ID)
 	if err != nil {
@@ -87,7 +91,7 @@ func exportPage(st *store.Store, graph *engine.Graph, request Request) (string, 
 		return "", "", err
 	}
 	title := nodeTitle(node) + " - " + page.Title
-	return exportSection(page.Title, body, 1), title, nil
+	return exportSection(page.Title, body, 1, request.Language), title, nil
 }
 
 func exportNode(st *store.Store, graph *engine.Graph, request Request) (string, string, error) {
@@ -108,7 +112,7 @@ func exportProject(st *store.Store, graph *engine.Graph, request Request) (strin
 	sections := []string{"# " + title}
 	// The wiring goes first: without it the export is a pile of documents with
 	// no way to tell what leads to what.
-	if relations := RelationSection(graph, 2); relations != "" {
+	if relations := RelationSection(graph, 2, request.Language); relations != "" {
 		sections = append(sections, relations)
 	}
 	total := len(title)
@@ -141,7 +145,7 @@ func nodeSections(
 	if err != nil {
 		return nil, err
 	}
-	sections := []string{exportSection(nodeTitle(node), body, baseLevel)}
+	sections := []string{exportSection(nodeTitle(node), body, baseLevel, request.Language)}
 	pages, err := st.ListNodePages(node.ID)
 	if err != nil {
 		return sections, nil
@@ -151,7 +155,7 @@ func nodeSections(
 		if err != nil {
 			continue
 		}
-		sections = append(sections, exportSection(page.Title, body, baseLevel+1))
+		sections = append(sections, exportSection(page.Title, body, baseLevel+1, request.Language))
 	}
 	return sections, nil
 }
@@ -214,13 +218,14 @@ func nodeTitle(node *engine.Node) string {
 }
 
 // exportSection puts a document under one heading at the given level: an
-// existing top heading is reused, otherwise the title is prepended.
-func exportSection(title, body string, level int) string {
+// existing top heading is reused, otherwise the title is prepended (an
+// untitled one is named in language).
+func exportSection(title, body string, level int, language locale.Language) string {
 	body = strings.TrimSpace(body)
 	if !startsWithTopHeading(body) {
 		heading := strings.TrimSpace(title)
 		if heading == "" {
-			heading = "未命名"
+			heading = wordsFor(language).untitled
 		}
 		body = "# " + heading + "\n\n" + body
 	}

@@ -32,6 +32,7 @@ func (a *API) postExport(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
+	request.Language = httpx.Language(c.Request)
 	markdown, title, err := export.BuildMarkdown(st, request)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -44,7 +45,7 @@ func (a *API) postExport(c *gin.Context) {
 	// The document names its own language; one with no words to tell by
 	// takes the reader's.
 	options := document.Options{Title: title, Assets: st.DocumentAssets(), Language: "en"}
-	if httpx.Language(c.Request) == locale.Chinese {
+	if request.Language == locale.Chinese {
 		options.Language = "zh-Hant"
 	}
 	var data []byte

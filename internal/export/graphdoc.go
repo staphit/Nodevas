@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // The relationship graph, written into the exported document.
@@ -18,12 +19,54 @@ import (
 
 const maxDiagramNodes = 300
 
-func relationLabel(edge *engine.Edge) string {
+// graphWords are the words the graph section is written in, one set per
+// interface language: the section is read by whoever asked for the export,
+// whatever language the project's own text is in.
+type graphWords struct {
+	graph, relations, entries, requires, next string
+	optional, deprecated, untitled            string
+	tooMany                                   string // takes the node limit
+	colon, separator, open, close             string
+}
+
+var graphWordsIn = map[locale.Language]graphWords{
+	locale.English: {
+		graph: "Graph", relations: "Relations", entries: "Start nodes",
+		requires: "Requires", next: "Next",
+		optional: "Optional", deprecated: "Deprecated", untitled: "Untitled",
+		tooMany: "(More than %d nodes: the diagram is left out and only the relations are listed.)",
+		colon:   ": ", separator: ", ", open: " (", close: ")",
+	},
+	locale.Chinese: {
+		graph: "關係圖", relations: "關係", entries: "起點",
+		requires: "前置", next: "後續",
+		optional: "選用", deprecated: "棄用", untitled: "未命名",
+		tooMany: "（節點超過 %d 個，略過流程圖，僅列出關係。）",
+		colon:   "：", separator: "、", open: "（", close: "）",
+	},
+}
+
+func wordsFor(language locale.Language) graphWords {
+	if words, ok := graphWordsIn[language]; ok {
+		return words
+	}
+	return graphWordsIn[locale.English]
+}
+
+func relationLabel(edge *engine.Edge, words graphWords) string {
 	switch edge.Relation {
 	case engine.RelationOptional:
-		return "選用"
+		return words.optional
 	case engine.RelationDeprecated:
-		return "棄用"
+		return words.deprecated
+	}
+	return ""
+}
+
+// relationSuffix marks an optional or deprecated wire after a title.
+func relationSuffix(edge *engine.Edge, words graphWords) string {
+	if label := relationLabel(edge, words); label != "" {
+		return words.open + label + words.close
 	}
 	return ""
 }
@@ -48,11 +91,11 @@ func mermaidID(id string) string {
 
 // mermaidLabel quotes a title for a Mermaid node. Quotes and brackets would
 // otherwise end the label early.
-func mermaidLabel(text string) string {
+func mermaidLabel(text string, words graphWords) string {
 	replacer := strings.NewReplacer(`"`, "'", "[", "(", "]", ")", "\n", " ")
 	label := strings.TrimSpace(replacer.Replace(text))
 	if label == "" {
-		return "未命名"
+		return words.untitled
 	}
 	if runes := []rune(label); len(runes) > 40 {
 		label = string(runes[:40]) + "…"
@@ -60,9 +103,10 @@ func mermaidLabel(text string) string {
 	return label
 }
 
-// RelationSection renders the project's wiring as a Markdown section, or ""
-// when the project has no edges worth drawing.
-func RelationSection(graph *engine.Graph, level int) string {
+// RelationSection renders the project's wiring as a Markdown section in
+// language, or "" when the project has no edges worth drawing.
+func RelationSection(graph *engine.Graph, level int, language locale.Language) string {
+	words := wordsFor(language)
 	if graph == nil || len(graph.Nodes) == 0 {
 		return ""
 	}
@@ -87,19 +131,19 @@ func RelationSection(graph *engine.Graph, level int) string {
 	}
 
 	var body strings.Builder
-	body.WriteString(strings.Repeat("#", min(level, 6)) + " 關係圖\n\n")
+	body.WriteString(strings.Repeat("#", min(level, 6)) + " " + words.graph + "\n\n")
 
 	if len(order) <= maxDiagramNodes {
 		body.WriteString("```mermaid\nflowchart TD\n")
 		for _, id := range order {
-			fmt.Fprintf(&body, "  %s[\"%s\"]\n", mermaidID(id), mermaidLabel(titles[id]))
+			fmt.Fprintf(&body, "  %s[\"%s\"]\n", mermaidID(id), mermaidLabel(titles[id], words))
 		}
 		for _, edge := range edges {
 			arrow := "-->"
 			if edge.Relation != engine.RelationRequired {
 				arrow = "-.->"
 			}
-			if label := relationLabel(edge); label != "" {
+			if label := relationLabel(edge, words); label != "" {
 				fmt.Fprintf(&body, "  %s %s|%s| %s\n",
 					mermaidID(edge.From), arrow, label, mermaidID(edge.To))
 				continue
@@ -109,8 +153,7 @@ func RelationSection(graph *engine.Graph, level int) string {
 		}
 		body.WriteString("```\n\n")
 	} else {
-		body.WriteString(fmt.Sprintf(
-			"（節點超過 %d 個，略過流程圖，僅列出關係。）\n\n", maxDiagramNodes))
+		body.WriteString(fmt.Sprintf(words.tooMany+"\n\n", maxDiagramNodes))
 	}
 
 	// The outline is the fallback for formats that cannot draw: every node
@@ -118,10 +161,7 @@ func RelationSection(graph *engine.Graph, level int) string {
 	incoming := map[string][]string{}
 	outgoing := map[string][]string{}
 	for _, edge := range edges {
-		suffix := ""
-		if label := relationLabel(edge); label != "" {
-			suffix = "（" + label + "）"
-		}
+		suffix := relationSuffix(edge, words)
 		incoming[edge.To] = append(incoming[edge.To], titles[edge.From]+suffix)
 		outgoing[edge.From] = append(outgoing[edge.From], titles[edge.To]+suffix)
 	}
@@ -143,7 +183,8 @@ func RelationSection(graph *engine.Graph, level int) string {
 	}
 	sort.Strings(entries)
 	if len(entries) > 0 {
-		fmt.Fprintf(&body, "**起點**：%s\n\n", strings.Join(entries, "、"))
+		fmt.Fprintf(&body, "**%s**%s%s\n\n", words.entries, words.colon,
+			strings.Join(entries, words.separator))
 	}
 	for _, id := range order {
 		if len(incoming[id]) == 0 && len(outgoing[id]) == 0 {
@@ -151,21 +192,25 @@ func RelationSection(graph *engine.Graph, level int) string {
 		}
 		fmt.Fprintf(&body, "- **%s**", titles[id])
 		if len(incoming[id]) > 0 {
-			fmt.Fprintf(&body, "\n  - 前置：%s", strings.Join(incoming[id], "、"))
+			fmt.Fprintf(&body, "\n  - %s%s%s", words.requires, words.colon,
+				strings.Join(incoming[id], words.separator))
 		}
 		if len(outgoing[id]) > 0 {
-			fmt.Fprintf(&body, "\n  - 後續：%s", strings.Join(outgoing[id], "、"))
+			fmt.Fprintf(&body, "\n  - %s%s%s", words.next, words.colon,
+				strings.Join(outgoing[id], words.separator))
 		}
 		body.WriteString("\n")
 	}
 	return strings.TrimSpace(body.String())
 }
 
-// NodeRelationLines renders one node's own wiring, for a single-node export.
-func NodeRelationLines(graph *engine.Graph, nodeID string, level int) string {
+// NodeRelationLines renders one node's own wiring in language, for a
+// single-node export.
+func NodeRelationLines(graph *engine.Graph, nodeID string, level int, language locale.Language) string {
 	if graph == nil {
 		return ""
 	}
+	words := wordsFor(language)
 	titles := map[string]string{}
 	for _, node := range graph.Nodes {
 		if node != nil {
@@ -177,10 +222,7 @@ func NodeRelationLines(graph *engine.Graph, nodeID string, level int) string {
 		if edge == nil {
 			continue
 		}
-		suffix := ""
-		if label := relationLabel(edge); label != "" {
-			suffix = "（" + label + "）"
-		}
+		suffix := relationSuffix(edge, words)
 		if edge.To == nodeID && titles[edge.From] != "" {
 			before = append(before, titles[edge.From]+suffix)
 		}
@@ -192,12 +234,12 @@ func NodeRelationLines(graph *engine.Graph, nodeID string, level int) string {
 		return ""
 	}
 	var body strings.Builder
-	body.WriteString(strings.Repeat("#", min(level, 6)) + " 關係\n\n")
+	body.WriteString(strings.Repeat("#", min(level, 6)) + " " + words.relations + "\n\n")
 	if len(before) > 0 {
-		fmt.Fprintf(&body, "- 前置：%s\n", strings.Join(before, "、"))
+		fmt.Fprintf(&body, "- %s%s%s\n", words.requires, words.colon, strings.Join(before, words.separator))
 	}
 	if len(after) > 0 {
-		fmt.Fprintf(&body, "- 後續：%s\n", strings.Join(after, "、"))
+		fmt.Fprintf(&body, "- %s%s%s\n", words.next, words.colon, strings.Join(after, words.separator))
 	}
 	return strings.TrimSpace(body.String())
 }
