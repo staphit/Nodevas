@@ -57,6 +57,29 @@ export function visibleArea(board: Area, overlays: readonly Area[]): Area {
 }
 
 /**
+ * How far `visible` sits inside `outer` on each side, never negative: the
+ * padding that keeps something laid out in `outer` within what shows.
+ */
+export function insetsWithin(outer: Area, visible: Area): Area {
+  return {
+    left: Math.max(0, Math.round(visible.left - outer.left)),
+    top: Math.max(0, Math.round(visible.top - outer.top)),
+    right: Math.max(0, Math.round(outer.right - visible.right)),
+    bottom: Math.max(0, Math.round(outer.bottom - visible.bottom)),
+  };
+}
+
+/**
+ * The overlays laid over the board from outside `board`, where they will come
+ * to rest.
+ */
+export function boardOverlayRects(board: HTMLElement): Area[] {
+  return Array.from(board.ownerDocument.querySelectorAll<HTMLElement>(BOARD_OVERLAY_SELECTOR))
+    .filter((element) => !board.contains(element))
+    .map(restingRect);
+}
+
+/**
  * An element's rect without its current translation. The drawer slides in
  * (and a phone's sheet slides up) while a jump is being answered, and the
  * card should be centred against where it comes to rest.
@@ -85,12 +108,7 @@ export function visibleBoardArea(board: HTMLElement): Area {
     right: rect.left + board.clientWidth,
     bottom: rect.top + board.clientHeight,
   };
-  const overlays = Array.from(
-    board.ownerDocument.querySelectorAll<HTMLElement>(BOARD_OVERLAY_SELECTOR),
-  )
-    .filter((element) => !board.contains(element))
-    .map(restingRect);
-  return visibleArea(area, overlays);
+  return visibleArea(area, boardOverlayRects(board));
 }
 
 /**

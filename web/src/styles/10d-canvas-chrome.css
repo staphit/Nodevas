@@ -388,7 +388,10 @@
 
 /* graph.yaml does not parse or validate: the reason in place of the board.
    The parser's words can be one long unbroken line; they wrap rather than
-   widen the card past the pane. */
+   widen the card past the pane. The background fills the pane; the card is
+   laid out in the part of it the reader can see (UnreadableGraphState
+   measures it, less an open drawer or a phone's sheet), so neither its text
+   nor its Reload button is under the drawer. */
 .board-unreadable {
   position: absolute;
   inset: 0;
@@ -398,23 +401,37 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  padding: var(--notice-top, 0px) var(--notice-right, 0px) var(--notice-bottom, 0px) var(--notice-left, 0px);
 }
-/* An open drawer lies over the pane's right side (useDrawerCover measures the
-   reach): the card centres, and wraps, in what is left, so its text and its
-   Reload button are not under the drawer. The background still fills the
-   pane. On a phone the drawer is a sheet and the reach is never set. */
-.lane-wrap[data-drawer-cover] .board-unreadable {
-  padding-right: var(--drawer-cover);
-}
+/* As wide as what shows allows, up to a reading width that grows with the
+   text; never a strip narrower than a short sentence. */
 .board-unreadable-state {
+  width: min(calc(100% - 32px), calc(640px * var(--font-scale, 1)));
+  min-width: min(calc(100% - 16px), calc(240px * var(--font-scale, 1)));
   border-style: solid;
   border-color: var(--st-failed-fg);
   background: var(--st-failed-bg);
+}
+.board-unreadable-state .ui-empty-state-action button {
+  white-space: nowrap;
+}
+/* Too narrow for Reload beside the words (an open drawer, a phone, larger
+   text): the words take the card's width and Reload goes under them. */
+.board-unreadable[data-layout="stacked"] .board-unreadable-state {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 12px;
+  margin: 16px auto;
+  padding: 14px 16px;
+}
+.board-unreadable[data-layout="stacked"] .ui-empty-state-action {
+  grid-column: 2;
 }
 .board-unreadable-state .ui-empty-state-mark {
   border-color: var(--st-failed-fg);
 }
 .board-unreadable-state p {
+  max-width: none;
   color: var(--text);
 }
 .board-unreadable-detail {
@@ -426,4 +443,8 @@
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* A validator can list many problems: they scroll here, so Reload under or
+     beside them stays in view. */
+  max-height: min(40vh, calc(180px * var(--font-scale, 1)));
+  overflow: auto;
 }
