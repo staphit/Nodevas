@@ -9,13 +9,13 @@ import { reportError, useApp } from "../../store";
  * behind 'load project "x": '. Split into the hub's sentence, which already
  * carries the advice, and the parser's or validator's own words.
  */
-const HUB_FRAME = /^([^(（]*[.。]) ?[(（]([\s\S]*)[)）]$/;
+const HUB_FRAME = /^([^(\uFF08]*[.\u3002]) ?[(\uFF08]([\s\S]*)[)\uFF09]$/;
 
 export function splitUnreadableGraph(message: string): {
   sentence: string | null;
   detail: string;
 } {
-  const said = /(?:^|[:：] ?)graph\.yaml: ([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
+  const said = /(?:^|[:\uFF1A] ?)graph\.yaml: ([\s\S]*)$/.exec(message)?.[1].trim() ?? message.trim();
   const framed = HUB_FRAME.exec(said);
   if (framed) return { sentence: framed[1].trim(), detail: framed[2].trim() };
   return { sentence: null, detail: said };
