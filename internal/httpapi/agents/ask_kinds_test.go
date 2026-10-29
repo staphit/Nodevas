@@ -45,6 +45,11 @@ func askOverHTTP(t *testing.T, router http.Handler, body string) (agents.Ask, ch
 		if len(got.Asks) == 1 {
 			return got.Asks[0], asked
 		}
+		select {
+		case rec := <-asked:
+			t.Fatalf("the ask %s returned at once: %d %s", body, rec.Code, rec.Body)
+		default:
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("the ask %s never became pending", body)
@@ -112,13 +117,13 @@ func TestQuestionAndChoiceOverHTTP(t *testing.T) {
 	}
 }
 
-// A permission prompt's run is the transport's, never the body's; it waits
+// A permission prompt's run is the transport's (the body has no say); it waits
 // five minutes at most; allowing it for the run allows the next one.
 func TestPermissionAskOverHTTP(t *testing.T) {
 	router := runRouter(t)
 	heartbeat(t, router, "alice-agent", "claude:a1", "alice-bot")
 	body := `{"sessionId":"claude:a1","sessionName":"alice-bot","kind":"permission","tool":"Bash",` +
-		`"toolInput":"{\"command\":\"go test ./...\"}","runId":"someone-elses-run","timeoutSeconds":3600}`
+		`"toolInput":"{\"command\":\"go test ./...\"}","timeoutSeconds":3600}`
 	ask, asked := askOverHTTP(t, router, body)
 	if ask.Kind != agents.AskKindPermission || ask.Tool != "Bash" || ask.RunID != "run-7" ||
 		!strings.Contains(ask.ToolInput, "go test") {

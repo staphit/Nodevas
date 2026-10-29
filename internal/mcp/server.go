@@ -249,6 +249,11 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 			if !ok || toolRes == nil || toolRes.IsError {
 				return res, nil
 			}
+			// approve_tool's one text content is the CLI's to parse, not
+			// the model's to read: nothing may be added to it.
+			if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && params.Name == ApproveToolName {
+				return toolRes, nil
+			}
 			if unread := client.UnreadCount(); unread > 0 {
 				toolRes.Content = append(toolRes.Content, &mcp.TextContent{
 					Text: fmt.Sprintf("[Unread mail: %d message(s) waiting — call check_inbox]", unread),

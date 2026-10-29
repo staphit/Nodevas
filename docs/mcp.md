@@ -59,7 +59,7 @@ An agent can work the queue safely:
    `NODE_TYPE_PEOPLE_ONLY`: release it for a person instead.
 6. Call `release_task` if the work cannot be completed.
 
-Available capabilities include project listing, ready-task discovery, node reading and search, graph outlines, graph validation, task claiming and release, status updates, node creation, body and metadata updates, dependency links, and multi-agent collaboration (`list_team`, `send_message`, `check_inbox`, `ask_user`). MCP also exposes project and node resources plus the `work_the_queue` prompt. It intentionally has no delete tool.
+Available capabilities include project listing, ready-task discovery, node reading and search, graph outlines, graph validation, task claiming and release, status updates, node creation, body and metadata updates, dependency links, and multi-agent collaboration (`list_team`, `send_message`, `check_inbox`, `ask_user`, `approve_tool`). MCP also exposes project and node resources plus the `work_the_queue` prompt. It intentionally has no delete tool.
 
 ## Agent-to-agent collaboration & human-in-the-loop
 
@@ -68,7 +68,10 @@ Multiple MCP sessions connected to the same Nodevas server automatically registe
 - `list_team`: list active (and recently offline) agent sessions and project members.
 - `send_message`: message another agent by session name (`api-claude`), actor-qualified name (`alice/api-claude`), or by the node it holds (`node:design`). Messages can attach a `nodeId` to link the discussion to a task.
 - `check_inbox`: fetch unread messages (optionally long-polling with `waitSeconds`). Every tool response also appends an `[Unread mail: N message(s) waiting]` notice when unread mail is present.
-- `ask_user`: prompt a human in the Nodevas Agent chat panel (`Ctrl+Shift+A`) to approve or deny a question (blocking up to 10 minutes). When `about` references a peer message ID, the human's verified decision (`<nodevas-approval>`) is also forwarded to the original sender.
+- `ask_user`: prompt a human in the Nodevas Agent chat panel (`Ctrl+Shift+A`) and wait for the answer (blocking up to 10 minutes). `kind` picks the prompt: `approval` (default; approve or deny, before a risky step), `question` (the person types an answer: information the agent needs) or `choice` (the person picks one of 2 to 8 `options`). The result has `status` (`approved`, `denied`, `answered` or `expired`), `note`, and for a question or choice the `answer`. A person may dismiss a question or choice (`denied`). When `about` references a peer message ID, the human's verified decision (`<nodevas-approval>`) is also forwarded to the original sender.
+- `approve_tool`: the target of Claude Code's `--permission-prompt-tool mcp__nodevas__approve_tool`, which a runner adds when its permission relay is on; not for the model to call. It takes Claude Code's `{tool_name, input, tool_use_id?}`, shows the person a permission prompt (tool name and input), waits up to 5 minutes, and returns one text content: `{"behavior":"allow","updatedInput":<the input unchanged>}` or `{"behavior":"deny","message":"<who denied, the note, or that nobody answered>"}`. "Allow for this run" allows the same tool again in the same run without asking.
+
+A session waits on one `ask_user` prompt at a time (a second gets `409 CONFLICT`). Permission prompts are counted apart: the CLI raises them for its own tool calls, possibly while `ask_user` waits or several at once for parallel calls, so they never wait behind a question (at most 8 at once per session). Only a person answers (the asking session's account or an administrator), never an agent: `POST /api/agents/asks/:id/answer` with `{"decision":"approve"|"deny"}` for an approval, `{"decision":"answer","answer":"..."}` or `deny` for a question or choice (the answer must be one of a choice's options), and `approve`, `approve_run` or `deny` for a permission prompt.
 
 Sessions are bound to the actor that first registered them: on a shared server another account cannot take over a session or read its inbox. Pass `--session-name` to `nodevas mcp` for a stable address; otherwise one is derived from the repo and agent (`visual-editor-claude`).
 

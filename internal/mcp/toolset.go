@@ -38,6 +38,8 @@ var Toolsets = []string{ToolsetFull, ToolsetRun}
 //     their requires edges and their reference notes to the board with these.
 //   - ask_user: a headless run's one way to reach a person; the adapters'
 //     tool timeouts are sized for it.
+//   - approve_tool: the runner's permission relay points the CLI's
+//     permission prompts at it (--permission-prompt-tool).
 //   - check_inbox: a late ask_user answer arrives as a message, and every
 //     tool result points at check_inbox when mail is waiting.
 //   - send_message: runs working on one project tell each other what they
@@ -53,6 +55,7 @@ var RunTools = []string{
 	"create_subgraph",
 	"link_nodes",
 	"ask_user",
+	"approve_tool",
 	"check_inbox",
 	"send_message",
 	"submit_verdict",

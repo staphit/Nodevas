@@ -234,9 +234,11 @@ func TestRolePayloadBudgets(t *testing.T) {
 		return len(raw)
 	}
 	run := size(toolsetSession(t, url, ToolsetRun))
+	// Every role carries approve_tool (about 400 bytes), the target of the
+	// runner's permission relay: the reviewer's ceiling rose from 3000.
 	ceilings := map[string]int{
 		"planner": 13000, "qa": 11000, "researcher": 11000,
-		"executor": 7000, "tester": 4500, "reviewer": 3000,
+		"executor": 7000, "tester": 4500, "reviewer": 3500,
 	}
 	for role, ceiling := range ceilings {
 		got := size(roleOptionsSession(t, Options{Server: url, Role: role}))

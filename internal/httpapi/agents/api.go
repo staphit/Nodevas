@@ -517,14 +517,18 @@ func (a *API) getAsks(c *gin.Context) {
 
 func (a *API) postAsk(c *gin.Context) {
 	var body struct {
-		SessionID      string `json:"sessionId"`
-		SessionName    string `json:"sessionName"`
-		Actor          string `json:"actor"`
-		Agent          string `json:"agent"`
-		Question       string `json:"question"`
-		AboutMsgID     string `json:"aboutMsgId"`
-		NodeID         string `json:"nodeId"`
-		TimeoutSeconds int    `json:"timeoutSeconds"`
+		SessionID      string   `json:"sessionId"`
+		SessionName    string   `json:"sessionName"`
+		Actor          string   `json:"actor"`
+		Agent          string   `json:"agent"`
+		Question       string   `json:"question"`
+		AboutMsgID     string   `json:"aboutMsgId"`
+		NodeID         string   `json:"nodeId"`
+		Kind           string   `json:"kind"`
+		Options        []string `json:"options"`
+		Tool           string   `json:"tool"`
+		ToolInput      string   `json:"toolInput"`
+		TimeoutSeconds int      `json:"timeoutSeconds"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxAskBody) {
 		return
@@ -542,10 +546,7 @@ func (a *API) postAsk(c *gin.Context) {
 			locale.Errorf("a run may not ask as a person's session", "執行不能以人的工作階段身分提問"), nil)
 		return
 	}
-	timeout := time.Duration(body.TimeoutSeconds) * time.Second
-	if timeout <= 0 || timeout > agents.MaxAskTimeout {
-		timeout = agents.MaxAskTimeout
-	}
+	timeout := agents.AskTimeout(body.Kind, time.Duration(body.TimeoutSeconds)*time.Second)
 	controller := http.NewResponseController(c.Writer)
 	_ = controller.SetWriteDeadline(time.Now().Add(timeout + 30*time.Second))
 
@@ -558,7 +559,14 @@ func (a *API) postAsk(c *gin.Context) {
 		Question:    body.Question,
 		AboutMsgID:  body.AboutMsgID,
 		NodeID:      body.NodeID,
-		FromRun:     fromRun,
+		Kind:        body.Kind,
+		Options:     body.Options,
+		Tool:        body.Tool,
+		ToolInput:   body.ToolInput,
+		// The run is the transport's word, never the body's: an allow for
+		// the run is keyed on it.
+		RunID:   a.runIDOf(c.Request),
+		FromRun: fromRun,
 	}, timeout)
 	if err != nil {
 		if errors.Is(err, c.Request.Context().Err()) {
@@ -584,12 +592,16 @@ func (a *API) postAskAnswer(c *gin.Context) {
 	var body struct {
 		Decision string `json:"decision"`
 		Note     string `json:"note"`
+		Answer   string `json:"answer"`
 	}
-	if !httpx.DecodeJSONLimit(c, &body, maxInboxBody) {
+	// A text answer runs to MaxAskAnswerRunes characters of any script.
+	if !httpx.DecodeJSONLimit(c, &body, maxAskBody) {
 		return
 	}
 	projectKey := a.projectKey(c.Request)
-	ask, err := a.hub.Answer(c.Request.Context(), projectKey, c.Param("id"), body.Decision, body.Note, humanViewer(c.Request))
+	ask, err := a.hub.AnswerWith(c.Request.Context(), projectKey, c.Param("id"), agents.AnswerInput{
+		Decision: body.Decision, Note: body.Note, Answer: body.Answer,
+	}, humanViewer(c.Request))
 	if err != nil {
 		fail(c, err)
 		return

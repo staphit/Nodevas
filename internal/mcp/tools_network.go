@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -89,9 +90,11 @@ type saveAttachmentOutput struct {
 }
 
 type askUserInput struct {
-	Question string `json:"question" jsonschema:"question or approval prompt for the human"`
-	About    string `json:"about,omitempty" jsonschema:"message id to forward verified decision to"`
-	NodeID   string `json:"nodeId,omitempty" jsonschema:"board node id"`
+	Question string   `json:"question" jsonschema:"question or approval prompt for the human"`
+	Kind     string   `json:"kind,omitempty" jsonschema:"approval (default), question or choice"`
+	Options  []string `json:"options,omitempty" jsonschema:"choice only: 2-8 options"`
+	About    string   `json:"about,omitempty" jsonschema:"message id to forward verified decision to"`
+	NodeID   string   `json:"nodeId,omitempty" jsonschema:"board node id"`
 }
 
 type askUserOutput struct {
@@ -99,7 +102,25 @@ type askUserOutput struct {
 	Status    string `json:"status"`
 	DecidedBy string `json:"decidedBy,omitempty"`
 	Note      string `json:"note,omitempty"`
+	Answer    string `json:"answer,omitempty"`
 }
+
+// approveToolSchema is approve_tool's input as Claude Code sends it to its
+// --permission-prompt-tool. Written out rather than inferred so the input
+// object is any object, and a field a newer CLI adds is not refused.
+var approveToolSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"tool_name":   map[string]any{"type": "string"},
+		"input":       map[string]any{"type": "object"},
+		"tool_use_id": map[string]any{"type": "string"},
+	},
+	"required": []string{"tool_name", "input"},
+}
+
+// ApproveToolName is the permission-prompt tool's name (Claude Code's
+// --permission-prompt-tool mcp__nodevas__approve_tool).
+const ApproveToolName = "approve_tool"
 
 func registerNetworkTools(server *mcp.Server, client *Client) {
 	mcp.AddTool(server, &mcp.Tool{
@@ -151,9 +172,10 @@ func registerNetworkTools(server *mcp.Server, client *Client) {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ask_user",
-		Description: "Ask a human in the Nodevas UI to approve or deny a request (blocks up to 10 minutes).",
-		Annotations: &mcp.ToolAnnotations{Title: "Ask human approval"},
+		Name: "ask_user",
+		Description: "Ask a human in the Nodevas UI and wait (up to 10 min). kind: \"question\" for information you need " +
+			"(text answer), \"choice\" to pick one of options, \"approval\" (default) before a risky step.",
+		Annotations: &mcp.ToolAnnotations{Title: "Ask a human"},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in askUserInput) (*mcp.CallToolResult, askUserOutput, error) {
 		out, err := client.AskUser(ctx, in)
 		if err != nil {
@@ -161,6 +183,66 @@ func registerNetworkTools(server *mcp.Server, client *Client) {
 		}
 		return nil, out, nil
 	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        ApproveToolName,
+		Description: "Permission prompt relay for the agent CLI (--permission-prompt-tool); not for you to call.",
+		InputSchema: approveToolSchema,
+		Annotations: &mcp.ToolAnnotations{Title: "Relay a permission prompt"},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
+		// The raw arguments, not the decoded map: updatedInput must be
+		// the CLI's input exactly, big numbers and all.
+		var args struct {
+			ToolName string          `json:"tool_name"`
+			Input    json.RawMessage `json:"input"`
+		}
+		if req != nil && req.Params != nil {
+			_ = json.Unmarshal(req.Params.Arguments, &args)
+		}
+		input := args.Input
+		if len(input) == 0 || string(input) == "null" {
+			input = json.RawMessage("{}")
+		}
+		text := client.ApproveTool(ctx, args.ToolName, input)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+	})
+}
+
+// permissionPromptReply is the JSON Claude Code expects back from its
+// --permission-prompt-tool.
+type permissionPromptReply struct {
+	Behavior     string          `json:"behavior"`
+	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
+	Message      string          `json:"message,omitempty"`
+}
+
+func denyText(message string) string {
+	raw, _ := json.Marshal(permissionPromptReply{Behavior: "deny", Message: message})
+	return string(raw)
+}
+
+// permissionReplyText is the permission-prompt reply for a decided ask:
+// allow with input unchanged when a person allowed it (once or for the run),
+// otherwise deny saying who denied it, or that nobody answered in time.
+func permissionReplyText(ask agents.Ask, input json.RawMessage) string {
+	switch ask.Status {
+	case agents.AskApproved:
+		raw, _ := json.Marshal(permissionPromptReply{Behavior: "allow", UpdatedInput: input})
+		return string(raw)
+	case agents.AskExpired:
+		return denyText(fmt.Sprintf("Nobody answered this permission prompt in Nodevas within %d minutes, so it was denied. "+
+			"Do not retry the same call; continue without it or explain what you need with ask_user.",
+			int(agents.PermissionAskTimeout/time.Minute)))
+	}
+	who := strings.TrimPrefix(strings.TrimSpace(ask.DecidedBy), "mcp:")
+	if who == "" {
+		who = "a person"
+	}
+	message := fmt.Sprintf("Denied in Nodevas by %s.", who)
+	if ask.Note != "" {
+		message += " Note: " + ask.Note
+	}
+	return denyText(message)
 }
 
 // Heartbeat registers or updates this MCP process's session in the server's
@@ -595,6 +677,14 @@ func (c *Client) AskUser(ctx context.Context, in askUserInput) (askUserOutput, e
 		"nodeId":         strings.TrimSpace(in.NodeID),
 		"timeoutSeconds": int(agents.MaxAskTimeout / time.Second),
 	}
+	// Only when set: a server from before kinds refuses fields it does not
+	// know, and an approval is what it would ask anyway.
+	if kind := strings.TrimSpace(in.Kind); kind != "" && kind != agents.AskKindApproval {
+		body["kind"] = kind
+	}
+	if len(in.Options) > 0 {
+		body["options"] = in.Options
+	}
 	var resp struct {
 		Ask         agents.Ask `json:"ask"`
 		UnreadCount int        `json:"unreadCount"`
@@ -610,7 +700,65 @@ func (c *Client) AskUser(ctx context.Context, in askUserInput) (askUserOutput, e
 		Status:    resp.Ask.Status,
 		DecidedBy: resp.Ask.DecidedBy,
 		Note:      resp.Ask.Note,
+		Answer:    resp.Ask.Answer,
 	}, nil
+}
+
+// ApproveTool relays one of the agent CLI's permission prompts to a person
+// (a permission ask) and returns the reply text the CLI expects. It never
+// fails: anything that keeps the prompt from a person denies the call,
+// saying why.
+func (c *Client) ApproveTool(ctx context.Context, tool string, input json.RawMessage) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return denyText("approve_tool needs tool_name.")
+	}
+	c.mu.Lock()
+	sessionID := c.sessionID
+	sessionName := c.sessionName
+	agentKind := c.agentKind
+	nodeID := c.nodeID
+	c.mu.Unlock()
+	if sessionName == "" {
+		_ = c.Heartbeat(ctx, "", "", "")
+		c.mu.Lock()
+		sessionName = c.sessionName
+		c.mu.Unlock()
+	}
+	body := map[string]any{
+		"sessionId":      sessionID,
+		"sessionName":    sessionName,
+		"actor":          c.actor,
+		"agent":          agentKind,
+		"kind":           agents.AskKindPermission,
+		"tool":           tool,
+		"toolInput":      capInput(string(input), agents.MaxAskToolInputBytes),
+		"nodeId":         nodeID,
+		"timeoutSeconds": int(agents.PermissionAskTimeout / time.Second),
+	}
+	var resp struct {
+		Ask         agents.Ask `json:"ask"`
+		UnreadCount int        `json:"unreadCount"`
+	}
+	if err := c.doLongPoll(ctx, "/api/agents/asks", body, &resp, agents.PermissionAskTimeout+30*time.Second); err != nil {
+		return denyText("Could not ask a person in Nodevas, so the call is denied: " + err.Error())
+	}
+	c.mu.Lock()
+	c.unreadCount = resp.UnreadCount
+	c.mu.Unlock()
+	return permissionReplyText(resp.Ask, input)
+}
+
+// capInput cuts s to at most n bytes on a rune boundary.
+func capInput(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // doLongPoll runs a POST that may legitimately block longer than the default

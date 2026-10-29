@@ -203,11 +203,12 @@ func shapeAsk(in AskInput) (askShape, error) {
 	return shape, nil
 }
 
-// askTimeout is how long an ask of kind waits: timeout, or the kind's
-// longest wait when timeout is unset or longer.
-func askTimeout(kind string, timeout time.Duration) time.Duration {
+// AskTimeout is how long an ask of kind waits: timeout, or the kind's
+// longest wait (PermissionAskTimeout for a permission prompt, else
+// MaxAskTimeout) when timeout is unset or longer.
+func AskTimeout(kind string, timeout time.Duration) time.Duration {
 	limit := MaxAskTimeout
-	if kind == AskKindPermission {
+	if strings.EqualFold(strings.TrimSpace(kind), AskKindPermission) {
 		limit = PermissionAskTimeout
 	}
 	if timeout <= 0 || timeout > limit {
@@ -239,7 +240,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if len(question) > maxBodyBytes {
 		return Ask{}, fmt.Errorf("%w: question exceeds %d bytes", ErrInvalid, maxBodyBytes)
 	}
-	timeout = askTimeout(shape.kind, timeout)
+	timeout = AskTimeout(shape.kind, timeout)
 
 	actorID := strings.TrimSpace(in.ActorID)
 	if actorID == "" {
