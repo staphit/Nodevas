@@ -264,7 +264,7 @@ export function TreeContextMenu({
       <button
         type="button"
         role="menuitem"
-        disabled={transfer.markdownImportBusy}
+        disabled={transfer.markdownImportBusy || transfer.nodeImportBlocked}
         onClick={() => {
           transfer.markdownImportInputRef.current?.click();
           onClose();

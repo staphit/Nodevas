@@ -333,7 +333,7 @@ export function ProjectContextMenu({
       <button
         type="button"
         role="menuitem"
-        disabled={transfer.markdownImportBusy}
+        disabled={transfer.markdownImportBusy || (transfer.nodeImportBlocked && menu.name === activeProject)}
         onClick={() => {
           const target = menu.name;
           onClose();
@@ -351,7 +351,7 @@ export function ProjectContextMenu({
       <button
         type="button"
         role="menuitem"
-        disabled={transfer.jsonCanvasBusy}
+        disabled={transfer.jsonCanvasBusy || (transfer.nodeImportBlocked && menu.name === activeProject)}
         onClick={() => {
           const target = menu.name;
           onClose();

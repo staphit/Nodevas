@@ -107,6 +107,7 @@ export function ProjectTransferBar({
     markdownImportBusy,
     jsonCanvasBusy,
     documentExportBusy,
+    nodeImportBlocked,
     closeTransferMenus,
     exportProjectArchive,
     exportProjectDocument,
@@ -216,7 +217,7 @@ export function ProjectTransferBar({
               <button
                 type="button"
                 role="menuitem"
-                disabled={markdownImportBusy || !activeProject}
+                disabled={markdownImportBusy || nodeImportBlocked || !activeProject}
                 onClick={() => {
                   markdownImportInputRef.current?.click();
                   closeTransferMenus();
@@ -228,7 +229,7 @@ export function ProjectTransferBar({
               <button
                 type="button"
                 role="menuitem"
-                disabled={jsonCanvasBusy || !activeProject}
+                disabled={jsonCanvasBusy || nodeImportBlocked || !activeProject}
                 onClick={() => {
                   jsonCanvasImportInputRef.current?.click();
                   closeTransferMenus();

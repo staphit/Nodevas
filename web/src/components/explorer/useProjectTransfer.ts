@@ -54,6 +54,10 @@ export function useProjectTransfer({
   const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const runGraphCommand = useApp((state) => state.runGraphCommand);
+  // Markdown and Canvas imports create nodes, which writes graph.yaml: while
+  // the active project's file does not read, that is the file the reader has
+  // to fix, so they are off like the board's New node.
+  const nodeImportBlocked = useApp((state) => state.graphUnreadable !== null);
   const { t } = useI18n();
   const projectLabel = useApp(
     (state) =>
@@ -149,10 +153,10 @@ export function useProjectTransfer({
    * was imported rather than at the project they started from.
    */
   const enterImportTarget = async (): Promise<boolean> => {
-    if (!importTarget || importTarget === activeProject) return true;
+    if (!importTarget || importTarget === activeProject) return nodeImportAllowed();
     try {
       await switchProject(importTarget);
-      return true;
+      return nodeImportAllowed();
     } catch (error) {
       setProjectTransferNotice(
         t("explorer.openImportTargetFailed", {
@@ -163,6 +167,13 @@ export function useProjectTransfer({
       reportError(error);
       return false;
     }
+  };
+
+  /** Whether the project now active can take new nodes; says why not. */
+  const nodeImportAllowed = (): boolean => {
+    if (useApp.getState().graphUnreadable === null) return true;
+    setProjectTransferNotice(t("explorer.importUnreadable"));
+    return false;
   };
 
   // The whole project as one readable document, next to the archive formats
@@ -250,6 +261,7 @@ export function useProjectTransfer({
     if (!files?.length || markdownImportBusy) return;
     if (!(await enterImportTarget())) {
       setImportTarget("");
+      if (markdownImportInputRef.current) markdownImportInputRef.current.value = "";
       return;
     }
     setMarkdownImportBusy(true);
@@ -268,7 +280,7 @@ export function useProjectTransfer({
           await api.createNode({ id }, text);
           importedIds.push(id);
         } catch (error) {
-          failures.push(`${file.name}: ${(error as Error).message}`);
+          failures.push(t("explorer.markdownImportFailure", { name: file.name, error: (error as Error).message }));
         }
       }
       await loadAll();
@@ -375,6 +387,7 @@ export function useProjectTransfer({
     if (jsonCanvasBusy) return;
     if (!(await enterImportTarget())) {
       setImportTarget("");
+      if (jsonCanvasImportInputRef.current) jsonCanvasImportInputRef.current.value = "";
       return;
     }
     setJsonCanvasBusy(true);
@@ -497,6 +510,7 @@ export function useProjectTransfer({
     markdownImportBusy,
     jsonCanvasBusy,
     documentExportBusy,
+    nodeImportBlocked,
     closeTransferMenus,
     beginImport,
     importTarget,
