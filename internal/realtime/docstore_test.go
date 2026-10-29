@@ -29,8 +29,26 @@ func TestSidecarRejectsZeroLengthAndTooManyDeltas(t *testing.T) {
 }
 
 func TestLargeSidecarEncodingIsSerialized(t *testing.T) {
-	room := t.TempDir()
+	assertLargeSidecarsEncodeOneAtATime(t, NewHub())
+}
+
+// The encode slot is held through the sidecar's disk write, and a 1 MiB fsync
+// on a loaded machine (the -race suite, a virus scanner opening the new file)
+// has taken over two seconds. That is slow, not a second encoder stuck.
+func TestLargeSidecarEncodingWaitsOutASlowWrite(t *testing.T) {
 	hub := NewHub()
+	var slowed atomic.Bool
+	hub.persistDocBeforeWrite = func() {
+		if slowed.CompareAndSwap(false, true) {
+			time.Sleep(2500 * time.Millisecond)
+		}
+	}
+	assertLargeSidecarsEncodeOneAtATime(t, hub)
+}
+
+func assertLargeSidecarsEncodeOneAtATime(t *testing.T, hub *Hub) {
+	t.Helper()
+	room := t.TempDir()
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	var concurrent atomic.Int32
