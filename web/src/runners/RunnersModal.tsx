@@ -32,7 +32,7 @@ export const AUTOACCEPT_COMMANDS = [
 ];
 
 /** The runner CLI command to toggle relaying permission prompts to Nodevas. */
-export const PERMISSION_RELAY_COMMAND = "nodevas runner set permissionRelay true (or false)";
+export const PERMISSION_RELAY_COMMAND = "nodevas runner set permissionRelay true";
 
 function PolicyChips({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) return <span className="runner-empty-inline">{empty}</span>;
@@ -350,6 +350,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
               <code>{PERMISSION_RELAY_COMMAND}</code>
               {t("runners.permissionRelayHelp", { command: "\0" }).split("\0")[1]}
             </span>
+            <span className="runner-hint">{t("runners.permissionRelayServeNote")}</span>
           </div>
 
           {/* Revoking is rare and final: it waits in the details, not on
