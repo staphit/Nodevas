@@ -136,6 +136,9 @@ func claudeMCPTimeoutAtLeast(ms int) bool {
 //   - the markers Claude Code sets for its own children (a runner started from
 //     inside a Claude Code session would otherwise hand them on, and the CLI
 //     refuses to start "inside" another one);
+//   - any outer agent's session and markers (outerAgentEnv): the run's
+//     `nodevas mcp` would take the outer session's id for its own, and the
+//     run's asks and heartbeats would land on that session;
 //   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
 //     secret, the copilot and advisor keys. jobEnv adds back the few a run
 //     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP, NODEVAS_RUN_NODE);
@@ -158,15 +161,26 @@ func childEnv() []string {
 	return out
 }
 
+// outerAgentEnv are the variables an agent sets for what it starts, naming
+// its session (the ones `nodevas mcp` reads to tell which session it serves)
+// or saying it is the parent. An agent the runner starts sets its own.
+var outerAgentEnv = []string{
+	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+	"CODEX_THREAD_ID", "CODEX_SANDBOX",
+	"OPENCODE_SESSION_ID", "OPENCODE",
+	"GEMINI_SESSION_ID", "GEMINI_CLI",
+	"COPILOT_AGENT_SESSION_ID", "GROK_SESSION_ID",
+	"CURSOR_TRACE_ID", "CURSOR_AGENT",
+}
+
 // strippedEnv reports whether childEnv drops the variable called name.
 func strippedEnv(name string) bool {
 	upper := strings.ToUpper(name)
 	switch upper {
-	case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
+	case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
 		return true
 	}
-	return strings.HasPrefix(upper, "NODEVAS_")
+	return slices.Contains(outerAgentEnv, upper) || strings.HasPrefix(upper, "NODEVAS_")
 }
 
 // RunIDEnv names the run an agent process belongs to. `nodevas hook` does
