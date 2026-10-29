@@ -80,9 +80,11 @@ func assertLargeSidecarsEncodeOneAtATime(t *testing.T, hub *Hub) {
 	case <-time.After(50 * time.Millisecond):
 	}
 	release <- struct{}{}
+	// A liveness bound, not a speed one: the first holder still has its
+	// fsync to finish, which a loaded machine can stretch past seconds.
 	select {
 	case <-entered:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("second encoder did not resume")
 	}
 	release <- struct{}{}
