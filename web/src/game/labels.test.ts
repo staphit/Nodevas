@@ -34,4 +34,21 @@ describe("actorLabel with asks", () => {
     expect(labelEn).toContain("antigravity wants to run run_command");
     expect(labelEn).not.toContain("antigravity wants to run run_command: {cmd: 'ls'}");
   });
+
+  it("renders actionLabel for ask per kind", async () => {
+    const { actionLabel } = await import("./labels");
+    const noTitle = () => "";
+
+    expect(actionLabel(tEn, { kind: "ask", askId: "1", askKind: "approval" }, noTitle)).toBe("Approve");
+    expect(actionLabel(tZh, { kind: "ask", askId: "1", askKind: "approval" }, noTitle)).toBe("核准");
+
+    expect(actionLabel(tEn, { kind: "ask", askId: "1", askKind: "permission" }, noTitle)).toBe("Review permission");
+    expect(actionLabel(tZh, { kind: "ask", askId: "1", askKind: "permission" }, noTitle)).toBe("審核權限");
+
+    expect(actionLabel(tEn, { kind: "ask", askId: "1", askKind: "choice" }, noTitle)).toBe("Choose");
+    expect(actionLabel(tZh, { kind: "ask", askId: "1", askKind: "choice" }, noTitle)).toBe("選擇");
+
+    expect(actionLabel(tEn, { kind: "ask", askId: "1", askKind: "question" }, noTitle)).toBe("Answer question");
+    expect(actionLabel(tZh, { kind: "ask", askId: "1", askKind: "question" }, noTitle)).toBe("回答問題");
+  });
 });
