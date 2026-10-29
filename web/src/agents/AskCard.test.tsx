@@ -162,6 +162,17 @@ describe("AskCard by kind", () => {
     expect(screen.getByText(/8:5|9:0/)).toBeInTheDocument();
   });
 
+  it("uses ask.expiresAt for countdown when present", () => {
+    const ask: AgentAsk = {
+      ...baseAsk,
+      createdAt: Date.now() - 600_000,
+      expiresAt: Date.now() + 120_000,
+    };
+    render(<AskCard ask={ask} onAnswer={vi.fn()} />);
+
+    expect(screen.getByText(/1:59|2:00/)).toBeInTheDocument();
+  });
+
   it("shows result and hides actions when answered or expired", () => {
     const answeredAsk: AgentAsk = {
       ...baseAsk,
