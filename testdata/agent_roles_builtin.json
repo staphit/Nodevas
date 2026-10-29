@@ -19,6 +19,7 @@
     "update_node_meta": ["meta"],
     "set_acceptance": ["acceptance"],
     "ask_user": ["message"],
+    "approve_tool": ["message"],
     "check_inbox": ["message"],
     "send_message": ["message"],
     "list_team": ["message"],
@@ -28,42 +29,42 @@
   "roles": [
     {
       "id": "planner", "label": "Planner", "builtin": true, "rank": "orchestrator",
-      "tools": ["get_node", "get_graph_outline", "search_nodes", "create_subgraph", "create_node", "link_nodes", "set_acceptance", "ask_user", "check_inbox", "send_message"],
+      "tools": ["get_node", "get_graph_outline", "search_nodes", "create_subgraph", "create_node", "link_nodes", "set_acceptance", "ask_user", "approve_tool", "check_inbox", "send_message"],
       "writeTypes": ["task", "scene", "event", "note", "gate", "choice"],
       "acceptanceTypes": ["task", "scene", "event", "goal"],
       "caps": ["read", "create", "link", "acceptance", "message"]
     },
     {
       "id": "qa", "label": "QA", "builtin": true, "rank": "orchestrator",
-      "tools": ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "check_inbox", "send_message", "submit_verdict"],
+      "tools": ["get_node", "get_graph_outline", "set_acceptance", "create_subgraph", "link_nodes", "ask_user", "approve_tool", "check_inbox", "send_message", "submit_verdict"],
       "writeTypes": ["task", "scene", "event"],
       "acceptanceTypes": ["goal"],
       "caps": ["read", "create", "link", "acceptance", "message", "verdict"]
     },
     {
       "id": "tester", "label": "Tester", "builtin": true, "rank": "worker",
-      "tools": ["get_node", "ask_user", "check_inbox", "send_message"],
+      "tools": ["get_node", "ask_user", "approve_tool", "check_inbox", "send_message"],
       "writeTypes": [],
       "acceptanceTypes": [],
       "caps": ["read", "message"]
     },
     {
       "id": "executor", "label": "Executor", "builtin": true, "rank": "worker",
-      "tools": ["claim_task", "get_node", "set_node_status", "release_task", "ask_user", "check_inbox", "send_message"],
+      "tools": ["claim_task", "get_node", "set_node_status", "release_task", "ask_user", "approve_tool", "check_inbox", "send_message"],
       "writeTypes": ["task", "scene", "event"],
       "acceptanceTypes": [],
       "caps": ["read", "claim", "status", "message"]
     },
     {
       "id": "reviewer", "label": "Reviewer", "builtin": true, "rank": "worker",
-      "tools": ["get_node", "check_inbox", "send_message", "submit_verdict"],
+      "tools": ["get_node", "approve_tool", "check_inbox", "send_message", "submit_verdict"],
       "writeTypes": [],
       "acceptanceTypes": [],
       "caps": ["read", "message", "verdict"]
     },
     {
       "id": "researcher", "label": "Researcher", "builtin": true, "rank": "worker",
-      "tools": ["get_node", "get_graph_outline", "search_nodes", "search_documents", "create_node", "update_node_body", "link_nodes", "ask_user", "check_inbox", "send_message"],
+      "tools": ["get_node", "get_graph_outline", "search_nodes", "search_documents", "create_node", "update_node_body", "link_nodes", "ask_user", "approve_tool", "check_inbox", "send_message"],
       "writeTypes": ["note"],
       "acceptanceTypes": [],
       "caps": ["read", "body", "create", "link", "message"]
