@@ -19,16 +19,18 @@ func TestHeadlessPreamblesPointAtAskUser(t *testing.T) {
 		return job
 	}
 	for name, job := range map[string]runnerwire.Job{
-		"implement":       base,
-		"revise":          with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobRevise; j.Review = "fix" }),
-		"staged executor": with(func(j *runnerwire.Job) { j.Kind, j.Role, j.TestFiles = runnerwire.JobRevise, roleExecutor, []string{"a_test.go"} }),
-		"review":          with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobReview }),
-		"plan":            with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobPlan }),
-		"replan":          with(func(j *runnerwire.Job) { j.Kind, j.Review = runnerwire.JobPlan, "changed" }),
-		"qa acceptance":   with(func(j *runnerwire.Job) { j.Kind, j.Role = runnerwire.JobPlan, roleQA }),
-		"tester":          with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobTest }),
-		"judge":           with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobJudge }),
-		"qa verify":       with(func(j *runnerwire.Job) { j.Kind, j.Role = runnerwire.JobJudge, roleQA }),
+		"implement": base,
+		"revise":    with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobRevise; j.Review = "fix" }),
+		"staged executor": with(func(j *runnerwire.Job) {
+			j.Kind, j.Role, j.TestFiles = runnerwire.JobRevise, roleExecutor, []string{"a_test.go"}
+		}),
+		"review":        with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobReview }),
+		"plan":          with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobPlan }),
+		"replan":        with(func(j *runnerwire.Job) { j.Kind, j.Review = runnerwire.JobPlan, "changed" }),
+		"qa acceptance": with(func(j *runnerwire.Job) { j.Kind, j.Role = runnerwire.JobPlan, roleQA }),
+		"tester":        with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobTest }),
+		"judge":         with(func(j *runnerwire.Job) { j.Kind = runnerwire.JobJudge }),
+		"qa verify":     with(func(j *runnerwire.Job) { j.Kind, j.Role = runnerwire.JobJudge, roleQA }),
 	} {
 		prompt := Prompt(job, "agent/n-42")
 		if strings.Contains(prompt, "no one to answer") {

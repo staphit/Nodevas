@@ -134,6 +134,13 @@ func Binary(kind string) string {
 	return kind
 }
 
+// headlessAskNote is how every headless preamble says who is there: nobody
+// at the terminal, but a person through the hub's ask_user.
+const headlessAskNote = "Nobody is watching this terminal, but a person can answer you: when you are blocked on " +
+	"a decision or missing information, call the nodevas MCP tool ask_user (kind \"question\" for information you " +
+	"need, \"choice\" to pick among options, \"approval\" before a risky step) and wait for the answer. Ask only " +
+	"what you cannot find out or decide yourself."
+
 // Prompt is what the agent is told: the runner's preamble, then the task as
 // the hub assembled it. The preamble is the runner's, not the hub's, because
 // only the runner knows the worktree and what it will do with it afterwards.
@@ -168,8 +175,7 @@ func Prompt(job runnerwire.Job, branch string) string {
 	if job.NodeTitle != "" {
 		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
 	}
-	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. Nobody is watching this terminal; "+
-		"there is no one to answer questions here.\n\n", branch)
+	fmt.Fprintf(&b, ", in a dedicated git worktree on branch %s. "+headlessAskNote+"\n\n", branch)
 	if revise {
 		fmt.Fprintf(&b, "This branch already has an open pull request, %s. A reviewer asked for changes: "+
 			"address that review, on top of the work already on the branch.\n\n", job.PRURL)
@@ -233,7 +239,7 @@ func reviewPrompt(job runnerwire.Job) string {
 		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
 	}
 	fmt.Fprintf(&b, ". This is a code review of pull request %s (branch %s), whose head is checked out in "+
-		"the current directory. Nobody is watching this terminal; there is no one to answer questions here.\n\n",
+		"the current directory. "+headlessAskNote+"\n\n",
 		job.PRURL, job.Branch)
 	b.WriteString("Rules for this review:\n")
 	b.WriteString("1. Do not modify, create or delete any file, and do not commit or push: this is a review, " +
@@ -287,8 +293,7 @@ func planPrompt(job runnerwire.Job) string {
 	if job.NodeTitle != "" {
 		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
 	}
-	b.WriteString(", in a read-only checkout of the repository. Nobody is watching this terminal; " +
-		"there is no one to answer questions here.\n\n")
+	b.WriteString(", in a read-only checkout of the repository. " + headlessAskNote + "\n\n")
 	b.WriteString("Your job is to break the goal into tasks on the Nodevas board, not to do them. " +
 		"Other agents will implement each task later, one pull request per task.\n\n")
 	b.WriteString("Rules for this run:\n")
@@ -328,8 +333,7 @@ func replanPrompt(job runnerwire.Job) string {
 	if job.NodeTitle != "" {
 		fmt.Fprintf(&b, " (%q)", job.NodeTitle)
 	}
-	b.WriteString(", in a read-only checkout of the repository. Nobody is watching this terminal; " +
-		"there is no one to answer questions here.\n\n")
+	b.WriteString(", in a read-only checkout of the repository. " + headlessAskNote + "\n\n")
 	b.WriteString("This goal was already broken into tasks, and the person has since changed its requirement. " +
 		"Your job is to reconcile the goal's tasks with the revised requirement on the Nodevas board, not to do " +
 		"them. Other agents will implement each task later, one pull request per task.\n\n")
