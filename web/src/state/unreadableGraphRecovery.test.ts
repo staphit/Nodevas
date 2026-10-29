@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, RequestError } from "../api";
+import { api } from "../api";
 import { translate } from "../i18n";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
