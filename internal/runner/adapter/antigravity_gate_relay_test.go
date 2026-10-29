@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -172,6 +173,128 @@ func TestAntigravityGateHooksRelay(t *testing.T) {
 		}
 		if (tc.wantRelay && hook.Timeout < 330) || (!tc.wantRelay && hook.Timeout != 10) {
 			t.Errorf("%+v: timeout %d", tc, hook.Timeout)
+		}
+	}
+}
+
+// agyArg is the value of cmd's --name=value argument, if it has one.
+func agyArg(args []string, name string) (string, bool) {
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, name+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// Headless agy 1.4.10 refuses a shell command after the gate's "allow"
+// ("user denied permission to run command"): a hook cannot grant the command
+// permission. With the relay gate in place, the run's session settings grant
+// it, so the gate (its own denials, then the person in Nodevas) is the only
+// say on shell commands. The owner's other permission rules are carried over,
+// as --settings replaces the owner's permissions for the session; nothing
+// else grants commands, and skip-permissions stays off.
+func TestAntigravityRelayGrantsCommandsToTheGate(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "nodevas.exe")
+	if antigravityGateHooks(exe, false, true) == nil {
+		t.Skip("no hook path on this machine")
+	}
+	owner := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(owner, []byte("\xef\xbb\xbf"+`{"model":"m","permissions":{"allow":["mcp(nodevas/*)"],"deny":["command(rm *)"],"defaultMode":"x"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := antigravityOwnerSettingsPath
+	antigravityOwnerSettingsPath = func() (string, error) { return owner, nil }
+	t.Cleanup(func() { antigravityOwnerSettingsPath = old })
+
+	command := func(mode string, relay, review bool, nodevas string) []string {
+		t.Helper()
+		job := runnerwire.Job{RunID: "run-1", NodeID: "node-1", Prompt: "do it"}
+		if review {
+			job.Kind = runnerwire.JobReview
+		}
+		env := RunEnv{Binary: "agy", Workdir: t.TempDir(), Branch: "b", TempDir: t.TempDir(),
+			MCP: MCPServer{Command: nodevas, Args: []string{"mcp"}}, PermissionMode: mode, PermissionRelay: relay}
+		cmd, err := (Antigravity{}).Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(cmd.Args, "--dangerously-skip-permissions") && mode != "full" {
+			t.Errorf("%s relay=%v: skip-permissions in %q", mode, relay, cmd.Args)
+		}
+		return cmd.Args
+	}
+
+	for _, mode := range []string{"", "accept-edits"} {
+		args := command(mode, true, false, exe)
+		path, ok := agyArg(args, "--settings")
+		if !ok {
+			t.Fatalf("%q relay: no --settings in %q", mode, args)
+		}
+		if i, j := slices.Index(args, "--settings="+path), slices.Index(args, "-p="); i < 0 || j != len(args)-1 || i > j {
+			t.Errorf("%q: --settings must come before -p=: %q", mode, args)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Permissions map[string]any `json:"permissions"`
+			Model       *string        `json:"model"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		allow, _ := got.Permissions["allow"].([]any)
+		if !slices.Contains(allow, any("command(*)")) || !slices.Contains(allow, any("mcp(nodevas/*)")) {
+			t.Errorf("%q: allow = %v", mode, allow)
+		}
+		if deny, _ := got.Permissions["deny"].([]any); !slices.Contains(deny, any("command(rm *)")) ||
+			got.Permissions["defaultMode"] != "x" || got.Model != nil {
+			t.Errorf("%q: settings = %s", mode, raw)
+		}
+	}
+
+	// No relay gate, no grant: relay off, plan, auto, full, a review, and a
+	// nodevas path no hook can run.
+	for _, tc := range []struct {
+		name, mode string
+		relay      bool
+		review     bool
+		nodevas    string
+	}{
+		{"relay off", "accept-edits", false, false, exe},
+		{"plan", "plan", true, false, exe},
+		{"auto", "auto", true, false, exe},
+		{"full", "full", true, false, exe},
+		{"review", "accept-edits", true, true, exe},
+		{"no hook path", "accept-edits", true, false, ""},
+	} {
+		if args := command(tc.mode, tc.relay, tc.review, tc.nodevas); slices.ContainsFunc(args, func(a string) bool {
+			return strings.HasPrefix(a, "--settings")
+		}) {
+			t.Errorf("%s: %q", tc.name, args)
+		}
+	}
+
+	// The owner has no settings file: the grant alone. A file that does not
+	// parse is left to agy, without a grant that would drop its rules.
+	if err := os.Remove(owner); err != nil {
+		t.Fatal(err)
+	}
+	path, ok := agyArg(command("accept-edits", true, false, exe), "--settings")
+	if !ok {
+		t.Fatal("no settings without an owner file")
+	}
+	if raw, _ := os.ReadFile(path); !strings.Contains(string(raw), `"command(*)"`) {
+		t.Errorf("settings = %s", raw)
+	}
+	for _, bad := range []string{`{"permissions":`, `{"permissions":{"allow":"command(*)"}}`, `{"permissions":[]}`} {
+		if err := os.WriteFile(owner, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := agyArg(command("accept-edits", true, false, exe), "--settings"); ok {
+			t.Errorf("owner %s: granted", bad)
 		}
 	}
 }
