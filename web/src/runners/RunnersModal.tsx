@@ -232,6 +232,7 @@ function RunnerCard({ runner }: { runner: Runner }) {
   const { t } = useI18n();
   const revoke = useRunners((s) => s.revoke);
   const revoking = useRunners((s) => Boolean(s.revoking[runner.id]));
+  const setPermissionRelay = useRunners((s) => s.setPermissionRelay);
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const info = runner.info;
@@ -333,6 +334,21 @@ function RunnerCard({ runner }: { runner: Runner }) {
               )}
             </div>
           )}
+
+          <div className="runner-section runner-permission-relay" data-testid={`runner-relay-${runner.id}`}>
+            <span className="runner-section-label">{t("runners.settings")}</span>
+            <label className="settings-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={Boolean(info?.permissionRelay)}
+                aria-label={t("runners.permissionRelay")}
+                onChange={(e) => void setPermissionRelay(runner.id, e.target.checked)}
+              />
+              <span>{t("runners.permissionRelay")}</span>
+            </label>
+            <span className="runner-hint">{t("runners.permissionRelayHelp")}</span>
+          </div>
 
           {/* Revoking is rare and final: it waits in the details, not on
               every runner's line beside Details. */}

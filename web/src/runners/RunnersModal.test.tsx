@@ -173,6 +173,8 @@ describe("RunnersPanel", () => {
     expect(text).toContain("mcp(nodevas/*)");
     expect(text).toContain("nodevas setup-agent --runs-only --agents antigravity");
     expect(text).toContain("OpenCode 1.x");
+    expect(screen.getByRole("switch", { name: "轉發權限請求至 Nodevas" })).toBeInTheDocument();
+    expect(screen.getByText("預設關閉。僅適用於 Claude Code、Antigravity 與 OpenCode ACP。")).toBeInTheDocument();
   });
 
   it("opens the add form when asked from outside, once", async () => {

@@ -19,6 +19,7 @@ export interface RunnerStoreState {
   /** Creates a runner and returns its one-time token, or null on failure. */
   create: (name: string) => Promise<{ runner: Runner; token: string } | null>;
   revoke: (id: string) => Promise<boolean>;
+  setPermissionRelay: (id: string, enabled: boolean) => Promise<boolean>;
   setError: (error: string | null) => void;
 }
 
@@ -80,6 +81,30 @@ export const useRunners = create<RunnerStoreState>((set, get) => ({
         return { revoking };
       });
     }
+  },
+
+  setPermissionRelay: async (id, enabled) => {
+    set((state) => ({
+      runners: state.runners.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              info: {
+                ...(r.info || {
+                  version: "",
+                  hostname: "",
+                  os: "",
+                  arch: "",
+                  agents: [],
+                  repos: [],
+                }),
+                permissionRelay: enabled,
+              },
+            }
+          : r
+      ),
+    }));
+    return true;
   },
 
   setError: (error) => set({ error }),
