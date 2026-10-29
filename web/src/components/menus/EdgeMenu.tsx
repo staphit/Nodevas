@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import type { EdgeLine, EdgeRelation, Graph } from "../../types";
 import { localizedLineLabel, localizedRelationLabel, useI18n } from "../../i18n";
 import { EDGE_LINES, edgeRelation } from "../../domain/graph/edgeStyle";
+import { reportError } from "../../store";
 import type { LaneContextMenu } from "../LaneView";
 
 const ADVANCED_RELATIONS: Exclude<EdgeRelation, "">[] = ["optional", "deprecated"];
