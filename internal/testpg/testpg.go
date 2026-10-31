@@ -100,16 +100,20 @@ func patient(t testing.TB, raw string) string {
 	if err != nil {
 		return raw
 	}
-	left := noDeadline
-	if run, ok := t.(interface{ Deadline() (time.Time, bool) }); ok {
-		if deadline, set := run.Deadline(); set {
-			left = time.Until(deadline)
-		}
-	}
 	query := location.Query()
-	query.Set("connect_timeout", strconv.Itoa(max(1, int(left/time.Second))))
+	query.Set("connect_timeout", strconv.Itoa(max(1, int(timeLeft(t)/time.Second))))
 	location.RawQuery = query.Encode()
 	return location.String()
+}
+
+// timeLeft is what is left of the test run (-timeout), or noDeadline.
+func timeLeft(t testing.TB) time.Duration {
+	if run, ok := t.(interface{ Deadline() (time.Time, bool) }); ok {
+		if deadline, set := run.Deadline(); set {
+			return time.Until(deadline)
+		}
+	}
+	return noDeadline
 }
 
 func withDatabase(raw, name string) (string, error) {

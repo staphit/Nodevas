@@ -54,6 +54,12 @@ func useStalledPostgres(t testing.TB, via func(server string) string) *Stall {
 	query.Set("connect_timeout", "1")
 	location.RawQuery = query.Encode()
 	t.Setenv(db.URLEnv, location.String())
+	// The one-second connect timeout is for the dials after Hang, but it
+	// bounds the dial that opens the workspace before it too, and a busy
+	// machine's server can take longer to answer that one. Opening keeps
+	// retrying for as long as the test run may, as it does for a server
+	// still starting; after Hang nothing opens again.
+	t.Setenv(db.WaitEnv, timeLeft(t).String())
 	return stall
 }
 
