@@ -103,10 +103,21 @@ type serveProcess struct {
 	done   chan error
 }
 
+// serveStopTimeout is how long a test's serve has to shut down once its stdin
+// closes. Serve bounds every step of its shutdown (5 s for requests, 30 s for
+// the final backup, 30 s for history commits), so this is only reached by a
+// serve that hangs.
+const serveStopTimeout = 2 * time.Minute
+
+// startServe starts serve on root. The test's cleanup stops it as the desktop
+// app does, by closing its stdin, and waits for it to exit: a serve that shuts
+// down waits for what it started. A kill does not, and on Windows does not
+// reach serve's children either, so the git of a project's history went on
+// writing .vised/git while t.TempDir removed the folder.
 func startServe(t *testing.T, root string, env []string, args ...string) *serveProcess {
 	t.Helper()
 	port := freePort(t)
-	all := append([]string{"serve", "--project", root, "--port", fmt.Sprint(port), "--no-runner"}, args...)
+	all := append([]string{"serve", "--project", root, "--port", fmt.Sprint(port), "--no-runner", "--stop-on-stdin-close"}, args...)
 	cmd := exec.Command(nodevasBinary(t), all...)
 	cmd.Env = env
 	output := &syncBuffer{}
@@ -121,11 +132,19 @@ func startServe(t *testing.T, root string, env []string, args ...string) *serveP
 	process := &serveProcess{cmd: cmd, output: output, stdin: stdin, base: fmt.Sprintf("http://127.0.0.1:%d", port), done: make(chan error, 1)}
 	go func() { process.done <- cmd.Wait() }()
 	t.Cleanup(func() {
+		_ = stdin.Close()
+		select {
+		case err := <-process.done:
+			process.done <- err
+			return
+		case <-time.After(serveStopTimeout):
+		}
 		_ = cmd.Process.Kill()
 		select {
 		case <-process.done:
 		case <-time.After(10 * time.Second):
 		}
+		t.Errorf("serve did not stop within %s of its stdin closing; killed:\n%s", serveStopTimeout, output.String())
 	})
 	return process
 }
