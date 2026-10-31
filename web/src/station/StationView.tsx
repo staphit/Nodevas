@@ -199,8 +199,8 @@ function ActivityLanes() {
   const graph = useApp((s) => s.graph);
   const lanes: ActivityLane[] = useMemo(() => {
     const titles = new Map((graph?.nodes ?? []).map((node) => [node.id, node.title]));
-    return buildActivity({ runs, asks, messages, now: Date.now(), titleOf: (id) => titles.get(id) ?? "" });
-  }, [runs, asks, messages, graph]);
+    return buildActivity({ runs, asks, messages, now: Date.now(), titleOf: (id) => titles.get(id) ?? "", t });
+  }, [runs, asks, messages, graph, t]);
 
   if (lanes.length === 0) return <p className="station-empty">{t("station.activity.empty")}</p>;
   return (
