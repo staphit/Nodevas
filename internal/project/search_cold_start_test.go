@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"nodevas/internal/db"
 	"nodevas/internal/engine"
 	"nodevas/internal/realtime"
 	"nodevas/internal/searchindex"
@@ -69,8 +70,9 @@ func stillBuilding(pm *ProjectManager, info ProjectInfo) bool {
 }
 
 // watchColdSearchWaits records how long each search of the project at root
-// is about to wait for its first index build, until the test ends.
-func watchColdSearchWaits(t *testing.T, root string) func() []time.Duration {
+// is about to wait for its first index build, until the test ends. With a
+// stall, each such search is first held that long, as a busy machine holds it.
+func watchColdSearchWaits(t *testing.T, root string, stall time.Duration) func() []time.Duration {
 	var mu sync.Mutex
 	var waits []time.Duration
 	hook := func(projectPath string, within time.Duration) {
@@ -80,6 +82,7 @@ func watchColdSearchWaits(t *testing.T, root string) func() []time.Duration {
 		mu.Lock()
 		waits = append(waits, within)
 		mu.Unlock()
+		time.Sleep(stall)
 	}
 	coldSearchWaited.Store(&hook)
 	t.Cleanup(func() { coldSearchWaited.Store(nil) })
@@ -113,7 +116,7 @@ func untilTestDeadline(t *testing.T) time.Duration {
 // search or the build failed under load with nothing wrong.
 func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 	pm, info, _ := searchLoadProject(t, 3000)
-	waits := watchColdSearchWaits(t, info.Path)
+	waits := watchColdSearchWaits(t, info.Path, 0)
 
 	results, err := pm.SearchProjectNodes(info, "n1234")
 	if err != nil {
@@ -163,6 +166,13 @@ func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 // A project of a few nodes can hold a thousand pages. The first search before
 // its index is built answers from the graph just the same, instead of reading
 // every page of every node, which takes seconds and competes with the build.
+//
+// Checked without a clock, which load made fail with no page read: the build
+// is held back by a lock on search_documents, so the searches surely answer
+// before it; each says how long it waits for the build (within
+// coldSearchBudget); and text only the pages hold is not found, which the
+// direct scan reading every page would find. The searches are also held
+// longer than the budget, as a busy machine holds them.
 func TestFirstSearchOfAFewNodesWithManyPagesAnswersFromTitles(t *testing.T) {
 	pm, info, _ := searchLoadProject(t, 4)
 	page := []byte(strings.Repeat("page prose that only the index should read.\n", 40))
@@ -177,35 +187,55 @@ func TestFirstSearchOfAFewNodesWithManyPagesAnswersFromTitles(t *testing.T) {
 			}
 		}
 	}
-	coldIndexFor(t, pm)
-	// Load: the search is descheduled for longer than the budget, as it is
-	// beside a full parallel test run.
-	stall := func(string, time.Duration) { time.Sleep(coldSearchBudget + 50*time.Millisecond) }
-	coldSearchWaited.Store(&stall)
-	t.Cleanup(func() { coldSearchWaited.Store(nil) })
-
-	began := time.Now()
-	results, err := pm.SearchProjectNodes(info, "n0002")
-	took := time.Since(began)
+	database := coldIndexFor(t, pm)
+	hold, err := database.Writer().Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took > coldSearchBudget {
-		t.Fatalf("first search took %v reading pages (budget %v)", took, coldSearchBudget)
+	defer func() { _ = hold.Rollback() }()
+	if _, err := hold.Exec(`LOCK TABLE search_documents IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	waits := watchColdSearchWaits(t, info.Path, coldSearchBudget+50*time.Millisecond)
+
+	results, err := pm.SearchProjectNodes(info, "n0002")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(results) != 1 || results[0].NodeID != "n0002" {
 		t.Fatalf("first search = %+v, want the node titled n0002", results)
+	}
+	paged, err := pm.SearchProjectNodes(info, "only the index should read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paged) != 0 {
+		t.Fatalf("a search before the build found %d hits in page text: it read the pages", len(paged))
+	}
+	if !stillBuilding(pm, info) {
+		t.Fatal("the index build finished with search_documents locked")
+	}
+	if got := waits(); len(got) != 2 {
+		t.Fatalf("the two searches told of %d waits for the build (%v), want 2", len(got), got)
+	} else {
+		for _, within := range got {
+			if within > coldSearchBudget {
+				t.Fatalf("a search waited up to %v for the index build, want at most %v", within, coldSearchBudget)
+			}
+		}
 	}
 }
 
 // coldIndexFor gives the project a fresh index manager over a new database,
 // so its first search finds no index, as after a hub start.
-func coldIndexFor(t *testing.T, pm *ProjectManager) {
+func coldIndexFor(t *testing.T, pm *ProjectManager) *db.DB {
 	t.Helper()
+	database := testpg.New(t)
 	pm.mu.Lock()
-	index := &searchIndex{manager: searchindex.NewManagerWithDB(testpg.New(t))}
+	index := &searchIndex{manager: searchindex.NewManagerWithDB(database)}
 	pm.searchIndex = index
 	pm.searchLive.Store(index)
 	pm.mu.Unlock()
 	t.Cleanup(func() { _ = index.manager.Close() })
+	return database
 }
