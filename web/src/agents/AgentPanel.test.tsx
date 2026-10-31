@@ -114,6 +114,17 @@ describe("AgentPanel", () => {
     expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
   });
 
+  it("follows the hub's canAnswer over the viewer's role", () => {
+    const ask = useAgents.getState().asks[0];
+    useAgents.setState({
+      asks: [{ ...ask, canAnswer: false }],
+      viewer: { id: "root", name: "root", role: "admin" },
+    });
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Approve/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+  });
+
   it("shows settled asks with their results alongside pending asks", () => {
     useAgents.setState({
       asks: [
@@ -209,6 +220,19 @@ describe("AgentPanel settled asks", () => {
     expect(screen.queryByText("Last week's question?")).toBeNull();
     expect(screen.queryByText("Allowed for this run")).toBeNull();
     expect(screen.queryByText("Bob's question?")).toBeNull();
+  });
+
+  it("keeps a settled ask by the hub's canAnswer, over the viewer's role", () => {
+    useAgents.setState({
+      viewer: { id: "root", name: "root", role: "admin" },
+      asks: [
+        settled({ id: "theirs", actorId: "bob", question: "Bob's prompt?", canAnswer: false }),
+        settled({ id: "mine", actorId: "bob", question: "Shared question?", canAnswer: true }),
+      ],
+    });
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.queryByText("Bob's prompt?")).toBeNull();
+    expect(screen.getByText("Shared question?")).toBeInTheDocument();
   });
 
   it("shows no asks section once nothing is pending or recently settled", () => {

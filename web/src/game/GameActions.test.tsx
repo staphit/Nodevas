@@ -179,4 +179,30 @@ describe("Station ask dialog answering", () => {
     fireEvent.keyDown(screen.getByRole("group", { name: /tool permission/ }), { key: "1" });
     expect(answerAsk).not.toHaveBeenCalled();
   });
+
+  it("follows the hub's canAnswer: an admin may not answer another member's permission prompt", () => {
+    const answerAsk = vi.fn(async () => true);
+    useAgents.setState({
+      asks: [{ ...permission, canAnswer: false }],
+      answerAsk,
+      viewer: { id: "root", name: "root", role: "admin" },
+      error: null,
+    });
+    open("ask-perm");
+    expect(screen.getByText(/Only the runner's owner/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Allow|Deny/ })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("group", { name: /tool permission/ }), { key: "3" });
+    expect(answerAsk).not.toHaveBeenCalled();
+  });
+
+  it("follows the hub's canAnswer when it lets the viewer answer", () => {
+    useAgents.setState({
+      asks: [{ ...permission, canAnswer: true }],
+      answerAsk: vi.fn(async () => true),
+      viewer: { id: "bob", name: "bob", role: "member" },
+      error: null,
+    });
+    open("ask-perm");
+    expect(screen.getByRole("button", { name: /Deny/ })).toBeInTheDocument();
+  });
 });

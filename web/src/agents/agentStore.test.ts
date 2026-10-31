@@ -3,6 +3,7 @@ import type { AgentMessage, AgentSession } from "../api";
 import { setProjectOverride } from "../api";
 import { agentsApi } from "../api/agents";
 import {
+  canAnswerAsk,
   canManageSession,
   excerpt,
   resetAnnouncedForTests,
@@ -210,6 +211,24 @@ describe("inbound", () => {
     expect(canManageSession(session, { id: "bob", name: "b", role: "member" })).toBe(false);
     expect(canManageSession(session, { id: "bob", name: "b", role: "admin" })).toBe(true);
   });
+
+  it("canAnswerAsk: the hub's canAnswer decides, else the session rule, permission owner-only", () => {
+    const ask = {
+      id: "a1", project: "alpha", sessionId: "s1", sessionName: "api-claude", actorId: "alice",
+      question: "q", status: "pending" as const, createdAt: 1,
+    };
+    const admin = { id: "bob", name: "b", role: "admin" as const };
+    const member = { id: "bob", name: "b", role: "member" as const };
+    // The listing says so: it wins over the viewer's role either way.
+    expect(canAnswerAsk({ ...ask, canAnswer: false }, admin)).toBe(false);
+    expect(canAnswerAsk({ ...ask, canAnswer: true }, member)).toBe(true);
+    // Without it: own asks or an admin's, but a permission prompt is the owner's alone.
+    expect(canAnswerAsk(ask, admin)).toBe(true);
+    expect(canAnswerAsk(ask, member)).toBe(false);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, admin)).toBe(false);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, { ...member, id: "alice" })).toBe(true);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, null)).toBe(true);
+  });
 });
 
 describe("send", () => {
@@ -336,7 +355,12 @@ describe("agent-notify", () => {
     });
     mockFetch({
       "GET /api/agents/asks": () => ({
-        asks: [ask({}), ask({ id: "theirs", actorId: "carol" }), ask({ id: "done", status: "approved" })],
+        asks: [
+          ask({}),
+          ask({ id: "theirs", actorId: "carol" }),
+          ask({ id: "done", status: "approved" }),
+          ask({ id: "notmine", canAnswer: false }),
+        ],
       }),
     });
     useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" } });
@@ -345,6 +369,7 @@ describe("agent-notify", () => {
     await useAgents.getState().handleAsk("a1");
     await useAgents.getState().handleAsk("theirs");
     await useAgents.getState().handleAsk("done");
+    await useAgents.getState().handleAsk("notmine");
 
     const toasts = useAgents.getState().toasts;
     expect(toasts).toHaveLength(1);

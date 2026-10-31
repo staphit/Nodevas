@@ -71,6 +71,19 @@ describe("ModeSwitch", () => {
     expect(station.querySelector(".mode-switch-badge")?.textContent).toBe("1");
   });
 
+  it("counts by the hub's canAnswer when the listing carries it", () => {
+    useAgents.setState({
+      viewer: { id: "ann", name: "ann", role: "admin" },
+      asks: [
+        ask({ id: "a", actorId: "carol", kind: "permission", canAnswer: false }),
+        ask({ id: "b", actorId: "carol", canAnswer: true }),
+        ask({ id: "c", actorId: "carol", kind: "permission" }),
+      ],
+    });
+    render(<ModeSwitch />);
+    expect(screen.getByRole("button", { name: "Station, 1 waiting on you" })).toBeInTheDocument();
+  });
+
   it("adds the runs and the budget Station's waiting strip lists", () => {
     useStation.setState({ runs: [mergeable()], project: "p", loaded: true });
     useBudget.setState({ status: { exceeded: "cost" } as unknown as RunBudgetStatus });

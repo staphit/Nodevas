@@ -176,6 +176,29 @@ describe("StationWaiting", () => {
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("o"));
   });
 
+  it("leaves out an ask the hub says the viewer may not answer, admin or not", () => {
+    useAgents.setState({
+      viewer: { id: "root", name: "root", role: "admin" },
+      asks: [
+        {
+          id: "ask-p2",
+          project: "p",
+          sessionId: "s1",
+          sessionName: "laptop-claude",
+          actorId: "u1",
+          kind: "permission",
+          tool: "Bash",
+          question: "Allow Bash?",
+          status: "pending",
+          createdAt: 1,
+          canAnswer: false,
+        },
+      ],
+    });
+    mount();
+    expect(screen.queryByText("laptop-claude wants to run Bash")).toBeNull();
+  });
+
   it("lists permission asks and opens answer dialog", async () => {
     useAgents.setState({
       asks: [
