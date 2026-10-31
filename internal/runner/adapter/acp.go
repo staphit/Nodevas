@@ -408,17 +408,31 @@ type acpOption struct {
 	Kind     string `json:"kind"`
 }
 
+// The hub's runScope values (agents.RunScope*) the relay acts on: an
+// approve_run of the whole tool, or of this one shell command.
+const (
+	RunScopeTool    = "tool"
+	RunScopeCommand = "command"
+)
+
 // relay asks the person about a parked permission request and answers it:
 // allow_once, allow_always for a tool allowed for the rest of the run, or
-// reject_once, which is also the answer to no answer at all. Once the
+// reject_once, which is also the answer to no answer at all. allow_always
+// has OpenCode remember a rule of its own for the tool, so it is sent only
+// for the hub's whole-tool scope (RunScopeTool); an approval for one
+// command, for this call, or of a scope the hub did not name is allow_once,
+// and the hub's own run grant answers the next matching ask. Once the
 // session is over nothing is sent.
 func (s *acpSession) relay(id json.RawMessage, options []acpOption, title string, req PermissionRequest) {
 	decision := s.asker.AskPermission(s.ctx, req)
 	kind, text := "reject_once", "denied in Nodevas"
 	if decision.Allow {
 		kind, text = "allow_once", "allowed in Nodevas"
-		if decision.ForRun {
+		switch {
+		case decision.ForRun && decision.RunScope == RunScopeTool:
 			kind, text = "allow_always", "allowed in Nodevas for the rest of the run"
+		case decision.ForRun && decision.RunScope == RunScopeCommand:
+			text = "allowed in Nodevas, this command for the rest of the run"
 		}
 	} else if decision.Reason != "" {
 		text += ": " + decision.Reason
