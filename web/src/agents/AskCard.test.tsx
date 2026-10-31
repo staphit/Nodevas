@@ -298,6 +298,80 @@ describe("AskCard by kind", () => {
   });
 });
 
+describe("AskCard allow-for-run scope", () => {
+  const permAsk: AgentAsk = {
+    ...baseAsk,
+    id: "ask-scope",
+    kind: "permission",
+    sessionName: "api-claude",
+    tool: "Edit",
+    toolInput: '{"file_path":"a.ts"}',
+    runId: "run-1",
+    question: "api-claude wants to run Edit",
+  };
+
+  it("says a tool-wide allow covers this tool for the rest of the run", () => {
+    const onAnswer = vi.fn();
+    render(<AskCard ask={{ ...permAsk, runScope: "tool" }} onAnswer={onAnswer} />);
+    const button = screen.getByRole("button", { name: "Allow Edit for the rest of this run 2" });
+    fireEvent.click(button);
+    expect(onAnswer).toHaveBeenCalledWith({ decision: "approve_run" });
+  });
+
+  it("says a shell allow covers only this exact command", () => {
+    render(
+      <AskCard
+        ask={{ ...permAsk, tool: "Bash", toolInput: '{"command":"npm test"}', runScope: "command" }}
+        onAnswer={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Allow this exact command for the rest of this run 2" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers only Allow and Deny when the allow would cover this call alone", () => {
+    const onAnswer = vi.fn();
+    render(
+      <AskCard
+        ask={{ ...permAsk, tool: "Bash", toolInput: '{"command":"ls"}', runScope: "once" }}
+        onAnswer={onAnswer}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /run/ })).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Allow 1", "Deny 3"]);
+    const card = screen.getByRole("group", { name: /tool permission/ });
+    card.focus();
+    fireEvent.keyDown(card, { key: "2" });
+    expect(onAnswer).not.toHaveBeenCalled();
+    fireEvent.keyDown(card, { key: "1" });
+    expect(onAnswer).toHaveBeenCalledWith({ decision: "approve" });
+  });
+
+  it("says in zh-TW what the allow covers", () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    const { rerender } = render(<AskCard ask={{ ...permAsk, runScope: "tool" }} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "本次執行剩餘期間一律允許 Edit 2" })).toBeInTheDocument();
+    rerender(<AskCard ask={{ ...permAsk, tool: "Bash", runScope: "command" }} onAnswer={vi.fn()} />);
+    expect(
+      screen.getByRole("button", { name: "本次執行剩餘期間一律允許這條完全相同的指令 2" }),
+    ).toBeInTheDocument();
+  });
+
+  it("settles with what the allow covered", () => {
+    const settled: AgentAsk = { ...permAsk, status: "approved", decision: "approve_run" };
+    const { rerender } = render(<AskCard ask={{ ...settled, runScope: "tool" }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed Edit for the rest of this run")).toBeInTheDocument();
+    rerender(<AskCard ask={{ ...settled, tool: "Bash", runScope: "command" }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Allowed this exact command for the rest of this run")).toBeInTheDocument();
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    rerender(<AskCard ask={{ ...settled, runScope: "tool" }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("本次執行剩餘期間已一律允許 Edit")).toBeInTheDocument();
+    rerender(<AskCard ask={{ ...settled, tool: "Bash", runScope: "command" }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("本次執行剩餘期間已一律允許這條完全相同的指令")).toBeInTheDocument();
+  });
+});
+
 describe("AskCard permission input", () => {
   const permAsk: AgentAsk = {
     ...baseAsk,
