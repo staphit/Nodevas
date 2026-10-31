@@ -34,3 +34,14 @@ describe("ask card title", () => {
     expect(last(css, ".copilot-permission-title", "min-width")).toMatch(/ch|em/);
   });
 });
+
+describe("Agent chat's asks section", () => {
+  // Six asks at 1280x800 made it 1143px tall in an 800px drawer that does not
+  // scroll: the lower cards and the composer were out of reach.
+  it("is capped in height and scrolls its own cards", () => {
+    const css = sheet("16-agents.css");
+    expect(last(css, ".agent-asks-section", "max-height")).toMatch(/vh|cqh|px/);
+    expect(last(css, ".agent-asks-section", "overflow-y")).toBe("auto");
+    expect(last(css, ".agent-asks-section", "flex-shrink")).toBe("0");
+  });
+});
