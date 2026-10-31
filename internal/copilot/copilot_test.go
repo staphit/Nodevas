@@ -161,10 +161,20 @@ func (h *harness) start(req TurnRequest) *running {
 	return r
 }
 
-// until reads events up to and including the first of the given type.
+// reportMargin is the time left before the test run's deadline in which
+// until still reports what it saw, rather than leaving it to -timeout.
+const reportMargin = 10 * time.Second
+
+// until reads events up to and including the first of the given type. It
+// waits as long as the test run may (-timeout): a turn's events can be slow
+// on a busy machine, and one that never comes still fails with what the
+// stream did carry, just before the run's deadline.
 func (r *running) until(eventType string) Event {
 	r.t.Helper()
-	timeout := time.After(5 * time.Second)
+	var timeout <-chan time.Time
+	if deadline, ok := r.t.Deadline(); ok {
+		timeout = time.After(max(time.Until(deadline)-reportMargin, 0))
+	}
 	for {
 		select {
 		case event, ok := <-r.events:
