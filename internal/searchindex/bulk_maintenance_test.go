@@ -14,11 +14,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/store"
 	"nodevas/internal/testpg"
 )
 
@@ -133,6 +135,33 @@ func planBuffers(plan string) int {
 	hit, _ := strconv.Atoi(match[1])
 	read, _ := strconv.Atoi(match[2])
 	return hit + read
+}
+
+// A cold build reads each node's document once, from one walk of nodes/,
+// instead of resolving and statting every node's files one path at a time.
+// Counted, not timed: each contained file operation opens the project root
+// once. Five per node made the 2000-node bulk load below take 25 s to over two
+// minutes beside a full test run, nearly all of it in those opens.
+func TestColdBuildOpensEachNodeOnce(t *testing.T) {
+	const nodes = 200
+	root := writeBulkProject(t, nodes, 40)
+	m := newManager(t)
+	var opens atomic.Int64
+	clean := filepath.Clean(root)
+	stop := store.WatchRootOpens(func(opened string) {
+		if filepath.Clean(opened) == clean {
+			opens.Add(1)
+		}
+	})
+	defer stop()
+	if _, err := m.RankContext(context.Background(), root, "warm", 10); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	// One read per node, and a few for graph.yaml and the walk.
+	if got := opens.Load(); got > nodes+16 {
+		t.Fatalf("a cold build of %d nodes opened the project %d times, want at most %d", nodes, got, nodes+16)
+	}
 }
 
 func TestBulkLoadLeavesRankOnTheGINIndexes(t *testing.T) {
