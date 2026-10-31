@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentAsk } from "../api";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { AgentPanel } from "./AgentPanel";
@@ -168,14 +169,14 @@ describe("AgentPanel", () => {
 });
 
 describe("AgentPanel settled asks", () => {
-  const settled = (over: Record<string, unknown>) => ({
+  const settled = (over: Partial<AgentAsk> & Pick<AgentAsk, "id" | "question">): AgentAsk => ({
     project: "alpha",
     sessionId: "claude:1",
     sessionName: "api-claude",
     actorId: "alice",
     agent: "claude",
-    kind: "question" as const,
-    status: "answered" as const,
+    kind: "question",
+    status: "answered",
     createdAt: Date.now() - 120_000,
     decidedAt: Date.now() - 60_000,
     ...over,
