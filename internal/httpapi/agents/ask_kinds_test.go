@@ -161,7 +161,8 @@ func TestRunnerRelayPermissionAsk(t *testing.T) {
 	if got := time.Duration(ask.ExpiresAt-ask.CreatedAt) * time.Millisecond; got != 300*time.Second || ask.RunID != "run-7" {
 		t.Fatalf("relay ask = %+v (waits %v)", ask, got)
 	}
-	rec := call(t, router, "root", http.MethodPost, "/api/agents/asks/"+ask.ID+"/answer", `{"decision":"approve_run"}`)
+	// Without accounts the relay's "run:agy" is the local person's run.
+	rec := call(t, router, "local", http.MethodPost, "/api/agents/asks/"+ask.ID+"/answer", `{"decision":"approve_run"}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"decision":"approve_run"`) {
 		t.Fatalf("answer = %d %s", rec.Code, rec.Body)
 	}

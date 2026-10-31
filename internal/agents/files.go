@@ -375,7 +375,21 @@ func (h *Hub) FileContent(ctx context.Context, project, id, name string, v Viewe
 	return f, content, nil
 }
 
-// MayAnswer reports whether v may answer ask a.
+// MayAnswer reports whether v may answer ask a: the person whose session
+// asked, or an administrator. A permission prompt is its runner owner's
+// alone: answering it runs a tool on their machine, which an administrator
+// of the hub was never lent. Without accounts the one local person owns
+// every machine, whatever actor a run's sidecar names.
 func (v Viewer) MayAnswer(a Ask) bool {
-	return v.Admin || strings.EqualFold(a.ActorID, strings.TrimSpace(v.ID))
+	id := strings.TrimSpace(v.ID)
+	if id == "" {
+		id = "local"
+	}
+	if strings.EqualFold(a.ActorID, id) {
+		return true
+	}
+	if a.Kind == AskKindPermission {
+		return id == "local"
+	}
+	return v.Admin
 }

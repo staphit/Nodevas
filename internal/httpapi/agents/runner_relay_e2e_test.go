@@ -54,7 +54,12 @@ func TestRunnerHubAskerAgainstTheHub(t *testing.T) {
 	if pending.Kind != "permission" || pending.Tool != "run_command" || pending.RunID != "run-7" {
 		t.Fatalf("pending ask = %+v", pending)
 	}
-	if rec := call(t, router, "root", http.MethodPost, "/api/agents/asks/"+pending.ID+"/answer", `{"decision":"approve_run"}`); rec.Code != http.StatusOK {
+	// The runner's owner answers; an administrator may not (a permission
+	// prompt runs a tool on the owner's machine).
+	if rec := call(t, router, "root", http.MethodPost, "/api/agents/asks/"+pending.ID+"/answer", `{"decision":"approve_run"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("an admin answering alice's permission prompt = %d %s, want 404", rec.Code, rec.Body)
+	}
+	if rec := call(t, router, "alice", http.MethodPost, "/api/agents/asks/"+pending.ID+"/answer", `{"decision":"approve_run"}`); rec.Code != http.StatusOK {
 		t.Fatalf("answer = %d %s", rec.Code, rec.Body)
 	}
 	select {

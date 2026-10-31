@@ -95,10 +95,11 @@ func buildingRun(r runs.Record) BuildingRun {
 	return out
 }
 
-// mayAnswer mirrors the web's canManageSession: the person behind the asking
-// session, or an administrator.
+// mayAnswer is whether actor may answer ask (agents.Viewer.MayAnswer): the
+// person behind the asking session, or an administrator, except for another
+// person's permission prompt.
 func mayAnswer(actor identity.Actor, ask agents.Ask) bool {
-	return actor.IsAdmin() || ask.ActorID == actor.ID
+	return agents.Viewer{ID: actor.ID, Admin: actor.IsAdmin()}.MayAnswer(ask)
 }
 
 // Assemble builds the building for actor: the projects readable(dir) allows,

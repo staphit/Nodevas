@@ -797,7 +797,8 @@ func resolveDecision(ask Ask, decision, answer string) (status, answerOut string
 //
 // Only the person whose session asked, or an administrator, may answer: the
 // answer is that person's decision, and an approval forwarded about a message
-// speaks for them. To anyone else the ask does not exist. An ask already
+// speaks for them. A permission prompt is its runner owner's alone
+// (Viewer.MayAnswer). To anyone else the ask does not exist. An ask already
 // decided stays as it is and is returned unchanged.
 func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerInput, viewer Viewer) (Ask, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
@@ -818,7 +819,7 @@ func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerIn
 	if err != nil {
 		return Ask{}, err
 	}
-	if !viewer.Admin && !strings.EqualFold(existing.ActorID, decidedBy) {
+	if !(Viewer{ID: decidedBy, Admin: viewer.Admin}).MayAnswer(existing) {
 		return Ask{}, ErrNotFound
 	}
 	// A permission prompt that expired was denied to the CLI already; a
