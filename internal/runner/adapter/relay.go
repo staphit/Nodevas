@@ -35,6 +35,31 @@ func PermissionRelayApplies(kind, mode string, acp bool) bool {
 	return false
 }
 
+// RunSessionEnv pins the session id a run's `nodevas mcp` reports: it takes
+// "<agent kind>:<value>" from this variable when no CLI of its own names the
+// session. The runner sets it to the run's session name for the CLIs whose
+// permission prompts it relays itself, so those asks (RunSessionID) and the
+// sidecar's own (ask_user, heartbeats) are one session to the hub and the web.
+const RunSessionEnv = "NODEVAS_SESSION_ID"
+
+// RunSessionID is the session id of a run of agent kind whose `nodevas mcp`
+// has RunSessionEnv set to sessionName.
+func RunSessionID(agent, sessionName string) string {
+	if agent == "" || sessionName == "" {
+		return sessionName
+	}
+	return agent + ":" + sessionName
+}
+
+// runSessionEnv is RunSessionEnv for a run whose `nodevas mcp` arguments are
+// env.MCP.Args, or nothing without a session name.
+func runSessionEnv(env RunEnv) []string {
+	if h, ok := HubAskerFromMCPArgs(env.MCP.Args); ok && h.SessionName != "" {
+		return []string{RunSessionEnv + "=" + h.SessionName}
+	}
+	return nil
+}
+
 // PermissionAskTimeout is how long the hub waits for a person to answer a
 // permission ask before it expires (and the answer is no).
 const PermissionAskTimeout = 5 * time.Minute
@@ -137,7 +162,7 @@ func (h HubAsker) AskPermission(ctx context.Context, req PermissionRequest) Perm
 		question += ": " + preview
 	}
 	body, err := json.Marshal(map[string]any{
-		"sessionId":      h.SessionName,
+		"sessionId":      RunSessionID(h.Agent, h.SessionName),
 		"sessionName":    h.SessionName,
 		"actor":          h.Actor,
 		"agent":          h.Agent,

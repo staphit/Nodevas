@@ -161,13 +161,14 @@ func antigravityModeArgs(mode string) ([]string, error) {
 
 // antigravityEnv is what the agy process gets on top of jobEnv: the run's MCP
 // arguments and its node, which agy hands its hooks too (the gate's asks name
-// the node).
+// the node), and the session id its `nodevas mcp` reports (RunSessionEnv),
+// which the gate's asks carry too.
 func antigravityEnv(job runnerwire.Job, env RunEnv) ([]string, error) {
 	args, err := json.Marshal(env.MCP.Args)
 	if err != nil {
 		return nil, err
 	}
-	return []string{RunMCPEnv + "=" + string(args), RunNodeEnv + "=" + job.NodeID}, nil
+	return append([]string{RunMCPEnv + "=" + string(args), RunNodeEnv + "=" + job.NodeID}, runSessionEnv(env)...), nil
 }
 
 // writeAntigravityRoot writes the run's customization root, which defines the

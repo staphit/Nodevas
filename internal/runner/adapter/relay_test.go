@@ -101,7 +101,7 @@ func TestHubAskerPermission(t *testing.T) {
 	}
 	ask := hub.last()
 	for key, want := range map[string]any{"kind": "permission", "tool": "run_command", "toolInput": req.Input,
-		"sessionName": "demo-antigravity-default-run1", "sessionId": "demo-antigravity-default-run1",
+		"sessionName": "demo-antigravity-default-run1", "sessionId": "antigravity:demo-antigravity-default-run1",
 		"actor": "run:antigravity", "agent": "antigravity", "nodeId": "n-42",
 		"timeoutSeconds": float64(PermissionAskTimeout / time.Second)} {
 		if ask[key] != want {
