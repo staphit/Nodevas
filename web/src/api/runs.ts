@@ -75,6 +75,35 @@ export interface RunEvent {
   usage?: RunUsage;
 }
 
+/** One ask of a run as its timeline shows it (GET /api/runs/:id/asks):
+ * what the run's agent waited on and how that ended. `preview` (a permission
+ * prompt's input on one line, at most 120 characters) and `note` reach only
+ * those who may answer the ask; everyone else sees the tool, or a question's
+ * text, alone. Prompts allowed by an earlier "allow for this run" without
+ * asking are not listed. */
+export interface RunAsk {
+  id: string;
+  kind: "approval" | "question" | "choice" | "permission" | string;
+  status: "pending" | "approved" | "denied" | "answered" | "expired" | string;
+  /** approve, approve_run, deny or answer; absent while pending or expired. */
+  decision?: string;
+  /** An approval's, question's or choice's text on one line. */
+  question?: string;
+  tool?: string;
+  preview?: string;
+  note?: string;
+  sessionName?: string;
+  /** Unix ms, on the hub's clock. */
+  createdAt: number;
+  decidedAt?: number;
+  /** Still waiting, and the viewer may answer it. */
+  canAnswer: boolean;
+}
+
+export interface RunAsksResponse {
+  asks: RunAsk[] | null;
+}
+
 export interface Run {
   id: string;
   project: string;
@@ -484,6 +513,8 @@ export const runsApi = {
   getRun: (id: string) => req<Run>(runPath(id)),
   getRunEvents: (id: string, after = 0, limit = RUN_EVENTS_PAGE) =>
     req<RunEventsResponse>(`${runPath(id)}/events?after=${after}&limit=${limit}`),
+  /** The run's asks for its timeline, oldest first (the newest 200). */
+  getRunAsks: (id: string) => req<RunAsksResponse>(`${runPath(id)}/asks`),
   /** External sessions' changes on a node (W6), project-scoped like every
    * node route. */
   getSessionChanges: (nodeId: string) =>

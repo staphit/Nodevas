@@ -158,6 +158,8 @@ export type {
   MergeStatus,
   PRState,
   Run,
+  RunAsk,
+  RunAsksResponse,
   RunBudget,
   RunBudgetLimit,
   RunBudgetStatus,

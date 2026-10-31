@@ -9,6 +9,7 @@ import {
   type PipelineState,
   type Run,
   type RunChanges,
+  type RunAsk,
   type RunEvent,
 } from "../api";
 
@@ -44,6 +45,8 @@ export interface RunStoreState {
   /** A run's events in seq order, without duplicates. */
   eventsByRun: Record<string, RunEvent[]>;
   eventErrors: Record<string, string>;
+  /** A run's asks for its timeline, oldest first (GET /api/runs/:id/asks). */
+  asksByRun: Record<string, RunAsk[]>;
   /** Runs some view is showing live, with how many views are. Only these
    * follow run-events pushes. */
   watched: Record<string, number>;
@@ -106,7 +109,7 @@ export interface RunStoreState {
   /** runs-changed: the id is a node id. Refreshes it only if loaded. */
   onRunsChanged: (nodeId: string | undefined) => void;
   /** run-events: the id is a run id. Fetches new events if it is watched. */
-  onRunEvents: (runId: string | undefined) => void;
+  onRunEvents: (runId: string | undefined, kind?: string) => void;
   /** After a reconnect: whatever is on screen may have missed pushes. */
   resync: () => void;
   /** A different project: nothing held belongs to it. */
@@ -226,6 +229,7 @@ const initial = {
   nodeErrors: {},
   eventsByRun: {},
   eventErrors: {},
+  asksByRun: {},
   watched: {},
   selectedRun: {},
   cancelling: {},
