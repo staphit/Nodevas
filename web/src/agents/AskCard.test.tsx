@@ -162,6 +162,16 @@ describe("AskCard by kind", () => {
     expect(screen.getByText(/8:5|9:0/)).toBeInTheDocument();
   });
 
+  it("gives its title a tooltip and a short run chip with the full run id on hover", () => {
+    const runId = "0123456789abcdef01234567";
+    render(<AskCard ask={{ ...baseAsk, runId }} onAnswer={vi.fn()} />);
+    const title = screen.getByText("api-claude asks for approval");
+    expect(title).toHaveAttribute("title", "api-claude asks for approval");
+    const chip = screen.getByText(/Run 01234567/);
+    expect(chip.textContent).not.toContain(runId);
+    expect(chip).toHaveAttribute("title", expect.stringContaining(runId));
+  });
+
   it("uses ask.expiresAt for countdown when present", () => {
     const ask: AgentAsk = {
       ...baseAsk,
