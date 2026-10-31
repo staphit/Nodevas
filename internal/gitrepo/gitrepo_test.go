@@ -223,20 +223,24 @@ func TestNoHooksPathLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// The repository's own hooks folder never runs either.
+// The repository's own hooks folder never runs either. Commit passes
+// --no-verify, which skips pre-commit and commit-msg whatever the hooks path
+// says, so the hooks planted here are ones it does not skip.
 func TestRepositoryHookDoesNotRun(t *testing.T) {
 	r, dir := newRepo(t)
-	marker := filepath.Join(t.TempDir(), "hook-ran")
-	hook := "#!/bin/sh\ntouch '" + filepath.ToSlash(marker) + "'\nexit 1\n"
-	write(t, r.GitDir(), "hooks/pre-commit", hook)
-	if err := os.Chmod(filepath.Join(r.GitDir(), "hooks", "pre-commit"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	write(t, dir, "graph.yaml", "nodes: []\n")
-	if sha, err := r.Commit(context.Background(), nil, "graph", Person{Name: "ann"}, time.Now()); err != nil || sha == "" {
-		t.Fatalf("commit %q, %v", sha, err)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("the repository's pre-commit hook ran")
+	for _, name := range []string{"prepare-commit-msg", "post-commit"} {
+		marker := filepath.Join(t.TempDir(), name+"-ran")
+		hook := "#!/bin/sh\ntouch '" + filepath.ToSlash(marker) + "'\n"
+		write(t, r.GitDir(), "hooks/"+name, hook)
+		if err := os.Chmod(filepath.Join(r.GitDir(), "hooks", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, dir, "graph.yaml", "nodes: [] # "+name+"\n")
+		if sha, err := r.Commit(context.Background(), nil, "graph", Person{Name: "ann"}, time.Now()); err != nil || sha == "" {
+			t.Fatalf("commit %q, %v", sha, err)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("the repository's %s hook ran", name)
+		}
 	}
 }
