@@ -114,6 +114,7 @@ describe("AskCard by kind", () => {
       question: "Permission to run tool",
       tool: "Bash",
       toolInput: "git status",
+      runId: "run-1",
     };
     render(<AskCard ask={permAsk} onAnswer={onAnswer} />);
 
@@ -305,6 +306,20 @@ describe("AskCard permission input", () => {
     render(<AskCard ask={{ ...permAsk, toolInput }} onAnswer={vi.fn()} />);
     expect(screen.getByRole("alert")).toHaveTextContent(/cut off/);
     expect(screen.queryByRole("button", { name: /Allow for this run/ })).toBeNull();
+  });
+
+  it("offers no allow-for-run, by button or key 2, on a prompt outside a run", () => {
+    const onAnswer = vi.fn();
+    render(
+      <AskCard ask={{ ...permAsk, runId: undefined, toolInput: '{"command":"ls"}' }} onAnswer={onAnswer} />,
+    );
+    expect(screen.queryByRole("button", { name: /Allow for this run/ })).toBeNull();
+    const card = screen.getByRole("group", { name: /tool permission/ });
+    card.focus();
+    fireEvent.keyDown(card, { key: "2" });
+    expect(onAnswer).not.toHaveBeenCalled();
+    fireEvent.keyDown(card, { key: "1" });
+    expect(onAnswer).toHaveBeenCalledWith({ decision: "approve" });
   });
 
   it("does not warn about a whole input", () => {
