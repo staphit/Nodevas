@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/db"
@@ -211,9 +212,23 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 // can pin it.
 var coldSearchWait = 50 * time.Millisecond
 
+// coldSearchWaited is a test seam: told how long a search is about to wait
+// for a project's first index build, so a test can check the wait itself
+// rather than time a search under load. One atomic load when unset.
+var coldSearchWaited atomic.Pointer[func(projectPath string, within time.Duration)]
+
+// warmingForSearch reports whether the project's first index build is still
+// running after a search has waited coldSearchWait for it.
+func (pm *ProjectManager) warmingForSearch(index *searchIndex, projectPath string) bool {
+	if hook := coldSearchWaited.Load(); hook != nil {
+		(*hook)(projectPath, coldSearchWait)
+	}
+	return index.indexes().Warming(projectPath, coldSearchWait)
+}
+
 func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
 	index := pm.getSearchIndex()
-	if index.indexes().Warming(project.Path, coldSearchWait) {
+	if pm.warmingForSearch(index, project.Path) {
 		return pm.searchWhileIndexing(project, normalized), nil
 	}
 	return index.search(project, normalized)
@@ -319,7 +334,7 @@ func nodeSearchMetadata(node *engine.Node, userNames map[string]string) string {
 // searchWhileIndexing: hits whose title holds the query first.
 func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit int) ([]SearchResult, error) {
 	index := pm.getSearchIndex()
-	if index.indexes().Warming(info.Path, coldSearchWait) {
+	if pm.warmingForSearch(index, info.Path) {
 		normalized := strings.ToLower(strings.TrimSpace(query))
 		results := pm.searchWhileIndexing(info, normalized)
 		for i := range results {

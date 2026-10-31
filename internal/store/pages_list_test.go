@@ -2,37 +2,52 @@ package store
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"nodevas/internal/identity"
 )
 
-// fastestListing is the quickest of a few ListNodePages calls: the floor of
-// what one listing costs, with scheduler noise taken out.
-func fastestListing(t *testing.T, st *Store, nodeID string) time.Duration {
+// listingFileOps is how many file-system operations on its project (opens of
+// the project root, one per contained path operation) one checked
+// ListNodePages of nodeID makes: not the remembered verdict, a full check.
+//
+// Counted, not timed: a listing of a few pages takes less than one tick of
+// the Windows clock, so a timed one read 0s against 0.5ms and failed as
+// "+Infx" with nothing wrong.
+func listingFileOps(t *testing.T, st *Store, nodeID string) int64 {
 	t.Helper()
-	best := time.Duration(1<<63 - 1)
-	for range 7 {
-		start := time.Now()
-		if _, err := st.ListNodePages(nodeID); err != nil {
-			t.Fatal(err)
+	st.InvalidatePageLists()
+	var ops atomic.Int64
+	root := filepath.Clean(st.Root())
+	count := func(opened string) {
+		if filepath.Clean(opened) == root {
+			ops.Add(1)
 		}
-		best = min(best, time.Since(start))
 	}
-	return best
+	rootOpened.Store(&count)
+	defer rootOpened.Store(nil)
+	if _, err := st.ListNodePages(nodeID); err != nil {
+		t.Fatal(err)
+	}
+	return ops.Load()
 }
 
 func TestListNodePagesCostDoesNotGrowWithPageCount(t *testing.T) {
 	few := benchPagesStore(t, 2, 5)
 	many := benchPagesStore(t, 2, 250)
-	small, large := fastestListing(t, few, "n00001"), fastestListing(t, many, "n00001")
+	small, large := listingFileOps(t, few, "n00001"), listingFileOps(t, many, "n00001")
 	// The pages endpoint is read on every node the board opens. Checking
 	// each listed file one path at a time made it ~25x dearer at 250 pages
-	// than at 5; one directory read keeps it near flat.
-	if large > 6*small {
-		t.Fatalf("listing 250 pages took %v, 5 pages %v: %.1fx, want under 6x", large, small, float64(large)/float64(small))
+	// than at 5; one directory read keeps it flat.
+	if small == 0 {
+		t.Fatal("a listing made no file-system operation that was counted")
+	}
+	if large != small {
+		t.Fatalf("listing 250 pages made %d file-system operations, 5 pages %d: want the same", large, small)
 	}
 }
 
