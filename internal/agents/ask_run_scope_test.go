@@ -32,6 +32,11 @@ func TestApproveRunOnAShellToolCoversOnlyThatCommand(t *testing.T) {
 			{"run_command", `{"CommandLine":"git status","Cwd":"/w"}`,
 				`{"CommandLine":"git status","Cwd":"/w"}`,
 				`{"CommandLine":"git log","Cwd":"/w"}`},
+			// The Antigravity CLI labels each call with model-written
+			// toolSummary and toolAction text.
+			{"run_command", `{"CommandLine":"git status","WaitMsBeforeAsync":10000,"toolSummary":"Git status","toolAction":"Checking status"}`,
+				`{"CommandLine":"git status","WaitMsBeforeAsync":10000,"toolSummary":"Git status again","toolAction":"Rechecking status"}`,
+				`{"CommandLine":"git log","WaitMsBeforeAsync":10000,"toolSummary":"Git status","toolAction":"Checking status"}`},
 			{"run_command", `{"CommandLine":"rm -rf build","Cwd":"/w/app"}`,
 				`{"CommandLine":"rm -rf build","Cwd":"/w/app"}`,
 				`{"CommandLine":"rm -rf build","Cwd":"/"}`},
