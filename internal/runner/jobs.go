@@ -592,7 +592,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
+		MCP:            adapter.MCPServer{Command: exe},
 		PermissionMode: mode,
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
@@ -601,6 +601,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Version:          version,
 		PermissionRelay:  cfg.PermissionRelay,
 	}
+	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	cmd, err := ad.Command(job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
@@ -766,7 +767,7 @@ func modeText(cfg *Config, kind string) string {
 // runner's proxy, as a worker, under a session name that says which run it is,
 // with only the tools a run uses: each definition is paid for on every model
 // call.
-func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
+func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
 	model := job.Model
 	if model == "" {
 		model = "default"
@@ -789,7 +790,7 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 	}
 	// A role job is served its role's tools only (the hub's allowlist); a
 	// legacy job keeps the run toolset, exactly as before.
-	if role := roleArgs(job); role != nil {
+	if role := roleArgs(job, relayTools...); role != nil {
 		return append(args, role...)
 	}
 	return append(args, "--toolset", "run")

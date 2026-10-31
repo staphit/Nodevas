@@ -6,6 +6,7 @@ package runner
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"nodevas/internal/engine"
@@ -84,14 +85,16 @@ func prDraft(cfg *Config, job runnerwire.Job, result runnerwire.RunResult) bool 
 var toolName = regexp.MustCompile(`^[a-z][a-z_]{0,63}$`)
 
 // roleArgs are the role flags of a role job's sidecar: --role, and --tools
-// with the hub's allowlist (names only). nil for a legacy job.
-func roleArgs(job runnerwire.Job) []string {
+// with the hub's allowlist (names only) plus relayTools, the tools the run's
+// permission relay needs whatever the role lists (adapter.RelayMCPTools).
+// nil for a legacy job, whose run toolset has them already.
+func roleArgs(job runnerwire.Job, relayTools ...string) []string {
 	if job.Role == "" || !engine.ValidRoleID(job.Role) {
 		return nil
 	}
 	var tools []string
-	for _, tool := range job.Tools {
-		if toolName.MatchString(tool) {
+	for _, tool := range append(slices.Clone(job.Tools), relayTools...) {
+		if toolName.MatchString(tool) && !slices.Contains(tools, tool) {
 			tools = append(tools, tool)
 		}
 	}

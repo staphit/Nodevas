@@ -41,7 +41,7 @@ const NodevasMCPTools = "mcp__nodevas"
 
 // ClaudeApproveTool is the --permission-prompt-tool of a run with
 // permissionRelay: the hub's approve_tool on the run's nodevas MCP server.
-const ClaudeApproveTool = NodevasMCPTools + "__approve_tool"
+const ClaudeApproveTool = NodevasMCPTools + "__" + ApproveToolName
 
 // ClaudeMCPTimeoutEnv is Claude Code's MCP tool-call timeout, in ms.
 const ClaudeMCPTimeoutEnv = "MCP_TOOL_TIMEOUT"
@@ -103,7 +103,7 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// which waits for a person. It is consulted only after the deny rules
 	// above and the permission mode, so it never widens them; plan and
 	// dontAsk never ask at all.
-	relay := env.PermissionRelay && PermissionRelayApplies("claude", mode, false)
+	relay := ClaudeRelays(env)
 	if relay {
 		args = append(args, "--permission-prompt-tool", ClaudeApproveTool)
 	}
@@ -123,6 +123,32 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	cmd.Env = jobEnv(job, extra...)
 	return cmd, nil
+}
+
+// ClaudeRelays reports whether a Claude Code run under env sends its
+// permission prompts to the hub's approve_tool (--permission-prompt-tool):
+// permissionRelay on, in a mode that asks at all.
+func ClaudeRelays(env RunEnv) bool {
+	mode := env.PermissionMode
+	if mode == "" {
+		mode = DefaultClaudePermissionMode
+	}
+	return env.PermissionRelay && PermissionRelayApplies("claude", mode, false)
+}
+
+// ApproveToolName is the nodevas MCP tool ClaudeApproveTool names.
+const ApproveToolName = "approve_tool"
+
+// RelayMCPTools are the nodevas tools a run's sidecar must serve, whatever
+// its role's allowlist, for the run's permission relay: approve_tool for a
+// Claude Code run that relays, since the CLI refuses to start when the tool
+// --permission-prompt-tool names is not listed. The other CLIs relay through
+// the runner, not the sidecar.
+func RelayMCPTools(kind string, env RunEnv) []string {
+	if kind == "claude" && ClaudeRelays(env) {
+		return []string{ApproveToolName}
+	}
+	return nil
 }
 
 // claudeMCPTimeoutAtLeast reports whether the runner's own environment
