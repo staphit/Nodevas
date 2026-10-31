@@ -217,6 +217,14 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 				Type: agents.AskEvent, ID: ask.ID, Kind: ask.Kind, RunID: ask.RunID,
 			})
 		}
+		// A run's ask that starts waiting or ends is news for that run's
+		// timeline (GET /api/runs/:id/asks): kind "ask" tells an open run
+		// view to refetch its asks rather than its events.
+		if ask, ok := payload.(agents.Ask); ok && eventType == agents.AskEvent && ask.RunID != "" {
+			s.hub.BroadcastRoomEvent(projectRoot, realtime.Event{
+				Type: runnerwire.RunEventsEvent, ID: ask.RunID, Kind: runnerwire.RunEventsAskKind,
+			})
+		}
 		// An external session's changes are news for one node: the event
 		// names it, so only a browser showing that node refetches.
 		if eventType == agents.SessionChangesEvent {

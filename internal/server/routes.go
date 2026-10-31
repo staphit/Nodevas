@@ -101,6 +101,9 @@ func (s *Server) Handler() http.Handler {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
 		s.configureStepUp(runsAPI)
 		runsAPI.UseAutoRoute(s.autoRouteRequest)
+		if s.agents != nil {
+			runsAPI.UseAsks(s.agents)
+		}
 		runsAPI.Register(api)
 		// Agent analytics (pure SQL and rules) and the Explorer.
 		s.analyticsAPI().Register(api)

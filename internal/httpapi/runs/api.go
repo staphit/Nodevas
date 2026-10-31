@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/agents"
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
@@ -46,6 +47,9 @@ type API struct {
 	// autoRoute is agent analytics' auto routing (UseAutoRoute); nil keeps
 	// the rules' pick.
 	autoRoute AutoRoute
+	// asks is the agent network a run's asks live in (UseAsks); nil lists
+	// none.
+	asks *agents.Hub
 }
 
 // AutoRoute decides the dispatch dialog's route: manual is what the
@@ -54,6 +58,10 @@ type AutoRoute func(r *http.Request, ownerID, project, nodeID, role string, manu
 
 // UseAutoRoute sends GET /api/runs/route through auto routing.
 func (a *API) UseAutoRoute(fn AutoRoute) { a.autoRoute = fn }
+
+// UseAsks lists a run's asks (GET /api/runs/:id/asks) from the agent
+// network's hub.
+func (a *API) UseAsks(hub *agents.Hub) { a.asks = hub }
 
 // New builds the handler set.
 func New(pm *project.ProjectManager, reg *runners.Registry, d *runs.Dispatcher) *API {
@@ -73,6 +81,7 @@ func (a *API) Register(api *gin.RouterGroup) {
 	api.GET("/runs", a.list)
 	api.GET("/runs/:id", a.get)
 	api.GET("/runs/:id/events", a.events)
+	api.GET("/runs/:id/asks", a.runAsks)
 	api.GET("/runs/:id/changes", a.changes)
 	api.POST("/runs/:id/cancel", a.cancel)
 	api.POST("/runs/:id/retry-now", a.retryNow)
@@ -422,6 +431,32 @@ func (a *API) events(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, runnerwire.RunEventsResponse{Events: events, More: more})
+}
+
+// runAsks returns what the run's agent asked and how each ask ended, for its
+// timeline: the run's own events are the runner's to number, so a hub-side
+// ask is not one of them. Whoever may see the run sees that it waited and on
+// what; a prompt's input and the answer's note only those who may answer it
+// (agents.RunAsk).
+func (a *API) runAsks(c *gin.Context) {
+	r, ok := a.visible(c)
+	if !ok {
+		return
+	}
+	asks := []agents.RunAsk{}
+	if a.asks != nil {
+		st := httpx.StoreFor(c.Request, a.pm)
+		authed := auth.ActorFrom(c.Request)
+		viewer := agents.Viewer{ID: authed.ID, Admin: authed.IsAdmin(), Agent: authed.IsAgent()}
+		list, err := a.asks.RunAsks(c.Request.Context(), st.Root(), r.ID, viewer)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		asks = list
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, agents.RunAsksResponse{Asks: asks})
 }
 
 // changes returns what the run committed: files, counts and the patch. Changes

@@ -25,7 +25,9 @@ func TestARunsAskReachesItsTimeline(t *testing.T) {
 	if _, err := server.agents.Touch(agents.Heartbeat{SessionID: "r1", Project: root, ActorID: "local", Name: "app-claude-r1", RunID: "run-1"}); err != nil {
 		t.Fatal(err)
 	}
-	forRun := func(event realtime.Event) bool { return event.ID == "run-1" && event.Kind == "ask" }
+	forRun := func(event realtime.Event) bool {
+		return event.ID == "run-1" && event.Kind == runnerwire.RunEventsAskKind
+	}
 
 	in := agents.AskInput{
 		Project: root, SessionID: "r1", SessionName: "app-claude-r1", ActorID: "local", Agent: "claude",

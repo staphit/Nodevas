@@ -336,4 +336,7 @@ type RunEventsResponse struct {
 const (
 	RunsChangedEvent = "runs-changed"
 	RunEventsEvent   = "run-events"
+	// RunEventsAskKind is the kind of a RunEventsEvent that is about one of
+	// the run's asks (GET /api/runs/:id/asks), not its events.
+	RunEventsAskKind = "ask"
 )
