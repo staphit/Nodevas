@@ -190,5 +190,55 @@ func previewLine(s string) string {
 }
 
 // ExpireRunAsks expires the asks of run runID in project still waiting, now
-// that the run has ended.
-func (h *Hub) ExpireRunAsks(ctx context.Context, project, runID string) {}
+// that the run has ended: nobody's answer reaches its agent any more. Each
+// waiter returns its ask expired, and each change is emitted like any
+// expiry, so the run's timeline and the agent panels stop offering it. Asks
+// already settled are left as they are.
+func (h *Hub) ExpireRunAsks(ctx context.Context, project, runID string) {
+	project = strings.Trim(strings.TrimSpace(project), "/")
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
+	var ids []string
+	if h.database == nil {
+		h.mu.Lock()
+		for _, a := range h.memAsks {
+			if a.Project == project && a.RunID == runID && a.Status == AskPending {
+				ids = append(ids, a.ID)
+			}
+		}
+		h.mu.Unlock()
+	} else {
+		rows, err := h.database.QueryContext(ctx, `
+			SELECT id FROM agent_asks
+			 WHERE project = ? AND run_id = ? AND status = 'pending'`, project, runID)
+		if err != nil {
+			return
+		}
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		_ = rows.Close()
+	}
+	for _, id := range ids {
+		expired, err := h.expireAsk(ctx, project, id)
+		if err != nil || expired.Status != AskExpired {
+			// Answered in the meantime: that answer was delivered.
+			continue
+		}
+		h.mu.Lock()
+		waitCh, waiting := h.askWaiters[id]
+		h.mu.Unlock()
+		if waiting {
+			select {
+			case waitCh <- expired:
+			default:
+			}
+		}
+		h.emit(project, AskEvent, expired)
+	}
+}

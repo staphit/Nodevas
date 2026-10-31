@@ -369,6 +369,8 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 	s.runs.SetOnApproved(s.stagedApproved)
 	// A run that ends or a pipeline that moves changes the scorecards.
 	s.runs.Observe(invalidateScorecardsOn)
+	// A run that ends leaves nobody to act on what its agent still asks.
+	s.runs.Observe(s.expireEndedRunAsks)
 	// Runs waiting for an agent's usage limit to reset are offered again
 	// when it has (internal/runs/handoff.go); the waits are stored, so this
 	// picks up those a restart interrupted.
@@ -614,4 +616,22 @@ func (s *Server) AbuseStats() AbuseStats {
 // ?project= / X-Nodevas-Project, or the active sub-project when neither is set.
 func (s *Server) store(r *http.Request) *store.Store {
 	return httpx.StoreFor(r, s.pm)
+}
+
+// expireEndedRunAsks expires what a run that has just ended still waited on
+// (agents.Hub.ExpireRunAsks), off the dispatcher's goroutine.
+func (s *Server) expireEndedRunAsks(u runs.Update) {
+	if s.agents == nil || s.pm == nil || u.Run.ID == "" || !runnerwire.RunFinal(u.Run.Status) {
+		return
+	}
+	project, runID := u.Run.Project, u.Run.ID
+	safego.Go("expire an ended run's asks", func() {
+		st, err := s.pm.StoreFor(project)
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.agents.ExpireRunAsks(ctx, st.Root(), runID)
+	})
 }
