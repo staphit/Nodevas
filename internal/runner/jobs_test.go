@@ -200,8 +200,13 @@ func TestHelperProcess(t *testing.T) {
 		edit()
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
-	case "hang":
+	case "hang", "slow-hang":
 		fmt.Println(`{"type":"system","subtype":"init","session_id":"s-hang","model":"m"}`)
+		if mode == "slow-hang" {
+			// Starts its grandchild only after a while, the way a helper
+			// does on a machine a parallel "go test ./..." saturates.
+			time.Sleep(slowHangStart)
+		}
 		// A grandchild holding our stdout, like node's children do: killing
 		// only this process would leave it running and the pipe open.
 		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
@@ -970,10 +975,18 @@ func TestRunCancelKillsTree(t *testing.T) {
 	waitDead(t, env, "run-cancel")
 }
 
+// slowHangStart is how long the slow-hang helper waits before it starts its
+// grandchild: longer than TestRunTimeout's run timeout.
+const slowHangStart = time.Second
+
+// TestRunTimeout: a run that outlasts its timeout fails with a message that
+// says so, and its whole process tree is gone. The helper is slow to start
+// its grandchild, as on a busy machine; the tree that is killed must still be
+// the whole one, grandchild included.
 func TestRunTimeout(t *testing.T) {
 	env := startJobRunner(t, func(c *Client) { c.RunTimeout = 500 * time.Millisecond })
 	env.hub.hello()
-	env.hub.offer(testJob("run-slow", "hang:"))
+	env.hub.offer(testJob("run-slow", "slow-hang:"))
 	result := env.hub.wait("run-slow", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.Error != "timed out after 500ms" {
 		t.Fatalf("result = %+v", result)
