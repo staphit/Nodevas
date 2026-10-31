@@ -546,6 +546,12 @@ func (a *API) postAsk(c *gin.Context) {
 			locale.Errorf("a run may not ask as a person's session", "執行不能以人的工作階段身分提問"), nil)
 		return
 	}
+	// An agent seldom names the node it asks about; a run's is the one its
+	// runner's proxy vouches it was dispatched on.
+	nodeID := strings.TrimSpace(body.NodeID)
+	if nodeID == "" {
+		nodeID = auth.ActorFrom(c.Request).RunNodeID
+	}
 	timeout := agents.AskTimeout(body.Kind, time.Duration(body.TimeoutSeconds)*time.Second)
 	controller := http.NewResponseController(c.Writer)
 	_ = controller.SetWriteDeadline(time.Now().Add(timeout + 30*time.Second))
@@ -558,7 +564,7 @@ func (a *API) postAsk(c *gin.Context) {
 		Agent:       body.Agent,
 		Question:    body.Question,
 		AboutMsgID:  body.AboutMsgID,
-		NodeID:      body.NodeID,
+		NodeID:      nodeID,
 		Kind:        body.Kind,
 		Options:     body.Options,
 		Tool:        body.Tool,
