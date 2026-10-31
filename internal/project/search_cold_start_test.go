@@ -44,16 +44,16 @@ func TestUsingTheDatabaseBuildsTheOpenProjectsIndex(t *testing.T) {
 	database := testpg.New(t)
 	pm.UseDatabase(database)
 
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var rows int
-		if err := database.Search().QueryRow(`SELECT count(*) FROM search_documents`).Scan(&rows); err == nil && rows == 3 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no search was made, and the open project's index was never built (%d rows)", rows)
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Wait for the background work UseDatabase started, and start none: a
+	// clock here (it was 10 s) failed under load with the build on its way,
+	// and the build itself must not be what this wait asks for.
+	pm.getSearchIndex().indexes().Wait()
+	var rows int
+	if err := database.Search().QueryRow(`SELECT count(*) FROM search_documents`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 3 {
+		t.Fatalf("no search was made, and the open project's index was never built (%d rows)", rows)
 	}
 }
 

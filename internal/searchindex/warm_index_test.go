@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"nodevas/internal/testpg"
 )
 
 // pinRevalidate sets how long a query trusts the index for the length of one
@@ -142,4 +144,29 @@ func TestAnUnannouncedEditIsFoundWithinASecond(t *testing.T) {
 	}
 	time.Sleep(60 * time.Millisecond)
 	eventually(t, manager, root, "after", []string{"alpha"}, time.Second)
+}
+
+// Wait sees a warm build through without starting one: after Warm the
+// project is indexed, and with nothing asked for it returns at once with
+// nothing built.
+func TestWaitSeesAWarmBuildThrough(t *testing.T) {
+	database := testpg.New(t)
+	m := NewManagerWithDB(database)
+	t.Cleanup(func() { _ = m.Close() })
+	root := writeProject(t,
+		fixtureNode{id: "alpha", title: "Alpha", body: "one"},
+		fixtureNode{id: "beta", title: "Beta", body: "two"})
+
+	m.Wait()
+	if n := count(t, database, `SELECT count(*) FROM search_documents`); n != 0 {
+		t.Fatalf("%d rows with no build asked for, want 0", n)
+	}
+	m.Warm(root)
+	m.Wait()
+	if m.Warming(root, 0) {
+		t.Fatal("Wait returned while the warm build was still running")
+	}
+	if n := count(t, database, `SELECT count(*) FROM search_documents`); n != 2 {
+		t.Fatalf("%d rows after Wait, want the 2 nodes", n)
+	}
 }
