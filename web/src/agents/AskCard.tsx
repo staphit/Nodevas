@@ -74,6 +74,22 @@ function ToolInput({
   );
 }
 
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+/** The "allow for this run" button's label: what it covers. */
+function allowRunLabel(t: Translate, ask: Pick<AgentAsk, "runScope" | "tool">): string {
+  if (ask.runScope === "command") return t("agents.ask.allowRunCommand");
+  if (ask.runScope === "tool") return t("agents.ask.allowRunTool", { tool: ask.tool || "tool" });
+  return t("agents.ask.allowRun");
+}
+
+/** A permission prompt allowed for the rest of its run, as it settled. */
+function allowedRunLabel(t: Translate, ask: Pick<AgentAsk, "runScope" | "tool">): string {
+  if (ask.runScope === "command") return t("agents.ask.statusAllowedRunCommand");
+  if (ask.runScope === "tool") return t("agents.ask.statusAllowedRunTool", { tool: ask.tool || "tool" });
+  return t("agents.ask.statusAllowedRun");
+}
+
 /** The hub refuses a longer answer (agents.MaxAskAnswerRunes). */
 const MAX_ANSWER_CHARS = 4000;
 
@@ -101,8 +117,9 @@ export function AskCard({
   const isPending = ask.status === "pending";
   const inputCut = kind === "permission" && toolInputMayBeCut(ask.toolInput);
   // The hub remembers "allow for this run" per run: outside one it would
-  // allow this prompt alone, while the card claimed more.
-  const canAllowRun = Boolean(ask.runId) && !inputCut;
+  // allow this prompt alone, while the card claimed more. A runScope of
+  // "once" (a shell command cut to fit) is the same: nothing to remember.
+  const canAllowRun = Boolean(ask.runId) && !inputCut && ask.runScope !== "once";
 
   useEffect(() => {
     if (!isPending) return;
@@ -221,7 +238,7 @@ export function AskCard({
                 ? ask.decision === "approve_run" ||
                   ask.answer === "approve_run" ||
                   ask.note === ALLOWED_FOR_RUN_NOTE
-                  ? t("agents.ask.statusAllowedRun")
+                  ? allowedRunLabel(t, ask)
                   : t("agents.ask.statusAllowed")
                 : t("agents.ask.statusApproved")
               : ask.status === "denied"
@@ -339,7 +356,7 @@ export function AskCard({
               disabled={busy}
               onClick={() => onAnswer({ decision: "approve_run" })}
             >
-              {t("agents.ask.allowRun")} <kbd>2</kbd>
+              {allowRunLabel(t, ask)} <kbd>2</kbd>
             </button>
           )}
           <button

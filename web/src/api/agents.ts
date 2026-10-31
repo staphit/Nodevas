@@ -86,6 +86,11 @@ export type AgentAskDecision =
   | "answer"
   | "approve_run";
 
+/** What allowing a permission prompt for the rest of its run covers: every
+ * later call of its tool, the same shell command only, or this call alone
+ * (a shell command cut to fit). */
+export type AgentAskRunScope = "tool" | "command" | "once";
+
 export interface AgentAskAnswerRequest {
   decision: AgentAskDecision;
   note?: string;
@@ -115,6 +120,9 @@ export interface AgentAsk {
   runId?: string;
   tool?: string;
   toolInput?: string;
+  /** A permission prompt's: what "allow for this run" covers. Absent from an
+   * older hub, where it covered the tool. */
+  runScope?: AgentAskRunScope;
   /** Whether the viewer may answer it: set on an ask the hub lists for a
    * person (GET /api/agents/asks). Absent elsewhere. */
   canAnswer?: boolean;
