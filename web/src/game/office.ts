@@ -312,7 +312,7 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
     if (hasChanges(run)) actions.push({ kind: "run-diff", runId: run.id, nodeId: run.nodeId });
     const prUrl = safePRUrl(run.prUrl);
     if (prUrl) actions.push({ kind: "pr", runId: run.id, url: prUrl });
-    if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId });
+    if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId, askKind: ask.kind });
     for (const message of heldMail) actions.push({ kind: "held-message", messageId: message.id });
     const pose = runPose(run, { runnerOnline: online, asking: Boolean(ask) });
     actors.push({
@@ -358,7 +358,7 @@ export function buildCurrentOffice(inputs: CurrentOfficeInputs): CurrentOffice {
       : { kind: "session", sessionId: session.id };
     const actions: ClickTarget[] = [target];
     if (nodeId) actions.push({ kind: "session-diff", sessionId: session.id, nodeId });
-    if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId });
+    if (ask) actions.push({ kind: "ask", askId: ask.id, sessionId: ask.sessionId, askKind: ask.kind });
     for (const message of heldMail) actions.push({ kind: "held-message", messageId: message.id });
     const pose = sessionPose(session, { now, asking: Boolean(ask) });
     actors.push({

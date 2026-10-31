@@ -122,7 +122,7 @@ export function compactOffice(p: BuildingProject, now: number): CompactOffice {
     actions.push(inProject(p.name, { kind: "run", runId: run.id, nodeId: run.nodeId }));
   }
   const waiting: ClickTarget[] = [
-    ...p.asks.map((ask): ClickTarget => inProject(p.name, { kind: "ask", askId: ask.id, sessionId: ask.sessionId })),
+    ...p.asks.map((ask): ClickTarget => inProject(p.name, { kind: "ask", askId: ask.id, sessionId: ask.sessionId, askKind: ask.kind })),
     ...p.reviews.map((review): ClickTarget => inProject(p.name, { kind: "autopilot", goalNodeId: review.goalNodeId })),
   ];
   // Several tasks of one autopilot wait in the same goal: one entry for it.

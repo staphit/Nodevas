@@ -1,4 +1,5 @@
 import { req } from "./http";
+import type { AgentAskKind } from "./agents";
 import type { MergeStatus, Run } from "./runs";
 
 /**
@@ -65,8 +66,7 @@ export interface BuildingAsk {
   sessionId: string;
   sessionName: string;
   agent: string;
-  /** Kind is approval, question, choice or permission. */
-  kind?: string;
+  kind?: AgentAskKind;
   /** At most 120 characters. */
   question: string;
   options?: string[];
