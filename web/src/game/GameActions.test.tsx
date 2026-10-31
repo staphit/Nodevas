@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgents } from "../agents/agentStore";
 import type { AgentAsk } from "../api";
 import { readPreferences } from "../preferences";
@@ -106,5 +106,45 @@ describe("Station ask dialog title per kind", () => {
       </GameActionsProvider>,
     );
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("回答問題");
+  });
+});
+
+describe("Station ask dialog answering", () => {
+  const permission: AgentAsk = {
+    id: "ask-perm",
+    project: "alpha",
+    sessionId: "s1",
+    sessionName: "agent-1",
+    actorId: "u1",
+    kind: "permission",
+    tool: "Bash",
+    toolInput: '{"command":"npm test"}',
+    runId: "run-1",
+    question: "agent-1 wants to run Bash",
+    status: "pending",
+    createdAt: Date.now(),
+  };
+
+  beforeEach(() => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+  });
+
+  const open = (askId: string) => {
+    render(
+      <GameActionsProvider>
+        <Trigger askId={askId} />
+      </GameActionsProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  };
+
+  it("opens with focus in the ask card, so its number keys answer", () => {
+    const answerAsk = vi.fn(async () => true);
+    useAgents.setState({ asks: [permission], answerAsk, viewer: null, error: null });
+    open("ask-perm");
+    const card = screen.getByRole("group", { name: /tool permission/ });
+    expect(card.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "2" });
+    expect(answerAsk).toHaveBeenCalledWith("ask-perm", { decision: "approve_run" });
   });
 });
