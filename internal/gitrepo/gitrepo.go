@@ -83,9 +83,6 @@ var (
 	availableOnce sync.Once
 	gitPath       string
 	unavailable   string
-
-	noHooksOnce sync.Once
-	noHooksDir  string
 )
 
 // Available reports whether a git of MinVersion or newer can be run here.
@@ -139,16 +136,16 @@ func versionAtLeast(out, min string) bool {
 	return atoi(have[2]) >= atoi(want[2])
 }
 
-// noHooksPath is an empty directory for core.hooksPath: no hook runs.
+// noHooksPath is the core.hooksPath that runs no hook: a path inside the
+// git executable, which is a file, so no folder can ever exist there, nothing
+// is left behind, and no hook can be planted there by anyone who could not
+// already replace git itself. Git finds no hook and runs none.
 func noHooksPath() string {
-	noHooksOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nodevas-gitrepo-nohooks-")
-		if err != nil {
-			dir = filepath.Join(os.DevNull, "nodevas-nohooks")
-		}
-		noHooksDir = filepath.ToSlash(dir)
-	})
-	return noHooksDir
+	base := gitPath
+	if base == "" {
+		base = os.DevNull
+	}
+	return filepath.ToSlash(base) + "/no-hooks"
 }
 
 // Open opens the repository of the project folder workTree, creating it on
