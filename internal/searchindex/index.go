@@ -557,10 +557,11 @@ func (ix *projectIndex) reindex(ctx context.Context, id, title, meta string) err
 }
 
 // reindexFound is reindex for a node a walk of nodes/ (scanNodes) looked
-// for: one it found is read from where the walk saw it.
-func (ix *projectIndex) reindexFound(ctx context.Context, found map[string]*nodeFiles, id, title, meta string) error {
-	files := found[id]
-	if files == nil || !files.doc.Exists {
+// for: files is what the walk found for it, docPath the document the store
+// resolves for it (store.NodeDocPaths). The walk's files are read only when
+// they are the ones reindex would read; anything else is read by reindex.
+func (ix *projectIndex) reindexFound(ctx context.Context, files *nodeFiles, docPath, id, title, meta string) error {
+	if !files.atStorePaths(docPath, id) {
 		return ix.reindex(ctx, id, title, meta)
 	}
 	body, doc, pages := readFound(ix.root, files)
@@ -687,8 +688,10 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 	order := make([]string, 0, len(graph.Nodes))
 	// Nodes new to the index (all of them in a cold build) are read from one
 	// walk of nodes/, not resolved and statted one path at a time: that was
-	// five opens of the project per node.
+	// five opens of the project per node. One more walk, the store's own,
+	// says which of the files the first one found are each node's.
 	var found map[string]*nodeFiles
+	var docPaths map[string]string
 	for _, node := range graph.Nodes {
 		if node == nil {
 			continue
@@ -702,9 +705,9 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 		old, known := ix.docs[node.ID]
 		if !known {
 			if found == nil {
-				found = scanNodes(ix.root)
+				found, docPaths = scanNodes(ix.root), store.NodeDocPaths(ix.root)
 			}
-			if err := ix.reindexFound(ctx, found, node.ID, node.Title, meta); err != nil {
+			if err := ix.reindexFound(ctx, found[node.ID], docPaths[node.ID], node.ID, node.Title, meta); err != nil {
 				return err
 			}
 			continue
@@ -761,6 +764,25 @@ func (ix *projectIndex) rewriteMeta(ctx context.Context, old *document, title, m
 type nodeFiles struct {
 	doc   fileStamp
 	pages []fileStamp
+}
+
+// atStorePaths reports whether the walk found node id's files where the
+// store reads them: its document at docPath, the shallowest copy the store
+// resolves (store.NodeDocPath), and pages only in the <id>.pages folder
+// beside it (store.NodePagesPath). The walk keeps the last copy of a
+// document it meets and every <id>.pages folder anywhere under nodes/, so a
+// deeper copy or a stray pages folder answers false.
+func (files *nodeFiles) atStorePaths(docPath, id string) bool {
+	if files == nil || !files.doc.Exists || docPath == "" || files.doc.Path != filepath.Clean(docPath) {
+		return false
+	}
+	pagesDir := filepath.Join(filepath.Dir(files.doc.Path), id+".pages")
+	for _, page := range files.pages {
+		if filepath.Dir(page.Path) != pagesDir {
+			return false
+		}
+	}
+	return true
 }
 
 // scanNodes walks nodes/ once and collects the stamps of every node document
