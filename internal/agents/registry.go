@@ -169,7 +169,7 @@ type Hub struct {
 // NewHub constructs an agent network hub backed by database (which may be nil
 // in unit tests that exercise only in-memory behavior).
 func NewHub(database *db.DB, notify EventFunc) *Hub {
-	return &Hub{
+	h := &Hub{
 		database:      database,
 		notify:        notify,
 		now:           time.Now,
@@ -181,13 +181,17 @@ func NewHub(database *db.DB, notify EventFunc) *Hub {
 		senderHistory: make(map[string][]int64),
 		threadTurns:   make(map[string]int),
 	}
+	h.expireOrphanedAsks()
+	return h
 }
 
-// SetDatabase attaches a persistent workspace database to the hub.
+// SetDatabase attaches a persistent workspace database to the hub. Asks a
+// hub before left pending in it are expired (expireOrphanedAsks).
 func (h *Hub) SetDatabase(database *db.DB) {
 	h.mu.Lock()
 	h.database = database
 	h.mu.Unlock()
+	h.expireOrphanedAsks()
 }
 
 func (h *Hub) emit(project, eventType string, payload any) {

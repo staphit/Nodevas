@@ -500,6 +500,8 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 // ask_user waits or several at once for parallel calls, so they never wait
 // behind a question; maxPendingPermissions bounds them instead.
 func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
+	// Asks past their time wait on nobody: they never hold the session.
+	h.expireStaleAsks(ctx, ask.Project)
 	permission := ask.Kind == AskKindPermission
 	limit := 1
 	if permission {
@@ -688,6 +690,87 @@ func scanAsk(row rowScanner) (Ask, error) {
 	return a, nil
 }
 
+// expireStaleAsks expires the pending asks of projects (of every project
+// when none is named) whose time is up: one still waited on is about to
+// give up anyway, and one a stopped hub left pending waits on nobody, so it
+// must not hold its session's question or permission slots, nor show in a
+// listing as waiting. Asks from before expiry times are up MaxAskTimeout
+// after they were made. Each project whose asks changed is told.
+func (h *Hub) expireStaleAsks(ctx context.Context, projects ...string) {
+	now := h.nowMillis()
+	legacy := now - MaxAskTimeout.Milliseconds()
+	changed := map[string]bool{}
+	if h.database == nil {
+		want := make(map[string]bool, len(projects))
+		for _, p := range projects {
+			want[p] = true
+		}
+		h.mu.Lock()
+		for _, a := range h.memAsks {
+			if a.Status != AskPending || (len(want) > 0 && !want[a.Project]) {
+				continue
+			}
+			if (a.ExpiresAt > 0 && a.ExpiresAt <= now) || (a.ExpiresAt == 0 && a.CreatedAt <= legacy) {
+				a.Status = AskExpired
+				a.DecidedAt = now
+				changed[a.Project] = true
+			}
+		}
+		h.mu.Unlock()
+	} else {
+		where := `
+			 WHERE status = 'pending'
+			   AND ((expires_at > 0 AND expires_at <= ?) OR (expires_at = 0 AND created_at <= ?))`
+		args := []any{now, legacy}
+		if len(projects) > 0 {
+			where += ` AND project IN (?` + strings.Repeat(", ?", len(projects)-1) + `)`
+			for _, p := range projects {
+				args = append(args, p)
+			}
+		}
+		// Listings call this all the time: the writer is only bothered
+		// when there is something to expire.
+		var one int
+		if err := h.database.QueryRowContext(ctx, `SELECT 1 FROM agent_asks`+where+` LIMIT 1`, args...).Scan(&one); err != nil {
+			return
+		}
+		// A write with RETURNING: on the writer, not the read pool.
+		_ = h.database.Tx(ctx, func(tx *sql.Tx) error {
+			rows, err := tx.QueryContext(ctx, `UPDATE agent_asks SET status = 'expired', decided_at = ?`+where+` RETURNING project`,
+				append([]any{now}, args...)...)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var project string
+				if rows.Scan(&project) == nil {
+					changed[project] = true
+				}
+			}
+			return rows.Err()
+		})
+	}
+	for project := range changed {
+		h.emit(project, AskEvent, nil)
+	}
+}
+
+// expireOrphanedAsks expires every ask left pending in the database: a hub
+// that has just attached it waits on none of them, so nobody's answer could
+// reach their tool calls, which ended with the hub before.
+func (h *Hub) expireOrphanedAsks() {
+	h.mu.Lock()
+	database := h.database
+	h.mu.Unlock()
+	if database == nil {
+		return
+	}
+	_, _ = database.ExecContext(context.Background(), `
+		UPDATE agent_asks SET status = 'expired', decided_at = ? WHERE status = 'pending'
+	`, h.nowMillis())
+}
+
 func (h *Hub) expireAsk(ctx context.Context, project, askID string) (Ask, error) {
 	now := h.nowMillis()
 	if h.database == nil {
@@ -815,6 +898,8 @@ func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerIn
 	if decidedBy == "" {
 		decidedBy = "local"
 	}
+	// An ask past its time is answered as an expired one.
+	h.expireStaleAsks(ctx, project)
 	existing, err := h.lookupAsk(ctx, project, askID)
 	if err != nil {
 		return Ask{}, err
@@ -998,6 +1083,7 @@ const maxSettledAsks = 100
 func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	status = strings.ToLower(strings.TrimSpace(status))
+	h.expireStaleAsks(ctx, project)
 	if h.database == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -1081,6 +1167,7 @@ func (h *Hub) PendingAsksIn(ctx context.Context, projects []string) ([]Ask, erro
 	if len(projects) == 0 {
 		return out, nil
 	}
+	h.expireStaleAsks(ctx, projects...)
 	if h.database == nil {
 		want := make(map[string]bool, len(projects))
 		for _, p := range projects {
