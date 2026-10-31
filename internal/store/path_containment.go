@@ -76,6 +76,15 @@ func validateProjectPath(root *os.Root, rel string, allowMissing bool) error {
 // that count file-system work instead of timing it; nil otherwise.
 var rootOpened atomic.Pointer[func(root string)]
 
+// WatchRootOpens has fn told the project root each time a contained path
+// operation opens it, until stop is called: rootOpened for tests in other
+// packages that count file-system work instead of timing it. One watcher at a
+// time.
+func WatchRootOpens(fn func(root string)) (stop func()) {
+	rootOpened.Store(&fn)
+	return func() { rootOpened.Store(nil) }
+}
+
 func openProjectRoot(root string) (*os.Root, error) {
 	if hook := rootOpened.Load(); hook != nil {
 		(*hook)(root)

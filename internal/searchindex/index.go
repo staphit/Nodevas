@@ -281,9 +281,20 @@ func firstHeading(text string) string {
 // graph.yaml, which is what makes a watcher-driven node update cheap.
 func readBody(root, id string) (string, fileStamp, []fileStamp) {
 	nodePath := store.NodeDocPath(root, id)
+	pages, _ := pageStamps(root, store.NodePagesPath(root, id))
+	return bodyOf(root, nodePath, pages), stampFile(root, nodePath), pages
+}
+
+// readFound is readBody for a node scanNodes found: the walk already placed
+// its document and stamped its files, so only their contents are read.
+func readFound(root string, files *nodeFiles) (string, fileStamp, []fileStamp) {
+	return bodyOf(root, files.doc.Path, files.pages), files.doc, files.pages
+}
+
+// bodyOf is the indexed text of the node document at nodePath and its text
+// subpages pages.
+func bodyOf(root, nodePath string, pages []fileStamp) string {
 	content := strings.ReplaceAll(readCapped(root, nodePath, nodeContentLimit), "\x1f", "")
-	pageDir := store.NodePagesPath(root, id)
-	pages, _ := pageStamps(root, pageDir)
 	var body strings.Builder
 	body.WriteString(content)
 
@@ -364,7 +375,7 @@ func readBody(root, id string) (string, fileStamp, []fileStamp) {
 			break
 		}
 	}
-	return body.String(), stampFile(root, nodePath), pages
+	return body.String()
 }
 
 func plainBody(body string) string {
@@ -545,6 +556,17 @@ func (ix *projectIndex) reindex(ctx context.Context, id, title, meta string) err
 	return ix.write(ctx, id, title, meta, body, doc, pages)
 }
 
+// reindexFound is reindex for a node a walk of nodes/ (scanNodes) looked
+// for: one it found is read from where the walk saw it.
+func (ix *projectIndex) reindexFound(ctx context.Context, found map[string]*nodeFiles, id, title, meta string) error {
+	files := found[id]
+	if files == nil || !files.doc.Exists {
+		return ix.reindex(ctx, id, title, meta)
+	}
+	body, doc, pages := readFound(ix.root, files)
+	return ix.write(ctx, id, title, meta, body, doc, pages)
+}
+
 // relativePath is what search_documents.path holds: where the node's markdown
 // lives inside the project, in slash form, so the row reads the same on every
 // platform and means something to whoever opens the database.
@@ -663,6 +685,10 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 	names := userNames(graph)
 	live := make(map[string]struct{}, len(graph.Nodes))
 	order := make([]string, 0, len(graph.Nodes))
+	// Nodes new to the index (all of them in a cold build) are read from one
+	// walk of nodes/, not resolved and statted one path at a time: that was
+	// five opens of the project per node.
+	var found map[string]*nodeFiles
 	for _, node := range graph.Nodes {
 		if node == nil {
 			continue
@@ -675,7 +701,10 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 		meta := metadataText(node, names)
 		old, known := ix.docs[node.ID]
 		if !known {
-			if err := ix.reindex(ctx, node.ID, node.Title, meta); err != nil {
+			if found == nil {
+				found = scanNodes(ix.root)
+			}
+			if err := ix.reindexFound(ctx, found, node.ID, node.Title, meta); err != nil {
 				return err
 			}
 			continue
