@@ -153,8 +153,10 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 			Text: "view only: the runner's owner did not allow typing into this terminal from the hub"})
 	}
+	// modeText, not permissionText: the person at the terminal answers the
+	// CLI's permission prompts, which are never relayed here.
 	text := fmt.Sprintf("started %s interactively in a %dx%d terminal (model %s, %s)",
-		job.Agent, initialCols, initialRows, orDash(job.Model), permissionText(cfg, job.Agent))
+		job.Agent, initialCols, initialRows, orDash(job.Model), modeText(cfg, job.Agent))
 	if job.Agent == "codex" && cfg.CodexIgnoreUserConfig {
 		text += "; codexIgnoreUserConfig does not apply to the interactive CLI"
 	}
