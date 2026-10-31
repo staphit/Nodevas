@@ -6,12 +6,16 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/agents"
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
@@ -134,7 +138,7 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 	// The executor's body writes (its scene or event) and graph ops are
 	// decided by the store, which sees the node.
 	bodyByStore := capability == string(engine.CapBody) && role.Slot() == engine.RoleExecutor
-	if capability != roleCapOps && !bodyByStore && !role.HasCap(engine.Capability(capability)) {
+	if capability != roleCapOps && !bodyByStore && !role.HasCap(engine.Capability(capability)) && !runPermissionAsk(c) {
 		httpx.Coded(c, http.StatusForbidden, store.CodeRoleDenied,
 			locale.Errorf("role %s may not call %s %s (needs %s)", "角色 %s 不能呼叫 %s %s（需要 %s）", role.ID, r.Method, r.URL.Path, capability),
 			map[string]any{"role": role.ID})
@@ -145,6 +149,42 @@ func (s *Server) withRoleGuard(c *gin.Context) {
 		c.Request = r.WithContext(auth.WithActor(r.Context(), actor))
 	}
 	c.Next()
+}
+
+// maxPeekedAskBody is the most of an ask's body runPermissionAsk reads: the
+// asks API's own limit.
+const maxPeekedAskBody = 64 << 10
+
+// runPermissionAsk reports whether c is a run relaying one of its agent CLI's
+// permission prompts: POST /api/agents/asks of kind permission, through its
+// runner's proxy from one of that runner's runs. Any role may: the ask only
+// puts the run's own tool call to a person and grants nothing by itself,
+// whereas refusing it denies every prompt without asking anyone. The body is
+// put back exactly as it came, and its kind read as the asks API reads it.
+func runPermissionAsk(c *gin.Context) bool {
+	r := c.Request
+	if r.Method != http.MethodPost || r.URL.Path != "/api/agents/asks" || r.Body == nil {
+		return false
+	}
+	if proxied, ok := runnerProxiedFrom(r.Context()); !ok || proxied.runID == "" {
+		return false
+	}
+	body := r.Body
+	raw, err := io.ReadAll(io.LimitReader(body, maxPeekedAskBody+1))
+	c.Request.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(raw), body), body}
+	if err != nil || len(raw) > maxPeekedAskBody {
+		return false
+	}
+	var ask struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(raw, &ask) != nil {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(ask.Kind)) == agents.AskKindPermission
 }
 
 // errRunEnded refuses a request from a run that has finished.
