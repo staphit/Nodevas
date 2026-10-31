@@ -175,8 +175,13 @@ var shellTools = map[string]bool{
 }
 
 // cosmeticInputKeys are tool-input fields (lower case) that describe a
-// shell call without changing what it runs.
-var cosmeticInputKeys = map[string]bool{"description": true, "timeout": true, "waitmsbeforeasync": true}
+// shell call without changing what it runs: Claude Code's description and
+// timeout, and the Antigravity CLI's WaitMsBeforeAsync and the toolSummary
+// and toolAction labels its model writes anew for every call.
+var cosmeticInputKeys = map[string]bool{
+	"description": true, "timeout": true,
+	"waitmsbeforeasync": true, "toolsummary": true, "toolaction": true,
+}
 
 // runKeyFor is the runKey of a permission prompt for tool with input (as
 // sent, before the hub cuts it): "" for a tool allowed tool-wide, one key
