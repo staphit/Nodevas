@@ -333,7 +333,13 @@ describe("the run's agent session", () => {
     });
     expect(world.actors[0].pose).toBe("asking-user");
     expect(world.actors[0].area).toBe("meeting");
-    expect(world.actors[0].actions).toContainEqual({ kind: "ask", askId: "perm1", sessionId: "unknown-session" });
+    // The menu names it for its kind: "Review permission", not "Answer question".
+    expect(world.actors[0].actions).toContainEqual({
+      kind: "ask",
+      askId: "perm1",
+      sessionId: "unknown-session",
+      askKind: "permission",
+    });
   });
 
   it("lets a bubble pop after the window, and ignores held or rejected mail as speech", () => {
@@ -399,6 +405,14 @@ describe("sessions with no run in view", () => {
   it("raises the hand of a session asking", () => {
     const world = office({ sessions: [makeSession({ id: "s1" })], asks: [makeAsk({ sessionId: "s1" })] });
     expect(world.actors[0].pose).toBe("asking-user");
+  });
+
+  it("hands a session's ask action the ask's kind, for its menu label", () => {
+    const world = office({
+      sessions: [makeSession({ id: "s1" })],
+      asks: [makeAsk({ id: "c1", sessionId: "s1", kind: "choice", options: ["a", "b"] })],
+    });
+    expect(world.actors[0].actions).toContainEqual({ kind: "ask", askId: "c1", sessionId: "s1", askKind: "choice" });
   });
 });
 

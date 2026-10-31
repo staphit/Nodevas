@@ -200,7 +200,9 @@ describe("compactOffice", () => {
     const run = brun({ status: "running", nodeId: "n-run" });
     const p = project("app", {
       runs: [run],
-      asks: [{ id: "a1", sessionId: "s1", sessionName: "x", agent: "claude", question: "?", nodeId: "", createdAt: NOW }],
+      asks: [
+        { id: "a1", sessionId: "s1", sessionName: "x", agent: "claude", kind: "approval", question: "?", nodeId: "", createdAt: NOW },
+      ],
       reviews: [
         { autopilotId: "ap", goalNodeId: "goal", nodeId: "t1", pipelineId: "p" },
         { autopilotId: "ap", goalNodeId: "goal", nodeId: "t2", pipelineId: "q" },
@@ -209,7 +211,7 @@ describe("compactOffice", () => {
     expect(compactOffice(p, NOW).actions).toEqual([
       { kind: "project", project: "app" },
       { kind: "in-project", project: "app", then: { kind: "run", runId: run.id, nodeId: "n-run" } },
-      { kind: "in-project", project: "app", then: { kind: "ask", askId: "a1", sessionId: "s1" } },
+      { kind: "in-project", project: "app", then: { kind: "ask", askId: "a1", sessionId: "s1", askKind: "approval" } },
       { kind: "in-project", project: "app", then: { kind: "autopilot", goalNodeId: "goal" } },
     ]);
   });
