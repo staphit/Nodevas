@@ -121,14 +121,20 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		PingInterval: time.Second,
 	}
 	runCtx, stopRunner := context.WithCancel(ctx)
-	runnerDone := make(chan error, 1)
-	go func() { runnerDone <- client.Run(runCtx) }()
+	var runErr error
+	runnerStopped := make(chan struct{})
+	go func() {
+		runErr = client.Run(runCtx)
+		close(runnerStopped)
+	}()
 	defer func() {
 		stopRunner()
-		<-runnerDone
+		<-runnerStopped
 	}()
 
-	// The runner's hello says it makes copilot calls, and with what.
+	// The runner's hello says it makes copilot calls, and with what. A runner
+	// that stops first (a token it refuses, a runner the hub revoked) fails
+	// the test with its error instead of leaving it to wait out -timeout.
 	var target struct{ provider, model string }
 	for {
 		r, err := relay.Target(ctx, ann.ID)
@@ -139,7 +145,11 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		if !errors.Is(err, runners.ErrNoLLMRunner) {
 			t.Fatalf("runner never offered copilot calls: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-runnerStopped:
+			t.Fatalf("the runner stopped before it offered copilot calls: %v", runErr)
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if target.provider != "openai" || target.model != "gpt-test" {
 		t.Fatalf("target = %+v", target)
