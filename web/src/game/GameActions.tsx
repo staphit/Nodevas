@@ -213,13 +213,17 @@ export function askDialogTitle(
   }
 }
 
+// A question's answer box, else the card itself, whose number keys answer;
+// the close button first would swallow them.
+const ASK_FOCUS = ["[data-ask-id] textarea:not(:disabled)", "[data-ask-id]"] as const;
+
 function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
   const { t } = useI18n();
   const ask = useAgents((s) => s.asks.find((item) => item.id === askId));
   const submitting = useAgents((s) => Boolean(s.submittingAskIds[askId]));
   const answerAsk = useAgents((s) => s.answerAsk);
   return (
-    <GameDialog title={askDialogTitle(t, ask?.kind)} onClose={onClose}>
+    <GameDialog title={askDialogTitle(t, ask?.kind)} onClose={onClose} initialFocus={ASK_FOCUS}>
       {ask && ask.status === "pending" ? (
         <AskCard
           ask={ask}
@@ -281,10 +285,14 @@ function HeldDialog({ messageId, onClose }: { messageId: string; onClose: () => 
 export function GameDialog({
   title,
   onClose,
+  initialFocus,
   children,
 }: {
   title: string;
   onClose: () => void;
+  /** Selectors tried in order for what takes focus when the dialog opens,
+   * before its first control. */
+  initialFocus?: readonly string[];
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -297,11 +305,12 @@ export function GameDialog({
       onClose();
     };
     window.addEventListener("keydown", onKey, true);
-    const first = panel.current?.querySelector<HTMLElement>(
-      "button:not(:disabled), textarea, input, [href]",
-    );
+    const first = [...(initialFocus ?? []), "button:not(:disabled), textarea, input, [href]"]
+      .map((selector) => panel.current?.querySelector<HTMLElement>(selector))
+      .find(Boolean);
     first?.focus();
     return () => window.removeEventListener("keydown", onKey, true);
+    // Focus is placed once, when the dialog opens.
   }, [onClose]);
   return createPortal(
     <div className="confirm-backdrop game-dialog-backdrop" onClick={onClose}>
