@@ -33,6 +33,7 @@ import { RunModeTabs } from "./RunModeTabs";
 import { askOutcome, askSubject, interleaveAsks } from "./runAsks";
 import { useRuns } from "./runStore";
 import { useNodeType } from "../nodeTypeTheme";
+import { usePreference } from "../store";
 import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
 
 /** The hub's cap on GET /api/runs. */
@@ -487,12 +488,15 @@ export function RunEventItem({
  * answered. */
 export function RunAskItem({ ask }: { ask: RunAsk }) {
   const { t } = useI18n();
+  // Station docks Agent chat (and lists what waits on you) beside the run
+  // view, with no floating panel to open from here.
+  const station = usePreference("projectMode") === "station";
   const what = askSubject(t, ask);
   if (ask.status === "pending") {
     const text = t(ask.canAnswer ? "runs.ask.waitingYou" : "runs.ask.waiting", { what });
     return (
       <li className="run-ev run-ev-ask is-pending">
-        {ask.canAnswer ? (
+        {ask.canAnswer && !station ? (
           <button
             type="button"
             className="run-ev-ask-open"
