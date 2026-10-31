@@ -66,6 +66,14 @@ const antigravityRootDir = "agyroot"
 // dir (writeAntigravityRelaySettings).
 const antigravitySettingsFile = "agysettings.json"
 
+// antigravityToolTimeoutSeconds bounds one nodevas MCP tool call. agy's own
+// default cuts a call off after three minutes ("MCP tool call to server
+// \"nodevas\" timed out after 3m0s"); ask_user waits up to ten for a person.
+// timeoutSeconds is the server entry's key agy 1.4.x reads for it (checked
+// against agy 1.4.12: 5 cut a 20 s call at 5 s, 240 let a 200 s call
+// finish). Gemini CLI and OpenCode get the same 15 minutes.
+const antigravityToolTimeoutSeconds = 900
+
 // AntigravityCommandRule is agy's permission rule for every shell command.
 const AntigravityCommandRule = "command(*)"
 
@@ -169,6 +177,8 @@ func writeAntigravityRoot(env RunEnv, gate, readOnly, relay bool) (root string, 
 				"command": env.MCP.Command,
 				"args":    env.MCP.Args,
 				"env":     map[string]string{"NODEVAS_AGENT": "antigravity"},
+				// agy's three minutes would cut ask_user's wait short.
+				"timeoutSeconds": antigravityToolTimeoutSeconds,
 			},
 		},
 	}, "", "  ")
