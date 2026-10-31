@@ -439,6 +439,36 @@ describe("AskCard permission input", () => {
     expect(onAnswer).toHaveBeenCalledWith({ decision: "approve" });
   });
 
+  it("takes the hub's toolInputTruncated as cut, however whole the input looks", () => {
+    const onAnswer = vi.fn();
+    render(
+      <AskCard
+        ask={{ ...permAsk, toolInput: '{"CommandLine":"ls"}', toolInputTruncated: true }}
+        onAnswer={onAnswer}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/cut off/);
+    expect(screen.queryByRole("button", { name: /for the rest of this run|for this run/ })).toBeNull();
+    const card = screen.getByRole("group", { name: /tool permission/ });
+    card.focus();
+    fireEvent.keyDown(card, { key: "1" });
+    fireEvent.keyDown(card, { key: "2" });
+    expect(onAnswer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Allow$/ }));
+    expect(onAnswer).toHaveBeenCalledWith({ decision: "approve" });
+  });
+
+  it("trusts toolInputTruncated false over the guess from the input's shape", () => {
+    render(
+      <AskCard
+        ask={{ ...permAsk, toolInput: '{"CommandLine":"echo', toolInputTruncated: false }}
+        onAnswer={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: /Allow for this run/ })).toBeInTheDocument();
+  });
+
   it("does not warn about a whole input", () => {
     render(<AskCard ask={{ ...permAsk, toolInput: '{"CommandLine":"ls"}' }} onAnswer={vi.fn()} />);
     expect(screen.queryByRole("alert")).toBeNull();
