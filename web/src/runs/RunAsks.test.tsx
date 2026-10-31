@@ -111,6 +111,8 @@ describe("a run's asks in its timeline", () => {
       "Tests pass.",
     ]);
     expect(waiting.closest("li")).toHaveClass("run-ev-ask", "is-pending");
+    // Named as the app names the panel everywhere else.
+    expect(waiting).toHaveAttribute("title", "Open Agent chat to answer");
 
     fireEvent.click(waiting);
     expect(useAgents.getState().open).toBe(true);
@@ -147,7 +149,8 @@ describe("a run's asks in its timeline", () => {
       ask({ id: "a2", tool: "Edit", status: "denied", decision: "deny", note: "不要動這個檔案" }),
       ask({ id: "a3", status: "approved", decision: "approve_run" }),
     ]);
-    expect(await within(timeline).findByRole("button", { name: /等你回覆：Bash · go test/ })).toBeInTheDocument();
+    const waiting = await within(timeline).findByRole("button", { name: /等你回覆：Bash · go test/ });
+    expect(waiting).toHaveAttribute("title", "開啟 Agent 對話回覆");
     expect(within(timeline).getByText("Edit——已拒絕：不要動這個檔案")).toBeInTheDocument();
     expect(within(timeline).getByText("Bash——本次執行一律允許")).toBeInTheDocument();
   });
