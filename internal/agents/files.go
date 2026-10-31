@@ -375,6 +375,30 @@ func (h *Hub) FileContent(ctx context.Context, project, id, name string, v Viewe
 	return f, content, nil
 }
 
+// Shown is a as v may see it in a listing, with CanAnswer set. Everyone
+// who can open the project sees that an agent waits and on what kind of
+// ask, but a permission prompt's input and question (command lines with
+// tokens, file contents) and a person's answer and note are for those who
+// may answer it (MayAnswer).
+func (v Viewer) Shown(a Ask) Ask {
+	may := v.MayAnswer(a)
+	can := may && !v.Agent
+	a.CanAnswer = &can
+	if may {
+		return a
+	}
+	a.ToolInput = ""
+	a.Note = ""
+	if a.Kind == AskKindPermission {
+		// The relay's question quotes the input; the answer is only
+		// whether it was allowed for the run.
+		a.Question = fmt.Sprintf("Allow %s?", a.Tool)
+	} else {
+		a.Answer = ""
+	}
+	return a
+}
+
 // MayAnswer reports whether v may answer ask a: the person whose session
 // asked, or an administrator. A permission prompt is its runner owner's
 // alone: answering it runs a tool on their machine, which an administrator

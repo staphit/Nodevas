@@ -512,6 +512,11 @@ func (a *API) getAsks(c *gin.Context) {
 	if asks == nil {
 		asks = []agents.Ask{}
 	}
+	// Each ask as the caller may see it, and whether they may answer it.
+	viewer := humanViewer(c.Request)
+	for i := range asks {
+		asks[i] = viewer.Shown(asks[i])
+	}
 	c.JSON(http.StatusOK, map[string]any{"asks": asks})
 }
 

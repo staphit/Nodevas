@@ -113,6 +113,9 @@ type Ask struct {
 	// ExpiresAt is when a pending ask stops waiting (unix ms).
 	ExpiresAt int64 `json:"expiresAt,omitempty"`
 	DecidedAt int64 `json:"decidedAt,omitempty"`
+	// CanAnswer is set on an ask listed for a person (Viewer.Shown): whether
+	// they may answer it.
+	CanAnswer *bool `json:"canAnswer,omitempty"`
 	// runKey narrows what allowing a permission prompt for the rest of its
 	// run covers: "" the tool, "cmd:<hash>" one shell command (runKeyFor).
 	runKey string
