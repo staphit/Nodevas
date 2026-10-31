@@ -326,3 +326,65 @@ func TestAntigravityGateAsksNameTheNode(t *testing.T) {
 		t.Errorf("ask = %v", ask)
 	}
 }
+
+// Headless agy refuses a shell command a hook allowed unless a session
+// allow rule grants it, and the rule comes only with session settings. When
+// the owner's settings cannot be carried over (unreadable, or permissions
+// that do not read as such) there are none, so the gate must not ask a
+// person whose Allow agy would then ignore: it stays the plain gate.
+func TestAntigravityRelayWithoutSettingsKeepsThePlainGate(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "nodevas.exe")
+	if antigravityGateHooks(exe, false, true) == nil {
+		t.Skip("no hook path on this machine")
+	}
+	owner := filepath.Join(t.TempDir(), "settings.json")
+	old := antigravityOwnerSettingsPath
+	antigravityOwnerSettingsPath = func() (string, error) { return owner, nil }
+	t.Cleanup(func() { antigravityOwnerSettingsPath = old })
+
+	gate := func(t *testing.T) (command string, settings bool) {
+		t.Helper()
+		tmp := t.TempDir()
+		job := runnerwire.Job{RunID: "run-1", NodeID: "node-1", Prompt: "do it"}
+		env := RunEnv{Binary: "agy", Workdir: t.TempDir(), Branch: "b", TempDir: tmp,
+			MCP: MCPServer{Command: exe, Args: []string{"mcp"}}, PermissionMode: "accept-edits", PermissionRelay: true}
+		cmd, err := (Antigravity{}).Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(tmp, antigravityRootDir, ".agents", "hooks.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hooks map[string]map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		}
+		if err := json.Unmarshal(data, &hooks); err != nil {
+			t.Fatal(err)
+		}
+		_, settings = agyArg(cmd.Args, "--settings")
+		return hooks["nodevas-run"]["PreToolUse"][0].Hooks[0].Command, settings
+	}
+
+	for _, bad := range []string{`{"permissions":`, `{"permissions":{"allow":"command(*)"}}`, `{"permissions":[]}`} {
+		if err := os.WriteFile(owner, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		command, settings := gate(t)
+		if settings || strings.Contains(command, AntigravityGateRelayFlag) {
+			t.Errorf("owner %s: settings %v, gate %q", bad, settings, command)
+		}
+		if !strings.Contains(command, AntigravityGateArgs) {
+			t.Errorf("owner %s: no gate at all: %q", bad, command)
+		}
+	}
+	// Readable settings: the relay gate and its grant, as before.
+	if err := os.WriteFile(owner, []byte(`{"permissions":{"allow":["mcp(nodevas/*)"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if command, settings := gate(t); !settings || !strings.HasSuffix(command, " "+AntigravityGateRelayFlag) {
+		t.Errorf("good owner file: settings %v, gate %q", settings, command)
+	}
+}
