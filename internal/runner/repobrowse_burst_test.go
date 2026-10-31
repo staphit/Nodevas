@@ -90,9 +90,13 @@ func TestRepoBrowseWaitEndsWithTheCaller(t *testing.T) {
 }
 
 // A request nobody has told to stop still stops waiting at repoSlotWait.
+//
+// The free slots are taken on the real repoSlotWait and the short one is
+// pinned only for the request that must wait: taken on 50 ms, a slot whose
+// taker was descheduled that long between starting its timer and its select
+// finds both cases ready, and select may pick the timer and refuse it.
 func TestRepoBrowseWaitEndsAtRepoSlotWait(t *testing.T) {
 	cfg, _ := browseRepo(t)
-	pinRepoSlotWait(t, 50*time.Millisecond)
 	for range repoBrowseConcurrent {
 		if err := acquireRepoSlot(context.Background()); err != nil {
 			t.Fatal(err)
@@ -103,6 +107,7 @@ func TestRepoBrowseWaitEndsAtRepoSlotWait(t *testing.T) {
 			releaseRepoSlot()
 		}
 	}()
+	pinRepoSlotWait(t, 50*time.Millisecond)
 	if done := browse(cfg, runnerwire.RepoOpList, "src"); done.Code != runnerwire.RepoErrBusy {
 		t.Fatalf("code = %q, want busy once repoSlotWait passed", done.Code)
 	}
