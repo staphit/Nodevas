@@ -241,7 +241,9 @@ describe("RunModeTabs", () => {
     );
     expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(screen.getByTestId("run-terminal")).toBeInTheDocument());
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    // The terminal connects in an effect, which React may run after the
+    // commit that put it in the document: wait for the socket itself.
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(screen.getByText("timeline")).not.toBeVisible();
 
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
