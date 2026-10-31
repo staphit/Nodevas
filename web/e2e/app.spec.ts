@@ -1,9 +1,21 @@
 import { type Page } from "@playwright/test";
 import { declineTour, expect, freshProject, test } from "./fixture";
 
-/** The app boots with a project selected; wait for that rather than a timeout. */
+/**
+ * Opens the worker's seeded project (two nodes, one dependency; see
+ * seedWorkspace) and waits for the app to show it rather than a timeout.
+ *
+ * The server stays on whichever project was opened last, and the worker may
+ * have run another spec first whose freshProject left an edgeless project
+ * open, so the seeded one is opened explicitly rather than assumed.
+ */
 async function openApp(page: Page) {
   await declineTour(page);
+  const open = await page.request.post("/api/projects/open", { data: { name: "e2e-project" } });
+  expect(open.ok(), await open.text()).toBeTruthy();
+  await expect
+    .poll(async () => (await (await page.request.get("/api/projects")).json()).active, { timeout: 15_000 })
+    .toBe("e2e-project");
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Nodevas" })).toBeVisible();
   await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
