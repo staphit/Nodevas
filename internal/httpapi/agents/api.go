@@ -534,6 +534,9 @@ func (a *API) postAsk(c *gin.Context) {
 		Tool           string   `json:"tool"`
 		ToolInput      string   `json:"toolInput"`
 		TimeoutSeconds int      `json:"timeoutSeconds"`
+
+		// ToolInputTruncated: the relay cut toolInput to fit.
+		ToolInputTruncated bool `json:"toolInputTruncated"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxAskBody) {
 		return
@@ -574,6 +577,9 @@ func (a *API) postAsk(c *gin.Context) {
 		Options:     body.Options,
 		Tool:        body.Tool,
 		ToolInput:   body.ToolInput,
+		// The hub ORs in its own cut.
+		ToolInputTruncated: body.ToolInputTruncated,
+
 		// The run is the transport's word, never the body's: an allow for
 		// the run is keyed on it.
 		RunID:   a.runIDOf(c.Request),

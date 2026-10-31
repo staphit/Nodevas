@@ -736,6 +736,12 @@ func (c *Client) ApproveTool(ctx context.Context, tool string, input json.RawMes
 		"nodeId":         nodeID,
 		"timeoutSeconds": int(agents.PermissionAskTimeout / time.Second),
 	}
+	// Only when cut: the person cannot see the whole call, so the hub flags
+	// it and allows it once only. A server from before the flag refuses
+	// fields it does not know, which denies the call: safe.
+	if len(input) > agents.MaxAskToolInputBytes {
+		body["toolInputTruncated"] = true
+	}
 	var resp struct {
 		Ask         agents.Ask `json:"ask"`
 		UnreadCount int        `json:"unreadCount"`

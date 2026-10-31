@@ -388,6 +388,7 @@ func (v Viewer) Shown(a Ask) Ask {
 		return a
 	}
 	a.ToolInput = ""
+	a.ToolInputTruncated = false
 	a.Note = ""
 	if a.Kind == AskKindPermission {
 		// The relay's question quotes the input; the answer is only

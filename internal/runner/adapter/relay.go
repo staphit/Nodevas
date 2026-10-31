@@ -165,7 +165,7 @@ func (h HubAsker) AskPermission(ctx context.Context, req PermissionRequest) Perm
 	if preview := strings.TrimSpace(Truncate(req.Input, 500)); preview != "" {
 		question += ": " + preview
 	}
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"sessionId":      RunSessionID(h.Agent, h.SessionName),
 		"sessionName":    h.SessionName,
 		"actor":          h.Actor,
@@ -176,7 +176,14 @@ func (h HubAsker) AskPermission(ctx context.Context, req PermissionRequest) Perm
 		"tool":           tool,
 		"toolInput":      input,
 		"timeoutSeconds": int(PermissionAskTimeout / time.Second),
-	})
+	}
+	// Only when cut: the hub flags the ask, and an allow for the run of it
+	// allows this call only. A hub from before the flag refuses fields it
+	// does not know, which denies the call: safe.
+	if len(input) < len(req.Input) {
+		payload["toolInputTruncated"] = true
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fail("%v", err)
 	}

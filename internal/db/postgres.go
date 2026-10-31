@@ -1048,6 +1048,15 @@ CREATE INDEX IF NOT EXISTS agent_asks_run ON agent_asks (project, run_id, tool, 
 ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_key TEXT COLLATE "C" NOT NULL DEFAULT '';
 `,
 	},
+	{
+		// Whether a permission prompt's tool input was cut to fit, by the
+		// hub or by whoever relayed it (agents.Ask.ToolInputTruncated). Rows
+		// from before read as whole.
+		name: "0032_agent_ask_input_truncated",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool_input_truncated BOOLEAN NOT NULL DEFAULT FALSE;
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

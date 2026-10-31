@@ -98,6 +98,12 @@ type Ask struct {
 	// names it, and its input (JSON or text, at most MaxAskToolInputBytes).
 	Tool      string `json:"tool,omitempty"`
 	ToolInput string `json:"toolInput,omitempty"`
+
+	// ToolInputTruncated: ToolInput is only the start of the call's input,
+	// cut by the hub or by whoever relayed the prompt (the runner, the MCP
+	// sidecar). Allowing such a prompt for the run allows this call only.
+	ToolInputTruncated bool `json:"toolInputTruncated,omitempty"`
+
 	Status    string `json:"status"`
 	DecidedBy string `json:"decidedBy,omitempty"`
 	Note      string `json:"note,omitempty"`
@@ -141,6 +147,9 @@ func (a Ask) RunScope() string {
 		return ""
 	}
 	switch {
+	case a.ToolInputTruncated:
+		// Nobody saw the whole call (shapeAsk keys it to nothing).
+		return RunScopeOnce
 	case strings.HasPrefix(a.runKey, runKeyCommand):
 		return RunScopeCommand
 	case strings.HasPrefix(a.runKey, runKeyOnce):
@@ -247,6 +256,9 @@ type AskInput struct {
 	// Tool and ToolInput belong to permission prompts only.
 	Tool      string
 	ToolInput string
+	// ToolInputTruncated: whoever relayed the prompt cut ToolInput to fit.
+	// The hub adds its own cut; other kinds ignore it.
+	ToolInputTruncated bool
 	// FromRun: the asker is a run (the transport recognised it), whose
 	// inbox is its own session's alone (recipientAliases).
 	FromRun bool
@@ -265,12 +277,13 @@ type AnswerInput struct {
 
 // askShape is an ask's validated kind and the fields that go with it.
 type askShape struct {
-	kind      string
-	options   []string
-	tool      string
-	toolInput string
-	runKey    string
-	question  string
+	kind           string
+	options        []string
+	tool           string
+	toolInput      string
+	inputTruncated bool
+	runKey         string
+	question       string
 }
 
 // shapeAsk validates in's kind and the fields that go with it.
@@ -291,8 +304,15 @@ func shapeAsk(in AskInput) (askShape, error) {
 		case len(in.Options) > 0:
 			return askShape{}, fmt.Errorf("%w: options belong to kind choice", ErrInvalid)
 		}
-		shape.toolInput = capBytes(strings.TrimSpace(in.ToolInput), MaxAskToolInputBytes)
-		shape.runKey = runKeyFor(shape.tool, strings.TrimSpace(in.ToolInput))
+		input := strings.TrimSpace(in.ToolInput)
+		shape.toolInput = capBytes(input, MaxAskToolInputBytes)
+		shape.inputTruncated = in.ToolInputTruncated || len(shape.toolInput) < len(input)
+		shape.runKey = runKeyFor(shape.tool, input)
+		if shape.inputTruncated {
+			// Nobody saw the whole call: an allow for the run covers it
+			// alone, whatever the tool.
+			shape.runKey = runKeyOnce + newID()
+		}
 		if shape.question == "" {
 			shape.question = fmt.Sprintf("Allow %s?", shape.tool)
 		}
@@ -430,6 +450,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		CreatedAt:   now,
 		ExpiresAt:   now + timeout.Milliseconds(),
 	}
+	ask.ToolInputTruncated = shape.inputTruncated
 
 	// Waiting before the ask exists: an answer that lands the moment it is
 	// stored (a run-wide allow releasing it) must find the waiter.
@@ -677,13 +698,13 @@ func insertAsk(ctx context.Context, tx *sql.Tx, ask Ask) error {
 			id, project, session_id, session_name, actor_id, agent,
 			question, about_msg_id, node_id, status, decided_by, note,
 			created_at, decided_at, kind, options, answer, run_id, tool,
-			tool_input, expires_at, run_key
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tool_input, expires_at, run_key, tool_input_truncated
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		ask.ID, ask.Project, ask.SessionID, ask.SessionName, ask.ActorID, ask.Agent,
 		ask.Question, ask.AboutMsgID, ask.NodeID, ask.Status, ask.DecidedBy, ask.Note,
 		ask.CreatedAt, ask.DecidedAt, ask.Kind, options, ask.Answer, ask.RunID, ask.Tool,
-		ask.ToolInput, ask.ExpiresAt, ask.runKey,
+		ask.ToolInput, ask.ExpiresAt, ask.runKey, ask.ToolInputTruncated,
 	)
 	return err
 }
@@ -692,7 +713,7 @@ func insertAsk(ctx context.Context, tx *sql.Tx, ask Ask) error {
 const askColumns = `id, project, session_id, session_name, actor_id, agent,
 		       question, about_msg_id, node_id, status, decided_by, note,
 		       created_at, decided_at, kind, options, answer, run_id, tool,
-		       tool_input, expires_at, run_key`
+		       tool_input, expires_at, run_key, tool_input_truncated`
 
 // scanAsk reads one row of askColumns.
 func scanAsk(row rowScanner) (Ask, error) {
@@ -702,7 +723,7 @@ func scanAsk(row rowScanner) (Ask, error) {
 		&a.ID, &a.Project, &a.SessionID, &a.SessionName, &a.ActorID, &a.Agent,
 		&a.Question, &a.AboutMsgID, &a.NodeID, &a.Status, &a.DecidedBy, &a.Note,
 		&a.CreatedAt, &a.DecidedAt, &a.Kind, &options, &a.Answer, &a.RunID, &a.Tool,
-		&a.ToolInput, &a.ExpiresAt, &a.runKey,
+		&a.ToolInput, &a.ExpiresAt, &a.runKey, &a.ToolInputTruncated,
 	); err != nil {
 		return Ask{}, err
 	}
