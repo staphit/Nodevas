@@ -30,6 +30,13 @@ type Stall struct {
 // always returns a Stall.
 func UseStalledPostgres(t testing.TB) *Stall {
 	t.Helper()
+	return useStalledPostgres(t, func(server string) string { return server })
+}
+
+// useStalledPostgres is UseStalledPostgres with the Stall forwarding to
+// via(server) instead of the server itself.
+func useStalledPostgres(t testing.TB, via func(server string) string) *Stall {
+	t.Helper()
 	location, err := url.Parse(UseEnv(t))
 	if err != nil {
 		t.Fatalf("%s: %v", db.URLEnv, err)
@@ -38,7 +45,7 @@ func UseStalledPostgres(t testing.TB) *Stall {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	stall := &Stall{listener: listener, target: location.Host}
+	stall := &Stall{listener: listener, target: via(location.Host)}
 	t.Cleanup(stall.close)
 	go stall.serve()
 
