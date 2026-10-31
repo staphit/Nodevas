@@ -988,7 +988,13 @@ func (h *Hub) getAskByID(ctx context.Context, project, id string) (Ask, error) {
 	return a, err
 }
 
-// ListAsks returns ask requests for a project (filtered by status when non-empty).
+// maxSettledAsks caps the settled asks an unfiltered ListAsks returns.
+const maxSettledAsks = 100
+
+// ListAsks returns ask requests for a project, newest first: those of status
+// when it is non-empty, else every pending ask and the newest settled ones.
+// Every relayed permission prompt adds a row, so a cap over all statuses
+// would push a question still waiting out of the listing.
 func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, error) {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	status = strings.ToLower(strings.TrimSpace(status))
@@ -1013,11 +1019,23 @@ func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, erro
 		  FROM agent_asks
 		 WHERE project = ?`
 	args := []any{project}
-	if status != "" {
-		query += ` AND status = ?`
+	switch status {
+	case "":
+		query += ` AND (status = 'pending' OR id IN (
+			SELECT id FROM agent_asks
+			 WHERE project = ? AND status != 'pending'
+			 ORDER BY created_at DESC, id DESC LIMIT ?))
+		 ORDER BY created_at DESC, id DESC`
+		args = append(args, project, maxSettledAsks)
+	case AskPending:
+		// Bounded by the sessions themselves (one question and
+		// maxPendingPermissions prompts each).
+		query += ` AND status = ? ORDER BY created_at DESC, id DESC`
 		args = append(args, status)
+	default:
+		query += ` AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = append(args, status, maxSettledAsks)
 	}
-	query += ` ORDER BY created_at DESC LIMIT 100`
 
 	rows, err := h.database.QueryContext(ctx, query, args...)
 	if err != nil {
