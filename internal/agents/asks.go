@@ -443,7 +443,23 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	}
 	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(question, 200))
 
-	h.emit(project, AskEvent, ask)
+	// The person may have allowed the tool for the run between the check
+	// above and the insert, after releaseRunPrompts listed what waited:
+	// looking again now that the ask is stored leaves no gap, since an
+	// allow stored later releases it.
+	released := false
+	if shape.kind == AskKindPermission && runID != "" {
+		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.runKey); decidedBy != "" {
+			updated, _, decided, err := h.decideAsk(ctx, project, ask.ID, AskApproved, DecisionApproveRun, AllowedForRunNote, decidedBy, false)
+			if err == nil && decided {
+				h.deliverDecision(ctx, updated, false, decidedBy)
+				released = true
+			}
+		}
+	}
+	if !released {
+		h.emit(project, AskEvent, ask)
+	}
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
