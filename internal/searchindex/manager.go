@@ -570,11 +570,17 @@ func (m *Manager) Prune(ctx context.Context, roots []string) error {
 	return docs.prune(ctx, keep)
 }
 
-// Wait returns once the background passes running or scheduled when it was
-// called, and any they schedule in turn, have finished: a project Warm asked
-// to build is built (or its build failed). It starts nothing, so a caller can
-// tell work that was asked for from work that never was.
-func (m *Manager) Wait() {}
+// Wait returns once no background pass is running or scheduled: a project
+// Warm asked to build is built (or its build failed). It starts nothing, so a
+// caller can tell work that was asked for from work that never was. Changes
+// reported while it waits extend the wait.
+func (m *Manager) Wait() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for m.busy > 0 {
+		m.idle.Wait()
+	}
+}
 
 // Close drops what the cache holds and waits for background work to stop.
 // The database belongs to the caller and is left open; the manager stays
