@@ -14,6 +14,7 @@ import { useApp } from "../store";
 import { AgentChatEmpty } from "./AgentChatEmpty";
 import { AskCard } from "./AskCard";
 import { canManageSession, useAgents } from "./agentStore";
+import { drawerAsks } from "./askList";
 import {
   addAttachments,
   formatFileSize,
@@ -123,12 +124,13 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
   );
   const [promptHidden, setPromptHidden] = useState(promptDismissed);
 
-  const pendingAsks = asks.filter((a) => a.status === "pending");
-  const settledAsks = asks
-    .filter((a) => a.status !== "pending")
-    .sort((a, b) => (b.decidedAt ?? b.createdAt) - (a.decidedAt ?? a.createdAt))
-    .slice(0, 5);
-  const visibleAsks = [...pendingAsks, ...settledAsks];
+  // Settled asks age out of the list: a clock re-reads it now and then.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const visibleAsks = drawerAsks(asks, viewer, now);
 
   useEffect(() => {
     if (!docked) inputRef.current?.focus();

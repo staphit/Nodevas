@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import type { AgentAsk, AgentAskAnswerRequest } from "../api";
 import { useI18n } from "../i18n";
+import { ALLOWED_FOR_RUN_NOTE } from "./askList";
 
 export function askQuestionText(
   t: (key: string, values?: Record<string, string | number>) => string,
@@ -216,7 +217,7 @@ export function AskCard({
               ? kind === "permission"
                 ? ask.decision === "approve_run" ||
                   ask.answer === "approve_run" ||
-                  ask.note === "allowed for this run"
+                  ask.note === ALLOWED_FOR_RUN_NOTE
                   ? t("agents.ask.statusAllowedRun")
                   : t("agents.ask.statusAllowed")
                 : t("agents.ask.statusApproved")
@@ -233,7 +234,7 @@ export function AskCard({
               {t("agents.ask.resultAnswer", { answer: ask.answer })}
             </p>
           )}
-          {ask.note && ask.note !== "allowed for this run" && (
+          {ask.note && ask.note !== ALLOWED_FOR_RUN_NOTE && (
             <p className="agent-ask-result-note">
               {t("agents.ask.resultNote", { note: ask.note })}
             </p>
