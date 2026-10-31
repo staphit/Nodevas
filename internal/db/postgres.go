@@ -83,7 +83,7 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	writer.SetMaxIdleConns(1)
 	writer.SetConnMaxLifetime(0)
 
-	if err := pingUntil(writer, wait); err != nil {
+	if err := pingUntil(writer, wait, pingAttempt(writeConfig.ConnectTimeout)); err != nil {
 		writer.Close()
 		return nil, fmt.Errorf("%w: %s: %w", ErrUnreachable, describeURL(writeConfig), err)
 	}
@@ -141,13 +141,25 @@ func setDefaults(params, defaults map[string]string) {
 // statement_timeout; neither should fail a server's start.
 const NoTimeouts = `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0`
 
+// minPingAttempt bounds one ping: connecting (connect_timeout) and the round
+// trip after it.
+const minPingAttempt = 10 * time.Second
+
+// pingAttempt is how long one ping may take: at least minPingAttempt, and
+// never less than the connect_timeout the URL asked for plus a few seconds
+// for the ping itself. A URL that says to wait 60 s for a busy server to
+// answer is not cut off at 10 s.
+func pingAttempt(connectTimeout time.Duration) time.Duration {
+	return max(minPingAttempt, connectTimeout+5*time.Second)
+}
+
 // pingUntil retries a ping with a short backoff until it succeeds or wait has
-// passed. A zero wait is a single attempt.
-func pingUntil(handle *sql.DB, wait time.Duration) error {
+// passed, giving each attempt up to attempt. A zero wait is a single attempt.
+func pingUntil(handle *sql.DB, wait, attempt time.Duration) error {
 	deadline := time.Now().Add(wait)
 	delay := 500 * time.Millisecond
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), attempt)
 		err := handle.PingContext(ctx)
 		cancel()
 		if err == nil {
