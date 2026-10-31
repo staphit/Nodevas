@@ -221,7 +221,9 @@ export function AskCard({
                   : t("agents.ask.statusAllowed")
                 : t("agents.ask.statusApproved")
               : ask.status === "denied"
-                ? t("agents.ask.statusDenied")
+                ? kind === "question" || kind === "choice"
+                  ? t("agents.ask.statusDismissed")
+                  : t("agents.ask.statusDenied")
                 : ask.status === "answered"
                   ? t("agents.ask.statusAnswered")
                   : t("agents.ask.expired")}
