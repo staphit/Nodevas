@@ -28,12 +28,14 @@ func (c *Config) RepoBrowseOn() bool {
 const (
 	// repoBrowseConcurrent reads run at once; the rest wait their turn.
 	repoBrowseConcurrent = 4
-	// repoSlotWait is how long a read waits for its turn: past the hub's
-	// own wait (runners.DefaultRepoTimeout), nobody is listening any more.
-	repoSlotWait = 15 * time.Second
 	// binarySniffBytes is how much of a file is checked for a NUL byte.
 	binarySniffBytes = 8 << 10
 )
+
+// repoSlotWait is how long a read waits for its turn: past the hub's own
+// wait (runners.DefaultRepoTimeout), nobody is listening any more. A var only
+// so tests can pin it.
+var repoSlotWait = 15 * time.Second
 
 // repoSlots bounds the reads in flight. Clicking through folders fast is
 // normal use, so a read past the bound queues instead of being refused; the
