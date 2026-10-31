@@ -46,3 +46,29 @@ func TestMigration0030AgentAskKinds(t *testing.T) {
 		t.Fatal("an unknown kind was stored")
 	}
 }
+
+// 0032_agent_ask_input_truncated: whether a permission prompt's tool input
+// was cut to fit. Rows written before it read as whole.
+func TestMigration0032AgentAskInputTruncated(t *testing.T) {
+	database := testpg.New(t)
+	ctx := context.Background()
+	var applied int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE name = '0032_agent_ask_input_truncated'`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 1 {
+		t.Fatalf("0032_agent_ask_input_truncated applied %d times", applied)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO agent_asks (id, project, session_id, session_name, actor_id, question, status, created_at)
+		VALUES ('old', 'p', 's', 's', 'a', 'q', 'pending', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	var truncated bool
+	if err := database.QueryRowContext(ctx, `SELECT tool_input_truncated FROM agent_asks WHERE id = 'old'`).Scan(&truncated); err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Fatal("an old row reads as cut")
+	}
+}

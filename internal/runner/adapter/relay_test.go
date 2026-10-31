@@ -178,3 +178,29 @@ func TestHubAskerFailsClosed(t *testing.T) {
 		t.Errorf("PermissionWait = %v", PermissionWait)
 	}
 }
+
+// An input cut to fit says so, so the hub flags the ask and allows it once
+// only; a whole one sends no flag at all (an older hub refuses fields it does
+// not know).
+func TestHubAskerFlagsACutInput(t *testing.T) {
+	hub, srv := newFakeHub(t, `{"id":"a1","status":"approved"}`, `{"id":"a2","status":"approved"}`)
+	asker, ok := HubAskerFromMCPArgs(testMCPArgs(srv.URL))
+	if !ok {
+		t.Fatal("no asker")
+	}
+	long := `{"CommandLine":"echo ` + strings.Repeat("ü", maxToolInput) + `"}`
+	if got := asker.AskPermission(context.Background(), PermissionRequest{Tool: "run_command", Input: long}); !got.Allow {
+		t.Fatalf("cut input = %+v", got)
+	}
+	body := hub.last()
+	input, _ := body["toolInput"].(string)
+	if body["toolInputTruncated"] != true || len(input) > maxToolInput {
+		t.Fatalf("cut ask = truncated %v, %d bytes", body["toolInputTruncated"], len(input))
+	}
+	if got := asker.AskPermission(context.Background(), PermissionRequest{Tool: "run_command", Input: `{"CommandLine":"ls"}`}); !got.Allow {
+		t.Fatalf("whole input = %+v", got)
+	}
+	if _, sent := hub.last()["toolInputTruncated"]; sent {
+		t.Fatalf("a whole input sent toolInputTruncated: %v", hub.last())
+	}
+}

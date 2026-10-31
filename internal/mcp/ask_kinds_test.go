@@ -210,3 +210,30 @@ func TestPermissionReplyShapes(t *testing.T) {
 		}
 	}
 }
+
+// An input too long to show whole is cut on its way to the hub, and the ask
+// says so; allowing it covers this call only. The CLI still gets the whole
+// input back.
+func TestApproveToolFlagsACutInput(t *testing.T) {
+	url, _ := liveServer(t)
+	alice := mcpNamedSession(t, url, "mcp:alice", "claude:a1", "api-claude", "claude")
+	input := `{"file_path":"big.go","content":"` + strings.Repeat("é", agents.MaxAskToolInputBytes) + `"}`
+	done := approveTool(t, alice, map[string]any{"tool_name": "Write", "input": json.RawMessage(input)})
+	ask := pendingAskOver(t, url)
+	if !ask.ToolInputTruncated || ask.RunScope() != agents.RunScopeOnce || len(ask.ToolInput) > agents.MaxAskToolInputBytes {
+		t.Fatalf("pending = truncated %v, scope %q, %d bytes", ask.ToolInputTruncated, ask.RunScope(), len(ask.ToolInput))
+	}
+	answerOver(t, url, ask.ID, `{"decision":"approve"}`)
+	reply, text := permissionReply(t, done)
+	if string(reply["behavior"]) != `"allow"` || string(reply["updatedInput"]) != input {
+		t.Fatalf("reply = %.200s", text)
+	}
+
+	whole := approveTool(t, alice, map[string]any{"tool_name": "Edit", "input": map[string]any{"file_path": "main.go"}})
+	ask = pendingAskOver(t, url)
+	if ask.ToolInputTruncated {
+		t.Fatalf("a whole input is flagged as cut: %+v", ask)
+	}
+	answerOver(t, url, ask.ID, `{"decision":"deny"}`)
+	permissionReply(t, whole)
+}
