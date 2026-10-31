@@ -152,6 +152,25 @@
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--st-ready-bg) 35%, var(--surface));
 }
+.agent-ask-tool-input-label {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.agent-ask-blank-run {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.agent-ask-cut-warning {
+  margin: 6px 0 0;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 45%, var(--border));
+  border-radius: 6px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  font-size: calc(12px * var(--font-scale, 1));
+}
 .agent-ask-not-yours {
   margin: 6px 0 0;
   color: var(--text-2);

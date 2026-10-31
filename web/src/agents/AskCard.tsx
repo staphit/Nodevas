@@ -17,6 +17,62 @@ export function askQuestionText(
   return ask.question;
 }
 
+/** The hub, runner and MCP server each cut a permission prompt's input to
+ * this many bytes, and say nothing when they do. */
+export const TOOL_INPUT_MAX_BYTES = 4096;
+
+/**
+ * Whether a permission prompt's input may have been cut: it reaches the size
+ * limit (the cut backs off up to 3 bytes to a rune boundary), or it is JSON
+ * that ends early (cut, then trimmed of the blank padding before the cut).
+ */
+export function toolInputMayBeCut(input: string | undefined): boolean {
+  if (!input) return false;
+  if (new TextEncoder().encode(input).length >= TOOL_INPUT_MAX_BYTES - 3) return true;
+  const trimmed = input.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      JSON.parse(trimmed);
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ToolInput({
+  input,
+  t,
+}: {
+  input: string;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
+  // A run of 16 blank characters or more is drawn as a visible marker, so
+  // padding cannot push the rest of a command out of sight.
+  const parts: Array<string | { blank: number }> = [];
+  const pattern = /\s{16,}/g;
+  let last = 0;
+  for (let match = pattern.exec(input); match; match = pattern.exec(input)) {
+    if (match.index > last) parts.push(input.slice(last, match.index));
+    parts.push({ blank: match[0].length });
+    last = match.index + match[0].length;
+  }
+  if (last < input.length) parts.push(input.slice(last));
+  return (
+    <pre>
+      {parts.map((part, i) =>
+        typeof part === "string" ? (
+          part
+        ) : (
+          <mark key={i} className="agent-ask-blank-run">
+            {t("agents.ask.blankRun", { count: part.blank })}
+          </mark>
+        ),
+      )}
+    </pre>
+  );
+}
+
 export function AskCard({
   ask,
   submitting,
@@ -39,6 +95,7 @@ export function AskCard({
 
   const kind = ask.kind ?? "approval";
   const isPending = ask.status === "pending";
+  const inputCut = kind === "permission" && toolInputMayBeCut(ask.toolInput);
 
   useEffect(() => {
     if (!isPending) return;
@@ -68,6 +125,8 @@ export function AskCard({
         onAnswer({ decision: "deny", ...(note ? { note } : {}) });
       }
     } else if (kind === "permission") {
+      // A cut input is allowed with a deliberate click, never a stray key.
+      if (inputCut && (event.key === "1" || event.key === "2")) return;
       if (event.key === "1") {
         event.preventDefault();
         onAnswer({ decision: "approve" });
@@ -135,10 +194,15 @@ export function AskCard({
       <p className="copilot-permission-summary">{askQuestionText(t, ask)}</p>
 
       {kind === "permission" && ask.toolInput && (
-        <details className="copilot-tool-detail">
-          <summary>{t("agents.ask.toolInput")}</summary>
-          <pre>{ask.toolInput}</pre>
-        </details>
+        <div className="copilot-tool-detail agent-ask-tool-input">
+          <span className="agent-ask-tool-input-label">{t("agents.ask.toolInput")}</span>
+          <ToolInput input={ask.toolInput} t={t} />
+        </div>
+      )}
+      {inputCut && isPending && (
+        <p className="agent-ask-cut-warning" role="alert">
+          {t("agents.ask.inputCut")}
+        </p>
       )}
 
       {!isPending ? (
@@ -250,15 +314,17 @@ export function AskCard({
             disabled={busy}
             onClick={() => onAnswer({ decision: "approve" })}
           >
-            {t("agents.ask.allow")} <kbd>1</kbd>
+            {t("agents.ask.allow")} {!inputCut && <kbd>1</kbd>}
           </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onAnswer({ decision: "approve_run" })}
-          >
-            {t("agents.ask.allowRun")} <kbd>2</kbd>
-          </button>
+          {!inputCut && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onAnswer({ decision: "approve_run" })}
+            >
+              {t("agents.ask.allowRun")} <kbd>2</kbd>
+            </button>
+          )}
           <button
             type="button"
             className="danger"
