@@ -14,6 +14,19 @@ import (
 func TestRepoBrowseBurstQueuesInsteadOfRefusing(t *testing.T) {
 	cfg, _ := browseRepo(t)
 	const n = 200
+	// Load: the reads ahead of the burst hold every slot for longer than
+	// repoSlotWait, as a burst's own reads do beside a full test run.
+	for range repoBrowseConcurrent {
+		if err := acquireRepoSlot(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	go func() {
+		time.Sleep(repoSlotWait + time.Second)
+		for range repoBrowseConcurrent {
+			releaseRepoSlot()
+		}
+	}()
 	var wg sync.WaitGroup
 	codes := make(chan string, n)
 	for range n {
