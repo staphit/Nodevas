@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/store"
 	"nodevas/internal/testpg"
 )
 
@@ -264,6 +266,58 @@ func TestADeletedNodeLeavesNothingBehind(t *testing.T) {
 	if n := count(t, manager.database,
 		`SELECT count(*) FROM search_documents WHERE body_tokens @@ ?::tsquery`, tsqueryLiteral("sh")); n != 1 {
 		t.Fatalf("the deleted node's tokens are still indexed: %d rows match", n)
+	}
+}
+
+// A node is indexed from the files the store reads for it, cold build
+// included: the shallowest copy of its document (store.NodeDocPath) and the
+// <id>.pages folder beside that copy. A deeper copy of the document, or an
+// <id>.pages folder in another folder, is not the node's text.
+func TestANodeIsIndexedFromTheFilesTheStoreReads(t *testing.T) {
+	root := writeProject(t,
+		fixtureNode{
+			id: "alpha", title: "Alpha", body: "shallow lantern",
+			pages: map[string]string{"one.md": "beside beacon"},
+		},
+		fixtureNode{id: "beta", title: "Beta", body: "beta body"},
+	)
+	stray := filepath.Join(root, "nodes", "zz")
+	for _, dir := range []string{"alpha.pages", "beta.pages"} {
+		if err := os.MkdirAll(filepath.Join(stray, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range map[string]string{
+		"alpha.md":                              "deeper omega",
+		filepath.Join("alpha.pages", "two.md"):  "deeper orbit",
+		filepath.Join("beta.pages", "three.md"): "stray quasar",
+	} {
+		if err := os.WriteFile(filepath.Join(stray, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := store.NodeDocPath(root, "alpha"), filepath.Join(root, "nodes", "alpha.md"); got != want {
+		t.Fatalf("the store reads alpha from %s, want %s", got, want)
+	}
+
+	manager := newManager(t)
+	for _, check := range []struct {
+		query string
+		want  []string
+	}{
+		{"lantern", []string{"alpha"}}, // the document the store reads
+		{"beacon", []string{"alpha"}},  // the pages folder beside it
+		{"omega", nil},                 // a deeper copy of the document
+		{"orbit", nil},                 // the deeper copy's pages folder
+		{"quasar", nil},                // a pages folder with no document beside it
+	} {
+		if got := ids(search(t, manager, root, check.query)); !slices.Equal(got, check.want) {
+			t.Errorf("search %q = %v, want %v", check.query, got, check.want)
+		}
+	}
+	if n := count(t, manager.database, `SELECT count(*) FROM search_documents WHERE node_id = ? AND path = ?`,
+		"alpha", "nodes/alpha.md"); n != 1 {
+		t.Errorf("alpha's row is not keyed by nodes/alpha.md (%d rows)", n)
 	}
 }
 
