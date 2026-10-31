@@ -61,33 +61,52 @@ func TestUsingTheDatabaseBuildsTheOpenProjectsIndex(t *testing.T) {
 // must not wait for it.
 const coldSearchBudget = 200 * time.Millisecond
 
+// stillBuilding reports whether the project's first index build has not
+// finished yet, without waiting for it.
+func stillBuilding(pm *ProjectManager, info ProjectInfo) bool {
+	return !pm.AwaitSearchIndex(info.Path, 0)
+}
+
+// untilTestDeadline is how long t may still wait for background work: the
+// rest of its go test -timeout, less a moment to report a failure. How long
+// a build takes is the machine's load, not the code's (seconds here, over a
+// minute beside a full parallel test run), so a test that has to see one
+// finish waits for the build itself rather than for a guess at its length.
+func untilTestDeadline(t *testing.T) time.Duration {
+	deadline, ok := t.Deadline()
+	if !ok {
+		return 24 * time.Hour
+	}
+	return time.Until(deadline) - 5*time.Second
+}
+
 // The first search of a large project whose index is still being built
 // answers from the titles in the cached graph at once, instead of waiting
 // seconds for the build; once the build is in, the bodies are searchable.
+//
+// "At once" is that the build was still running when the search answered: a
+// search that waited for it would find it finished. Wall-clock budgets on the
+// search or the build failed under load with nothing wrong.
 func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 	pm, info, _ := searchLoadProject(t, 3000)
 
-	began := time.Now()
 	results, err := pm.SearchProjectNodes(info, "n1234")
-	took := time.Since(began)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if took > coldSearchBudget {
-		t.Fatalf("first search took %v, waiting for the index build (budget %v)", took, coldSearchBudget)
+	if !stillBuilding(pm, info) {
+		t.Fatal("the first search answered after the index build finished: it waited for the build")
 	}
 	if len(results) != 1 || results[0].NodeID != "n1234" {
 		t.Fatalf("first search = %+v, want the node titled n1234", results)
 	}
 
-	began = time.Now()
 	ranked, err := pm.RankProjectNodes(info, "n2345", 10)
-	took = time.Since(began)
 	if err != nil {
 		t.Fatalf("ranked search: %v", err)
 	}
-	if took > coldSearchBudget {
-		t.Fatalf("first ranked search took %v (budget %v)", took, coldSearchBudget)
+	if !stillBuilding(pm, info) {
+		t.Fatal("the first ranked search answered after the index build finished: it waited for the build")
 	}
 	if len(ranked) == 0 || ranked[0].NodeID != "n2345" {
 		t.Fatalf("first ranked search = %+v, want the node titled n2345 first", ranked)
@@ -95,19 +114,15 @@ func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 
 	// The build goes on in the background and is what later searches read:
 	// text only in the bodies is found.
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		results, err := pm.SearchProjectNodes(info, "buried needle")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(results) == 60 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("body search = %d results after the build, want 60", len(results))
-		}
-		time.Sleep(50 * time.Millisecond)
+	if wait := untilTestDeadline(t); !pm.AwaitSearchIndex(info.Path, wait) {
+		t.Fatalf("the index build did not finish within %v", wait)
+	}
+	results, err = pm.SearchProjectNodes(info, "buried needle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 60 {
+		t.Fatalf("body search = %d results after the build, want 60", len(results))
 	}
 }
 
