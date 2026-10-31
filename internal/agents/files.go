@@ -374,3 +374,8 @@ func (h *Hub) FileContent(ctx context.Context, project, id, name string, v Viewe
 	}
 	return f, content, nil
 }
+
+// MayAnswer reports whether v may answer ask a.
+func (v Viewer) MayAnswer(a Ask) bool {
+	return v.Admin || strings.EqualFold(a.ActorID, strings.TrimSpace(v.ID))
+}
