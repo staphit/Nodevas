@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 
 	"nodevas/internal/locale"
 )
@@ -70,7 +71,15 @@ func validateProjectPath(root *os.Root, rel string, allowMissing bool) error {
 	return nil
 }
 
+// rootOpened, when set, is told the project root each time a contained path
+// operation opens it, which every one of them does once. A seam for tests
+// that count file-system work instead of timing it; nil otherwise.
+var rootOpened atomic.Pointer[func(root string)]
+
 func openProjectRoot(root string) (*os.Root, error) {
+	if hook := rootOpened.Load(); hook != nil {
+		(*hook)(root)
+	}
 	opened, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, err
