@@ -178,6 +178,11 @@ func TestFirstSearchOfAFewNodesWithManyPagesAnswersFromTitles(t *testing.T) {
 		}
 	}
 	coldIndexFor(t, pm)
+	// Load: the search is descheduled for longer than the budget, as it is
+	// beside a full parallel test run.
+	stall := func(string, time.Duration) { time.Sleep(coldSearchBudget + 50*time.Millisecond) }
+	coldSearchWaited.Store(&stall)
+	t.Cleanup(func() { coldSearchWaited.Store(nil) })
 
 	began := time.Now()
 	results, err := pm.SearchProjectNodes(info, "n0002")
