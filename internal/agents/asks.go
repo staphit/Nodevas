@@ -2,7 +2,9 @@ package agents
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,19 +108,88 @@ type Ask struct {
 	// ExpiresAt is when a pending ask stops waiting (unix ms).
 	ExpiresAt int64 `json:"expiresAt,omitempty"`
 	DecidedAt int64 `json:"decidedAt,omitempty"`
-	// runKey narrows an "allow for this run" of a permission prompt.
+	// runKey narrows what allowing a permission prompt for the rest of its
+	// run covers: "" the tool, "cmd:<hash>" one shell command (runKeyFor).
 	runKey string
 }
 
-// The scopes an "allow for this run" of a permission prompt covers.
+// The scopes an "allow for this run" of a permission prompt covers
+// (Ask.RunScope, "runScope" in its JSON).
 const (
-	RunScopeTool    = "tool"
+	// RunScopeTool: every later call of the same tool in the run.
+	RunScopeTool = "tool"
+	// RunScopeCommand: the same shell command (and working directory) again
+	// in the run; any other command still asks.
 	RunScopeCommand = "command"
-	RunScopeOnce    = "once"
+	// RunScopeOnce: this call only. A shell command cut to fit cannot be
+	// told apart from a longer one with the same start.
+	RunScopeOnce = "once"
 )
 
-// RunScope is what allowing a for the rest of its run covers.
-func (a Ask) RunScope() string { return "" }
+// RunScope is what allowing a for the rest of its run covers, or "" for an
+// ask that is not a permission prompt.
+func (a Ask) RunScope() string {
+	if a.Kind != AskKindPermission {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(a.runKey, runKeyCommand):
+		return RunScopeCommand
+	case strings.HasPrefix(a.runKey, runKeyOnce):
+		return RunScopeOnce
+	}
+	return RunScopeTool
+}
+
+const (
+	runKeyCommand = "cmd:"
+	runKeyOnce    = "once:"
+)
+
+// shellTools are the agent CLIs' tools that run a command line (lower
+// case): Claude Code's Bash, the Antigravity CLI's run_command and
+// send_command_input, OpenCode's bash and its ACP kind execute, and the
+// names other CLIs give theirs. Allowing one of them for the run allows one
+// command, never the shell.
+var shellTools = map[string]bool{
+	"bash": true, "run_command": true, "send_command_input": true, "execute": true,
+	"shell": true, "exec": true, "exec_command": true, "local_shell": true,
+	"powershell": true, "terminal": true, "run_terminal_cmd": true,
+}
+
+// cosmeticInputKeys are tool-input fields (lower case) that describe a
+// shell call without changing what it runs.
+var cosmeticInputKeys = map[string]bool{"description": true, "timeout": true, "waitmsbeforeasync": true}
+
+// runKeyFor is the runKey of a permission prompt for tool with input (as
+// sent, before the hub cuts it): "" for a tool allowed tool-wide, one key
+// per command for a shell tool, a key matching nothing for a shell command
+// that may have been cut to fit.
+func runKeyFor(tool, input string) string {
+	if !shellTools[strings.ToLower(tool)] {
+		return ""
+	}
+	// The runner cuts input to MaxAskToolInputBytes at a rune boundary, so
+	// input this long may be the start of a longer command.
+	if len(input) > MaxAskToolInputBytes-utf8.UTFMax {
+		return runKeyOnce + newID()
+	}
+	canonical := input
+	var fields map[string]any
+	if json.Unmarshal([]byte(input), &fields) == nil && fields != nil {
+		for key := range fields {
+			if cosmeticInputKeys[strings.ToLower(key)] {
+				delete(fields, key)
+			}
+		}
+		// Marshalled maps sort their keys: the same call, the same text.
+		if raw, err := json.Marshal(fields); err == nil {
+			canonical = string(raw)
+		}
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(tool) + "\x00" + canonical))
+	return runKeyCommand + hex.EncodeToString(sum[:])
+}
 
 // DecisionOf is the decision that settled a: approve, approve_run, deny or
 // answer, or "" while it is pending or once it expired.
@@ -137,11 +208,15 @@ func DecisionOf(a Ask) string {
 	return ""
 }
 
-// MarshalJSON writes the ask with its decision.
+// MarshalJSON writes the ask with its decision and, for a permission
+// prompt, its runScope.
 func (a Ask) MarshalJSON() ([]byte, error) {
 	type plain Ask
 	a.Decision = DecisionOf(a)
-	return json.Marshal(plain(a))
+	return json.Marshal(struct {
+		plain
+		RunScope string `json:"runScope,omitempty"`
+	}{plain(a), a.RunScope()})
 }
 
 // AskInput is the payload for creating a human-in-the-loop prompt.
@@ -186,6 +261,7 @@ type askShape struct {
 	options   []string
 	tool      string
 	toolInput string
+	runKey    string
 	question  string
 }
 
@@ -208,6 +284,7 @@ func shapeAsk(in AskInput) (askShape, error) {
 			return askShape{}, fmt.Errorf("%w: options belong to kind choice", ErrInvalid)
 		}
 		shape.toolInput = capBytes(strings.TrimSpace(in.ToolInput), MaxAskToolInputBytes)
+		shape.runKey = runKeyFor(shape.tool, strings.TrimSpace(in.ToolInput))
 		if shape.question == "" {
 			shape.question = fmt.Sprintf("Allow %s?", shape.tool)
 		}
@@ -305,7 +382,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		runID = h.sessionRunID(project, sessionID)
 	}
 	if shape.kind == AskKindPermission && runID != "" {
-		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool); decidedBy != "" {
+		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.runKey); decidedBy != "" {
 			return h.allowForRun(ctx, Ask{
 				ID:          newID(),
 				Project:     project,
@@ -320,6 +397,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 				RunID:       runID,
 				Tool:        shape.tool,
 				ToolInput:   shape.toolInput,
+				runKey:      shape.runKey,
 			}, decidedBy)
 		}
 	}
@@ -339,6 +417,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		RunID:       runID,
 		Tool:        shape.tool,
 		ToolInput:   shape.toolInput,
+		runKey:      shape.runKey,
 		Status:      AskPending,
 		CreatedAt:   now,
 		ExpiresAt:   now + timeout.Milliseconds(),
@@ -462,14 +541,18 @@ func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 	})
 }
 
-// runAllowedBy is who allowed tool for the rest of run (an approve_run
-// permission ask of that run and tool), or "" when nobody did.
-func (h *Hub) runAllowedBy(ctx context.Context, project, runID, tool string) string {
+// runAllowedBy is who allowed tool (with runKey, its command for a shell
+// tool) for the rest of run: an approve_run permission ask of that run, tool
+// and key; "" when nobody did.
+func (h *Hub) runAllowedBy(ctx context.Context, project, runID, tool, runKey string) string {
+	if strings.HasPrefix(runKey, runKeyOnce) {
+		return ""
+	}
 	if h.database == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		for _, a := range h.memAsks {
-			if a.Project == project && a.RunID == runID && a.Tool == tool && a.Kind == AskKindPermission &&
+			if a.Project == project && a.RunID == runID && a.Tool == tool && a.runKey == runKey && a.Kind == AskKindPermission &&
 				a.Status == AskApproved && a.Answer == DecisionApproveRun {
 				return a.DecidedBy
 			}
@@ -479,10 +562,10 @@ func (h *Hub) runAllowedBy(ctx context.Context, project, runID, tool string) str
 	var decidedBy string
 	if err := h.database.QueryRowContext(ctx, `
 		SELECT decided_by FROM agent_asks
-		 WHERE project = ? AND run_id = ? AND tool = ? AND kind = 'permission'
+		 WHERE project = ? AND run_id = ? AND tool = ? AND run_key = ? AND kind = 'permission'
 		   AND status = 'approved' AND answer = ?
 		 ORDER BY decided_at LIMIT 1
-	`, project, runID, tool, DecisionApproveRun).Scan(&decidedBy); err != nil {
+	`, project, runID, tool, runKey, DecisionApproveRun).Scan(&decidedBy); err != nil {
 		return ""
 	}
 	return decidedBy
@@ -511,14 +594,17 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 	return ask, nil
 }
 
-// releaseRunPrompts allows the permission prompts of run and tool still
-// waiting, now that decidedBy allowed the tool for the run.
-func (h *Hub) releaseRunPrompts(ctx context.Context, project, runID, tool, decidedBy string) {
+// releaseRunPrompts allows the permission prompts of run, tool and runKey
+// still waiting, now that decidedBy allowed them for the run.
+func (h *Hub) releaseRunPrompts(ctx context.Context, project, runID, tool, runKey, decidedBy string) {
+	if strings.HasPrefix(runKey, runKeyOnce) {
+		return
+	}
 	var ids []string
 	if h.database == nil {
 		h.mu.Lock()
 		for _, a := range h.memAsks {
-			if a.Project == project && a.RunID == runID && a.Tool == tool && a.Kind == AskKindPermission && a.Status == AskPending {
+			if a.Project == project && a.RunID == runID && a.Tool == tool && a.runKey == runKey && a.Kind == AskKindPermission && a.Status == AskPending {
 				ids = append(ids, a.ID)
 			}
 		}
@@ -526,8 +612,8 @@ func (h *Hub) releaseRunPrompts(ctx context.Context, project, runID, tool, decid
 	} else {
 		rows, err := h.database.QueryContext(ctx, `
 			SELECT id FROM agent_asks
-			 WHERE project = ? AND run_id = ? AND tool = ? AND kind = 'permission' AND status = 'pending'
-		`, project, runID, tool)
+			 WHERE project = ? AND run_id = ? AND tool = ? AND run_key = ? AND kind = 'permission' AND status = 'pending'
+		`, project, runID, tool, runKey)
 		if err != nil {
 			return
 		}
@@ -562,13 +648,13 @@ func insertAsk(ctx context.Context, tx *sql.Tx, ask Ask) error {
 			id, project, session_id, session_name, actor_id, agent,
 			question, about_msg_id, node_id, status, decided_by, note,
 			created_at, decided_at, kind, options, answer, run_id, tool,
-			tool_input, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tool_input, expires_at, run_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		ask.ID, ask.Project, ask.SessionID, ask.SessionName, ask.ActorID, ask.Agent,
 		ask.Question, ask.AboutMsgID, ask.NodeID, ask.Status, ask.DecidedBy, ask.Note,
 		ask.CreatedAt, ask.DecidedAt, ask.Kind, options, ask.Answer, ask.RunID, ask.Tool,
-		ask.ToolInput, ask.ExpiresAt,
+		ask.ToolInput, ask.ExpiresAt, ask.runKey,
 	)
 	return err
 }
@@ -577,7 +663,7 @@ func insertAsk(ctx context.Context, tx *sql.Tx, ask Ask) error {
 const askColumns = `id, project, session_id, session_name, actor_id, agent,
 		       question, about_msg_id, node_id, status, decided_by, note,
 		       created_at, decided_at, kind, options, answer, run_id, tool,
-		       tool_input, expires_at`
+		       tool_input, expires_at, run_key`
 
 // scanAsk reads one row of askColumns.
 func scanAsk(row rowScanner) (Ask, error) {
@@ -587,7 +673,7 @@ func scanAsk(row rowScanner) (Ask, error) {
 		&a.ID, &a.Project, &a.SessionID, &a.SessionName, &a.ActorID, &a.Agent,
 		&a.Question, &a.AboutMsgID, &a.NodeID, &a.Status, &a.DecidedBy, &a.Note,
 		&a.CreatedAt, &a.DecidedAt, &a.Kind, &options, &a.Answer, &a.RunID, &a.Tool,
-		&a.ToolInput, &a.ExpiresAt,
+		&a.ToolInput, &a.ExpiresAt, &a.runKey,
 	); err != nil {
 		return Ask{}, err
 	}
@@ -751,7 +837,7 @@ func (h *Hub) AnswerWith(ctx context.Context, project, askID string, in AnswerIn
 	}
 	h.deliverDecision(ctx, updated, wasExpired, decidedBy)
 	if answer == DecisionApproveRun && updated.RunID != "" {
-		h.releaseRunPrompts(ctx, project, updated.RunID, updated.Tool, decidedBy)
+		h.releaseRunPrompts(ctx, project, updated.RunID, updated.Tool, updated.runKey, decidedBy)
 	}
 	return updated, nil
 }

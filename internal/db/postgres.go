@@ -1039,6 +1039,15 @@ ALTER TABLE agent_asks ADD CONSTRAINT agent_asks_status_check CHECK (status IN (
 CREATE INDEX IF NOT EXISTS agent_asks_run ON agent_asks (project, run_id, tool, status) WHERE run_id != '';
 `,
 	},
+	{
+		// What allowing a permission prompt for the rest of its run covers:
+		// '' the tool, 'cmd:<hash>' one shell command, 'once:<id>' nothing
+		// more (agents.Ask.RunScope). Rows from before allowed their tool.
+		name: "0031_agent_ask_run_key",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_key TEXT COLLATE "C" NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as
