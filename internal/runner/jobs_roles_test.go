@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -156,5 +157,66 @@ func TestParseJudgeVerdict(t *testing.T) {
 		if got := parseJudgeVerdict(text); got != want {
 			t.Errorf("parseJudgeVerdict(%q) = %q, want %q", text, got, want)
 		}
+	}
+}
+
+// A Claude run with permissionRelay points --permission-prompt-tool at
+// approve_tool, and Claude Code will not start when its MCP server does not
+// list that tool. A role's own allowlist may leave it out (a custom role, an
+// override, a pipeline resolved before approve_tool existed), so the run's
+// sidecar serves it on top of the role's tools whenever the run relays.
+func TestRelayingRoleRunServesApproveTool(t *testing.T) {
+	sidecarTools := func(t *testing.T, env *jobEnv, runID string) (string, bool) {
+		t.Helper()
+		var config struct {
+			MCPServers map[string]struct {
+				Args []string `json:"args"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(env.recorded(t, runID, "mcp.json")), &config); err != nil {
+			t.Fatal(err)
+		}
+		args := config.MCPServers["nodevas"].Args
+		if i := slices.Index(args, "--tools"); i >= 0 && i+1 < len(args) {
+			return args[i+1], true
+		}
+		return "", false
+	}
+	roleJob := func(runID string, tools []string) runnerwire.Job {
+		job := testJob(runID, "ok: do the thing")
+		job.Role, job.Tools = "custom-role-fixer", tools
+		return job
+	}
+
+	relay := startJobRunner(t, func(c *Client) { c.Config.PermissionRelay = true })
+	relay.hub.hello()
+	relay.hub.offer(roleJob("run-role-relay", []string{"get_node", "ask_user"}))
+	relay.hub.wait("run-role-relay", runnerwire.TypeFinish)
+	if tools, ok := sidecarTools(t, relay, "run-role-relay"); !ok || tools != "get_node,ask_user,approve_tool" {
+		t.Errorf("relay: --tools %q (%v), want get_node,ask_user,approve_tool", tools, ok)
+	}
+	// A role with no tools of its own still gets the one the CLI needs.
+	relay.hub.offer(roleJob("run-role-bare", nil))
+	relay.hub.wait("run-role-bare", runnerwire.TypeFinish)
+	if tools, ok := sidecarTools(t, relay, "run-role-bare"); !ok || tools != "approve_tool" {
+		t.Errorf("bare role: --tools %q (%v), want approve_tool", tools, ok)
+	}
+
+	// Without the relay the role's allowlist is served as it is.
+	off := startJobRunner(t, nil)
+	off.hub.hello()
+	off.hub.offer(roleJob("run-role-off", []string{"get_node", "ask_user"}))
+	off.hub.wait("run-role-off", runnerwire.TypeFinish)
+	if tools, _ := sidecarTools(t, off, "run-role-off"); tools != "get_node,ask_user" {
+		t.Errorf("relay off: --tools %q", tools)
+	}
+
+	// Plan mode never asks, so nothing is added.
+	plan := startJobRunner(t, func(c *Client) { c.Config.PermissionRelay, c.Config.PermissionMode = true, "plan" })
+	plan.hub.hello()
+	plan.hub.offer(roleJob("run-role-plan", []string{"get_node"}))
+	plan.hub.wait("run-role-plan", runnerwire.TypeFinish)
+	if tools, _ := sidecarTools(t, plan, "run-role-plan"); tools != "get_node" {
+		t.Errorf("plan mode: --tools %q", tools)
 	}
 }
