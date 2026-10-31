@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,57 +14,39 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
+
+	"nodevas/internal/dbconn"
 )
 
-// URLEnv names the variable that moves the workspace's operational data from
-// the SQLite file to a PostgreSQL server. It is an environment variable and
-// not a nodevas.yaml key for the same reason the SMTP password is: the URL
-// carries a password, and nodevas.yaml sits in the workspace beside the notes.
-const URLEnv = "NODEVAS_DATABASE_URL"
+// URLEnv names an external PostgreSQL server (a NAS, a hosted deployment).
+// Unset, the workspace runs its own embedded server. It is an environment
+// variable and not a nodevas.yaml key for the same reason the SMTP password
+// is: the URL carries a password, and nodevas.yaml sits in the workspace
+// beside the notes.
+const URLEnv = dbconn.URLEnv
 
 // URLFileEnv names a file holding the URL instead, for a container that gets
 // its secrets as mounted files, as NODEVAS_SMTP_PASSWORD_FILE does.
-const URLFileEnv = URLEnv + "_FILE"
+const URLFileEnv = dbconn.URLFileEnv
 
 // URLFromEnv returns the configured PostgreSQL URL, or "" for none. URLEnv
 // wins over URLFileEnv when both are set.
 func URLFromEnv(lookup func(string) (string, bool)) (string, error) {
-	if raw, _ := lookup(URLEnv); strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw), nil
-	}
-	path, _ := lookup(URLFileEnv)
-	if strings.TrimSpace(path) == "" {
-		return "", nil
-	}
-	data, err := os.ReadFile(strings.TrimSpace(path))
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", URLFileEnv, err)
-	}
-	return strings.TrimSpace(string(data)), nil
+	return dbconn.URLFromEnv(lookup)
 }
 
-// WaitEnv bounds how long Open keeps retrying an unreachable server before it
-// falls back to the SQLite file, as a Go duration ("30s", "2m"). On a NAS that
-// has just booted the database container usually comes up after this one, and
-// giving up at the first refused connection would leave the server on the
-// fallback until somebody restarts it.
+// WaitEnv bounds how long OpenRoot keeps retrying an unreachable external
+// server before it gives up, as a Go duration ("30s", "2m"). On a NAS that has
+// just booted the database container usually comes up after this one. Past
+// it, serve exits and the container's restart policy tries again: there is no
+// fallback database.
 const WaitEnv = "NODEVAS_DATABASE_WAIT"
 
 // defaultWait is WaitEnv's value when it is unset.
 const defaultWait = 30 * time.Second
 
-// Backend names the engine a DB talks to.
-type Backend string
-
-const (
-	SQLite   Backend = "sqlite"
-	Postgres Backend = "postgres"
-)
-
 // ErrUnreachable wraps a failure to reach the PostgreSQL server at all, as
-// opposed to reaching it and being refused something. Only this kind falls
-// back to SQLite: a server that answers and rejects the schema is a problem to
-// surface, not one to route around.
+// opposed to reaching it and being refused something.
 var ErrUnreachable = errors.New("postgres unreachable")
 
 // waitFromEnv reads WaitEnv.
@@ -82,14 +63,7 @@ func waitFromEnv(lookup func(string) (string, bool)) (time.Duration, error) {
 }
 
 // OpenPostgres connects to a PostgreSQL server and brings its schema up to
-// date, retrying an unreachable server for up to wait.
-//
-// The handles mirror the SQLite ones on purpose. The write pool is one
-// connection, so the transactions that count and then insert ("the first
-// account is an administrator", "the last administrator cannot be removed")
-// stay serialised exactly as SQLite's single writer serialised them, rather
-// than depending on an isolation level. The read pool is opened with
-// default_transaction_read_only, the server-side counterpart of query_only.
+// date, retrying an unreachable server for up to wait. See DB for the pools.
 func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	writeConfig, err := pgx.ParseConfig(rawURL)
 	if err != nil {
@@ -101,6 +75,8 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	}
 	readConfig := writeConfig.Copy()
 	readConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	setDefaults(writeConfig.RuntimeParams, writerTimeouts)
+	setDefaults(readConfig.RuntimeParams, readerTimeouts)
 
 	writer := sql.OpenDB(rebindConnector{stdlib.GetConnector(*writeConfig)})
 	writer.SetMaxOpenConns(1)
@@ -117,13 +93,53 @@ func OpenPostgres(rawURL string, wait time.Duration) (*DB, error) {
 	reader.SetMaxIdleConns(maxReaders)
 	reader.SetConnMaxLifetime(0)
 
-	database := &DB{write: writer, read: reader, path: describeURL(writeConfig), backend: Postgres}
+	search := sql.OpenDB(rebindConnector{stdlib.GetConnector(*writeConfig.Copy())})
+	search.SetMaxOpenConns(searchConns)
+	search.SetMaxIdleConns(searchConns)
+	search.SetConnMaxLifetime(0)
+
+	database := &DB{write: writer, read: reader, search: search, path: describeURL(writeConfig)}
 	if err := database.migrate(context.Background()); err != nil {
 		database.Close()
 		return nil, err
 	}
 	return database, nil
 }
+
+// writerTimeouts bound every session on the write pools (the main writer and
+// the search pool). The main writer is one connection: without these, one
+// lock wait or one transaction left open on a shared server would stall every
+// audit, session and run write in the process indefinitely. A lock wait fails
+// with lock_not_available (55P03), a runaway statement with query_canceled
+// (57014), and a session idle inside a transaction is closed by the server.
+var writerTimeouts = map[string]string{
+	"statement_timeout":                   "15s",
+	"lock_timeout":                        "5s",
+	"idle_in_transaction_session_timeout": "30s",
+}
+
+// readerTimeouts bound the read pool: reads take no locks worth waiting on,
+// but an analytics query over a large history must not hold a connection
+// forever.
+var readerTimeouts = map[string]string{
+	"statement_timeout": "30s",
+}
+
+// setDefaults sets each param the connection string did not: a value in the
+// URL (postgres://…?statement_timeout=60s) is the operator's and wins.
+func setDefaults(params, defaults map[string]string) {
+	for key, value := range defaults {
+		if _, set := params[key]; !set {
+			params[key] = value
+		}
+	}
+}
+
+// NoTimeouts lifts the pool's timeouts for the rest of one transaction. A
+// migration may wait for another process's migration lock longer than
+// lock_timeout, and a step over a large table may run longer than
+// statement_timeout; neither should fail a server's start.
+const NoTimeouts = `SET LOCAL statement_timeout = 0; SET LOCAL lock_timeout = 0`
 
 // pingUntil retries a ping with a short backoff until it succeeds or wait has
 // passed. A zero wait is a single attempt.
@@ -147,6 +163,17 @@ func pingUntil(handle *sql.DB, wait time.Duration) error {
 	}
 }
 
+// DescribeURL is a connection string's server and database without the
+// credentials, for logs and for an operator being told where the data lives.
+// A URL that does not parse is described as such, never echoed.
+func DescribeURL(rawURL string) string {
+	config, err := pgx.ParseConfig(rawURL)
+	if err != nil {
+		return "(an unparseable PostgreSQL URL)"
+	}
+	return describeURL(config)
+}
+
 // describeURL is the server's address without its credentials, for logs and
 // for an operator being told where the data went.
 func describeURL(config *pgx.ConnConfig) string {
@@ -159,10 +186,8 @@ func describeURL(config *pgx.ConnConfig) string {
 }
 
 // IsUniqueViolation reports whether err is a write refused by a unique
-// constraint or index, on either engine. A non-empty name narrows it to that
-// constraint: PostgreSQL reports the index name, SQLite prints the indexed
-// columns or the index name depending on the index, so callers that care pass
-// the index name and match the column form themselves.
+// constraint or index. A non-empty name narrows it to that constraint (the
+// index name PostgreSQL reports).
 func IsUniqueViolation(err error, name string) bool {
 	if err == nil {
 		return false
@@ -170,13 +195,12 @@ func IsUniqueViolation(err error, name string) bool {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return pgErr.Code == "23505" && (name == "" || pgErr.ConstraintName == name)
 	}
-	message := err.Error()
-	return strings.Contains(message, "UNIQUE constraint failed") &&
-		(name == "" || strings.Contains(message, name))
+	return false
 }
 
-// rebindConnector lets the SQL in this program keep SQLite's ? placeholders on
-// PostgreSQL, which wants $1, $2, …, by rewriting each statement on its way to
+// rebindConnector lets the SQL in this program keep the ? placeholders it was
+// written with (when it also ran on SQLite) on PostgreSQL, which wants $1, $2,
+// …, by rewriting each statement on its way to
 // the driver. Doing it under database/sql instead of at every call site keeps
 // *sql.DB and *sql.Tx the types the rest of the program already passes around.
 type rebindConnector struct{ inner driver.Connector }
@@ -265,30 +289,28 @@ func rebind(query string) string {
 	return out.String()
 }
 
-// pgSchemaMigrations is the bookkeeping table, as schema_migrations is on
-// SQLite.
+// pgSchemaMigrations is the bookkeeping table: one row per applied step,
+// matched by name.
 const pgSchemaMigrations = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
 )`
 
-// pgMigrations is the PostgreSQL schema. It follows the SQLite one table for
-// table, so the queries in the rest of the program run unchanged on either:
+// pgMigrations is the schema. It was written to mirror the SQLite schema this
+// program used to keep beside it, which is why some of it reads the way it
+// does:
 //
 //   - nocase is an ICU collation that ignores case, so the queries' own
 //     "COLLATE NOCASE" (folded to nocase by the parser) finds it by name.
-//   - accounts keeps a rowid column, which is what "ORDER BY rowid" means on
-//     SQLite: the order the rows were created in.
+//   - accounts keeps a rowid column: the order the rows were created in.
 //   - Timestamp and hash columns use the C collation, so they compare and sort
-//     byte by byte as they do on SQLite, whatever locale the server runs in.
-//   - The search index has no counterpart here. It is derived from the
-//     Markdown, built on SQLite's FTS5, and stays in the workspace's SQLite
-//     file; see DB.Local.
+//     byte by byte whatever locale the server runs in.
 //
-// The names line up with the SQLite steps they mirror. A server starts from
-// the current SQLite shape, so 0006's data repair has nothing to repair and
-// only its index is created, in 0001.
+// Steps are matched by name in schema_migrations, and databases in the field
+// (the NAS) have these names recorded, so none is ever renamed or
+// renumbered. The gaps (0004, 0006) are SQLite-only steps that never had a
+// PostgreSQL counterpart: 0004 was the FTS5 index, 0006 a SQLite data repair.
 var pgMigrations = []migration{
 	{
 		name: "0001_accounts",
@@ -804,9 +826,287 @@ ALTER TABLE runs ADD COLUMN limit_waits        INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX runs_retry_at ON runs (retry_at) WHERE retry_at <> '';
 `,
 	},
+	{
+		name: "0025_agent_roles",
+		stmt: `
+ALTER TABLE runs ADD COLUMN role     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN verify   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN checks   TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN override TEXT NOT NULL DEFAULT '';
+-- What a role's job is offered besides the prompt (tools, the Tester's
+-- files, acceptance items, a verify spec), as JSON; '' for a legacy run.
+ALTER TABLE runs ADD COLUMN job_roles TEXT NOT NULL DEFAULT '';
+CREATE INDEX runs_owner_role ON runs (owner_id, role, status);
+ALTER TABLE run_pipelines ADD COLUMN stages     TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN phase      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN test_files TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN guard      TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_pipelines ADD COLUMN tries      TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN stages     TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN goal_phase TEXT NOT NULL DEFAULT '';
+ALTER TABLE autopilot_runs ADD COLUMN qa_round   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE autopilot_runs ADD COLUMN qa_run_id  TEXT NOT NULL DEFAULT '';
+CREATE TABLE run_role_settings (
+    owner_id       TEXT COLLATE "C" NOT NULL,
+    project        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    role           TEXT COLLATE "C" NOT NULL,
+    max_concurrent INTEGER NOT NULL DEFAULT 0,
+    daily_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+    daily_tokens   BIGINT NOT NULL DEFAULT 0,
+    daily_runs     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, project, role)
+);
+`,
+	},
+	{
+		// The search index, which lived in a SQLite FTS5 table until the
+		// database became PostgreSQL only. It is derived from the Markdown and
+		// rebuilt lazily, so an upgraded server starts with it empty. The text
+		// must stay the same objects as searchindex.Schema, which recreates a
+		// dropped table (search_schema_test.go compares them).
+		name: "0026_search_index",
+		stmt: SearchIndexSchema,
+	},
+	{
+		// One row per legacy SQLite file internal/legacysqlite imported (or was
+		// told to skip), so the import happens once and a rename it could not
+		// finish is retried.
+		name: "0027_legacy_imports",
+		stmt: `
+CREATE TABLE legacy_imports (
+    source        TEXT COLLATE "C" PRIMARY KEY,
+    source_sha256 TEXT COLLATE "C" NOT NULL DEFAULT '',
+    status        TEXT COLLATE "C" NOT NULL DEFAULT 'imported' CHECK (status IN ('imported', 'skipped')),
+    imported_at   TEXT COLLATE "C" NOT NULL,
+    counts        JSONB NOT NULL DEFAULT '{}'
+);
+`,
+	},
+	{
+		name: "0028_agent_analytics",
+		stmt: `
+ALTER TABLE runs ADD COLUMN cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN cost_estimated   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN cost_settled     BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN node_type        TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN acceptance_count INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX runs_project_role_created ON runs (project, role, created_at);
+CREATE INDEX runs_retry_of ON runs (retry_of) WHERE retry_of <> '';
+CREATE INDEX runs_finished ON runs (finished_at) WHERE finished_at <> '';
+
+ALTER TABLE agent_session_usage ADD COLUMN run_id TEXT COLLATE "C" NOT NULL DEFAULT '';
+
+CREATE TABLE copilot_usage (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id TEXT COLLATE "C" NOT NULL,
+    account_id      TEXT COLLATE "C" NOT NULL,
+    project         TEXT COLLATE "C" NOT NULL,
+    provider        TEXT NOT NULL DEFAULT '',
+    model           TEXT NOT NULL DEFAULT '',
+    input_tokens    BIGINT NOT NULL DEFAULT 0,
+    output_tokens   BIGINT NOT NULL DEFAULT 0,
+    created_at      TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX copilot_usage_project ON copilot_usage (project, created_at);
+
+CREATE TABLE agent_session_actions (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project    TEXT COLLATE "C" NOT NULL,
+    session_id TEXT COLLATE "C" NOT NULL,
+    run_id     TEXT COLLATE "C" NOT NULL DEFAULT '',
+    at         TEXT COLLATE "C" NOT NULL,
+    action     TEXT NOT NULL CHECK (action IN ('joined','left','doing','message','ask','changes','usage')),
+    node_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX agent_session_actions_session ON agent_session_actions (project, session_id, at);
+CREATE INDEX agent_session_actions_at ON agent_session_actions (at);
+
+CREATE TABLE run_evidence (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id      TEXT COLLATE "C" NOT NULL,
+    pipeline_id TEXT COLLATE "C" NOT NULL DEFAULT '',
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    kind        TEXT NOT NULL,
+    outcome     TEXT NOT NULL DEFAULT 'info' CHECK (outcome IN ('pass','fail','skip','info')),
+    summary     TEXT NOT NULL DEFAULT '',
+    at          TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_evidence_run ON run_evidence (run_id);
+CREATE INDEX run_evidence_pipeline ON run_evidence (pipeline_id, at);
+CREATE INDEX run_evidence_node ON run_evidence (project, node_id, at);
+
+CREATE TABLE autopilot_qa_rounds (
+    autopilot_id TEXT COLLATE "C" NOT NULL,
+    round        INTEGER NOT NULL,
+    run_id       TEXT COLLATE "C" NOT NULL DEFAULT '',
+    outcome      TEXT NOT NULL CHECK (outcome IN ('pass','fail','none')),
+    fix_tasks    INTEGER NOT NULL DEFAULT 0,
+    reason       TEXT NOT NULL DEFAULT '',
+    created_at   TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (autopilot_id, round)
+);
+
+CREATE TABLE run_verdicts (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    run_id         TEXT COLLATE "C" NOT NULL UNIQUE REFERENCES runs(id),
+    project        TEXT COLLATE "C" NOT NULL,
+    node_id        TEXT COLLATE "C" NOT NULL,
+    pipeline_id    TEXT COLLATE "C" NOT NULL DEFAULT '',
+    role           TEXT COLLATE "C" NOT NULL CHECK (role IN ('reviewer','qa')),
+    round          INTEGER NOT NULL DEFAULT 1,
+    subject_run_id TEXT COLLATE "C" NOT NULL DEFAULT '',
+    agent          TEXT NOT NULL DEFAULT '',
+    model          TEXT NOT NULL DEFAULT '',
+    outcome        TEXT NOT NULL CHECK (outcome IN ('pass','fail')),
+    severity       TEXT NOT NULL CHECK (severity IN ('none','low','medium','high','critical')),
+    reasons        TEXT NOT NULL DEFAULT '[]',
+    note           TEXT NOT NULL DEFAULT '',
+    source         TEXT NOT NULL DEFAULT 'mcp' CHECK (source IN ('mcp','finish')),
+    created_at     TEXT COLLATE "C" NOT NULL,
+    updated_at     TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX run_verdicts_node ON run_verdicts (project, node_id, created_at);
+CREATE INDEX run_verdicts_pipeline ON run_verdicts (pipeline_id, round);
+
+CREATE TABLE analytics_settings (
+    owner_id        TEXT COLLATE "C" NOT NULL,
+    project         TEXT COLLATE "C" NOT NULL DEFAULT '',
+    auto_routing    BOOLEAN NOT NULL DEFAULT false,
+    exploration_pct INTEGER NOT NULL DEFAULT 10 CHECK (exploration_pct BETWEEN 0 AND 50),
+    required_tiers  TEXT NOT NULL DEFAULT '{}',
+    updated_at      TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, project)
+);
+
+CREATE TABLE route_picks (
+    id            TEXT COLLATE "C" PRIMARY KEY,
+    owner_id      TEXT COLLATE "C" NOT NULL,
+    project       TEXT COLLATE "C" NOT NULL,
+    node_id       TEXT COLLATE "C" NOT NULL,
+    role          TEXT COLLATE "C" NOT NULL DEFAULT '',
+    source        TEXT NOT NULL CHECK (source IN ('manual','auto','none')),
+    rule_id       TEXT NOT NULL DEFAULT '',
+    runner_id     TEXT COLLATE "C" NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    tier          TEXT NOT NULL DEFAULT '',
+    required_tier TEXT NOT NULL DEFAULT '',
+    explore       BOOLEAN NOT NULL DEFAULT false,
+    reason        TEXT NOT NULL,
+    run_id        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    created_at    TEXT COLLATE "C" NOT NULL
+);
+CREATE INDEX route_picks_project ON route_picks (project, created_at);
+CREATE INDEX route_picks_at ON route_picks (created_at);
+
+CREATE TABLE analytics_dismissed (
+    owner_id     TEXT COLLATE "C" NOT NULL,
+    key          TEXT COLLATE "C" NOT NULL,
+    dismissed_at TEXT COLLATE "C" NOT NULL,
+    PRIMARY KEY (owner_id, key)
+);
+`,
+	},
+	{
+		// The search index's GIN indexes without a pending list. See
+		// SearchIndexTuning.
+		name: "0029_search_gin_fastupdate",
+		stmt: SearchIndexTuning,
+	},
+	{
+		// An ask's kind (approval, question, choice, permission), a
+		// choice's options (a JSON array), the person's text answer, the
+		// run it came from, a permission prompt's tool and input, and when
+		// it expires. Rows from before read as approvals; "answered" is the
+		// status of a question or choice a person answered. Every statement
+		// tolerates a rerun.
+		name: "0030_agent_ask_kinds",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS kind       TEXT NOT NULL DEFAULT 'approval';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS options    TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS answer     TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_id     TEXT COLLATE "C" NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool       TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool_input TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS expires_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_asks DROP CONSTRAINT IF EXISTS agent_asks_kind_check;
+ALTER TABLE agent_asks ADD CONSTRAINT agent_asks_kind_check CHECK (kind IN ('approval', 'question', 'choice', 'permission'));
+ALTER TABLE agent_asks DROP CONSTRAINT IF EXISTS agent_asks_status_check;
+ALTER TABLE agent_asks ADD CONSTRAINT agent_asks_status_check CHECK (status IN ('pending', 'approved', 'denied', 'answered', 'expired'));
+CREATE INDEX IF NOT EXISTS agent_asks_run ON agent_asks (project, run_id, tool, status) WHERE run_id != '';
+`,
+	},
+	{
+		// What allowing a permission prompt for the rest of its run covers:
+		// '' the tool, 'cmd:<hash>' one shell command, 'once:<id>' nothing
+		// more (agents.Ask.RunScope). Rows from before allowed their tool.
+		name: "0031_agent_ask_run_key",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_key TEXT COLLATE "C" NOT NULL DEFAULT '';
+`,
+	},
+	{
+		// Whether a permission prompt's tool input was cut to fit, by the
+		// hub or by whoever relayed it (agents.Ask.ToolInputTruncated). Rows
+		// from before read as whole.
+		name: "0032_agent_ask_input_truncated",
+		stmt: `
+ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool_input_truncated BOOLEAN NOT NULL DEFAULT FALSE;
+`,
+	},
 }
 
-// pgMigrationLock is the advisory lock key migrations hold on PostgreSQL, so a
-// CLI command and a server starting at the same moment do not both apply a
-// step. SQLite gets the same exclusion from its single writer.
+// SearchIndexSchema is migration 0026: the search index's table, as
+// internal/searchindex defines it (searchindex.Schema).
+const SearchIndexSchema = `
+CREATE TABLE IF NOT EXISTS search_documents (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project     TEXT COLLATE "C" NOT NULL,
+    node_id     TEXT COLLATE "C" NOT NULL,
+    path        TEXT COLLATE "C" NOT NULL DEFAULT '',
+    title       TEXT NOT NULL DEFAULT '',
+    modified_at TEXT COLLATE "C" NOT NULL DEFAULT '',
+    meta        TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL DEFAULT '',
+    meta_tokens TSVECTOR NOT NULL,
+    body_tokens TSVECTOR NOT NULL,
+    token_count INTEGER NOT NULL,
+    oversize    BOOLEAN NOT NULL DEFAULT false,
+    UNIQUE (project, node_id, path)
+);
+CREATE INDEX IF NOT EXISTS search_documents_meta_tokens ON search_documents USING gin (meta_tokens);
+CREATE INDEX IF NOT EXISTS search_documents_body_tokens ON search_documents USING gin (body_tokens);
+CREATE INDEX IF NOT EXISTS search_documents_oversize ON search_documents (project) WHERE oversize;
+`
+
+// SearchIndexTuning is migration 0029, and what internal/searchindex runs
+// after recreating a dropped table (searchindex.SchemaTuning): the two GIN
+// indexes with fastupdate off, and whatever an older server left in their
+// pending lists merged into the index proper.
+//
+// With fastupdate on (PostgreSQL's default) new entries go to an unsorted
+// pending list that every probe scans in full and that is merged only by
+// (auto)vacuum or when it outgrows gin_pending_list_limit. A bulk reindex of
+// a few thousand documents leaves the list large, the planner prices each
+// index probe off it, and the ranked query flips to a sequential scan that
+// reads every tsvector: seconds instead of milliseconds on 5,000 documents.
+// Writes to this table are batched and asynchronous already, so the cheaper
+// insert the pending list buys is not worth it.
+//
+// Every statement tolerates the table being gone (an operator may drop it;
+// the search index recreates it on first use). Setting a GIN index's
+// fastupdate takes an exclusive lock on it, which a migration can afford.
+const SearchIndexTuning = `
+ALTER INDEX IF EXISTS search_documents_meta_tokens SET (fastupdate = off);
+ALTER INDEX IF EXISTS search_documents_body_tokens SET (fastupdate = off);
+SELECT gin_clean_pending_list(v.idx)
+FROM (VALUES (to_regclass('search_documents_meta_tokens')), (to_regclass('search_documents_body_tokens'))) AS v(idx)
+WHERE v.idx IS NOT NULL;
+`
+
+// pgMigrationLock is the advisory lock key migrations hold, so a CLI command
+// and a server starting at the same moment do not both apply a step.
 const pgMigrationLock = 0x6e6f6465 // "node"

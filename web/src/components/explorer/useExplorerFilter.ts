@@ -11,6 +11,7 @@ import type { ProjectEntry } from "../../state/types";
 import type { Graph } from "../../types";
 import { useApp, usePreference } from "../../store";
 import { sortProjectTree } from "./sortProjects";
+import { withLiveNodeCount } from "../../state/liveProjects";
 
 export function useExplorerFilter(
   graph: Graph | null,
@@ -27,13 +28,14 @@ export function useExplorerFilter(
   );
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const activeNodes = useMemo(
-    () =>
-      [...(graph?.nodes ?? [])].sort((left, right) =>
-        (left.title || left.id).localeCompare(right.title || right.id),
-      ),
-    [graph?.nodes],
-  );
+  // Natural order, like the project list (sortProjects): "Card 2" before
+  // "Card 10". One collator for the whole sort, not one per comparison.
+  const activeNodes = useMemo(() => {
+    const collator = new Intl.Collator("zh-Hant", { numeric: true, sensitivity: "base" });
+    return [...(graph?.nodes ?? [])].sort((left, right) =>
+      collator.compare(left.title || left.id, right.title || right.id),
+    );
+  }, [graph?.nodes]);
   const visibleNodes = normalizedQuery
     ? activeNodes.filter((node) =>
         `${node.title ?? ""} ${node.id} ${
@@ -45,11 +47,18 @@ export function useExplorerFilter(
     : activeNodes;
   const projectSort = usePreference("explorerProjectSort");
   const projectOrder = useApp((state) => state.projectOrder);
+  const graphProject = useApp((state) => state.graphProject);
+  // The open project's count follows the graph on screen; see liveProjects.
+  const nodeCount = graph?.nodes?.length;
+  const liveProjects = useMemo(
+    () => withLiveNodeCount(projects, activeProject, graphProject, nodeCount),
+    [activeProject, graphProject, nodeCount, projects],
+  );
   // Sorting happens on the tree, not on the flat list, so a child never ends
   // up before its parent; see explorer/sortProjects.
   const sortedProjects = useMemo(
-    () => sortProjectTree(projects, projectSort, projectOrder),
-    [projects, projectSort, projectOrder],
+    () => sortProjectTree(liveProjects, projectSort, projectOrder),
+    [liveProjects, projectSort, projectOrder],
   );
   const visibleProjects = useMemo(() => {
     if (normalizedQuery) {

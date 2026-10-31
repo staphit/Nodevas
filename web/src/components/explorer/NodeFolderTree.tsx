@@ -16,6 +16,9 @@ import { useState, type ReactNode } from "react";
 import type { GraphNode } from "../../types";
 import { IconFolder, IconFolderOpen, IconPlus, IconTrash } from "../../icons";
 import { useI18n } from "../../i18n";
+import { NodeRows, type NodeRowProps } from "./NodeRows";
+
+export type { NodeRowProps };
 
 /** Drag payload keys, distinct from the project tree's own. */
 export const NODE_DRAG_TYPE = "application/x-nodevas-nodes";
@@ -30,8 +33,14 @@ export interface NodeFolderTreeProps {
   visibleNodes: GraphNode[];
   /** While searching, folders are ignored and every hit is listed flat. */
   searching: boolean;
-  /** Renders one node row; owned by the tree so the row markup stays in one place. */
-  renderNode: (node: GraphNode) => ReactNode;
+  /**
+   * Renders one node row; owned by the tree so the row markup stays in one
+   * place. The row's <li> spreads `row` on: its position in the list, and
+   * the keyboard and focus handling a windowed list needs.
+   */
+  renderNode: (node: GraphNode, row?: NodeRowProps) => ReactNode;
+  /** The open node, brought into view in a long list when it changes. */
+  activeNodeId?: string | null;
   createFolder: (path: string) => void;
   renameFolder: (path: string, name: string) => void;
   deleteFolder: (path: string) => void;
@@ -75,6 +84,7 @@ export function NodeFolderTree({
   visibleNodes,
   searching,
   renderNode,
+  activeNodeId,
   createFolder,
   renameFolder,
   deleteFolder,
@@ -272,9 +282,13 @@ export function NodeFolderTree({
               </li>
             )}
             {subfolders.map((child) => renderFolder(child, depth + 1))}
-            {contents.map((node) => renderNode(node))}
+            <NodeRows nodes={contents} renderNode={renderNode} activeNodeId={activeNodeId} />
             {contents.length === 0 && subfolders.length === 0 && creatingIn !== path && (
-              <li className="tree-empty">{t("explorer.emptyFolderShort")}</li>
+              // One folder step in from the folder's own row, so the line
+              // reads as this folder's content.
+              <li className="tree-empty" style={{ paddingInlineStart: `${36 + (depth + 1) * 12}px` }}>
+                {t("explorer.emptyFolderShort")}
+              </li>
             )}
           </ul>
         )}
@@ -287,7 +301,7 @@ export function NodeFolderTree({
   if (searching) {
     return (
       <ul className="node-list tree-node-list">
-        {visibleNodes.map((node) => renderNode(node))}
+        <NodeRows nodes={visibleNodes} renderNode={renderNode} activeNodeId={activeNodeId} />
         {visibleNodes.length === 0 && <li className="tree-empty">{t("explorer.noMatchingNodes")}</li>}
       </ul>
     );
@@ -325,7 +339,7 @@ export function NodeFolderTree({
           </li>
         )}
         {rootFolders.map((folder) => renderFolder(folder, 0))}
-        {rootNodes.map((node) => renderNode(node))}
+        <NodeRows nodes={rootNodes} renderNode={renderNode} activeNodeId={activeNodeId} />
         {rootNodes.length === 0 && rootFolders.length === 0 && (
           <li className="tree-empty">{t("explorer.emptyFolderShort")}</li>
         )}

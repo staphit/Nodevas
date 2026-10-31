@@ -3,19 +3,22 @@
 //
 // What lives in memory is only what it takes to decide that nothing has to be
 // read: the graph's order, and per node its title, its metadata line and the
-// freshness stamp of the files it was built from. The text and the postings are
-// in SQLite (see persist.go).
+// freshness stamp of the files it was built from. The text and the tokens are
+// in PostgreSQL (see persist.go).
 //
-// Nothing in this file locks. Every method here is called with the owning
-// entry's mutex held (see manager.go for the locking contract).
+// Nothing in this file locks. Every projectIndex method is called with the
+// owning entry's build lock held; an indexView is immutable once made and is
+// what queries read with no lock at all (see manager.go for the contract).
 
 package searchindex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +45,7 @@ const (
 // the file.
 type Match struct {
 	NodeID string
+	PageID string
 	Title  string
 	Text   string
 }
@@ -100,15 +104,20 @@ func freshness(doc fileStamp, pages []fileStamp) string {
 // document is what memory keeps of a node: enough to tell that the row in the
 // database is still the right one.
 type document struct {
-	id    string
-	title string
-	meta  string
-	path  string
-	stamp string
+	id         string
+	title      string
+	meta       string
+	path       string
+	stamp      string
+	pageTitles []string
 }
 
 func (d *document) size() int64 {
-	return int64(len(d.id) + len(d.title) + len(d.meta) + len(d.path) + len(d.stamp))
+	n := int64(len(d.id) + len(d.title) + len(d.meta) + len(d.path) + len(d.stamp))
+	for _, t := range d.pageTitles {
+		n += int64(len(t))
+	}
+	return n
 }
 
 // projectIndex is one project's half of the index: the part that cannot be
@@ -123,7 +132,37 @@ type projectIndex struct {
 	order   []string
 	docs    map[string]*document
 	bytes   int64
+
+	// pending is what write queued and flush has not yet written, at most one
+	// entry per node (pendingAt indexes it). A cold project is thousands of
+	// nodes, and one transaction each would spend the build waiting on
+	// commits; batches of them spend it indexing.
+	pending      []pendingWrite
+	pendingAt    map[string]int
+	pendingBytes int
+
+	// unmaintained counts rows written since the table was last maintained
+	// (docStore.maintain); a bulk write past bulkWrites triggers it.
+	unmaintained int
 }
+
+// pendingWrite is one node queued for the database.
+type pendingWrite struct {
+	doc   *storedDoc
+	stamp string
+}
+
+const (
+	// writeBatch and writeBatchBytes bound one flush: enough nodes to make the
+	// commit cheap, few enough bytes that one transaction stays small.
+	writeBatch      = 64
+	writeBatchBytes = 4 << 20
+
+	// bulkWrites is how many rows one graph refresh or reconcile writes
+	// before it maintains the table afterwards: a cold build, a large import,
+	// a rescan after Rebuild. A few edits never pay for an ANALYZE.
+	bulkWrites = 256
+)
 
 func newProjectIndex(root string, docs *docStore) *projectIndex {
 	clean := cleanRoot(root)
@@ -149,7 +188,14 @@ func openIndex(ctx context.Context, docs *docStore, root string) (*projectIndex,
 		return nil, err
 	}
 	for id, doc := range stored {
-		ix.setDoc(&document{id: id, title: doc.title, meta: doc.meta, path: doc.path, stamp: doc.stamp})
+		ix.setDoc(&document{
+			id:         id,
+			title:      doc.title,
+			meta:       doc.meta,
+			path:       doc.path,
+			stamp:      doc.stamp,
+			pageTitles: extractPageTitles(doc.body),
+		})
 	}
 	if err := ix.refreshGraph(ctx); err != nil {
 		return nil, err
@@ -198,30 +244,194 @@ func metadataText(node *engine.Node, names map[string]string) string {
 	}, " ")
 }
 
+// pageBreak introduces a subpage inside a stored body: the marker, the page's
+// id (and optional tab-separated title), a newline, and then the page's text.
+const pageBreak = "\n\x1f"
+
+type bodyPage struct {
+	id    string
+	title string
+	text  string
+}
+
+func pageIDFromPath(path string) string {
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+func cleanHeaderField(s string) string {
+	return strings.NewReplacer("\x1f", "", "\n", " ", "\r", " ", "\t", " ").Replace(strings.TrimSpace(s))
+}
+
+func firstHeading(text string) string {
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			return strings.TrimSpace(strings.TrimLeft(line, "#"))
+		}
+		return ""
+	}
+	return ""
+}
+
 // readBody reads a node's markdown and its text subpages. It never touches
 // graph.yaml, which is what makes a watcher-driven node update cheap.
 func readBody(root, id string) (string, fileStamp, []fileStamp) {
 	nodePath := store.NodeDocPath(root, id)
-	content := readCapped(root, nodePath, nodeContentLimit)
-	pages, _ := pageStamps(root, store.NodePagesPath(root, id))
+	content := strings.ReplaceAll(readCapped(root, nodePath, nodeContentLimit), "\x1f", "")
+	pageDir := store.NodePagesPath(root, id)
+	pages, _ := pageStamps(root, pageDir)
 	var body strings.Builder
 	body.WriteString(content)
+
+	titlesByID := map[string]string{}
+	orderByID := map[string]int{}
 	for _, page := range pages {
+		if filepath.Base(page.Path) != "pages.json" {
+			continue
+		}
+		if data, err := store.ReadProjectFileLimit(root, page.Path, pageContentLimit); err == nil {
+			var manifest struct {
+				Pages []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"pages"`
+			}
+			if json.Unmarshal(data, &manifest) == nil {
+				for idx, entry := range manifest.Pages {
+					if entry.ID != "" {
+						orderByID[entry.ID] = idx
+						titlesByID[entry.ID] = strings.TrimSpace(entry.Title)
+					}
+				}
+			}
+		}
+		break
+	}
+
+	textPages := make([]fileStamp, 0, len(pages))
+	for _, page := range pages {
+		if filepath.Base(page.Path) == "pages.json" {
+			continue
+		}
+		textPages = append(textPages, page)
+	}
+	if len(orderByID) > 0 {
+		sort.SliceStable(textPages, func(i, j int) bool {
+			oi, okI := orderByID[pageIDFromPath(textPages[i].Path)]
+			oj, okJ := orderByID[pageIDFromPath(textPages[j].Path)]
+			if okI != okJ {
+				return okI
+			}
+			if okI && okJ {
+				return oi < oj
+			}
+			return false
+		})
+	}
+
+	pageBytes := 0
+	for _, page := range textPages {
 		data, err := store.ReadProjectFileLimit(root, page.Path, pageContentLimit)
 		if err != nil {
 			continue
 		}
-		remaining := pageContentLimit - body.Len()
+		remaining := pageContentLimit - pageBytes
 		if len(data) > remaining {
 			data = data[:remaining]
 		}
+		pageBytes += len(data)
+		pageID := pageIDFromPath(page.Path)
+		pageText := strings.ReplaceAll(string(data), "\x1f", "")
+		pageTitle := titlesByID[pageID]
+		if pageTitle == "" {
+			pageTitle = firstHeading(pageText)
+		} else if !containsFold(pageText, strings.ToLower(pageTitle)) {
+			pageText = pageTitle + "\n" + pageText
+		}
+		body.WriteString(pageBreak)
+		body.WriteString(cleanHeaderField(pageID))
+		if pageTitle != "" {
+			body.WriteByte('\t')
+			body.WriteString(cleanHeaderField(pageTitle))
+		}
 		body.WriteByte('\n')
-		body.Write(data)
-		if body.Len() >= pageContentLimit {
+		body.WriteString(pageText)
+		if pageBytes >= pageContentLimit {
 			break
 		}
 	}
 	return body.String(), stampFile(root, nodePath), pages
+}
+
+func plainBody(body string) string {
+	if !strings.Contains(body, "\x1f") {
+		return body
+	}
+	parts := strings.Split(body, pageBreak)
+	var out strings.Builder
+	out.Grow(len(body))
+	out.WriteString(parts[0])
+	for _, part := range parts[1:] {
+		if _, text, ok := strings.Cut(part, "\n"); ok {
+			out.WriteByte('\n')
+			out.WriteString(text)
+		}
+	}
+	return out.String()
+}
+
+func splitBodyPages(body string) (string, []bodyPage) {
+	if !strings.Contains(body, "\x1f") {
+		return body, nil
+	}
+	parts := strings.Split(body, pageBreak)
+	pages := make([]bodyPage, 0, len(parts)-1)
+	for _, part := range parts[1:] {
+		header, text, ok := strings.Cut(part, "\n")
+		if !ok {
+			continue
+		}
+		id, title, _ := strings.Cut(header, "\t")
+		if id != "" {
+			pages = append(pages, bodyPage{id: id, title: title, text: text})
+		}
+	}
+	return parts[0], pages
+}
+
+// pageHeaders keeps a stored body's subpage markers and headers (id and
+// title) and drops every text, so extractPageTitles still reads it.
+func pageHeaders(body string) string {
+	_, pages := splitBodyPages(body)
+	var out strings.Builder
+	for _, p := range pages {
+		out.WriteString(pageBreak)
+		out.WriteString(p.id)
+		if p.title != "" {
+			out.WriteByte('\t')
+			out.WriteString(p.title)
+		}
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func extractPageTitles(body string) []string {
+	_, pages := splitBodyPages(body)
+	if len(pages) == 0 {
+		return nil
+	}
+	titles := make([]string, 0, len(pages))
+	for _, p := range pages {
+		if p.title != "" {
+			titles = append(titles, p.title)
+		}
+	}
+	return titles
 }
 
 func readCapped(root, path string, limit int64) string {
@@ -255,19 +465,26 @@ func pageStamps(root, dir string) ([]fileStamp, error) {
 		if entry.IsDir() {
 			continue
 		}
-		format, ok := store.PageFormatFromFilename(entry.Name())
+		name := entry.Name()
+		if name == "pages.json" {
+			stamps = append(stamps, stampFile(root, filepath.Join(dir, name)))
+			continue
+		}
+		format, ok := store.PageFormatFromFilename(name)
 		if !ok || !store.PageFormatIsText(format) {
 			continue
 		}
-		stamps = append(stamps, stampFile(root, filepath.Join(dir, entry.Name())))
+		stamps = append(stamps, stampFile(root, filepath.Join(dir, name)))
 	}
 	return stamps, nil
 }
 
 // ---------- writing ----------
 
-// write indexes one node: it stores the text, replaces the node's postings and
-// records what the row was built from.
+// write indexes one node: it queues the text and the tokens, together with
+// what the row was built from, for the next flush. Every caller flushes before
+// it returns, so a write is in the database by the time the method that made
+// it is done.
 func (ix *projectIndex) write(ctx context.Context, id, title, meta, body string, doc fileStamp, pages []fileStamp) error {
 	meta = truncateRunes(meta, docTextLimit)
 	budget := docTextLimit - len(meta) - 1
@@ -277,11 +494,48 @@ func (ix *projectIndex) write(ctx context.Context, id, title, meta, body string,
 	body = truncateRunes(body, budget)
 	stamp := freshness(doc, pages)
 	path := relativePath(ix.root, doc.Path)
-	stored := &storedDoc{nodeID: id, title: title, path: path, meta: meta, body: body}
-	if err := ix.store.put(ctx, ix.project, stored, stamp); err != nil {
+	return ix.queue(ctx, &storedDoc{nodeID: id, title: title, path: path, meta: meta, body: body}, stamp)
+}
+
+// queue adds a node to the pending batch, replacing an earlier write of the
+// same node, and flushes when the batch is full.
+func (ix *projectIndex) queue(ctx context.Context, doc *storedDoc, stamp string) error {
+	if ix.pendingAt == nil {
+		ix.pendingAt = make(map[string]int, writeBatch)
+	}
+	write := pendingWrite{doc: doc, stamp: stamp}
+	if at, ok := ix.pendingAt[doc.nodeID]; ok {
+		ix.pendingBytes -= len(ix.pending[at].doc.meta) + len(ix.pending[at].doc.body)
+		ix.pending[at] = write
+	} else {
+		ix.pendingAt[doc.nodeID] = len(ix.pending)
+		ix.pending = append(ix.pending, write)
+	}
+	ix.pendingBytes += len(doc.meta) + len(doc.body)
+	if len(ix.pending) >= writeBatch || ix.pendingBytes >= writeBatchBytes {
+		return ix.flush(ctx)
+	}
+	return nil
+}
+
+// flush writes the pending batch in one transaction and only then records the
+// nodes in memory: a batch that failed leaves memory saying the rows are old,
+// so the next reconcile writes them again.
+func (ix *projectIndex) flush(ctx context.Context) error {
+	if len(ix.pending) == 0 {
+		return nil
+	}
+	batch := ix.pending
+	ix.pending, ix.pendingBytes = nil, 0
+	clear(ix.pendingAt)
+	if err := ix.store.putMany(ctx, ix.project, batch); err != nil {
 		return err
 	}
-	ix.setDoc(&document{id: id, title: title, meta: meta, path: path, stamp: stamp})
+	ix.unmaintained += len(batch)
+	for _, write := range batch {
+		doc := write.doc
+		ix.setDoc(&document{id: doc.nodeID, title: doc.title, meta: doc.meta, path: doc.path, stamp: write.stamp, pageTitles: extractPageTitles(doc.body)})
+	}
 	return nil
 }
 
@@ -304,33 +558,76 @@ func relativePath(root, path string) string {
 
 // ---------- querying ----------
 
+// indexView is what a query reads: the project's graph order and titles as of
+// one moment, never changed after it is made. The rows it points at are
+// whatever PostgreSQL has committed, so a query running while a reindex is
+// part way through sees each node either before or after its write.
+type indexView struct {
+	project    string
+	store      *docStore
+	order      []string
+	titles     map[string]string
+	pageTitles map[string][]string
+}
+
+// view snapshots the index for queries. order is shared rather than copied:
+// refreshGraph replaces the slice, it never writes into one.
+func (ix *projectIndex) view() *indexView {
+	titles := make(map[string]string, len(ix.docs))
+	pageTitles := make(map[string][]string, len(ix.docs))
+	for id, doc := range ix.docs {
+		titles[id] = doc.title
+		if len(doc.pageTitles) > 0 {
+			pageTitles[id] = doc.pageTitles
+		}
+	}
+	return &indexView{project: ix.project, store: ix.store, order: ix.order, titles: titles, pageTitles: pageTitles}
+}
+
+func (ix *indexView) matchesTitle(id, trimmed string) bool {
+	if title, ok := ix.titles[id]; ok && strings.EqualFold(strings.TrimSpace(title), trimmed) {
+		return true
+	}
+	for _, pt := range ix.pageTitles[id] {
+		if strings.EqualFold(strings.TrimSpace(pt), trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
 // query returns every document whose stored text contains the (already
 // lowercased) query, in graph order.
 //
-// Two stages, and the second one is not optional. FTS5 is searching tokens this
-// package produced, and those tokens are character bigrams: a document holding
-// "ab" and "bc" anywhere satisfies a MATCH for the bigrams of "abc" without
-// containing "abc". Moving the posting lists into SQLite changed where the
-// candidates come from, not that they are candidates, so containsFold still has
-// to see the query as a substring of the text before a document is a result.
-func (ix *projectIndex) query(ctx context.Context, lowered string) ([]Match, error) {
+// Two stages, and the second one is not optional. The database is searching
+// tokens this package produced, and those tokens are character bigrams: a
+// document holding "ab" and "bc" anywhere matches the bigrams of "abc" without
+// containing "abc". Where the candidates come from changed, not that they are
+// candidates, so containsFold still has to see the query as a substring of the
+// text before a document is a result.
+func (ix *indexView) query(ctx context.Context, lowered string) ([]Match, error) {
 	candidates, err := ix.store.candidates(ctx, ix.project, queryTokens(lowered))
 	if err != nil {
 		return nil, err
 	}
-	verified := make(map[string]*storedDoc, len(candidates))
+	type verifiedMatch struct {
+		title  string
+		pageID string
+		text   string
+	}
+	verified := make(map[string]verifiedMatch, len(candidates))
 	for _, doc := range candidates {
-		if containsFold(doc.text(), lowered) {
-			verified[doc.nodeID] = doc
+		if pageID, text, ok := doc.match(lowered); ok {
+			verified[doc.nodeID] = verifiedMatch{title: doc.title, pageID: pageID, text: text}
 		}
 	}
 	out := make([]Match, 0, len(verified))
 	for _, id := range ix.order {
-		doc, ok := verified[id]
+		m, ok := verified[id]
 		if !ok {
 			continue
 		}
-		out = append(out, Match{NodeID: id, Title: doc.title, Text: doc.text()})
+		out = append(out, Match{NodeID: id, PageID: m.pageID, Title: m.title, Text: m.text})
 	}
 	return out, nil
 }
@@ -344,7 +641,10 @@ func (ix *projectIndex) refreshNode(ctx context.Context, id string) error {
 	if !ok {
 		return ix.refreshGraph(ctx)
 	}
-	return ix.reindex(ctx, id, doc.title, doc.meta)
+	if err := ix.reindex(ctx, id, doc.title, doc.meta); err != nil {
+		return err
+	}
+	return ix.flush(ctx)
 }
 
 // refreshGraph re-parses graph.yaml and reconciles the document set with it.
@@ -389,6 +689,9 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := ix.flush(ctx); err != nil {
+		return err
+	}
 	for id := range ix.docs {
 		if _, ok := live[id]; !ok {
 			if err := ix.store.remove(ctx, ix.project, id); err != nil {
@@ -399,7 +702,18 @@ func (ix *projectIndex) refreshGraph(ctx context.Context) error {
 	}
 	ix.order = order
 	ix.graph = stampFile(ix.root, graphPath)
+	ix.maintainAfterBulk(ctx)
 	return nil
+}
+
+// maintainAfterBulk maintains the table once enough rows were written since
+// it last was.
+func (ix *projectIndex) maintainAfterBulk(ctx context.Context) {
+	if ix.unmaintained < bulkWrites {
+		return
+	}
+	ix.unmaintained = 0
+	ix.store.maintain(ctx)
 }
 
 // rewriteMeta replaces a node's metadata without touching its files.
@@ -409,12 +723,7 @@ func (ix *projectIndex) rewriteMeta(ctx context.Context, old *document, title, m
 		return err
 	}
 	meta = truncateRunes(meta, docTextLimit)
-	stored := &storedDoc{nodeID: old.id, title: title, path: old.path, meta: meta, body: body}
-	if err := ix.store.put(ctx, ix.project, stored, old.stamp); err != nil {
-		return err
-	}
-	ix.setDoc(&document{id: old.id, title: title, meta: meta, path: old.path, stamp: old.stamp})
-	return nil
+	return ix.queue(ctx, &storedDoc{nodeID: old.id, title: title, path: old.path, meta: meta, body: body}, old.stamp)
 }
 
 // ---------- the freshness net ----------
@@ -465,9 +774,11 @@ func scanNodes(root string) map[string]*nodeFiles {
 		}
 		parent := filepath.Base(filepath.Dir(path))
 		if strings.HasSuffix(strings.ToLower(parent), ".pages") {
-			format, ok := store.PageFormatFromFilename(name)
-			if !ok || !store.PageFormatIsText(format) {
-				return nil
+			if name != "pages.json" {
+				format, ok := store.PageFormatFromFilename(name)
+				if !ok || !store.PageFormatIsText(format) {
+					return nil
+				}
 			}
 			id := parent[:len(parent)-len(".pages")]
 			node := at(id)
@@ -537,5 +848,95 @@ func (ix *projectIndex) reconcile(ctx context.Context) (bool, error) {
 		}
 		changed = true
 	}
+	if err := ix.flush(ctx); err != nil {
+		return false, err
+	}
+	ix.maintainAfterBulk(ctx)
 	return changed, nil
+}
+
+// Ranked is one result of a ranked search. Match is the tier it ranked in:
+// "title" (the query is the node's title), "phrase" (the text contains the
+// whole query) or "terms" (it shares some of the query's terms). Score is
+// BM25 (FTS5's bm25() negated), so higher is better; an exact title the
+// terms did not reach scores 0.
+type Ranked struct {
+	NodeID string
+	PageID string
+	Title  string
+	Text   string
+	Match  string
+	Score  float64
+}
+
+// Ranked-search tiers, best first.
+const (
+	MatchTitle  = "title"
+	MatchPhrase = "phrase"
+	MatchTerms  = "terms"
+)
+
+func matchTier(match string) int {
+	switch match {
+	case MatchTitle:
+		return 0
+	case MatchPhrase:
+		return 1
+	}
+	return 2
+}
+
+// rank answers a query with the best documents first: an exact title, then
+// the whole query as a phrase, then any shared terms, each tier by BM25 and
+// then by graph order. Unlike query, a document need not contain every term,
+// which is what lets a question typed as a sentence find anything.
+func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranked, error) {
+	trimmed := strings.TrimSpace(query)
+	lowered := strings.ToLower(trimmed)
+	tokens := rankTokens(lowered)
+	candidates, err := ix.store.rankedCandidates(ctx, ix.project, tokens, limit)
+	if err != nil {
+		return nil, err
+	}
+	position := make(map[string]int, len(ix.order))
+	for index, id := range ix.order {
+		position[id] = index
+	}
+	byID := make(map[string]*rankedDoc, len(candidates))
+	for _, doc := range candidates {
+		if _, live := position[doc.nodeID]; live {
+			byID[doc.nodeID] = doc
+		}
+	}
+	// An exact title always comes first, even when the terms did not fetch it.
+	for _, id := range ix.order {
+		if byID[id] != nil || !ix.matchesTitle(id, trimmed) {
+			continue
+		}
+		stored, err := ix.store.document(ctx, ix.project, id)
+		if err != nil {
+			return nil, err
+		}
+		if stored != nil {
+			byID[id] = &rankedDoc{storedDoc: *stored}
+		}
+	}
+	out := make([]Ranked, 0, len(byID))
+	for id, doc := range byID {
+		pageID, text, match := doc.rankMatch(trimmed, lowered, tokens)
+		out = append(out, Ranked{NodeID: id, PageID: pageID, Title: doc.title, Text: text, Match: match, Score: doc.score})
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		if ta, tb := matchTier(out[a].Match), matchTier(out[b].Match); ta != tb {
+			return ta < tb
+		}
+		if out[a].Score != out[b].Score {
+			return out[a].Score > out[b].Score
+		}
+		return position[out[a].NodeID] < position[out[b].NodeID]
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }

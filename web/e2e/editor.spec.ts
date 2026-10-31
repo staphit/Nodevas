@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, freshProject, test } from "./fixture";
 
 async function openDocument(page: Page) {
@@ -11,15 +11,62 @@ async function openDocument(page: Page) {
 
 const editorText = (page: Page) => page.locator(".cm-content");
 
+/** Everything past bold, italic, list and link lives in "More formatting". */
+async function openFormatMenu(drawer: Locator) {
+  await drawer.getByRole("button", { name: "更多格式" }).click();
+  return drawer.getByRole("menu", { name: "更多格式" });
+}
+
+async function chooseMode(drawer: Locator, mode: "即時編輯" | "原始碼" | "預覽") {
+  const menu = await openFormatMenu(drawer);
+  await menu.getByRole("menuitemradio", { name: mode }).click();
+}
+
+async function expectMode(drawer: Locator, mode: "即時編輯" | "原始碼" | "預覽") {
+  const menu = await openFormatMenu(drawer);
+  await expect(menu.getByRole("menuitemradio", { name: mode })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await drawer.page().keyboard.press("Escape");
+}
+
+async function toggleOutline(drawer: Locator) {
+  const menu = await openFormatMenu(drawer);
+  await menu.getByRole("menuitemcheckbox", { name: "文件目錄" }).click();
+}
+
+/** A node's pages are tabs above the toolbar, with "+" beside them. */
+function pageTabs(drawer: Locator) {
+  return drawer.getByRole("tablist", { name: "內容頁面" });
+}
+
+async function addSubpage(drawer: Locator) {
+  await drawer.getByRole("button", { name: "新增子頁" }).click();
+}
+
+async function openPage(drawer: Locator, title: RegExp) {
+  await pageTabs(drawer).getByRole("tab", { name: title }).click();
+}
+
+/** File versions are on the Activity tab. */
+async function openHistory(drawer: Locator) {
+  await drawer.getByRole("tab", { name: "活動" }).click();
+  await drawer.locator(".node-history > summary").click();
+}
+
+/** Card appearance is under More properties. */
+async function openAppearance(drawer: Locator) {
+  await drawer.getByText("更多屬性", { exact: true }).click();
+  await drawer.locator(".meta-appearance > summary").click();
+}
+
 test.describe("markdown editor", () => {
   test("edits in place with the markup rendered, not as raw source", async ({
     page,
   }) => {
     const drawer = await openDocument(page);
-    await expect(drawer.getByRole("button", { name: "即時編輯" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expectMode(drawer, "即時編輯");
 
     await editorText(page).click();
     await page.keyboard.type("# 章節一\n**重點**在這裡\n- 第一項\n");
@@ -50,25 +97,24 @@ test.describe("markdown editor", () => {
     await editorText(page).click();
     await page.keyboard.type("# 標題\n");
 
-    await drawer.getByRole("button", { name: "原始碼" }).click();
+    await chooseMode(drawer, "原始碼");
     await expect(editorText(page)).toContainText("# 標題");
 
-    await drawer.getByRole("button", { name: "預覽" }).click();
+    await chooseMode(drawer, "預覽");
     await expect(page.locator(".md-preview h1")).toContainText("標題");
 
-    await drawer.getByRole("button", { name: "即時編輯" }).click();
+    // Preview keeps its way back in view.
+    await drawer.getByRole("button", { name: "回到編輯" }).click();
     await expect(page.locator(".cm-live-h1")).toContainText("標題");
   });
 
   test("remembers the chosen mode", async ({ page }) => {
     const drawer = await openDocument(page);
-    await drawer.getByRole("button", { name: "原始碼" }).click();
+    await chooseMode(drawer, "原始碼");
 
     await page.reload();
     await page.locator(".lane-wrap.graph .col-card").filter({ hasText: "筆記" }).first().click();
-    await expect(
-      page.getByRole("dialog", { name: "節點編輯" }).getByRole("button", { name: "原始碼" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    await expectMode(page.getByRole("dialog", { name: "節點編輯" }), "原始碼");
   });
 
   test("ticks a task from the rendered checkbox", async ({ page }) => {
@@ -86,9 +132,7 @@ test.describe("markdown editor", () => {
     // The tick is written back into the markdown, which is what gets saved.
     await page.keyboard.press("Control+s");
     await expect(page.getByText("已儲存").first()).toBeVisible();
-    await page.getByRole("dialog", { name: "節點編輯" })
-      .getByRole("button", { name: "原始碼" })
-      .click();
+    await chooseMode(page.getByRole("dialog", { name: "節點編輯" }), "原始碼");
     await expect(editorText(page)).toContainText("[x]");
   });
 });
@@ -110,7 +154,7 @@ test.describe("document history and structure", () => {
     await page.keyboard.press("Control+s");
     await expect(page.getByText("已儲存").first()).toBeVisible();
 
-    await drawer.getByText(/歷程/).click();
+    await openHistory(drawer);
     const versions = drawer.locator(".nh-files li");
     await expect(versions.first()).toBeVisible();
     await expect(versions).toHaveCount(1);
@@ -127,7 +171,7 @@ test.describe("document history and structure", () => {
   test("restores an earlier version of a subpage", async ({ page }) => {
     const drawer = await openDocument(page);
 
-    await drawer.getByRole("button", { name: "新增子頁" }).click();
+    await addSubpage(drawer);
     await drawer.getByLabel("子頁標題").fill("草稿");
     await drawer.getByRole("button", { name: "建立頁面" }).click();
     await expect(drawer.getByLabel("檔案位置")).toContainText(".pages/");
@@ -146,7 +190,7 @@ test.describe("document history and structure", () => {
     await expect(page.getByText("已儲存").first()).toBeVisible();
 
     // The history follows the open page, not the node's main document.
-    await drawer.getByText(/歷程/).click();
+    await openHistory(drawer);
     const versions = drawer.locator(".nh-files li");
     await expect(versions.first()).toBeVisible();
     await versions.first().getByRole("button", { name: "預覽" }).click();
@@ -156,6 +200,7 @@ test.describe("document history and structure", () => {
 
     await preview.getByRole("button", { name: "還原這一版" }).click();
     await page.getByRole("button", { name: "還原版本" }).click();
+    await drawer.getByRole("tab", { name: "內容" }).click();
     await expect(editorText(page)).toContainText("草稿");
     await expect(editorText(page)).not.toContainText("子頁第二版");
   });
@@ -186,7 +231,7 @@ test.describe("outline", () => {
     await editorText(page).click();
     await page.keyboard.type("# 第一章\n內文一\n## 小節\n內文二\n# 第二章\n內文三\n");
 
-    await drawer.getByRole("button", { name: "文件目錄" }).click();
+    await toggleOutline(drawer);
     const outline = drawer.getByRole("navigation", { name: "文件目錄" });
     await expect(outline).toBeVisible();
     await expect(outline.getByRole("button", { name: /第一章/ })).toBeVisible();
@@ -196,7 +241,7 @@ test.describe("outline", () => {
     // Jumping moves the caret, so typing continues at that heading.
     await outline.getByRole("button", { name: /第一章/ }).click();
     await page.keyboard.type("X");
-    await drawer.getByRole("button", { name: "原始碼" }).click();
+    await chooseMode(drawer, "原始碼");
     await expect(editorText(page)).toContainText("X# 第一章");
   });
 
@@ -205,13 +250,13 @@ test.describe("outline", () => {
     await editorText(page).click();
     await page.keyboard.type("只是一段內文。\n");
 
-    await drawer.getByRole("button", { name: "文件目錄" }).click();
+    await toggleOutline(drawer);
     await expect(drawer.getByText("尚無標題")).toBeVisible();
   });
 
   test("remembers that the outline is open", async ({ page }) => {
     const drawer = await openDocument(page);
-    await drawer.getByRole("button", { name: "文件目錄" }).click();
+    await toggleOutline(drawer);
     await expect(drawer.getByRole("navigation", { name: "文件目錄" })).toBeVisible();
 
     await page.reload();
@@ -229,7 +274,7 @@ test.describe("node card appearance", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "橢圓" }).click();
     await expect(card.first()).toHaveClass(/shape-ellipse/);
 
@@ -257,12 +302,14 @@ test.describe("node card appearance", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "六角形" }).click();
     await expect(card.first()).toHaveClass(/shape-hexagon/);
 
     await drawer.getByRole("button", { name: "重設為預設外觀" }).click();
-    await expect(card.first()).not.toHaveClass(/shape-/);
+    // Back to the node type's own shape: a Task is a rounded card.
+    await expect(card.first()).not.toHaveClass(/shape-hexagon/);
+    await expect(card.first()).toHaveClass(/shape-round/);
   });
 
   test("outlines a clipped shape on every edge, in the chosen colour", async ({
@@ -273,7 +320,7 @@ test.describe("node card appearance", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "菱形" }).click();
     await expect(card.first()).toHaveClass(/shape-diamond/);
     await drawer.getByRole("button", { name: "外框 #ff9f9f" }).click();
@@ -307,7 +354,7 @@ test.describe("node card appearance", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "外框 #8fd3ff" }).click();
 
     await expect
@@ -398,7 +445,7 @@ test.describe("shapes keep their contents", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "菱形" }).click();
     await expect(card.first()).toHaveClass(/shape-diamond/);
 
@@ -433,7 +480,7 @@ test.describe("shapes keep their contents", () => {
     await card.first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByLabel("自訂文字顏色").fill("#ff0000");
 
     await expect
@@ -448,7 +495,7 @@ test.describe("card text placement", () => {
     const card = page.locator(".lane-wrap.graph .col-card").filter({ hasText: "對齊節點" });
     await card.first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
 
     const textAlign = () =>
       card.first().evaluate((element) => getComputedStyle(element).textAlign);
@@ -470,7 +517,7 @@ test.describe("card text placement", () => {
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
 
     // A diamond centres its text by default; asking for left must win.
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
     await drawer.getByRole("button", { name: "菱形" }).click();
     await drawer.getByRole("button", { name: "靠左" }).click();
     await drawer.getByRole("button", { name: "靠上" }).click();
@@ -501,7 +548,7 @@ test.describe("shape geometry", () => {
     const card = page.locator(".lane-wrap.graph .col-card").filter({ hasText: "尺寸節點" });
     await card.first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
-    await drawer.getByRole("tab", { name: "外觀" }).click();
+    await openAppearance(drawer);
 
     const measure = () =>
       card.first().evaluate((element) => {
@@ -533,10 +580,11 @@ test.describe("tables", () => {
     const drawer = await openDocument(page);
     await editorText(page).click();
 
-    await drawer.getByRole("button", { name: "插入表格" }).click();
-    await drawer.getByLabel("列數").fill("2");
-    await drawer.getByLabel("欄數").fill("2");
-    await drawer.getByRole("button", { name: "插入", exact: true }).click();
+    await openFormatMenu(drawer);
+    const tableForm = drawer.getByRole("form", { name: "插入表格" });
+    await tableForm.getByLabel("列數").fill("2");
+    await tableForm.getByLabel("欄數").fill("2");
+    await tableForm.getByRole("button", { name: "插入", exact: true }).click();
 
     // The caret lands in the first header cell, so the table bar is up.
     const tableBar = drawer.getByRole("toolbar", { name: "表格編輯" });
@@ -549,7 +597,7 @@ test.describe("tables", () => {
     await tableBar.getByRole("button", { name: "在下方插入一列" }).click();
     await expect(tableBar).toContainText("表格 4×3");
 
-    await drawer.getByRole("button", { name: "原始碼" }).click();
+    await chooseMode(drawer, "原始碼");
     await expect(editorText(page)).toContainText("欄 1");
     await expect(editorText(page)).toContainText("| --- |");
   });
@@ -574,7 +622,7 @@ test.describe("document export", () => {
     ]) {
       // Export is a dialog now: pick the format, then confirm. Nothing leaves
       // on the format click alone.
-      await drawer.getByRole("button", { name: "匯出檔案" }).click();
+      await (await openFormatMenu(drawer)).getByRole("menuitem", { name: "匯出檔案…" }).click();
       const dialog = page.getByRole("dialog", { name: /匯出/ });
       await dialog.getByRole("radio", { name: new RegExp(format) }).click();
       const download = page.waitForEvent("download");
@@ -598,7 +646,7 @@ test.describe("document export", () => {
     await editorText(page).click();
     await page.keyboard.type("尚未儲存的內容\n");
 
-    await drawer.getByRole("button", { name: "匯出檔案" }).click();
+    await (await openFormatMenu(drawer)).getByRole("menuitem", { name: "匯出檔案…" }).click();
     const dialog = page.getByRole("dialog", { name: /匯出/ });
     await dialog.getByRole("radio", { name: /純文字/ }).click();
     const download = page.waitForEvent("download");
@@ -615,17 +663,22 @@ test.describe("page formats", () => {
   test("creates a plain-text page and keeps it as text", async ({ page }) => {
     const drawer = await openDocument(page);
 
-    await drawer.getByRole("button", { name: "新增子頁" }).click();
+    await addSubpage(drawer);
     await drawer.getByLabel("子頁標題").fill("備忘");
     await drawer.getByLabel("子頁檔案格式").first().selectOption("txt");
     await drawer.getByRole("button", { name: "建立頁面" }).click();
 
-    // The tab says what the file is, and the path shows the extension.
-    await expect(drawer.getByRole("tab", { name: /備忘/ })).toContainText("純文字");
+    // The page list says what the file is, and the path shows the extension.
+    const memo = pageTabs(drawer).getByRole("tab", { name: /備忘/ });
+    await expect(memo).toHaveAttribute("aria-selected", "true");
+    await expect(memo).toHaveAttribute("title", /純文字/);
     await expect(drawer.getByLabel("檔案位置")).toContainText(".txt");
     // Markdown-only tools are gone: plain text has no headings.
-    await expect(drawer.getByRole("button", { name: "設為內文" })).toBeHidden();
-    await expect(drawer.getByRole("button", { name: "即時編輯" })).toBeHidden();
+    await expect(drawer.getByRole("button", { name: "粗體" })).toBeHidden();
+    const format = await openFormatMenu(drawer);
+    await expect(format.getByRole("menuitem", { name: "內文" })).toHaveCount(0);
+    await expect(format.getByRole("menuitemradio", { name: "即時編輯" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
 
     await editorText(page).click();
     await page.keyboard.type("純文字內容\n");
@@ -635,14 +688,14 @@ test.describe("page formats", () => {
     await page.reload();
     await page.locator(".lane-wrap.graph .col-card").filter({ hasText: "筆記" }).first().click();
     const reopened = page.getByRole("dialog", { name: "節點編輯" });
-    await reopened.getByRole("tab", { name: /備忘/ }).click();
+    await openPage(reopened, /備忘/);
     await expect(editorText(page)).toContainText("純文字內容");
   });
 
   test("round-trips a Word page through the editor", async ({ page }) => {
     const drawer = await openDocument(page);
 
-    await drawer.getByRole("button", { name: "新增子頁" }).click();
+    await addSubpage(drawer);
     await drawer.getByLabel("子頁標題").fill("報告");
     await drawer.getByLabel("子頁檔案格式").first().selectOption("docx");
     await expect(drawer.getByText(/存檔時重新產生 \.docx/)).toBeVisible();
@@ -658,9 +711,9 @@ test.describe("page formats", () => {
     await page.reload();
     await page.locator(".lane-wrap.graph .col-card").filter({ hasText: "筆記" }).first().click();
     const reopened = page.getByRole("dialog", { name: "節點編輯" });
-    await reopened.getByRole("tab", { name: /報告/ }).click();
+    await openPage(reopened, /報告/);
     // Reopening converts the .docx back to Markdown.
-    await reopened.getByRole("button", { name: "原始碼" }).click();
+    await chooseMode(reopened, "原始碼");
     await expect(editorText(page)).toContainText("**粗體**");
     await expect(editorText(page)).toContainText("- 項目一");
   });
@@ -668,7 +721,7 @@ test.describe("page formats", () => {
   test("converts an existing page to another format", async ({ page }) => {
     const drawer = await openDocument(page);
 
-    await drawer.getByRole("button", { name: "新增子頁" }).click();
+    await addSubpage(drawer);
     await drawer.getByLabel("子頁標題").fill("轉檔");
     await drawer.getByRole("button", { name: "建立頁面" }).click();
     await editorText(page).click();
@@ -681,7 +734,7 @@ test.describe("page formats", () => {
     await drawer.getByLabel("子頁檔案格式").selectOption("html");
     await page.getByRole("button", { name: "轉換這一頁的檔案格式" }).click();
 
-    await expect(drawer.getByRole("tab", { name: /轉檔/ })).toContainText("網頁");
+    await expect(pageTabs(drawer).getByRole("tab", { name: /轉檔/ })).toHaveAttribute("title", /網頁/);
     await expect(drawer.getByLabel("檔案位置")).toContainText(".html");
     // Mod-End in CodeMirror: Command on macOS, Control elsewhere.
     await editorText(page).press("ControlOrMeta+End");

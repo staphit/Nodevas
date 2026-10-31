@@ -92,6 +92,9 @@ describe("autopilot API", () => {
   });
 
   it("answers null for a goal that never had a run", async () => {
+    mockFetch(null);
+    expect(await autopilotApi.getAutopilotForGoal("goal")).toBeNull();
+    // An older hub answered 404.
     mockFetch({ error: "not found" }, 404);
     expect(await autopilotApi.getAutopilotForGoal("goal")).toBeNull();
   });

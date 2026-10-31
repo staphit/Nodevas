@@ -2,75 +2,174 @@
  * one contiguous slice of the original — moving rules between files can
  * change which one wins.
  *
- * content pages, editor toolbar
+ * node panel menus, content pages, editor toolbar
  */
-/* ---------- document pages ---------- */
-.content-page-bar {
-  display: flex;
-  flex-shrink: 0;
-  min-width: 0;
-  height: 38px;
-  border-bottom: 1px solid var(--border);
+/* ---------- node panel menus (DrawerMenu) ---------- */
+.drawer-menu {
+  position: relative;
+  display: inline-flex;
+}
+.drawer-menu-panel {
+  z-index: calc(var(--z-drawer) + 20);
+  display: grid;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px var(--shadow);
+}
+.drawer-menu-panel [role="menu"] {
+  display: grid;
+  gap: 1px;
+}
+.drawer-menu-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.drawer-menu-item:hover,
+.drawer-menu-item:focus-visible {
+  outline: none;
   background: var(--surface-2);
 }
-.content-page-tabs {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
-  padding: 4px 5px 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+.drawer-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
-.content-page-tabs button {
+.drawer-menu-item.checked {
+  font-weight: 600;
+}
+.drawer-menu-item.danger {
+  color: var(--st-failed-fg);
+}
+.drawer-menu-icon {
   display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  max-width: 180px;
-  padding: 0 11px;
-  border: 1px solid transparent;
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+  justify-content: center;
   color: var(--text-2);
-  background: transparent;
-  cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.drawer-menu-item.checked .drawer-menu-icon {
+  color: var(--accent);
+}
+.drawer-menu-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.content-page-tabs button:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-.content-page-tabs button.active {
-  border-color: var(--border);
-  color: var(--text);
-  background: var(--surface);
-  font-weight: 600;
-}
-.content-page-action {
-  display: inline-flex;
-  flex: 0 0 36px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-left: 1px solid var(--border);
+.drawer-menu-hint {
   color: var(--text-2);
-  background: transparent;
+  font-size: calc(10.5px * var(--font-scale, 1));
+}
+.drawer-menu-group {
+  padding: 6px 8px 2px;
+  color: var(--text-2);
+  font-size: calc(10px * var(--font-scale, 1));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.drawer-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.drawer-menu-extra {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+.drawer-menu-extra .editor-tool-more-row {
+  margin-bottom: 0;
+}
+.editor-markdown-help > summary {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
-.content-page-action:hover {
-  color: var(--text);
-  background: var(--hover);
+.editor-markdown-help .markdown-help-grid {
+  margin-top: 6px;
 }
-.content-page-loading {
-  align-self: center;
-  padding: 0 8px;
+
+/* ---------- document pages ---------- */
+/* The page switcher and the file path share one row above the toolbar. */
+.editor-file-row {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px 10px 0;
+}
+.editor-file-row .editor-path {
+  flex: 1;
+  padding: 0;
+}
+/* A node's pages as tabs; a long list scrolls sideways. */
+.content-page-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 65%;
+}
+.content-page-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.content-page-tab {
+  flex: 0 0 auto;
+  max-width: 160px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.content-page-tab:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.content-page-tab.active {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.content-page-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.content-page-current {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.content-page-action {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
 }
 .content-page-create {
   display: flex;
@@ -85,58 +184,95 @@
   flex: 0 0 auto;
   color: var(--accent);
 }
+/* The title wants room for its example placeholder; when the row is short
+   of it, the select and buttons wrap under it instead. */
 .content-page-create input {
-  flex: 1;
-  min-width: 80px;
-}
-.content-page-create button {
-  white-space: nowrap;
-}
-.content-page-create select {
-  flex: 0 0 auto;
-  height: 26px;
-  padding: 0 5px;
+  flex: 1 1 calc(240px * var(--font-scale, 1));
+  min-width: calc(80px * var(--font-scale, 1));
+  min-height: 26px;
+  padding: 1px 7px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--text);
-  font-size: 11.5px;
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.content-page-create input:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 0;
+  border-color: transparent;
+}
+/* Themed like the select beside them: no user-agent outset boxes. Create is
+   the filled one; Import and Cancel stay quiet. */
+.content-page-create button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.content-page-create button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+.content-page-create button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.content-page-create button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.content-page-create button.ghost {
+  background: transparent;
+}
+.content-page-create button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.content-page-create select {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 /* The Word/HTML caveat wraps onto its own line under the form. */
 .content-page-create-note {
   flex: 1 0 100%;
   margin: 0;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .content-page-create {
   flex-wrap: wrap;
 }
-/* Tab badge: the extension, only when it is not the Markdown default. */
-.content-page-format {
-  margin-left: 5px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.04em;
-}
-.content-page-tabs button.active .content-page-format {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: inherit;
-}
+/* Sized by its text, so a larger text size widens it rather than cutting
+   off the format's name. */
 .content-page-format-select {
-  height: 24px;
-  max-width: 130px;
-  padding: 0 4px;
+  flex: 0 0 auto;
+  min-height: 24px;
+  max-width: calc(130px * var(--font-scale, 1));
+  padding: 1px 4px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .md-preview-plain {
   margin: 0;
@@ -157,7 +293,7 @@
   place-items: center;
   color: var(--text-2);
   background: var(--surface);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* ---------- editor toolbar ---------- */
@@ -178,7 +314,7 @@
   min-width: 26px;
   height: 26px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   cursor: pointer;
   display: inline-flex;
@@ -201,7 +337,7 @@
   border-radius: 5px;
   background: var(--surface);
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .tool-list-select:hover,
@@ -218,6 +354,27 @@
 }
 .tool-flex {
   flex: 1;
+}
+.tool-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.tool-btn:disabled:hover {
+  background: none;
+  color: var(--text-2);
+}
+/* "More formatting": a word, not another icon, so the rest is findable. */
+.editor-more-trigger {
+  gap: 4px;
+  padding: 0 8px;
+}
+.editor-more-trigger[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.editor-back-to-edit {
+  gap: 5px;
+  border-color: var(--border);
 }
 /* Card resize handles: visible only on the selected card, 12px targets. */
 .col-card-handle {
@@ -251,4 +408,12 @@
     height: 18px;
     margin: -9px 0 0 -9px;
   }
+}
+/* A legacy free-text kind: why this node behaves as Task. */
+.node-type-unknown-hint {
+  max-width: 240px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.4;
 }

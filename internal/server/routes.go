@@ -12,14 +12,13 @@ import (
 	"nodevas/internal/httpapi/graph"
 	membersapi "nodevas/internal/httpapi/members"
 	"nodevas/internal/httpapi/node"
-	packsapi "nodevas/internal/httpapi/packs"
 	"nodevas/internal/httpapi/project"
 	"nodevas/internal/httpapi/remoteapi"
 	runnersapi "nodevas/internal/httpapi/runners"
 	runsapi "nodevas/internal/httpapi/runs"
+	stationapi "nodevas/internal/httpapi/station"
 	"nodevas/internal/httpapi/system"
 	usageapi "nodevas/internal/httpapi/usage"
-	"nodevas/internal/packs"
 	"nodevas/internal/usage"
 )
 
@@ -37,7 +36,7 @@ func (s *Server) Handler() http.Handler {
 	// recovery is mandatory: malformed user input must never crash the process.
 	router.RedirectTrailingSlash = false
 	router.RedirectFixedPath = false
-	router.Use(recoverPanics(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withAuditTrail)
+	router.Use(recoverPanics(), s.secureHTTP, AccessMiddleware(s.accessVerifier, s.accessRequired), s.preAuthAbuseLimits, s.withAuth, s.withAbuseLimits, s.withRequestProject, s.withProjectAccess, s.withRoleGuard, s.withAuditTrail, s.withScorecardInvalidation)
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
@@ -75,6 +74,9 @@ func (s *Server) Handler() http.Handler {
 			return proxied
 		})
 		agentsAPI.UseRunOf(func(r *http.Request) string { return proxiedRunIDFrom(r.Context()) })
+		if s.runs != nil {
+			agentsAPI.UseRunUsage(s.runs.Store().SetUsageFromSession)
+		}
 		if s.usage != nil {
 			agentsAPI.UseUsage(s.usage, func(projectKey string) {
 				if s.hub == nil {
@@ -93,12 +95,19 @@ func (s *Server) Handler() http.Handler {
 		usageapi.New(s.pm, s.usage).Register(api)
 	}
 	if s.runners != nil {
-		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithLinks(s.runnerLinkOptions()).Register(api)
+		runnersapi.New(s.runners, s.runs).WithLLM(s.llm).WithRepo(s.repo).WithLinks(s.runnerLinkOptions()).Register(api)
 	}
 	if s.runs != nil {
 		runsAPI := runsapi.New(s.pm, s.runners, s.runs)
 		s.configureStepUp(runsAPI)
+		runsAPI.UseAutoRoute(s.autoRouteRequest)
+		if s.agents != nil {
+			runsAPI.UseAsks(s.agents)
+		}
 		runsAPI.Register(api)
+		// Agent analytics (pure SQL and rules) and the Explorer.
+		s.analyticsAPI().Register(api)
+		s.explorerAPI().Register(api)
 		if s.autopilot != nil {
 			autopilotAPI := autopilotapi.New(s.pm, s.autopilot)
 			s.configureAutopilotStepUp(autopilotAPI)
@@ -108,6 +117,12 @@ func (s *Server) Handler() http.Handler {
 		controlapi.New(s.pm, s.runs, s.autopilot).Register(api)
 	} else {
 		s.configureStepUp(nil)
+	}
+	if s.pm != nil {
+		// Station's building: every readable project at once. It checks each
+		// project itself, so it is exempt from the per-request project gate,
+		// and it is not on the runner proxy's allowlist.
+		stationapi.New(s.pm, stationapi.NewSources(s.pm, s.runs, s.autopilot, s.agents), s.projectReadable).Register(api)
 	}
 	sys := system.New(s.pm, s.notifier, s.auth)
 	if s.mailer != nil {
@@ -125,14 +140,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	sys.Register(api)
-	packsAPI := packsapi.New(packs.New(func() string { return packs.Dir(s.pm.Workspace()) }))
-	if s.audit != nil {
-		packsAPI.UseAudit(s.audit)
-	}
-	// A pack is the workspace's, so every client hears of it, whatever
-	// project it watches.
-	packsAPI.UseChanged(func(id string) { s.hub.Broadcast(packsapi.ChangedEvent, id) })
-	packsAPI.Register(api)
+	s.registerHealth(api)
 	if s.copilot != nil {
 		s.copilot.Register(api)
 	}

@@ -55,6 +55,11 @@ def embed(texts):
 
 
 if __name__ == "__main__":
+    # Belt and braces for interpreters that ignore -X utf8: the protocol is
+    # UTF-8 JSON lines, never the console code page.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     for line in sys.stdin:
         texts = json.loads(line)
         if not isinstance(texts, list) or len(texts) > 32 or not all(isinstance(text, str) for text in texts):

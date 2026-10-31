@@ -13,24 +13,29 @@ import {
 } from "../store";
 import { statusOptions } from "../statusTheme";
 import { useI18n } from "../i18n";
+import { localizeIssue } from "../issueMessages";
 import { IconPlus } from "../icons";
 import { EmptyState } from "./InteractionPrimitives";
+import { UnreadableGraphState } from "./lane/UnreadableGraphState";
 import { analyzeGraph } from "../analysis";
 import { BoardToolbar } from "./BoardToolbar";
-import { GraphBatchToolbar } from "./GraphBatchToolbar";
-import { GraphToolsPanel } from "./GraphToolsPanel";
+import { GraphBatchToolbar, NodeClipboardNotice } from "./GraphBatchToolbar";
+import { GraphToolsPanel, activeFilterCount } from "./GraphToolsPanel";
 import { TimelineGrid } from "./timeline/TimelineGrid";
 import { TimelineCards } from "./timeline/TimelineCards";
-import { useTimelineLayout } from "./timeline/useTimelineLayout";
+import { GAP_H, HORIZONTAL_GAP_W, useTimelineLayout } from "./timeline/useTimelineLayout";
 import { useTimelineDays } from "./timeline/useTimelineDays";
+import { TIMELINE_CULL_MIN_LANES } from "./timeline/timelineCulling";
 import { useTimelineCellSize } from "./timeline/useTimelineCellSize";
 import { useMilestoneDrag } from "./timeline/useMilestoneDrag";
 import { usePlanMenu } from "./timeline/usePlanMenu";
 import { useNarrowViewport } from "./TopbarOverflow";
 import { GraphCanvas } from "./canvas/GraphCanvas";
+import { paintLiftedCards } from "./canvas/GraphCard";
 import { GraphMinimap } from "./canvas/GraphMinimap";
+import { ProblemsPanel, problemCount } from "./canvas/ProblemsPanel";
 import { useCardResize } from "./canvas/useCardResize";
-import { useCardDrag } from "./canvas/useCardDrag";
+import { useCardDrag, type CardDragState } from "./canvas/useCardDrag";
 import {
   rectOfColumn,
   snapBoxesOfColumns,
@@ -40,6 +45,16 @@ import {
 import { useCanvasPan } from "./canvas/useCanvasPan";
 import { useConnectionDrag } from "./canvas/useConnectionDrag";
 import { useMarquee } from "./canvas/useMarquee";
+import { useViewWindow } from "./canvas/useViewWindow";
+import { cardDetailAt } from "./canvas/GraphCard";
+import {
+  boardViewKey,
+  recallBoardView,
+  recallTimelineView,
+  rememberTimelineView,
+  timelineViewKey,
+} from "./canvas/boardViewMemory";
+import { CULL_MIN_CARDS, cardRect, rectsIntersect } from "./canvas/viewportCulling";
 import {
   GraphGestureModeProvider,
   type GraphGestureMode,
@@ -47,7 +62,9 @@ import {
 import { useGraphWiring } from "./canvas/useGraphWiring";
 import { useBoardShortcuts } from "./canvas/useBoardShortcuts";
 import { useNodeCreation } from "./canvas/useNodeCreation";
+import { useRevealOpenedCard } from "./canvas/useRevealOpenedCard";
 import { useNodeConditions } from "./canvas/useNodeConditions";
+import { withRequiresProjection } from "./canvas/requiresProjection";
 import { useCanvasDecorations } from "./canvas/useCanvasDecorations";
 import { useGraphViews } from "./canvas/useGraphViews";
 import { useBoardColumns } from "./canvas/useBoardColumns";
@@ -63,30 +80,62 @@ import {
   ROW_H,
   type Col,
   type Point,
+  type Rect,
 } from "./canvas/geometry";
 import {
   boardMetrics,
   fitViewToCards,
   graphCellAt,
+  nearestFreeGraphCell,
   graphObstacleRects,
+  GRAPH_PAN_BUFFER_X,
+  GRAPH_PAN_BUFFER_Y,
+  openingScroll,
+  RULER_W,
+  timelineNodeColumnWidth,
+  timelineOpeningScroll,
 } from "./lane/boardGeometry";
 import { connectionPreview } from "./lane/connectionPreview";
-import { GraphAnalysisPanel } from "./lane/GraphAnalysisPanel";
 import {
   LaneContextMenuLayer,
   useLaneContextMenu,
 } from "./lane/LaneContextMenuLayer";
 import { useBoardReveal } from "./lane/useBoardReveal";
 import { useBoardViewport } from "./lane/useBoardViewport";
+import { useBoardDrawerCover, useDrawerCover } from "./lane/useDrawerCover";
 import { useEdgeCommands } from "./lane/useEdgeCommands";
 import { useLaneNotices } from "./lane/useLaneNotices";
 import { useDependencyGates } from "./lane/useDependencyGates";
 import { useTimelineOrderDrag } from "./lane/useTimelineOrderDrag";
+import { useMinuteClock } from "./lane/useMinuteClock";
+import { visibleBoardArea } from "./lane/boardVisibleArea";
+import { VIEWPORT_MARGIN } from "./floatingPanel";
+
+/** The new-node form's widest (12-timeline.css `.node-create-menu`). */
+const NODE_CREATE_FORM_W = 380;
+
+/** A horizontal timeline's sticky date header (TimelineGrid's HORIZONTAL_HEADER_H). */
+const TIMELINE_DATE_HEADER_H = 48;
 
 export type LaneContextMenu =
   | { kind: "plan"; x: number; y: number; nodeId: string; date: string }
-  | { kind: "graph"; x: number; y: number; col: number; row: number }
-  | { kind: "node-create"; x: number; y: number; col: number; row: number }
+  | {
+      kind: "graph";
+      x: number;
+      y: number;
+      col: number;
+      row: number;
+      /** The type a new node starts as; Task when absent. */
+      nodeKind?: string;
+    }
+  | {
+      kind: "node-create";
+      x: number;
+      y: number;
+      col: number;
+      row: number;
+      nodeKind?: string;
+    }
   | {
       kind: "edge";
       x: number;
@@ -94,6 +143,9 @@ export type LaneContextMenu =
       edges: { from: string; to: string }[];
     }
   | { kind: "logic-gate"; x: number; y: number; gateId: string }
+  /** The node's short menu: open, agents, add dependency, duplicate, trash. */
+  | { kind: "node-actions"; x: number; y: number; nodeId: string }
+  /** The node's dependency editor, from "Add dependency…" or a wire's gate. */
   | { kind: "node"; x: number; y: number; nodeId: string };
 
 export type GraphSelection =
@@ -105,6 +157,16 @@ export type GraphSelection =
   | { kind: "edges"; edges: { from: string; to: string }[] }
   | { kind: "vertex"; wireKey: string; index: number }
   | null;
+
+/**
+ * The empty-state hint over a board that has groups but no cards, in board
+ * pixels: the room left between its card and the groups' tops, the card's
+ * height until it has been measured (it grows with the text size), and the
+ * margin .ui-empty-state keeps around it.
+ */
+const EMPTY_HINT_GAP = 20;
+const EMPTY_HINT_CARD_H = 76;
+const EMPTY_HINT_MARGIN = 48;
 
 /** Props both panes take. `variant` is supplied by GraphPane / TimelinePane. */
 export interface PaneProps {
@@ -127,13 +189,16 @@ export function LaneView({
   keyboardActive,
   onActivate,
 }: PaneProps & { variant: "graph" | "timeline" }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const isGraph = variant === "graph";
-  const graph = useApp((s) => s.graph);
+  // Read through the requires projection: a hand-written graph.yaml can name
+  // a prerequisite in `requires` without drawing its wire, and the board must
+  // still show it, count it and offer to remove it.
+  const graph = withRequiresProjection(useApp((s) => s.graph));
   const statuses = useApp((s) => s.statuses);
   const runState = useApp((s) => s.runState);
   const issues = useApp((s) => s.issues);
-  const openTab = useApp((s) => s.openTab);
+  const openTabInStore = useApp((s) => s.openTab);
   const updateCanvasLayout = useApp((s) => s.updateCanvasLayout);
   const updatePlan = useApp((s) => s.updatePlan);
   const updateWorkflowDefinition = useApp((s) => s.updateWorkflowDefinition);
@@ -147,6 +212,11 @@ export function LaneView({
   const moveStamp = useApp((s) => s.moveStamp);
   const activeTab = useApp((s) => s.activeTab);
   const activeProject = useApp((s) => s.activeProject);
+  const graphProject = useApp((s) => s.graphProject);
+  // graph.yaml does not parse or validate: the board says why in place of
+  // the cards, and offers nothing that would write over the file.
+  const graphUnreadable = useApp((s) => s.graphUnreadable);
+  const unreadable = graphUnreadable !== null;
   const planStatusDefinitions = graph?.ui?.planStatuses ?? [];
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
@@ -200,8 +270,36 @@ export function LaneView({
   const [graphSelection, setGraphSelection] = useState<GraphSelection>(null);
   const { graphNotice, setGraphNotice, planNotice, setPlanNotice } =
     useLaneNotices();
-  const [graphToolsOpen, setGraphToolsOpen] = useState(false);
-  const [analysisOpen, setAnalysisOpen] = useState(false);
+  // The Problems side panel: the schedule analysis and the validation
+  // warnings, beside the board instead of on top of it.
+  const [problemsOpen, setProblemsOpen] = useState(false);
+  const problemsButtonRef = useRef<HTMLButtonElement>(null);
+  const closeDrawer = useApp((s) => s.closeDrawer);
+  // The panel and the node drawer answer different questions and both take
+  // the right-hand side, so one opening closes the other: Problems closes the
+  // drawer here, and picking a problem (which opens the drawer) closes
+  // Problems below.
+  // While graph.yaml does not read there is nothing to list (the panel is not
+  // drawn), so the button counts nothing and opens nothing.
+  const toggleProblems = (update: (open: boolean) => boolean) => {
+    if (unreadable) return;
+    const next = update(problemsOpen);
+    if (next && useApp.getState().activeTab !== null) closeDrawer();
+    setProblemsOpen(next);
+  };
+  // Closed from inside (× or Escape), the keyboard goes back to the button
+  // that opened it rather than to the top of the page.
+  const closeProblems = () => {
+    setProblemsOpen(false);
+    problemsButtonRef.current?.focus();
+  };
+  // And the other way: a node opened any other way (Enter or a double click
+  // on a card, the palette) takes the side back from Problems.
+  const lastActiveTab = useRef(activeTab);
+  useEffect(() => {
+    if (activeTab !== null && activeTab !== lastActiveTab.current) setProblemsOpen(false);
+    lastActiveTab.current = activeTab;
+  }, [activeTab]);
   // What a plain drag means, for a pointer with no modifier keys to hold. The
   // modifiers keep working in every mode, so this only ever adds a way in.
   const [gestureMode, setGestureMode] = useState<GraphGestureMode>("select");
@@ -249,10 +347,30 @@ export function LaneView({
     runCanvasCommand,
   });
   const boardRef = useRef<HTMLDivElement>(null);
+  // The node drawer lies over the pane's right side; the toolbar keeps its
+  // right-hand controls clear of it.
+  const paneRef = useRef<HTMLElement>(null);
+  const emptyHintRef = useRef<HTMLDivElement>(null);
+  const drawerCover = useDrawerCover(paneRef);
+  // So does the vertical timeline's date ruler, sticky at the board's right.
+  const boardDrawerCover = useBoardDrawerCover(paneRef);
+  // Every way the board opens a node — a card, Enter, its menu, a row in
+  // Problems — keeps the card out from under the drawer that opens with it.
+  const { openTab, revealIfHidden } = useRevealOpenedCard({
+    enabled: isGraph && !collapsed,
+    boardRef,
+    openTab: openTabInStore,
+  });
+  // Station and Settings unmount the board, so the view this project was left
+  // at in this session — if any — is read once, on mount.
+  const [rememberedView] = useState(() =>
+    isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined,
+  );
   const canvasPan = useCanvasPan({
     boardRef,
     collapsed,
     displayScale: graphNodeScale,
+    initialZoom: rememberedView?.zoom,
   });
   // Two different numbers on purpose. `zoom` is the user's own, and the only
   // one the toolbar shows or the wheel changes. `viewScale` is what the board
@@ -263,12 +381,81 @@ export function LaneView({
   const zoomAt = canvasPan.zoomAt;
   const setZoomDirect = canvasPan.setZoom;
   const graphPointFromClient = canvasPan.pointFromClient;
-  const { boardViewport, boardScroll, setBoardScroll } = useBoardViewport({
+  // The project menu swaps the project under a board that stays mounted, so
+  // the zoom follows it here: the new project's remembered zoom, or 100% for
+  // one this session has not shown. Set during render, so the commit that
+  // shows the new project is already drawn at its own zoom, and the opening
+  // scroll useBoardViewport restores below lands at that scale rather than
+  // being re-centred from the old one.
+  // Whether the project on show had been shown before it came up, which is
+  // also what spares a phone's board a second first-sight fit below.
+  // `staleGraph` is the graph the store held when the project changed under
+  // a mounted board: the old project's, kept until the new one loads. Not
+  // when the board came up before the workspace named any project: what was
+  // loaded then is the server's active project, the one now being named.
+  // `staleRunState` is the same for the run state, which loads beside the
+  // graph and can land after it.
+  const [shownProject, setShownProject] = useState(() => ({
+    project: activeProject,
+    remembered: rememberedView !== undefined,
+    staleGraph: null as typeof graph,
+    staleRunState: null as typeof runState,
+  }));
+  if (shownProject.project !== activeProject) {
+    const remembered = isGraph ? recallBoardView(boardViewKey(activeProject)) : undefined;
+    setShownProject({
+      project: activeProject,
+      remembered: remembered !== undefined,
+      staleGraph: shownProject.project ? graph : null,
+      staleRunState: shownProject.project ? runState : null,
+    });
+    if (isGraph) setZoomDirect(remembered?.zoom ?? 1);
+  }
+  // Whether the graph on show is this project's, so anything framing its
+  // cards can wait for them: a different graph has arrived since the switch,
+  // or the load says whose it is. (graphProject alone cannot say: the first
+  // load can land before the workspace names the active project.)
+  const graphReady =
+    graph !== null &&
+    shownProject.project === activeProject &&
+    (graph !== shownProject.staleGraph || graphProject === activeProject);
+  // The timeline's calendar is built from the records too, so its opening
+  // also waits for this project's run state: built from the last project's,
+  // it opened on the last project's days.
+  const runStateReady =
+    shownProject.staleRunState === null || runState !== shownProject.staleRunState;
+  // Set once the cards are laid out below; the opening scroll reads it.
+  const openingCardsRef = useRef<() => Rect[]>(() => []);
+  const timelineOpeningRef = useRef(() => ({ left: 0, top: 0 }));
+  // The timeline view whose opening has landed; its scroll is recorded below.
+  const timelineOpenedRef = useRef("");
+  // The minimap floats over the board's bottom-right corner; the opening
+  // keeps the cards out from under it when they have room to be.
+  const minimapRef = useRef<HTMLDivElement>(null);
+  const openingCornerRef = useRef(() => {
+    const board = boardRef.current;
+    const map = minimapRef.current;
+    if (!board || !map) return null;
+    const view = board.getBoundingClientRect();
+    const rect = map.getBoundingClientRect();
+    const right = view.left + board.clientLeft + board.clientWidth;
+    const bottom = view.top + board.clientTop + board.clientHeight;
+    if (rect.width <= 0 || rect.left >= right || rect.top >= bottom) return null;
+    // A little room between a card and the map's edge.
+    return { width: right - rect.left + 8, height: bottom - rect.top + 8 };
+  });
+  const { boardViewport } = useBoardViewport({
     boardRef,
     collapsed,
     isGraph,
     activeProject,
     zoom: viewScale,
+    userZoom: zoom,
+    openingCards: openingCardsRef,
+    openingCorner: openingCornerRef,
+    timelineOpening: timelineOpeningRef,
+    timelineOrientation,
+    contentReady: isGraph ? graphReady : graphReady && runStateReady,
   });
 
   const userNames = useMemo(
@@ -304,12 +491,23 @@ export function LaneView({
       document.removeEventListener("visibilitychange", refreshNow);
     };
   }, []);
+  // The current-time line is labelled to the minute, so it keeps its own
+  // clock; a day it moves into is a new today for the calendar too.
+  const clock = useMinuteClock(!isGraph && !collapsed);
+  useEffect(() => {
+    if (dayKey(clock) !== dayKey(now)) setNow(clock);
+  }, [clock]);
 
   const errorNodes = useMemo(() => {
     const set = new Set<string>();
     for (const i of issues) if (i.severity === "error" && i.nodeId) set.add(i.nodeId);
     return set;
   }, [issues]);
+  // The hub writes its findings in English; the panel reads them in the UI's language.
+  const localizedIssues = useMemo(
+    () => issues.map((issue) => localizeIssue(issue, language)),
+    [issues, language],
+  );
 
   // ----- graph layout: stored positions use continuous grid units so
   // integer coordinates remain compatible while dragging is fully free-form.
@@ -322,6 +520,19 @@ export function LaneView({
       timelineCellWidth,
       timelineCellHeight,
     });
+  // A large graph mounts only the cards near the view. Read after
+  // useBoardViewport's opening scroll, which lands in the same commit.
+  // A large timeline does the same with its lanes (timelineCulling).
+  const viewWindow = useViewWindow({
+    boardRef,
+    enabled:
+      !collapsed &&
+      (isGraph
+        ? cols.length >= CULL_MIN_CARDS
+        : timelineCols.length >= TIMELINE_CULL_MIN_LANES),
+    zoom: viewScale,
+    viewport: boardViewport,
+  });
 
   const { boardW, graphOffsetX, graphCanvasH, graphOffsetY } = boardMetrics({
     isGraph,
@@ -390,6 +601,7 @@ export function LaneView({
    */
 
   const { state: drag, handlers: cardDragHandlers } = useCardDrag({
+    onFrame: (live) => paintDrag(live),
     zoom: viewScale,
     snapToGrid,
     columns: cols,
@@ -476,35 +688,39 @@ export function LaneView({
     runCanvasCommand({ type: "canvas.moveNodes", positions });
     setGraphNotice({ text: t("lane.nodesAligned", { count: moved }), kind: "ok" });
   };
-  // ----- live drag. What a peer sees while a card is still under a pointer;
-  // where it lands arrives afterwards as a graph op.
+  // ----- live drag. The offset changes on every pointermove and goes nowhere
+  // near React: each animation frame writes it to the board as two custom
+  // properties, which the lifted cards' transform reads. The same frame tells
+  // the peers, who see it as a ghost; where the cards land arrives afterwards
+  // as a graph op.
+  const boardInnerRef = useRef<HTMLDivElement>(null);
   const reportDrag = useApp((state) => state.reportDrag);
-  const ghosts = useApp((state) => state.ghosts);
-  const peers = useApp((state) => state.peers);
   const lastDragSentAt = useRef(0);
   const dragReported = useRef(false);
+  const paintDrag = (live: CardDragState) => {
+    paintLiftedCards(boardInnerRef.current, live.ids, live.dx, live.dy);
+    if (!isGraph || !live.moved) return;
+    // About thirty a second: enough to read as motion, far under the socket's
+    // stream budget, and the gesture is redrawn locally either way.
+    const now = Date.now();
+    if (now - lastDragSentAt.current < 33) return;
+    lastDragSentAt.current = now;
+    dragReported.current = true;
+    reportDrag(live.ids, live.dx, live.dy, true);
+  };
   useEffect(() => {
-    if (!isGraph) return;
-    if (drag?.moved) {
-      // About thirty a second: enough to read as motion, far under the socket's
-      // stream budget, and the gesture is redrawn locally either way.
-      const now = Date.now();
-      if (now - lastDragSentAt.current < 33) return;
-      lastDragSentAt.current = now;
-      dragReported.current = true;
-      reportDrag(drag.ids, drag.dx, drag.dy, true);
-      return;
-    }
+    if (drag) return;
     // One last message so the ghost goes away even if the drop changed nothing.
     if (dragReported.current) {
       dragReported.current = false;
       reportDrag([], 0, 0, false);
     }
-  }, [isGraph, drag, reportDrag]);
+  }, [drag, reportDrag]);
 
   // A pointer on the board, in the same offset-free space the ghosts use, so a
-  // window scrolled somewhere else still draws it over the right card.
-  const presences = useApp((state) => state.presences);
+  // window scrolled somewhere else still draws it over the right card. Other
+  // people's pointers and ghosts are drawn by PeerOverlay, which subscribes to
+  // them itself: the board does not re-render for somebody else's mouse.
   const reportPresenceState = useApp((state) => state.reportPresenceState);
   const reportPointer = (event: React.PointerEvent<HTMLElement>) => {
     if (!isGraph) return;
@@ -521,30 +737,6 @@ export function LaneView({
     // The board is not on screen any more, so neither is this pointer.
     return () => reportPresenceState({ pointer: undefined });
   }, [reportPresenceState, isGraph]);
-
-  const peerPointers = useMemo(
-    () =>
-      peers
-        .filter((peer) => presences[peer.id]?.pointer)
-        .map((peer) => ({
-          peerId: peer.id,
-          name: peer.actor?.name || "?",
-          color: peer.color || "#888",
-          point: presences[peer.id].pointer!,
-        })),
-    [peers, presences],
-  );
-
-  const peerGhosts = useMemo(
-    () =>
-      Object.entries(ghosts).map(([peerId, ghost]) => ({
-        peerId,
-        color: peers.find((peer) => peer.id === peerId)?.color || "#888",
-        name: peers.find((peer) => peer.id === peerId)?.actor?.name ?? "",
-        ...ghost,
-      })),
-    [ghosts, peers],
-  );
 
 
   const saveGatePlacement = (targetId: string, point: Point) => {
@@ -609,11 +801,9 @@ export function LaneView({
 
 
   const handleBoardScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    if (isGraph) {
-      const element = event.currentTarget;
-      setBoardScroll({ left: element.scrollLeft, top: element.scrollTop });
-      return;
-    }
+    // The graph's scroll is read where it is used — the culling window and the
+    // minimap frame each follow it by frame — so a pan renders no board.
+    if (isGraph) return;
     onBoardScroll(event);
   };
 
@@ -621,6 +811,13 @@ export function LaneView({
     enabled: isGraph,
     withoutModifier: gestureMode === "marquee",
     pointFromClient: graphPointFromClient,
+    // A culled board has no element for most cards; the layout knows them all.
+    nodesInRect: viewWindow
+      ? (rect) =>
+          cols.flatMap((column) =>
+            rectsIntersect(cardRect(column, centerX, rowTop), rect) ? [column.node.id] : [],
+          )
+      : undefined,
     onSingleSelect: (nodeId) => selectNode(nodeId),
     onMultiSelect: (nodeIds) => {
       setGraphSelection(nodeIds.length ? { kind: "nodes", ids: nodeIds } : null);
@@ -651,7 +848,7 @@ export function LaneView({
 
   useBoardShortcuts({
     isGraph,
-    collapsed: collapsed ?? false,
+    collapsed: (collapsed ?? false) || unreadable,
     keyboardActive: keyboardActive ?? false,
     graph,
     graphSelection,
@@ -706,7 +903,7 @@ export function LaneView({
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
   const nowOffset =
-    ((now.getHours() * 60 + now.getMinutes()) / (24 * 60)) *
+    ((clock.getHours() * 60 + clock.getMinutes()) / (24 * 60)) *
     timelineCellHeight;
   const centerX = (c: Col) =>
     getCenterX(c, {
@@ -719,6 +916,17 @@ export function LaneView({
     });
 
 
+
+  // The horizontal timeline's sticky node column, narrowed beside a drawer.
+  const timelineNodeColumnW =
+    timelineOrientation === "horizontal"
+      ? timelineNodeColumnWidth({
+          cellWidth: timelineCellWidth,
+          viewportWidth: boardViewport.width,
+          cover: boardDrawerCover,
+          zoom: viewScale,
+        })
+      : timelineCellWidth;
 
   const {
     byNodeDay,
@@ -737,6 +945,7 @@ export function LaneView({
     timelineCols,
     timelineCellWidth,
     timelineCellHeight,
+    nodeColumnWidth: timelineNodeColumnW,
     boardViewport,
     zoom: viewScale,
     todayKey,
@@ -755,6 +964,125 @@ export function LaneView({
       dayCount: days.length,
     });
 
+  // Groups and annotations are content too: a template that is nothing but
+  // four quadrant groups opened on a corner of the first one. Over a board
+  // with no cards the empty-state hint is part of what the opening frames,
+  // set just above the decorations so it does not cover their titles.
+  const decorationRects: Rect[] = isGraph
+    ? [...(graph?.ui?.groups ?? []), ...(graph?.ui?.annotations ?? [])].map((item) => ({
+        left: item.x + graphOffsetX,
+        top: item.y + graphOffsetY,
+        right: item.x + graphOffsetX + item.width,
+        bottom: item.y + graphOffsetY + item.height,
+      }))
+    : [];
+  // The hint over a board with groups but no cards ends just above them; the
+  // opening frames it at its measured height.
+  const hasEmptyHint = cols.length === 0 && decorationRects.length > 0;
+  const groupsTop = hasEmptyHint ? Math.min(...decorationRects.map((rect) => rect.top)) : 0;
+  const emptyHintRect = (): Rect | null => {
+    if (!hasEmptyHint) return null;
+    const card =
+      emptyHintRef.current?.querySelector<HTMLElement>(".ui-empty-state")?.offsetHeight ||
+      EMPTY_HINT_CARD_H;
+    return {
+      left: Math.min(...decorationRects.map((rect) => rect.left)),
+      right: Math.max(...decorationRects.map((rect) => rect.right)),
+      top: groupsTop - EMPTY_HINT_GAP - card,
+      bottom: groupsTop,
+    };
+  };
+  const openingContent = (): Rect[] => {
+    if (!isGraph) return [];
+    const hint = emptyHintRect();
+    return [
+      ...cols.map((column) => cardRect(column, centerX, rowTop)),
+      ...decorationRects,
+      ...(hint ? [hint] : []),
+    ];
+  };
+  openingCardsRef.current = openingContent;
+  // The timeline comes back where this project's was left — its scroll is a
+  // place in this project's calendar, never another's — and a project it has
+  // not shown opens on today (timelineOpeningScroll).
+  const timelineKey = timelineViewKey(activeProject, timelineOrientation);
+  const timelineDaySize =
+    timelineOrientation === "horizontal" ? timelineCellWidth : timelineCellHeight;
+  timelineOpeningRef.current = () => {
+    timelineOpenedRef.current = timelineKey;
+    const horizontal = timelineOrientation === "horizontal";
+    const remembered = recallTimelineView(timelineKey);
+    // Days collapsed into gaps have no fixed size, and a different day size or
+    // zoom is a different layout: those open afresh.
+    if (
+      remembered &&
+      !collapseEmpty &&
+      remembered.daySize === timelineDaySize &&
+      remembered.scale === viewScale
+    ) {
+      // The range may have grown into the past since: the same day is further on.
+      const shift = days.findIndex((day) => dayKey(day) === remembered.firstDay);
+      if (shift >= 0) {
+        const delta = shift * timelineDaySize * viewScale;
+        return horizontal
+          ? { left: remembered.left + delta, top: remembered.top }
+          : { left: remembered.left, top: remembered.top + delta };
+      }
+    }
+    const contentDays = new Set<string>();
+    for (const byDay of [...byNodeDay.values(), ...plansByNodeDay.values()]) {
+      for (const [day, items] of byDay) if (items.length > 0) contentDays.add(day);
+    }
+    // Each lane's days with a record or a plan, in lane order, so the lane
+    // axis opens on the ones with something on the opening day.
+    const lanes = timelineCols.map(
+      (column) =>
+        new Set(
+          [byNodeDay.get(column.node.id), plansByNodeDay.get(column.node.id)].flatMap((byDay) =>
+            byDay ? [...byDay].flatMap(([day, items]) => (items.length > 0 ? [day] : [])) : [],
+          ),
+        ),
+    );
+    return timelineOpeningScroll({
+      days,
+      rowItems,
+      todayKey,
+      contentDays,
+      orientation: timelineOrientation,
+      daySize: horizontal ? timelineCellWidth : timelineCellHeight,
+      gapSize: horizontal ? HORIZONTAL_GAP_W : GAP_H,
+      viewport: boardViewport,
+      zoom: viewScale,
+      lanes,
+      laneSize: horizontal ? timelineCellHeight : timelineCellWidth,
+      // The sticky date ruler beside the lanes (vertical) or the date header
+      // above or below them (horizontal: TimelineGrid's 48px).
+      laneInset: horizontal ? TIMELINE_DATE_HEADER_H : RULER_W,
+    });
+  };
+
+  // Recorded as the timeline scrolls, once its opening has landed for this
+  // project: before that the scroll is still the last project's.
+  const recordTimelineRef = useRef(() => undefined as void);
+  recordTimelineRef.current = () => {
+    const board = boardRef.current;
+    if (isGraph || collapsed || !board || timelineOpenedRef.current !== timelineKey) return;
+    rememberTimelineView(timelineKey, {
+      left: board.scrollLeft,
+      top: board.scrollTop,
+      firstDay: days.length > 0 ? dayKey(days[0]) : "",
+      daySize: timelineDaySize,
+      scale: viewScale,
+    });
+  };
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board || isGraph || collapsed) return;
+    const onScroll = () => recordTimelineRef.current();
+    board.addEventListener("scroll", onScroll, { passive: true });
+    return () => board.removeEventListener("scroll", onScroll);
+  }, [collapsed, isGraph]);
+
   useBoardReveal({
     isGraph,
     collapsed,
@@ -763,6 +1091,9 @@ export function LaneView({
     colOf,
     timelineColOf,
     timelineCellWidth,
+    timelineCellHeight,
+    timelineOrientation,
+    timelineDateAxis,
     zoom: viewScale,
     centerX,
     rowTop,
@@ -859,7 +1190,18 @@ export function LaneView({
   // ----- right-click creation: graph nodes and expected timeline milestones
   const nodeCreation = useNodeCreation({
     planStatusDefinitions,
-    createNode,
+    // A card made where the reader is looking can still land out of sight:
+    // under the drawer, or left of column 0's place on a narrow board.
+    // The card just made is the selection, and an open drawer follows it the
+    // way it follows a click, so the board, the timeline, the drawer and the
+    // explorer all name one node. A closed drawer stays closed.
+    createNode: async (node, options) => {
+      const id = await createNode(node, options);
+      selectNode(id);
+      if (useApp.getState().activeTab !== null) void openTab(id).catch(reportError);
+      revealIfHidden(id);
+      return id;
+    },
     setLifecycleStatus,
     setGraphNotice,
     setContextMenu,
@@ -959,23 +1301,35 @@ export function LaneView({
   /**
    * Anchor for the toolbar's "新增節點" button: the middle of what the user is
    * currently looking at, so the node appears where they are working rather
-   * than at the origin [B-03].
+   * than at the origin [B-03]. What they are looking at is the board less
+   * the drawer laid over it: the board's own middle can be under the drawer,
+   * and the form and the card with it.
    */
   const viewportCreationAnchor = (): Extract<LaneContextMenu, { kind: "graph" }> => {
     const board = boardRef.current;
-    const rect = board?.getBoundingClientRect();
-    const x = rect ? rect.left + rect.width / 2 : 240;
-    const y = rect ? rect.top + Math.min(rect.height / 2, 320) : 200;
-    if (!board || !isGraph) return { kind: "graph", x, y, col: 0, row: 0 };
-    const contentX =
-      (board.scrollLeft + board.clientWidth / 2) / viewScale - graphOffsetX;
+    if (!board) return { kind: "graph", x: 240, y: 200, col: 0, row: 0 };
+    const rect = board.getBoundingClientRect();
+    const visible = visibleBoardArea(board);
+    const centreX = (visible.left + visible.right) / 2;
+    // The form opens with its corner here: as near the middle as lets all of
+    // it fit in what is showing, never past its left edge.
+    const x = Math.max(
+      visible.left + VIEWPORT_MARGIN,
+      Math.min(centreX, visible.right - NODE_CREATE_FORM_W - VIEWPORT_MARGIN),
+    );
+    const y = visible.top + Math.min((visible.bottom - visible.top) / 2, 320);
+    if (!isGraph) return { kind: "graph", x, y, col: 0, row: 0 };
+    const contentX = (board.scrollLeft + centreX - rect.left) / viewScale - graphOffsetX;
     const contentY =
-      (board.scrollTop + board.clientHeight / 2) / viewScale - graphOffsetY;
+      (board.scrollTop + (visible.top + visible.bottom) / 2 - rect.top) / viewScale -
+      graphOffsetY;
     return {
       kind: "graph",
       x,
       y,
-      ...graphCellAt(contentX, contentY),
+      // Off any card already there: pressing the button twice without
+      // touching the board must not put the second card on the first.
+      ...nearestFreeGraphCell(graphCellAt(contentX, contentY), cols),
     };
   };
 
@@ -986,6 +1340,7 @@ export function LaneView({
     nodeCreation.setNodePlanDates({});
     nodeCreation.setNodeCustomPlanDrafts([]);
     nodeCreation.setNodeCreateError(null);
+    nodeCreation.setNodeCreateKind(menu.nodeKind || "task");
     setContextMenu({ ...menu, kind: "node-create" });
   };
 
@@ -1005,7 +1360,12 @@ export function LaneView({
   });
 
 
-  const fitGraph = (selectionOnly: boolean) => {
+  // `opening` is a phone's first sight of the board: a board that does not
+  // fit even at the smallest zoom is then framed the way a desktop opens it
+  // (openingScroll) — on the card nearest its top-left corner — rather than
+  // centred on the middle of its bounds, which on a wide, mostly shallow
+  // board is empty grid with the top card row cut off.
+  const fitGraph = (selectionOnly: boolean, opening = false) => {
     const board = boardRef.current;
     if (!board) return;
     const candidates = selectionOnly
@@ -1021,31 +1381,66 @@ export function LaneView({
     // and the scroll has to be written in terms of the two together.
     const nextZoom = clampZoom(view.zoom / graphNodeScale);
     const nextViewScale = nextZoom * graphNodeScale;
-    setZoomDirect(nextZoom);
-    requestAnimationFrame(() => {
-      board.scrollLeft = view.focusX * nextViewScale - board.clientWidth / 2;
-      board.scrollTop = view.focusY * nextViewScale - board.clientHeight / 2;
+    // A graph narrower than the view is drawn centred in it, and how much
+    // room that leaves depends on the zoom: the focus moves with the origin,
+    // so it is placed against the origin the new zoom draws at.
+    const next = boardMetrics({
+      isGraph,
+      maxCol,
+      maxRow,
+      timelineColumnCount: timelineCols.length,
+      timelineCellWidth,
+      boardViewport,
+      zoom: nextViewScale,
+    });
+    const shiftX = next.graphOffsetX - graphOffsetX;
+    const shiftY = next.graphOffsetY - graphOffsetY;
+    if (opening) {
+      const viewport = { width: board.clientWidth, height: board.clientHeight };
+      const scroll = openingScroll(
+        openingContent().map((rect) => ({
+          left: rect.left + shiftX,
+          right: rect.right + shiftX,
+          top: rect.top + shiftY,
+          bottom: rect.bottom + shiftY,
+        })),
+        nextViewScale,
+        viewport,
+      );
+      canvasPan.zoomOnto(nextZoom, {
+        x: (scroll.left + viewport.width / 2) / nextViewScale,
+        y: (scroll.top + viewport.height / 2) / nextViewScale,
+      });
+      return;
+    }
+    canvasPan.zoomOnto(nextZoom, {
+      x: view.focusX + shiftX,
+      y: view.focusY + shiftY,
     });
   };
 
   // A phone at 100% shows about two cards of a 164px-grid board, so the first
   // sight of a project is the whole of it. Once per project, not per mount or
   // per resize: after that first fit the zoom is the user's own. Desktop keeps
-  // its opening behaviour — small boards already centre themselves and the
+  // its opening behaviour — the opening scroll frames the cards and the
   // toolbar's 全部置中 does this on demand. Waiting for a real measurement
   // matters because the effect runs before useBoardViewport has one; fitGraph
-  // writes its scroll in a requestAnimationFrame, so it lands after the
-  // remembered opening scroll rather than under it.
+  // writes its scroll with the commit that draws its zoom (or at once when
+  // the zoom stays), so it lands after the opening scroll rather than under it.
   const narrow = useNarrowViewport();
+  // A board this session already showed has been through its first sight:
+  // coming back from Station or Settings, or to it from another project in
+  // the project menu, keeps the user's zoom, not a refit.
   const autoFitKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isGraph || collapsed || !narrow) return;
+    if (!isGraph || collapsed || !narrow || !graphReady) return;
     if (boardViewport.width <= 0 || boardViewport.height <= 0) return;
     if (cols.length === 0) return;
-    const key = activeProject || "__default__";
+    const key = boardViewKey(activeProject);
     if (autoFitKeyRef.current === key) return;
     autoFitKeyRef.current = key;
-    fitGraph(false);
+    if (shownProject.remembered) return;
+    fitGraph(false, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitGraph is
     // recreated every render; the guards above decide when a fit happens.
   }, [
@@ -1056,6 +1451,7 @@ export function LaneView({
     boardViewport.height,
     cols.length,
     activeProject,
+    graphReady,
   ]);
 
   // How far out the board is drawn decides how much a card can say. Below these
@@ -1064,12 +1460,9 @@ export function LaneView({
   // attribute on .board-inner is a single selector invalidation however many
   // cards are up, and both factors of the scale are quantized (zoom to 0.1,
   // node scale to 0.05), so the levels cannot flicker at a boundary.
-  const lod =
-    !isGraph || viewScale >= 0.8
-      ? undefined
-      : viewScale >= 0.6
-        ? "compact"
-        : "minimal";
+  // The cards leave out what the level hides (cardDetailAt), so a pan that far
+  // out mounts only what is drawn.
+  const lod = isGraph ? cardDetailAt(viewScale) : undefined;
   const gridVars = {
     // Cards ride the board's CSS zoom, which the node scale is folded into, so
     // their text would grow with the box unless it is divided back out first.
@@ -1103,14 +1496,98 @@ export function LaneView({
       graphOffsetY,
     });
 
+  const emptyHint = cols.length === 0 && (
+    // The graph opens scrolled to its pan buffer (useBoardViewport), so
+    // the hint is placed in that opening view rather than at the
+    // surface's top-left corner, which is off screen. The timeline
+    // opens on today, far down or across its calendar: the hint comes
+    // ahead of the calendar, stuck to the pane's top-left and taking
+    // no room, so it is in the pane wherever the calendar is scrolled.
+    // Either way the box is as wide as the pane and only its card takes the
+    // pointer: around it are the groups' title bars and buttons.
+    <div
+      ref={emptyHintRef}
+      className="board-empty"
+      style={
+        isGraph
+          ? {
+              position: "absolute",
+              pointerEvents: "none",
+              // Over decorations: across the opening view, just above them —
+              // placed by its bottom edge, so a card grown taller with the
+              // text size grows upward, clear of them.
+              left: hasEmptyHint
+                ? openingScroll(openingContent(), viewScale, boardViewport).left / viewScale
+                : GRAPH_PAN_BUFFER_X,
+              top: hasEmptyHint
+                ? groupsTop - EMPTY_HINT_GAP + EMPTY_HINT_MARGIN
+                : GRAPH_PAN_BUFFER_Y,
+              transform: hasEmptyHint ? "translateY(-100%)" : undefined,
+              width:
+                boardViewport.width > 0
+                  ? boardViewport.width / viewScale
+                  : undefined,
+            }
+          : {
+              position: "sticky",
+              pointerEvents: "none",
+              top: 0,
+              left: 0,
+              height: 0,
+              // Its own formatting context: the message's top margin would
+              // otherwise collapse through it and push the calendar down.
+              display: "flow-root",
+              // Over the sticky date header and the lane heads.
+              zIndex: 14,
+              width:
+                boardViewport.width > 0
+                  ? boardViewport.width / viewScale
+                  : undefined,
+            }
+      }
+    >
+      <div style={{ display: "contents", pointerEvents: "auto" }}>
+        <EmptyState
+          title={t("lane.emptyTitle")}
+          description={t("lane.emptyDescription")}
+          action={
+            <button
+              type="button"
+              onClick={(event) =>
+                openNodeCreationMenu({
+                  kind: "graph",
+                  x: event.clientX || 24,
+                  y: event.clientY || 88,
+                  col: 0,
+                  row: 0,
+                })
+              }
+            >
+              <IconPlus size={13} />
+              {t("nodeCreate.create")}
+            </button>
+          }
+        />
+      </div>
+    </div>
+  );
+
   return (
     <GraphGestureModeProvider value={gestureMode}>
     <section
+      ref={paneRef}
       className={`lane-wrap ${isGraph ? "graph" : "timeline"}${
         collapsed ? " pane-collapsed" : ""
       }${timelineWidthResizeEdge ? " timeline-cell-resizing" : ""}`}
       aria-label={isGraph ? t("lane.graph") : t("lane.timeline")}
-      style={collapsed ? undefined : paneStyle}
+      data-drawer-cover={drawerCover > 0 ? "" : undefined}
+      style={
+        drawerCover > 0
+          ? ({ ...(collapsed ? {} : paneStyle), "--drawer-cover": `${drawerCover}px` } as CSSProperties)
+          : collapsed
+            ? undefined
+            : paneStyle
+      }
       onPointerDownCapture={onActivate}
       onFocusCapture={onActivate}
     >
@@ -1129,11 +1606,25 @@ export function LaneView({
         cardFontScale={cardFontScale}
         setCardFontScale={setCardFontScale}
         resetCardScale={resetCardScale}
-        graphToolsOpen={graphToolsOpen}
-        setGraphToolsOpen={setGraphToolsOpen}
-        analysisOpen={analysisOpen}
-        setAnalysisOpen={setAnalysisOpen}
-        analysis={analysis}
+        filterPanel={
+          <GraphToolsPanel
+            graph={graph}
+            customStatuses={customStatuses}
+            selectableStatuses={selectableStatuses}
+            viewFilter={viewFilter}
+            setViewFilter={setViewFilter}
+            savedViewName={savedViewName}
+            setSavedViewName={setSavedViewName}
+            saveCurrentView={saveCurrentView}
+            applySavedView={applySavedView}
+            removeSavedView={removeSavedView}
+          />
+        }
+        activeFilters={activeFilterCount(viewFilter)}
+        problemCount={unreadable ? 0 : problemCount(analysis, issues)}
+        problemsOpen={problemsOpen && !unreadable}
+        setProblemsOpen={toggleProblems}
+        problemsButtonRef={problemsButtonRef}
         fitGraph={fitGraph}
         snapToGrid={snapToGrid}
         setSnapToGrid={setSnapToGrid}
@@ -1146,6 +1637,7 @@ export function LaneView({
         nodeTitle={nodeTitle}
         openNodeCreationMenu={openNodeCreationMenu}
         viewportCreationAnchor={viewportCreationAnchor}
+        canCreate={!unreadable}
         timelineOrientation={timelineOrientation}
         changeTimelineOrientation={changeTimelineOrientation}
         timelineDateAxis={timelineDateAxis}
@@ -1166,7 +1658,8 @@ export function LaneView({
         graphNotice={graphNotice}
         planNotice={planNotice}
       />
-      {isGraph && !collapsed && selectedIDs.length > 0 && (
+      {/* Two or more: one node has its own menu and its drawer. */}
+      {isGraph && !collapsed && !unreadable && selectedIDs.length > 1 && (
         <GraphBatchToolbar
           graph={graph}
           customStatuses={customStatuses}
@@ -1183,28 +1676,10 @@ export function LaneView({
           onSelectedNodeChange={onSelectedNodeChange}
         />
       )}
-      {isGraph && !collapsed && graphToolsOpen && (
-        <GraphToolsPanel
-          graph={graph}
-          customStatuses={customStatuses}
-          selectableStatuses={selectableStatuses}
-          viewFilter={viewFilter}
-          setViewFilter={setViewFilter}
-          savedViewName={savedViewName}
-          setSavedViewName={setSavedViewName}
-          saveCurrentView={saveCurrentView}
-          applySavedView={applySavedView}
-          removeSavedView={removeSavedView}
-        />
-      )}
-      {isGraph && !collapsed && analysisOpen && (
-        <GraphAnalysisPanel
-          analysis={analysis}
-          selectNode={selectNode}
-          nodeTitle={nodeTitle}
-        />
-      )}
+      {/* The clipboard outlives the selection that filled it. */}
+      {isGraph && !collapsed && !unreadable && selectedIDs.length <= 1 && <NodeClipboardNotice strip />}
       {collapsed ? null : (
+      <div className={`lane-body${isGraph && problemsOpen ? " problems-open" : ""}`}>
       <div
         ref={boardRef}
         className={`board pan-enabled${panning ? " panning" : ""}`}
@@ -1219,6 +1694,7 @@ export function LaneView({
         }}
       >
         <div
+          ref={boardInnerRef}
           className={`board-inner${isGraph ? " graph-bg" : ""}${
             drag?.moved ? " dragging" : ""
           }${
@@ -1259,13 +1735,20 @@ export function LaneView({
               aria-hidden
             />
           )}
+          {/* Unreadable: the scroll container stays, so a fixed file brings the
+              board back where it was left, but nothing is drawn on it. */}
+          {!isGraph && !unreadable && emptyHint}
           {/* ---------- timeline: lane header + expected/actual lifecycle cards ---------- */}
-          {!isGraph && (
+          {!isGraph && !unreadable && (
             <TimelineGrid
               timelineOrientation={timelineOrientation}
               timelineDateAxis={timelineDateAxis}
               timelineNodeAxis={timelineNodeAxis}
+              timelineVDateAxis={timelineVDateAxis}
+              rulerInset={boardDrawerCover / viewScale}
+              viewWindow={viewWindow}
               timelineCellWidth={timelineCellWidth}
+              nodeColumnWidth={timelineNodeColumnW}
               timelineCellHeight={timelineCellHeight}
               setTimelineCellSize={setTimelineCellSize}
               useAutoTimelineCellSize={useAutoTimelineCellSize}
@@ -1298,12 +1781,12 @@ export function LaneView({
               planDrag={planDrag}
               actualDrag={actualDrag}
               selectedNodeId={selectedNodeId}
-              now={now}
+              now={clock}
               timelineOrderDragRef={timelineOrderDragRef}
               updateTimelineOrderDrag={updateTimelineOrderDrag}
             />
           )}
-          {isGraph && (
+          {isGraph && !unreadable && (
             <GraphCanvas
               graph={graph}
               cols={cols}
@@ -1326,13 +1809,13 @@ export function LaneView({
               graphObstacles={graphObstacles}
               centerX={centerX}
               rowTop={rowTop}
+              viewWindow={viewWindow}
+              cardDetail={lod}
               snapEnabled={snapGuidesEnabled}
               snapBoxes={snapBoxes}
               // One gesture runs at a time, so whichever is live owns the lines.
               snapGuides={drag?.guides ?? cardResize?.guides ?? decorationGuides}
               onSnapGuides={setDecorationGuides}
-              peerGhosts={peerGhosts}
-              peerPointers={peerPointers}
               drag={drag}
               cardDragHandlers={cardDragHandlers}
               cardResize={cardResize}
@@ -1367,33 +1850,11 @@ export function LaneView({
               setGraphNotice={setGraphNotice}
             />
           )}
-          {cols.length === 0 && (
-            <EmptyState
-              title={t("lane.emptyTitle")}
-              description={t("lane.emptyDescription")}
-              action={
-                <button
-                  type="button"
-                  onClick={(event) =>
-                    openNodeCreationMenu({
-                      kind: "graph",
-                      x: event.clientX || 24,
-                      y: event.clientY || 88,
-                      col: 0,
-                      row: 0,
-                    })
-                  }
-                >
-                  <IconPlus size={13} />
-                  {t("nodeCreate.create")}
-                </button>
-              }
-            />
-          )}
+          {isGraph && !unreadable && emptyHint}
         </div>
       </div>
-      )}
-      {isGraph && !collapsed && minimapVisible && cols.length > 0 && (
+      {graphUnreadable !== null && <UnreadableGraphState message={graphUnreadable} />}
+      {isGraph && !unreadable && minimapVisible && cols.length > 0 && (
         <GraphMinimap
           cols={cols}
           selectedGraphNodeIDs={selectedGraphNodeIDs}
@@ -1401,14 +1862,31 @@ export function LaneView({
           boardW={boardW}
           svgH={svgH}
           zoom={viewScale}
-          boardScroll={boardScroll}
           boardViewport={boardViewport}
+          graphOffsetX={graphOffsetX}
+          graphOffsetY={graphOffsetY}
           centerX={centerX}
           rowTop={rowTop}
+          mapRef={minimapRef}
         />
       )}
+      {isGraph && !unreadable && problemsOpen && (
+        <ProblemsPanel
+          analysis={analysis}
+          issues={localizedIssues}
+          nodeTitle={nodeTitle}
+          onPick={(nodeId) => {
+            setProblemsOpen(false);
+            selectNode(nodeId);
+            void openTab(nodeId).catch(reportError);
+          }}
+          onClose={closeProblems}
+        />
+      )}
+      </div>
+      )}
 
-      {contextMenu && (
+      {contextMenu && !unreadable && (
         <LaneContextMenuLayer
           contextMenu={contextMenu}
           setContextMenu={setContextMenu}
@@ -1420,6 +1898,7 @@ export function LaneView({
           selectNode={selectNode}
           duplicateNode={duplicateNode}
           deleteNode={deleteNode}
+          createGroupFromSelection={createGroupFromSelection}
           openNodeCreationMenu={openNodeCreationMenu}
           createCanvasGroup={createCanvasGroup}
           createCanvasAnnotation={createCanvasAnnotation}

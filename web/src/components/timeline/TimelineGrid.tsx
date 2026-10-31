@@ -11,6 +11,8 @@ import { StatusShape } from "../../statusTheme";
 import type { GraphNode, Status, StatusDefinition } from "../../types";
 import { ResizeHandle } from "../InteractionPrimitives";
 import type { Col } from "../canvas/geometry";
+import type { ViewWindow } from "../canvas/viewportCulling";
+import { laneSlots, laneSpan } from "./timelineCulling";
 import {
   formatLocalizedMonthDay,
   formatLocalizedTime,
@@ -46,6 +48,24 @@ export interface TimelineGridProps {
   timelineOrientation: "vertical" | "horizontal";
   timelineDateAxis: "top" | "bottom";
   timelineNodeAxis: "left" | "right";
+  /** Where a vertical timeline's date ruler sits: on the left it comes first. */
+  timelineVDateAxis?: "left" | "right";
+  /**
+   * How far in from the board's right edge a vertical timeline's date ruler
+   * sticks, in board pixels: an open node drawer lies over that edge.
+   */
+  rulerInset?: number;
+  /**
+   * A horizontal timeline's sticky node column, in board pixels: a date cell
+   * wide on its own, narrower beside an open node drawer
+   * (timelineNodeColumnWidth). A right-hand one sticks `rulerInset` in.
+   */
+  nodeColumnWidth?: number;
+  /**
+   * What part of the board is in view, when the timeline is large enough to
+   * mount only the lanes near it (timelineCulling); null draws every lane.
+   */
+  viewWindow?: ViewWindow;
   timelineCellWidth: number;
   timelineCellHeight: number;
   setTimelineCellSize: (dimension: "width" | "height", value: number) => void;
@@ -105,7 +125,11 @@ export function TimelineGrid({
   timelineOrientation,
   timelineDateAxis,
   timelineNodeAxis,
+  timelineVDateAxis = "right",
+  rulerInset = 0,
+  viewWindow = null,
   timelineCellWidth,
+  nodeColumnWidth = timelineCellWidth,
   timelineCellHeight,
   setTimelineCellSize,
   useAutoTimelineCellSize,
@@ -143,12 +167,64 @@ export function TimelineGrid({
   updateTimelineOrderDrag,
 }: TimelineGridProps) {
   const { t, language } = useI18n();
+  // Lanes something holds stay mounted wherever the view goes: the one being
+  // reordered, the one whose milestone is being dragged (both hold the
+  // pointer), the selection and the open document.
+  const pinned = [
+    timelineOrderDrag?.id,
+    planDrag?.nodeId,
+    actualDrag?.nodeId,
+    selectedNodeId,
+    activeTab,
+  ].flatMap((id) => (id ? [timelineCols.findIndex((column) => column.node.id === id)] : []));
+  const laneSlotsFor = (vertical: boolean) =>
+    laneSlots(
+      timelineCols.length,
+      laneSpan(viewWindow, vertical ? "x" : "y"),
+      vertical
+        ? timelineVDateAxis === "left"
+          ? RULER_W
+          : 0
+        : timelineDateAxis === "bottom"
+          ? 0
+          : HORIZONTAL_HEADER_H,
+      vertical ? timelineCellWidth : timelineCellHeight,
+      pinned,
+    );
+  // The ruler on the right sticks beside an open drawer rather than under it.
+  const rulerStyle =
+    timelineVDateAxis !== "left" && rulerInset > 0
+      ? { width: RULER_W, right: rulerInset }
+      : { width: RULER_W };
+  // A right-hand node column sticks beside an open drawer the same way.
+  const nodeColumnRight =
+    timelineNodeAxis === "right" && rulerInset > 0 ? { right: rulerInset } : {};
+  const columnSlots = timelineOrientation === "vertical" ? laneSlotsFor(true) : [];
+  const rowSlots = timelineOrientation === "horizontal" ? laneSlotsFor(false) : [];
   return (
     <>
         {timelineOrientation === "vertical" && (
           <>
-            <div className="lane-head-row" style={{ width: boardW }}>
-              {timelineCols.map((c, index) => {
+            {/* As wide as what it heads: the board keeps one lane's room
+                with no lanes, which here would be an empty strip beside the
+                ruler's corner with its bottom rule stopping short. */}
+            <div
+              className="lane-head-row"
+              style={{ width: timelineCols.length ? boardW : RULER_W }}
+            >
+              {columnSlots.map((slot) => {
+                if (slot.kind === "skip") {
+                  return (
+                    <div
+                      key={`skip-${slot.from}`}
+                      className="lane-skip"
+                      style={{ width: slot.count * timelineCellWidth }}
+                      aria-hidden="true"
+                    />
+                  );
+                }
+                const index = slot.index;
+                const c = timelineCols[index];
                 const st: Status = statuses[c.node.id] ?? "ready";
                 const assigned =
                   (c.node.assignee && userNames.get(c.node.assignee)) || t("timeline.unassigned");
@@ -208,7 +284,25 @@ export function TimelineGrid({
                   </button>
                 );
               })}
-              <div className="lane-head-cell ruler" style={{ width: RULER_W }} />
+              {/* The ruler's corner carries a lane head's two lines, unseen,
+                  so the header is as tall before its lanes mount (a large
+                  timeline mounts them once the view is known; an empty
+                  project has none) as after. The day rows start below it and
+                  the opening scroll puts today's right under it: a header
+                  that grew afterwards slid today's row under itself, as the
+                  browser's scroll anchoring held the rows still. */}
+              <div className="lane-head-cell ruler" style={rulerStyle}>
+                {/* A lane head is a button, whose line height is the font's
+                    own rather than the page's. */}
+                <span
+                  className="lane-head-copy"
+                  aria-hidden="true"
+                  style={{ visibility: "hidden", lineHeight: "normal" }}
+                >
+                  <span className="lane-head-title">&nbsp;</span>
+                  <span className="lane-head-assignee">&nbsp;</span>
+                </span>
+              </div>
             </div>
             <div className="board-rows">
               {rowItems.map((item, idx) => {
@@ -222,7 +316,7 @@ export function TimelineGrid({
                       onClick={() => setCollapse(false)}
                     >
                       <div className="board-gap-label">{t("timeline.gapLabel", { count: String(item.count) })}</div>
-                      <div className="board-date-r mono" style={{ width: RULER_W }}>
+                      <div className="board-date-r mono" style={rulerStyle}>
                         ⋯
                       </div>
                     </div>
@@ -237,8 +331,25 @@ export function TimelineGrid({
                     key={d.getTime()}
                     data-date={key}
                     className={`board-row${isToday ? " board-today" : ""}${isFuture ? " board-future" : ""}`}
+                    // A day is a day tall with no lanes to stretch it too: the
+                    // opening scroll and the culling count rows at this size.
+                    style={{ minHeight: timelineCellHeight }}
                   >
-                    {timelineCols.map((c) => {
+                    {columnSlots.map((slot) => {
+                      if (slot.kind === "skip") {
+                        return (
+                          <div
+                            key={`skip-${slot.from}`}
+                            className="board-skip"
+                            style={{
+                              width: slot.count * timelineCellWidth,
+                              height: timelineCellHeight,
+                            }}
+                            aria-hidden="true"
+                          />
+                        );
+                      }
+                      const c = timelineCols[slot.index];
                       return (
                         <div
                           key={c.node.id}
@@ -276,7 +387,7 @@ export function TimelineGrid({
                     )}
                     <div
                       className={`board-date-r mono${isToday ? " today" : ""}${isFuture ? " future" : ""}`}
-                      style={{ width: RULER_W }}
+                      style={rulerStyle}
                     >
                       {formatLocalizedMonthDay(d, language)}
                       {isToday && (
@@ -297,26 +408,45 @@ export function TimelineGrid({
           <div
             className={`horizontal-timeline${
               timelineDateAxis === "bottom" ? " date-axis-bottom" : ""
-            }${timelineNodeAxis === "right" ? " node-axis-right" : ""}`}
+            }${timelineNodeAxis === "right" ? " node-axis-right" : ""}${
+              nodeColumnWidth < timelineCellWidth ? " node-column-compact" : ""
+            }`}
             style={{
               width: horizontalTimelineW,
               minHeight: horizontalTimelineH,
               ["--timeline-resize-span" as string]: `${horizontalTimelineH}px`,
             }}
           >
+            {/* The corner stands outside the date header: the header is a
+                stacking context, and its day grips run the full height, so
+                only a corner of its own can cover them where the node column
+                sits (the node heads outrank the header for the same reason).
+                It overlaps the header's lead by a negative margin. */}
+            {/* Beside an open drawer at large text the label can run out of
+                lines; the whole of it is on hover. */}
+            <div
+              className="horizontal-corner"
+              title={t("timeline.corner")}
+              style={{
+                width: nodeColumnWidth,
+                height: HORIZONTAL_HEADER_H,
+                ...nodeColumnRight,
+                ...(timelineDateAxis === "bottom"
+                  ? { marginTop: -HORIZONTAL_HEADER_H }
+                  : { marginBottom: -HORIZONTAL_HEADER_H }),
+              }}
+            >
+              <span className="horizontal-corner-label">{t("timeline.corner")}</span>
+            </div>
             <div
               className="horizontal-date-head"
               style={{ height: HORIZONTAL_HEADER_H }}
             >
               <div
-                className="horizontal-corner"
-                style={{
-                  width: timelineCellWidth,
-                  height: HORIZONTAL_HEADER_H,
-                }}
-              >
-                {t("timeline.corner")}
-              </div>
+                className="horizontal-date-lead"
+                style={{ width: nodeColumnWidth }}
+                aria-hidden="true"
+              />
               {rowItems.map((item, index) => {
                 if (item.kind === "gap") {
                   return (
@@ -406,7 +536,19 @@ export function TimelineGrid({
             </div>
 
             <div className="horizontal-node-rows">
-              {timelineCols.map((column, columnIndex) => {
+              {rowSlots.map((slot) => {
+                if (slot.kind === "skip") {
+                  return (
+                    <div
+                      key={`skip-${slot.from}`}
+                      className="horizontal-node-skip"
+                      style={{ height: slot.count * timelineCellHeight }}
+                      aria-hidden="true"
+                    />
+                  );
+                }
+                const columnIndex = slot.index;
+                const column = timelineCols[columnIndex];
                 const status: Status = statuses[column.node.id] ?? "ready";
                 const assigned =
                   (column.node.assignee &&
@@ -445,8 +587,9 @@ export function TimelineGrid({
                           : ""
                       }`}
                       style={{
-                        width: timelineCellWidth,
+                        width: nodeColumnWidth,
                         height: timelineCellHeight,
+                        ...nodeColumnRight,
                       }}
                       onPointerDown={(event) =>
                         startTimelineOrderDrag(event, column.node.id)
@@ -558,7 +701,7 @@ export function TimelineGrid({
                 style={{
                   left:
                     horizontalNowX -
-                    (timelineNodeAxis === "right" ? timelineCellWidth : 0),
+                    (timelineNodeAxis === "right" ? nodeColumnWidth : 0),
                   top: timelineDateAxis === "bottom" ? 0 : HORIZONTAL_HEADER_H,
                   height:
                     Math.max(timelineCols.length, 1) *

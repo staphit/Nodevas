@@ -212,6 +212,8 @@ func readGoalBoard(ctx context.Context, env *serverToolEnv, goal string) (goalBo
 // liveAutopilot is the goal's running or paused autopilot, or nil.
 func liveAutopilot(ctx context.Context, env *serverToolEnv, goal string) (*runnerwire.AutopilotRun, error) {
 	var view runnerwire.AutopilotView
+	// No autopilot is a null body (the zero view, no status); an older hub
+	// answered 404.
 	err := env.do(ctx, http.MethodGet, "/api/autopilot?goal="+url.QueryEscape(goal), nil, &view)
 	if isStatus(err, http.StatusNotFound) {
 		return nil, nil

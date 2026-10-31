@@ -129,6 +129,20 @@ jobs:
           chmod +x desktop/resources/bin/nodevas
           lipo -info desktop/resources/bin/nodevas
 
+      # The embedded PostgreSQL for both architectures (the app is universal;
+      # the backend picks pg/darwin-<arch>), fetched by the same Go code serve
+      # uses: the archive is refused unless its SHA-256 matches the manifest.
+      # electron-builder signs these Mach-O files with the app.
+      - name: Bundle the pinned PostgreSQL
+        shell: bash
+        run: |
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target darwin-arm64 --out desktop/resources/pg/darwin-arm64
+          go run -tags nomsgpack ./cmd/nodevas db install-postgres \
+            --target darwin-amd64 --out desktop/resources/pg/darwin-x64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/darwin-arm64 darwin-arm64
+          node desktop/scripts/verify-pg-bundle.mjs desktop/resources/pg/darwin-x64 darwin-amd64
+
       # electron-builder downloads the Electron it packages itself, and the
       # dmg/zip targets need no package's install script.
       - name: Install desktop dependencies
@@ -173,6 +187,8 @@ jobs:
           test -n "${dmg_path}"
           test -n "${zip_path}"
           test -x "${app_path}/Contents/Resources/bin/nodevas"
+          node desktop/scripts/verify-pg-bundle.mjs "${app_path}/Contents/Resources/pg/darwin-arm64" darwin-arm64
+          node desktop/scripts/verify-pg-bundle.mjs "${app_path}/Contents/Resources/pg/darwin-x64" darwin-amd64
           if [[ "${SIGNED}" == "true" ]]; then
             codesign --verify --deep --strict "${app_path}"
           else

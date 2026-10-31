@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/safego"
 	"nodevas/internal/store"
 )
 
@@ -88,21 +89,124 @@ func ScanNodeLinks(projects []ProjectInfo) []NodeLink {
 	return links
 }
 
-// scanProjectLinks reads one project's documents and returns their links.
-func scanProjectLinks(info ProjectInfo) []NodeLink {
-	var links []NodeLink
-	for _, node := range graphNodes(info.Path) {
-		data, err := store.ReadProjectFileLimit(info.Path, store.NodeDocPath(info.Path, node.ID), maxLinkScanBytes)
+// readLinkDocument reads one document for a link scan. A var so tests can
+// watch the reads.
+var readLinkDocument = func(root, path string) ([]byte, error) {
+	return store.ReadProjectFileLimit(root, path, maxLinkScanBytes)
+}
+
+// WarmNodeLinks scans every project's links in the background, so the first
+// node drawer opened after a start is answered from the cache rather than from
+// a read of every document in the workspace (seconds, on a large one with a
+// cold disk). A drawer opened during the warm-up waits for the project being
+// scanned instead of reading it a second time. Close stops it at the next
+// project and waits for it.
+func (pm *ProjectManager) WarmNodeLinks() {
+	if pm.closing.Load() {
+		return
+	}
+	pm.linksWarm.Add(1)
+	go func() {
+		defer pm.linksWarm.Done()
+		defer safego.Recover("warm node links")
+		projects, err := pm.List()
 		if err != nil {
+			return
+		}
+		for _, info := range projects {
+			if pm.closing.Load() {
+				return
+			}
+			if !info.IsFolder {
+				projectLinks(info)
+			}
+		}
+	}()
+}
+
+// linkScanWorkers is how many documents of one project a scan reads at once.
+// The reads wait on the disk, not the CPU: overlapping them is what turns a
+// cold scan of thousands of documents from seconds into a fraction of that.
+const linkScanWorkers = 8
+
+// documentLinks is what one document said, with the stamp of the version it
+// was read at. The links carry no FromNode or FromTitle: those come from the
+// graph, which changes without the document changing.
+type documentLinks struct {
+	stamp string
+	links []NodeLink
+}
+
+// scanProjectLinks returns one project's links in graph order, and what each
+// document said. documents holds the stamp of every document on disk, keyed
+// by path; a node whose document is not in it has none. A document whose
+// stamp matches previous is not read again. With documents nil (a project
+// too large to stamp) every document is read.
+func scanProjectLinks(info ProjectInfo, documents map[string]string, previous map[string]documentLinks) ([]NodeLink, map[string]documentLinks) {
+	nodes := graphNodes(info.Path)
+	paths := make([]string, len(nodes))
+	found := make([]documentLinks, len(nodes))
+	var unread []int
+	var located map[string]string
+	if documents != nil {
+		located = store.NodeDocPaths(info.Path)
+	}
+	for i, node := range nodes {
+		if documents == nil {
+			paths[i] = store.NodeDocPath(info.Path, node.ID)
+			unread = append(unread, i)
 			continue
 		}
-		for _, link := range ParseNodeLinks(string(data), info.Name) {
+		paths[i] = located[node.ID]
+		stamp, onDisk := documents[paths[i]]
+		if paths[i] == "" || !onDisk {
+			continue
+		}
+		if known, ok := previous[paths[i]]; ok && known.stamp == stamp {
+			found[i] = known
+			continue
+		}
+		found[i].stamp = stamp
+		unread = append(unread, i)
+	}
+
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(linkScanWorkers, len(unread)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer safego.Recover("scan node links")
+			for i := range next {
+				data, err := readLinkDocument(info.Path, paths[i])
+				if err != nil {
+					// Not remembered: the next scan tries it again.
+					found[i] = documentLinks{}
+					continue
+				}
+				found[i].links = ParseNodeLinks(string(data), info.Name)
+			}
+		}()
+	}
+	for _, i := range unread {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+
+	var links []NodeLink
+	read := make(map[string]documentLinks, len(nodes))
+	for i, node := range nodes {
+		if found[i].stamp != "" {
+			read[paths[i]] = found[i]
+		}
+		for _, link := range found[i].links {
 			link.FromNode = node.ID
 			link.FromTitle = node.Title
 			links = append(links, link)
 		}
 	}
-	return links
+	return links, read
 }
 
 // NodeTitles returns one project's node ids with their titles, in graph
@@ -171,12 +275,31 @@ var (
 	graphCacheMu sync.Mutex
 	graphCache   = map[string]cacheEntry[[]graphNode]{}
 
+	// linkCacheMu guards linkCache and linkScans.
 	linkCacheMu sync.Mutex
-	linkCache   = map[string]cacheEntry[[]NodeLink]{}
-	// linkCacheNames keeps the project name each cached scan was made under,
-	// because the name is written into every link a project produces.
-	linkCacheNames = map[string]string{}
+	linkCache   = map[string]*projectLinkCache{}
+	// linkScans are the scans running now, per project directory: a second
+	// caller with the same stamp and name waits for the first one's result
+	// instead of reading the project again.
+	linkScans = map[string]*linkScan{}
 )
+
+// projectLinkCache is one project's links as last scanned: the project's
+// stamp and name then (the name is written into every link), the links, and
+// what each document said, so the next scan reads only what changed.
+type projectLinkCache struct {
+	stamp     string
+	name      string
+	links     []NodeLink
+	documents map[string]documentLinks
+}
+
+type linkScan struct {
+	stamp string
+	name  string
+	done  chan struct{}
+	links []NodeLink
+}
 
 // graphNodes returns the ids and titles in one project's graph.yaml, parsing
 // the file only when it changed. The returned slice is shared with the cache
@@ -218,66 +341,88 @@ func readGraphNodes(root string) []graphNode {
 }
 
 // projectLinks returns one project's links, from the cache while none of its
-// files changed. The returned slice is shared with the cache and must not be
-// modified.
+// files changed, and reading only the documents that did when some have. The
+// returned slice is shared with the cache and must not be modified.
 func projectLinks(info ProjectInfo) []NodeLink {
-	stamp, cacheable := projectDocumentsStamp(info.Path)
-	if cacheable {
-		linkCacheMu.Lock()
-		entry, ok := linkCache[info.Path]
-		name := linkCacheNames[info.Path]
-		linkCacheMu.Unlock()
-		if ok && entry.stamp == stamp && name == info.Name {
-			return entry.value
-		}
+	stamp, documents, cacheable := projectDocuments(info.Path)
+	if !cacheable {
+		links, _ := scanProjectLinks(info, nil, nil)
+		return links
 	}
-	links := scanProjectLinks(info)
-	if cacheable {
-		linkCacheMu.Lock()
-		if len(linkCache) >= maxCachedProjects {
-			linkCache = map[string]cacheEntry[[]NodeLink]{}
-			linkCacheNames = map[string]string{}
-		}
-		linkCache[info.Path] = cacheEntry[[]NodeLink]{stamp: stamp, value: links}
-		linkCacheNames[info.Path] = info.Name
+	linkCacheMu.Lock()
+	cached := linkCache[info.Path]
+	if cached != nil && cached.stamp == stamp && cached.name == info.Name {
 		linkCacheMu.Unlock()
+		return cached.links
 	}
+	if running, ok := linkScans[info.Path]; ok && running.stamp == stamp && running.name == info.Name {
+		linkCacheMu.Unlock()
+		<-running.done
+		return running.links
+	}
+	scan := &linkScan{stamp: stamp, name: info.Name, done: make(chan struct{})}
+	linkScans[info.Path] = scan
+	linkCacheMu.Unlock()
+
+	defer func() {
+		linkCacheMu.Lock()
+		if linkScans[info.Path] == scan {
+			delete(linkScans, info.Path)
+		}
+		linkCacheMu.Unlock()
+		close(scan.done)
+	}()
+	var previous map[string]documentLinks
+	if cached != nil && cached.name == info.Name {
+		previous = cached.documents
+	}
+	links, read := scanProjectLinks(info, documents, previous)
+	scan.links = links
+	linkCacheMu.Lock()
+	if len(linkCache) >= maxCachedProjects {
+		linkCache = map[string]*projectLinkCache{}
+	}
+	linkCache[info.Path] = &projectLinkCache{stamp: stamp, name: info.Name, links: links, documents: read}
+	linkCacheMu.Unlock()
 	return links
 }
 
-// projectDocumentsStamp fingerprints the files a scan of this project would
-// read: graph.yaml, which decides which documents are visited, and every
-// markdown file under nodes/. The second return is false for a project too
-// large to fingerprint honestly.
-func projectDocumentsStamp(root string) (string, bool) {
+// projectDocuments fingerprints the files a scan of this project would read:
+// graph.yaml, which decides which documents are visited, and every markdown
+// file under nodes/, whose stamps it also returns by path. The last return
+// is false for a project too large to fingerprint honestly.
+func projectDocuments(root string) (string, map[string]string, bool) {
 	sum := sha256.New()
 	fmt.Fprintf(sum, "graph:%s\n", fileStamp(root, filepath.Join(root, "graph.yaml")))
-	documents := 0
 	if err := store.ValidateProjectTree(root, filepath.Join(root, "nodes")); err != nil {
-		return "", false
+		return "", nil, false
 	}
+	documents := map[string]string{}
+	tooMany := false
 	_ = filepath.WalkDir(
 		filepath.Join(root, "nodes"),
 		func(path string, entry fs.DirEntry, err error) error {
 			if err != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 				return nil
 			}
-			documents++
-			if documents > maxStampedDocuments {
+			if len(documents) >= maxStampedDocuments {
+				tooMany = true
 				return fs.SkipAll
 			}
 			info, infoErr := entry.Info()
 			if infoErr != nil {
 				return nil
 			}
-			fmt.Fprintf(sum, "%s:%d:%d\n", path, info.Size(), info.ModTime().UnixNano())
+			stamp := fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+			documents[path] = stamp
+			fmt.Fprintf(sum, "%s:%s\n", path, stamp)
 			return nil
 		},
 	)
-	if documents > maxStampedDocuments {
-		return "", false
+	if tooMany {
+		return "", nil, false
 	}
-	return hex.EncodeToString(sum.Sum(nil)), true
+	return hex.EncodeToString(sum.Sum(nil)), documents, true
 }
 
 // fileStamp describes a file by size and modification time. A missing file has

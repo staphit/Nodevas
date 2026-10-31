@@ -18,9 +18,11 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/buildinfo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 const maxCreateBody = 4 << 10
@@ -49,6 +51,8 @@ type API struct {
 	runs *runs.Dispatcher
 	// llm relays copilot model calls (WithLLM); nil drops their answers.
 	llm *runners.LLMRelay
+	// repo carries read-only repo browsing answers (WithRepo).
+	repo *runners.RepoRelay
 	// link enables device links (WithLinks; link.go); nil serves none.
 	link *LinkOptions
 }
@@ -62,6 +66,13 @@ func New(reg *runners.Registry, dispatcher *runs.Dispatcher) *API {
 // through relay. It returns a for chaining.
 func (a *API) WithLLM(relay *runners.LLMRelay) *API {
 	a.llm = relay
+	return a
+}
+
+// WithRepo relays read-only repo browsing answers (runnerwire/repobrowse.go)
+// through relay. It returns a for chaining.
+func (a *API) WithRepo(relay *runners.RepoRelay) *API {
+	a.repo = relay
 	return a
 }
 
@@ -116,7 +127,7 @@ func (a *API) create(c *gin.Context) {
 	// A runner acts as its owner; an agent minting one would hand itself a
 	// credential that outlives its session.
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot create runners"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot create runners", "agent 不能建立 runner"), nil)
 		return
 	}
 	runner, token, err := a.reg.Create(c.Request.Context(), actor, body.Name)
@@ -166,6 +177,7 @@ func (s *session) Send(env runnerwire.Envelope) error {
 func (s *session) Bye(reason string) {
 	s.byeOnce.Do(func() {
 		go func() {
+			defer safego.Recover("runner bye")
 			_ = s.send(context.Background(), runnerwire.Envelope{Type: runnerwire.TypeBye, Reason: reason})
 			_ = s.conn.Close(websocket.StatusNormalClosure, reason)
 		}()
@@ -180,7 +192,7 @@ func readEnvelope(ctx context.Context, conn *websocket.Conn, timeout time.Durati
 		return runnerwire.Envelope{}, err
 	}
 	if kind != websocket.MessageText {
-		return runnerwire.Envelope{}, errors.New("binary message")
+		return runnerwire.Envelope{}, locale.Errorf("binary message", "二進位訊息")
 	}
 	var env runnerwire.Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -281,6 +293,11 @@ func (a *API) connect(c *gin.Context) {
 			if a.llm != nil {
 				_ = a.llm.Deliver(runner.ID, env)
 			}
+		case runnerwire.TypeRepoDone:
+			// A repo browse answer; one nobody waits for is dropped.
+			if a.repo != nil {
+				_ = a.repo.Deliver(runner.ID, env)
+			}
 		case runnerwire.TypeTermOut:
 			if a.runs == nil {
 				_ = conn.Close(websocket.StatusPolicyViolation, "this hub does not take runs")
@@ -295,7 +312,7 @@ func (a *API) connect(c *gin.Context) {
 }
 
 // errMalformed is a run message missing the part its type requires.
-var errMalformed = errors.New("malformed run message")
+var errMalformed = locale.Errorf("malformed run message", "執行訊息格式錯誤")
 
 // runMessage applies one run message. The runner's ID comes from its
 // authenticated socket, never from the message: the dispatcher refuses any

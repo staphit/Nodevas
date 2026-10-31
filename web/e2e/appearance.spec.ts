@@ -1,6 +1,9 @@
 import { type Page } from "@playwright/test";
 import { declineTour, expect, freshProject, test } from "./fixture";
 
+const SWITCH_LIGHT = "切換為淺色";
+const SWITCH_DARK = "切換為深色";
+
 async function openApp(page: Page) {
   await declineTour(page);
   await page.goto("/");
@@ -29,7 +32,7 @@ test.describe("responsive", () => {
       await page.setViewportSize(viewport);
       await openApp(page);
 
-      await expect(page.getByRole("combobox", { name: "專案", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^專案：/ })).toBeVisible();
       await expect(page.getByRole("button", { name: "設定", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: /新增節點/ }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
@@ -61,8 +64,12 @@ test.describe("theme", () => {
 
     const root = page.locator("html");
     const initial = await root.getAttribute("data-theme");
+    // The theme lives in Settings › General.
+    await page.getByRole("button", { name: "設定", exact: true }).click();
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
     const toggle = page.getByRole("button", {
-      name: initial === "dark" ? /切換淺色模式/ : /切換深色模式/,
+      name: initial === "dark" ? SWITCH_LIGHT : SWITCH_DARK,
+      exact: true,
     });
     await toggle.click();
 
@@ -79,25 +86,26 @@ test.describe("theme", () => {
     const handle = page.getByRole("separator", { name: "調整專案總管寬度" });
     await handle.focus();
     await page.keyboard.press("Shift+ArrowRight");
-    await expect(handle).not.toHaveAttribute("aria-valuenow", "304");
+    await expect(handle).not.toHaveAttribute("aria-valuenow", "320");
 
     await page.getByRole("button", { name: "設定", exact: true }).click();
-    await page.getByRole("button", { name: "外觀與語言" }).click();
-    const dialog = page.getByRole("region", { name: "專案設定" });
+    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: /^一般/ }).click();
+    await page.getByRole("button", { name: /^編輯器與版面/ }).click();
+    const dialog = page.getByRole("region", { name: "編輯器與版面", exact: true });
     await dialog.getByRole("button", { name: "重設全部本機偏好" }).click();
     await page.getByRole("button", { name: "重設", exact: true }).click();
 
     // The reset wipes every local preference — including the pinned zh-TW
-    // language — so the dialog has to be found again under its English name.
+    // language — so the row has to be found again under its English name.
     // The notice itself was translated at click time, before the language
-    // flipped, so it still reads in Chinese inside the English dialog.
-    const resetDialog = page.getByRole("region", { name: "Project settings" });
+    // flipped, so it still reads in Chinese inside the English row.
+    const resetDialog = page.getByRole("region", { name: "Editor and layout", exact: true });
     await expect(resetDialog.getByText("已重設全部本機偏好")).toBeVisible();
     // Still in Settings: the reset does not throw you out of it.
-    await page.getByRole("button", { name: "Info", exact: true }).click();
+    await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(page.getByRole("separator", { name: "Resize project explorer" })).toHaveAttribute(
       "aria-valuenow",
-      "304",
+      "320",
     );
   });
 });

@@ -4,9 +4,9 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"path/filepath"
 	"strings"
@@ -36,7 +36,7 @@ func (a *API) PostWorkspaceAdd(c *gin.Context) {
 	}
 
 	if err := a.pm.SwitchWorkspace(root); err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("開啟工作區失敗：%w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("opening the workspace failed: %w", "開啟工作區失敗：%w", err))
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{
@@ -72,7 +72,7 @@ func (a *API) PostWorkspaceOpen(c *gin.Context) {
 		}
 	}
 	if !found {
-		httpx.Err(c, http.StatusNotFound, fmt.Errorf("工作區尚未加入：%q", root))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("workspace not added: %q", "工作區尚未加入：%q", root))
 		return
 	}
 	if project.WorkspacePathEqual(root, a.pm.Workspace()) {
@@ -80,7 +80,7 @@ func (a *API) PostWorkspaceOpen(c *gin.Context) {
 		return
 	}
 	if err := a.pm.SwitchWorkspace(root); err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("切換工作區失敗：%w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("switching workspace failed: %w", "切換工作區失敗：%w", err))
 		return
 	}
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "path": root})
@@ -100,7 +100,7 @@ func (a *API) PostWorkspaceRemove(c *gin.Context) {
 	}
 	raw := strings.TrimSpace(body.Path)
 	if raw == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("請提供要移除的工作區路徑"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("give the path of the workspace to remove", "請提供要移除的工作區路徑"))
 		return
 	}
 	requested, err := filepath.Abs(filepath.Clean(raw))
@@ -131,11 +131,11 @@ func (a *API) PostWorkspaceRemove(c *gin.Context) {
 		}
 	}
 	if target == "" {
-		httpx.Err(c, http.StatusNotFound, fmt.Errorf("工作區尚未加入：%q", requested))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("workspace not added: %q", "工作區尚未加入：%q", requested))
 		return
 	}
 	if len(roots) <= 1 {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("最後一個工作區不能移除；請先加入另一個工作區"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("the last workspace cannot be removed; add another workspace first", "最後一個工作區不能移除；請先加入另一個工作區"))
 		return
 	}
 	if project.WorkspacePathEqual(target, a.pm.Workspace()) {
@@ -147,7 +147,7 @@ func (a *API) PostWorkspaceRemove(c *gin.Context) {
 			}
 		}
 		if err := a.pm.SwitchWorkspace(fallback); err != nil {
-			httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("切換到其他工作區失敗：%w", err))
+			httpx.Err(c, http.StatusInternalServerError, locale.Errorf("switching to another workspace failed: %w", "切換到其他工作區失敗：%w", err))
 			return
 		}
 	}
@@ -180,7 +180,8 @@ func (a *API) GetProjects(c *gin.Context) {
 	if perAccount {
 		current = a.currentName(c.Request)
 	}
-	visible := projects[:0]
+	// A fresh slice, never nil: "projects" is always a JSON array.
+	visible := make([]project.ProjectInfo, 0, len(projects))
 	for _, p := range projects {
 		// A project the caller may not read is not listed at all; its
 		// folder still is, as a plain directory in the tree.
@@ -197,6 +198,9 @@ func (a *API) GetProjects(c *gin.Context) {
 	if err != nil {
 		httpx.Err(c, http.StatusInternalServerError, err)
 		return
+	}
+	if workspaces == nil {
+		workspaces = []project.WorkspaceInfo{}
 	}
 	// Host paths are implementation details, not workspace identifiers. A
 	// remote account is scoped to the active workspace and must not learn what

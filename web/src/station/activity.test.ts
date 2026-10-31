@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentAsk, AgentMessage, Run } from "../api";
+import { translate } from "../i18n";
 import { buildActivity, MAX_LANES } from "./activity";
 
 const NOW = Date.parse("2026-10-26T14:00:00Z");
@@ -15,6 +16,7 @@ function run(over: Partial<Run>): Run {
 
 const titles: Record<string, string> = { n1: "Search", n2: "Auth API" };
 const titleOf = (id: string) => titles[id] ?? "";
+const t = (key: string, values?: Record<string, string | number>) => translate(key, "en", values);
 
 describe("buildActivity", () => {
   it("puts each agent's runs on its lane, placed within the hour", () => {
@@ -30,6 +32,7 @@ describe("buildActivity", () => {
       messages: [],
       now: NOW,
       titleOf,
+      t,
     });
     expect(lanes.map((l) => l.key)).toEqual(["claude", "codex"]);
     const [claude, codex] = lanes;
@@ -51,6 +54,7 @@ describe("buildActivity", () => {
       ],
       now: NOW,
       titleOf,
+      t,
     });
     const claude = lanes.find((l) => l.key === "claude")!;
     expect(claude.marks.map((m) => m.kind)).toEqual(["limit", "ask"]);
@@ -65,8 +69,33 @@ describe("buildActivity", () => {
     const runs = Array.from({ length: MAX_LANES + 3 }, (_, i) =>
       run({ id: `r${i}`, agent: `agent${i}`, finishedAt: min(50 - i) }),
     );
-    const lanes = buildActivity({ runs, asks: [], messages: [], now: NOW, titleOf });
+    const lanes = buildActivity({ runs, asks: [], messages: [], now: NOW, titleOf, t });
     expect(lanes).toHaveLength(MAX_LANES);
     expect(lanes[0].key).toBe(`agent${MAX_LANES + 2}`);
+  });
+
+  it("marks a permission prompt in the viewer's language, and not the prompts the hub allowed itself", () => {
+    const zh = (key: string, values?: Record<string, string | number>) => translate(key, "zh-TW", values);
+    const permission = {
+      id: "p",
+      kind: "permission",
+      agent: "antigravity",
+      sessionName: "antigravity",
+      tool: "run_command",
+      question: 'antigravity wants to run run_command: {"CommandLine":"ls"}',
+      status: "pending",
+      createdAt: NOW - 5 * 60_000,
+    } as AgentAsk;
+    const auto = {
+      ...permission,
+      id: "auto",
+      status: "approved",
+      note: "allowed for this run",
+      createdAt: NOW - 4 * 60_000,
+    } as AgentAsk;
+    const lanes = buildActivity({ runs: [], asks: [permission, auto], messages: [], now: NOW, titleOf, t: zh });
+    const marks = lanes.find((l) => l.key === "antigravity")!.marks;
+    expect(marks).toHaveLength(1);
+    expect(marks[0].text).toBe("antigravity 想要執行 run_command");
   });
 });

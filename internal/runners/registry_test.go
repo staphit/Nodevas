@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/identity"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/testpg"
 )
 
 var (
@@ -40,7 +40,7 @@ func (f *fakeConn) got() []string {
 func newRegistry(t *testing.T) (*Registry, *int) {
 	t.Helper()
 	changes := 0
-	return NewRegistry(dbtest.Open(t), func() { changes++ }), &changes
+	return NewRegistry(testpg.New(t), func() { changes++ }), &changes
 }
 
 func TestCreateStoresOnlyTheTokenHash(t *testing.T) {

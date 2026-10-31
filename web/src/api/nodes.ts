@@ -176,10 +176,13 @@ export const nodesApi = {
 
   getDraft: (id: string) =>
     req<{ exists: boolean; content?: string }>(`/api/drafts/${encodeURIComponent(id)}`),
-  putDraft: (id: string, content: string) =>
+  /** `project` names where the draft belongs when it is not the project
+   * requests go to now: one parked after another tab moved the hub. */
+  putDraft: (id: string, content: string, project?: string) =>
     req<{ ok: boolean }>(`/api/drafts/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify({ content }),
+      ...(project ? { headers: { "X-Nodevas-Project": project } } : {}),
     }),
   deleteDraft: (id: string) =>
     req<{ ok: boolean }>(`/api/drafts/${encodeURIComponent(id)}`, { method: "DELETE" }),

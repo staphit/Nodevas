@@ -8,9 +8,11 @@ import {
   type UsageReport,
   type UsageSession,
 } from "../api";
-import { useI18n } from "../i18n";
+import { formatList, useI18n } from "../i18n";
 import { IconClose, IconRefresh, IconUsage, IconWarning } from "../icons";
+import { roleNameById } from "../roles/roleLabels";
 import { relativeTime } from "../runners/RunnersModal";
+import { useApp } from "../store";
 import { openNodeRuns } from "../runs/openRuns";
 import { UsageChart, type UsageMetric } from "./UsageChart";
 import { formatShare, formatTokens, formatTokensExact, formatUSD, perDay } from "./usageFormat";
@@ -72,7 +74,7 @@ function UnpricedWarning({ report, onAddPrices }: { report: UsageReport; onAddPr
       <span>
         {t("usage.unpriced", {
           tokens: formatTokens(report.totals.unpricedTokens),
-          models: models.join(", ") || t("usage.unknownModel"),
+          models: formatList(models) || t("usage.unknownModel"),
         })}
       </span>
       <button type="button" className="usage-link-btn" onClick={() => onAddPrices(models)}>
@@ -157,6 +159,53 @@ function AgentTable({ report }: { report: UsageReport }) {
                 </td>
                 <td className="num">{formatTokens(perDay(g.totalTokens, report.days))}</td>
                 <td className="num">{formatUSD(perDay(g.costUsd, report.days))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/** Spend by the run's role (a legacy run's by its kind; sessions and the
+ * copilot by their own name). */
+function RoleTable({ report }: { report: UsageReport }) {
+  const { t } = useI18n();
+  const graph = useApp((s) => s.graph);
+  if (report.byRole.length === 0) return null;
+  return (
+    <section className="usage-section" aria-label={t("usage.byRole")}>
+      <h3>{t("usage.byRole")}</h3>
+      <div className="usage-table-wrap">
+        <table className="usage-table">
+          <thead>
+            <tr>
+              <th scope="col">{t("analytics.col.role")}</th>
+              <th scope="col" className="num">
+                {t("usage.col.tokens")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.cost")}
+              </th>
+              <th scope="col" className="num">
+                {t("usage.col.share")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.byRole.map((g) => (
+              <tr key={g.key}>
+                <th scope="row">{g.key ? roleNameById(graph, g.key, t) : t("usage.unknownAgent")}</th>
+                <td className="num" title={formatTokensExact(g.totalTokens)}>
+                  {formatTokens(g.totalTokens)}
+                </td>
+                <CostCell group={g} />
+                <td className="num">
+                  {report.totals.costUsd > 0
+                    ? formatShare(g.costUsd, report.totals.costUsd)
+                    : formatShare(g.totalTokens, report.totals.totalTokens)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -272,7 +321,7 @@ function SessionTable({ sessions, onOpenRun }: { sessions: UsageSession[]; onOpe
                 <CostCell group={{ ...s, key: s.id }} />
                 <td className="num">{s.lastAt ? relativeTime(s.lastAt) : "—"}</td>
                 <td>{s.agent}</td>
-                <td className="usage-model usage-models">{models.join(", ") || "—"}</td>
+                <td className="usage-model usage-models">{formatList(models) || "—"}</td>
               </tr>
             );
           })}
@@ -636,6 +685,7 @@ export function UsageModal({ onClose }: { onClose: () => void }) {
                 </div>
                 <UsageChart days={report.byDay} metric={metric} />
                 <AgentTable report={report} />
+                <RoleTable report={report} />
                 <ModelTable models={report.byModel} totals={report.totals} />
               </>
             )}

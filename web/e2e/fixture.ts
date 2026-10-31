@@ -3,117 +3,169 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createDatabase, dropDatabase, nodevasBinary } from "./database";
 
 let counter = 0;
 let previous: string | null = null;
 
+export interface StartedServer {
+  baseURL: string;
+  /** Everything the server wrote to stdout and stderr so far. */
+  logs: () => string;
+  stop: () => Promise<void>;
+}
+
+/**
+ * Boots the e2e binary on a workspace against one PostgreSQL database and
+ * waits until it answers. Its output is echoed and kept for assertions.
+ */
+export async function startServer(opts: {
+  workspace: string;
+  port: number;
+  databaseURL: string;
+}): Promise<StartedServer> {
+  const baseURL = `http://127.0.0.1:${opts.port}`;
+  // A server already answering here belongs to another run (another
+  // checkout's e2e, say). Testing against it would test the wrong build.
+  const taken = await fetch(`${baseURL}/api/projects`).then(
+    () => true,
+    () => false,
+  );
+  if (taken) {
+    throw new Error(
+      `port ${opts.port} is already serving; set NODEVAS_E2E_PORT_BASE to another range`,
+    );
+  }
+  // The workspace catalog lives in the user config directory; point it at
+  // the throwaway workspace so workers neither share state nor touch the
+  // developer's real setup.
+  const configDir = join(opts.workspace, "config");
+  mkdirSync(configDir, { recursive: true });
+
+  let output = "";
+  const server = spawn(
+    nodevasBinary(),
+    // No runner: these specs answer the runner routes themselves.
+    ["serve", "--project", opts.workspace, "--port", String(opts.port), "--no-runner"],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        APPDATA: configDir,
+        LOCALAPPDATA: configDir,
+        XDG_CONFIG_HOME: configDir,
+        HOME: configDir,
+        NODEVAS_DATABASE_URL: opts.databaseURL,
+        NODEVAS_DATABASE_URL_FILE: "",
+      },
+    },
+  );
+  for (const stream of [server.stdout, server.stderr]) {
+    stream?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+      process.stderr.write(chunk);
+    });
+  }
+
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    try {
+      const res = await fetch(`${baseURL}/api/projects`);
+      if (res.ok) break;
+    } catch {
+      /* not up yet */
+    }
+    if (server.exitCode !== null) {
+      throw new Error(`e2e server exited early (${server.exitCode})`);
+    }
+    if (Date.now() > deadline) {
+      server.kill();
+      throw new Error(`e2e server did not come up on port ${opts.port}`);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return {
+    baseURL,
+    logs: () => output,
+    stop: async () => {
+      server.kill();
+      await new Promise((resolve) => {
+        server.once("exit", resolve);
+        setTimeout(resolve, 5_000);
+      });
+    },
+  };
+}
+
+/** Same seed as serve.mjs: one project with two nodes and one dependency. */
+export function seedWorkspace(): string {
+  const workspace = mkdtempSync(join(tmpdir(), "nodevas-e2e-"));
+  const project = join(workspace, "e2e-project");
+  mkdirSync(join(project, "nodes"), { recursive: true });
+  writeFileSync(
+    join(project, "graph.yaml"),
+    [
+      "version: 1",
+      "nodes:",
+      "  - id: alpha",
+      "    title: 設計稿",
+      "    kind: task",
+      "  - id: beta",
+      "    title: 實作",
+      "    kind: task",
+      "    requires: alpha",
+      "edges:",
+      "  - from: alpha",
+      "    to: beta",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  writeFileSync(join(project, "nodes", "alpha.md"), "# 設計稿\n\n初稿內容。\n", "utf8");
+  writeFileSync(join(project, "nodes", "beta.md"), "# 實作\n\n待辦。\n", "utf8");
+  return workspace;
+}
+
 /**
  * Each worker gets its own server on its own port with its own throwaway
- * workspace. The server holds one active project at a time, so tests sharing
- * a server would trample each other's project switches — separate instances
- * are what make parallel workers safe. The binary is built once in
+ * workspace and its own database on the run's shared PostgreSQL (see
+ * database.ts). The server holds one active project at a time, so tests
+ * sharing a server would trample each other's project switches — separate
+ * instances are what make parallel workers safe. The binary is built once in
  * global-setup.ts; booting another instance of it costs almost nothing.
  *
  * Ports start clear of 5700 (serve.mjs default) and 5701 (mobile preview) so
  * an e2e run never fights a preview run for a listener. Two checkouts running
  * e2e at once would still collide, so NODEVAS_E2E_PORT_BASE moves the range.
  */
-const portBase = Number(process.env.NODEVAS_E2E_PORT_BASE) || 5720;
+export const portBase = Number(process.env.NODEVAS_E2E_PORT_BASE) || 5720;
 
 export const test = base.extend<{}, { workerServer: { baseURL: string } }>({
   workerServer: [
     async ({}, use, workerInfo) => {
       const port = portBase + workerInfo.parallelIndex;
-      const baseURL = `http://127.0.0.1:${port}`;
-      // A server already answering here belongs to another run (another
-      // checkout's e2e, say). Testing against it would test the wrong build.
-      const taken = await fetch(`${baseURL}/api/projects`).then(
-        () => true,
-        () => false,
-      );
-      if (taken) {
-        throw new Error(
-          `port ${port} is already serving; set NODEVAS_E2E_PORT_BASE to another range`,
-        );
-      }
-      const binary = join(
-        import.meta.dirname,
-        ".bin",
-        process.platform === "win32" ? "nodevas.exe" : "nodevas",
-      );
-
-      // Same seed as serve.mjs: one project with two nodes and one dependency.
-      const workspace = mkdtempSync(join(tmpdir(), "nodevas-e2e-"));
-      const project = join(workspace, "e2e-project");
-      mkdirSync(join(project, "nodes"), { recursive: true });
-      writeFileSync(
-        join(project, "graph.yaml"),
-        [
-          "version: 1",
-          "nodes:",
-          "  - id: alpha",
-          "    title: 設計稿",
-          "    kind: task",
-          "  - id: beta",
-          "    title: 實作",
-          "    kind: task",
-          "    requires: alpha",
-          "edges:",
-          "  - from: alpha",
-          "    to: beta",
-          "",
-        ].join("\n"),
-        "utf8",
-      );
-      writeFileSync(join(project, "nodes", "alpha.md"), "# 設計稿\n\n初稿內容。\n", "utf8");
-      writeFileSync(join(project, "nodes", "beta.md"), "# 實作\n\n待辦。\n", "utf8");
-
-      // The workspace catalog lives in the user config directory; point it at
-      // the throwaway workspace so workers neither share state nor touch the
-      // developer's real setup.
-      const configDir = join(workspace, "config");
-      mkdirSync(configDir, { recursive: true });
-
-      const server = spawn(
-        binary,
-        // No runner: these specs answer the runner routes themselves.
-        ["serve", "--project", workspace, "--port", String(port), "--no-runner"],
-        {
-          stdio: "inherit",
-          env: {
-            ...process.env,
-            APPDATA: configDir,
-            XDG_CONFIG_HOME: configDir,
-            HOME: configDir,
-          },
-        },
-      );
-
-      const deadline = Date.now() + 60_000;
-      for (;;) {
-        try {
-          const res = await fetch(`${baseURL}/api/projects`);
-          if (res.ok) break;
-        } catch {
-          /* not up yet */
-        }
-        if (server.exitCode !== null) {
-          throw new Error(`e2e server exited early (${server.exitCode})`);
-        }
-        if (Date.now() > deadline) {
-          server.kill();
-          throw new Error(`e2e server did not come up on port ${port}`);
-        }
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      await use({ baseURL });
-
-      server.kill();
-      await new Promise((resolve) => {
-        server.once("exit", resolve);
-        setTimeout(resolve, 5_000);
+      const workspace = seedWorkspace();
+      const database = `e2e_w${workerInfo.parallelIndex}_${process.pid}`;
+      const server = await startServer({
+        workspace,
+        port,
+        databaseURL: createDatabase(database),
       });
+
+      // The server must be on this worker's database on the shared server,
+      // never on a file or a cluster of its own.
+      const ready = server
+        .logs()
+        .split("\n")
+        .find((line) => line.includes("db.ready"));
+      expect(ready, "serve logged no db.ready line").toBeTruthy();
+      expect(ready).toContain("external");
+      expect(ready).toContain(database);
+
+      await use({ baseURL: server.baseURL });
+
+      await server.stop();
+      dropDatabase(database);
       try {
         rmSync(workspace, { recursive: true, force: true });
       } catch {
@@ -184,7 +236,7 @@ export async function freshProject(page: Page, titles = ["設計稿", "實作"])
     const created = await page.request.post("/api/nodes", {
       data: { title, kind: "task", body: "" },
     });
-    expect(created.ok()).toBeTruthy();
+    expect(created.ok(), await created.text()).toBeTruthy();
   }
   // Wait for the server to actually be on the new project: opening one is a
   // filesystem operation, and loading the app before it lands races with it.

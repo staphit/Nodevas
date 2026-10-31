@@ -1,0 +1,114 @@
+version: 1
+type: workflow
+users:
+    - id: platform
+      name: 平台組
+    - id: qa
+      name: QA
+    - id: agent-runner
+      name: Agent Runner
+    - id: reviewer
+      name: 審查者
+nodes:
+    - id: node-0001
+      title: 定義 harness 契約
+      kind: task
+      priority: urgent
+      assignee: platform
+      deadline: "2026-08-14"
+      tags:
+        - harness
+        - 規格
+    - id: node-0002
+      title: 建立確定性評估器
+      kind: task
+      priority: high
+      assignee: platform
+      deadline: "2026-08-16"
+      requires: node-0001
+      tags:
+        - harness
+        - 評估
+    - id: node-0003
+      title: 新增可重播的 fixture 套件
+      kind: task
+      priority: high
+      assignee: qa
+      deadline: "2026-08-18"
+      requires: node-0002
+      tags:
+        - 測試
+        - 重播
+    - id: node-0004
+      title: 以 fixture 執行 agent 迴圈
+      kind: task
+      priority: high
+      assignee: agent-runner
+      deadline: "2026-08-20"
+      requires: node-0003
+      tags:
+        - 執行
+        - 追蹤
+    - id: node-0005
+      title: 發布失敗分流筆記
+      kind: task
+      priority: medium
+      assignee: reviewer
+      deadline: "2026-08-21"
+      requires: node-0004
+      tags:
+        - 審查
+        - 交接
+edges:
+    - from: node-0001
+      to: node-0002
+    - from: node-0002
+      to: node-0003
+    - from: node-0003
+      to: node-0004
+    - from: node-0004
+      to: node-0005
+ui:
+    positions:
+        node-0001:
+            x: 0
+            "y": 0
+        node-0002:
+            x: 0.707
+            "y": 1.275
+        node-0003:
+            x: 0.507
+            "y": 2.587
+        node-0004:
+            x: 0.927
+            "y": 4.087
+        node-0005:
+            x: 2.585
+            "y": 3.875
+    timeline_order:
+        - node-0001
+        - node-0002
+        - node-0003
+        - node-0004
+        - node-0005
+    plans:
+        node-0001:
+            - date: "2026-08-14"
+              status: started
+              note: 敲定 harness 契約。
+        node-0002:
+            - date: "2026-08-16"
+              status: started
+              note: 讓評估結果可重現。
+        node-0003:
+            - date: "2026-08-18"
+              status: started
+              note: 加入可重播的 fixture。
+        node-0004:
+            - date: "2026-08-20"
+              status: started
+              note: 擷取一次 agent trace。
+        node-0005:
+            - date: "2026-08-21"
+              status: started
+              note: 發布下一個最小實驗。

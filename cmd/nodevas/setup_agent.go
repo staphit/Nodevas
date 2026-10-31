@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"nodevas/internal/agentsetup"
+	"nodevas/internal/engine"
 	"nodevas/internal/mcp"
 )
 
@@ -28,7 +29,14 @@ func setupAgentCmd(args []string) {
 	actor := fs.String("actor", "",
 		"the attribution every agent acts under; empty gives each its own, mcp:<agent>")
 	agentRole := fs.String("agent-role", "worker", "the write-permission class: worker or orchestrator")
+	agentRoleName := fs.String("role", "",
+		"the agent role the sessions act in (planner, qa, tester, executor, reviewer, researcher, custom-role-<id>); empty keeps every tool")
 	_ = fs.Parse(args)
+	roleName := strings.TrimSpace(*agentRoleName)
+	if roleName != "" && !engine.ValidRoleID(roleName) {
+		fmt.Fprintf(os.Stderr, "nodevas setup-agent: --role %q is not a role: use planner, qa, tester, executor, reviewer, researcher or custom-role-<id>\n", roleName)
+		os.Exit(2)
+	}
 
 	role := strings.TrimSpace(*agentRole)
 	if role != "worker" && role != "orchestrator" {
@@ -65,6 +73,7 @@ func setupAgentCmd(args []string) {
 		Project:   strings.TrimSpace(*projectName),
 		Actor:     strings.TrimSpace(*actor),
 		AgentRole: role,
+		Role:      roleName,
 	})
 	failed := false
 	for _, r := range reports {

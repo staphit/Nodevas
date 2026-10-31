@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -17,6 +18,7 @@ import (
 	"nodevas/internal/project"
 	"nodevas/internal/realtime"
 	"nodevas/internal/server"
+	"nodevas/internal/testpg"
 )
 
 // liveServer starts a real Nodevas server over loopback and returns its URL.
@@ -30,6 +32,9 @@ func liveServer(t *testing.T) (string, *project.ProjectManager) {
 		t.Fatalf("workspace: %v", err)
 	}
 	t.Cleanup(pm.StopWatcher)
+	// The search index lives in the workspace database, as serve wires it;
+	// without one search_nodes only has the direct scan.
+	pm.UseDatabase(testpg.New(t))
 
 	graph := &engine.Graph{
 		Version: 1,
@@ -59,6 +64,16 @@ func liveServer(t *testing.T) (string, *project.ProjectManager) {
 	http := httptest.NewServer(server.New(pm, realtime.NewHub(), nil).Handler())
 	t.Cleanup(http.Close)
 	return http.URL, pm
+}
+
+// awaitSearchIndex waits for the project's first index build. Until it is in,
+// a search answers from titles alone (coldSearchWait), which on a loaded
+// machine is what a test searching body text would otherwise get.
+func awaitSearchIndex(t *testing.T, pm *project.ProjectManager) {
+	t.Helper()
+	if !pm.AwaitSearchIndex(pm.Store().Root(), 30*time.Second) {
+		t.Fatal("the project's search index was not built")
+	}
 }
 
 // mcpSession wires a real MCP client to the server under test, so every

@@ -6,7 +6,8 @@
  * first-class gates.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { memo, useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   ROW_H,
   WIRE_CLEARANCE,
@@ -16,10 +17,10 @@ import {
   constrainPointOutsideRects,
   edgePlacementKey,
   gateWireKey,
-  nearestClearRatio,
   pointOnLine,
   rectBoundary,
   svgPointerPoint,
+  widestOpeningRatio,
   type Col,
   type Point,
   type Rect,
@@ -28,6 +29,12 @@ import type { EdgeLine, EdgeRelation } from "../../types";
 import { DependencyLine } from "./DependencyLine";
 import { useI18n } from "../../i18n";
 import { isPlainAllOfRequirement } from "./simpleDependency";
+import {
+  constrainPointOutsideIndex,
+  nearestClearRatioInIndex,
+  obstacleIndex,
+  type ObstacleIndex,
+} from "./obstacleIndex";
 
 
 
@@ -48,6 +55,27 @@ export interface Gate {
 export const GATE_W = 76;
 export const GATE_H = 24;
 export const DEFAULT_GATE_RATIO = 0.72;
+
+/**
+ * The label a gate box shows. A box with no room for the whole of it names
+ * just the operator ("OR" out of "Any · OR"), the part that tells one
+ * condition from another; the full wording stays in its tooltip.
+ */
+export function gateBoxLabel(label: string, compact: boolean): string {
+  if (!compact) return label;
+  const at = label.lastIndexOf(" · ");
+  return at >= 0 ? label.slice(at + 3) : label;
+}
+
+/** How wide a box drawn around `label` is: GATE_W, or just its text when compact. */
+export function gateBoxWidth(label: string, compact: boolean): number {
+  if (!compact) return GATE_W;
+  // The label is 9.5px bold monospace: about 6px a Latin letter, a full em a
+  // CJK character, plus a little padding either side.
+  let text = 0;
+  for (const char of label) text += char.charCodeAt(0) >= 0x2e80 ? 9.5 : 6;
+  return Math.max(GATE_H, Math.ceil(text + 10));
+}
 
 export const BINARY_GATE_OPS = new Set(["and", "or", "xor", "nand", "nor"]);
 
@@ -82,51 +110,57 @@ export function showsGateBadge(gate: Gate): boolean {
   return !defaultAllOf;
 }
 
-export function GateWiring({
-  gate,
-  centerX,
-  rowTop,
-  storedPoint,
-  storedRatio,
-  onPositionChange,
-  selectedEdges,
-  onSelectEdge,
-  onOpenEdgeMenu,
-  getWireVertices,
-  onWireVerticesChange,
-  selectedVertex,
-  onSelectVertex,
-  obstacles,
-  onEditGate,
-  onDeleteGate,
-}: {
-  gate: Gate;
-  centerX: (c: Col) => number;
-  rowTop: (row: number) => number;
-  storedPoint?: Point;
-  storedRatio?: number;
-  onPositionChange: (targetId: string, point: Point) => void;
-  /** Wire keys drawn as selected: the picked edge, plus any wire whose two
-      endpoints are both inside a marquee selection. */
-  selectedEdges: ReadonlySet<string>;
-  onSelectEdge: (from: string, to: string) => void;
-  onOpenEdgeMenu: (
-    edges: { from: string; to: string }[],
-    x: number,
-    y: number,
-  ) => void;
-  getWireVertices: (wireKey: string) => Point[];
-  onWireVerticesChange: (wireKey: string, vertices: Point[]) => void;
-  selectedVertex: { wireKey: string; index: number } | null;
-  onSelectVertex: (wireKey: string, index: number) => void;
-  obstacles: Rect[];
-  onEditGate: (targetId: string, x: number, y: number) => void;
-  onDeleteGate: (targetId: string) => void;
-}) {
-  const { t } = useI18n();
+/** Where a gate's condition box sits, in board units. */
+export interface GateLayout {
+  /** Where the box is drawn: its hand placement pushed off any card, or else
+      the fallback. */
+  center: Point;
+  /** Where the box goes without a placement — on the line from its inputs to
+      its node, clear of the cards. A double-click puts it back here. */
+  fallback: Point;
+  /** No room for the whole box where it is drawn, so it shrinks to the
+      operator alone: between two neighbouring columns there is only the
+      gap between the cards. */
+  compact: boolean;
+}
+
+/** Whether a box this size centred on `point` overlaps none of the cards. */
+function boxIsClear(point: Point, halfWidth: number, halfHeight: number, obstacles: ObstacleIndex) {
+  const box = {
+    left: point.x - halfWidth,
+    right: point.x + halfWidth,
+    top: point.y - halfHeight,
+    bottom: point.y + halfHeight,
+  };
+  return obstacles
+    .near(box)
+    .every(
+      (rect) =>
+        rect.left >= box.right ||
+        rect.right <= box.left ||
+        rect.top >= box.bottom ||
+        rect.bottom <= box.top,
+    );
+}
+
+/**
+ * Lays out a gate's box against the board's obstacles. A gate drawn as plain
+ * wires has no box, so nothing is routed for it.
+ */
+export function gateLayout(
+  gate: Gate,
+  centerX: (c: Col) => number,
+  rowTop: (row: number) => number,
+  storedPoint: Point | undefined,
+  storedRatio: number | undefined,
+  obstacles: ObstacleIndex,
+): GateLayout {
   const tx = centerX(gate.to);
   const cardTop = rowTop(gate.to.row);
   const targetCenter = { x: tx, y: cardTop + ROW_H / 2 };
+  if (!showsGateBadge(gate)) {
+    return { center: targetCenter, fallback: targetCenter, compact: false };
+  }
   const sourceCenters = gate.parents.map((parent) => cardCenter(parent.from, centerX, rowTop));
   const sourceAverage =
     sourceCenters.length > 0
@@ -147,10 +181,10 @@ export function GateWiring({
     typeof storedRatio === "number" && Number.isFinite(storedRatio)
       ? Math.max(0, Math.min(1, storedRatio))
       : DEFAULT_GATE_RATIO;
-  const fallbackCenter = pointOnLine(
+  let fallback = pointOnLine(
     axisStart,
     axisEnd,
-    nearestClearRatio(
+    nearestClearRatioInIndex(
       axisStart,
       axisEnd,
       storedGateRatio,
@@ -159,16 +193,101 @@ export function GateWiring({
       GATE_H / 2 + WIRE_CLEARANCE,
     ),
   );
-  const initialCenter =
+  if (!boxIsClear(fallback, GATE_W / 2, GATE_H / 2, obstacles)) {
+    // Nowhere on the line holds the whole box: centre it in the widest stretch
+    // the cards leave, so as little of it as can be is over them.
+    const opening = widestOpeningRatio(
+      axisStart,
+      axisEnd,
+      obstacles.near({
+        left: Math.min(axisStart.x, axisEnd.x),
+        right: Math.max(axisStart.x, axisEnd.x),
+        top: Math.min(axisStart.y, axisEnd.y),
+        bottom: Math.max(axisStart.y, axisEnd.y),
+      }),
+    );
+    if (opening !== null) fallback = pointOnLine(axisStart, axisEnd, opening);
+  }
+  const center =
     storedPoint &&
     Number.isFinite(storedPoint.x) &&
     Number.isFinite(storedPoint.y)
-      ? constrainPointOutsideRects(
+      ? constrainPointOutsideIndex(
           storedPoint,
           obstacles,
           Math.max(GATE_W, GATE_H) / 2 + WIRE_CLEARANCE,
         )
-      : fallbackCenter;
+      : fallback;
+  return { center, fallback, compact: !boxIsClear(center, GATE_W / 2, GATE_H / 2, obstacles) };
+}
+
+/**
+ * Memoized: on a large board a pan that moves the culling window re-renders
+ * the canvas, and a gate that stays on screen with the same layout, handlers
+ * and selection is left alone. The board hands it one layout object per
+ * placement — a new one whenever its cards, placement, bends or the cards
+ * around it move — and handlers that keep their identity.
+ */
+export const GateWiring = memo(function GateWiring({
+  gate,
+  centerX,
+  rowTop,
+  layout,
+  storedPoint,
+  storedRatio,
+  onPositionChange,
+  selectedEdges,
+  onSelectEdge,
+  onOpenEdgeMenu,
+  getWireVertices,
+  onWireVerticesChange,
+  selectedVertex,
+  onSelectVertex,
+  obstacles,
+  onEditGate,
+  onDeleteGate,
+  badgeLayer,
+}: {
+  gate: Gate;
+  centerX: (c: Col) => number;
+  rowTop: (row: number) => number;
+  /** The box's place, worked out by the board; left out, it is worked out
+      here from the stored placement and ratio. */
+  layout?: GateLayout;
+  storedPoint?: Point;
+  storedRatio?: number;
+  onPositionChange: (targetId: string, point: Point) => void;
+  /** Wire keys drawn as selected: the picked edge, plus any wire whose two
+      endpoints are both inside a marquee selection. */
+  selectedEdges: ReadonlySet<string>;
+  onSelectEdge: (from: string, to: string) => void;
+  onOpenEdgeMenu: (
+    edges: { from: string; to: string }[],
+    x: number,
+    y: number,
+  ) => void;
+  getWireVertices: (wireKey: string) => Point[];
+  onWireVerticesChange: (wireKey: string, vertices: Point[]) => void;
+  selectedVertex: { wireKey: string; index: number } | null;
+  onSelectVertex: (wireKey: string, index: number) => void;
+  /** What a dragged box or bend is kept off: every card on the board. */
+  obstacles: Rect[];
+  onEditGate: (targetId: string, x: number, y: number) => void;
+  onDeleteGate: (targetId: string) => void;
+  /** Where the box itself is drawn: a layer over the cards, so a box with no
+      room clear of them still reads. Left out, it is drawn with its wires. */
+  badgeLayer?: SVGGElement | null;
+}) {
+  const { t } = useI18n();
+  const tx = centerX(gate.to);
+  const cardTop = rowTop(gate.to.row);
+  const targetCenter = { x: tx, y: cardTop + ROW_H / 2 };
+  const {
+    center: initialCenter,
+    fallback: fallbackCenter,
+    compact,
+  } = layout ??
+    gateLayout(gate, centerX, rowTop, storedPoint, storedRatio, obstacleIndex(obstacles));
   const [gateCenter, setGateCenter] = useState(initialCenter);
   const centerRef = useRef(initialCenter);
   const dragRef = useRef<{
@@ -250,6 +369,8 @@ export function GateWiring({
   };
 
   const effectiveOp = effectiveGateOp(gate);
+  const placeBadge = (badge: React.ReactElement) =>
+    badgeLayer ? createPortal(badge, badgeLayer) : badge;
 
   if (!effectiveOp || !showsGateBadge(gate)) {
     return (
@@ -304,6 +425,8 @@ export function GateWiring({
     label: t(`gate.label.${effectiveOp}`),
     description: t(`gate.description.${effectiveOp}`),
   };
+  const boxLabel = gateBoxLabel(presentation.label, compact);
+  const boxW = gateBoxWidth(boxLabel, compact);
   // Binary operators are meaningless with a single incoming edge; flag them
   // so a dangling AND/OR reads as "wiring incomplete", not "condition ok".
   const gateInvalid =
@@ -326,7 +449,7 @@ export function GateWiring({
             )}
             end={rectBoundary(
               gateCenter,
-              GATE_W / 2,
+              boxW / 2,
               GATE_H / 2,
               vertices[vertices.length - 1] ?? sourceCenter,
             )}
@@ -360,7 +483,7 @@ export function GateWiring({
           <DependencyLine
             start={rectBoundary(
               gateCenter,
-              GATE_W / 2,
+              boxW / 2,
               GATE_H / 2,
               vertices[0] ?? targetCenter,
             )}
@@ -405,69 +528,77 @@ export function GateWiring({
           />
         );
       })()}
-      <g
-        className={`gate-handle${dragging ? " dragging" : ""}`}
-        onPointerDown={startGateDrag}
-        onPointerMove={moveGate}
-        onPointerUp={(event) => finishGateDrag(event, true)}
-        onPointerCancel={(event) => finishGateDrag(event, false)}
-        onLostPointerCapture={(event) => finishGateDrag(event, true)}
-        onClick={(event) => {
-          if (suppressClickRef.current) {
-            suppressClickRef.current = false;
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          onEditGate(gate.to.node.id, event.clientX, event.clientY);
-        }}
-        onDoubleClick={resetGate}
-      >
-        <title>
-          {[presentation.description,
-            gateInvalid
-              ? t("gate.invalid", {
-                  count: gate.parents.length,
-                  operator: presentation.label,
-                })
-              : "",
-            t("gate.interactionHint")]
-            .filter(Boolean)
-            .join(" ")}
-        </title>
-        <rect
-          className="gate-node"
-          x={gateCenter.x - GATE_W / 2}
-          y={gateCenter.y - GATE_H / 2}
-          width={GATE_W}
-          height={GATE_H}
-          rx={6}
-        />
-        <text className="gate-label" x={gateCenter.x} y={gateCenter.y} textAnchor="middle">
-          {presentation.label}
-        </text>
-        {gateInvalid && (
+      {placeBadge(
+        <g
+          className={`gate-badge gate-${effectiveOp}${gateInvalid ? " gate-invalid" : ""}`}
+          data-gate-for={gate.to.node.id}
+        >
           <g
-            className="logic-gate-delete"
-            role="button"
-            aria-label={t("gate.deleteAria")}
-            onPointerDown={(event) => event.stopPropagation()}
+            className={`gate-handle${dragging ? " dragging" : ""}`}
+            onPointerDown={startGateDrag}
+            onPointerMove={moveGate}
+            onPointerUp={(event) => finishGateDrag(event, true)}
+            onPointerCancel={(event) => finishGateDrag(event, false)}
+            onLostPointerCapture={(event) => finishGateDrag(event, true)}
             onClick={(event) => {
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
               event.preventDefault();
               event.stopPropagation();
-              onDeleteGate(gate.to.node.id);
+              onEditGate(gate.to.node.id, event.clientX, event.clientY);
             }}
+            onDoubleClick={resetGate}
           >
-            <title>{t("gate.deleteTitle")}</title>
-            <circle cx={gateCenter.x + GATE_W / 2} cy={gateCenter.y - GATE_H / 2} r={7} />
-            <path
-              d={`M ${gateCenter.x + GATE_W / 2 - 2.5} ${gateCenter.y - GATE_H / 2 - 2.5} l 5 5 M ${
-                gateCenter.x + GATE_W / 2 + 2.5
-              } ${gateCenter.y - GATE_H / 2 - 2.5} l -5 5`}
+            <title>
+              {[compact ? presentation.label : "",
+                presentation.description,
+                gateInvalid
+                  ? t("gate.invalid", {
+                      count: gate.parents.length,
+                      operator: presentation.label,
+                    })
+                  : "",
+                t("gate.interactionHint")]
+                .filter(Boolean)
+                .join(" ")}
+            </title>
+            <rect
+              className="gate-node"
+              x={gateCenter.x - boxW / 2}
+              y={gateCenter.y - GATE_H / 2}
+              width={boxW}
+              height={GATE_H}
+              rx={6}
             />
+            <text className="gate-label" x={gateCenter.x} y={gateCenter.y} textAnchor="middle">
+              {boxLabel}
+            </text>
+            {gateInvalid && (
+              <g
+                className="logic-gate-delete"
+                role="button"
+                aria-label={t("gate.deleteAria")}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDeleteGate(gate.to.node.id);
+                }}
+              >
+                <title>{t("gate.deleteTitle")}</title>
+                <circle cx={gateCenter.x + boxW / 2} cy={gateCenter.y - GATE_H / 2} r={7} />
+                <path
+                  d={`M ${gateCenter.x + boxW / 2 - 2.5} ${gateCenter.y - GATE_H / 2 - 2.5} l 5 5 M ${
+                    gateCenter.x + boxW / 2 + 2.5
+                  } ${gateCenter.y - GATE_H / 2 - 2.5} l -5 5`}
+                />
+              </g>
+            )}
           </g>
-        )}
-      </g>
+        </g>,
+      )}
     </g>
   );
-}
+});

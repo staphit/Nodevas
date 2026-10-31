@@ -40,6 +40,12 @@ const (
 
 	// MaxModelLen bounds the model name a heartbeat reports.
 	MaxModelLen = 64
+
+	// PresenceEvent is emitted, besides "agents-changed", when a session's
+	// presence really changes: it appears, comes back online, changes state
+	// or node, or leaves. A plain heartbeat does not emit it, so it is quiet
+	// enough to drive views across projects (Station's building).
+	PresenceEvent = "agent-presence"
 )
 
 var (
@@ -137,8 +143,11 @@ type Hub struct {
 	notify   EventFunc
 	now      func() time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*Session // key: project + "\x00" + sessionID
+	mu sync.Mutex
+	// actionsDB is the action log's database when the hub has none of its
+	// own (SetActionLog).
+	actionsDB *db.DB
+	sessions  map[string]*Session // key: project + "\x00" + sessionID
 
 	// In-memory fallback stores when database == nil (used in lightweight tests)
 	memMessages []Message
@@ -155,12 +164,16 @@ type Hub struct {
 	// Loop guard state
 	senderHistory map[string][]int64 // key: project+"\x00"+from -> timestamps
 	threadTurns   map[string]int     // key: project+"\x00"+threadID -> consecutive agent turns
+
+	// beforeAskInsert, set by tests only, runs as CreateAndWait is about to
+	// store a pending ask.
+	beforeAskInsert func()
 }
 
 // NewHub constructs an agent network hub backed by database (which may be nil
 // in unit tests that exercise only in-memory behavior).
 func NewHub(database *db.DB, notify EventFunc) *Hub {
-	return &Hub{
+	h := &Hub{
 		database:      database,
 		notify:        notify,
 		now:           time.Now,
@@ -172,13 +185,17 @@ func NewHub(database *db.DB, notify EventFunc) *Hub {
 		senderHistory: make(map[string][]int64),
 		threadTurns:   make(map[string]int),
 	}
+	h.expireOrphanedAsks()
+	return h
 }
 
-// SetDatabase attaches a persistent workspace database to the hub.
+// SetDatabase attaches a persistent workspace database to the hub. Asks a
+// hub before left pending in it are expired (expireOrphanedAsks).
 func (h *Hub) SetDatabase(database *db.DB) {
 	h.mu.Lock()
 	h.database = database
 	h.mu.Unlock()
+	h.expireOrphanedAsks()
 }
 
 func (h *Hub) emit(project, eventType string, payload any) {
@@ -266,6 +283,14 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	h.pruneExpiredLocked(now)
 	key := project + "\x00" + sessionID
 	existing, ok := h.sessions[key]
+	// presence: whether this heartbeat changes what the session looks like
+	// from outside (PresenceEvent), rather than only keeping it alive.
+	presence := !ok
+	var wasOnline bool
+	var wasState, wasNode, wasDoing string
+	if ok {
+		wasOnline, wasState, wasNode, wasDoing = existing.Online, existing.State, existing.NodeID, existing.Doing
+	}
 	if !ok {
 		baseName := sanitizeToken(hb.Name)
 		if baseName == "" {
@@ -371,11 +396,21 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		}
 		existing.LastSeen = now
 		existing.Online = true
+		presence = !wasOnline || existing.State != wasState || existing.NodeID != wasNode
 	}
 	snapshot := *existing
 	h.mu.Unlock()
 
+	switch {
+	case !ok:
+		h.LogAction(project, sessionID, snapshot.RunID, ActionJoined, snapshot.NodeID, snapshot.Doing)
+	case (snapshot.Doing != wasDoing || snapshot.NodeID != wasNode) && (snapshot.Doing != "" || snapshot.NodeID != ""):
+		h.LogAction(project, sessionID, snapshot.RunID, ActionDoing, snapshot.NodeID, snapshot.Doing)
+	}
 	h.emit(project, "agents-changed", nil)
+	if presence {
+		h.emit(project, PresenceEvent, nil)
+	}
 	return snapshot, nil
 }
 
@@ -411,9 +446,12 @@ func (h *Hub) Leave(project, sessionID, actorID string) error {
 	s.Since = now
 	s.Doing = ""
 	s.NodeID = ""
+	runID := s.RunID
 	h.mu.Unlock()
+	h.LogAction(project, sessionID, runID, ActionLeft, "", "")
 
 	h.emit(project, "agents-changed", nil)
+	h.emit(project, PresenceEvent, nil)
 	return nil
 }
 

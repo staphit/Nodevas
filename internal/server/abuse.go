@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"math"
 	"net/http"
@@ -16,6 +15,8 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -124,42 +125,7 @@ func (s *tokenBucketStore) allowMulti(checks []bucketCheck, now time.Time) (bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. Memory bounding & cleanup strategy
-	if len(s.entries) >= s.maxEntries {
-		for k, entry := range s.entries {
-			if !isPinnedBucket(k) && now.Sub(entry.seen) > s.ttl {
-				delete(s.entries, k)
-			}
-		}
-		// If still full after TTL cleanup, evict oldest non-pinned entries (LRU by seen timestamp)
-		if len(s.entries) >= s.maxEntries {
-			type kv struct {
-				k    string
-				seen time.Time
-			}
-			evictable := make([]kv, 0, len(s.entries))
-			for k, entry := range s.entries {
-				if !isPinnedBucket(k) {
-					evictable = append(evictable, kv{k: k, seen: entry.seen})
-				}
-			}
-			// Sort oldest seen first
-			for i := 0; i < len(evictable)-1; i++ {
-				for j := i + 1; j < len(evictable); j++ {
-					if evictable[j].seen.Before(evictable[i].seen) {
-						evictable[i], evictable[j] = evictable[j], evictable[i]
-					}
-				}
-			}
-			toRemove := s.maxEntries / 5
-			if toRemove < 1 {
-				toRemove = 1
-			}
-			for i := 0; i < len(evictable) && i < toRemove; i++ {
-				delete(s.entries, evictable[i].k)
-			}
-		}
-	}
+	s.makeRoom(now)
 
 	// 2. First pass: check token availability across all dimensions without mutation
 	type evaluatedBucket struct {
@@ -245,6 +211,107 @@ func (s *tokenBucketStore) allowMulti(checks []bucketCheck, now time.Time) (bool
 	}
 
 	return true, 0
+}
+
+// makeRoom bounds the store's memory: when it is full it drops entries idle
+// past the TTL, then the least recently seen. The caller holds s.mu.
+func (s *tokenBucketStore) makeRoom(now time.Time) {
+	if len(s.entries) >= s.maxEntries {
+		for k, entry := range s.entries {
+			if !isPinnedBucket(k) && now.Sub(entry.seen) > s.ttl {
+				delete(s.entries, k)
+			}
+		}
+		// If still full after TTL cleanup, evict oldest non-pinned entries (LRU by seen timestamp)
+		if len(s.entries) >= s.maxEntries {
+			type kv struct {
+				k    string
+				seen time.Time
+			}
+			evictable := make([]kv, 0, len(s.entries))
+			for k, entry := range s.entries {
+				if !isPinnedBucket(k) {
+					evictable = append(evictable, kv{k: k, seen: entry.seen})
+				}
+			}
+			// Sort oldest seen first
+			for i := 0; i < len(evictable)-1; i++ {
+				for j := i + 1; j < len(evictable); j++ {
+					if evictable[j].seen.Before(evictable[i].seen) {
+						evictable[i], evictable[j] = evictable[j], evictable[i]
+					}
+				}
+			}
+			toRemove := s.maxEntries / 5
+			if toRemove < 1 {
+				toRemove = 1
+			}
+			for i := 0; i < len(evictable) && i < toRemove; i++ {
+				delete(s.entries, evictable[i].k)
+			}
+		}
+	}
+}
+
+// reserveMulti is allowMulti for a caller that can wait its turn. When the
+// buckets are short it still takes the cost, running them into debt, and
+// reports how long the caller waits for them to refill, as long as that is
+// at most maxWait: the debt is the queue, so the next caller waits behind
+// it. Past maxWait nothing is taken and the retry is in whole seconds.
+func (s *tokenBucketStore) reserveMulti(checks []bucketCheck, now time.Time, maxWait time.Duration) (time.Duration, bool, int) {
+	if len(checks) == 0 {
+		return 0, true, 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.makeRoom(now)
+
+	tokens := make([]float64, len(checks))
+	entries := make([]*abuseEntry, len(checks))
+	var wait float64
+	for i := range checks {
+		if checks[i].cost <= 0 {
+			checks[i].cost = 1.0
+		}
+		check := checks[i]
+		cur := check.burst
+		if entry := s.entries[check.key]; entry != nil {
+			elapsed := max(now.Sub(entry.last).Seconds(), 0)
+			cur = min(entry.tokens+elapsed*check.rate, check.burst)
+			entries[i] = entry
+		} else if len(s.entries) >= s.maxEntries && !isPinnedBucket(check.key) {
+			return 0, false, 1
+		}
+		tokens[i] = cur
+		if short := check.cost - cur; short > 0 {
+			wait = max(wait, short/check.rate)
+		}
+	}
+	if over := wait - maxWait.Seconds(); over > 0 {
+		return 0, false, max(1, int(math.Ceil(over)))
+	}
+	for i, check := range checks {
+		if entry := entries[i]; entry != nil {
+			entry.tokens = tokens[i] - check.cost
+			entry.last = now
+			entry.seen = now
+		} else {
+			s.entries[check.key] = &abuseEntry{tokens: tokens[i] - check.cost, last: now, seen: now}
+		}
+	}
+	return time.Duration(wait * float64(time.Second)), true, 0
+}
+
+// refund gives back what reserveMulti took, for a caller that stopped
+// waiting, so the callers queued behind it move up.
+func (s *tokenBucketStore) refund(checks []bucketCheck) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, check := range checks {
+		if entry := s.entries[check.key]; entry != nil {
+			entry.tokens = min(entry.tokens+check.cost, check.burst)
+		}
+	}
 }
 
 func (s *tokenBucketStore) allow(key string, now time.Time, rate, burst, cost float64) (bool, int) {
@@ -444,13 +511,16 @@ func ClassifyRoute(method, path string) (RouteClass, float64) {
 		path == "/api/auth/status" {
 		return ClassPublicAuth, 1.0
 	}
-	// Installing a view pack decodes up to 28 MB of base64 and unpacks the
-	// zip in memory, so few may run at once. Listing packs is an ordinary read.
-	if isHeavyPath(path) || (method == http.MethodPost && path == "/api/packs") {
+	if isHeavyPath(path) {
 		return ClassHeavy, 2.0
 	}
 	if isExpensivePath(path) {
 		return ClassExpensive, 2.0
+	}
+	// A report costs one token: the page asks for three at once, and the
+	// scorecards under them are cached for a minute.
+	if method == http.MethodGet && analyticsReportPath(path) {
+		return ClassExpensive, 1.0
 	}
 	if isUnsafeMethod(method) {
 		return ClassWrite, 1.0
@@ -473,15 +543,34 @@ func isHeavyPath(path string) bool {
 }
 
 func isExpensivePath(path string) bool {
-	if path == "/api/search" || path == "/api/validate" || path == "/api/dsl/check" ||
+	// Search and repo browsing are read-class: a person typing or clicking
+	// through folders fast is normal use, and each is cheap and capped.
+	if path == "/api/validate" || path == "/api/dsl/check" ||
 		path == "/api/history/version" || path == "/api/history/restore" ||
 		path == "/api/trash/restore" || path == "/api/notify/test" ||
-		path == "/api/audit" || path == "/api/audit/health" {
+		path == "/api/audit" || path == "/api/audit/health" ||
+		// One call may create a hundred nodes and validates the graph twice.
+		path == "/api/graph/subgraph" {
 		return true
 	}
 	return strings.HasPrefix(path, "/api/remote/") &&
 		path != "/api/remote/config" &&
 		path != "/api/remote/sync/status"
+}
+
+// analyticsReportPath is an analytics report: each loads a window (up to a
+// year) of run history and aggregates it. Settings, retention and route
+// picks are plain reads.
+// analyticsSlotWait is how long an analytics report waits for a slot.
+const analyticsSlotWait = 5 * time.Second
+
+func analyticsReportPath(path string) bool {
+	switch path {
+	case "/api/analytics/insights", "/api/analytics/overview",
+		"/api/analytics/scorecards", "/api/analytics/tiers":
+		return true
+	}
+	return false
 }
 
 func expensivePath(path string) bool {
@@ -538,7 +627,40 @@ func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip stri
 	if class == ClassPublicAuth {
 		return true, 0
 	}
+	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip), now)
+	if !ok {
+		g.recordRejection(class)
+		return false, retry
+	}
+	return true, 0
+}
 
+// readQueueWait is the longest a read waits for its turn. A person switching
+// projects fast in a few tabs sends a few hundred reads in a second; they
+// wait a moment instead of failing. Past it a read is refused: that is a
+// flood, not a person.
+const readQueueWait = 10 * time.Second
+
+// ReserveRoute is AllowRoute for a request that waits its turn rather than
+// fail: it reports how long to wait (up to maxWait) and a cancel that gives
+// the place back when the request stops waiting. Past maxWait it refuses,
+// taking nothing, like AllowRoute.
+func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
+	if class == ClassPublicAuth {
+		return 0, true, 0, func() {}
+	}
+	checks := g.routeChecks(class, cost, actorID, ip)
+	wait, ok, retry := g.store.reserveMulti(checks, now, maxWait)
+	if !ok {
+		g.recordRejection(class)
+		return 0, false, retry, func() {}
+	}
+	return wait, true, 0, func() { g.store.refund(checks) }
+}
+
+// routeChecks is the buckets a request of class is charged to: the class's
+// global one, its address's and its actor's.
+func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string) []bucketCheck {
 	var gRate, gBurst, ipRate, ipBurst, actRate, actBurst float64
 	switch class {
 	case ClassRead:
@@ -586,13 +708,7 @@ func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip stri
 			cost:  cost,
 		})
 	}
-
-	ok, retry := g.store.allowMulti(checks, now)
-	if !ok {
-		g.recordRejection(class)
-		return false, retry
-	}
-	return true, 0
+	return checks
 }
 
 func (g *abuseGuard) allow(key string, now time.Time, rate, burst float64) bool {
@@ -661,9 +777,22 @@ func (g *abuseGuard) logRateLimit(ctx context.Context, class RouteClass, path, r
 	}
 }
 
+// preAuthDeferredKey marks a request preAuthAbuseLimits let through
+// uncharged because it claims an identity; withAuth charges it if the claim
+// is refused (chargeRefusedCredential).
+const preAuthDeferredKey = "nodevas.preauth.deferred"
+
 // preAuthAbuseLimits is installed before authentication to reject volumetric unauthenticated
 // traffic on /api/* and /ws without invoking session checks. Static assets are untouched.
+//
+// The bucket is for traffic without an identity. A request that claims one
+// (a session cookie, or the person at a standalone hub's keyboard) is not
+// charged here: once signed in it is held to the per-actor classes in
+// withAbuseLimits, so people who share an address do not share this bucket.
+// A claim that authentication refuses is charged then, so a made-up cookie
+// is no way around it; checking one costs a map lookup.
 func (s *Server) preAuthAbuseLimits(c *gin.Context) {
+	s.forwardingNotes().observe(c.Request)
 	if s.abuse == nil {
 		c.Next()
 		return
@@ -678,17 +807,67 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 		c.Next()
 		return
 	}
-
-	ip := auth.ClientIP(c.Request)
-	now := time.Now()
-	if ok, retrySec := s.abuse.AllowPreAuth(ip, now); !ok {
-		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
-		c.Header("Retry-After", strconv.Itoa(retrySec))
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
-		c.Abort()
+	if s.claimsIdentity(c.Request) {
+		c.Set(preAuthDeferredKey, true)
+		c.Next()
+		return
+	}
+	if !s.chargePreAuth(c) {
 		return
 	}
 	c.Next()
+}
+
+// chargePreAuth takes one token from the pre-auth buckets for c's address,
+// and answers 429 when there is none.
+func (s *Server) chargePreAuth(c *gin.Context) bool {
+	ip := auth.ClientIP(c.Request)
+	if ok, retrySec := s.abuse.AllowPreAuth(ip, time.Now()); !ok {
+		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
+		c.Header("Retry-After", strconv.Itoa(retrySec))
+		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
+		c.Abort()
+		return false
+	}
+	return true
+}
+
+// chargeRefusedCredential charges a request preAuthAbuseLimits deferred,
+// now that authentication refused it. It reports whether it answered (429).
+func (s *Server) chargeRefusedCredential(c *gin.Context) bool {
+	if s.abuse == nil || !c.GetBool(preAuthDeferredKey) {
+		return false
+	}
+	return !s.chargePreAuth(c)
+}
+
+// claimsIdentity reports a request that will be signed in by withAuth if
+// its claim holds: a session cookie on a guarded route, or a direct
+// loopback request to a standalone hub. Sign-in routes never qualify: the
+// pre-auth bucket is their only limit.
+func (s *Server) claimsIdentity(r *http.Request) bool {
+	path := r.URL.Path
+	if auth.PublicPaths[path] || path == runnerwire.LinkPath || strings.HasPrefix(path, runnerPathPrefix) {
+		return false
+	}
+	if class, _ := ClassifyRoute(r.Method, path); class == ClassPublicAuth {
+		return false
+	}
+	if _, local := s.auth.(auth.LocalOnly); local && auth.DirectLoopback(r) {
+		return true
+	}
+	cookie, err := r.Cookie(auth.SessionCookieName)
+	return err == nil && cookie.Value != ""
+}
+
+// forwardingNotes is the server's untrusted-forwarder warning (forwarding.go).
+func (s *Server) forwardingNotes() *forwardingNotes {
+	s.forwardingOnce.Do(func() {
+		if s.forwarding == nil {
+			s.forwarding = newForwardingNotes(nil)
+		}
+	})
+	return s.forwarding
 }
 
 // withAbuseLimits bounds operations by route class, cost, actor, IP, and global buckets.
@@ -719,10 +898,35 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	ip := auth.ClientIP(c.Request)
 	now := time.Now()
 
-	if ok, retrySec := s.abuse.AllowRoute(class, cost, actorID, ip, now); !ok {
+	// The person at the keyboard of a standalone hub is every tab, the copilot
+	// and the local runner at once, all as one actor: a busy board opened in a
+	// few tabs reads past the per-actor limit on its own. Reads straight from
+	// this machine skip that one bucket; the global and per-IP buckets, and
+	// every write limit, still apply. A hub with accounts is unchanged.
+	if class == ClassRead && s.directLocalActor(c.Request, actor) {
+		actorID = ""
+	}
+
+	// A read past the burst waits its turn (a person clicking fast); every
+	// other class is refused at once.
+	var allowed bool
+	var retrySec int
+	if class == ClassRead {
+		var wait time.Duration
+		var cancel func()
+		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, ip, now, readQueueWait)
+		if allowed && wait > 0 && !waitTurn(c.Request.Context(), wait) {
+			cancel()
+			c.Abort()
+			return
+		}
+	} else {
+		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, ip, now)
+	}
+	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("too many requests"))
+		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
 		c.Abort()
 		return
 	}
@@ -742,18 +946,60 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		sem = s.abuse.sem
 	}
 
+	// The analytics page asks for its reports together; on a small host
+	// they wait their turn for a slot rather than fail.
+	var wait <-chan time.Time
+	if analyticsReportPath(path) {
+		timer := time.NewTimer(analyticsSlotWait)
+		defer timer.Stop()
+		wait = timer.C
+	}
 	select {
 	case sem <- struct{}{}:
 		defer func() { <-sem }()
 		c.Next()
+		return
 	case <-c.Request.Context().Done():
 		return
 	default:
-		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, 1)
-		c.Header("Retry-After", "1")
-		httpx.Err(c, http.StatusTooManyRequests, errors.New("server is busy"))
-		c.Abort()
 	}
+	if wait != nil {
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+			c.Next()
+			return
+		case <-c.Request.Context().Done():
+			return
+		case <-wait:
+		}
+	}
+	s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, 1)
+	c.Header("Retry-After", "1")
+	httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("server is busy", "伺服器忙碌中"))
+	c.Abort()
+}
+
+// waitTurn waits d, and reports false when ctx ends first (the client gave
+// up).
+func waitTurn(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// directLocalActor reports a request from the local user of a standalone
+// (loopback, no accounts) hub that reached it directly, not through a proxy.
+func (s *Server) directLocalActor(r *http.Request, actor identity.Actor) bool {
+	if _, local := s.auth.(auth.LocalOnly); !local {
+		return false
+	}
+	return actor.ID == identity.Local.ID && auth.DirectLoopback(r)
 }
 
 // AbuseStats reports limiter health and metrics for administrators.

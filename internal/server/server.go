@@ -6,12 +6,14 @@ import (
 	"errors"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"nodevas/internal/agents"
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/autopilot"
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/fsbrowse"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/httpapi/system"
@@ -23,6 +25,7 @@ import (
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 	"nodevas/internal/store"
 	"nodevas/internal/usage"
 	"path/filepath"
@@ -44,7 +47,10 @@ type Server struct {
 	auth     auth.Authenticator
 	mailer   system.PasscodeMailer
 	audit    *audit.Store
-	agents   *agents.Hub
+	// auditQueue writes the middleware's audit rows off the request path;
+	// made by UseAudit, drained by Shutdown.
+	auditQueue *audit.Queue
+	agents     *agents.Hub
 	// runners serves /api/runners and /api/runner/*; nil until UseRunnersDB.
 	runners *runners.Registry
 	// runs serves /api/runs and the run traffic on the runner socket; nil
@@ -55,6 +61,15 @@ type Server struct {
 	usage *usage.Store
 	// llm relays copilot model calls to runners; nil until UseRunnersDB.
 	llm *runners.LLMRelay
+	// repo relays read-only repo browsing to runners (the Explorer); nil
+	// until UseRunnersDB.
+	repo *runners.RepoRelay
+	// analyticsDB is the workspace database agent analytics reads (pure
+	// SQL, never a model); nil until UseRunnersDB.
+	analyticsDB *db.DB
+	// database is the workspace database healthz pings and metrics reads
+	// (health.go); the first one a Use*DB call was given.
+	database *db.DB
 	// links holds device link codes and runnerAccess the Access service
 	// token they carry (runner_links.go); nil until UseRunnersDB.
 	links        *runners.Links
@@ -75,8 +90,18 @@ type Server struct {
 	accessVerifier *auth.AccessVerifier
 	accessRequired bool
 	abuse          *abuseGuard
+	// forwarding warns about forwarding headers from untrusted peers
+	// (forwarding.go); made on first use unless a test set it first.
+	forwarding     *forwardingNotes
+	forwardingOnce sync.Once
 	stop           chan struct{}
 	stopOnce       sync.Once
+	// background is the goroutines Shutdown waits for (background.go);
+	// backgroundRunning counts them for tests and metrics.
+	background        sync.WaitGroup
+	backgroundMu      sync.Mutex
+	backgroundStopped bool
+	backgroundRunning atomic.Int64
 	// allowedHosts are the Host header names this server answers on, lowercased
 	// and without a port. A nil map means nobody has said where this server
 	// listens, so there is no name to judge a Host against: that is the zero
@@ -93,6 +118,10 @@ type Server struct {
 	// router is the last router Handler built, read by the copilot's tool
 	// bridge from request goroutines while startup may still be writing it.
 	router atomic.Pointer[builtRouter]
+	// buildingPings throttles building-changed per project (building.go);
+	// made on first use unless a test set it first.
+	buildingPings *buildingPings
+	buildingOnce  sync.Once
 }
 
 // builtRouter boxes the router for the atomic pointer.
@@ -154,6 +183,22 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 			return
 		}
 		projectRoot = agentsRoom(projectRoot)
+		// A prompt allowed on an earlier "allow for this run" waits on
+		// nobody, and a run makes one per tool call: reloading every
+		// browser's panel for each would refetch it all per command.
+		if eventType == agents.AskAllowedForRunEvent {
+			return
+		}
+		// Asks, mail and presence changes are news for Station's building in
+		// every project that may read this one. A presence change is only
+		// that: the agents-changed every heartbeat sends covers the panel.
+		switch eventType {
+		case agents.AskEvent, "agent-message", agents.PresenceEvent:
+			s.pingBuilding(projectRoot)
+		}
+		if eventType == agents.PresenceEvent {
+			return
+		}
 		// A notify message pops up on its recipient's screen, so it travels
 		// as its own event naming the message; everything else is one
 		// "reload the agent panel" signal.
@@ -165,12 +210,20 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		// A new question waits on somebody: it also travels as its own event
 		// naming the ask, so the person who can answer is told. Its answer or
 		// expiry is only a panel reload.
+		// It names the ask's kind and run too, so the toast can say what
+		// is asked ("wants to run Bash") before the browser fetches it.
 		if ask, ok := payload.(agents.Ask); ok && eventType == agents.AskEvent && ask.Status == agents.AskPending {
-			if projectRoot == "" {
-				s.hub.Broadcast(agents.AskEvent, ask.ID)
-			} else {
-				s.hub.BroadcastRoom(projectRoot, agents.AskEvent, ask.ID)
-			}
+			s.hub.BroadcastRoomEvent(projectRoot, realtime.Event{
+				Type: agents.AskEvent, ID: ask.ID, Kind: ask.Kind, RunID: ask.RunID,
+			})
+		}
+		// A run's ask that starts waiting or ends is news for that run's
+		// timeline (GET /api/runs/:id/asks): kind "ask" tells an open run
+		// view to refetch its asks rather than its events.
+		if ask, ok := payload.(agents.Ask); ok && eventType == agents.AskEvent && ask.RunID != "" {
+			s.hub.BroadcastRoomEvent(projectRoot, realtime.Event{
+				Type: runnerwire.RunEventsEvent, ID: ask.RunID, Kind: runnerwire.RunEventsAskKind,
+			})
 		}
 		// An external session's changes are news for one node: the event
 		// names it, so only a browser showing that node refetches.
@@ -189,11 +242,13 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		}
 		s.hub.BroadcastRoom(projectRoot, "agents-changed", "")
 	})
-	go s.notifier.Run(s.stop)
+	// Background loops are restarted after a panic rather than taking the
+	// server down with them (internal/safego).
+	safego.LoopUntil(s.stop, "notifier", func() { s.notifier.Run(s.stop) })
 	// The backup loop touches the workspace immediately at startup, so it only
 	// runs with a real project manager (a static-only server passes nil).
 	if pm != nil {
-		go s.remotes.RunBackupLoop(s.stop)
+		safego.LoopUntil(s.stop, "backup loop", func() { s.remotes.RunBackupLoop(s.stop) })
 	}
 	if hub != nil && pm != nil {
 		// Change events go to the clients watching that project, not to every
@@ -224,6 +279,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		hubErr = s.hub.Close()
 	}
 	s.stopOnce.Do(func() { close(s.stop) })
+	// The background loops have been asked to stop; they finish before the
+	// database (closed by the caller after this returns) goes away.
+	bgErr := s.waitBackground(ctx)
+	hubErr = errors.Join(hubErr, bgErr)
+	// Queued audit rows are written before the database goes away.
+	if s.auditQueue != nil {
+		hubErr = errors.Join(hubErr, s.auditQueue.Close(ctx))
+	}
 	if s.pm == nil || s.remotes == nil {
 		return hubErr
 	}
@@ -268,11 +331,15 @@ func (s *Server) UseAccess(verifier *auth.AccessVerifier, required bool) {
 // accounts should configure it before building their handler.
 func (s *Server) UseAudit(store *audit.Store) {
 	s.audit = store
+	if store != nil && s.auditQueue == nil {
+		s.auditQueue = audit.NewQueue(store, audit.DefaultQueueSize)
+	}
 }
 
 // UseAgentsDB attaches the workspace database to the agent collaboration hub so
 // messages and ask_user requests persist across restarts.
 func (s *Server) UseAgentsDB(database *db.DB) {
+	s.useDatabase(database)
 	if s.agents != nil {
 		s.agents.SetDatabase(database)
 	}
@@ -285,6 +352,7 @@ func (s *Server) UseAgentsDB(database *db.DB) {
 // database. Call it before Handler. Without it the runner endpoints do not
 // exist and a runner token opens nothing.
 func (s *Server) UseRunnersDB(database *db.DB) {
+	s.useDatabase(database)
 	s.runners = runners.NewRegistry(database, func() {
 		if s.hub != nil {
 			s.hub.Broadcast(runnerwire.ChangedEvent, "")
@@ -295,16 +363,38 @@ func (s *Server) UseRunnersDB(database *db.DB) {
 		func(project, runID string) { s.broadcastProject(project, runnerwire.RunEventsEvent, runID) })
 	s.runs.SetNotify(func(project, runID string) { s.broadcastProject(project, runnerwire.RunNotifyEvent, runID) })
 	s.runs.SetAudit(s.auditRun)
+	// Agent roles: a staged pipeline's evidence goes on its node's history,
+	// and its approval marks the node done (the Executor may not).
+	s.runs.SetEvidence(s.recordEvidence)
+	s.runs.SetOnApproved(s.stagedApproved)
+	// A run that ends or a pipeline that moves changes the scorecards.
+	s.runs.Observe(invalidateScorecardsOn)
+	// A run that ends leaves nobody to act on what its agent still asks.
+	s.runs.Observe(s.expireEndedRunAsks)
 	// Runs waiting for an agent's usage limit to reset are offered again
 	// when it has (internal/runs/handoff.go); the waits are stored, so this
 	// picks up those a restart interrupted.
 	retries, stopRetries := context.WithCancel(context.Background())
-	go func() {
-		<-s.stop
-		stopRetries()
-	}()
-	go s.runs.RunRetries(retries, runs.RetryInterval)
+	s.goBackground("run retries", func() {
+		defer stopRetries()
+		go func() {
+			select {
+			case <-s.stop:
+				stopRetries()
+			case <-retries.Done():
+			}
+		}()
+		safego.RunLoop(retries, "run retries", func(ctx context.Context) { s.runs.RunRetries(ctx, runs.RetryInterval) })
+	})
 	s.llm = runners.NewLLMRelay(s.runners)
+	s.repo = runners.NewRepoRelay(s.runners)
+	s.analyticsDB = database
+	if s.agents != nil {
+		// External sessions' action log is analytics history, kept even
+		// where the agent network itself runs in memory.
+		s.agents.SetActionLog(database)
+	}
+	s.startAnalytics(database)
 	s.useRunnerLinks()
 	// W7: the autopilot's LLM advisor asks the owner's advisor model through
 	// the same relay.
@@ -382,6 +472,40 @@ func (s *Server) auditRun(entry runs.AuditEntry) {
 	})
 }
 
+// recordEvidence appends a staged pipeline's evidence (red/green runs, the
+// diff guard, judge checks) to its node's journal.
+func (s *Server) recordEvidence(project, nodeID, runID, kind, outcome, summary string) {
+	if s.pm == nil {
+		return
+	}
+	st, err := s.pm.StoreFor(project)
+	if err != nil {
+		return
+	}
+	if err := st.AppendEvidence(nodeID, kind, summary); err != nil {
+		slog.Warn("runs: record evidence", slog.String("node", nodeID), slog.Any("error", err))
+		return
+	}
+	s.broadcastProject(project, "state-changed", "")
+}
+
+// stagedApproved marks a node done when its staged pipeline is approved: the
+// pipeline, not the Executor, finishes the node, with the evidence noted.
+func (s *Server) stagedApproved(project, nodeID, evidence string) {
+	if s.pm == nil {
+		return
+	}
+	st, err := s.pm.StoreFor(project)
+	if err != nil {
+		return
+	}
+	_ = st.AppendEvidence(nodeID, "approved", evidence)
+	if _, err := st.SetStatus(nodeID, engine.StatusDone, "pipeline", evidence); err != nil {
+		slog.Warn("runs: mark approved node done", slog.String("node", nodeID), slog.Any("error", err))
+	}
+	s.broadcastProject(project, "state-changed", "")
+}
+
 // broadcastProject tells the clients watching a project, named as ?project=
 // names it, about a change. Run changes arrive from a runner's socket, not a
 // request, so there is no request store to take the room from.
@@ -399,6 +523,11 @@ func (s *Server) broadcastProject(name, evType, id string) {
 		return
 	}
 	s.hub.BroadcastRoom(st.Root(), evType, id)
+	// What runs and autopilots are doing is what the building shows; their
+	// event streams and notifications are not.
+	if evType == runnerwire.RunsChangedEvent || evType == autopilot.ChangedEvent {
+		s.pingBuilding(st.Root())
+	}
 }
 
 // UseMailer enables one-time passcode delivery. Call it before Handler.
@@ -487,4 +616,22 @@ func (s *Server) AbuseStats() AbuseStats {
 // ?project= / X-Nodevas-Project, or the active sub-project when neither is set.
 func (s *Server) store(r *http.Request) *store.Store {
 	return httpx.StoreFor(r, s.pm)
+}
+
+// expireEndedRunAsks expires what a run that has just ended still waited on
+// (agents.Hub.ExpireRunAsks), off the dispatcher's goroutine.
+func (s *Server) expireEndedRunAsks(u runs.Update) {
+	if s.agents == nil || s.pm == nil || u.Run.ID == "" || !runnerwire.RunFinal(u.Run.Status) {
+		return
+	}
+	project, runID := u.Run.Project, u.Run.ID
+	safego.Go("expire an ended run's asks", func() {
+		st, err := s.pm.StoreFor(project)
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.agents.ExpireRunAsks(ctx, st.Root(), runID)
+	})
 }

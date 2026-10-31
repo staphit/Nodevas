@@ -71,6 +71,32 @@ export interface AgentMessage {
   decidedAt?: number;
 }
 
+export type AgentAskKind = "approval" | "question" | "choice" | "permission";
+export type AgentAskStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "answered"
+  | "expired";
+export type AgentAskDecision =
+  | "approve"
+  | "approved"
+  | "deny"
+  | "denied"
+  | "answer"
+  | "approve_run";
+
+/** What allowing a permission prompt for the rest of its run covers: every
+ * later call of its tool, the same shell command only, or this call alone
+ * (a shell command cut to fit). */
+export type AgentAskRunScope = "tool" | "command" | "once";
+
+export interface AgentAskAnswerRequest {
+  decision: AgentAskDecision;
+  note?: string;
+  answer?: string;
+}
+
 export interface AgentAsk {
   id: string;
   project: string;
@@ -81,11 +107,28 @@ export interface AgentAsk {
   question: string;
   aboutMsgId?: string;
   nodeId?: string;
-  status: "pending" | "approved" | "denied" | "expired";
+  status: AgentAskStatus;
   decidedBy?: string;
   note?: string;
   createdAt: number;
   decidedAt?: number;
+  expiresAt?: number;
+  kind?: AgentAskKind;
+  options?: string[];
+  answer?: string;
+  decision?: AgentAskDecision;
+  runId?: string;
+  tool?: string;
+  toolInput?: string;
+  /** True when the hub, the MCP server or the runner relay cut toolInput to
+   * fit: the agent may run more than it shows. */
+  toolInputTruncated?: boolean;
+  /** A permission prompt's: what "allow for this run" covers. Absent from an
+   * older hub, where it covered the tool. */
+  runScope?: AgentAskRunScope;
+  /** Whether the viewer may answer it: set on an ask the hub lists for a
+   * person (GET /api/agents/asks). Absent elsewhere. */
+  canAnswer?: boolean;
 }
 
 export interface AgentRosterResponse {
@@ -152,12 +195,28 @@ export const agentsApi = {
     const qs = status ? `?status=${encodeURIComponent(status)}` : "";
     return req<{ asks: AgentAsk[] }>(`/api/agents/asks${qs}`);
   },
-  answerAgentAsk: (id: string, decision: "approved" | "denied", note?: string) =>
-    req<{ ok: boolean; ask: AgentAsk }>(
+  answerAgentAsk: (
+    id: string,
+    payload: AgentAskAnswerRequest | ("approved" | "denied" | "approve" | "deny"),
+    legacyNote?: string,
+  ) => {
+    let body: AgentAskAnswerRequest;
+    if (typeof payload === "string") {
+      const decision: AgentAskDecision =
+        payload === "approved" ? "approve" : payload === "denied" ? "deny" : payload;
+      body = {
+        decision,
+        ...(legacyNote !== undefined && legacyNote !== "" ? { note: legacyNote } : {}),
+      };
+    } else {
+      body = payload;
+    }
+    return req<{ ok: boolean; ask: AgentAsk }>(
       `/api/agents/asks/${encodeURIComponent(id)}/answer`,
       {
         method: "POST",
-        body: JSON.stringify({ decision, note: note ?? "" }),
+        body: JSON.stringify(body),
       },
-    ),
+    );
+  },
 };

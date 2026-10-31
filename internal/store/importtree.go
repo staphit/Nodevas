@@ -11,6 +11,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // ImportDocument is one source file on its way to becoming a node.
@@ -30,12 +31,12 @@ type ImportDocument struct {
 // land on top of content someone else owns.
 func (s *Store) ImportDocuments(g *engine.Graph, docs []ImportDocument) (int, error) {
 	if g == nil {
-		return 0, errors.New("graph is required")
+		return 0, locale.Errorf("graph is required", "需要提供圖")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.statPath(s.GraphPath()); err == nil {
-		return 0, fmt.Errorf("%s already exists", s.GraphPath())
+		return 0, locale.Errorf("%s already exists", "%s 已存在", s.GraphPath())
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return 0, err
 	}

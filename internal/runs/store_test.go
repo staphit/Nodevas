@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"nodevas/internal/db/dbtest"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/testpg"
 )
 
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	return NewStore(dbtest.Open(t))
+	return NewStore(testpg.New(t))
 }
 
 func createRun(t *testing.T, s *Store, node string) Record {

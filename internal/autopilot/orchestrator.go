@@ -19,8 +19,10 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/safego"
 )
 
 // Runs is what the orchestrator needs of the run dispatcher.
@@ -51,6 +53,18 @@ type Board interface {
 	Graph(project string) (*engine.Graph, *engine.RunState, error)
 	Content(project, nodeID string) (string, error)
 	SetStatus(project, nodeID string, status engine.Status, by, note string) error
+	// References are the notes a node uses as context, summarized for its
+	// run prompt; the bool says more exist than were summarized.
+	References(project, nodeID string) ([]runs.Reference, bool, error)
+	// CreatedByRun is the run whose agent created a node, or ""
+	// (store.CreatedByRun): what QA's and the planner's runs made.
+	CreatedByRun(project, nodeID string) string
+}
+
+// acceptanceLocker is a Board that can lock a node's acceptance criteria
+// when an Executor starts on it (store.LockAcceptance).
+type acceptanceLocker interface {
+	LockAcceptance(project, nodeID string) error
 }
 
 // Options are the orchestrator's collaborators.
@@ -66,6 +80,29 @@ type Options struct {
 	// Tick is how often every live autopilot is looked at regardless of
 	// updates; zero means DefaultTick.
 	Tick time.Duration
+	// Route, when set, is agent analytics' auto routing
+	// (analytics.Route): given what the owner's rules picked, it returns
+	// that, or with auto routing on and no rule, its own pick. Nil keeps the
+	// rules' pick.
+	Route RouteFunc
+}
+
+// RouteRequest is one routing decision the orchestrator asks for.
+type RouteRequest struct {
+	OwnerID, Project, NodeID, Role string
+	// Manual is what the owner's routing rules picked (RuleID "" none).
+	Manual runnerwire.RouteSuggestion
+}
+
+// RouteFunc decides a routing request; see Options.Route.
+type RouteFunc func(ctx context.Context, in RouteRequest) runnerwire.RouteSuggestion
+
+// routeWith is manual, or opts.Route's decision when it is set.
+func routeWith(ctx context.Context, route RouteFunc, in RouteRequest) runnerwire.RouteSuggestion {
+	if route == nil {
+		return in.Manual
+	}
+	return route(ctx, in)
 }
 
 // ChangedEvent is the realtime event an autopilot change sends to its
@@ -104,10 +141,11 @@ type Orchestrator struct {
 // stageRank orders stages first seen at the same moment: a task's pipeline
 // reaches them in this order (CI last before the merge, as it gates it).
 var stageRank = map[string]int{
-	runnerwire.StageQueued: 0, runnerwire.StageImplement: 1, runnerwire.StageCommit: 2,
-	runnerwire.StagePush: 3, runnerwire.StagePR: 4, runnerwire.StageReview: 5,
-	runnerwire.StageHuman: 6, runnerwire.StageRevise: 7, runnerwire.StageApproved: 8,
-	runnerwire.StageCI: 9, runnerwire.StageMerge: 10, runnerwire.StageDone: 11,
+	runnerwire.StageQueued: 0, runnerwire.StageTest: 1, runnerwire.StageVerifyRed: 2,
+	runnerwire.StageImplement: 3, runnerwire.StageCommit: 4, runnerwire.StagePush: 5, runnerwire.StagePR: 6,
+	runnerwire.StageVerifyGreen: 7, runnerwire.StageGuard: 8, runnerwire.StageJudge: 9,
+	runnerwire.StageReview: 10, runnerwire.StageHuman: 11, runnerwire.StageRevise: 12,
+	runnerwire.StageApproved: 13, runnerwire.StageCI: 14, runnerwire.StageMerge: 15, runnerwire.StageDone: 16,
 }
 
 // stamp is a pass's time: now, but strictly after the previous pass's, as the
@@ -133,6 +171,7 @@ func New(opts Options) *Orchestrator {
 	o := &Orchestrator{opts: opts, kicks: make(chan string, 256), index: map[string]string{}}
 	o.rules = rulesAdvisor{
 		routing: opts.Runs.Routing,
+		route:   opts.Route,
 		kind: func(project, nodeID string) (string, []string) {
 			g, _, err := opts.Board.Graph(project)
 			if err != nil || g == nil {
@@ -207,9 +246,11 @@ func (o *Orchestrator) lock(id string) func() {
 	return mu.Unlock
 }
 
-// Start resumes every live autopilot and runs the loop until ctx ends.
+// Start resumes every live autopilot and runs the loop until ctx ends. A
+// panic in the loop is logged and the loop starts again (safego), so one
+// autopilot's bad state cannot stop every other one, or the hub.
 func (o *Orchestrator) Start(ctx context.Context) {
-	go o.loop(ctx)
+	safego.Loop(ctx, "autopilot orchestrator", o.loop)
 	o.kickLive(ctx)
 }
 
@@ -232,9 +273,11 @@ func (o *Orchestrator) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id := <-o.kicks:
-			o.Reconcile(ctx, id)
+			// One autopilot's pass panicking is logged and the loop goes on
+			// to the next kick; the periodic pass retries it.
+			safego.Call("autopilot reconcile "+id, func() { o.Reconcile(ctx, id) })
 		case <-ticker.C:
-			o.kickLive(ctx)
+			safego.Call("autopilot live pass", func() { o.kickLive(ctx) })
 		}
 	}
 }
@@ -304,6 +347,12 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 	o.syncMembers(w)
 	o.refresh(ctx, w)
 	o.propagateFailures(w)
+	if w.rec.Workflow != nil {
+		// Workflow stages (goalflow.go): QA's criteria, the breakdown, the
+		// tasks, QA's verification and a person's review of the goal.
+		o.goalFlow(ctx, w)
+		return o.save(ctx, w, before)
+	}
 	if w.rec.Status == runnerwire.AutopilotRunning {
 		o.schedule(ctx, w)
 	}
@@ -384,18 +433,34 @@ func (o *Orchestrator) syncMembers(w *work) {
 		}
 		t.Title = w.dag.title(id)
 		t.Upstream = slices.Clone(w.dag.upstream[id])
+		// A task waiting for a person (a Review, a Decision) is re-read on
+		// every pass: the person finishing it on the board is what releases it.
+		if t.Hold == runnerwire.HoldPerson && t.RunID == "" && t.PipelineID == "" && !final1(t.State) {
+			switch {
+			case skippedOnBoard(statuses[id]):
+				t.Hold = ""
+				setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[id])+" on the board")
+			case engine.Settled(statuses[id], boardStatuses(w.graph)):
+				t.Hold = ""
+				setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, string(statuses[id])+" on the board")
+			}
+			continue
+		}
 		if t.RunID != "" || t.PipelineID != "" || final1(t.State) || t.Hold != "" {
 			continue
 		}
+		nodeType := w.dag.nodeType(id)
 		switch {
-		case !w.dag.dispatchable(id):
-			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, "not a task ("+w.dag.nodes[id].Kind+"): nothing to implement")
 		case skippedOnBoard(statuses[id]):
 			// Set aside on the board (a revision's replan skips what it made
 			// obsolete): it settles what waits on it, and shows as skipped.
 			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, string(statuses[id])+" on the board")
 		case engine.Settled(statuses[id], boardStatuses(w.graph)):
 			setState(t, runnerwire.TaskSuccess, runnerwire.StageDone, "already "+string(statuses[id])+" on the board")
+		case !w.dag.dispatchable(id) && (nodeType.Completion == engine.CompletionPeople || nodeType.Completion == engine.CompletionAnyone):
+			hold(t, runnerwire.HoldPerson, "", "a "+nodeType.Label+" node: waiting for a person")
+		case !w.dag.dispatchable(id):
+			setState(t, runnerwire.TaskSkipped, runnerwire.StageDone, "not a task ("+nodeType.Label+"): nothing to implement")
 		case w.dag.inCycle(id):
 			setState(t, runnerwire.TaskFailed, "", "on a dependency cycle: it can never become ready")
 		default:
@@ -833,13 +898,39 @@ func (o *Orchestrator) dispatch(ctx context.Context, w *work, t *runnerwire.Task
 		Prompt: runs.Truncate(extra, runs.MaxExtraPrompt), Fallbacks: choice.Implement[1:],
 		Pipeline: pipelineFor(pol, head),
 	}
-	record, err := o.opts.Runs.Start(ctx, runs.StartRequest{
+	var acceptance *engine.Acceptance
+	if n := w.graph.NodeByID(t.NodeID); n != nil {
+		acceptance = n.Acceptance
+	}
+	req := runs.StartRequest{
 		Body: body, Project: rec.Project, ActorID: rec.CreatedBy, ActorName: rec.CreatedByName,
 		SteppedUpAt: rec.SteppedUpAt,
-		LoadNode: func() (string, string, bool, error) {
-			return t.Title, content, true, nil
+		// The DAG only schedules dispatchable members, so the type gate in
+		// runs.Start passes; it is still stated rather than assumed.
+		LoadNode: func() (runs.NodeInfo, bool, error) {
+			nodeType := w.dag.nodeType(t.NodeID)
+			refs, truncated, err := o.opts.Board.References(rec.Project, t.NodeID)
+			if err != nil {
+				return runs.NodeInfo{}, false, err
+			}
+			return runs.NodeInfo{
+				Title: t.Title, Content: content, Type: nodeType.ID, AgentMode: nodeType.AgentMode,
+				References: refs, ReferencesTruncated: truncated,
+				// The workflow frozen when the autopilot started, not the
+				// project's as it is now.
+				Acceptance: acceptance, Workflow: rec.Workflow,
+			}, true, nil
 		},
-	})
+	}
+	if rec.Workflow != nil {
+		req.Roles = w.graph.ResolvedAgentRoles()
+		req.Body.Pipeline = o.stagedPipeline(ctx, w, req.Body.Pipeline, head)
+		if locker, ok := o.opts.Board.(acceptanceLocker); ok {
+			project, node := rec.Project, t.NodeID
+			req.LockAcceptance = func() error { return locker.LockAcceptance(project, node) }
+		}
+	}
+	record, err := o.opts.Runs.Start(ctx, req)
 	if err != nil {
 		var refused *runs.StartError
 		if errors.As(err, &refused) && (refused.Code == runs.StartBudget || refused.Code == runs.StartPrecondition) {
@@ -971,7 +1062,7 @@ type CreateInput struct {
 // repository, records it with its tasks and runs the first pass.
 func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.AutopilotView, error) {
 	if !engine.ValidNodeID(in.GoalNodeID) {
-		return runnerwire.AutopilotView{}, invalidf("goalNodeId is not a valid node id")
+		return runnerwire.AutopilotView{}, invalidf("goalNodeId is not a valid node id", "goalNodeId 不是有效的節點代號")
 	}
 	pol, err := ValidatePolicy(in.Policy)
 	if err != nil {
@@ -982,11 +1073,22 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 		return runnerwire.AutopilotView{}, err
 	}
 	if g == nil || g.NodeByID(in.GoalNodeID) == nil {
-		return runnerwire.AutopilotView{}, fmt.Errorf("%w: goal node", ErrNotFound)
+		return runnerwire.AutopilotView{}, locale.Errorf("%w: goal node", "%w：目標節點", ErrNotFound)
+	}
+	if goalType := g.TypeOf(g.NodeByID(in.GoalNodeID)); goalType.AgentMode != engine.AgentDispatch && goalType.AgentMode != engine.AgentAutopilot {
+		return runnerwire.AutopilotView{}, locale.Errorf("%w: a %s node cannot be an Autopilot goal", "%w：%s 節點不能當 Autopilot 目標", ErrNodeType, goalType.Label)
 	}
 	d := buildDAG(g, in.GoalNodeID)
-	if len(d.order) == 0 {
-		return runnerwire.AutopilotView{}, invalidf("the goal has no tasks yet: break it down first (a plan run, or tasks wired into it)")
+	// The goal's workflow stages are frozen here, as its task set is: a later
+	// change to the project's (or the goal's) stages does not reach a run
+	// already under way.
+	wf := engine.EffectiveWorkflow(g, in.GoalNodeID).Normalized()
+	goalPhase := ""
+	if wf != nil {
+		goalPhase = initialGoalPhase(wf, g.NodeByID(in.GoalNodeID), len(d.order))
+	}
+	if len(d.order) == 0 && (goalPhase == "" || goalPhase == runnerwire.GoalPhaseTasks) {
+		return runnerwire.AutopilotView{}, invalidf("the goal has no tasks yet: break it down first (a plan run, or tasks wired into it)", "目標還沒有任務：請先拆解（計畫執行，或把任務接到目標上）")
 	}
 	todo := 0
 	for _, id := range d.order {
@@ -995,14 +1097,14 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 		}
 	}
 	if todo > runnerwire.MaxAutopilotTasks {
-		return runnerwire.AutopilotView{}, invalidf("the goal has %d tasks; an autopilot works at most %d: split the goal", todo, runnerwire.MaxAutopilotTasks)
+		return runnerwire.AutopilotView{}, invalidf("the goal has %d tasks; an autopilot works at most %d: split the goal", "目標有 %d 個任務；autopilot 最多處理 %d 個：請拆分目標", todo, runnerwire.MaxAutopilotTasks)
 	}
 	// The task set is frozen here, each task with the content it starts with.
 	tasks := make([]runnerwire.TaskInstance, 0, len(d.order))
 	for _, id := range d.order {
 		body, err := o.opts.Board.Content(in.Project, id)
 		if err != nil {
-			return runnerwire.AutopilotView{}, fmt.Errorf("read task %s: %w", id, err)
+			return runnerwire.AutopilotView{}, locale.Errorf("read task %s: %w", "讀取任務 %s：%w", id, err)
 		}
 		title := d.title(id)
 		tasks = append(tasks, runnerwire.TaskInstance{NodeID: id, Title: title, State: runnerwire.TaskNone,
@@ -1023,7 +1125,7 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 			}
 		}
 		if len(repos) != 1 {
-			return runnerwire.AutopilotView{}, invalidf("choose the repository the tasks change (repoId): your runners offer %d", len(repos))
+			return runnerwire.AutopilotView{}, invalidf("choose the repository the tasks change (repoId): your runners offer %d", "請選擇任務要修改的儲存庫（repoId）：你的 runner 提供了 %d 個", len(repos))
 		}
 		for id := range repos {
 			pol.RepoID = id
@@ -1036,9 +1138,10 @@ func (o *Orchestrator) Create(ctx context.Context, in CreateInput) (runnerwire.A
 	rec, err := o.opts.Store.Create(ctx, Record{
 		AutopilotRun: runnerwire.AutopilotRun{
 			Project: in.Project, GoalNodeID: in.GoalNodeID, Policy: pol,
-			CreatedBy: in.Actor.ID, CreatedByName: name,
+			CreatedBy: in.Actor.ID, CreatedByName: name, GoalPhase: goalPhase,
 		},
 		SteppedUpAt: in.SteppedUpAt,
+		Workflow:    wf,
 	}, tasks)
 	if err != nil {
 		return runnerwire.AutopilotView{}, err
@@ -1140,6 +1243,12 @@ func (o *Orchestrator) List(ctx context.Context, project string, statuses ...str
 	return out, nil
 }
 
+// WaitingHuman lists the live autopilots' tasks waiting for a person's
+// review across projects, in one query (Store.WaitingHuman).
+func (o *Orchestrator) WaitingHuman(ctx context.Context, projects []string) ([]WaitingHumanRow, error) {
+	return o.opts.Store.WaitingHuman(ctx, projects)
+}
+
 // Get is one autopilot record, for access checks.
 func (o *Orchestrator) Get(ctx context.Context, id string) (Record, error) {
 	return o.opts.Store.Get(ctx, id)
@@ -1164,7 +1273,7 @@ func (o *Orchestrator) setStatus(ctx context.Context, id, from, to, reason strin
 	}
 	if rec.Status != from {
 		unlock()
-		return conflictf("the autopilot is %s", rec.Status)
+		return conflictf("the autopilot is %s", "autopilot 目前是 %s", rec.Status)
 	}
 	rec.Status, rec.Reason = to, reason
 	_, err = o.opts.Store.Save(ctx, rec, nil)
@@ -1203,14 +1312,14 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 	}
 	if w.rec.Status != runnerwire.AutopilotPaused {
 		unlock()
-		return conflictf("the autopilot is %s; only a paused one takes the goal's revised tasks", w.rec.Status)
+		return conflictf("the autopilot is %s; only a paused one takes the goal's revised tasks", "autopilot 目前是 %s；只有暫停中的才能接受目標修改後的任務", w.rec.Status)
 	}
 	before := snapshot(w)
 	statuses := engine.ComputeStatuses(w.graph, w.state)
 	content := func(nodeID string) (string, error) {
 		body, err := o.opts.Board.Content(w.rec.Project, nodeID)
 		if err != nil {
-			return "", fmt.Errorf("read task %s: %w", nodeID, err)
+			return "", locale.Errorf("read task %s: %w", "讀取任務 %s：%w", nodeID, err)
 		}
 		return contentHash(w.dag.title(nodeID), body), nil
 	}
@@ -1258,7 +1367,7 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 	}
 	if todo > runnerwire.MaxAutopilotTasks {
 		unlock()
-		return invalidf("the revised goal has %d tasks; an autopilot works at most %d: split the goal", todo, runnerwire.MaxAutopilotTasks)
+		return invalidf("the revised goal has %d tasks; an autopilot works at most %d: split the goal", "修改後的目標有 %d 個任務；autopilot 最多處理 %d 個：請拆分目標", todo, runnerwire.MaxAutopilotTasks)
 	}
 	w.rec.Status, w.rec.Reason, w.dirty = runnerwire.AutopilotRunning, "", true
 	err = o.save(ctx, w, before)
@@ -1279,7 +1388,7 @@ func (o *Orchestrator) Cancel(ctx context.Context, id, reason string) error {
 		return err
 	}
 	if final(w.rec.Status) {
-		return conflictf("the autopilot already %s", w.rec.Status)
+		return conflictf("the autopilot already %s", "autopilot 已經 %s", w.rec.Status)
 	}
 	before := snapshot(w)
 	for _, t := range w.tasks {
@@ -1317,10 +1426,10 @@ func (o *Orchestrator) Retry(ctx context.Context, id, nodeID string) error {
 		case t.State == runnerwire.TaskFailed, t.State == runnerwire.TaskUpstreamFailed, t.State == runnerwire.TaskSkipped:
 		case t.Hold == runnerwire.HoldChanged, t.Hold == runnerwire.HoldRemoved:
 			if _, member := w.dag.nodes[nodeID]; !member {
-				return conflictf("the task is no longer part of the goal; skip it instead")
+				return conflictf("the task is no longer part of the goal; skip it instead", "這個任務已不屬於目標；請改為略過")
 			}
 		default:
-			return conflictf("only a failed, skipped or held task can be retried; this one is %s", t.State)
+			return conflictf("only a failed, skipped or held task can be retried; this one is %s", "只有失敗、略過或擱置的任務可以重試；這個是 %s", t.State)
 		}
 		// Retrying a task held for its change accepts the task as it is now;
 		// any other retry keeps the content it started with, so a change
@@ -1347,7 +1456,7 @@ func (o *Orchestrator) Retry(ctx context.Context, id, nodeID string) error {
 func (o *Orchestrator) Skip(ctx context.Context, id, nodeID string) error {
 	return o.taskAction(ctx, id, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
 		if t.State == runnerwire.TaskSuccess || t.State == runnerwire.TaskSkipped {
-			return conflictf("the task is already %s", t.State)
+			return conflictf("the task is already %s", "這個任務已經是 %s", t.State)
 		}
 		if !final1(t.State) {
 			o.stopTry(ctx, t, "skipped in the autopilot")
@@ -1377,10 +1486,10 @@ const humanChangesPrefix = "changes requested: "
 func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.Reviewer, admin bool, verdict, comment string) error {
 	verdict = strings.TrimSpace(verdict)
 	if verdict != runnerwire.VerdictApprove && verdict != runnerwire.VerdictChanges {
-		return invalidf("verdict must be %q or %q", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
+		return invalidf("verdict must be %q or %q", "判定須為「%s」或「%s」", runnerwire.VerdictApprove, runnerwire.VerdictChanges)
 	}
 	if len(comment) > 8<<10 {
-		return invalidf("the comment is at most 8192 bytes")
+		return invalidf("the comment is at most 8192 bytes", "留言最多 8192 位元組")
 	}
 	rec, err := o.Get(ctx, id)
 	if err != nil {
@@ -1412,7 +1521,7 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 				}
 			}
 			if t.State != runnerwire.TaskWaitingHuman {
-				return conflictf("the task is not waiting for a review; it is %s", t.State)
+				return conflictf("the task is not waiting for a review; it is %s", "這個任務沒有在等審查；目前是 %s", t.State)
 			}
 			if _, err := o.opts.Runs.HumanReview(ctx, t.PipelineID, who, verdict, comment); err != nil {
 				return err
@@ -1426,7 +1535,7 @@ func (o *Orchestrator) Review(ctx context.Context, id, nodeID string, who runs.R
 	}
 	return o.taskAction(ctx, id, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
 		if t.State != runnerwire.TaskWaitingHuman {
-			return conflictf("the task is not waiting for a review; it is %s", t.State)
+			return conflictf("the task is not waiting for a review; it is %s", "這個任務沒有在等審查；目前是 %s", t.State)
 		}
 		if verdict == runnerwire.VerdictApprove {
 			t.HumanVerdict = verdict
@@ -1449,9 +1558,9 @@ func (o *Orchestrator) reviewHold(ctx context.Context, rec Record, nodeID string
 	return o.taskAction(ctx, rec.ID, nodeID, func(w *work, t *runnerwire.TaskInstance) error {
 		if t.Hold != runnerwire.HoldSensitive || t.State != runnerwire.TaskWaitingHuman {
 			if t.Hold == runnerwire.HoldChanged || t.Hold == runnerwire.HoldRemoved {
-				return conflictf("the task is held because %s; retry or skip it", t.Reason)
+				return conflictf("the task is held because %s; retry or skip it", "這個任務因 %s 而擱置；請重試或略過", t.Reason)
 			}
-			return conflictf("the task is not waiting for a review; it is %s", t.State)
+			return conflictf("the task is not waiting for a review; it is %s", "這個任務沒有在等審查；目前是 %s", t.State)
 		}
 		if verdict == runnerwire.VerdictApprove {
 			t.HumanVerdict = verdict
@@ -1483,11 +1592,11 @@ func (o *Orchestrator) taskAction(ctx context.Context, id, nodeID string, fn fun
 	t := w.tasks[nodeID]
 	if t == nil {
 		unlock()
-		return fmt.Errorf("%w: task", ErrNotFound)
+		return locale.Errorf("%w: task", "%w：任務", ErrNotFound)
 	}
 	if w.rec.Status == runnerwire.AutopilotCancelled {
 		unlock()
-		return conflictf("the autopilot was cancelled; start a new one")
+		return conflictf("the autopilot was cancelled; start a new one", "autopilot 已取消；請啟動新的")
 	}
 	before := snapshot(w)
 	if err := fn(w, t); err != nil {
@@ -1505,4 +1614,50 @@ func (o *Orchestrator) taskAction(ctx context.Context, id, nodeID string, fn fun
 	}
 	o.Reconcile(ctx, id)
 	return nil
+}
+
+// stagedPipeline is a task's pipeline under the autopilot's frozen
+// workflow: when its stages gate tasks (Tester, Reviewer, CI, a checklist
+// judge), a pipeline with a Tester and, if the Reviewer stage is on, at
+// least one reviewer: the role's routing rule target, else the policy's
+// reviewers, else the implementer.
+func (o *Orchestrator) stagedPipeline(ctx context.Context, w *work, p *runnerwire.Pipeline, head runnerwire.AgentModel) *runnerwire.Pipeline {
+	wf := w.rec.Workflow.Normalized()
+	if !wf.Staged() {
+		return p
+	}
+	out := runnerwire.Pipeline{Implement: head, MaxRounds: 2}
+	if p != nil {
+		out = *p
+	}
+	if out.MaxRounds < 1 {
+		out.MaxRounds = 2
+	}
+	byRole := func(role string) (runnerwire.AgentModel, bool) {
+		rules, err := o.opts.Runs.Routing(ctx, w.rec.CreatedBy)
+		if err != nil {
+			return runnerwire.AgentModel{}, false
+		}
+		s := runs.Suggest(rules, runs.RouteNode{Project: w.rec.Project, Role: role})
+		if s.RuleID == "" {
+			s = routeWith(ctx, o.opts.Route, RouteRequest{OwnerID: w.rec.CreatedBy, Project: w.rec.Project,
+				NodeID: w.rec.GoalNodeID, Role: role, Manual: s})
+			return s.Target, s.RuleID != "" && s.Match == runnerwire.RouteAuto
+		}
+		return s.Target, s.Match == runnerwire.RouteRole
+	}
+	if out.Tester.Agent == "" {
+		out.Tester = head
+		if am, ok := byRole(engine.RoleTester); ok {
+			out.Tester = am
+		}
+	}
+	if wf.Stages.Reviewer && len(runnerwire.ReviewersOf(out)) == 0 {
+		reviewer := head
+		if am, ok := byRole(engine.RoleReviewer); ok {
+			reviewer = am
+		}
+		out.Reviewers = []runnerwire.AgentModel{reviewer}
+	}
+	return &out
 }

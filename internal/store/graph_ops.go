@@ -15,13 +15,13 @@
 package store
 
 import (
-	"fmt"
 	"math"
 	"strings"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // maxGraphOps bounds one request. A drag emits one op per selected node, so
@@ -31,7 +31,8 @@ const maxGraphOps = 2_000
 // GraphOp is one change to graph.yaml.
 type GraphOp struct {
 	// Kind is one of: move | node-size | node-metadata | add-edge |
-	// remove-edge | set-edge-style | timeline-order.
+	// remove-edge | set-edge-style | timeline-order | add-ref | remove-ref |
+	// acceptance | workflow | node-workflow | agent-roles.
 	Kind string `json:"kind"`
 
 	NodeID string   `json:"nodeId,omitempty"`
@@ -58,6 +59,29 @@ type GraphOp struct {
 	Line     *string `json:"line,omitempty"`
 
 	Order []string `json:"order,omitempty"`
+
+	// Ref is the target of add-ref/remove-ref: NodeID uses Ref as context.
+	Ref string `json:"ref,omitempty"`
+
+	// Acceptance is the acceptance op's new list (agent roles). Lock and
+	// attribution are the server's: a client's values are not trusted.
+	Acceptance *engine.Acceptance `json:"acceptance,omitempty"`
+	// Workflow is the workflow op's project stages, or the node-workflow
+	// op's Goal override; nil drops it.
+	Workflow *engine.Workflow `json:"workflow,omitempty"`
+	// AgentRoles is the agent-roles op's whole sparse role list.
+	AgentRoles []engine.AgentRoleDef `json:"agentRoles,omitempty"`
+}
+
+// createdByRunFunc reports whether the acting run created a node.
+type createdByRunFunc func(nodeID string) bool
+
+func (s *Store) createdByActorRunLocked(actor identity.Actor) createdByRunFunc {
+	if !actor.HasRole() || actor.RunID == "" {
+		return func(string) bool { return false }
+	}
+	file := s.loadCreatedByLocked()
+	return func(id string) bool { return file.Nodes[id].Run == actor.RunID }
 }
 
 // ApplyGraphOps applies a batch of commands atomically and returns the new
@@ -67,59 +91,49 @@ type GraphOp struct {
 // user looking at a board that matches neither what they did nor what they
 // had.
 func (s *Store) ApplyGraphOps(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, error) {
+	graph, rev, _, err := s.ApplyGraphOpsSynced(actor, ops)
+	return graph, rev, err
+}
+
+// ApplyGraphOpsSynced is ApplyGraphOps that also names the nodes whose files
+// it rewrote; see SaveGraphSynced for why a caller needs them.
+//
+// Calls that arrive while another write holds the store are committed
+// together (graph_ops_batch.go): each is still applied, validated and
+// accepted or refused on its own, in arrival order, but graph.yaml is read,
+// written and fsynced once for all of them. The graph returned is the one
+// that write put on disk, with the rev to match; it may already include the
+// calls queued behind this one, and it is shared between them, so it is
+// read-only, like LoadGraph's.
+func (s *Store) ApplyGraphOpsSynced(actor identity.Actor, ops []GraphOp) (*engine.Graph, string, []string, error) {
 	if len(ops) == 0 {
-		return nil, "", fmt.Errorf("no operations given")
+		return nil, "", nil, locale.Errorf("no operations given", "沒有提供任何操作")
 	}
 	if len(ops) > maxGraphOps {
-		return nil, "", fmt.Errorf("too many operations in one request (maximum %d)", maxGraphOps)
+		return nil, "", nil, locale.Errorf("too many operations in one request (maximum %d)", "單次請求的操作太多（最多 %d 個）", maxGraphOps)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	call := s.queueGraphOps(actor, ops)
+	return call.graph, call.rev, call.synced, call.err
+}
 
-	graph, _, err := s.loadGraphLocked()
-	if err != nil {
-		return nil, "", err
-	}
+// applyGraphOpsLocked applies one call's ops to graph, which the caller owns,
+// and validates the result. On error graph is left half-changed: the caller
+// throws it away.
+func (s *Store) applyGraphOpsLocked(actor identity.Actor, graph *engine.Graph, ops []GraphOp, touched map[string]bool) error {
 	if graph.UI == nil {
 		graph.UI = &engine.UIState{}
 	}
-	touched := map[string]bool{}
+	createdBy := s.createdByActorRunLocked(actor)
 	for _, op := range ops {
-		if err := applyGraphOp(actor, graph, op, touched); err != nil {
-			return nil, "", err
+		if err := applyGraphOp(actor, graph, op, touched, createdBy); err != nil {
+			return err
 		}
 	}
-	if err := ValidateGraphForStorage(graph); err != nil {
-		return nil, "", err
-	}
-	data, err := s.marshalGraph(graph)
-	if err != nil {
-		return nil, "", err
-	}
-	updates := make([]fileUpdate, 0, len(touched)+1)
-	// Node metadata lives in two places: graph.yaml and the document's
-	// frontmatter. Writing only one of them is how they drift apart.
-	for id := range touched {
-		node := graph.NodeByID(id)
-		if node == nil {
-			continue
-		}
-		update, err := s.prepareNodeFileUpdate(node)
-		if err != nil {
-			return nil, "", fmt.Errorf("sync node %s: %w", id, err)
-		}
-		if update != nil {
-			updates = append(updates, *update)
-		}
-	}
-	updates = append(updates, fileUpdate{path: s.GraphPath(), data: data})
-	if err := s.applyUpdatesLocked(actor, updates); err != nil {
-		return nil, "", err
-	}
-	return graph, Rev(data), nil
+	engine.NormalizeLogicGates(graph)
+	return ValidateGraphForStorage(graph)
 }
 
-func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool) error {
+func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched map[string]bool, createdBy createdByRunFunc) error {
 	switch op.Kind {
 	// move, node-size and timeline-order stay ungated: they change how the
 	// board is drawn, not what the node says, so a restricted node can still
@@ -127,10 +141,10 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 	case "move":
 		node := graph.NodeByID(op.NodeID)
 		if node == nil {
-			return fmt.Errorf("node %q not found", op.NodeID)
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
 		}
 		if op.X == nil || op.Y == nil || !finite(*op.X) || !finite(*op.Y) {
-			return fmt.Errorf("move needs finite x and y")
+			return locale.Errorf("move needs finite x and y", "移動需要有限的 x 與 y")
 		}
 		if graph.UI.Positions == nil {
 			graph.UI.Positions = map[string]engine.Position{}
@@ -138,10 +152,10 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		graph.UI.Positions[op.NodeID] = engine.Position{X: *op.X, Y: *op.Y}
 	case "node-size":
 		if graph.NodeByID(op.NodeID) == nil {
-			return fmt.Errorf("node %q not found", op.NodeID)
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
 		}
 		if op.Width == nil || op.Height == nil || !finite(*op.Width) || !finite(*op.Height) {
-			return fmt.Errorf("node-size needs finite width and height")
+			return locale.Errorf("node-size needs finite width and height", "調整大小需要有限的寬與高")
 		}
 		if graph.UI.NodeStyles == nil {
 			graph.UI.NodeStyles = map[string]engine.NodeStyle{}
@@ -153,9 +167,12 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 	case "node-metadata":
 		node := graph.NodeByID(op.NodeID)
 		if node == nil {
-			return fmt.Errorf("node %q not found", op.NodeID)
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
 		}
 		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkRole(actor, graph, engine.CapMeta, node); err != nil {
 			return err
 		}
 		if op.WriteAccess != nil {
@@ -164,7 +181,7 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			case engine.WriteAccessAll, engine.WriteAccessWorker,
 				engine.WriteAccessOrchestrator, engine.WriteAccessHumanOnly:
 			default:
-				return fmt.Errorf("invalid write_access %q", *op.WriteAccess)
+				return locale.Errorf("invalid write_access %q", "write_access「%s」無效", *op.WriteAccess)
 			}
 			node.WriteAccess = access
 		}
@@ -172,7 +189,16 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			node.Title = *op.Title
 		}
 		if op.Kind_ != nil {
-			node.Kind = *op.Kind_
+			kind := engine.NormalizeNodeKind(*op.Kind_)
+			// An unknown type is refused as new input; a legacy value the node
+			// already carries may be written back unchanged.
+			if !graph.KnownNodeKind(kind) && kind != node.Kind {
+				return unknownNodeTypeError(node.ID, kind)
+			}
+			if err := checkKindChange(actor, graph, node.Kind, kind); err != nil {
+				return err
+			}
+			node.Kind = kind
 		}
 		if op.Priority != nil {
 			node.Priority = *op.Priority
@@ -189,23 +215,31 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		touched[node.ID] = true
 	case "add-edge":
 		if graph.NodeByID(op.From) == nil || graph.NodeByID(op.To) == nil {
-			return fmt.Errorf("edge %s->%s names a node that does not exist", op.From, op.To)
+			return locale.Errorf("edge %s->%s names a node that does not exist", "連線 %s->%s 指向不存在的節點", op.From, op.To)
 		}
 		// The dependency lands in the To node's requires, so that node's
 		// access is the one that matters.
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
 			return err
 		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
+			return err
+		}
 		if op.From == op.To {
-			return fmt.Errorf("a node cannot depend on itself")
+			return locale.Errorf("a node cannot depend on itself", "節點不能相依於自己")
 		}
 		if gateID := booleanGateForOutput(graph, op.To); gateID != "" {
-			return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+			return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 		}
 		if gateID := logicGateOwningEdge(graph, op.From, op.To); gateID != "" {
-			return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+			return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 		}
 		target := graph.NodeByID(op.To)
+		if !dependsOn(graph, target, op.From) {
+			if err := refuseDependencyCycle(graph, op.From, op.To); err != nil {
+				return err
+			}
+		}
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.From == op.From && edge.To == op.To {
 				edge.Relation = engine.RelationRequired
@@ -229,13 +263,16 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		graph.Edges = append(graph.Edges, &engine.Edge{From: op.From, To: op.To})
 	case "remove-edge":
 		if graph.NodeByID(op.From) == nil || graph.NodeByID(op.To) == nil {
-			return fmt.Errorf("edge %s->%s names a node that does not exist", op.From, op.To)
+			return locale.Errorf("edge %s->%s names a node that does not exist", "連線 %s->%s 指向不存在的節點", op.From, op.To)
 		}
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
 			return err
 		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
+			return err
+		}
 		if gateID := logicGateOwningEdge(graph, op.From, op.To); gateID != "" {
-			return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+			return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 		}
 		target := graph.NodeByID(op.To)
 		hasRequiredEdge := false
@@ -245,18 +282,24 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			}
 		}
 		if gateID := booleanGateForOutput(graph, op.To); gateID != "" && hasRequiredEdge {
-			return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+			return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 		}
 		kept := graph.Edges[:0:0]
 		removedRequired := false
+		wired := false
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.From == op.From && edge.To == op.To {
+				wired = true
 				removedRequired = removedRequired || edge.Blocks()
 				continue
 			}
 			kept = append(kept, edge)
 		}
 		graph.Edges = kept
+		// The wire's bends and label go with it, so a later save cannot bring
+		// the edge back from a stale bend (see materializeRequiresWires).
+		delete(graph.UI.WireVertices, op.From+"->"+op.To)
+		delete(graph.UI.EdgeLabels, op.From+"->"+op.To)
 		hasIncoming := false
 		for _, edge := range graph.Edges {
 			if edge != nil && edge.To == op.To {
@@ -267,6 +310,14 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if !hasIncoming {
 			delete(graph.UI.Gates, op.To)
 			delete(graph.UI.WireVertices, "gate:"+op.To)
+		}
+		// No wire at all: a hand-written graph.yaml named the dependency only
+		// in `requires`, and the board drew its wire from the expression.
+		// Removing that wire removes the condition it stood for. A condition
+		// that does not parse names nothing the board could have drawn, so it
+		// is left alone as before.
+		if !wired && nodeRequiresRef(target, op.From) {
+			removedRequired = true
 		}
 		if removedRequired {
 			changed, err := pruneNodeRequirement(target, op.From)
@@ -279,7 +330,7 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		}
 	case "set-edge-style":
 		if op.Relation == nil && op.Line == nil {
-			return fmt.Errorf("set-edge-style needs relation or line")
+			return locale.Errorf("set-edge-style needs relation or line", "設定連線樣式需要關係或線型")
 		}
 		var selected *engine.Edge
 		for _, edge := range graph.Edges {
@@ -288,11 +339,25 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 				break
 			}
 		}
-		if selected == nil {
-			return fmt.Errorf("edge %s->%s not found", op.From, op.To)
+		// A dependency named only in `requires` is drawn as a wire all the
+		// same; styling it writes the explicit edge it stands for first.
+		requiresOnly := selected == nil && graph.NodeByID(op.From) != nil &&
+			nodeRequiresRef(graph.NodeByID(op.To), op.From)
+		if selected == nil && !requiresOnly {
+			return locale.Errorf("edge %s->%s not found", "找不到連線 %s->%s", op.From, op.To)
 		}
 		if err := checkNodeWrite(actor, graph.NodeByID(op.To)); err != nil {
 			return err
+		}
+		if err := checkRoleLink(actor, graph, graph.NodeByID(op.To), false); err != nil {
+			return err
+		}
+		if requiresOnly {
+			if gateID := requiresWireGate(graph, op.From, op.To); gateID != "" {
+				return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
+			}
+			selected = &engine.Edge{From: op.From, To: op.To, Relation: engine.RelationRequired}
+			graph.Edges = append(graph.Edges, selected)
 		}
 		nextRelation := selected.Relation
 		if op.Relation != nil {
@@ -300,11 +365,11 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		}
 		if nextRelation != selected.Relation {
 			if gateID := logicGateOwningEdge(graph, op.From, op.To); gateID != "" {
-				return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+				return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 			}
 			if gateID := booleanGateForOutput(graph, op.To); gateID != "" &&
 				(selected.Blocks() || nextRelation == engine.RelationRequired) {
-				return fmt.Errorf("edge %s->%s is controlled by logic gate %q", op.From, op.To, gateID)
+				return locale.Errorf("edge %s->%s is controlled by logic gate %q", "連線 %s->%s 由邏輯閘「%s」控制", op.From, op.To, gateID)
 			}
 			target := graph.NodeByID(op.To)
 			var changed bool
@@ -312,6 +377,11 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 			if selected.Blocks() && nextRelation != engine.RelationRequired {
 				changed, err = pruneNodeRequirement(target, op.From)
 			} else if !selected.Blocks() && nextRelation == engine.RelationRequired {
+				if !dependsOn(graph, target, op.From) {
+					if err := refuseDependencyCycle(graph, op.From, op.To); err != nil {
+						return err
+					}
+				}
 				changed, err = appendNodeRequirement(target, op.From)
 			}
 			if err != nil {
@@ -325,17 +395,131 @@ func applyGraphOp(actor identity.Actor, graph *engine.Graph, op GraphOp, touched
 		if op.Line != nil {
 			selected.Line = *op.Line
 		}
+	case "add-ref":
+		// A reference is stored on the node that uses it, so that node's
+		// access is the one that matters, as add-edge checks To.
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkRoleLink(actor, graph, node, true); err != nil {
+			return err
+		}
+		if graph.NodeByID(op.Ref) == nil {
+			return locale.Errorf("reference target %q not found", "找不到參照目標「%s」", op.Ref)
+		}
+		if op.Ref == node.ID {
+			return locale.Errorf("a node cannot reference itself", "節點不能參照自己")
+		}
+		if node.HasRef(op.Ref) {
+			return nil // idempotent
+		}
+		if len(node.Refs) >= maxNodeRefs {
+			return locale.Errorf("node %q has too many references (maximum %d)", "節點「%s」的參照太多（最多 %d 個）", node.ID, maxNodeRefs)
+		}
+		node.Refs = append(node.Refs, op.Ref)
+		touched[node.ID] = true
+	case "remove-ref":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkRoleLink(actor, graph, node, true); err != nil {
+			return err
+		}
+		if !node.HasRef(op.Ref) {
+			return nil
+		}
+		kept := make([]string, 0, len(node.Refs))
+		for _, ref := range node.Refs {
+			if ref != op.Ref {
+				kept = append(kept, ref)
+			}
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		node.Refs = kept
+		touched[node.ID] = true
 	case "timeline-order":
 		order := make([]string, 0, len(op.Order))
 		for _, id := range op.Order {
 			if graph.NodeByID(id) == nil {
-				return fmt.Errorf("node %q not found", id)
+				return locale.Errorf("node %q not found", "找不到節點「%s」", id)
 			}
 			order = append(order, id)
 		}
 		graph.UI.TimelineOrder = order
+	case "acceptance":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		before := node.Acceptance
+		after := normalizeAcceptance(actor, before, op.Acceptance)
+		if err := checkAcceptanceWrite(actor, graph, node, before, after, createdBy(node.ID)); err != nil {
+			return err
+		}
+		if actor.IsAgent() && after != nil {
+			if after.EqualItems(before) && before != nil {
+				after.By = before.By
+			} else {
+				after.By = acceptanceAttribution(actor)
+			}
+		}
+		node.Acceptance = after
+		if err := engine.ValidateNodeAcceptance(graph, node); err != nil {
+			return err
+		}
+	case "workflow":
+		if err := checkWorkflowEdit(actor, "", graph.Workflow, op.Workflow); err != nil {
+			return err
+		}
+		if err := engine.ValidateWorkflow(op.Workflow); err != nil {
+			return err
+		}
+		graph.Workflow = op.Workflow
+	case "node-workflow":
+		node := graph.NodeByID(op.NodeID)
+		if node == nil {
+			return locale.Errorf("node %q not found", "找不到節點「%s」", op.NodeID)
+		}
+		if err := checkNodeWrite(actor, node); err != nil {
+			return err
+		}
+		if err := checkWorkflowEdit(actor, node.ID, node.Workflow, op.Workflow); err != nil {
+			return err
+		}
+		if op.Workflow != nil && graph.TypeOf(node).AgentMode != engine.AgentAutopilot {
+			return locale.Errorf("node %q: only an Autopilot type (a Goal) can override workflow stages", "節點「%s」：只有 Autopilot 類型（目標）可以覆寫工作流程階段", node.ID)
+		}
+		if err := engine.ValidateWorkflow(op.Workflow); err != nil {
+			return err
+		}
+		node.Workflow = op.Workflow
+	case "agent-roles":
+		if err := checkAgentRolesEdit(actor, graph.AgentRoles, op.AgentRoles); err != nil {
+			return err
+		}
+		if err := engine.ValidateAgentRoleDefs(op.AgentRoles); err != nil {
+			return err
+		}
+		if len(op.AgentRoles) == 0 {
+			graph.AgentRoles = nil
+		} else {
+			graph.AgentRoles = op.AgentRoles
+		}
 	default:
-		return fmt.Errorf("unknown graph operation %q", strings.TrimSpace(op.Kind))
+		return locale.Errorf("unknown graph operation %q", "不明的圖操作「%s」", strings.TrimSpace(op.Kind))
 	}
 	return nil
 }
@@ -355,7 +539,7 @@ func containsNodeRef(expr dsl.Expr, nodeID string) bool {
 func appendNodeRequirement(node *engine.Node, sourceID string) (bool, error) {
 	expr, parseErr := dsl.Parse(node.Requires)
 	if parseErr != nil {
-		return false, fmt.Errorf("cannot add dependency to node %q: invalid requires expression: %w", node.ID, parseErr)
+		return false, locale.Errorf("cannot add dependency to node %q: invalid requires expression: %w", "無法替節點「%s」加入相依：前置條件運算式無效：%w", node.ID, parseErr)
 	}
 	if containsNodeRef(expr, sourceID) {
 		return false, nil
@@ -369,10 +553,17 @@ func appendNodeRequirement(node *engine.Node, sourceID string) (bool, error) {
 	return true, nil
 }
 
+// nodeRequiresRef reports whether the node's requires expression parses and
+// names sourceID.
+func nodeRequiresRef(node *engine.Node, sourceID string) bool {
+	expr, parseErr := dsl.Parse(node.Requires)
+	return parseErr == nil && expr != nil && containsNodeRef(expr, sourceID)
+}
+
 func pruneNodeRequirement(node *engine.Node, sourceID string) (bool, error) {
 	expr, parseErr := dsl.Parse(node.Requires)
 	if parseErr != nil {
-		return false, fmt.Errorf("cannot remove dependency from node %q: invalid requires expression: %w", node.ID, parseErr)
+		return false, locale.Errorf("cannot remove dependency from node %q: invalid requires expression: %w", "無法從節點「%s」移除相依：前置條件運算式無效：%w", node.ID, parseErr)
 	}
 	if expr == nil || !containsNodeRef(expr, sourceID) {
 		return false, nil

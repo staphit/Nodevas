@@ -102,7 +102,7 @@ func registerWriteTools(server *mcp.Server, client *Client) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "set_node_status",
-		Description: "Report done, failed or skipped for your claimed task, with an accurate note. Use release_task if unfinished.",
+		Description: "Report done, failed or skipped for your claimed task, with an accurate note. Use release_task if unfinished. A people-only type (review, decision, goal) is refused: release it for a person.",
 		Annotations: &mcp.ToolAnnotations{Title: "Report an outcome", IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in setStatusInput) (*mcp.CallToolResult, setStatusOutput, error) {
 		id := strings.TrimSpace(in.ID)
@@ -179,6 +179,27 @@ func guide(err error) error {
 		advice = "It is not actionable; get_ready_tasks lists what is."
 	case "NOT_OWNER":
 		advice = "Claim it with claim_task before reporting on it."
+	case CodeNodeTypePeopleOnly:
+		advice = "Only a person can complete this node's type. Do not retry: give it back with release_task " +
+			"and say in your report that it is ready for a person."
+	case CodeNodeTypeNoStatus:
+		advice = "This node has no status (a Note); there is nothing to report on it."
+	case CodeNodeTypeForbidsAgent:
+		advice = "Agents cannot take this node's type; get_ready_tasks lists what agents may work."
+	case CodeUnknownNodeType:
+		advice = "Use a type id from get_graph_outline nodeTypes."
+	case CodeAgentRestoreDenied:
+		advice = "Ask a person to restore it."
+	case "ROLE_DENIED":
+		advice = "ROLE_DENIED: your role may not do this. Do not retry; finish what your role may do and report."
+	case "STAGE_GATE_PENDING":
+		advice = "STAGE_GATE_PENDING: do not set it done; report your work and stop."
+	case "ACCEPTANCE_LOCKED":
+		advice = "ACCEPTANCE_LOCKED: an Executor is working against these criteria; ask a person to change them."
+	case "ACCEPTANCE_REQUIRED":
+		advice = "ACCEPTANCE_REQUIRED: write the acceptance criteria first."
+	case "UNKNOWN_ROLE":
+		advice = "UNKNOWN_ROLE: this project does not define the role this session declares."
 	default:
 		return err
 	}

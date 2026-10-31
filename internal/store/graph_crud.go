@@ -15,9 +15,21 @@ import (
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
+	ids, err := s.nextNodeIDsLocked(g, 1)
+	if err != nil {
+		return "", err
+	}
+	return ids[0], nil
+}
+
+// nextNodeIDsLocked picks n fresh automatic ids, skipping ids in the graph, in
+// the trash and on disk. The used set is built once, so a batch of a hundred
+// costs one trash listing.
+func (s *Store) nextNodeIDsLocked(g *engine.Graph, n int) ([]string, error) {
 	used := make(map[string]bool, len(g.Nodes))
 	for _, node := range g.Nodes {
 		if node != nil {
@@ -26,14 +38,15 @@ func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
 	}
 	trash, err := s.ListTrash()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, item := range trash {
 		if item.NodeID != "" {
 			used[item.NodeID] = true
 		}
 	}
-	for number := 1; number <= 9_999_999; number++ {
+	ids := make([]string, 0, n)
+	for number := 1; number <= 9_999_999 && len(ids) < n; number++ {
 		id := fmt.Sprintf("node-%04d", number)
 		if used[id] {
 			continue
@@ -41,24 +54,29 @@ func (s *Store) nextNodeIDLocked(g *engine.Graph) (string, error) {
 		if _, err := s.statPath(s.NodePath(id)); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", err
+			return nil, err
 		}
-		return id, nil
+		used[id] = true
+		ids = append(ids, id)
 	}
-	return "", errors.New("automatic node id space exhausted")
+	if len(ids) < n {
+		return nil, locale.Errorf("automatic node id space exhausted", "自動節點代號已用盡")
+	}
+	return ids, nil
 }
 
 func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (string, error) {
 	if n == nil {
-		return "", errors.New("node is required")
+		return "", locale.Errorf("node is required", "需要指定節點")
 	}
 	nf, err := engine.ParseNodeFile([]byte(body))
 	if err != nil {
-		return "", fmt.Errorf("node file: %w", err)
+		return "", locale.Errorf("node file: %w", "節點檔案：%w", err)
 	}
 	hydrateNodeFromMeta(n, nf.Meta)
+	n.Kind = engine.NormalizeNodeKind(n.Kind)
 	if n.Kind == "" {
-		n.Kind = "task"
+		n.Kind = engine.NodeKindTask
 	}
 	// Normalized before SyncFrontmatter below, or "all" would land in the
 	// document's frontmatter while the graph stores "". The enum itself is
@@ -70,6 +88,28 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 	if err != nil {
 		return "", err
 	}
+	if !g.KnownNodeKind(n.Kind) {
+		return "", unknownNodeTypeError(n.ID, n.Kind)
+	}
+	if err := checkRole(actor, g, engine.CapCreate, n); err != nil {
+		return "", err
+	}
+	if n.Workflow != nil {
+		if err := checkWorkflowEdit(actor, n.ID, nil, n.Workflow); err != nil {
+			return "", err
+		}
+	}
+	if n.Acceptance != nil {
+		acceptance := normalizeAcceptance(actor, nil, n.Acceptance)
+		if acceptance != nil {
+			acceptance.Locked = false
+			acceptance.By = acceptanceAttribution(actor)
+		}
+		if err := checkAcceptanceWrite(actor, g, n, nil, acceptance, true); err != nil {
+			return "", err
+		}
+		n.Acceptance = acceptance
+	}
 	if n.ID == "" {
 		n.ID, err = s.nextNodeIDLocked(g)
 		if err != nil {
@@ -77,7 +117,7 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 		}
 	}
 	if !engine.ValidNodeID(n.ID) {
-		return "", fmt.Errorf("invalid node id %q", n.ID)
+		return "", locale.Errorf("invalid node id %q", "節點代號「%s」無效", n.ID)
 	}
 	engine.SyncFrontmatter(nf, n)
 	out, err := engine.ComposeNodeFile(nf)
@@ -85,10 +125,10 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 		return "", err
 	}
 	if g.NodeByID(n.ID) != nil {
-		return "", fmt.Errorf("node %q already exists", n.ID)
+		return "", locale.Errorf("node %q already exists", "節點「%s」已存在", n.ID)
 	}
 	if _, err := s.statPath(s.NodePath(n.ID)); err == nil {
-		return "", fmt.Errorf("node file %q already exists", n.ID)
+		return "", locale.Errorf("node file %q already exists", "節點檔案「%s」已存在", n.ID)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
@@ -116,15 +156,19 @@ func (s *Store) CreateNode(actor identity.Actor, n *engine.Node, body string) (s
 	}); err != nil {
 		return "", err
 	}
+	if actor.RunID != "" {
+		s.recordCreatedByRunLocked(actor.RunID, []string{n.ID})
+	}
 	return n.ID, nil
 }
 
 // DuplicateNode creates an independent copy of a node, its document, subpages,
 // attachments, expected plans, and visual style. Outgoing dependencies are
-// intentionally not copied.
-func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, error) {
+// intentionally not copied. The copy's title says it is one in language, the
+// language of whoever asked for it.
+func (s *Store) DuplicateNode(actor identity.Actor, sourceID string, language locale.Language) (string, error) {
 	if !engine.ValidNodeID(sourceID) {
-		return "", fmt.Errorf("invalid node id")
+		return "", locale.Errorf("invalid node id", "節點代號無效")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,9 +183,24 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	}
 	source := g.NodeByID(sourceID)
 	if source == nil {
-		return "", fmt.Errorf("node %q not found", sourceID)
+		return "", locale.Errorf("node %q not found", "找不到節點「%s」", sourceID)
+	}
+	if err := checkRole(actor, g, engine.CapCreate, source); err != nil {
+		return "", err
 	}
 	duplicate := *source
+	// A copy has not been dispatched: its criteria start unlocked.
+	if source.Acceptance != nil {
+		acceptance := *source.Acceptance
+		acceptance.Items = append([]engine.AcceptanceItem(nil), source.Acceptance.Items...)
+		acceptance.Locked = false
+		duplicate.Acceptance = &acceptance
+	}
+	if source.Workflow != nil {
+		workflow := *source.Workflow
+		workflow.TestGlobs = append([]string(nil), source.Workflow.TestGlobs...)
+		duplicate.Workflow = &workflow
+	}
 	duplicate.ID, err = s.nextNodeIDLocked(g)
 	if err != nil {
 		return "", err
@@ -150,8 +209,9 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	if duplicate.Title == "" {
 		duplicate.Title = sourceID
 	}
-	duplicate.Title += "（副本）"
+	duplicate.Title = locale.CopyTitle(duplicate.Title, language)
 	duplicate.Tags = append([]string(nil), source.Tags...)
+	duplicate.Refs = append([]string(nil), source.Refs...)
 	duplicate.Effects = append([]engine.Effect(nil), source.Effects...)
 
 	content, err := s.ReadFile(s.NodePath(sourceID))
@@ -277,7 +337,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	}
 	sourceAttachments := s.NodeFilesDir(sourceID)
 	if err := ValidateProjectPath(s.root, sourceAttachments, true); err != nil {
-		return "", fmt.Errorf("duplicate attachment source: %w", err)
+		return "", locale.Errorf("duplicate attachment source: %w", "複製附件來源：%w", err)
 	}
 	attachments, err := readDuplicateAttachments(sourceAttachments)
 	if err != nil {
@@ -286,7 +346,7 @@ func (s *Store) DuplicateNode(actor identity.Actor, sourceID string) (string, er
 	if len(attachments) > 0 {
 		destination := s.NodeFilesDir(duplicate.ID)
 		if err := ValidateProjectPath(s.root, destination, true); err != nil {
-			return "", fmt.Errorf("duplicate attachment destination is not a regular directory: %w", err)
+			return "", locale.Errorf("duplicate attachment destination is not a regular directory: %w", "複製附件的目的地不是一般資料夾：%w", err)
 		}
 		if err := requireSafeDuplicateAttachmentDir(destination); err != nil {
 			return "", err
@@ -368,8 +428,7 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 		}
 		for _, ref := range dsl.NodeRefs(expr) {
 			if removing[ref] {
-				return fmt.Errorf(
-					"node %q is required by %q; remove that dependency first", ref, node.ID)
+				return locale.Errorf("node %q is required by %q; remove that dependency first", "節點「%s」是「%s」的前置條件；請先移除這個相依", ref, node.ID)
 			}
 		}
 	}
@@ -379,15 +438,13 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 	for _, gate := range g.UI.LogicGates {
 		for _, output := range gate.OutputNodes() {
 			if removing[output] {
-				return fmt.Errorf(
-					"node %q is the output of logic gate %q; delete that gate first",
+				return locale.Errorf("node %q is the output of logic gate %q; delete that gate first", "節點「%s」是邏輯閘「%s」的輸出；請先刪除這個閘",
 					output, gate.ID)
 			}
 		}
 		for _, input := range gate.Inputs {
 			if removing[input] {
-				return fmt.Errorf(
-					"node %q is an input of logic gate %q; delete that gate first",
+				return locale.Errorf("node %q is an input of logic gate %q; delete that gate first", "節點「%s」是邏輯閘「%s」的輸入；請先刪除這個閘",
 					input, gate.ID)
 			}
 		}
@@ -403,8 +460,24 @@ func checkNodesRemovable(g *engine.Graph, kept []*engine.Node, removing map[stri
 // dependency loses that operand rather than blocking the deletion. An
 // expression that consisted only of removed nodes clears entirely; a gate whose
 // output or last input is going away is dropped with it. kept is the node slice
-// as it looks after the removal.
+// as it looks after the removal. References to a removed node are dropped
+// too; they never block a deletion.
 func detachRemovedNodes(g *engine.Graph, kept []*engine.Node, removing map[string]bool) {
+	for _, node := range kept {
+		if node == nil || len(node.Refs) == 0 {
+			continue
+		}
+		refs := node.Refs[:0:0]
+		for _, ref := range node.Refs {
+			if !removing[ref] {
+				refs = append(refs, ref)
+			}
+		}
+		if len(refs) == 0 {
+			refs = nil
+		}
+		node.Refs = refs
+	}
 	for _, node := range kept {
 		if node == nil || node.Requires == "" {
 			continue
@@ -490,13 +563,13 @@ func (s *Store) DeleteNode(actor identity.Actor, id string) (DeleteNodeOutcome, 
 func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutcome, error) {
 	var zero DeleteNodesOutcome
 	if len(ids) == 0 {
-		return zero, fmt.Errorf("no node ids given")
+		return zero, locale.Errorf("no node ids given", "沒有提供節點代號")
 	}
 	removing := make(map[string]bool, len(ids))
 	unique := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if !engine.ValidNodeID(id) {
-			return zero, fmt.Errorf("invalid node id")
+			return zero, locale.Errorf("invalid node id", "節點代號無效")
 		}
 		if removing[id] {
 			continue
@@ -512,6 +585,9 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		return zero, err
 	}
 
+	if err := checkRoleDelete(actor, unique[0]); err != nil {
+		return zero, err
+	}
 	kept := g.Nodes[:0]
 	found := make(map[string]bool, len(removing))
 	for _, node := range g.Nodes {
@@ -526,7 +602,7 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 	}
 	for _, id := range unique {
 		if !found[id] {
-			return zero, fmt.Errorf("node %q not found", id)
+			return zero, locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 	}
 
@@ -604,7 +680,7 @@ func (s *Store) DeleteNodes(actor identity.Actor, ids []string) (DeleteNodesOutc
 		cleanup()
 		for _, item := range queued {
 			if markerErr := s.removePath(item.path); markerErr != nil && !errors.Is(markerErr, os.ErrNotExist) {
-				err = errors.Join(err, fmt.Errorf("remove uncommitted delete cleanup marker: %w", markerErr))
+				err = errors.Join(err, locale.Errorf("remove uncommitted delete cleanup marker: %w", "移除未提交的刪除清理標記：%w", markerErr))
 			}
 		}
 		return zero, err

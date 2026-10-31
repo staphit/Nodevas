@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   IconCompass,
   IconFolder,
@@ -72,7 +72,6 @@ export function Sidebar() {
   const { t } = useI18n();
   const graph = useApp((state) => state.graph);
   const statuses = useApp((state) => state.statuses);
-  const issues = useApp((state) => state.issues);
   const trash = useApp((state) => state.trash);
   const workspace = useApp((state) => state.workspace);
   const workspaces = useApp((state) => state.workspaces);
@@ -117,10 +116,25 @@ export function Sidebar() {
   const canCreateProjects = !viewer || viewer.role === "admin";
   const toolsId = useId();
   const workspaceExpanded = usePreference("explorerWorkspaceExpanded");
-  const [validationExpanded, setValidationExpanded] = useState(false);
-  const [projectTransferNotice, setProjectTransferNotice] = useState<string | null>(
-    null,
+  // The notice line says what the last project action did, so it belongs to
+  // the project open when it was said: opening another (a switch, an example)
+  // clears it. Actions that open a project set it once that one is open.
+  const [projectNotice, setProjectNotice] = useState<{
+    text: string;
+    project: string;
+  } | null>(null);
+  const setProjectTransferNotice = useCallback(
+    (text: string | null) =>
+      setProjectNotice(
+        text === null ? null : { text, project: useApp.getState().activeProject },
+      ),
+    [],
   );
+  const projectTransferNotice =
+    projectNotice?.project === activeProject ? projectNotice.text : null;
+  useEffect(() => {
+    if (projectNotice && projectNotice.project !== activeProject) setProjectNotice(null);
+  }, [projectNotice, activeProject]);
   const [folderOpenBusy, setFolderOpenBusy] = useState<string | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeMenuTarget | null>(
     null,
@@ -169,6 +183,7 @@ export function Sidebar() {
     projects,
     visibleNodes,
     visibleProjects,
+    activeTab,
   );
 
   const transfer = useProjectTransfer({
@@ -281,10 +296,6 @@ export function Sidebar() {
           ]
         : [];
 
-  useEffect(() => {
-    setValidationExpanded(issues.length > 0);
-  }, [activeProject, issues.length > 0]);
-
   const toggleNodes = () => {
     updateUIPreference("explorerNodesExpanded", !nodesExpanded);
   };
@@ -293,15 +304,36 @@ export function Sidebar() {
     updateUIPreference("explorerWorkspaceExpanded", !workspaceExpanded);
   };
 
+  // A switch takes a few hundred ms. A click that lands meanwhile is queued,
+  // not dropped: the last click wins, and a project overtaken before its turn
+  // is never opened. Refs, because the clicks arrive between renders.
+  const projectSwitchUnderWay = useRef<string | null>(null);
+  const queuedProjectSwitch = useRef<string | null>(null);
   const openProject = async (name: string) => {
-    if (switchingProject) return;
     const next = new Set(expandedProjects);
     next.add(name);
     persistExpandedProjects(next);
     setSwitchingProject(name);
+    if (projectSwitchUnderWay.current !== null) {
+      queuedProjectSwitch.current = name === projectSwitchUnderWay.current ? null : name;
+      return;
+    }
+    let target: string | null = name;
     try {
-      await switchProject(name);
+      while (target !== null) {
+        projectSwitchUnderWay.current = target;
+        queuedProjectSwitch.current = null;
+        try {
+          await switchProject(target);
+        } catch (error) {
+          // A switch the reader has already moved on from has nothing to say.
+          if (queuedProjectSwitch.current === null) throw error;
+        }
+        target = queuedProjectSwitch.current;
+      }
     } finally {
+      projectSwitchUnderWay.current = null;
+      queuedProjectSwitch.current = null;
       setSwitchingProject(null);
     }
   };
@@ -339,8 +371,30 @@ export function Sidebar() {
             <span className="explorer-workspace-label">{workspaceName}</span>
           </div>
           <span className="explorer-project-count">
-            {t("sidebar.projectCount", { count: String(projects.length) })}
+            {projects.length === 1
+              ? t("sidebar.projectCountOne")
+              : t("sidebar.projectCount", { count: String(projects.length) })}
           </span>
+          {/* Folding the explorer lives with the explorer; the board's header
+              has the matching » to bring it back. */}
+          <button
+            type="button"
+            className="explorer-collapse"
+            onClick={() => {
+              updateUIPreference("explorerCollapsed", true);
+              // The explorer, this button with it, is about to unmount; the
+              // board header's » is the way back, so the keyboard waits there.
+              requestAnimationFrame(() =>
+                document.querySelector<HTMLElement>(".board-explorer-toggle")?.focus(),
+              );
+            }}
+            title={t("board.collapseExplorer")}
+            aria-label={t("board.collapseExplorer")}
+            aria-expanded
+            aria-controls="project-explorer"
+          >
+            «
+          </button>
         </div>
         {/* One action up front — a first project is all a new workspace needs —
             and the rest one press away. The fold is remembered, so someone
@@ -403,7 +457,7 @@ export function Sidebar() {
           <button
             type="button"
             onClick={() => transfer.markdownImportInputRef.current?.click()}
-            disabled={transfer.markdownImportBusy || !activeProject}
+            disabled={transfer.markdownImportBusy || transfer.nodeImportBlocked || !activeProject}
             title={t("sidebar.importMdTitle")}
           >
             <IconImport size={13} />
@@ -492,7 +546,6 @@ export function Sidebar() {
         toggleNodeSelection={toggleNodeSelection}
         statuses={statuses}
         customStatuses={customStatuses}
-        issues={issues}
         userNames={userNames}
         activeNodes={activeNodes}
         visibleNodes={visibleNodes}
@@ -517,8 +570,6 @@ export function Sidebar() {
         }
         trash={trash}
         restoreTrash={restoreTrash}
-        validationExpanded={validationExpanded}
-        setValidationExpanded={setValidationExpanded}
       />
       </section>
 

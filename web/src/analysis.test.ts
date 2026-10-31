@@ -105,7 +105,10 @@ describe("dependency blocking", () => {
     expect(analyze(graph, { a: IDEA.id }).overdue.has("a")).toBe(false);
     const blocking = chain([IDEA]);
     blocking.ui!.plans = { a: [{ status: "done", date: "2025-01-01" }] };
-    expect(analyze(blocking, { a: IDEA.id }).overdue.has("a")).toBe(true);
+    // As data: the panel words it in the reader's language.
+    expect(analyze(blocking, { a: IDEA.id }).overdue.get("a")).toEqual([
+      { kind: "deadline", date: "2025-01-01" },
+    ]);
   });
 
   it.each(gateTruthTable.cases)(
@@ -175,7 +178,7 @@ describe("dependency blocking", () => {
       target: "in_progress",
     });
     expect(analysis.blocked.get("target")).toEqual(["a", "b"]);
-    expect(analysis.violations[0]?.message).toContain("XOR 條件不成立");
+    expect(analysis.violations[0]?.reason).toEqual({ kind: "gate-false", operator: "xor" });
   });
 
   it("blocks an unwired gate without inventing a node id", () => {
@@ -201,7 +204,7 @@ describe("dependency blocking", () => {
     expect(analysis.blocked.get("target")).toEqual([]);
     expect(analysis.blocking.size).toBe(0);
     expect(analysis.violations[0]?.sourceIds).toEqual([]);
-    expect(analysis.violations[0]?.message).toContain("AND 尚未接妥");
+    expect(analysis.violations[0]?.reason).toEqual({ kind: "gate-incomplete", operator: "and" });
   });
 
   it.each(requiresTruthTable.cases)(
@@ -390,5 +393,114 @@ describe("deprecated status spreads", () => {
     // the previous fixpoint concluded too: neither node ever loses every way in.
     expect(analysis.deprecatedNodeIds.has("d")).toBe(false);
     expect(analysis.deprecatedNodeIds.has("e")).toBe(false);
+  });
+});
+
+describe("node types in the analysis", () => {
+  // start → write → end, with a note wired in as a prerequisite of `write`.
+  function story(): Graph {
+    return {
+      version: 1,
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "bible", kind: "note" },
+        { id: "write", kind: "scene", requires: "start and bible" },
+        { id: "end", kind: "end", requires: "write" },
+      ],
+      edges: [
+        { from: "start", to: "write" },
+        { from: "bible", to: "write" },
+        { from: "write", to: "end" },
+      ],
+      ui: {
+        plans: {
+          bible: [
+            { status: "started", date: "2000-01-01" },
+            { status: "done", date: "2000-01-02" },
+          ],
+        },
+      },
+    };
+  }
+
+  it("never lets a note block, nor counts it late or blocked", () => {
+    const analysis = analyzeGraph(story(), { start: "done" }, new Date("2026-01-01T12:00:00"));
+    expect(analysis.blocked.has("write")).toBe(false);
+    expect(analysis.blocking.has("bible")).toBe(false);
+    expect(analysis.blocked.has("bible")).toBe(false);
+    expect(analysis.overdue.has("bible")).toBe(false);
+    expect(analysis.entryNodeIds.has("bible")).toBe(false);
+  });
+
+  it("keeps notes off the critical path and weighs Start and End nothing", () => {
+    const analysis = analyzeGraph(story(), {});
+    // The path ends on the last node that is work, never on an End marker.
+    expect(analysis.criticalPath).toEqual(["start", "write"]);
+    expect(analysis.criticalNodeIds.has("bible")).toBe(false);
+    expect(analysis.criticalNodeIds.has("end")).toBe(false);
+    // Only the scene takes a day.
+    expect(analysis.criticalDays).toBe(1);
+    expect(analysis.hasCycle).toBe(false);
+  });
+
+  it("treats a custom type with no status like a note", () => {
+    const graph: Graph = {
+      version: 1,
+      nodes: [{ id: "who", kind: "custom-type-1" }, { id: "b", requires: "who" }],
+      edges: [{ from: "who", to: "b" }],
+      nodeTypes: [
+        {
+          id: "custom-type-1",
+          label: "角色",
+          agentMode: "none",
+          completion: "none",
+          countsInProgress: false,
+        },
+      ],
+    };
+    const analysis = analyzeGraph(graph, {});
+    expect(analysis.blocked.has("b")).toBe(false);
+    expect(analysis.criticalPath).toEqual(["b"]);
+  });
+});
+
+describe("references", () => {
+  // A reference is context, not an edge: adding refs — even ones that would
+  // close a loop, or point at a deprecated branch — changes nothing here.
+  const base = (): Graph => ({
+    version: 1,
+    nodes: [
+      { id: "note", kind: "note" },
+      { id: "s1", kind: "scene" },
+      { id: "s2", kind: "scene", requires: "s1" },
+      { id: "s3", kind: "scene" },
+      { id: "old", kind: "scene" },
+    ],
+    edges: [
+      { from: "s1", to: "s2" },
+      { from: "s2", to: "s3" },
+      { from: "s3", to: "old", relation: "deprecated" },
+    ],
+  });
+  const snapshot = (graph: Graph) => {
+    const analysis = analyzeGraph(graph, { s1: "in_progress" }, new Date("2026-01-01T00:00:00"));
+    return {
+      entry: [...analysis.entryNodeIds].sort(),
+      blocked: [...analysis.blocked.entries()],
+      blocking: [...analysis.blocking.entries()],
+      critical: analysis.criticalPath,
+      hasCycle: analysis.hasCycle,
+      deprecated: [...analysis.deprecatedNodeIds].sort(),
+    };
+  };
+
+  it("leaves entry points, blocking, the critical path and fading alone", () => {
+    const withRefs = base();
+    const byId = new Map(withRefs.nodes!.map((node) => [node.id, node]));
+    byId.get("s1")!.refs = ["note", "s3"];
+    byId.get("s3")!.refs = ["note", "s1"];
+    byId.get("old")!.refs = ["s1"];
+    byId.get("note")!.refs = ["old"];
+    expect(snapshot(withRefs)).toEqual(snapshot(base()));
   });
 });

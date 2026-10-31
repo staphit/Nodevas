@@ -285,6 +285,11 @@ func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, e
 	if err != nil {
 		return nil, err
 	}
+	return f.wrap(cmd, job, env), nil
+}
+
+// wrap has the helper run the real adapter's cmd.
+func (f fakeAgent) wrap(cmd *exec.Cmd, job runnerwire.Job, env adapter.RunEnv) *exec.Cmd {
 	mode, _, _ := strings.Cut(job.Prompt, ":")
 	cmd.Path = os.Args[0]
 	cmd.Args = append([]string{os.Args[0], "-test.run=^TestHelperProcess$", "--"}, cmd.Args[1:]...)
@@ -293,7 +298,26 @@ func (f fakeAgent) Command(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, e
 		"NODEVAS_TEST_RECORD="+filepath.Join(f.record, job.RunID),
 		"NODEVAS_TEST_MCP="+filepath.Join(env.TempDir, "mcp.json"),
 		"NODEVAS_TEST_FIXTURES="+f.fixtures)
-	return cmd, nil
+	return cmd
+}
+
+// CommandRelay is the real adapter's launch decision (adapter.Launch) for
+// the command Command makes.
+func (f fakeAgent) CommandRelay(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, bool, error) {
+	cmd, off, err := adapter.Launch(f.real, job, env)
+	if err != nil {
+		return nil, false, err
+	}
+	return f.wrap(cmd, job, env), !off && env.PermissionRelay, nil
+}
+
+// relayOffAgent is fakeAgent for an adapter that switched the permission
+// relay off at launch (agy without session settings or a hook path).
+type relayOffAgent struct{ fakeAgent }
+
+func (f relayOffAgent) CommandRelay(job runnerwire.Job, env adapter.RunEnv) (*exec.Cmd, bool, error) {
+	cmd, err := f.Command(job, env)
+	return cmd, false, err
 }
 
 // fakeConversation is fakeAgent for an adapter that talks to its CLI (ACP).
@@ -1122,5 +1146,67 @@ func TestMCPArgsServeTheRunToolset(t *testing.T) {
 		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab", "--toolset", "run"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mcpArgs = %q, want %q", got, want)
+	}
+}
+
+// permissionRelay reaches the adapter: the Claude run asks the hub's
+// approve_tool, and its start line says so. Off (TestRunSucceeds' runner),
+// the arguments are today's.
+func TestRunRelaysPermissions(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) { c.Config.PermissionRelay = true })
+	env.hub.hello()
+	env.hub.offer(testJob("run-relay", "ok: do the thing"))
+	env.hub.wait("run-relay", runnerwire.TypeFinish)
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-relay", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(args, "--permission-prompt-tool"); i < 0 || args[i+1] != adapter.ClaudeApproveTool {
+		t.Errorf("args = %q", args)
+	}
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-relay") {
+		events = append(events, msg.Events...)
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started claude") })
+	if started < 0 || !strings.Contains(events[started].Text, "permission prompts relayed to Nodevas") {
+		t.Errorf("no start line with the relay in %+v", events)
+	}
+
+	off := startJobRunner(t, nil)
+	off.hub.hello()
+	off.hub.offer(testJob("run-norelay", "ok: do the thing"))
+	off.hub.wait("run-norelay", runnerwire.TypeFinish)
+	if raw := off.recorded(t, "run-norelay", "args"); strings.Contains(raw, "--permission-prompt-tool") {
+		t.Errorf("relay off: args = %s", raw)
+	}
+}
+
+// The start line says what the adapter decided at launch: a relay the
+// adapter switched off is not claimed.
+func TestRunStartLineFollowsTheLaunchRelayDecision(t *testing.T) {
+	env := startJobRunner(t, func(c *Client) {
+		c.Config.PermissionRelay = true
+		inner := c.Adapter
+		c.Adapter = func(kind string) adapter.Adapter {
+			if fa, ok := inner(kind).(fakeAgent); ok {
+				return relayOffAgent{fa}
+			}
+			return inner(kind)
+		}
+	})
+	env.hub.hello()
+	env.hub.offer(testJob("run-relayoff", "ok: do the thing"))
+	env.hub.wait("run-relayoff", runnerwire.TypeFinish)
+	var events []runnerwire.RunEvent
+	for _, msg := range env.hub.messages("run-relayoff") {
+		events = append(events, msg.Events...)
+	}
+	started := slices.IndexFunc(events, func(ev runnerwire.RunEvent) bool { return strings.HasPrefix(ev.Text, "started claude") })
+	if started < 0 {
+		t.Fatalf("no start line in %+v", events)
+	}
+	if text := events[started].Text; strings.Contains(text, "relayed to Nodevas") || !strings.Contains(text, "not relayed") {
+		t.Errorf("start line %q claims a relay the adapter switched off", text)
 	}
 }

@@ -71,6 +71,20 @@ const events = [
   { seq: 6, type: "usage", at, usage: { inputTokens: 120345, outputTokens: 4567, costUsd: 0.4211 } },
 ];
 
+// The run waits on the viewer: a permission prompt for a long command, cut to
+// one line by the hub.
+const asks = [
+  {
+    id: "ask1",
+    kind: "permission",
+    status: "pending",
+    tool: "Bash",
+    preview: "go test ./internal/... -run TestAVeryLongTestNameThatKeepsGoingAndGoingUntilTheHubCutsItToOneLineOfAHundredAndTw…",
+    createdAt: Date.parse("2026-10-24T08:00:02Z"),
+    canAnswer: true,
+  },
+];
+
 async function mockRuns(page: Page) {
   // The dialog offers only the viewer's own runners, so the fake one belongs
   // to whoever this server says the browser is.
@@ -82,7 +96,23 @@ async function mockRuns(page: Page) {
   await page.route(/\/api\/runs\/run1\/events/, (route) =>
     route.fulfill({ json: { events, more: false } }),
   );
+  await page.route(/\/api\/runs\/run1\/asks/, (route) => route.fulfill({ json: { asks } }));
   await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [run] } }));
+}
+
+/**
+ * New projects start on the Standard stages (Tester → Executor → Reviewer),
+ * whose dispatch dialog is roles.spec.ts's. These tests are about the plain
+ * dispatch form, which a project without stages keeps: clear the stages and
+ * reload the board.
+ */
+async function withoutStages(page: Page) {
+  const cleared = await page.request.post("/api/graph/ops", {
+    data: { ops: [{ kind: "workflow", workflow: null }] },
+  });
+  expect(cleared.ok(), await cleared.text()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText("設計稿").first()).toBeVisible();
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -101,16 +131,18 @@ for (const [name, viewport] of Object.entries({
     await page.setViewportSize(viewport);
     await mockRuns(page);
     await freshProject(page, ["設計稿"]);
+    await withoutStages(page);
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     await expect(drawer.getByText("執行中").first()).toBeVisible();
     const timeline = drawer.getByRole("list", { name: "執行過程" });
     await expect(timeline.getByText("I will add the route.")).toBeVisible();
     await expect(timeline.getByText("錯誤結果 · Bash")).toBeVisible();
+    await expect(timeline.getByRole("button", { name: /^等你回覆：Bash · go test \.\/internal/ })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "取消執行" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
@@ -220,7 +252,7 @@ for (const [name, viewport] of Object.entries({
     await page.getByText("設計稿").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     const list = drawer.getByRole("list", { name: "執行紀錄" });
     await expect(list.getByRole("link", { name: /PR #42/ })).toHaveAttribute(
@@ -335,7 +367,7 @@ for (const [name, viewport] of Object.entries({
     await page.getByText("設計稿").first().click();
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
 
     // The run's header offers the merge too.
     const detail = drawer.getByRole("region", { name: "執行詳情" });
@@ -458,8 +490,9 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["設計稿"]);
 
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-runners")));
-    await page.getByRole("navigation", { name: "設定" }).getByRole("button", { name: "路由規則" }).click();
-    const dialog = page.getByRole("region", { name: "路由規則" });
+    await page.getByRole("button", { name: /^進階/ }).click();
+    await page.getByRole("button", { name: /^路由規則/ }).click();
+    const dialog = page.getByRole("region", { name: "路由規則", exact: true });
     await expect(dialog).toBeVisible();
 
     const first = dialog.getByRole("listitem", { name: "規則 1" });
@@ -471,11 +504,12 @@ for (const [name, viewport] of Object.entries({
     await dialog.getByRole("button", { name: "新增規則" }).click();
     const second = dialog.getByRole("listitem", { name: "規則 2" });
     await second.getByRole("combobox", { name: "比對" }).selectOption("kind");
-    await second.getByRole("combobox", { name: "類型" }).fill("chore");
+    // The kind is picked from the project's types that agents work.
+    await second.getByRole("combobox", { name: "類型" }).selectOption("scene");
     await second.getByRole("combobox", { name: "目標 agent" }).selectOption("claude");
     await second.getByText("Fallback 鏈（0）").click();
     await second.getByRole("button", { name: "新增 fallback" }).click();
-    await second.getByRole("combobox", { name: "Fallback 1 agent" }).selectOption("codex");
+    await second.getByRole("combobox", { name: "備援 1 agent" }).selectOption("codex");
     await second.getByRole("button", { name: "上移規則 2" }).click();
     await expectInside(page, await dialog.boundingBox(), viewport.width);
 
@@ -484,7 +518,7 @@ for (const [name, viewport] of Object.entries({
     expect(puts).toHaveLength(1);
     const sent = (puts[0] as { rules: { id: string; match: string; value?: string }[] }).rules;
     expect(sent.map((rule) => [rule.match, rule.value])).toEqual([
-      ["kind", "chore"],
+      ["kind", "scene"],
       ["tag", "review"],
     ]);
     expect(sent[0]).toMatchObject({
@@ -498,11 +532,12 @@ for (const [name, viewport] of Object.entries({
     await page.setViewportSize(viewport);
     await mockRouting(page);
     await freshProject(page, ["設計稿"]);
+    await withoutStages(page);
     await page.getByText("設計稿").first().click();
 
     const drawer = page.getByRole("dialog", { name: "節點編輯" });
     await expect(drawer).toBeVisible();
-    await drawer.getByRole("tab", { name: "執行" }).click();
+    await drawer.getByRole("tab", { name: "活動", exact: true }).click();
     await drawer.getByRole("button", { name: "派給 agent…" }).click();
 
     const dialog = page.getByRole("dialog", { name: "派給 agent" });
@@ -517,7 +552,7 @@ for (const [name, viewport] of Object.entries({
     const chain = dialog.getByTestId("dispatch-fallbacks");
     await expect(chain).not.toHaveAttribute("open", "");
     await chain.getByText("Fallback 鏈（1）").click();
-    await expect(chain.getByRole("combobox", { name: "Fallback 1模型" })).toHaveValue("opus");
+    await expect(chain.getByRole("combobox", { name: "備援 1模型" })).toHaveValue("opus");
     await expectInside(page, await dialog.boundingBox(), viewport.width);
   });
 }

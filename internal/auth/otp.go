@@ -33,6 +33,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -75,15 +77,15 @@ const (
 // address is not one at all. Handlers must not pass it to the client:
 // answering "that address is not registered" turns the request endpoint into a
 // directory of who has an account.
-var ErrNoSuchAccount = errors.New("no account for that email address")
+var ErrNoSuchAccount = locale.Errorf("no account for that email address", "沒有帳號使用這個電子郵件地址")
 
 // ErrNoMailer is returned when passcodes cannot be delivered because the
 // operator has not configured outgoing mail. It is safe to show: it describes
 // the server, not the account.
-var ErrNoMailer = errors.New("this server cannot send passcodes: outgoing mail is not configured")
+var ErrNoMailer = locale.Errorf("this server cannot send passcodes: outgoing mail is not configured", "這個伺服器無法寄送驗證碼：沒有設定外寄郵件")
 
 // ErrTooManyOTPRequests is returned when the passcode request budget is spent.
-var ErrTooManyOTPRequests = errors.New("too many passcode requests; wait before trying again")
+var ErrTooManyOTPRequests = locale.Errorf("too many passcode requests; wait before trying again", "驗證碼請求太多；請稍候再試")
 
 // pendingOTP is the one live passcode an account may have.
 //

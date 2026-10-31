@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 type gatedAttachmentReader struct {
@@ -53,7 +54,7 @@ func TestDuplicateNodeCopiesAttachmentsAndRetargetsLocalLinks(t *testing.T) {
 		}
 	}
 
-	duplicateID, err := st.DuplicateNode(identity.Local, "alpha")
+	duplicateID, err := st.DuplicateNode(identity.Local, "alpha", locale.English)
 	if err != nil {
 		t.Fatalf("duplicate: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestDuplicateNodeRejectsLinkedAttachmentsWithoutCommitting(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := st.DuplicateNode(identity.Local, "alpha"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+	if _, err := st.DuplicateNode(identity.Local, "alpha", locale.English); err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("duplicate with linked attachment = %v, want symbolic-link error", err)
 	}
 	graph, _, err := st.LoadGraph()
@@ -157,7 +158,7 @@ func TestDuplicateNodeRejectsLinkedAttachmentDestination(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := st.DuplicateNode(identity.Local, "alpha"); err == nil || !strings.Contains(err.Error(), "destination is not a regular directory") {
+	if _, err := st.DuplicateNode(identity.Local, "alpha", locale.English); err == nil || !strings.Contains(err.Error(), "destination is not a regular directory") {
 		t.Fatalf("duplicate into linked destination = %v, want destination error", err)
 	}
 	entries, err := os.ReadDir(outside)
@@ -200,7 +201,7 @@ func TestDuplicateNodeCanReuseAnEmptyAttachmentDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotID, err := st.DuplicateNode(identity.Local, "alpha")
+	gotID, err := st.DuplicateNode(identity.Local, "alpha", locale.English)
 	if err != nil {
 		t.Fatalf("duplicate with empty destination: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestDuplicateNodeSerializesWithAttachmentUpload(t *testing.T) {
 		err error
 	}, 1)
 	go func() {
-		id, err := st.DuplicateNode(identity.Local, "alpha")
+		id, err := st.DuplicateNode(identity.Local, "alpha", locale.English)
 		duplicateDone <- struct {
 			id  string
 			err error
@@ -410,7 +411,7 @@ func TestDuplicateNodeRejectsOversizeAttachmentWithoutCommitting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := st.DuplicateNode(identity.Local, "alpha"); err == nil || !strings.Contains(err.Error(), "single-file limit") {
+	if _, err := st.DuplicateNode(identity.Local, "alpha", locale.English); err == nil || !strings.Contains(err.Error(), "single-file limit") {
 		t.Fatalf("oversize duplicate error = %v, want single-file limit", err)
 	}
 	graph, _, err := st.LoadGraph()

@@ -4,7 +4,7 @@
    part of the field's name. */
 .run-field > .run-field-label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 
@@ -28,7 +28,7 @@
   color: var(--text);
   background: var(--surface-2);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .am-input[aria-invalid="true"] {
   border-color: var(--st-failed-fg);
@@ -44,7 +44,7 @@
   background: none;
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-decoration: underline;
 }
 
@@ -111,7 +111,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   box-shadow: inset 0 0 0 1px var(--border);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .fallback-actions {
@@ -135,7 +135,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   cursor: pointer;
 }
@@ -160,13 +160,13 @@
 .pipeline-implement-note {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .route-sub > summary,
 .run-advanced > summary {
   color: var(--text-2);
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 600;
 }
 
@@ -221,14 +221,14 @@
   border-radius: 50%;
   color: var(--accent-text);
   background: var(--accent);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 700;
 }
 .route-rule-summary {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -260,7 +260,7 @@
   border-radius: 2px 6px 6px 2px;
   background: color-mix(in srgb, var(--accent) 9%, var(--surface));
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .run-route-miss {
@@ -274,7 +274,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 3px 6px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .run-kind,
 .run-verdict,
@@ -351,7 +351,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .run-limit-wait-panel {
   border-color: color-mix(in srgb, var(--st-ready-fg) 40%, var(--border));
@@ -371,7 +371,7 @@
   max-height: 240px;
   margin: 4px 0 0;
   overflow: auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -394,7 +394,7 @@
   gap: 4px 7px;
   padding: 0 3px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-pipeline-head > svg {
   flex: 0 0 auto;
@@ -414,7 +414,7 @@
   border-radius: 999px;
   color: var(--st-locked-fg);
   background: var(--st-locked-bg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -453,12 +453,39 @@
   border-left: 2px solid var(--accent);
   border-radius: 2px 6px 6px 2px;
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 .run-ev-hub b {
   margin-right: 4px;
   color: var(--accent);
+}
+
+/* A run's asks in its timeline: what it waits on (amber, a button when it
+   waits on the viewer), then how that ended (muted). */
+.run-ev-ask {
+  padding: 5px 9px;
+  border-left: 2px solid var(--border);
+  border-radius: 2px 6px 6px 2px;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  overflow-wrap: anywhere;
+}
+.run-ev-ask.is-pending {
+  border-left-color: var(--st-ready-fg);
+  background: color-mix(in srgb, var(--st-ready-fg) 10%, var(--surface));
+  color: var(--text);
+}
+.run-ev-ask-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .run-toast.is-pipeline-failed .run-toast-dot {
@@ -478,7 +505,7 @@
   .am-input {
     min-height: 36px;
     /* 16px keeps iOS from zooming the page on focus. */
-    font-size: 16px;
+    font-size: calc(16px * var(--font-scale, 1));
   }
   .reorder-buttons button {
     width: 36px;
@@ -506,7 +533,7 @@
   color: var(--accent);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .run-retry-now:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));

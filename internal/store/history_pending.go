@@ -1,0 +1,216 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"nodevas/internal/gitrepo"
+	"nodevas/internal/locale"
+)
+
+// The workspace's history as the Explorer's Git tab shows it.
+
+// WorkspacePending is one changed path not yet in history.
+type WorkspacePending struct {
+	Path string `json:"path"`
+	Mark string `json:"mark"`
+}
+
+// WorkspaceCommit is one history commit.
+type WorkspaceCommit struct {
+	SHA     string `json:"sha"`
+	At      string `json:"at"`
+	Author  string `json:"author"`
+	Subject string `json:"subject"`
+}
+
+// WorkspaceGit is GET /api/explorer/workspace/git.
+type WorkspaceGit struct {
+	Backend string             `json:"backend"`
+	Branch  string             `json:"branch"`
+	Pending []WorkspacePending `json:"pending"`
+	Commits []WorkspaceCommit  `json:"commits"`
+}
+
+// WorkspaceCommitPatch is one commit and its (capped) patch.
+type WorkspaceCommitPatch struct {
+	WorkspaceCommit
+	Patch     string `json:"patch"`
+	Truncated bool   `json:"truncated"`
+}
+
+// Workspace git limits.
+const (
+	MaxWorkspaceCommits = 50
+	maxWorkspacePending = 500
+)
+
+// ErrNoGitHistory: the workspace keeps history as file copies.
+var ErrNoGitHistory = locale.Errorf("this workspace keeps history as file copies, not git", "這個工作區以檔案副本保存歷史，不是 git")
+
+// ErrCommitNotFound: the workspace history has no such commit.
+var ErrCommitNotFound = locale.Errorf("no such commit in the workspace history", "工作區歷史中沒有這個提交")
+
+// historyRepo is the git history's repository, or ErrNoGitHistory.
+func (s *Store) historyRepo(ctx context.Context) (*gitrepo.Repo, error) {
+	g, ok := s.history().(*gitHistory)
+	if !ok {
+		return nil, ErrNoGitHistory
+	}
+	return g.ready(ctx)
+}
+
+// gitReadRetries are the pauses before HistoryGit reads again. A history
+// commit moves the branch by replacing its ref file, and a git that reads
+// the ref just then finds no branch: it lists no commits, or stops with
+// "your current branch 'main' does not have any commits yet" (a 500 about
+// once in 1,600 Git tab reads under a load of saves). The ref is back within
+// milliseconds. A var only so tests can shorten it.
+var gitReadRetries = []time.Duration{25 * time.Millisecond, 75 * time.Millisecond}
+
+// HistoryGit is the workspace's backend, pending changes and newest
+// commits (at most 50). A read that failed, or found a git repository with
+// no commits, is made again (gitReadRetries): reads are idempotent, and a
+// branch with no commits at all only happens before the first save.
+func (s *Store) HistoryGit(ctx context.Context) (WorkspaceGit, error) {
+	out, err := s.historyGitOnce(ctx)
+	for _, pause := range gitReadRetries {
+		if err == nil && (out.Backend != string(HistoryGit) || len(out.Commits) > 0) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return out, err
+		case <-time.After(pause):
+		}
+		out, err = s.historyGitOnce(ctx)
+	}
+	return out, err
+}
+
+// historyGitOnce is one read of what HistoryGit returns.
+func (s *Store) historyGitOnce(ctx context.Context) (WorkspaceGit, error) {
+	out := WorkspaceGit{Backend: string(HistoryFiles), Pending: []WorkspacePending{}, Commits: []WorkspaceCommit{}}
+	repo, err := s.historyRepo(ctx)
+	if errors.Is(err, ErrNoGitHistory) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	out.Backend = string(HistoryGit)
+	if raw, err := repo.Run(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		out.Branch = strings.TrimSpace(string(raw))
+	}
+	commits, err := repo.RecentCommits(ctx, MaxWorkspaceCommits)
+	if err != nil {
+		return out, err
+	}
+	for _, c := range commits {
+		out.Commits = append(out.Commits, WorkspaceCommit{SHA: c.SHA, At: c.At.UTC().Format(time.RFC3339),
+			Author: c.Author, Subject: c.Subject})
+	}
+	// No optional locks: status would otherwise refresh the index under
+	// index.lock, and a commit starting meanwhile would fail on it.
+	raw, err := repo.Run(ctx, []string{"GIT_OPTIONAL_LOCKS=0"}, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=normal")
+	if err != nil {
+		return out, err
+	}
+	for _, rec := range strings.Split(string(raw), "\x00") {
+		if len(rec) < 4 || len(out.Pending) >= maxWorkspacePending {
+			continue
+		}
+		xy, rel := rec[:2], rec[3:]
+		if strings.HasPrefix(rel, DataDir+"/") || secretRel(rel) {
+			continue
+		}
+		out.Pending = append(out.Pending, WorkspacePending{Path: rel, Mark: pendingMark(xy)})
+	}
+	return out, nil
+}
+
+func pendingMark(xy string) string {
+	if xy == "??" {
+		return "A"
+	}
+	for _, c := range xy {
+		switch c {
+		case 'A':
+			return "A"
+		case 'D':
+			return "D"
+		case 'R', 'C':
+			return "R"
+		}
+	}
+	return "M"
+}
+
+// HistoryCommitPatch is one workspace commit's patch.
+func (s *Store) HistoryCommitPatch(ctx context.Context, sha string) (WorkspaceCommitPatch, error) {
+	if !gitrepo.ValidSHA(sha) {
+		return WorkspaceCommitPatch{}, locale.Errorf("%w: a commit is its full id", "%w：提交需用完整代號", ErrBadPath)
+	}
+	repo, err := s.historyRepo(ctx)
+	if err != nil {
+		return WorkspaceCommitPatch{}, err
+	}
+	raw, err := repo.Run(ctx, nil, "log", "-n1", "--no-show-signature", "--format=%H%x1f%aI%x1f%an%x1f%s", sha, "--")
+	if err != nil {
+		return WorkspaceCommitPatch{}, ErrCommitNotFound
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(raw)), "\x1f", 4)
+	if len(parts) != 4 {
+		return WorkspaceCommitPatch{}, ErrCommitNotFound
+	}
+	patch, truncated, err := repo.CommitPatch(ctx, sha, gitrepo.MaxPatchBytes)
+	if err != nil {
+		return WorkspaceCommitPatch{}, err
+	}
+	return WorkspaceCommitPatch{WorkspaceCommit: WorkspaceCommit{SHA: parts[0], At: parts[1], Author: parts[2], Subject: parts[3]},
+		Patch: dropSecretPatchSections(patch), Truncated: truncated}, nil
+}
+
+// dropSecretPatchSections removes the sections of a patch that touch a
+// file that may hold secrets. A header's path fields are each checked, so a
+// name with spaces errs toward hiding.
+func dropSecretPatchSections(patch string) string {
+	var b strings.Builder
+	for _, section := range splitPatchSections(patch) {
+		header, _, _ := strings.Cut(section, "\n")
+		secret := false
+		for _, field := range strings.Fields(strings.TrimPrefix(header, "diff --git ")) {
+			field = strings.Trim(field, `"`)
+			field = strings.TrimPrefix(strings.TrimPrefix(field, "a/"), "b/")
+			if secretRel(field) {
+				secret = true
+				break
+			}
+		}
+		if !secret {
+			b.WriteString(section)
+		}
+	}
+	return b.String()
+}
+
+// splitPatchSections cuts a patch before each "diff --git " line.
+func splitPatchSections(patch string) []string {
+	var out []string
+	start := 0
+	for start < len(patch) {
+		next := strings.Index(patch[start+1:], "\ndiff --git ")
+		if next < 0 {
+			break
+		}
+		cut := start + 1 + next + 1
+		out = append(out, patch[start:cut])
+		start = cut
+	}
+	if start < len(patch) {
+		out = append(out, patch[start:])
+	}
+	return out
+}

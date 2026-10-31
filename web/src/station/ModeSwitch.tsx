@@ -1,19 +1,71 @@
-// The top bar's Info | Station switch. Part of the main bundle, so it stays
-// small: Station itself loads only when someone opens it.
+// The top bar's Board | Station | Settings switch: the three views, side by
+// side, one click each. Part of the main bundle, so it stays small: Station
+// and Settings load only when someone opens them.
 
-import { canManageSession, useAgents } from "../agents/agentStore";
-import { setProjectMode } from "../game/stageSkin";
+import { useMemo } from "react";
+
+import { canAnswerAsk, useAgents } from "../agents/agentStore";
+import { useAutopilot } from "../autopilot/autopilotStore";
+import { setProjectMode } from "./projectMode";
 import { useI18n } from "../i18n";
-import { IconCanvas, IconGear, IconSpark } from "../icons";
-import { usePreference } from "../store";
+import { IconCanvas, IconSpark } from "../icons";
+import { useBudget } from "../runs/budgetStore";
+import { useRuns } from "../runs/runStore";
+import { useApp, usePreference } from "../store";
+import { useStation } from "./stationStore";
+import { waitingOnYou } from "./waiting";
 
-/** Questions and held messages the viewer may answer: Station's badge. */
+/**
+ * Everything waiting on the viewer: Station's badge. The same list Station's
+ * "Waiting on you" card shows (waiting.ts), counted from the same stores:
+ * the questions and held messages they may answer, autopilot reviews, PRs to
+ * merge or fix, offers no runner took yet, usage limits and an exceeded daily
+ * budget. Station's recent runs count only once Station has loaded them for
+ * the project on screen.
+ */
 export function useWaitingCount(): number {
   const asks = useAgents((s) => s.asks);
   const held = useAgents((s) => s.held);
   const viewer = useAgents((s) => s.viewer);
-  const pending = asks.filter((ask) => ask.status === "pending" && canManageSession(ask, viewer)).length;
-  return pending + held.length;
+  const reviews = useAutopilot((s) => s.waiting);
+  const active = useRuns((s) => s.activeRuns);
+  const runs = useStation((s) => s.runs);
+  const runsProject = useStation((s) => s.project);
+  const activeProject = useApp((s) => s.activeProject);
+  const exceeded = useBudget((s) => s.status?.exceeded);
+  return useMemo(
+    () =>
+      waitingOnYou({
+        runs: runsProject === activeProject ? runs : [],
+        active,
+        asks,
+        held,
+        reviews,
+        budgetExceeded: exceeded,
+        canAnswer: (ask) => canAnswerAsk(ask, viewer),
+        now: Date.now(),
+      }).length,
+    [runs, runsProject, activeProject, active, asks, held, reviews, exceeded, viewer],
+  );
+}
+
+/** A toothed cog for Settings (the shared IconGear reads as a sun). */
+function IconCog({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M19.11 9.96 21.42 10.17 21.42 13.83 19.11 14.04 18.47 15.59 19.96 17.37 17.37 19.96 15.59 18.47 14.04 19.11 13.83 21.42 10.17 21.42 9.96 19.11 8.41 18.47 6.63 19.96 4.04 17.37 5.53 15.59 4.89 14.04 2.58 13.83 2.58 10.17 4.89 9.96 5.53 8.41 4.04 6.63 6.63 4.04 8.41 5.53 9.96 4.89 10.17 2.58 13.83 2.58 14.04 4.89 15.59 5.53 17.37 4.04 19.96 6.63 18.47 8.41Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
 }
 
 export function ModeSwitch() {
@@ -28,10 +80,10 @@ export function ModeSwitch() {
         aria-pressed={mode === "info"}
         onClick={() => setProjectMode("info")}
         title={t("mode.info.detail")}
-        aria-label={t("mode.info")}
+        aria-label={t("topbar.board")}
       >
         <IconCanvas size={14} />
-        <span>{t("mode.info")}</span>
+        <span>{t("topbar.board")}</span>
       </button>
       <button
         type="button"
@@ -55,11 +107,14 @@ export function ModeSwitch() {
         className={mode === "settings" ? "active" : ""}
         aria-pressed={mode === "settings"}
         onClick={() => setProjectMode("settings")}
-        title={t("mode.settings.detail")}
-        aria-label={t("mode.settings")}
+        title={t("topbar.settingsTitle")}
+        aria-label={t("topbar.settings")}
+        // The tour's "replay any time" step points here: Replay tour is in
+        // Settings › General.
+        data-tour="tour-replay"
       >
-        <IconGear size={14} />
-        <span>{t("mode.settings")}</span>
+        <IconCog />
+        <span>{t("topbar.settings")}</span>
       </button>
     </nav>
   );

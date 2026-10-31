@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { IconChevronDown, IconChevronUp, IconPlus, IconTrash } from "../icons";
 import { useI18n } from "../i18n";
+import { runnerModelLabel } from "../runners/runnerName";
 
 /** What a picker offers: the agents runners reported in their hello. */
 export interface CatalogAgent {
@@ -146,7 +147,7 @@ export function AgentModelPicker({
           <datalist id={`${listId}-models`}>
             {suggestions.map((model) => (
               <option key={model.id} value={model.id}>
-                {model.label || model.id}
+                {runnerModelLabel(t, model)}
               </option>
             ))}
           </datalist>
@@ -212,7 +213,7 @@ export function AgentModelPicker({
         {!value.model && <option value="">{t("routing.chooseModel")}</option>}
         {models.map((model) => (
           <option key={model.id} value={model.id}>
-            {(model.label || model.id) + (model.default ? t("runs.defaultSuffix") : "")}
+            {runnerModelLabel(t, model) + (model.default ? t("runs.defaultSuffix") : "")}
           </option>
         ))}
         <option value={OTHER}>{t("routing.other")}</option>

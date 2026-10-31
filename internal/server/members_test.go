@@ -35,7 +35,7 @@ func newMembersFixture(t *testing.T) *membersFixture {
 			t.Fatal(err)
 		}
 	}
-	if err := pm.Activate("other", true, ""); err != nil {
+	if err := pm.Activate("other", true, "", ""); err != nil {
 		t.Fatalf("create other: %v", err)
 	}
 	otherRoot := pm.Store().Root()
@@ -47,7 +47,7 @@ func newMembersFixture(t *testing.T) *membersFixture {
 	if err := os.WriteFile(filepath.Join(otherRoot, "graph.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := pm.Activate("main", false, ""); err != nil {
+	if err := pm.Activate("main", false, "", ""); err != nil {
 		t.Fatalf("back to main: %v", err)
 	}
 	server.UseRunnersDB(database)

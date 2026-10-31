@@ -2,7 +2,6 @@ package remoteapi
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"nodevas/internal/httpapi/httpx"
@@ -11,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // Remote endpoints let a workspace back up project bundles to, and restore them
@@ -91,7 +92,7 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 		cfg = remote.Config{}
 	case "folder":
 		if cfg.Folder == "" {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("folder is required"))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("folder is required", "需要提供資料夾"))
 			return
 		}
 		if httpx.RefuseHostPath(c, a.pm) {
@@ -110,7 +111,7 @@ func (a *API) putRemoteConfig(c *gin.Context) {
 			return
 		}
 	default:
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("unknown remote backend %q", cfg.Kind))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("unknown remote backend %q", "不明的遠端備份方式「%s」", cfg.Kind))
 		return
 	}
 	// Reject anything that cannot actually be built (bad folder path, etc.)
@@ -143,7 +144,7 @@ func (a *API) getRemoteList(c *gin.Context) {
 		return
 	}
 	if backend == nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("no remote is configured"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("no remote is configured", "沒有設定遠端備份"))
 		return
 	}
 	refs, err := backend.List(c.Request.Context())
@@ -170,7 +171,7 @@ func (a *API) postRemotePush(c *gin.Context) {
 		return
 	}
 	if backend == nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("no remote is configured"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("no remote is configured", "沒有設定遠端備份"))
 		return
 	}
 	name := strings.TrimSpace(c.Request.URL.Query().Get("project"))
@@ -206,7 +207,7 @@ func (a *API) postRemoteImport(c *gin.Context) {
 	}
 	id := strings.TrimSpace(body.ID)
 	if id == "" {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("id is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("id is required", "需要提供 id"))
 		return
 	}
 	backend, err := a.remotes.Store()
@@ -215,7 +216,7 @@ func (a *API) postRemoteImport(c *gin.Context) {
 		return
 	}
 	if backend == nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("no remote is configured"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("no remote is configured", "沒有設定遠端備份"))
 		return
 	}
 	reader, err := backend.Pull(c.Request.Context(), id)

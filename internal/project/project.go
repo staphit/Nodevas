@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/lockfile"
 	"nodevas/internal/realtime"
 	"nodevas/internal/store"
@@ -88,6 +89,9 @@ type ProjectManager struct {
 	store       *store.Store
 	stopWatch   func() error
 	searchIndex *searchIndex
+	// searchLive mirrors searchIndex for the store write hook, which may run
+	// while pm.mu is held; see noteSearchChange.
+	searchLive atomic.Pointer[searchIndex]
 
 	// watches are the watchers on projects other than the active one that
 	// Watch was asked for, keyed like stores. They are dropped with their
@@ -102,6 +106,10 @@ type ProjectManager struct {
 	storesMu sync.Mutex
 	stores   map[string]*store.Store
 
+	// lookups is what StoreFor remembers about project names; see
+	// lookup_cache.go.
+	lookups projectLookups
+
 	// lock is the OS-level advisory lock on the *active* workspace, held for
 	// as long as this manager serves it. It is an outer layer over the
 	// mutexes above, not a replacement: those serialise goroutines, this one
@@ -115,14 +123,28 @@ type ProjectManager struct {
 	// take an arbitrary host path then stop accepting one: an account is
 	// permission to edit projects, not to reach the whole disk.
 	remote bool
+
+	// linksWarm counts WarmNodeLinks passes still reading; closing tells them
+	// to stop at the next project.
+	linksWarm sync.WaitGroup
+	closing   atomic.Bool
+}
+
+// DefaultCatalogRoot is where NewProjectManager keeps the workspace catalog,
+// secrets and the serve log: nodevas under the user config directory.
+func DefaultCatalogRoot() (string, error) {
+	configRoot, err := os.UserConfigDir()
+	if err != nil {
+		return "", locale.Errorf("user config directory: %w", "使用者設定資料夾：%w", err)
+	}
+	return filepath.Join(configRoot, "nodevas"), nil
 }
 
 func NewProjectManager(workspace string, hub *realtime.Hub) (*ProjectManager, error) {
-	configRoot, err := os.UserConfigDir()
+	catalogRoot, err := DefaultCatalogRoot()
 	if err != nil {
-		return nil, fmt.Errorf("user config directory: %w", err)
+		return nil, err
 	}
-	catalogRoot := filepath.Join(configRoot, "nodevas")
 	return NewManagerAt(
 		workspace,
 		hub,
@@ -142,19 +164,19 @@ func NewManagerAt(
 		return nil, err
 	}
 	if _, err := os.Stat(abs); err != nil {
-		return nil, fmt.Errorf("workspace: %w", err)
+		return nil, locale.Errorf("workspace: %w", "工作區：%w", err)
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return nil, fmt.Errorf("workspace: %w", err)
+		return nil, locale.Errorf("workspace: %w", "工作區：%w", err)
 	}
 	info, err := os.Stat(real)
 	if err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("workspace is not a directory")
+		return nil, locale.Errorf("workspace is not a directory", "工作區不是資料夾")
 	}
 	catalogRoot, err = filepath.Abs(catalogRoot)
 	if err != nil {
-		return nil, fmt.Errorf("workspace catalog: %w", err)
+		return nil, locale.Errorf("workspace catalog: %w", "工作區清單：%w", err)
 	}
 	pm := &ProjectManager{workspace: real, catalogRoot: catalogRoot, hub: hub}
 	roots, err := pm.LoadWorkspaceRoots()
@@ -237,6 +259,10 @@ func (pm *ProjectManager) Store() *store.Store {
 }
 
 func (pm *ProjectManager) Close() {
+	// A link warm-up reads every project's documents; it stops at the next
+	// project, and nothing reads them once Close returns.
+	pm.closing.Store(true)
+	pm.linksWarm.Wait()
 	pm.mu.Lock()
 	if pm.stopWatch != nil {
 		_ = pm.stopWatch()
@@ -249,8 +275,10 @@ func (pm *ProjectManager) Close() {
 	closeStores(pm.cachedStores(), 30*time.Second)
 	// Persist the search index before dropping the workspace: it is a pure
 	// cache, but losing it on every clean shutdown means paying for a full
-	// rebuild on the next start for no reason.
+	// rebuild on the next start for no reason. Then wait for its background
+	// passes: they read project files the caller may be about to remove.
 	pm.FlushSearchIndex()
+	pm.closeSearchIndex()
 	pm.releaseWorkspaceLock()
 }
 
@@ -298,7 +326,23 @@ func (pm *ProjectManager) releaseWorkspaceLock() {
 	pm.lockedRoot = ""
 }
 
-func templateGraph(template string) *engine.Graph {
+// eisenhowerTitles are the Eisenhower template's quadrant titles per
+// interface language, in do / schedule / delegate / eliminate order. The
+// titles are written into the new project's graph, so they are chosen once,
+// in the language of whoever created it.
+var eisenhowerTitles = map[string][4]string{
+	"en":    {"Important and urgent: do now", "Important, not urgent: schedule", "Urgent, not important: delegate", "Neither urgent nor important: drop"},
+	"zh-TW": {"重要且緊急：立刻做", "重要不緊急：排程做", "緊急不重要：委派", "不緊急不重要：捨棄"},
+}
+
+// TemplateLanguage maps a language tag ("zh-TW", "zh-Hant-TW", "en-US", an
+// Accept-Language list...) to one the templates are written in: Chinese
+// for any zh tag, English for everything else.
+func TemplateLanguage(tag string) string {
+	return string(locale.FromTag(tag))
+}
+
+func templateGraph(template, language string) *engine.Graph {
 	if template == "eisenhower" {
 		quadrant := func(id, title, color string, x, y float64) engine.CanvasGroup {
 			return engine.CanvasGroup{
@@ -306,15 +350,16 @@ func templateGraph(template string) *engine.Graph {
 				X: x, Y: y, Width: 620, Height: 380,
 			}
 		}
+		titles := eisenhowerTitles[TemplateLanguage(language)]
 		return &engine.Graph{
 			Version: 1,
 			Type:    "workflow",
 			UI: &engine.UIState{
 				Groups: []engine.CanvasGroup{
-					quadrant("quad-do", "重要且緊急：立刻做", "#9f2f2d", 0, 0),
-					quadrant("quad-schedule", "重要不緊急：排程做", "#1f6c9f", 640, 0),
-					quadrant("quad-delegate", "緊急不重要：委派", "#956400", 0, 400),
-					quadrant("quad-eliminate", "不緊急不重要：捨棄", "#6f6c66", 640, 400),
+					quadrant("quad-do", titles[0], "#9f2f2d", 0, 0),
+					quadrant("quad-schedule", titles[1], "#1f6c9f", 640, 0),
+					quadrant("quad-delegate", titles[2], "#956400", 0, 400),
+					quadrant("quad-eliminate", titles[3], "#6f6c66", 640, 400),
 				},
 			},
 		}
@@ -322,29 +367,31 @@ func templateGraph(template string) *engine.Graph {
 	return &engine.Graph{Version: 1, Type: "story"}
 }
 
-func (pm *ProjectManager) Activate(name string, create bool, template string) error {
+// Activate opens name, first creating it from template when create is set;
+// language is the creator's interface language for the template's titles.
+func (pm *ProjectManager) Activate(name string, create bool, template, language string) error {
 	pm.activateMu.Lock()
 	defer pm.activateMu.Unlock()
-	return pm.activateLocked(name, create, template)
+	return pm.activateLocked(name, create, template, language)
 }
 
-func (pm *ProjectManager) activateLocked(name string, create bool, template string) error {
+func (pm *ProjectManager) activateLocked(name string, create bool, template, language string) error {
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return err
 	}
 	if create {
-		if err := pm.createLocked(name, dir, template); err != nil {
+		if err := pm.createLocked(name, dir, template, language, false); err != nil {
 			return err
 		}
 	}
 	if _, err := store.StatProjectPath(pm.workspace, filepath.Join(dir, "graph.yaml")); err != nil {
-		return fmt.Errorf("project %q has no graph.yaml", name)
+		return locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 	}
 
 	st := pm.cachedStore(dir)
 	if _, _, err := st.LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
 	stop, err := pm.watchStore(st)
 	if err != nil {
@@ -361,6 +408,7 @@ func (pm *ProjectManager) activateLocked(name string, create bool, template stri
 	// The active project has its own watcher now; a second one would report
 	// every external edit twice.
 	pm.stopExtraWatches(func(key string) bool { return key == storeCacheKey(dir) })
+	pm.warmSearch(dir)
 	if err := store.WriteProjectFileAtomic(pm.workspace, pm.lastFile(), []byte(name)); err != nil {
 		log.Printf("save last project: %v", err)
 	}
@@ -379,41 +427,63 @@ func (pm *ProjectManager) SetPerAccount(perAccount bool) { pm.perAccount.Store(p
 // business.
 func (pm *ProjectManager) OpenForCaller(name string) error {
 	if !pm.perAccount.Load() {
-		return pm.Activate(name, false, "")
+		return pm.Activate(name, false, "", "")
 	}
 	st, err := pm.StoreFor(name)
 	if err != nil {
 		return err
 	}
 	if _, _, err := st.LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
+	pm.warmSearch(st.Root())
 	return nil
 }
 
-// Create makes a new project without opening it. On a server with accounts
-// each person has their own current project (internal/server), so one person
-// creating a project must not move the project everyone else starts on.
-func (pm *ProjectManager) Create(name, template string) error {
+// ActivateNew creates name from template, with the workflow a project a
+// person creates starts with, and opens it; language is the creator's
+// interface language for the template's titles.
+func (pm *ProjectManager) ActivateNew(name, template, language string) error {
 	pm.activateMu.Lock()
 	defer pm.activateMu.Unlock()
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return err
 	}
-	if err := pm.createLocked(name, dir, template); err != nil {
+	if err := pm.createLocked(name, dir, template, language, true); err != nil {
+		return err
+	}
+	return pm.activateLocked(name, false, "", "")
+}
+
+// Create makes a new project, with the workflow a project a person creates
+// starts with, without opening it. On a server with accounts
+// each person has their own current project (internal/server), so one person
+// creating a project must not move the project everyone else starts on.
+func (pm *ProjectManager) Create(name, template, language string) error {
+	pm.activateMu.Lock()
+	defer pm.activateMu.Unlock()
+	dir, err := pm.Resolve(name)
+	if err != nil {
+		return err
+	}
+	if err := pm.createLocked(name, dir, template, language, true); err != nil {
 		return err
 	}
 	if _, _, err := pm.cachedStore(dir).LoadGraph(); err != nil {
-		return fmt.Errorf("load project %q: %w", name, err)
+		return locale.Errorf("load project %q: %w", "載入專案「%s」：%w", name, err)
 	}
 	return nil
 }
 
-func (pm *ProjectManager) createLocked(name, dir, template string) error {
+// createLocked writes a new project. workflow gives it the workflow a project
+// a person creates starts with (engine.NewProjectWorkflow); without it the
+// project has none (legacy) until someone picks a preset, which is what a
+// workspace's own first project and programmatic callers get.
+func (pm *ProjectManager) createLocked(name, dir, template, language string, workflow bool) error {
 	graphPath := filepath.Join(dir, "graph.yaml")
 	if _, statErr := store.StatProjectPath(pm.workspace, graphPath); statErr == nil {
-		return fmt.Errorf("project %q already exists", name)
+		return locale.Errorf("project %q already exists", "專案「%s」已存在", name)
 	} else if !os.IsNotExist(statErr) {
 		return statErr
 	}
@@ -424,18 +494,25 @@ func (pm *ProjectManager) createLocked(name, dir, template string) error {
 		}
 		// A plain grouping folder is an acceptable parent too.
 		if info, parentErr := store.StatProjectPath(pm.workspace, parentDir); parentErr != nil || !info.IsDir() {
-			return fmt.Errorf("parent %q does not exist", parent)
+			return locale.Errorf("parent %q does not exist", "上層「%s」不存在", parent)
 		}
 	}
 	if err := store.MkdirAllProjectPath(pm.workspace, filepath.Join(dir, "nodes"), 0o755); err != nil {
 		return err
 	}
 	if _, err := store.StatProjectPath(pm.workspace, graphPath); os.IsNotExist(err) {
-		data, merr := engine.MarshalGraph(templateGraph(template))
+		// Written once, workflow included: a second write right after this
+		// one could beat the history's first open and leave the creation
+		// recorded twice, once as an edit undoing the other.
+		graph := templateGraph(template, language)
+		if workflow {
+			graph.Workflow = engine.NewProjectWorkflow(graph.Type)
+		}
+		data, merr := engine.MarshalGraph(graph)
 		if merr != nil {
 			return merr
 		}
-		if werr := pm.cachedStore(dir).WriteAtomic(graphPath, data); werr != nil {
+		if werr := pm.cachedStore(dir).CreateGraph(data); werr != nil {
 			return werr
 		}
 	} else if err != nil {
@@ -451,6 +528,10 @@ func (pm *ProjectManager) watchStore(st *store.Store) (func() error, error) {
 		switch kind {
 		case "node-changed", "graph-changed":
 			pm.invalidateSearch(st.Root(), id)
+		}
+		if kind == "graph-changed" {
+			// Possibly gone: the next lookup looks again.
+			pm.lookups.forget(st.Root())
 		}
 	})
 }
@@ -480,6 +561,7 @@ func (pm *ProjectManager) Watch(st *store.Store) {
 		pm.watches = make(map[string]func() error)
 	}
 	pm.watches[key] = stop
+	pm.warmSearch(st.Root())
 }
 
 // Watching reports whether external edits to the project in dir are being
@@ -545,7 +627,7 @@ func (pm *ProjectManager) openWorkspaceLocked() error {
 		log.Printf("share workspace statuses: %v", err)
 	}
 	if len(openable) == 0 {
-		return pm.activateLocked("main", true, "")
+		return pm.activateLocked("main", true, "", "")
 	}
 	name := openable[0].Name
 	if data, readErr := store.ReadProjectFile(pm.workspace, pm.lastFile()); readErr == nil {
@@ -557,7 +639,7 @@ func (pm *ProjectManager) openWorkspaceLocked() error {
 			}
 		}
 	}
-	return pm.activateLocked(name, false, "")
+	return pm.activateLocked(name, false, "", "")
 }
 
 func (pm *ProjectManager) SwitchWorkspace(root string) error {
@@ -619,6 +701,12 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 	st.SetSharedStatuses(func() []engine.StatusDefinition {
 		return store.LoadWorkspaceStatuses(pm.workspaceRoot())
 	})
+	// The store's own writes are invisible to the watcher by design; this is
+	// how they reach the search index and the project lookup cache.
+	st.SetOnChange(func(path string) {
+		pm.noteSearchChange(dir, path)
+		pm.noteStoreChange(dir, path)
+	})
 	pm.stores[key] = st
 	return st
 }
@@ -626,7 +714,14 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 // StoreFor returns the store for a named project without changing the active
 // one. The project must already exist: this is a read/write path for existing
 // content, not a creation path.
+//
+// A project found once is remembered (lookup_cache.go), so the requests that
+// follow do not stat the disk.
 func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
+	workspace := pm.workspaceRoot()
+	if dir, ok := pm.lookups.get(workspace, name); ok {
+		return pm.cachedStore(dir), nil
+	}
 	dir, err := pm.Resolve(name)
 	if err != nil {
 		return nil, err
@@ -634,13 +729,14 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 	graphInfo, err := store.StatProjectPath(dir, filepath.Join(dir, "graph.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("project %q has no graph.yaml", name)
+			return nil, locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 		}
 		return nil, err
 	}
 	if !graphInfo.Mode().IsRegular() {
-		return nil, fmt.Errorf("project %q has no regular graph.yaml", name)
+		return nil, locale.Errorf("project %q has no regular graph.yaml", "專案「%s」沒有一般的 graph.yaml", name)
 	}
+	pm.lookups.remember(workspace, name, dir)
 	return pm.cachedStore(dir), nil
 }
 
@@ -657,7 +753,7 @@ func (pm *ProjectManager) ListedStore(name string) (*store.Store, error) {
 		return nil, err
 	}
 	if projectIsDetached(name, detached) {
-		return nil, fmt.Errorf("project %q is not in the workspace", name)
+		return nil, locale.Errorf("project %q is not in the workspace", "專案「%s」不在工作區內", name)
 	}
 	return st, nil
 }
@@ -684,6 +780,7 @@ func (pm *ProjectManager) EvictStores(dir string) {
 	// A watcher holds directory handles (Windows refuses the rename while it
 	// does) and would outlive the path it watches.
 	pm.stopExtraWatches(under)
+	pm.lookups.forget(dir)
 	pm.storesMu.Lock()
 	var evicted []*store.Store
 	for key, st := range pm.stores {
@@ -729,7 +826,7 @@ func (pm *ProjectManager) FlushHistory(ctx context.Context) error {
 	var errs []error
 	for _, st := range pm.cachedStores() {
 		if err := st.FlushHistory(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("history for %s: %w", st.Root(), err))
+			errs = append(errs, locale.Errorf("history for %s: %w", "%s 的歷史紀錄：%w", st.Root(), err))
 		}
 	}
 	return errors.Join(errs...)

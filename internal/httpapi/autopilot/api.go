@@ -7,7 +7,6 @@ package autopilot
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,9 +18,11 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	runsapi "nodevas/internal/httpapi/runs"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/runnerwire"
 	"nodevas/internal/runs"
+	"nodevas/internal/store"
 )
 
 const maxBody = 16 << 10
@@ -66,6 +67,8 @@ func fail(c *gin.Context, err error) {
 		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", err, nil)
 	case errors.Is(err, ap.ErrConflict):
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION", err, nil)
+	case errors.Is(err, ap.ErrNodeType):
+		httpx.Coded(c, http.StatusConflict, store.CodeNodeTypeForbidsAgent, err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)
 	}
@@ -74,7 +77,7 @@ func fail(c *gin.Context, err error) {
 func (a *API) project(c *gin.Context) (string, bool) {
 	name := runsapi.ProjectName(a.pm, httpx.StoreFor(c.Request, a.pm))
 	if name == "" {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 		return "", false
 	}
 	return name, true
@@ -85,7 +88,7 @@ func (a *API) project(c *gin.Context) (string, bool) {
 func person(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("agents cannot start or steer autopilots"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot start or steer autopilots", "agent 不能啟動或操控 autopilot"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -133,15 +136,23 @@ func (a *API) latest(c *gin.Context) {
 		return
 	}
 	if !engine.ValidNodeID(goal) {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("goal is not a valid node id"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("goal is not a valid node id", "目標不是有效的節點代號"), nil)
 		return
 	}
 	view, err := a.o.Latest(c.Request.Context(), name, goal)
+	c.Header("Cache-Control", "no-store")
+	// A goal that never had an autopilot is the ordinary answer, not a
+	// missing resource: null, so the browser does not log a failed request
+	// for every goal it looks at. An unknown id under /api/autopilot/:id is
+	// still a 404.
+	if errors.Is(err, ap.ErrNotFound) {
+		c.JSON(http.StatusOK, nil)
+		return
+	}
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, view)
 }
 
@@ -163,7 +174,7 @@ func (a *API) list(c *gin.Context, project string) {
 		for _, part := range strings.Split(raw, ",") {
 			status := strings.TrimSpace(part)
 			if !listable[status] {
-				httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("unknown autopilot status "+strconv.Quote(status)), nil)
+				httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("unknown autopilot status %q", "不明的 autopilot 狀態「%s」", status), nil)
 				return
 			}
 			if !seen[status] {
@@ -189,7 +200,7 @@ func (a *API) visible(c *gin.Context) (ap.Record, bool) {
 	}
 	rec, err := a.o.Get(c.Request.Context(), c.Param("id"))
 	if errors.Is(err, ap.ErrNotFound) || (err == nil && rec.Project != name) {
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("autopilot not found"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("autopilot not found", "找不到 autopilot"), nil)
 		return ap.Record{}, false
 	}
 	if err != nil {
@@ -212,7 +223,7 @@ func (a *API) steerable(c *gin.Context) (ap.Record, bool) {
 	}
 	if !actor.IsAdmin() && actor.ID != rec.CreatedBy {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("only the person who started this autopilot can steer it"), nil)
+			locale.Errorf("only the person who started this autopilot can steer it", "只有啟動這個 autopilot 的人可以操控它"), nil)
 		return rec, false
 	}
 	return rec, true
@@ -269,7 +280,7 @@ func (a *API) cancel(c *gin.Context) {
 func (a *API) node(c *gin.Context) (string, bool) {
 	node := c.Param("node")
 	if !engine.ValidNodeID(node) {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("not a valid node id"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("not a valid node id", "不是有效的節點代號"), nil)
 		return "", false
 	}
 	return node, true

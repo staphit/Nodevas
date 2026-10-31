@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { AuthError } from "../api";
 import { IconClose, IconShield } from "../icons";
-import { languageLocale, useI18n } from "../i18n";
+import { formatLocalizedTime, useI18n } from "../i18n";
 import { compactSecondFactor, isSecondFactorCode } from "../components/secondFactor";
 import { stepUpActive, useStepUp } from "./stepUpStore";
 
@@ -17,16 +17,9 @@ export function compactStepUpCode(value: string): string {
   return value.replace(/[\s-]+/g, "").toUpperCase();
 }
 
-/** "14:05" in the reader's language, or "" for an unparseable time. */
+/** "2:05 PM" / 「下午2:05」 like every other time, or "" for none. */
 export function formatClock(iso: string | undefined): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(languageLocale(), {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
+  return iso ? formatLocalizedTime(iso) : "";
 }
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;

@@ -26,7 +26,8 @@ const (
 	// KindRead cannot change anything (MCP ReadOnlyHint).
 	KindRead Kind = "read"
 	// KindWrite changes project content in a way history can undo:
-	// create_node, link_nodes, update_node_meta, set_node_status, claim/release.
+	// create_node, create_subgraph, link_nodes, update_node_meta, set_node_status,
+	// claim/release.
 	KindWrite Kind = "write"
 	// KindRisky replaces content wholesale (update_node_body) or is otherwise
 	// singled out; acceptEdits mode still asks before running it.

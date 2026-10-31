@@ -38,6 +38,7 @@ import (
 	"strings"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // maxEmailBytes bounds the address before it is parsed, let alone stored or
@@ -49,11 +50,11 @@ const maxEmailBytes = 320
 // ErrEmailTaken is returned when an administrator registers an address that
 // another account already signs in with. The comparison is case-insensitive,
 // because the mailbox is.
-var ErrEmailTaken = errors.New("that email address is already registered to another account")
+var ErrEmailTaken = locale.Errorf("that email address is already registered to another account", "這個電子郵件地址已登記給另一個帳號")
 
 // errAccountLookup is a sign-in address lookup that could not be answered: the
 // server's fault, whatever the address was.
-var errAccountLookup = errors.New("look up sign-in address")
+var errAccountLookup = locale.Errorf("look up sign-in address", "查詢登入信箱")
 
 // normalizeEmail trims and validates an address. A malformed one is refused
 // here rather than at send time, where the failure would look like an outage
@@ -65,14 +66,14 @@ var errAccountLookup = errors.New("look up sign-in address")
 func normalizeEmail(address string) (string, error) {
 	address = strings.TrimSpace(address)
 	if address == "" {
-		return "", errors.New("an email address is required to receive passcodes")
+		return "", locale.Errorf("an email address is required to receive passcodes", "需要電子郵件地址才能收到驗證碼")
 	}
 	if len(address) > maxEmailBytes {
-		return "", fmt.Errorf("an email address must be at most %d bytes", maxEmailBytes)
+		return "", locale.Errorf("an email address must be at most %d bytes", "電子郵件地址最多 %d 位元組", maxEmailBytes)
 	}
 	parsed, err := mail.ParseAddress(address)
 	if err != nil {
-		return "", fmt.Errorf("invalid email address %q: %w", address, err)
+		return "", locale.Errorf("invalid email address %q: %w", "電子郵件地址「%s」無效：%w", address, err)
 	}
 	return parsed.Address, nil
 }
@@ -104,7 +105,7 @@ func TypedAddress(typed string) string {
 func (u *UserStore) SetEmail(ctx context.Context, name, email string) error {
 	name = strings.TrimSpace(name)
 	if !userNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid user name %q", name)
+		return locale.Errorf("invalid user name %q", "使用者名稱「%s」無效", name)
 	}
 	address, err := normalizeEmail(email)
 	if err != nil {
@@ -112,7 +113,7 @@ func (u *UserStore) SetEmail(ctx context.Context, name, email string) error {
 	}
 	if err := u.updateAccount(ctx, name, setEmail, address); err != nil {
 		if errors.Is(err, errNoAccount) {
-			return fmt.Errorf("no such user %q", name)
+			return locale.Errorf("no such user %q", "沒有使用者「%s」", name)
 		}
 		return err
 	}
@@ -125,7 +126,7 @@ func (u *UserStore) ClearEmail(ctx context.Context, name string) error {
 	name = strings.TrimSpace(name)
 	if err := u.updateAccount(ctx, name, clearEmail); err != nil {
 		if errors.Is(err, errNoAccount) {
-			return fmt.Errorf("no such user %q", name)
+			return locale.Errorf("no such user %q", "沒有使用者「%s」", name)
 		}
 		return err
 	}
@@ -202,7 +203,7 @@ func (u *UserStore) signInAccount(ctx context.Context, email string) (emailAccou
 	// The caller checks its own ctx for that; past that check this is only
 	// ever the server's fault.
 	lookupFailed := func(err error) (emailAccount, error) {
-		return emailAccount{}, fmt.Errorf("%w: read accounts: %v", errAccountLookup, err)
+		return emailAccount{}, locale.Errorf("%w: read accounts: %v", "%w：讀取帳號：%v", errAccountLookup, err)
 	}
 	// One row: the partial unique index on email makes a second impossible, so
 	// reading one is not a shortcut.

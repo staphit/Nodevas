@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -23,11 +23,11 @@ import (
 var (
 	// ErrLinkNotFound is a code that is unknown, expired or already used. The
 	// three are one answer: a caller holding a stale code learns nothing more.
-	ErrLinkNotFound = errors.New("that device link is unknown, expired or already used; make a new one on the Runners page")
+	ErrLinkNotFound = locale.Errorf("that device link is unknown, expired or already used; make a new one on the Runners page", "這個裝置連結不存在、已過期或已使用；請在 Runners 頁面建立新的")
 	// ErrTooManyLinks is a person with MaxLinksPerUser codes outstanding.
-	ErrTooManyLinks = errors.New("too many device links are waiting to be used; use one or let them expire")
+	ErrTooManyLinks = locale.Errorf("too many device links are waiting to be used; use one or let them expire", "等待使用的裝置連結太多；請先使用或等它們過期")
 	// ErrLinkThrottled is a source that failed too many redeems lately.
-	ErrLinkThrottled = errors.New("too many failed device link attempts; wait and try again")
+	ErrLinkThrottled = locale.Errorf("too many failed device link attempts; wait and try again", "裝置連結失敗次數太多；請稍候再試")
 )
 
 const (
@@ -53,6 +53,10 @@ type Link struct {
 	Revision string
 	Name     string
 	Created  time.Time
+	// Language is what the browser that made the link reads: the notice
+	// that it was redeemed goes out in it, the redeeming runner being a
+	// program that says nothing of its owner's language.
+	Language locale.Language
 }
 
 type pendingLink struct {
@@ -111,8 +115,8 @@ func (l *Links) pruneLocked(now time.Time) {
 }
 
 // Issue makes a code for owner under name (already checked with CleanName).
-// The code is returned only here.
-func (l *Links) Issue(owner identity.Actor, revision, name string) (string, time.Time, error) {
+// The code is returned only here. language is the maker's (Link.Language).
+func (l *Links) Issue(owner identity.Actor, revision, name string, language locale.Language) (string, time.Time, error) {
 	if strings.TrimSpace(owner.ID) == "" {
 		return "", time.Time{}, ErrInvalid
 	}
@@ -138,7 +142,7 @@ func (l *Links) Issue(owner identity.Actor, revision, name string) (string, time
 	expires := now.Add(l.ttl)
 	l.pending = append(l.pending, &pendingLink{
 		hash:    sha256.Sum256([]byte(code)),
-		link:    Link{Owner: owner, Revision: revision, Name: name, Created: now},
+		link:    Link{Owner: owner, Revision: revision, Name: name, Created: now, Language: language},
 		expires: expires,
 	})
 	return code, expires, nil

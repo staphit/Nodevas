@@ -163,8 +163,8 @@ for (const [name, viewport] of Object.entries({
     await shot(page, `${name}-grid`);
 
     // And back: the goal is a node of the Info graph.
-    await goal.getByRole("button", { name: "在資訊中顯示" }).click();
-    await expect(page.getByRole("button", { name: "資訊", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await goal.getByRole("button", { name: "在看板中顯示" }).click();
+    await expect(page.getByRole("button", { name: "看板", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("dialog", { name: "節點編輯" })).toBeVisible();
   });
 }

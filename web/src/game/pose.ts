@@ -2,11 +2,11 @@
 // a run that is several things at once (failed CI on a PR that also waits
 // for a merge) always shows the same, most urgent one:
 //
-//   offline > asking-user > failed > awaiting-accept > waiting-ci
-//           > reviewing > working > idle
+//   offline > asking-user > failed > limit > awaiting-accept > waiting-ci
+//           > reviewing > working > finished > idle
 
 import type { AgentSession } from "../api/agents";
-import { runFinal, type Run } from "../api/runs";
+import { runFinal, runWaitsForLimit, type Run } from "../api/runs";
 import { sessionOnline } from "./presence";
 import type { Pose } from "./world";
 
@@ -29,11 +29,13 @@ export function runPose(run: Run, ctx: RunPoseContext): Pose {
   if (!runFinal(run.status) && ctx.runnerOnline === false) return "offline";
   if (ctx.asking) return "asking-user";
   if (run.status === "failed" || openPRWithCI(run, "failure")) return "failed";
+  if (runWaitsForLimit(run)) return "limit";
   if (run.status === "queued" || run.status === "offered" || run.merge?.status === "pending") {
     return "awaiting-accept";
   }
   if (openPRWithCI(run, "pending")) return "waiting-ci";
   if (run.status === "running") return run.kind === "review" ? "reviewing" : "working";
+  if (run.status === "succeeded") return "finished";
   return "idle";
 }
 
@@ -51,9 +53,9 @@ export function sessionPose(
   return session.state === "busy" ? "working" : "idle";
 }
 
-/** Whether a run in a final state still deserves a character: it needs
- * someone (failed, red or pending CI, a merge in flight). A cleanly finished
- * run with nothing pending leaves the room. */
+/** Whether a run in a final state still deserves a character for long: it
+ * needs someone (failed, red or pending CI, a merge in flight). A cleanly
+ * finished run only cheers for a moment (office.FINISHED_SHOW_MS). */
 export function finishedRunStaysInRoom(run: Run): boolean {
   if (!runFinal(run.status)) return true;
   if (run.status === "failed") return true;

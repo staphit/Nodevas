@@ -12,7 +12,7 @@ import (
 
 // Issue is a validation finding.
 type Issue struct {
-	Severity string `json:"severity"` // "error" | "warning"
+	Severity string `json:"severity"` // "error" | "warning" | "info"
 	NodeID   string `json:"nodeId,omitempty"`
 	Field    string `json:"field,omitempty"`  // e.g. "requires"
 	Offset   int    `json:"offset,omitempty"` // byte offset within the field, -1 if n/a
@@ -21,6 +21,10 @@ type Issue struct {
 
 // Validate checks the whole graph: DSL syntax, dangling references,
 // duplicate ids, dependency cycles, and disconnected nodes.
+//
+// Node.Refs (a node's reference notes) are deliberately not read here: a
+// reference never blocks, so it cannot form a cycle, dangle into Problems or
+// connect a node to the flow.
 func Validate(g *Graph) []Issue {
 	var issues []Issue
 	add := func(sev, nodeID, field string, off int, format string, args ...any) {
@@ -33,8 +37,31 @@ func Validate(g *Graph) []Issue {
 	if g.Version < 1 {
 		add("error", "", "version", -1, "version must be at least 1")
 	}
+	for _, problem := range NodeTypeDefProblems(g.NodeTypes) {
+		add("error", "", "node_types", -1, "%s", problem)
+	}
+	for _, problem := range AgentRoleDefProblems(g.AgentRoles) {
+		add("error", "", "agent_roles", -1, "%s", problem)
+	}
+	if err := ValidateGraphWorkflows(g); err != nil {
+		add("error", "", "workflow", -1, "%s", err)
+	}
+	for _, n := range g.Nodes {
+		if n != nil && n.Acceptance != nil {
+			if err := ValidateNodeAcceptance(g, n); err != nil {
+				add("error", n.ID, "acceptance", -1, "%s", err)
+			}
+		}
+	}
 
 	ids := map[string]bool{}
+	// Legacy free-text kinds ("bug", "伏筆") are summarized once per project
+	// as a hint instead of a warning per node, so an old story graph does not
+	// drown Problems in them.
+	var unknownKinds []string
+	unknownKindCount := map[string]int{}
+	unknownKindFirst := ""
+	unknownKindNodes := 0
 	for index, n := range g.Nodes {
 		if n == nil {
 			add("error", "", "nodes", -1, "node at index %d is null", index)
@@ -61,11 +88,43 @@ func Validate(g *Graph) []Issue {
 			add("error", n.ID, "write_access", -1, "invalid write_access %q", n.WriteAccess)
 		}
 		ids[n.ID] = true
+		if !g.KnownNodeKind(NormalizeNodeKind(n.Kind)) {
+			if unknownKindCount[n.Kind] == 0 {
+				unknownKinds = append(unknownKinds, n.Kind)
+			}
+			if unknownKindFirst == "" {
+				unknownKindFirst = n.ID
+			}
+			unknownKindCount[n.Kind]++
+			unknownKindNodes++
+		}
+		// Effects run only on a journaled done; an automatic or status-less
+		// node never has one (see deriveAutoStatuses).
+		if completion := g.TypeOf(n).Completion; len(n.Effects) > 0 &&
+			(completion == CompletionAuto || completion == CompletionNone) {
+			add("warning", n.ID, "effects", -1,
+				"effects never run on a %s node: it has no status change of its own; move them to a node before it",
+				g.TypeOf(n).Label)
+		}
 		for i, effect := range n.Effects {
 			if err := ValidateEffect(effect.Set); err != nil {
 				add("error", n.ID, fmt.Sprintf("effects[%d]", i), -1, "%s", err)
 			}
 		}
+	}
+
+	if unknownKindNodes > 0 {
+		parts := make([]string, 0, 6)
+		for i, kind := range unknownKinds {
+			if i == 5 {
+				parts = append(parts, "…")
+				break
+			}
+			parts = append(parts, fmt.Sprintf("%q ×%d", kind, unknownKindCount[kind]))
+		}
+		add("info", unknownKindFirst, "kind", -1,
+			"%d node(s) use types this project does not define (%s); they behave as Task. Pick a type for them, or add a custom type with that name.",
+			unknownKindNodes, strings.Join(parts, ", "))
 	}
 
 	// requires: syntax + references. deps collects node-ref edges for cycle
@@ -240,6 +299,9 @@ func Validate(g *Graph) []Issue {
 			if !ids[nodeID] {
 				add("error", nodeID, "ui.node_styles", -1, "node style references unknown node %q", nodeID)
 			}
+			if !ValidNodeShape(style.Shape) {
+				add("warning", nodeID, "ui.node_styles", -1, "unknown shape %q", style.Shape)
+			}
 			if math.IsNaN(style.Width) || math.IsInf(style.Width, 0) ||
 				math.IsNaN(style.Height) || math.IsInf(style.Height, 0) ||
 				(style.Width != 0 && (style.Width < 120 || style.Width > 360)) ||
@@ -292,8 +354,16 @@ func Validate(g *Graph) []Issue {
 			joinCycle(cycle))
 	}
 
-	// Disconnected nodes: no requires, not referenced, no edges.
-	if len(g.Nodes) > 1 {
+	// Disconnected nodes: no requires, not referenced, no edges. A node
+	// without status (Note) is reference material that lives outside the
+	// flow on purpose, so it is neither flagged nor counted.
+	inFlow := 0
+	for _, n := range g.Nodes {
+		if n != nil && g.TypeOf(n).Completion != CompletionNone {
+			inFlow++
+		}
+	}
+	if inFlow > 1 {
 		connected := map[string]bool{}
 		for id, refs := range deps {
 			if len(refs) > 0 {
@@ -311,7 +381,7 @@ func Validate(g *Graph) []Issue {
 			connected[e.To] = true
 		}
 		for _, n := range g.Nodes {
-			if n == nil {
+			if n == nil || g.TypeOf(n).Completion == CompletionNone {
 				continue
 			}
 			if n.ID != "" && !connected[n.ID] {

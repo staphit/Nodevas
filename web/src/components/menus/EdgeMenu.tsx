@@ -14,7 +14,8 @@
 import { useEffect, useState } from "react";
 import type { EdgeLine, EdgeRelation, Graph } from "../../types";
 import { localizedLineLabel, localizedRelationLabel, useI18n } from "../../i18n";
-import { LINE_LABELS, edgeRelation } from "../../domain/graph/edgeStyle";
+import { EDGE_LINES, edgeRelation } from "../../domain/graph/edgeStyle";
+import { reportError } from "../../store";
 import type { LaneContextMenu } from "../LaneView";
 
 const ADVANCED_RELATIONS: Exclude<EdgeRelation, "">[] = ["optional", "deprecated"];
@@ -154,7 +155,7 @@ export function EdgeMenu({
         {everyLineIs("") ? "✓ " : ""}
         {t("edgeMenu.autoLine")}
       </button>
-      {(Object.keys(LINE_LABELS) as Exclude<EdgeLine, "">[]).map((line) => (
+      {EDGE_LINES.map((line) => (
         <button
           key={line}
           type="button"

@@ -1,4 +1,7 @@
+import { markServerReachable, markServerUnreachable } from "./connectivity";
 import type { Verifier } from "./verify";
+import { LANGUAGE_OPTIONS, translate } from "../i18n";
+import { readPreference, type Language } from "../preferences";
 
 /** Optimistic-lock failure: server refused to overwrite a newer disk version. */
 export class ConflictError extends Error {
@@ -30,10 +33,45 @@ export class RequestError extends Error {
   }
 }
 
+/**
+ * The request never got an answer: the server is stopped, restarting, or out
+ * of reach. The browser's own wording ("Failed to fetch", "Load failed") is
+ * replaced, because it reaches the banner and the status pill as-is. The page
+ * language comes from <html lang>, which App keeps in step with the
+ * preference; importing the i18n module here would close a cycle through the
+ * store.
+ */
+export class NetworkError extends Error {
+  constructor() {
+    super(networkFailureText());
+  }
+}
+
+/** What browsers say when a fetch is refused, in case one slips through. */
+const BROWSER_NETWORK_FAILURES = ["Failed to fetch", "Load failed", "NetworkError when attempting to fetch resource."];
+
+/** The page's language, as the document says: http stays clear of the store. */
+function pageLanguage(): Language {
+  return document.documentElement.lang.startsWith("zh") ? "zh-TW" : "en";
+}
+
+function networkFailureText(): string {
+  return translate("api.error.unreachable", pageLanguage());
+}
+
+/** Whether a failure message says the server could not be reached. */
+export function isNetworkFailure(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return (
+    LANGUAGE_OPTIONS.some((language) => message === translate("api.error.unreachable", language)) ||
+    BROWSER_NETWORK_FAILURES.includes(message)
+  );
+}
+
 /** Raised when the server has accounts on and this browser is not signed in. */
 export class UnauthorizedError extends Error {
   constructor() {
-    super("需要登入");
+    super(translate("api.error.signInRequired", pageLanguage()));
   }
 }
 
@@ -80,6 +118,40 @@ export function csrfToken(): string {
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
+ * The app's language, sent as Accept-Language: the hub words its refusals and
+ * the titles it makes up (a duplicate's "X copy") for it. Left to the browser,
+ * a zh-TW browser with the app set to English got "Beta（副本）" back.
+ */
+export function requestLanguage(): Language {
+  return readPreference("language");
+}
+
+/** Sets Accept-Language to the app's language unless the caller chose one. */
+export function setRequestLanguage(headers: Headers): void {
+  if (!headers.has("Accept-Language")) headers.set("Accept-Language", requestLanguage());
+}
+
+/** What a reverse proxy answers when the hub behind it is down. */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+
+/**
+ * Whether a response is a proxy standing in for a hub it cannot reach: a
+ * 502/503/504 whose body is not the hub's own JSON error. The hub does send
+ * 503 itself (no mail transport, say), always as {"error": ...}; a proxy's
+ * page, an empty body or someone else's JSON is the hub being out of reach.
+ */
+export async function isGatewayFailure(res: Response): Promise<boolean> {
+  if (!GATEWAY_STATUSES.has(res.status)) return false;
+  if (!(res.headers.get("Content-Type") ?? "").includes("json")) return true;
+  try {
+    const body = await res.clone().json();
+    return !(body && typeof body === "object" && typeof body.error === "string");
+  } catch {
+    return true;
+  }
+}
+
+/**
  * When set, every project-scoped request carries this project name in the
  * X-Nodevas-Project header, and the server answers about that project instead
  * of its own active one.
@@ -103,17 +175,14 @@ export function getProjectOverride(): string {
 }
 
 /**
- * `verify` is opt-in per endpoint. The Go structs and `types.ts` are hand-synced
- * with nothing that fails a build when they drift, so the responses the whole
- * app is built on are checked here rather than surfacing as an `undefined` deep
- * in a component with nothing pointing back at the rename that caused it.
+ * Sends one request the way req() does (project header, JSON content type,
+ * CSRF token, 30 s timeout, the 401 sign-in prompt) and hands back the raw
+ * response, for the few callers that read a refusal's body themselves (a
+ * 409 that carries a fresh suggestion, a code the Explorer explains).
  */
-export async function req<T>(
-  url: string,
-  init?: RequestInit,
-  verify?: Verifier<T>,
-): Promise<T> {
+export async function send(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
+  setRequestLanguage(headers);
   if (projectOverride && !headers.has("X-Nodevas-Project")) {
     headers.set("X-Nodevas-Project", projectOverride);
   }
@@ -140,16 +209,42 @@ export async function req<T>(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("請求逾時");
+      throw new Error(translate("api.error.timeout", pageLanguage()));
+    }
+    if (error instanceof TypeError) {
+      markServerUnreachable();
+      throw new NetworkError();
     }
     throw error;
   } finally {
     window.clearTimeout(timeout);
   }
+  // A proxy answering for a hub that is down is no answer from the hub.
+  if (await isGatewayFailure(res)) {
+    markServerUnreachable();
+    throw new NetworkError();
+  }
+  // Any other answer, an error status included, means the server is there.
+  markServerReachable();
   if (res.status === 401) {
     notifyUnauthorized();
     throw new UnauthorizedError();
   }
+  return res;
+}
+
+/**
+ * `verify` is opt-in per endpoint. The Go structs and `types.ts` are hand-synced
+ * with nothing that fails a build when they drift, so the responses the whole
+ * app is built on are checked here rather than surfacing as an `undefined` deep
+ * in a component with nothing pointing back at the rename that caused it.
+ */
+export async function req<T>(
+  url: string,
+  init?: RequestInit,
+  verify?: Verifier<T>,
+): Promise<T> {
+  const res = await send(url, init);
   if (res.status === 409) {
     const body = await res.json().catch(() => ({}));
     throw new ConflictError(
@@ -175,7 +270,7 @@ export async function req<T>(
     if (res.status === 403) throw new AuthError(403, msg);
     throw new RequestError(res.status, msg, code);
   }
-  // 204: done, nothing to say (DELETE /api/packs/:id).
+  // 204: done, nothing to say.
   if (res.status === 204) return undefined as T;
   const body = await res.json();
   return verify ? verify(body, url) : (body as T);
@@ -189,6 +284,7 @@ export async function req<T>(
  */
 export async function authPost<T>(url: string, body: unknown): Promise<T> {
   const headers = new Headers({ "Content-Type": "application/json" });
+  setRequestLanguage(headers);
   // Sent when present; before the first sign-in there is no CSRF cookie yet.
   const token = csrfToken();
   if (token) headers.set("X-CSRF-Token", token);
@@ -204,9 +300,9 @@ export async function authPost<T>(url: string, body: unknown): Promise<T> {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new AuthError(0, "請求逾時");
+      throw new AuthError(0, translate("api.error.timeout", pageLanguage()));
     }
-    throw new AuthError(0, "無法連線到伺服器");
+    throw new AuthError(0, networkFailureText());
   } finally {
     window.clearTimeout(timeout);
   }

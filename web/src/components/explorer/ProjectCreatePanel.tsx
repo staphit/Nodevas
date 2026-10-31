@@ -12,6 +12,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
+import { projectNameClash, projectNameClashMessage } from "./projectNameTaken";
 
 /** `parent` is the containing project/folder path; "" means the workspace root. */
 export type ProjectCreateTarget = { mode: "project" | "folder"; parent: string };
@@ -28,7 +29,7 @@ export function useProjectCreate({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const switchProject = useApp((state) => state.switchProject);
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const { t } = useI18n();
   const [projectCreateTarget, setProjectCreateTarget] =
     useState<ProjectCreateTarget | null>(null);
@@ -78,22 +79,23 @@ export function useProjectCreate({
       projectCreateTarget.parent && projectCreateTarget.parent !== "."
         ? `${projectCreateTarget.parent}/${label}`
         : label;
-    if (projectByName.has(fullName)) {
-      setProjectCreateError(t("explorer.createDuplicate"));
+    const clash = projectNameClash(projectByName.keys(), fullName);
+    if (clash !== null) {
+      setProjectCreateError(projectNameClashMessage(clash, fullName, t("explorer.createDuplicate"), t));
       return;
     }
 
     setProjectCreateBusy(true);
     setProjectCreateError(null);
     try {
-      if (projectCreateTarget.mode === "folder") {
-        await api.createProjectFolder(fullName);
-        await refreshProjects();
-        setProjectTransferNotice(t("explorer.createdFolder", { name: fullName }));
-      } else {
-        await switchProject(fullName, true, projectTemplate);
-        setProjectTransferNotice(t("explorer.createdProject", { name: fullName }));
-      }
+      const mode = projectCreateTarget.mode;
+      await changeProjects(async () => {
+        if (mode === "folder") await api.createProjectFolder(fullName);
+        else await switchProject(fullName, true, projectTemplate);
+      });
+      setProjectTransferNotice(
+        t(mode === "folder" ? "explorer.createdFolder" : "explorer.createdProject", { name: fullName }),
+      );
       const next = new Set(expandedProjects);
       next.add(fullName);
       if (projectCreateTarget.parent) next.add(projectCreateTarget.parent);

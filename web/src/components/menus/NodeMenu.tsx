@@ -1,22 +1,20 @@
 /**
- * Node context menu [B-06].
+ * A node's dependency editor [B-06].
  *
- * Everything about one node's dependencies, plus open/duplicate/delete. The
+ * Reached from the node menu's "Add dependency…" and from a wire's gate. The
  * default view is plain "depends on": the nodes this one waits for, and a way
  * to add one. How several conditions combine, optional/deprecated relations
  * and standalone logic gates sit under "Advanced conditions", which opens by
- * itself whenever the node already uses one of them.
+ * itself whenever the node already uses one of them. Open, duplicate, trash
+ * and the agent actions are the short menu's (NodeActionsMenu).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EdgeRelation, GraphEdge, GraphNode, LogicGate } from "../../types";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
-import { IconPlus, IconSend, IconTerminal } from "../../icons";
-import { openNodeRuns } from "../../runs/RunsRoot";
-import { openAutopilot } from "../../autopilot/openAutopilot";
-import { useRuns } from "../../runs/runStore";
-import { useWorkstationVisible } from "../../runners/workstation";
-import { confirmAction } from "../ConfirmDialog";
+import { nodesWaitingOn } from "../../domain/graph/logicGate";
+import { requiresNodeRefs } from "../../domain/graph/requires";
+import { IconPlus } from "../../icons";
 import type { LaneContextMenu } from "../LaneView";
 import { localizedRelationLabel, useI18n } from "../../i18n";
 import {
@@ -27,6 +25,8 @@ import {
 export interface NodeMenuProps {
   contextMenu: Extract<LaneContextMenu, { kind: "node" }>;
   nodeTitle: (id: string | undefined) => string;
+  /** The board's dependency edges, to leave out nodes that would close a loop. */
+  edges: readonly GraphEdge[];
   incomingConditions: GraphEdge[];
   availableConditionSources: GraphNode[];
   conditionSource: string;
@@ -47,16 +47,13 @@ export interface NodeMenuProps {
   controllingLogicGate: LogicGate | undefined;
   assignableLogicGates: LogicGate[];
   assignExistingLogicGateToNode: (targetId: string, gateId: string) => void;
-  openTab: (id: string) => Promise<void>;
-  selectNode: (id: string) => void;
-  duplicateNode: (id: string) => Promise<string>;
-  deleteNode: (id: string) => Promise<void>;
   setContextMenu: (menu: LaneContextMenu | null) => void;
 }
 
 export function NodeMenu({
   contextMenu,
   nodeTitle,
+  edges,
   incomingConditions,
   availableConditionSources,
   conditionSource,
@@ -72,14 +69,23 @@ export function NodeMenu({
   controllingLogicGate,
   assignableLogicGates,
   assignExistingLogicGateToNode,
-  openTab,
-  selectNode,
-  duplicateNode,
-  deleteNode,
   setContextMenu,
 }: NodeMenuProps) {
   const { t, language } = useI18n();
   const requires = conditionTarget?.requires?.trim() ?? "";
+  // A node the expression already names is a prerequisite even before its
+  // wire is drawn, so it is not offered again; nor is one that already waits
+  // on this node, which would close a loop the add is refused for.
+  const nodeId = contextMenu.nodeId;
+  const choices = useMemo(() => {
+    const named = new Set(requiresNodeRefs(requires));
+    const downstream = nodesWaitingOn(edges, nodeId);
+    return availableConditionSources.filter((node) => !named.has(node.id) && !downstream.has(node.id));
+  }, [availableConditionSources, requires, edges, nodeId]);
+  useEffect(() => {
+    if (choices.some((node) => node.id === conditionSource)) return;
+    setConditionSource(choices[0]?.id ?? "");
+  }, [choices, conditionSource, setConditionSource]);
   const conditionKind = advancedConditionKind(requires);
   const hasRelationOverride = incomingConditions.some(
     (edge) => edgeRelation(edge) !== "",
@@ -106,7 +112,6 @@ export function NodeMenu({
           ? t("dependency.relationsChanged")
           : null;
 
-  const workstation = useWorkstationVisible();
   return (
     <>
       <div className="lane-context-title condition-menu-title">
@@ -116,81 +121,6 @@ export function NodeMenu({
       <div className="condition-menu-intro">
         {t("nodeMenu.intro")}
       </div>
-      <div className="condition-menu-node-actions">
-        <button
-          type="button"
-          onClick={() => {
-            setContextMenu(null);
-            void openTab(contextMenu.nodeId).catch(reportError);
-          }}
-        >
-          {t("nodeMenu.open")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setContextMenu(null);
-            void duplicateNode(contextMenu.nodeId)
-              .then((id) => selectNode(id))
-              .catch(reportError);
-          }}
-        >
-          {t("nodeMenu.duplicate")}
-        </button>
-        <button
-          type="button"
-          className="danger"
-          onClick={() => {
-            const id = contextMenu.nodeId;
-            setContextMenu(null);
-            void confirmAction({
-              title: t("nodeMenu.trashTitle"),
-              description: t("nodeMenu.trashDescription", { title: nodeTitle(id) }),
-              confirmLabel: t("batch.moveToTrash"),
-              tone: "danger",
-            }).then((confirmed) => {
-              if (confirmed) return deleteNode(id);
-            }).catch(reportError);
-          }}
-        >
-          {t("nodeMenu.trash")}
-        </button>
-      </div>
-      {workstation && (
-      <div className="node-menu-run-actions">
-        <button
-          type="button"
-          onClick={() => {
-            setContextMenu(null);
-            useRuns.getState().openDispatch(contextMenu.nodeId);
-          }}
-        >
-          <IconSend size={13} />
-          <span>{t("nodeMenu.dispatch")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setContextMenu(null);
-            openNodeRuns(contextMenu.nodeId);
-          }}
-        >
-          <IconTerminal size={13} />
-          <span>{t("nodeMenu.runs")}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const nodeId = contextMenu.nodeId;
-            setContextMenu(null);
-            openAutopilot(nodeId);
-          }}
-        >
-          <IconSend size={13} />
-          <span>{t("nodeMenu.autopilot")}</span>
-        </button>
-      </div>
-      )}
       {controllingLogicGate ? (
         <div className="controlled-by-standalone-gate">
           <b>{t("nodeMenu.gateManaged")}</b>
@@ -228,13 +158,13 @@ export function NodeMenu({
             <span className="lane-context-label">{t("nodeMenu.addSource")}</span>
             <select
               value={conditionSource}
-              disabled={availableConditionSources.length === 0}
+              disabled={choices.length === 0}
               onChange={(event) => setConditionSource(event.target.value)}
             >
-              {availableConditionSources.length === 0 ? (
+              {choices.length === 0 ? (
                 <option value="">{t("nodeMenu.noSources")}</option>
               ) : (
-                availableConditionSources.map((node) => (
+                choices.map((node) => (
                   <option key={node.id} value={node.id}>
                     {node.title || node.id}
                   </option>

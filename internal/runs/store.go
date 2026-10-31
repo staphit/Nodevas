@@ -22,22 +22,28 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/usage"
 )
 
 var (
 	// ErrNotFound covers a run that does not exist or is not the caller's to
 	// see or touch.
-	ErrNotFound = errors.New("run not found")
+	ErrNotFound = locale.Errorf("run not found", "找不到執行")
 	// ErrTransition is a status change the lifecycle does not allow from the
 	// run's current status, e.g. accepting a run that was already cancelled.
-	ErrTransition = errors.New("run status change not allowed")
+	ErrTransition = locale.Errorf("run status change not allowed", "不允許這個執行狀態變更")
 	// ErrInvalid is a request that breaks the limits.
-	ErrInvalid = errors.New("invalid run request")
+	ErrInvalid = locale.Errorf("invalid run request", "執行請求無效")
 )
 
 // MaxErrorBytes caps runs.error: a reason, not a log.
 const MaxErrorBytes = 4 << 10
+
+// MaxOverrideBytes caps a person's stage override reason.
+const MaxOverrideBytes = 200
 
 // maxShortField caps the event fields that are names rather than text.
 const maxShortField = 256
@@ -85,6 +91,46 @@ type Record struct {
 	JobHandoffNote   string
 	LimitWaits       int
 	ResetAt          string
+	// GuardAck is what a review's finish said about the Tester's files
+	// ("TESTS: approve-changes"); like ResetAt it is not stored: the staged
+	// pipeline records it on its guard at once.
+	GuardAck bool
+	// Agent roles: what the run's job is offered besides its prompt (the
+	// role's tools, the Tester's files an Executor must not change, the
+	// acceptance items and, for a verify or goal judge, what to verify).
+	// Role, Override, Verify and Checks are on the API's Run.
+	JobRoles
+}
+
+// JobRoles is a role job's offer fields, stored as runs.job_roles JSON.
+type JobRoles struct {
+	Tools      []string                    `json:"tools,omitempty"`
+	TestFiles  []string                    `json:"testFiles,omitempty"`
+	Acceptance []runnerwire.AcceptanceItem `json:"acceptance,omitempty"`
+	VerifySpec *runnerwire.VerifySpec      `json:"verifySpec,omitempty"`
+}
+
+func (j JobRoles) empty() bool {
+	return len(j.Tools) == 0 && len(j.TestFiles) == 0 && len(j.Acceptance) == 0 && j.VerifySpec == nil
+}
+
+func encodeJobRoles(j JobRoles) (string, error) {
+	if j.empty() {
+		return "", nil
+	}
+	if len(j.TestFiles) > runnerwire.MaxTestFiles {
+		j.TestFiles = j.TestFiles[:runnerwire.MaxTestFiles]
+	}
+	raw, err := json.Marshal(j)
+	return string(raw), err
+}
+
+func decodeJobRoles(raw string) JobRoles {
+	var out JobRoles
+	if raw != "" {
+		_ = json.Unmarshal([]byte(raw), &out)
+	}
+	return out
 }
 
 // Job is the offer for this run.
@@ -96,6 +142,7 @@ func (r Record) Job() runnerwire.Job {
 		Kind: r.Kind, Branch: r.JobBranch, PRURL: r.JobPRURL, Review: r.Review,
 		Mode:          r.Mode,
 		HandoffBranch: r.JobHandoffBranch, HandoffNote: r.JobHandoffNote,
+		Role: r.Role, Tools: r.Tools, TestFiles: r.TestFiles, Acceptance: r.Acceptance, Verify: r.VerifySpec,
 	}
 }
 
@@ -108,11 +155,22 @@ type Store struct {
 	// instant twice, and two runs with one created_at would have no order.
 	mu   sync.Mutex
 	last time.Time
+
+	// usage prices run costs (cost.go); its table is cached for a minute.
+	usage      *usage.Store
+	priceMu    sync.Mutex
+	prices     usage.Table
+	pricesAt   time.Time
+	pricesRead bool
 }
 
 // NewStore builds a store over the workspace database.
 func NewStore(database *db.DB) *Store {
-	return &Store{db: database, now: time.Now}
+	s := &Store{db: database, now: time.Now}
+	if database != nil {
+		s.usage = usage.NewStore(database)
+	}
+	return s
 }
 
 // stamp is RFC3339 with microseconds, fixed width so the text sorts in time
@@ -185,23 +243,46 @@ type New struct {
 	JobHandoffBranch, JobHandoffNote string
 	RetryAt                          string
 	LimitWaits                       int
+	// Agent roles: the role the run acts in ("" legacy), a person's stage
+	// override reason, and the job's role fields.
+	Role, Override string
+	JobRoles
+	// Agent analytics: the node's type and acceptance size when the run was
+	// made. Both empty copies them from the newest run on the same node.
+	NodeType        string
+	AcceptanceCount int
 }
 
 // Create records a queued run.
 func (s *Store) Create(ctx context.Context, in New) (Record, error) {
-	for _, required := range []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.Agent, in.RepoID, in.CreatedBy} {
-		if strings.TrimSpace(required) == "" {
-			return Record{}, fmt.Errorf("%w: missing field", ErrInvalid)
+	required := []string{in.Project, in.NodeID, in.RunnerID, in.OwnerID, in.RepoID, in.CreatedBy}
+	// A verify run is the runner's test command: no agent runs it.
+	if in.Kind != runnerwire.JobVerify {
+		required = append(required, in.Agent)
+	}
+	for _, field := range required {
+		if strings.TrimSpace(field) == "" {
+			return Record{}, locale.Errorf("%w: missing field", "%w：缺少欄位", ErrInvalid)
 		}
 	}
+	if in.Role != "" && !engine.ValidRoleID(in.Role) {
+		return Record{}, locale.Errorf("%w: role %q", "%w：角色「%s」", ErrInvalid, in.Role)
+	}
+	if len(in.Override) > MaxOverrideBytes {
+		return Record{}, locale.Errorf("%w: override over %d bytes", "%w：覆寫理由超過 %d 位元組", ErrInvalid, MaxOverrideBytes)
+	}
+	jobRoles, err := encodeJobRoles(in.JobRoles)
+	if err != nil {
+		return Record{}, err
+	}
 	if in.Mode != runnerwire.ModeHeadless && in.Mode != runnerwire.ModeInteractive {
-		return Record{}, fmt.Errorf("%w: unknown mode", ErrInvalid)
+		return Record{}, locale.Errorf("%w: unknown mode", "%w：不明的模式", ErrInvalid)
 	}
 	if len(in.JobPrompt) > runnerwire.MaxPromptBytes {
-		return Record{}, fmt.Errorf("%w: prompt over %d bytes", ErrInvalid, runnerwire.MaxPromptBytes)
+		return Record{}, locale.Errorf("%w: prompt over %d bytes", "%w：提示超過 %d 位元組", ErrInvalid, runnerwire.MaxPromptBytes)
 	}
 	if !jobKinds[in.Kind] {
-		return Record{}, fmt.Errorf("%w: job kind %q", ErrInvalid, in.Kind)
+		return Record{}, locale.Errorf("%w: job kind %q", "%w：工作種類「%s」", ErrInvalid, in.Kind)
 	}
 	fallbacks, err := encodeChain(in.Fallbacks)
 	if err != nil {
@@ -211,8 +292,8 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	// checks it is its own, the hub that it is one at all.
 	handoffBranch := ""
 	if in.JobHandoffBranch != "" {
-		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || in.Kind != runnerwire.JobImplement {
-			return Record{}, fmt.Errorf("%w: handoff branch %q", ErrInvalid, in.JobHandoffBranch)
+		if !runnerwire.ValidHandoffBranch(in.JobHandoffBranch) || (in.Kind != runnerwire.JobImplement && in.Kind != runnerwire.JobTest) {
+			return Record{}, locale.Errorf("%w: handoff branch %q", "%w：交接分支「%s」", ErrInvalid, in.JobHandoffBranch)
 		}
 		handoffBranch = in.JobHandoffBranch
 	}
@@ -227,20 +308,33 @@ func (s *Store) Create(ctx context.Context, in New) (Record, error) {
 	if in.Kind == runnerwire.JobPlan {
 		reviewCap = runnerwire.MaxRevisionBytes
 	}
+	nodeType, acceptanceCount := in.NodeType, in.AcceptanceCount
+	if nodeType == "" && acceptanceCount == 0 {
+		// Follow-up runs (fallbacks, pipeline steps, handoffs) carry the
+		// node's shape from the run before them.
+		err := s.db.QueryRowContext(ctx, `
+SELECT node_type, acceptance_count FROM runs WHERE project = ? AND node_id = ?
+ ORDER BY created_at DESC LIMIT 1`, in.Project, in.NodeID).Scan(&nodeType, &acceptanceCount)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Record{}, err
+		}
+	}
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO runs (id, project, node_id, runner_id, runner_name, owner_id, agent, model,
                   repo_id, repo_name, base, prompt, node_title, job_prompt, status,
                   created_by, created_by_name, created_at,
                   kind, job_branch, job_pr_url, review, retry_of, pipeline_id, fallbacks,
-                  stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  stepped_up_at, mode, job_handoff_branch, job_handoff_note, retry_at, limit_waits,
+                  role, override, job_roles, node_type, acceptance_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, in.Project, in.NodeID, in.RunnerID, in.RunnerName, in.OwnerID, in.Agent, in.Model,
 		in.RepoID, in.RepoName, in.Base, in.Prompt, in.NodeTitle, in.JobPrompt, runnerwire.RunQueued,
 		in.CreatedBy, in.CreatedByName, now,
 		in.Kind, Truncate(in.JobBranch, maxShortField), Truncate(in.JobPRURL, MaxPRURLBytes),
 		Truncate(in.Review, reviewCap), in.RetryOf, in.PipelineID, fallbacks,
 		Truncate(in.SteppedUpAt, 64), in.Mode, handoffBranch, Truncate(in.JobHandoffNote, runnerwire.MaxHandoffNoteBytes),
-		Truncate(in.RetryAt, 64), int64(in.LimitWaits))
+		Truncate(in.RetryAt, 64), int64(in.LimitWaits),
+		in.Role, in.Override, jobRoles, Truncate(nodeType, maxShortField), int64(max(acceptanceCount, 0)))
 	if err != nil {
 		return Record{}, err
 	}
@@ -254,12 +348,13 @@ const runColumns = `id, project, node_id, runner_id, runner_name, owner_id, agen
        pr_number, pr_state, pr_error, pr_head_sha,
        kind, failure_kind, verdict, retry_of, pipeline_id, fallbacks, job_branch, job_pr_url, review,
        stepped_up_at, mode, handoff_branch, handoff_note, job_handoff_branch, job_handoff_note,
-       retry_at, limit_waits`
+       retry_at, limit_waits, role, verify, checks, override, job_roles,
+       cost_usd, cost_estimated, node_type, acceptance_count`
 
 func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 	var r Record
-	var usage, fallbacks string
-	var exit, files, additions, deletions, prNumber, limitWaits int64
+	var usage, fallbacks, verify, checks, jobRoles string
+	var exit, files, additions, deletions, prNumber, limitWaits, acceptanceCount int64
 	if err := row.Scan(&r.ID, &r.Project, &r.NodeID, &r.RunnerID, &r.RunnerName, &r.OwnerID,
 		&r.Agent, &r.Model, &r.RepoID, &r.RepoName, &r.Base, &r.Branch, &r.Prompt, &r.NodeTitle,
 		&r.JobPrompt, &r.Status, &r.Error, &r.Summary, &exit, &usage, &r.PRURL, &r.CIStatus,
@@ -267,9 +362,12 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		&r.Commit, &files, &additions, &deletions, &prNumber, &r.PRState, &r.PRError, &r.PRHeadSHA,
 		&r.Kind, &r.FailureKind, &r.Verdict, &r.RetryOf, &r.PipelineID, &fallbacks,
 		&r.JobBranch, &r.JobPRURL, &r.Review, &r.SteppedUpAt, &r.Mode,
-		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits); err != nil {
+		&r.HandoffBranch, &r.HandoffNote, &r.JobHandoffBranch, &r.JobHandoffNote, &r.RetryAt, &limitWaits,
+		&r.Role, &verify, &checks, &r.Override, &jobRoles,
+		&r.CostUSD, &r.CostEstimated, &r.NodeType, &acceptanceCount); err != nil {
 		return Record{}, err
 	}
+	r.AcceptanceCount = int(acceptanceCount)
 	r.ExitCode = int(exit)
 	r.LimitWaits = int(limitWaits)
 	r.ContinuesFrom = r.JobHandoffBranch
@@ -281,6 +379,19 @@ func scanRun(row interface{ Scan(...any) error }) (Record, error) {
 		}
 	}
 	r.Fallbacks = decodeChain(fallbacks)
+	r.JobRoles = decodeJobRoles(jobRoles)
+	if verify != "" {
+		var parsed runnerwire.VerifyResult
+		if json.Unmarshal([]byte(verify), &parsed) == nil {
+			r.Verify = &parsed
+		}
+	}
+	if checks != "" {
+		var parsed []runnerwire.CheckResult
+		if json.Unmarshal([]byte(checks), &parsed) == nil && len(parsed) > 0 {
+			r.Checks = parsed
+		}
+	}
 	// A plan run carrying a revision reconciles it (runnerwire.Run.Replan).
 	r.Replan = r.Kind == runnerwire.JobPlan && r.Review != ""
 	return r, nil
@@ -356,6 +467,98 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Record, error) {
 	return out, nil
 }
 
+// BuildingFilter narrows ListBuilding: Station's building view of every
+// project the viewer may read at once.
+type BuildingFilter struct {
+	// Projects are the project names to include; none means no runs.
+	Projects []string
+	// Viewer, when set, keeps that person's runs (as Filter.Viewer).
+	Viewer string
+	// Since keeps ended runs made at or after it, in the store's own stamp
+	// form (FormatStamp). Runs that have not ended are always kept.
+	Since string
+	// Limit caps the result; 0 or more than 5000 means 2000.
+	Limit int
+}
+
+// FormatStamp writes t the way the store writes created_at, so a caller's
+// bound compares with stored times as text.
+func FormatStamp(t time.Time) string { return formatStamp(t) }
+
+// placeholders is "?, ?, …" for n values.
+func placeholders(n int) string {
+	return "?" + strings.Repeat(", ?", n-1)
+}
+
+// ListBuilding returns the runs of several projects in one query, newest
+// first: every run that has not ended, plus those made since f.Since.
+func (s *Store) ListBuilding(ctx context.Context, f BuildingFilter) ([]Record, error) {
+	if len(f.Projects) == 0 {
+		return []Record{}, nil
+	}
+	query := `SELECT ` + runColumns + ` FROM runs WHERE project IN (` + placeholders(len(f.Projects)) + `)`
+	args := make([]any, 0, len(f.Projects)+7)
+	for _, project := range f.Projects {
+		args = append(args, project)
+	}
+	query += ` AND (status IN (?, ?, ?) OR created_at >= ?)`
+	args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning, f.Since)
+	if f.Viewer != "" {
+		query += ` AND (created_by = ? OR owner_id = ?)`
+		args = append(args, f.Viewer, f.Viewer)
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 5000 {
+		limit = 2000
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	out, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]*Record, len(out))
+	for i := range out {
+		refs[i] = &out[i]
+	}
+	if err := s.attachMerges(ctx, refs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CountOthersActive counts, per project, the runs that have not ended and
+// that the viewer may not see (neither made them nor owns their runner).
+// Projects without any are absent from the map.
+func (s *Store) CountOthersActive(ctx context.Context, projects []string, viewer string) (map[string]int, error) {
+	out := map[string]int{}
+	if len(projects) == 0 || viewer == "" {
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+5)
+	for _, project := range projects {
+		args = append(args, project)
+	}
+	args = append(args, runnerwire.RunQueued, runnerwire.RunOffered, runnerwire.RunRunning, viewer, viewer)
+	rows, err := s.db.QueryContext(ctx, `SELECT project, COUNT(*) FROM runs
+		WHERE project IN (`+placeholders(len(projects))+`) AND status IN (?, ?, ?)
+		AND NOT (created_by = ? OR owner_id = ?)
+		GROUP BY project`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var project string
+		var n int
+		if err := rows.Scan(&project, &n); err != nil {
+			return nil, err
+		}
+		out[project] = n
+	}
+	return out, rows.Err()
+}
+
 // ForRunner returns the runner's runs in the given statuses, oldest first.
 func (s *Store) ForRunner(ctx context.Context, runnerID string, statuses ...string) ([]Record, error) {
 	if len(statuses) == 0 {
@@ -415,6 +618,9 @@ type Change struct {
 	// HandoffBranch and HandoffNote are a handoff a finish reports.
 	HandoffBranch string
 	HandoffNote   string
+	// Verify and Checks are a verify or judge run's result (agent roles).
+	Verify *runnerwire.VerifyResult
+	Checks []runnerwire.CheckResult
 }
 
 // Transition moves a run to status to, if the lifecycle allows it from the
@@ -464,12 +670,30 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 	if change.ExitCode != nil {
 		set("exit_code", int64(*change.ExitCode))
 	}
+	if change.Verify != nil {
+		raw, err := json.Marshal(change.Verify)
+		if err != nil {
+			return Record{}, err
+		}
+		set("verify", string(raw))
+	}
+	if len(change.Checks) > 0 {
+		raw, err := json.Marshal(change.Checks)
+		if err != nil {
+			return Record{}, err
+		}
+		set("checks", string(raw))
+	}
 	if change.Usage != nil {
 		raw, err := json.Marshal(change.Usage)
 		if err != nil {
 			return Record{}, err
 		}
 		set("usage", string(raw))
+		cost, estimated := s.runCost(ctx, current.Agent, current.Model, *change.Usage)
+		set("cost_usd", cost)
+		set("cost_estimated", estimated)
+		set("cost_settled", true)
 	}
 	now := s.stamp()
 	switch {
@@ -493,7 +717,7 @@ func (s *Store) Transition(ctx context.Context, id, to string, change Change) (R
 		if getErr != nil {
 			return Record{}, getErr
 		}
-		return latest, fmt.Errorf("%w: %s changed under us", ErrTransition, id)
+		return latest, locale.Errorf("%w: %s changed under us", "%w：%s 在處理期間被變更", ErrTransition, id)
 	}
 	return s.Get(ctx, id)
 }
@@ -503,7 +727,7 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 	switch result.Status {
 	case runnerwire.RunSucceeded, runnerwire.RunFailed, runnerwire.RunCancelled:
 	default:
-		return Record{}, fmt.Errorf("%w: finish status %q", ErrInvalid, result.Status)
+		return Record{}, locale.Errorf("%w: finish status %q", "%w：結束狀態「%s」", ErrInvalid, result.Status)
 	}
 	exit := result.ExitCode
 	failureKind := ""
@@ -517,14 +741,25 @@ func (s *Store) Finish(ctx context.Context, id, runnerID string, result runnerwi
 		runnerwire.ValidHandoffBranch(result.HandoffBranch) {
 		handoffBranch, handoffNote = result.HandoffBranch, result.HandoffNote
 	}
+	// The runner clamps its role fields; the hub clamps again.
+	result.ClampRoleFields()
+	verdict := CleanVerdict(result.Verdict)
+	if current, err := s.Get(ctx, id); err == nil {
+		verdict = s.reconcileVerdict(ctx, current, verdict)
+	}
 	r, err := s.Transition(ctx, id, result.Status, Change{
 		Runner: runnerID, Error: result.Error, Summary: result.Summary,
 		ExitCode: &exit, Usage: result.Usage,
-		FailureKind: failureKind, Verdict: CleanVerdict(result.Verdict),
+		FailureKind: failureKind, Verdict: verdict,
 		HandoffBranch: handoffBranch, HandoffNote: handoffNote,
+		Verify: result.Verify, Checks: result.Checks,
 	})
 	if err == nil && result.Status == runnerwire.RunFailed {
 		r.ResetAt = Truncate(result.ResetAt, 64)
+	}
+	if err == nil {
+		r.GuardAck = result.GuardAck
+		s.synthesizeVerdict(ctx, r)
 	}
 	return r, err
 }
@@ -540,13 +775,28 @@ func cleanEvent(e runnerwire.RunEvent) runnerwire.RunEvent {
 	return e
 }
 
+// insertEvents writes a batch of events in one statement: one round trip on
+// the single writer however many events a runner sent, where a row at a time
+// held the writer (and every audit and session write queued behind it) for
+// one round trip per event. The arrays are positional, so the parameter count
+// is fixed whatever the batch size.
+const insertEvents = `
+INSERT INTO run_events (run_id, seq, type, at, payload)
+SELECT ?, e.seq, e.type, e.at, e.payload
+FROM unnest(?::bigint[], ?::text[], ?::text[], ?::text[]) AS e(seq, type, at, payload)`
+
 // AppendEvents stores a batch of a run's events and reports how many were
 // new. A seq at or below the last one stored is a resend and is dropped, as
 // is anything past MaxRunEvents. A usage event also updates the run's usage,
 // even past the cap: usage is cumulative and the latest figure is the one
 // that matters.
+//
+// The batch is filtered in order first (a seq at or below the last one kept,
+// stored or earlier in this batch, is a resend) and the survivors written in
+// one INSERT.
 func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerwire.RunEvent) (int, error) {
 	added := 0
+	table := s.priceTable(ctx)
 	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
 		added = 0
 		var last sql.NullInt64
@@ -556,6 +806,8 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			return err
 		}
 		var usage *runnerwire.Usage
+		var seqs []int64
+		var types, ats, payloads []string
 		for _, event := range events {
 			if event.Seq <= 0 || (last.Valid && event.Seq <= last.Int64) {
 				continue
@@ -572,13 +824,17 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO run_events (run_id, seq, type, at, payload) VALUES (?, ?, ?, ?, ?)`,
-				runID, event.Seq, event.Type, event.At, string(payload)); err != nil {
+			seqs = append(seqs, event.Seq)
+			types = append(types, event.Type)
+			ats = append(ats, event.At)
+			payloads = append(payloads, string(payload))
+			count++
+		}
+		if len(seqs) > 0 {
+			if _, err := tx.ExecContext(ctx, insertEvents, runID, seqs, types, ats, payloads); err != nil {
 				return err
 			}
-			count++
-			added++
+			added = len(seqs)
 		}
 		if usage == nil {
 			return nil
@@ -587,7 +843,13 @@ func (s *Store) AppendEvents(ctx context.Context, runID string, events []runnerw
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE runs SET usage = ? WHERE id = ?`, string(raw), runID)
+		var agent, model string
+		if err := tx.QueryRowContext(ctx, `SELECT agent, model FROM runs WHERE id = ?`, runID).Scan(&agent, &model); err != nil {
+			return err
+		}
+		cost, estimated := runCostAt(table, agent, model, *usage)
+		_, err = tx.ExecContext(ctx, `UPDATE runs SET usage = ?, cost_usd = ?, cost_estimated = ?, cost_settled = true WHERE id = ?`,
+			string(raw), cost, estimated, runID)
 		return err
 	})
 	return added, err
@@ -609,8 +871,8 @@ func (s *Store) Events(ctx context.Context, runID string, after int64, limit int
 		limit = MaxEventPage
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT payload FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
-		runID, after, limit+1)
+		`SELECT payload FROM run_events WHERE run_id = ? AND (seq > ? OR (? = 0 AND seq = 0)) ORDER BY seq LIMIT ?`,
+		runID, after, after, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

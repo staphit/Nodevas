@@ -119,10 +119,10 @@ describe("table rendering", () => {
   it("builds an empty table with a header and body rows", () => {
     expect(buildTable(2, 3)).toBe(
       [
-        "| 欄 1 | 欄 2 | 欄 3 |",
-        "| ---- | ---- | ---- |",
-        "|      |      |      |",
-        "|      |      |      |",
+        "| Column 1 | Column 2 | Column 3 |",
+        "| -------- | -------- | -------- |",
+        "|          |          |          |",
+        "|          |          |          |",
       ].join("\n"),
     );
   });

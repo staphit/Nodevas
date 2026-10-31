@@ -1,0 +1,363 @@
+/* Settings: four sections, a search box over their list, and rows that open
+   in place. The page frame (.settings-page, its nav and panes) is in
+   25-station.css; this is what the sections draw inside it. */
+
+/* The list: a search box, then the sections (or the hits), each with a line
+   saying what it holds. */
+.settings-search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.settings-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-page-nav .settings-page-group button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.settings-page-nav .settings-page-group button small {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.settings-search-empty {
+  padding: 6px 8px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+/* A section: one card, its name on top. */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.settings-card > h2,
+.settings-card-head h2 {
+  margin: 0;
+  font-size: calc(15px * var(--font-scale, 1));
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-card > h2 small {
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 500;
+  font-family: var(--mono);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.settings-card-head h2 {
+  flex: 1;
+}
+.settings-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-subsection > h3 {
+  margin: 0;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+
+/* The workstation's switch, in the Agents header. */
+.settings-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.settings-switch input {
+  appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+.settings-switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+.settings-switch input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.settings-switch input:checked::after {
+  transform: translateX(14px);
+  background: var(--accent-text);
+}
+.settings-switch input:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.settings-switch input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A row: name, current value, and what edits it, opened in place. */
+.settings-disclosure {
+  border-top: 1px solid var(--border);
+}
+.settings-disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 2px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.settings-disclosure-toggle:hover {
+  background: var(--hover);
+}
+.settings-disclosure-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.settings-disclosure-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-disclosure-value {
+  min-width: 0;
+  max-width: 55%;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-disclosure-chevron {
+  color: var(--text-2);
+  transition: transform 160ms var(--ease-out);
+}
+.settings-disclosure-toggle[aria-expanded="true"] .settings-disclosure-chevron {
+  transform: rotate(90deg);
+}
+.settings-disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-disclosure-chevron,
+  .settings-switch input,
+  .settings-switch input::after {
+    transition: none;
+  }
+}
+
+/* A part that was a dialog, opened in a row: the row is its frame, so the
+   pane's own border, padding, icon and title go; its description stays. */
+.settings-disclosure-body > .settings-page-pane {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.settings-disclosure-body > .settings-page-pane > header {
+  padding: 0 0 10px;
+}
+.settings-disclosure-body > .settings-page-pane > header .confirm-dialog-icon,
+.settings-disclosure-body > .settings-page-pane > header h2 {
+  display: none;
+}
+.settings-disclosure-body > .settings-page-pane > header p {
+  margin: 0;
+}
+.settings-disclosure-body .notify-form,
+.settings-disclosure-body .usage-toolbar,
+.settings-disclosure-body .usage-body {
+  max-height: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+.settings-disclosure-body > .settings-page-pane > footer {
+  margin: 0;
+  padding: 10px 0 0;
+  background: none;
+}
+.settings-disclosure-body > .budget-settings,
+.settings-disclosure-body > .routing-settings {
+  padding: 0;
+}
+
+/* Advanced: one row that holds the rest, collapsed until asked for. */
+.settings-advanced {
+  gap: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.settings-advanced-toggle {
+  font-weight: 600;
+}
+.settings-advanced-body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* An editor of the project's definitions, without the dialog it was in. */
+.settings-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+/* Agents: a line per runner, and its one primary button. */
+.runners-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.runners-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.runners-actions button {
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.runners-actions button.primary {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.runners-actions button:hover:not(.primary) {
+  background: var(--hover);
+}
+.runner-card-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runner-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+.runner-autoaccept-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 760px) {
+  .settings-disclosure-value {
+    max-width: 45%;
+  }
+  .settings-card-head {
+    align-items: flex-start;
+  }
+}
+
+/* Settings › This project › Node types: one row per type. */
+.node-type-list .node-type-row {
+  row-gap: 6px;
+}
+.node-type-row .col-card-type {
+  flex: none;
+  max-width: 120px;
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 16px;
+}
+.node-type-name {
+  min-width: 80px;
+  font-weight: 600;
+}
+.node-type-row select {
+  max-width: 220px;
+}
+.node-type-row input[type="color"] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+}
+.node-type-clear {
+  min-width: 22px;
+  padding: 0 4px;
+}
+.node-type-behaviour {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.node-type-behaviour-fields {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.node-type-behaviour-fields .danger {
+  margin-left: auto;
+}
+
+/* General › text size: the slider, its percentage, and a reset. */
+.settings-text-size {
+  width: min(220px, 50vw);
+  accent-color: var(--accent);
+}
+.settings-text-size-value {
+  min-width: 3.5em;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}

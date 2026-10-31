@@ -3,9 +3,12 @@ import type { AgentMessage, AgentSession } from "../api";
 import { setProjectOverride } from "../api";
 import { agentsApi } from "../api/agents";
 import {
+  canAnswerAsk,
   canManageSession,
   excerpt,
   resetAnnouncedForTests,
+  seenKey,
+  unseenCount,
   useAgents,
 } from "./agentStore";
 import {
@@ -208,6 +211,24 @@ describe("inbound", () => {
     expect(canManageSession(session, { id: "bob", name: "b", role: "member" })).toBe(false);
     expect(canManageSession(session, { id: "bob", name: "b", role: "admin" })).toBe(true);
   });
+
+  it("canAnswerAsk: the hub's canAnswer decides, else the session rule, permission owner-only", () => {
+    const ask = {
+      id: "a1", project: "alpha", sessionId: "s1", sessionName: "api-claude", actorId: "alice",
+      question: "q", status: "pending" as const, createdAt: 1,
+    };
+    const admin = { id: "bob", name: "b", role: "admin" as const };
+    const member = { id: "bob", name: "b", role: "member" as const };
+    // The listing says so: it wins over the viewer's role either way.
+    expect(canAnswerAsk({ ...ask, canAnswer: false }, admin)).toBe(false);
+    expect(canAnswerAsk({ ...ask, canAnswer: true }, member)).toBe(true);
+    // Without it: own asks or an admin's, but a permission prompt is the owner's alone.
+    expect(canAnswerAsk(ask, admin)).toBe(true);
+    expect(canAnswerAsk(ask, member)).toBe(false);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, admin)).toBe(false);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, { ...member, id: "alice" })).toBe(true);
+    expect(canAnswerAsk({ ...ask, kind: "permission" }, null)).toBe(true);
+  });
 });
 
 describe("send", () => {
@@ -334,7 +355,12 @@ describe("agent-notify", () => {
     });
     mockFetch({
       "GET /api/agents/asks": () => ({
-        asks: [ask({}), ask({ id: "theirs", actorId: "carol" }), ask({ id: "done", status: "approved" })],
+        asks: [
+          ask({}),
+          ask({ id: "theirs", actorId: "carol" }),
+          ask({ id: "done", status: "approved" }),
+          ask({ id: "notmine", canAnswer: false }),
+        ],
       }),
     });
     useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" } });
@@ -343,6 +369,7 @@ describe("agent-notify", () => {
     await useAgents.getState().handleAsk("a1");
     await useAgents.getState().handleAsk("theirs");
     await useAgents.getState().handleAsk("done");
+    await useAgents.getState().handleAsk("notmine");
 
     const toasts = useAgents.getState().toasts;
     expect(toasts).toHaveLength(1);
@@ -352,8 +379,149 @@ describe("agent-notify", () => {
     Object.defineProperty(document, "hidden", { value: false, configurable: true });
   });
 
+  it("formats toast and system notification text per ask kind", async () => {
+    const shown: { title: string; body: string | undefined }[] = [];
+    class FakeNotification {
+      static permission = "granted";
+      onclick: (() => void) | null = null;
+      constructor(title: string, options?: NotificationOptions) {
+        shown.push({ title, body: options?.body });
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+
+    mockFetch({
+      "GET /api/agents/asks": () => ({
+        asks: [
+          {
+            id: "ask-question",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "question",
+            question: "Which port to bind?",
+            status: "pending",
+            createdAt: 1,
+          },
+          {
+            id: "ask-perm",
+            project: "alpha",
+            sessionId: "s1",
+            sessionName: "api-claude",
+            actorId: "alice",
+            agent: "claude",
+            kind: "permission",
+            tool: "Bash",
+            toolInput: "npm test",
+            question: "Allow Bash?",
+            status: "pending",
+            createdAt: 2,
+          },
+        ],
+      }),
+    });
+    useAgents.setState({ viewer: { id: "alice", name: "alice", role: "member" }, toasts: [] });
+
+    await useAgents.getState().handleAsk("ask-question");
+    await useAgents.getState().handleAsk("ask-perm");
+
+    const toasts = useAgents.getState().toasts;
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]).toMatchObject({
+      from: "api-claude asks",
+      body: "Which port to bind?",
+    });
+    expect(toasts[1]).toMatchObject({
+      from: "api-claude wants to run Bash",
+      body: "npm test",
+    });
+
+    expect(shown).toEqual([
+      { title: "api-claude asks", body: "Which port to bind?" },
+      { title: "api-claude wants to run Bash", body: "npm test" },
+    ]);
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+  });
+
   it("excerpt collapses whitespace", () => {
     expect(excerpt("a\n\n  b")).toBe("a b");
+  });
+});
+
+describe("answerAsk", () => {
+  it("sends {decision, note, answer} for structured answers", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-q/answer": () => ({ ok: true, ask: { id: "ask-q", status: "answered" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-q", {
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-q/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "answer",
+      answer: "Use PostgreSQL",
+      note: "Recommended",
+    });
+  });
+
+  it("says whether the answer was taken, so a dialog stays open on failure", async () => {
+    mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-ok/answer": () => ({ ok: true, ask: { id: "ask-ok", status: "approved" } }),
+      "POST /api/agents/asks/ask-long/answer": () =>
+        new Response(JSON.stringify({ error: "answer exceeds 4000 characters" }), { status: 400 }),
+    });
+    expect(await useAgents.getState().answerAsk("ask-ok", { decision: "approve" })).toBe(true);
+    expect(await useAgents.getState().answerAsk("ask-long", { decision: "answer", answer: "x" })).toBe(false);
+    expect(useAgents.getState().error).toMatch(/4000/);
+  });
+
+  it("sends approve_run for permission asks", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-p/answer": () => ({ ok: true, ask: { id: "ask-p", status: "approved" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-p", {
+      decision: "approve_run",
+    });
+
+    const post = calls.find((c) => c.method === "POST" && c.url.includes("/asks/ask-p/answer"));
+    expect(post).toBeDefined();
+    expect(post!.body).toEqual({
+      decision: "approve_run",
+    });
+  });
+
+  it("supports legacy approval calls (approved/denied) mapping to approve/deny", async () => {
+    const calls = mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-app/answer": () => ({ ok: true, ask: { id: "ask-app", status: "approved" } }),
+      "POST /api/agents/asks/ask-den/answer": () => ({ ok: true, ask: { id: "ask-den", status: "denied" } }),
+    });
+
+    await useAgents.getState().answerAsk("ask-app", "approved", "LGTM");
+    const call1 = calls.find((c) => c.url.includes("/asks/ask-app/answer"));
+    expect(call1!.body).toEqual({
+      decision: "approve",
+      note: "LGTM",
+    });
+
+    await useAgents.getState().answerAsk("ask-den", "denied");
+    const call2 = calls.find((c) => c.url.includes("/asks/ask-den/answer"));
+    expect(call2!.body).toEqual({
+      decision: "deny",
+    });
   });
 });
 
@@ -413,5 +581,63 @@ describe("attachments", () => {
     expect(validAttachmentName("")).toBe(false);
     expect(validAttachmentName("a".repeat(128))).toBe(true);
     expect(validAttachmentName("a".repeat(129))).toBe(false);
+  });
+});
+
+describe("unread in Agent chat", () => {
+  const alice = { id: "alice", name: "Alice", role: "member" } as never;
+  /** A time in ms, `n` seconds into the test's day. */
+  const T = (n: number) => 1_700_000_000_000 + n * 1_000;
+
+  beforeEach(() => {
+    try {
+      localStorage.clear();
+    } catch {
+      /* no storage */
+    }
+    useAgents.setState({ messages: [], seenAt: 0, seenProject: "" });
+  });
+
+  it("counts delivered messages after the mark that the viewer did not write", () => {
+    const messages = [
+      message({ id: "old", createdAt: T(1) }),
+      message({ id: "new", createdAt: T(3) }),
+      message({ id: "held", createdAt: T(3), status: "held" }),
+      message({ id: "mine", createdAt: T(3), senderAgent: "human", senderActor: "alice" }),
+      message({ id: "theirs", createdAt: T(3), senderAgent: "human", senderActor: "bob" }),
+      // An older hub's seconds.
+      message({ id: "secs", createdAt: T(4) / 1_000 }),
+    ];
+    expect(unseenCount(messages, T(2), alice)).toBe(3);
+    expect(unseenCount(messages, T(5), alice)).toBe(0);
+  });
+
+  it("remembers per project how far the chat was read, from now on a first visit", () => {
+    vi.useFakeTimers({ now: T(10) });
+    try {
+      useAgents.getState().loadSeen("alpha");
+      expect(useAgents.getState()).toMatchObject({ seenAt: T(10), seenProject: "alpha" });
+      expect(localStorage.getItem(seenKey("alpha"))).toBe(String(T(10)));
+
+      useAgents.setState({ messages: [message({ createdAt: T(12) }), message({ id: "m2", createdAt: T(11) })] });
+      expect(unseenCount(useAgents.getState().messages, useAgents.getState().seenAt, null)).toBe(2);
+      useAgents.getState().markSeen();
+      expect(useAgents.getState().seenAt).toBe(T(12));
+      expect(localStorage.getItem(seenKey("alpha"))).toBe(String(T(12)));
+
+      // Another project starts on its own; coming back reads the mark kept.
+      useAgents.getState().loadSeen("beta");
+      expect(useAgents.getState().seenProject).toBe("beta");
+      useAgents.getState().loadSeen("alpha");
+      expect(useAgents.getState().seenAt).toBe(T(12));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never moves the mark back", () => {
+    useAgents.setState({ seenAt: T(50), seenProject: "alpha", messages: [message({ createdAt: T(1) })] });
+    useAgents.getState().markSeen();
+    expect(useAgents.getState().seenAt).toBe(T(50));
   });
 });

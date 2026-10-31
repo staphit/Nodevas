@@ -5,13 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -45,8 +45,9 @@ var ciStatuses = map[string]bool{
 	runnerwire.CISuccess: true, runnerwire.CIFailure: true,
 }
 
-func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+// invalidf is an ErrInvalid saying why, in both languages.
+func invalidf(english, chinese string, args ...any) error {
+	return locale.Errorf("%w: "+english, "%w："+chinese, append([]any{ErrInvalid}, args...)...)
 }
 
 func isHex(s string) bool {
@@ -71,29 +72,29 @@ func validPath(p string, required bool) bool {
 // breaks them is refused whole rather than stored in part.
 func ValidateChanges(ch runnerwire.RunChanges) error {
 	if len(ch.Commit) > maxCommitBytes || !isHex(ch.Commit) {
-		return invalidf("commit is not an object name")
+		return invalidf("commit is not an object name", "commit 不是物件名稱")
 	}
 	if len(ch.Base) > maxShortField || !utf8.ValidString(ch.Base) || strings.ContainsRune(ch.Base, 0) {
-		return invalidf("base is not a branch name")
+		return invalidf("base is not a branch name", "base 不是分支名稱")
 	}
 	if len(ch.Files) > runnerwire.MaxChangedFiles {
-		return invalidf("%d files, over %d", len(ch.Files), runnerwire.MaxChangedFiles)
+		return invalidf("%d files, over %d", "%d 個檔案，超過 %d", len(ch.Files), runnerwire.MaxChangedFiles)
 	}
 	if len(ch.Patch) > runnerwire.MaxPatchBytes {
-		return invalidf("patch over %d bytes", runnerwire.MaxPatchBytes)
+		return invalidf("patch over %d bytes", "修補檔超過 %d 位元組", runnerwire.MaxPatchBytes)
 	}
 	if ch.Additions < 0 || ch.Deletions < 0 {
-		return invalidf("negative line counts")
+		return invalidf("negative line counts", "行數不能是負數")
 	}
 	for i, f := range ch.Files {
 		if !validPath(f.Path, true) || !validPath(f.OldPath, false) {
-			return invalidf("file %d: path missing, over %d bytes or not text", i, MaxPathBytes)
+			return invalidf("file %d: path missing, over %d bytes or not text", "第 %d 個檔案：路徑缺少、超過 %d 位元組或不是文字", i, MaxPathBytes)
 		}
 		if !fileStatuses[f.Status] {
-			return invalidf("file %d: status %q", i, f.Status)
+			return invalidf("file %d: status %q", "第 %d 個檔案：狀態「%s」", i, f.Status)
 		}
 		if f.Additions < 0 || f.Deletions < 0 {
-			return invalidf("file %d: negative line counts", i)
+			return invalidf("file %d: negative line counts", "第 %d 個檔案：行數不能是負數", i)
 		}
 	}
 	return nil
@@ -104,29 +105,29 @@ func ValidateChanges(ch runnerwire.RunChanges) error {
 func ValidatePR(pr runnerwire.PRInfo) error {
 	if pr.URL != "" {
 		if len(pr.URL) > MaxPRURLBytes || !strings.HasPrefix(pr.URL, "https://") {
-			return invalidf("pr url must be https:// and at most %d bytes", MaxPRURLBytes)
+			return invalidf("pr url must be https:// and at most %d bytes", "PR 網址須為 https:// 且最多 %d 位元組", MaxPRURLBytes)
 		}
 		if strings.IndexFunc(pr.URL, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-			return invalidf("pr url has spaces or control characters")
+			return invalidf("pr url has spaces or control characters", "PR 網址含有空白或控制字元")
 		}
 		u, err := url.Parse(pr.URL)
 		if err != nil || u.Host == "" || u.User != nil {
-			return invalidf("pr url is not a link")
+			return invalidf("pr url is not a link", "PR 網址不是連結")
 		}
 		if !prStates[pr.State] {
-			return invalidf("pr state %q", pr.State)
+			return invalidf("pr state %q", "PR 狀態「%s」", pr.State)
 		}
 	} else if pr.State != "" && !prStates[pr.State] {
-		return invalidf("pr state %q", pr.State)
+		return invalidf("pr state %q", "PR 狀態「%s」", pr.State)
 	}
 	if pr.Number < 0 || pr.Number > 1<<31-1 {
-		return invalidf("pr number out of range")
+		return invalidf("pr number out of range", "PR 編號超出範圍")
 	}
 	if !ciStatuses[pr.CI] {
-		return invalidf("ci status %q", pr.CI)
+		return invalidf("ci status %q", "CI 狀態「%s」", pr.CI)
 	}
 	if len(pr.HeadSHA) > maxCommitBytes || !isHex(pr.HeadSHA) {
-		return invalidf("pr head is not an object name")
+		return invalidf("pr head is not an object name", "PR head 不是物件名稱")
 	}
 	return nil
 }
@@ -162,7 +163,7 @@ func (s *Store) SetChanges(ctx context.Context, runID, runnerID string, ch runne
 		return Record{}, false, ErrNotFound
 	}
 	if !s.acceptsChanges(current) {
-		return current, false, fmt.Errorf("%w: changes for a %s run", ErrTransition, current.Status)
+		return current, false, locale.Errorf("%w: changes for a %s run", "%w：%s 執行的變更", ErrTransition, current.Status)
 	}
 	files := ch.Files
 	if files == nil {

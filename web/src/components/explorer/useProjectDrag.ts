@@ -41,7 +41,7 @@ export function useProjectDrag({
   projectOrder: string[];
   setProjectSort: (sort: ProjectSort) => void;
 }) {
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const moveProjectToWorkspace = useApp(
     (state) => state.moveProjectToWorkspace,
@@ -98,15 +98,16 @@ export function useProjectDrag({
     setProjectDropEdge(null);
     if (!name || name === newParent || newParent.startsWith(`${name}/`)) return;
     try {
-      const result = await api.moveProject(name, newParent);
-      setProjectTransferNotice(t("explorer.movedProject", { name: result.name }));
+      const result = await changeProjects(() => api.moveProject(name, newParent));
       const next = new Set(expandedProjects);
       next.delete(name);
       next.add(result.name);
       if (newParent) next.add(newParent);
       persistExpandedProjects(next);
-      await refreshProjects();
       if (result.active) await loadAll();
+      // Said once the moved project is open under its new name, which the
+      // notice belongs to.
+      setProjectTransferNotice(t("explorer.movedProject", { name: result.name }));
     } catch (error) {
       reportError(error);
       setProjectTransferNotice(

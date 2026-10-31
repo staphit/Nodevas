@@ -7,6 +7,8 @@
  * the behaviour is testable on its own.
  */
 
+import { translate } from "../i18n";
+
 export type TableAlign = "none" | "left" | "center" | "right";
 
 /** Random access over document lines, so callers need not split the doc. */
@@ -267,7 +269,7 @@ export function rowLineOffset(row: number): number {
 export function buildTable(rowCount: number, columnCount: number): string {
   const columns = Math.max(1, Math.min(20, Math.trunc(columnCount)));
   const bodyRows = Math.max(1, Math.min(100, Math.trunc(rowCount)));
-  const header = Array.from({ length: columns }, (_, index) => `欄 ${index + 1}`);
+  const header = Array.from({ length: columns }, (_, index) => translate("editor.table.column", undefined, { n: index + 1 }));
   const rows = [header];
   for (let row = 0; row < bodyRows; row++) rows.push(new Array(columns).fill(""));
   return renderTable(rows, new Array(columns).fill("none"));

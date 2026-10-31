@@ -24,21 +24,19 @@ import {
 } from "../store";
 import { OperationStatus, ResizeHandle } from "./InteractionPrimitives";
 import { DocumentOutline } from "./inspector/DocumentOutline";
-import { NodeAppearance } from "./inspector/NodeAppearance";
 import { NodeLinkPicker } from "./NodeLinkPicker";
-import { useNarrowViewport } from "./TopbarOverflow";
 import { LifecyclePanel } from "./inspector/LifecyclePanel";
-import { NodeHistory } from "./inspector/NodeHistory";
-import { NodeMetaForm } from "./inspector/NodeMetaForm";
-import { NodeRelations } from "./inspector/NodeRelations";
-import { NodeTimeline } from "./inspector/NodeTimeline";
-import { NodeRuns } from "../runs/NodeRuns";
+import { NodeActivity } from "./inspector/NodeActivity";
+import { NodeDependencies } from "./inspector/NodeDependencies";
+import { AssigneeField, NodeMetaForm } from "./inspector/NodeMetaForm";
 import { useRuns } from "../runs/runStore";
 import { useWorkstationVisible } from "../runners/workstation";
+import { DispatchControl } from "./drawer/DispatchControl";
 import { DocumentPreview } from "./drawer/DocumentPreview";
 import { DrawerTabs } from "./drawer/DrawerTabs";
 import { EditorToolbar } from "./drawer/EditorToolbar";
-import { SubpageControls } from "./drawer/SubpageControls";
+import { useNodeDetailView, type NodeDetailView } from "./drawer/openNodeDetail";
+import { SubpageControls, SubpageMenu } from "./drawer/SubpageControls";
 import { TableToolbar } from "./drawer/TableToolbar";
 import { useEditorExtensions, type EditorMode } from "./drawer/editorExtensions";
 import { setRemoteCarets } from "../editor/remoteCarets";
@@ -51,6 +49,8 @@ import { useAutosave } from "./drawer/useAutosave";
 import { useNodePages } from "./drawer/useNodePages";
 import { useTableEditing } from "./drawer/useTableEditing";
 import { useI18n } from "../i18n";
+import { AcceptanceCriteria } from "../roles/AcceptanceCriteria";
+import { GoalStagesOverride } from "../roles/GoalStagesOverride";
 
 /**
  * Right-hand slide-over panel. Hidden until a node is clicked; the file's
@@ -221,7 +221,9 @@ export function Drawer() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (tabMenuOpen.current) return;
+        // Something inside the panel — a menu, a dialog, the editor — has
+        // already answered this Escape.
+        if (tabMenuOpen.current || e.defaultPrevented) return;
         closeDrawer();
       }
     };
@@ -365,6 +367,9 @@ export function TabBody({
   const requestLock = useApp((s) => s.requestLock);
   const releaseLock = useApp((s) => s.releaseLock);
   const heldByOther = Boolean(lock && !lock.mine);
+  // graph.yaml does not parse or validate: the hub refuses the node's writes
+  // until it is fixed, so the panel reads rather than invite edits that fail.
+  const graphUnreadable = useApp((s) => s.graphUnreadable !== null);
 
   useEffect(() => {
     requestLock(id);
@@ -372,29 +377,31 @@ export function TabBody({
   }, [id, requestLock, releaseLock]);
 
   const workstation = useWorkstationVisible();
-  const [drawerView, setDrawerView] = useState<
-    "content" | "relations" | "timeline" | "appearance" | "runs"
-  >("content");
+  const [drawerView, setDrawerView] = useState<NodeDetailView>("content");
   // "Runs" in a node menu, or a dispatch that just went out, asks for this
-  // node's runs; the body showing that node consumes the request.
+  // node's runs, which live on the Activity tab; the body showing that node
+  // consumes the request.
   const showRunsRequest = useRuns((s) => s.showRunsRequest);
   useEffect(() => {
     if (showRunsRequest?.nodeId !== id) return;
-    setDrawerView("runs");
+    setDrawerView("activity");
     useRuns.getState().clearShowRunsRequest();
   }, [showRunsRequest, id]);
-  // The panel is one column of panes with the document last, which a desktop
-  // drawer has the height to show all at once and a phone sheet does not: on a
-  // 390px screen 基本資料 and 實際狀態 together are taller than half the sheet,
-  // and the document ends up below the fold of something that does not scroll.
-  // So on a phone the metadata opens closed. It is the same reasoning as the
-  // sheet itself — what you came for is the document; the metadata is what you
-  // check afterwards, and one tap away is close enough for that. Kept in state
-  // rather than left to the `open` attribute so a window resized across the
-  // breakpoint mid-session lands on the right default for its new width.
-  const narrow = useNarrowViewport();
-  const [metaOpen, setMetaOpen] = useState(!narrow);
-  useEffect(() => setMetaOpen(!narrow), [narrow]);
+  // openNodeDetail(): another part of the app asking for one view of this node,
+  // such as the board's "Add dependency…".
+  const viewRequest = useNodeDetailView((s) => s.request);
+  useEffect(() => {
+    if (viewRequest?.nodeId !== id) return;
+    setDrawerView(viewRequest.view);
+    useNodeDetailView.getState().clearRequest();
+  }, [viewRequest, id]);
+  // Type, priority, tags and the rest are looked at now and then, not every
+  // time a node is opened, so they wait behind one line under the tabs. Closed
+  // by default at every width: what a node is opened for is its document.
+  const [morePropsOpen, setMorePropsOpen] = useState(false);
+  const dependencyCount = useApp(
+    (s) => (s.graph?.edges ?? []).filter((edge) => edge.to === id).length,
+  );
   const editorMode = usePreference("editorMode");
   const setEditorMode = (mode: EditorMode) =>
     useApp.getState().updateUIPreference("editorMode", mode);
@@ -508,7 +515,11 @@ export function TabBody({
   // While a session is live the soft lock stops meaning read-only: converging
   // is what the CRDT is for. What is still single-writer is the file, and that
   // is the leader's job, so everyone else simply never saves.
+  // Locked out: somebody else holds the lock and there is no session to
+  // converge through, so this window reads the document and cannot write it.
+  const lockedOut = heldByOther && !liveDoc.ready;
   const saveBlocked =
+    graphUnreadable ||
     (liveDoc.ready ? !liveDoc.isLeader : heldByOther) ||
     Boolean(activePageID ? pageDoc?.conflict : tab?.conflict);
 
@@ -793,7 +804,7 @@ export function TabBody({
       {tab.conflict && (
         <div className="banner banner-conflict">
           <div className="banner-text">
-            <b>{t("drawer.conflictTitle")}</b>：{t("drawer.conflictDescription")}
+            <b>{t("drawer.conflictTitle")}</b>{t("common.colon")}{t("drawer.conflictDescription")}
           </div>
           <div className="banner-actions">
              <button onClick={() => void resolveConflict(id, "disk").catch(reportError)}>{t("drawer.loadDisk")}</button>
@@ -806,99 +817,86 @@ export function TabBody({
         </div>
       )}
 
-      <details
-        className="drawer-meta-band"
-        open={metaOpen}
-        onToggle={(event) => setMetaOpen(event.currentTarget.open)}
-      >
-        {/* The summary is drawn only at phone width (05-drawer.css); on a
-          * desktop drawer this band is always open and the two panels look
-          * exactly as they did before it existed. */}
-        <summary>{t("drawer.metaSummary")}</summary>
-        <NodeMetaForm id={id} />
-        <LifecyclePanel id={id} />
-      </details>
+      {graphUnreadable && (
+        <div className="banner banner-warn" role="status">
+          <span>{t("drawer.graphUnreadable")}</span>
+        </div>
+      )}
+
+      {/* The row a node is worked from: where it stands, whose it is, and
+          handing it to an agent. */}
+      {!graphUnreadable && (
+        <div className="drawer-action-row">
+          <LifecyclePanel id={id} />
+          <AssigneeField id={id} />
+          {/* Agents exist only once the workstation is on. */}
+          {workstation && (
+            <DispatchControl id={id} onShowRuns={() => setDrawerView("activity")} />
+          )}
+        </div>
+      )}
 
       <div className="node-view-tabs" role="tablist" aria-label={t("drawer.nodeInfo")}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "content"}
-          className={drawerView === "content" ? "active" : ""}
-          onClick={() => setDrawerView("content")}
-        >
-          {t("drawer.content")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "relations"}
-          className={drawerView === "relations" ? "active" : ""}
-          onClick={() => setDrawerView("relations")}
-        >
-          {t("drawer.relations")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "timeline"}
-          className={drawerView === "timeline" ? "active" : ""}
-          onClick={() => setDrawerView("timeline")}
-        >
-          {t("drawer.timeline")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "appearance"}
-          className={drawerView === "appearance" ? "active" : ""}
-          onClick={() => setDrawerView("appearance")}
-        >
-          {t("drawer.appearance")}
-        </button>
-        {/* Agent workstation tabs: only once the workstation is on. */}
-        {workstation && (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={drawerView === "runs"}
-          className={drawerView === "runs" ? "active" : ""}
-          onClick={() => setDrawerView("runs")}
-        >
-          {t("drawer.runs")}
-        </button>
-        )}
+        {(
+          [
+            ["content", t("drawer.content")],
+            ["dependencies", t("drawer.dependencies")],
+            ["activity", t("drawer.activity")],
+          ] as const
+        ).map(([view, label]) => (
+          <button
+            key={view}
+            type="button"
+            role="tab"
+            aria-selected={drawerView === view}
+            className={drawerView === view ? "active" : ""}
+            onClick={() => setDrawerView(view)}
+          >
+            {label}
+            {view === "dependencies" && dependencyCount > 0 && (
+              <span className="node-view-tab-count">{dependencyCount}</span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {drawerView === "relations" && <NodeRelations id={id} />}
-      {drawerView === "timeline" && <NodeTimeline id={id} />}
-      {drawerView === "appearance" && <NodeAppearance id={id} />}
-      {drawerView === "runs" && <NodeRuns id={id} />}
-
-      <div className="node-content-view" hidden={drawerView !== "content"}>
-        <NodeHistory
+      {drawerView === "dependencies" && <NodeDependencies id={id} />}
+      {drawerView === "activity" && (
+        <NodeActivity
           id={id}
-          path={documentPath}
+          documentPath={documentPath}
           format={activeFormat}
           onRestored={reloadDocument}
         />
+      )}
 
-        <SubpageControls pages={subpages} onPopout={popoutPage} />
+      <div className="node-content-view" hidden={drawerView !== "content"}>
+        {/* What the work must satisfy, above the work itself. */}
+        {!graphUnreadable && <AcceptanceCriteria id={id} />}
+        {!graphUnreadable && <GoalStagesOverride id={id} />}
+        <div className="editor-file-row">
+          <SubpageMenu pages={subpages} onPopout={popoutPage} />
+          <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
+            {activeProject && (
+              <>
+                <span className="editor-path-project" title={activeProject}>
+                  {activeProject}
+                </span>
+                <span className="editor-path-sep" aria-hidden>
+                  /
+                </span>
+              </>
+            )}
+            <span className="editor-path-file mono" title={documentPath}>
+              {documentPath}
+            </span>
+            {editorDirty && !lockedOut && (
+              <span className="editor-path-dirty">{t("drawer.editing")}</span>
+            )}
+          </nav>
+        </div>
 
-        <nav className="editor-path" aria-label={t("drawer.fileLocation")}>
-          {activeProject && (
-            <>
-              <span className="editor-path-project">{activeProject}</span>
-              <span className="editor-path-sep" aria-hidden>
-                /
-              </span>
-            </>
-          )}
-          <span className="editor-path-file mono" title={documentPath}>
-            {documentPath}
-          </span>
-          {editorDirty && <span className="editor-path-dirty">{t("drawer.editing")}</span>}
-        </nav>
+        <SubpageControls pages={subpages} />
 
         <EditorToolbar
           markdownTools={markdownTools}
@@ -920,15 +918,10 @@ export function TabBody({
 
         {markdownTools && !preview && <TableToolbar tables={tables} />}
 
-        <div className={`editor-stage${outlineOpen ? " with-outline" : ""}`}>
-        {outlineOpen && markdownTools && (
-          <DocumentOutline
-            source={editorBody}
-            activeLine={caretLine}
-            onJump={jumpToLine}
-          />
-        )}
-        {heldByOther && lock && (
+        {/* Above the stage, not in it: the stage lays the outline and the
+            editor out side by side, and a banner there takes the width the
+            document needs, down to nothing with large text. */}
+        {lockedOut && lock && (
           <div className="editor-lock-banner">
             <span>
               {t("drawer.otherUserEditing", { name: lock.actor.name || t("drawer.anotherUser") })}
@@ -946,6 +939,14 @@ export function TabBody({
               </span>
             ))}
           </div>
+        )}
+        <div className={`editor-stage${outlineOpen ? " with-outline" : ""}`}>
+        {outlineOpen && markdownTools && (
+          <DocumentOutline
+            source={editorBody}
+            activeLine={caretLine}
+            onJump={jumpToLine}
+          />
         )}
         {linkPickerOpen && (
           <NodeLinkPicker
@@ -974,11 +975,11 @@ export function TabBody({
             key={`${activePageID ?? "main"}:${activeFormat}${liveEditing ? ":live" : ""}`}
             ref={cmRef}
             className="editor"
-            style={{ fontSize }}
+            style={{ fontSize: `calc(${fontSize}px * var(--font-scale, 1))` }}
             value={liveEditing ? (liveMountText.current ?? "") : editorBody}
             height="100%"
             theme={theme}
-            readOnly={(liveDoc.ready ? false : heldByOther) || pageBusy}
+            readOnly={graphUnreadable || lockedOut || pageBusy}
             extensions={editorExtensions}
             onCreateEditor={syncEditorView}
             onChange={onEditorChange}
@@ -1022,12 +1023,33 @@ export function TabBody({
               </button>
             </>
           )}
-          <span className="tab-footer-hint">
-            {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
-            <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
-          </span>
+          {/* Nothing saves while graph.yaml cannot be read; the banner says so. */}
+          {/* Nor while another window holds the lock: this one only reads. */}
+          {!graphUnreadable && lockedOut && (
+            <span className="tab-footer-hint">{t("drawer.readOnlyNoSave")}</span>
+          )}
+          {!graphUnreadable && !lockedOut && (
+            <span className="tab-footer-hint">
+              {editorDirty ? t("drawer.editingAutoSave") : t("drawer.autoSave")}{" "}
+              <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> {t("drawer.saveNow")}
+            </span>
+          )}
         </div>
       </div>
+
+      {!graphUnreadable && (
+        <details
+          className="drawer-more-props"
+          open={morePropsOpen}
+          onToggle={(event) => setMorePropsOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <span>{t("drawer.moreProperties")}</span>
+            <span className="drawer-more-props-hint">{t("drawer.morePropertiesHint")}</span>
+          </summary>
+          {morePropsOpen && <NodeMetaForm id={id} />}
+        </details>
+      )}
     </div>
   );
 }

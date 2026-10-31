@@ -3,17 +3,18 @@ package project
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"nodevas/internal/store"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 	"nodevas/internal/lockfile"
 )
 
@@ -21,10 +22,11 @@ import (
 
 var ProjectNamePattern = regexp.MustCompile(`^[\p{L}\p{N}_][\p{L}\p{N}_ .-]*$`)
 
-// graphNodeCount answers "how many nodes does this graph.yaml hold" without
-// re-parsing the YAML every time. List() runs on every search query and every
-// project listing, and a full ParseGraph of a large graph purely to read
-// len(g.Nodes) dominated that cost.
+// graphHeader answers "how many nodes does this graph.yaml hold, and what
+// layout and office style does it name" without re-parsing the YAML every
+// time. List() runs on every search query, every project listing and every
+// Station building refresh, and a full ParseGraph of a large graph purely to
+// read len(g.Nodes) dominated that cost.
 //
 // The cache is keyed by size+modtime, so an edit through any path — the API,
 // an external editor, a restored backup — invalidates it. A stat is all a warm
@@ -36,40 +38,48 @@ var graphCountCache sync.Map // absolute graph.yaml path -> graphCountEntry
 type graphCountEntry struct {
 	size    int64
 	modTime time.Time
-	nodes   int
+	header  graphHeaderInfo
 }
 
-// graphNodeCount reports the node count of the graph.yaml at path. ok is false
-// when the file does not exist or cannot be parsed, which callers read as
-// "this directory is a grouping folder, not a project".
-func graphNodeCount(root, path string) (nodes int, ok bool) {
+// graphHeaderInfo is what the catalog reads from a graph.yaml: its node
+// count, its layout (graph type) and its stored office style ("" unset).
+type graphHeaderInfo struct {
+	nodes       int
+	layout      string
+	officeStyle string
+}
+
+// graphHeader reports the header of the graph.yaml at path. ok is false when
+// the file does not exist or cannot be read, which callers read as "this
+// directory is a grouping folder, not a project".
+func graphHeader(root, path string) (header graphHeaderInfo, ok bool) {
 	info, err := store.StatProjectPath(root, path)
 	if err != nil || info.IsDir() {
-		return 0, false
+		return graphHeaderInfo{}, false
 	}
 	if cached, hit := graphCountCache.Load(path); hit {
 		entry := cached.(graphCountEntry)
 		if entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
-			return entry.nodes, true
+			return entry.header, true
 		}
 	}
 	data, err := store.ReadProjectFile(root, path)
 	if err != nil {
-		return 0, false
+		return graphHeaderInfo{}, false
 	}
 	graph, err := engine.ParseGraph(data)
 	if err != nil {
 		// Unparseable graph.yaml still marks a project, just an unreadable one.
 		// Do not cache: the next call should retry once the file is repaired.
-		return 0, true
+		return graphHeaderInfo{}, true
 	}
-	nodes = len(graph.Nodes)
+	header = graphHeaderInfo{nodes: len(graph.Nodes), layout: graph.Type, officeStyle: graph.OfficeStyle}
 	graphCountCache.Store(path, graphCountEntry{
 		size:    info.Size(),
 		modTime: info.ModTime(),
-		nodes:   nodes,
+		header:  header,
 	})
-	return nodes, true
+	return header, true
 }
 
 var ignoredProjectDirectories = map[string]bool{
@@ -120,7 +130,7 @@ func (pm *ProjectManager) lockCatalogFile() (func(), error) {
 	lock, err := lockfile.AcquireWait(pm.catalogLockFile(), catalogFileLockTimeout)
 	if err != nil {
 		if errors.Is(err, lockfile.ErrLocked) {
-			return nil, fmt.Errorf("工作區清單正由其他 Nodevas 程序修改，請稍後再試")
+			return nil, locale.Errorf("another Nodevas process is changing the workspace list; try again shortly", "工作區清單正由其他 Nodevas 程序修改，請稍後再試")
 		}
 		return nil, err
 	}
@@ -130,15 +140,15 @@ func (pm *ProjectManager) lockCatalogFile() (func(), error) {
 func (pm *ProjectManager) NormalizeWorkspaceRoot(path string) (string, error) {
 	abs, err := filepath.Abs(strings.TrimSpace(path))
 	if err != nil || strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("請提供工作區資料夾路徑")
+		return "", locale.Errorf("give a workspace folder path", "請提供工作區資料夾路徑")
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("找不到工作區 %q", abs)
+		return "", locale.Errorf("workspace %q not found", "找不到工作區 %q", abs)
 	}
 	info, err := os.Stat(real)
 	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf("%q 不是資料夾", real)
+		return "", locale.Errorf("%q is not a folder", "%q 不是資料夾", real)
 	}
 	return real, nil
 }
@@ -154,7 +164,7 @@ func (pm *ProjectManager) loadWorkspaceRootsFile(path string) ([]string, error) 
 	}
 	var saved []string
 	if err := json.Unmarshal(data, &saved); err != nil {
-		return nil, fmt.Errorf("讀取工作區清單失敗：%w", err)
+		return nil, locale.Errorf("reading the workspace list failed: %w", "讀取工作區清單失敗：%w", err)
 	}
 	roots := make([]string, 0, len(saved))
 	for _, savedPath := range saved {
@@ -252,6 +262,12 @@ type ProjectInfo struct {
 	// IsFolder marks a plain workspace directory (no graph.yaml): it groups
 	// projects in the tree but cannot be opened itself.
 	IsFolder bool `json:"isFolder,omitempty"`
+	// Layout is the graph's type (workflow or story). OfficeStyle is the
+	// style Station draws its office in, resolved (the layout's default when
+	// unset); OfficeStyleSet says whether the project chose one.
+	Layout         string `json:"layout,omitempty"`
+	OfficeStyle    string `json:"officeStyle,omitempty"`
+	OfficeStyleSet bool   `json:"officeStyleSet,omitempty"`
 }
 
 func (pm *ProjectManager) detachedProjectsFile() string {
@@ -269,7 +285,7 @@ func (pm *ProjectManager) loadDetachedProjects() (map[string]bool, error) {
 	}
 	var names []string
 	if err := json.Unmarshal(data, &names); err != nil {
-		return nil, fmt.Errorf("read detached project list: %w", err)
+		return nil, locale.Errorf("read detached project list: %w", "讀取已卸離的專案清單：%w", err)
 	}
 	for _, name := range names {
 		if name != "." && ValidProjectPath(name) {
@@ -311,7 +327,9 @@ func (pm *ProjectManager) List() ([]ProjectInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []ProjectInfo
+	// Never nil: an empty workspace is an empty list, not JSON null, which a
+	// client iterating "projects" would trip on.
+	out := []ProjectInfo{}
 	add := func(name, dir string) {
 		label := filepath.Base(dir)
 		depth := strings.Count(filepath.ToSlash(name), "/")
@@ -329,8 +347,12 @@ func (pm *ProjectManager) List() ([]ProjectInfo, error) {
 			Depth:  depth,
 			Path:   dir,
 		}
-		if nodes, isProject := graphNodeCount(pm.workspace, filepath.Join(dir, "graph.yaml")); isProject {
-			info.Nodes = nodes
+		if header, isProject := graphHeader(pm.workspace, filepath.Join(dir, "graph.yaml")); isProject {
+			info.Nodes = header.nodes
+			info.Layout = header.layout
+			resolved := &engine.Graph{Type: header.layout, OfficeStyle: header.officeStyle}
+			info.OfficeStyle = resolved.ResolvedOfficeStyle()
+			info.OfficeStyleSet = header.officeStyle != "" && engine.ValidOfficeStyle(header.officeStyle)
 		} else {
 			info.IsFolder = true
 		}
@@ -398,21 +420,46 @@ func ValidProjectPath(name string) bool {
 	return true
 }
 
+// ReservedName refuses a project name Windows keeps for a device (CON, NUL,
+// AUX, COM1, ...): no folder can be called that there, and opening the path
+// fails as one outside the workspace, which names neither the reason nor
+// anything the reader should see. Elsewhere the names are ordinary.
+func ReservedName(name string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			continue
+		}
+		// The segment already passed ProjectNamePattern: what IsLocal still
+		// refuses in it is a device name.
+		if !filepath.IsLocal(segment) {
+			return locale.Errorf("%w: %q is reserved on Windows; pick another name",
+				"%w：「%s」是 Windows 保留的名稱，請換一個名稱", ErrInvalidName, segment)
+		}
+	}
+	return nil
+}
+
 // Resolve maps a project path to its directory, confined to the workspace.
 func (pm *ProjectManager) Resolve(name string) (string, error) {
 	if name == "." {
 		return pm.workspace, nil
 	}
 	if !ValidProjectPath(name) {
-		return "", fmt.Errorf("invalid project name %q", name)
+		return "", locale.Errorf("invalid project name %q", "專案名稱「%s」無效", name)
+	}
+	if err := ReservedName(name); err != nil {
+		return "", err
 	}
 	candidate := filepath.Join(pm.workspace, filepath.FromSlash(name))
 	rel, err := filepath.Rel(pm.workspace, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("project %q resolves outside the workspace", name)
+		return "", locale.Errorf("project %q resolves outside the workspace", "專案「%s」指向工作區之外", name)
 	}
 	if _, err := store.StatProjectPath(pm.workspace, candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("project %q: %w", name, err)
+		return "", locale.Errorf("project %q: %w", "專案「%s」：%w", name, err)
 	}
 	return candidate, nil
 }

@@ -379,6 +379,13 @@ function falseBlockers(expression: RequiresExpr, done: ReadonlySet<string>): str
   return pending.length ? pending : completed;
 }
 
+/** The nodes a requires expression names, in order; none when it does not
+ * parse. The expression is the truth, so a node named here is a
+ * prerequisite even before its wire is drawn. */
+export function requiresNodeRefs(source: string | undefined): string[] {
+  return evaluateRequires(source, new Set()).nodeRefs;
+}
+
 /** Evaluates exactly the DSL accepted by Go; syntax errors fail closed. */
 export function evaluateRequires(
   source: string | undefined,

@@ -5,7 +5,7 @@ import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useBudget } from "../runs/budgetStore";
-import { RunnersModal } from "./RunnersModal";
+import { RunnersPanel } from "./RunnersModal";
 import { useRunners } from "./runnerStore";
 
 const desktop: Runner = {
@@ -63,27 +63,157 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("RunnersModal", () => {
-  it("lists runners with their agents, models and repos", async () => {
+describe("RunnersPanel", () => {
+  it("lists each runner in one line, with its details folded away", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop, laptop] });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
 
     expect(await screen.findByText("desktop")).toBeInTheDocument();
     expect(screen.getByText("laptop")).toBeInTheDocument();
-    expect(screen.getByText(/Online/)).toBeInTheDocument();
-    expect(screen.getByText(/Never connected/)).toBeInTheDocument();
+    // Installed agents only; the missing gemini is a detail.
+    expect(screen.getByText("Online · claude · 1 repo")).toBeInTheDocument();
+    expect(screen.getByText("Never connected")).toBeInTheDocument();
+    expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
+    expect(screen.queryByText("github.com/staphit/Nodevas")).not.toBeInTheDocument();
+    // One primary button: Add runner.
+    expect(screen.getAllByRole("button").filter((button) => button.classList.contains("primary"))).toHaveLength(1);
+
+    const details = screen.getByRole("button", { name: "Details for desktop" });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("PC-01 · windows/amd64 · nodevas 1.2.3")).toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
     expect(screen.getByText("2.1.0 (Claude Code)")).toBeInTheDocument();
     expect(screen.getByText("CLI default ★")).toBeInTheDocument();
     expect(screen.getByText("opus")).toBeInTheDocument();
     expect(screen.getByText("Not installed")).toBeInTheDocument();
     expect(screen.getByText("github.com/staphit/Nodevas")).toBeInTheDocument();
+
+    fireEvent.click(details);
+    expect(screen.queryByText("CLI default ★")).not.toBeInTheDocument();
+  });
+
+  // At 150% text on a phone the line is cut ("…1 個 r…"); whole on hover.
+  it("gives a runner's line its whole text on hover", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+    render(<RunnersPanel />);
+    expect(await screen.findByText("Online · claude · 1 repo")).toHaveAttribute(
+      "title",
+      "Online · claude · 1 repo",
+    );
+  });
+
+  // A repo's path was cut with "…" and no tooltip: whole on hover, and it
+  // wraps rather than cuts, so the full path can be read and selected.
+  it("shows a repo's whole path, wrapped and with a tooltip", async () => {
+    const path = "D:/work/clients/a-very-long-customer-name/monorepo/packages/server";
+    const local: Runner = {
+      ...desktop,
+      info: { ...desktop.info!, repos: [{ id: "repo2", name: "server", path }] },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [local] });
+    render(<RunnersPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Details for desktop" }));
+    const shown = screen.getByText(path);
+    expect(shown).toHaveAttribute("title", path);
+    expect(shown).toHaveClass("runner-repo-path");
+    expect(screen.getByText("desktop")).toHaveAttribute("title", "desktop");
+  });
+
+  it("names the hub's own runner in the reader's language", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [{ ...desktop, name: "this machine" }] });
+    render(<RunnersPanel />);
+    expect(await screen.findByText("本機")).toBeInTheDocument();
+    expect(screen.queryByText("this machine")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /本機/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows a runner's details in zh-TW without the runner's English", async () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, language: "zh-TW" } });
+    const blocked: Runner = {
+      ...desktop,
+      info: {
+        ...desktop.info!,
+        agents: [
+          ...(desktop.info!.agents ?? []),
+          {
+            kind: "antigravity",
+            installed: false,
+            version: "",
+            models: [{ id: "default", label: "CLI default", default: true }],
+            error:
+              'antigravity: runs need "mcp(nodevas/*)" in permissions.allow of ~/.gemini/antigravity-cli/settings.json; ' +
+              "run `nodevas setup-agent --runs-only --agents antigravity`",
+          },
+          {
+            kind: "opencode",
+            installed: false,
+            models: [],
+            error: "opencode: version 3 is not supported yet; runs need OpenCode 1.x or 2.x",
+          },
+        ],
+      },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [blocked] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: /desktop/ }));
+
+    const details = document.querySelector(".runner-details") as HTMLElement;
+    const text = details.textContent ?? "";
+    for (const english of ["CLI default", "runs need", "is not supported yet", "Not installed", "Installed"]) {
+      expect(text).not.toContain(english);
+    }
+    expect(screen.getByText("CLI 預設 ★")).toBeInTheDocument();
+    // The fix is still there to copy: the rule and the command stay as they are.
+    expect(text).toContain("mcp(nodevas/*)");
+    expect(text).toContain("nodevas setup-agent --runs-only --agents antigravity");
+    expect(text).toContain("OpenCode 1.x");
+    const relaySection = screen.getByTestId(`runner-relay-${blocked.id}`);
+    expect(relaySection).toHaveTextContent("轉發權限請求至 Nodevas：關閉");
+    expect(relaySection.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
+    expect(relaySection).toHaveTextContent(
+      "要修改請在那台機器上執行：nodevas runner set permissionRelay true（或 false）；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
+    );
+    expect(relaySection).toHaveTextContent(
+      "由「nodevas serve --with-runner」啟動的 runner 會將設定保存在自己的設定檔中，因此請傳入該 runner 所使用的相同 --config。",
+    );
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("opens the add form when asked from outside, once", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+    const opened = vi.fn();
+
+    const view = render(<RunnersPanel addRequested onAddOpened={opened} />);
+    expect(await screen.findByLabelText("Runner name")).toBeInTheDocument();
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    // Drawn again with the request answered, it starts closed.
+    view.unmount();
+    render(<RunnersPanel addRequested={false} onAddOpened={opened} />);
+    await screen.findByText(/No runners yet/);
+    expect(screen.queryByLabelText("Runner name")).not.toBeInTheDocument();
+  });
+
+  it("leaves auto-accept and notifications to their own places", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+    expect(screen.queryByText("Auto-accept")).not.toBeInTheDocument();
+    expect(screen.queryByText(/System notifications|toasts/)).not.toBeInTheDocument();
   });
 
   it("shows an empty state", async () => {
     vi.spyOn(api, "listRunners").mockResolvedValue({ runners: null });
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     expect(await screen.findByText(/No runners yet/)).toBeInTheDocument();
   });
 
@@ -96,7 +226,7 @@ describe("RunnersModal", () => {
       .spyOn(api, "createRunner")
       .mockResolvedValue({ runner: laptop, token: "nvr_secret-token" });
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     await screen.findByText(/No runners yet/);
 
     fireEvent.click(screen.getByRole("button", { name: "Add runner" }));
@@ -120,12 +250,15 @@ describe("RunnersModal", () => {
 
     render(
       <>
-        <RunnersModal onClose={vi.fn()} />
+        <RunnersPanel />
         <ConfirmDialogHost />
       </>,
     );
     await screen.findByText("desktop");
 
+    // Revoke waits inside the runner's details.
+    expect(screen.queryByRole("button", { name: "Revoke runner desktop" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
     fireEvent.click(screen.getByRole("button", { name: "Revoke runner desktop" }));
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(revoke).not.toHaveBeenCalled();
@@ -144,7 +277,7 @@ describe("RunnersModal", () => {
     const budget = vi.spyOn(api, "getRunBudget");
     useBudget.getState().reset();
 
-    render(<RunnersModal onClose={vi.fn()} />);
+    render(<RunnersPanel />);
     await screen.findByText("desktop");
     expect(screen.queryByText("Daily budget")).not.toBeInTheDocument();
     expect(screen.queryByText("Routing rules")).not.toBeInTheDocument();
@@ -161,5 +294,43 @@ describe("RunnersModal", () => {
     await act(() => useRunners.getState().refreshIfLoaded());
     expect(list).toHaveBeenCalledTimes(2);
     expect(useRunners.getState().runners).toEqual([desktop]);
+  });
+
+  it("renders permission relay read-only status Off by default with command help text and no toggle", async () => {
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [desktop] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+
+    const section = screen.getByTestId(`runner-relay-${desktop.id}`);
+    expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: Off");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
+    expect(section).toHaveTextContent(
+      "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs.",
+    );
+    expect(section).toHaveTextContent(
+      "A runner started by 'nodevas serve --with-runner' keeps its settings in its own config file, so pass the same --config as that runner uses.",
+    );
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("renders permission relay read-only status On when enabled on runner config", async () => {
+    const relayRunner: Runner = {
+      ...desktop,
+      info: { ...desktop.info!, permissionRelay: true },
+    };
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [relayRunner] });
+
+    render(<RunnersPanel />);
+    await screen.findByText("desktop");
+    fireEvent.click(screen.getByRole("button", { name: "Details for desktop" }));
+
+    const section = screen.getByTestId(`runner-relay-${desktop.id}`);
+    expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: On");
+    expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });

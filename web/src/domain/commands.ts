@@ -10,6 +10,8 @@
  */
 
 import type {
+  Acceptance,
+  AgentRoleDef,
   CanvasAnnotation,
   CanvasGroup,
   EdgeLine,
@@ -17,16 +19,23 @@ import type {
   Graph,
   LogicGateOperator,
   NodeLinkRef,
+  CustomNodeTypeId,
   NodeStyle,
+  NodeTypeDef,
+  OfficeStyle,
   SavedView,
   StatusDefinition,
+  Workflow,
 } from "../types";
+import { hasMessage, translate } from "../i18n";
 import { CommandError } from "./errors";
 import type { CustomLifecycleStatus, MilestoneType } from "./glossary";
+import * as acceptance from "./graph/acceptance";
 import * as canvas from "./graph/canvas";
 import * as gates from "./graph/logicGate";
 import { applyImport, type ImportPayload } from "./graph/importer";
 import * as node from "./graph/node";
+import * as nodeTypes from "./graph/nodeTypes";
 import * as plan from "./graph/plan";
 import * as workflow from "./graph/workflow";
 import type { DomainId } from "./registry";
@@ -59,7 +68,12 @@ export type NodeCommand =
       refs: string[] | null;
     }
   | { type: "node.setLinks"; nodeId: string; links: NodeLinkRef[] }
-  | { type: "node.setUserEmail"; userId: string; email?: string };
+  /** `nodeId` uses `ref` as context (a Note); never blocks. */
+  | { type: "node.addRef"; nodeId: string; ref: string }
+  | { type: "node.removeRef"; nodeId: string; ref: string }
+  | { type: "node.setUserEmail"; userId: string; email?: string }
+  | { type: "node.setAcceptance"; nodeId: string; acceptance: Acceptance | null }
+  | { type: "node.setWorkflow"; nodeId: string; workflow: Workflow | null };
 
 export type PlanCommand =
   | { type: "plan.upsert"; nodeId: string; milestone: plan.PlanMilestoneInput }
@@ -91,7 +105,22 @@ export type WorkflowCommand =
       id: MilestoneType;
       /** Also drop milestones already scheduled with this type. */
       removeScheduled?: boolean;
-    };
+    }
+  | {
+      type: "workflow.addNodeType";
+      definition: Omit<NodeTypeDef, "id"> & { id?: CustomNodeTypeId };
+    }
+  | {
+      type: "workflow.updateNodeType";
+      id: string;
+      patch: Partial<Omit<NodeTypeDef, "id">>;
+    }
+  | { type: "workflow.removeNodeType"; id: CustomNodeTypeId }
+  | { type: "workflow.setStages"; workflow: Workflow | null }
+  | { type: "workflow.setAgentRoles"; agentRoles: AgentRoleDef[] }
+  /** The project's office look in Station; null goes back to the layout's
+   * default. */
+  | { type: "workflow.setOfficeStyle"; style: OfficeStyle | null };
 
 export type CanvasCommand =
   | {
@@ -198,8 +227,16 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       );
     case "node.setLinks":
       return node.setNodeLinks(graph, command.nodeId, command.links);
+    case "node.addRef":
+      return node.addNodeRef(graph, command.nodeId, command.ref);
+    case "node.removeRef":
+      return node.removeNodeRef(graph, command.nodeId, command.ref);
     case "node.setUserEmail":
       return node.setUserEmail(graph, command.userId, command.email);
+    case "node.setAcceptance":
+      return acceptance.setAcceptance(graph, command.nodeId, command.acceptance);
+    case "node.setWorkflow":
+      return acceptance.setNodeWorkflow(graph, command.nodeId, command.workflow);
 
     case "plan.upsert":
       return plan.upsertPlanMilestone(graph, command.nodeId, command.milestone);
@@ -237,6 +274,21 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       return workflow.removeMilestoneType(graph, command.id, {
         removeScheduled: command.removeScheduled,
       });
+    case "workflow.addNodeType":
+      void nodeTypes.addNodeType(graph, command.definition);
+      return;
+    case "workflow.updateNodeType":
+      return nodeTypes.updateNodeType(graph, command.id, command.patch);
+    case "workflow.removeNodeType":
+      return nodeTypes.removeNodeType(graph, command.id);
+    case "workflow.setStages":
+      return acceptance.setProjectWorkflow(graph, command.workflow);
+    case "workflow.setAgentRoles":
+      return acceptance.setAgentRoles(graph, command.agentRoles);
+    case "workflow.setOfficeStyle":
+      if (command.style) graph.officeStyle = command.style;
+      else delete graph.officeStyle;
+      return;
 
     case "canvas.moveNodes":
       if (command.shift) canvas.shiftBoard(graph, command.shift);
@@ -304,60 +356,17 @@ function applyGraphCommandStep(graph: Graph, command: GraphCommand): void {
       const exhaustive: never = command;
       throw new CommandError(
         "unsupported",
-        `未知的指令：${JSON.stringify(exhaustive)}`,
+        translate("domain.error.unknownCommand", undefined, { command: JSON.stringify(exhaustive) }),
       );
     }
   }
 }
 
-const COMMAND_LABELS: Record<GraphCommandType, string> = {
-  "graph.applyImport": "匯入節點",
-  "node.updateMetadata": "修改節點資料",
-  "node.setStyle": "調整節點外觀",
-  "node.setEntryOverride": "設定起點標記",
-  "node.assignByName": "指派負責人",
-  "node.assignMany": "批次指派負責人",
-  "node.addDependency": "建立前置關係",
-  "node.setRequires": "修改前置條件",
-  "node.setLinks": "編輯節點連結",
-  "node.setUserEmail": "修改成員信箱",
-  "plan.upsert": "設定預期里程碑",
-  "plan.move": "調整預期里程碑日期",
-  "plan.remove": "刪除預期里程碑",
-  "plan.clearNode": "清除節點預期計畫",
-  "workflow.addLifecycleStatus": "新增實際狀態定義",
-  "workflow.updateLifecycleStatus": "修改實際狀態定義",
-  "workflow.removeLifecycleStatus": "刪除實際狀態定義",
-  "workflow.addMilestoneType": "新增里程碑類型",
-  "workflow.updateMilestoneType": "修改里程碑類型",
-  "workflow.removeMilestoneType": "刪除里程碑類型",
-  "canvas.moveNodes": "移動節點",
-  "canvas.setTimelineOrder": "調整時間軸順序",
-  "canvas.setGatePlacement": "移動條件閘",
-  "canvas.setWireVertices": "調整連線轉折點",
-  "canvas.removeWireVertex": "刪除連線轉折點",
-  "canvas.setEdgeStyle": "調整關係樣式",
-  "canvas.removeEdge": "刪除關係",
-  "canvas.upsertGroup": "編輯群組底圖",
-  "canvas.removeGroup": "刪除群組底圖",
-  "canvas.upsertAnnotation": "編輯註解",
-  "canvas.removeAnnotation": "刪除註解",
-  "canvas.saveView": "儲存檢視",
-  "canvas.removeView": "刪除檢視",
-  "canvas.createLogicGate": "新增邏輯閘",
-  "canvas.convertEdgesToLogicGate": "關係線轉為邏輯閘",
-  "canvas.moveLogicGate": "移動邏輯閘",
-  "canvas.connectLogicGateInput": "連接邏輯閘輸入",
-  "canvas.disconnectLogicGateInput": "移除邏輯閘輸入",
-  "canvas.setLogicGateOutput": "設定邏輯閘輸出",
-  "canvas.toggleLogicGateOutput": "調整邏輯閘輸出",
-  "canvas.setLogicGateOperator": "變更邏輯閘運算子",
-  "canvas.removeLogicGate": "刪除邏輯閘",
-};
 
-/** Undo label / operation description, in UI wording. */
+/** Undo label / operation description, in the reader's language. */
 export function describeGraphCommand(command: GraphCommand): string {
-  return COMMAND_LABELS[command.type] ?? command.type;
+  const key = `graphCommand.${command.type}`;
+  return hasMessage("en", key) ? translate(key) : command.type;
 }
 
 export interface CommandTarget {

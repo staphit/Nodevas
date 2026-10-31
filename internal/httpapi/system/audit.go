@@ -11,6 +11,7 @@ import (
 
 	"nodevas/internal/audit"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 )
 
 // getAudit returns the recent database-backed trail.
@@ -61,7 +62,7 @@ func (a *API) postAuditHealthAcknowledge(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	if a.audit == nil {
 		httpx.Coded(c, http.StatusServiceUnavailable, "audit_unconfigured",
-			errors.New("audit store is not configured"), nil)
+			locale.Errorf("audit store is not configured", "沒有設定稽核儲存區"), nil)
 		return
 	}
 	var body struct {
@@ -78,11 +79,11 @@ func (a *API) postAuditHealthAcknowledge(c *gin.Context) {
 	switch {
 	case errors.Is(err, audit.ErrWritesDegraded):
 		httpx.Coded(c, http.StatusConflict, "audit_writes_degraded",
-			errors.New("audit database writes must recover before reconciliation is acknowledged"),
+			locale.Errorf("audit database writes must recover before reconciliation is acknowledged", "稽核資料庫須恢復寫入後才能確認對帳"),
 			map[string]any{"health": health})
 	case errors.Is(err, audit.ErrFallbackEventsChanged):
 		httpx.Coded(c, http.StatusConflict, "audit_fallback_count_changed",
-			errors.New("audit fallback count changed; refresh health and reconcile the new events"),
+			locale.Errorf("audit fallback count changed; refresh health and reconcile the new events", "稽核備援數量已變動；請重新整理狀態並對帳新的事件"),
 			map[string]any{"health": health})
 	default:
 		httpx.Coded(c, http.StatusServiceUnavailable, "audit_unavailable", err, nil)
@@ -110,14 +111,14 @@ func (a *API) getAudit(c *gin.Context) {
 	// 500 every other error from Query maps to.
 	if actor := strings.TrimSpace(c.Query("actor")); actor != "" {
 		if len(actor) > maxAuditFilterBytes {
-			httpx.Err(c, http.StatusBadRequest, errors.New("actor filter is too long"))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("actor filter is too long", "操作者篩選太長"))
 			return
 		}
 		filter.ActorID = actor
 	}
 	if action := strings.TrimSpace(c.Query("action")); action != "" {
 		if len(action) > maxAuditFilterBytes {
-			httpx.Err(c, http.StatusBadRequest, errors.New("action filter is too long"))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("action filter is too long", "動作篩選太長"))
 			return
 		}
 		filter.ActionPrefix = action

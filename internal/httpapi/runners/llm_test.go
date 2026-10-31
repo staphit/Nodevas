@@ -16,11 +16,11 @@ import (
 
 	"nodevas/internal/copilot"
 	"nodevas/internal/copilot/toolbridge"
-	"nodevas/internal/db/dbtest"
 	runnersapi "nodevas/internal/httpapi/runners"
 	"nodevas/internal/identity"
 	"nodevas/internal/runner"
 	"nodevas/internal/runners"
+	"nodevas/internal/testpg"
 )
 
 var ann = identity.Actor{ID: "u-ann", Name: "ann", Role: identity.RoleMember}
@@ -95,7 +95,7 @@ func hub(t *testing.T, reg *runners.Registry, relay *runners.LLMRelay) *httptest
 func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	database := dbtest.Open(t)
+	database := testpg.New(t)
 	reg := runners.NewRegistry(database, nil)
 	relay := runners.NewLLMRelay(reg)
 	relay.OfflineCheck = 50 * time.Millisecond

@@ -77,3 +77,30 @@ describe("applyGraphOps", () => {
     ).toBeNull();
   });
 });
+
+describe("reference ops", () => {
+  it("replays add-ref and remove-ref exactly", () => {
+    const added = applyGraphOps(graph(), [{ kind: "add-ref", nodeId: "b", ref: "a" }]);
+    expect(added?.nodes?.[1].refs).toEqual(["a"]);
+    // Idempotent, like the server.
+    const again = applyGraphOps(added!, [{ kind: "add-ref", nodeId: "b", ref: "a" }]);
+    expect(again?.nodes?.[1].refs).toEqual(["a"]);
+    // A reference is not a dependency: the edges are untouched.
+    expect(again?.edges).toEqual([]);
+
+    const removed = applyGraphOps(again!, [{ kind: "remove-ref", nodeId: "b", ref: "a" }]);
+    expect(removed?.nodes?.[1].refs).toBeUndefined();
+  });
+
+  it("reloads when either node is unknown here", () => {
+    expect(applyGraphOps(graph(), [{ kind: "add-ref", nodeId: "b", ref: "ghost" }])).toBeNull();
+    expect(applyGraphOps(graph(), [{ kind: "add-ref", nodeId: "ghost", ref: "a" }])).toBeNull();
+  });
+
+  it("removes a dangling reference, as the server does", () => {
+    const g = graph();
+    g.nodes![1].refs = ["ghost"];
+    const removed = applyGraphOps(g, [{ kind: "remove-ref", nodeId: "b", ref: "ghost" }]);
+    expect(removed?.nodes?.[1].refs).toBeUndefined();
+  });
+});

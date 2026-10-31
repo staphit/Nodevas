@@ -15,6 +15,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/engine/dsl"
+	"nodevas/internal/locale"
 )
 
 // getGraph returns the graph, its rev, computed statuses, and issues.
@@ -32,9 +33,12 @@ func (a *API) getGraph(c *gin.Context) {
 	}
 	if c.Query("view") == "outline" {
 		// Agent outlines need topology and status, not UI state or validation.
+		// The layout and the resolved node types tell a planner which kinds
+		// fit this board and which of them agents may work.
 		c.JSON(200, map[string]any{
 			"graph": &engine.Graph{Version: g.Version, Nodes: g.Nodes, Edges: g.Edges},
 			"rev":   rev, "statuses": engine.ComputeStatuses(g, rs),
+			"layout": g.Type, "nodeTypes": g.ResolvedNodeTypes(),
 		})
 		return
 	}
@@ -55,7 +59,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	if body.Graph == nil {
-		httpx.Err(c, 400, errors.New("body must be {graph, baseRev?}"))
+		httpx.Err(c, 400, locale.Errorf("body must be {graph, baseRev?}", "內容須為 {graph, baseRev?}"))
 		return
 	}
 	if err := store.ValidateGraphForStorage(body.Graph); err != nil {
@@ -65,7 +69,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	issues := engine.Validate(body.Graph)
-	rev, err := httpx.StoreFor(c.Request, a.pm).SaveGraph(auth.ActorFrom(c.Request), body.Graph, body.BaseRev)
+	rev, synced, err := httpx.StoreFor(c.Request, a.pm).SaveGraphSynced(auth.ActorFrom(c.Request), body.Graph, body.BaseRev)
 	if err != nil {
 		if httpx.WriteDenied(c, err) {
 			return
@@ -79,6 +83,7 @@ func (a *API) putGraph(c *gin.Context) {
 		return
 	}
 	a.notifyRoom(c.Request, "graph-changed", "")
+	a.notifyNodeFiles(c.Request, synced)
 	c.JSON(200, map[string]any{"ok": true, "rev": rev, "issues": issues})
 }
 
@@ -118,7 +123,7 @@ func (a *API) postDSLCheck(c *gin.Context) {
 		return
 	}
 	if len(body.Expr) > 64<<10 {
-		httpx.Err(c, 400, errors.New("expression is too long"))
+		httpx.Err(c, 400, locale.Errorf("expression is too long", "運算式太長"))
 		return
 	}
 	expr, perr := dsl.Parse(body.Expr)
@@ -148,7 +153,7 @@ func (a *API) postGraphOps(c *gin.Context) {
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
-	graph, rev, err := st.ApplyGraphOps(auth.ActorFrom(c.Request), body.Ops)
+	graph, rev, synced, err := st.ApplyGraphOpsSynced(auth.ActorFrom(c.Request), body.Ops)
 	if err != nil {
 		if httpx.WriteDenied(c, err) {
 			return
@@ -176,6 +181,7 @@ func (a *API) postGraphOps(c *gin.Context) {
 	} else {
 		a.notifyRoom(c.Request, "graph-changed", "")
 	}
+	a.notifyNodeFiles(c.Request, synced)
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":       true,
 		"graph":    graph,
@@ -189,6 +195,10 @@ func dependencyOpsRequireReload(ops []store.GraphOp) bool {
 	for _, op := range ops {
 		switch op.Kind {
 		case "add-edge", "remove-edge", "set-edge-style":
+			return true
+		// The server normalizes these (criteria ids, lock, attribution), so
+		// peers reload the stored result rather than replay the request.
+		case "acceptance", "workflow", "node-workflow", "agent-roles":
 			return true
 		}
 	}

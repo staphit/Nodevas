@@ -1,7 +1,9 @@
-// What a click in a game view does. Every ClickTarget the world model hands
+// What a click in the war room does. Every ClickTarget the world model hands
 // out maps to a real action of the app: open the node, open the run in the
-// drawer, show a diff, answer an ask, decide a held message, open the
-// autopilot, follow a PR link. The views never invent behaviour of their own.
+// drawer, show a diff, answer an ask, decide a held message, follow a PR
+// link, go to another project's office (and do something there once it has
+// loaded), open an autopilot or the runners. The views never invent
+// behaviour of their own.
 
 import {
   createContext,
@@ -16,8 +18,9 @@ import {
 import { createPortal } from "react-dom";
 
 import type { SessionChange } from "../api/runs";
+import type { AgentAskKind } from "../api";
 import { AskCard } from "../agents/AskCard";
-import { useAgents } from "../agents/agentStore";
+import { canAnswerAsk, useAgents } from "../agents/agentStore";
 import { openAutopilot } from "../autopilot/openAutopilot";
 import { useI18n } from "../i18n";
 import { RunDiffDialog } from "../runs/DiffViewer";
@@ -25,6 +28,8 @@ import { SessionDiffDialog } from "../runs/NodeSessions";
 import { openNodeRuns } from "../runs/openRuns";
 import { useRuns } from "../runs/runStore";
 import { useSessions } from "../runs/sessionStore";
+import { openSettings } from "../settings/openSettings";
+import { useStation } from "../station/stationStore";
 import { reportError, useApp } from "../store";
 import { mergeRuns } from "./useWorld";
 import type { ClickTarget } from "./world";
@@ -83,6 +88,8 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
     if (back?.isConnected) setTimeout(() => back.focus(), 0);
   }, []);
 
+  // An in-project target already in its project dispatches what it wraps.
+  const dispatchRef = useRef<(target: ClickTarget) => void>(() => undefined);
   const dispatch = useCallback(
     (target: ClickTarget) => {
       switch (target.kind) {
@@ -119,17 +126,41 @@ export function GameActionsProvider({ children }: { children: ReactNode }) {
         case "held-message":
           open({ kind: "held", messageId: target.messageId });
           return;
+        case "pr":
+          openExternal(target.url);
+          return;
+        case "project":
+          void useApp.getState().switchProject(target.project).catch(reportError);
+          return;
+        case "in-project": {
+          // Done by StationView once the project's own stores are loaded.
+          if (useApp.getState().activeProject === target.project) {
+            dispatchRef.current(target.then);
+            return;
+          }
+          useStation.getState().deferTarget(target.project, target.then);
+          void useApp
+            .getState()
+            .switchProject(target.project)
+            .then(() => useStation.getState().deferredReady(target.project))
+            .catch((error) => {
+              useStation.getState().clearDeferred();
+              reportError(error);
+            });
+          return;
+        }
         case "autopilot":
           openAutopilot(target.goalNodeId);
           return;
-        case "pr":
-          openExternal(target.url);
+        case "runners":
+          openSettings("runners");
           return;
       }
     },
     [open, t],
   );
 
+  dispatchRef.current = dispatch;
   const value = useMemo(() => ({ dispatch }), [dispatch]);
 
   return (
@@ -165,23 +196,58 @@ function GameDialogView({ dialog, onClose }: { dialog: Dialog; onClose: () => vo
   );
 }
 
+export function askDialogTitle(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  kind?: AgentAskKind,
+): string {
+  switch (kind) {
+    case "approval":
+      return t("game.action.askApproval");
+    case "choice":
+      return t("game.action.askChoice");
+    case "permission":
+      return t("game.action.askPermission");
+    case "question":
+    default:
+      return t("game.action.ask");
+  }
+}
+
+// A question's answer box, else the card itself, whose number keys answer;
+// the close button first would swallow them.
+const ASK_FOCUS = ["[data-ask-id] textarea:not(:disabled)", "[data-ask-id]"] as const;
+
 function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
   const { t } = useI18n();
   const ask = useAgents((s) => s.asks.find((item) => item.id === askId));
   const submitting = useAgents((s) => Boolean(s.submittingAskIds[askId]));
   const answerAsk = useAgents((s) => s.answerAsk);
+  const viewer = useAgents((s) => s.viewer);
+  // Why the last answer failed: shown here, since the drawer that shows the
+  // store's error is closed behind the dialog.
+  const [failure, setFailure] = useState<string | null>(null);
   return (
-    <GameDialog title={t("game.action.ask")} onClose={onClose}>
+    <GameDialog title={askDialogTitle(t, ask?.kind)} onClose={onClose} initialFocus={ASK_FOCUS}>
+      {failure && (
+        <p className="game-dialog-error" role="alert">
+          {failure}
+        </p>
+      )}
       {ask && ask.status === "pending" ? (
         <AskCard
           ask={ask}
           submitting={submitting}
+          canAnswer={canAnswerAsk(ask, viewer)}
           onSelectNode={(nodeId) => {
             onClose();
             void useApp.getState().openTab(nodeId).catch(reportError);
           }}
-          onAnswer={(decision, note) => {
-            void answerAsk(ask.id, decision, note).then(onClose);
+          onAnswer={(payload) => {
+            setFailure(null);
+            void answerAsk(ask.id, payload).then((ok) => {
+              if (ok) onClose();
+              else setFailure(useAgents.getState().error || t("game.dialog.answerFailed"));
+            });
           }}
         />
       ) : (
@@ -233,10 +299,14 @@ function HeldDialog({ messageId, onClose }: { messageId: string; onClose: () => 
 export function GameDialog({
   title,
   onClose,
+  initialFocus,
   children,
 }: {
   title: string;
   onClose: () => void;
+  /** Selectors tried in order for what takes focus when the dialog opens,
+   * before its first control. */
+  initialFocus?: readonly string[];
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -249,9 +319,9 @@ export function GameDialog({
       onClose();
     };
     window.addEventListener("keydown", onKey, true);
-    const first = panel.current?.querySelector<HTMLElement>(
-      "button:not(:disabled), textarea, input, [href]",
-    );
+    const first = [...(initialFocus ?? []), "button:not(:disabled), textarea, input, [href]"]
+      .map((selector) => panel.current?.querySelector<HTMLElement>(selector))
+      .find(Boolean);
     first?.focus();
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);

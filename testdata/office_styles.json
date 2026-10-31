@@ -1,0 +1,3 @@
+{"styles":["default","engineering","study","studio","cafe"],
+ "defaults":{"story":"study","workflow":"engineering","":"engineering"},
+ "invalid":["Default","space",""," study"]}

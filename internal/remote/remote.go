@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // A Remote is off-box storage for project bundles (.veproj archives). It is an
@@ -230,7 +231,7 @@ type folderRemote struct {
 func NewFolderRemote(dir string) (folderRemote, error) {
 	trimmed := strings.TrimSpace(dir)
 	if trimmed == "" {
-		return folderRemote{}, fmt.Errorf("folder remote needs a directory")
+		return folderRemote{}, locale.Errorf("folder remote needs a directory", "資料夾備份需要指定資料夾")
 	}
 	abs, err := filepath.Abs(trimmed)
 	if err != nil {
@@ -327,7 +328,7 @@ func (f folderRemote) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if !folderBundleIsOurs(name) {
-		return fmt.Errorf("refusing to delete %q: not a bundle this app created", name)
+		return locale.Errorf("refusing to delete %q: not a bundle this app created", "拒絕刪除「%s」：不是這個 App 建立的套件", name)
 	}
 	if err := os.Remove(filepath.Join(f.dir, name)); err != nil && !os.IsNotExist(err) {
 		return err
@@ -360,7 +361,7 @@ func (f folderRemote) List(ctx context.Context) ([]RemoteRef, error) {
 		for _, entry := range entries {
 			scanned++
 			if scanned > maxFolderEntriesScanned {
-				return nil, fmt.Errorf("folder remote contains more than %d entries", maxFolderEntriesScanned)
+				return nil, locale.Errorf("folder remote contains more than %d entries", "資料夾備份的項目超過 %d 個", maxFolderEntriesScanned)
 			}
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), RemoteBundleExt) {
 				continue
@@ -406,13 +407,13 @@ func (f folderRemote) List(ctx context.Context) ([]RemoteRef, error) {
 func safeBundleID(id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return "", fmt.Errorf("bundle id is required")
+		return "", locale.Errorf("bundle id is required", "需要套件代號")
 	}
 	if id != filepath.Base(id) || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
-		return "", fmt.Errorf("invalid bundle id %q", id)
+		return "", locale.Errorf("invalid bundle id %q", "套件代號「%s」無效", id)
 	}
 	if !strings.HasSuffix(id, RemoteBundleExt) {
-		return "", fmt.Errorf("invalid bundle id %q", id)
+		return "", locale.Errorf("invalid bundle id %q", "套件代號「%s」無效", id)
 	}
 	return id, nil
 }

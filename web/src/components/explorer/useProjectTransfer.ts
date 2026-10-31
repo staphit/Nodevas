@@ -8,12 +8,14 @@
 
 import { createElement, useRef, useState } from "react";
 import { api, type ExportFormat } from "../../api";
-import { downloadExport, printExport } from "../../editor/documentExport";
+import { downloadExport, printExport, saveExportedFile } from "../../editor/documentExport";
 import { IconExport } from "../../icons";
 import { confirmAction } from "../ConfirmDialog";
 import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import { edgeRelation } from "../../domain/graph/edgeStyle";
+import { isKnownKind, normalizeKind } from "../../domain/graph/nodeTypes";
+import { withRequiresProjection } from "../canvas/requiresProjection";
 import type { Graph, GraphNode } from "../../types";
 import type { ImportBundleChoice } from "./ImportBundleDialog";
 import { readBundleManifest, type BundleManifest } from "./projectArchive";
@@ -50,8 +52,13 @@ export function useProjectTransfer({
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
   const switchProject = useApp((state) => state.switchProject);
+  const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const runGraphCommand = useApp((state) => state.runGraphCommand);
+  // Markdown and Canvas imports create nodes, which writes graph.yaml: while
+  // the active project's file does not read, that is the file the reader has
+  // to fix, so they are off like the board's New node.
+  const nodeImportBlocked = useApp((state) => state.graphUnreadable !== null);
   const { t } = useI18n();
   const projectLabel = useApp(
     (state) =>
@@ -92,7 +99,11 @@ export function useProjectTransfer({
 
   // A folder, or a project with sub-projects, comes back as a bundle holding
   // the whole subtree; the server decides, the caller only names the root.
+  // The archive is fetched, not followed as a link, so a refusal (a graph.yaml
+  // that does not read) replaces the "Exporting …" notice instead of leaving
+  // it up for good.
   const exportProjectArchive = async (target?: { name: string; label: string }) => {
+    if (projectTransferBusy) return;
     const label = target?.label || projectLabel;
     const confirmed = await confirmExport(
       target?.name === "."
@@ -100,13 +111,19 @@ export function useProjectTransfer({
         : t("explorer.confirmExport.archive", { target: label }),
     );
     if (!confirmed) return;
-    const anchor = document.createElement("a");
-    anchor.href = api.projectExportURL(target?.name);
-    anchor.download = "";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    setProjectTransferBusy(true);
     setProjectTransferNotice(t("explorer.exportingArchive", { target: label }));
+    try {
+      const file = await api.exportProjectArchive(target?.name);
+      saveExportedFile(file);
+      setProjectTransferNotice(t("explorer.exportedFile", { name: file.name }));
+    } catch (error) {
+      setProjectTransferNotice(
+        t("explorer.archiveExportFailed", { error: (error as Error).message }),
+      );
+    } finally {
+      setProjectTransferBusy(false);
+    }
   };
 
   const closeTransferMenus = () => {
@@ -137,10 +154,10 @@ export function useProjectTransfer({
    * was imported rather than at the project they started from.
    */
   const enterImportTarget = async (): Promise<boolean> => {
-    if (!importTarget || importTarget === activeProject) return true;
+    if (!importTarget || importTarget === activeProject) return nodeImportAllowed();
     try {
       await switchProject(importTarget);
-      return true;
+      return nodeImportAllowed();
     } catch (error) {
       setProjectTransferNotice(
         t("explorer.openImportTargetFailed", {
@@ -153,6 +170,13 @@ export function useProjectTransfer({
     }
   };
 
+  /** Whether the project now active can take new nodes; says why not. */
+  const nodeImportAllowed = (): boolean => {
+    if (useApp.getState().graphUnreadable === null) return true;
+    setProjectTransferNotice(t("explorer.importUnreadable"));
+    return false;
+  };
+
   // The whole project as one readable document, next to the archive formats
   // — the editor toolbar only reaches the node it has open.
   const exportProjectDocument = async (choice: ExportFormat | "pdf") => {
@@ -160,7 +184,7 @@ export function useProjectTransfer({
     const confirmed = await confirmExport(
       t("explorer.confirmExport.document", {
         target: projectLabel,
-        format: `${t(`explorer.documentExport.${choice}`)} (.${choice})`,
+        format: t("common.withHint", { label: t(`explorer.documentExport.${choice}`), hint: `.${choice}` }),
       }),
     );
     if (!confirmed) return;
@@ -187,13 +211,16 @@ export function useProjectTransfer({
     setProjectTransferBusy(true);
     setProjectTransferNotice(t("explorer.importingFile", { name: file.name }));
     try {
-      const imported = await api.importProject(
-        file,
-        choice?.mode === "folder" ? choice.name : undefined,
-        choice?.mode,
-        importTarget,
-      );
-      await switchProject(imported.active);
+      const imported = await changeProjects(async () => {
+        const result = await api.importProject(
+          file,
+          choice?.mode === "folder" ? choice.name : undefined,
+          choice?.mode,
+          importTarget,
+        );
+        await switchProject(result.active);
+        return result;
+      });
       const next = new Set(expandedProjects);
       next.add(imported.active);
       persistExpandedProjects(next);
@@ -235,6 +262,7 @@ export function useProjectTransfer({
     if (!files?.length || markdownImportBusy) return;
     if (!(await enterImportTarget())) {
       setImportTarget("");
+      if (markdownImportInputRef.current) markdownImportInputRef.current.value = "";
       return;
     }
     setMarkdownImportBusy(true);
@@ -253,7 +281,7 @@ export function useProjectTransfer({
           await api.createNode({ id }, text);
           importedIds.push(id);
         } catch (error) {
-          failures.push(`${file.name}: ${(error as Error).message}`);
+          failures.push(t("explorer.markdownImportFailure", { name: file.name, error: (error as Error).message }));
         }
       }
       await loadAll();
@@ -270,7 +298,7 @@ export function useProjectTransfer({
           }),
         );
         reportError(
-          new Error(t("explorer.markdownImportFailed", { details: failures.join("；") })),
+          new Error(t("explorer.markdownImportFailed", { details: failures.join(t("explorer.markdownImportFailureSeparator")) })),
         );
       } else {
         setProjectTransferNotice(
@@ -323,11 +351,13 @@ export function useProjectTransfer({
               priority: node.priority,
               assignee: node.assignee,
               tags: node.tags,
+              refs: node.refs,
             },
           };
         }),
       );
-      const edges = (graph.edges ?? []).map((edge, index) => ({
+      // The wires the board draws, including the ones only `requires` states.
+      const edges = (withRequiresProjection(graph).edges ?? []).map((edge, index) => ({
         id: `edge-${index + 1}`,
         fromNode: edge.from,
         toNode: edge.to,
@@ -359,6 +389,7 @@ export function useProjectTransfer({
     if (jsonCanvasBusy) return;
     if (!(await enterImportTarget())) {
       setImportTarget("");
+      if (jsonCanvasImportInputRef.current) jsonCanvasImportInputRef.current.value = "";
       return;
     }
     setJsonCanvasBusy(true);
@@ -379,6 +410,7 @@ export function useProjectTransfer({
             priority?: string;
             assignee?: string;
             tags?: string[];
+            refs?: string[];
           };
         }>;
         edges?: Array<{ fromNode: string; toNode: string; label?: string }>;
@@ -403,7 +435,12 @@ export function useProjectTransfer({
         const created = await api.createNode(
           {
             title: source.vised?.title || heading || t("explorer.untitledNode"),
-            kind: source.vised?.kind || "task",
+            // A custom type from another project is not defined here; the
+            // node comes in as a Task rather than failing the whole import.
+            kind: (() => {
+              const kind = normalizeKind(source.vised?.kind);
+              return kind && isKnownKind(useApp.getState().graph, kind) ? kind : "task";
+            })(),
           },
           stripFrontmatter(source.text || ""),
         );
@@ -430,6 +467,12 @@ export function useProjectTransfer({
             priority: source.vised?.priority as GraphNode["priority"],
             assignee: source.vised?.assignee,
             tags: source.vised?.tags,
+            // Only references into the imported set survive, renamed; one
+            // pointing elsewhere would land on an unrelated node here.
+            refs: (source.vised?.refs ?? []).flatMap((ref) => {
+              const id = typeof ref === "string" ? idMap.get(ref) : undefined;
+              return id ? [id] : [];
+            }),
           })),
           edges: (parsed.edges ?? []).flatMap((edge) => {
             const from = idMap.get(edge.fromNode);
@@ -469,6 +512,7 @@ export function useProjectTransfer({
     markdownImportBusy,
     jsonCanvasBusy,
     documentExportBusy,
+    nodeImportBlocked,
     closeTransferMenus,
     beginImport,
     importTarget,

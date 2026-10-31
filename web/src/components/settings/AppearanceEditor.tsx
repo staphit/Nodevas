@@ -1,25 +1,20 @@
 import { useApp, usePreference } from "../../store";
-import { setProjectMode } from "../../game/stageSkin";
-import { LANGUAGE_OPTIONS, useI18n } from "../../i18n";
-import { EDITOR_FONT_SIZE, EDITOR_MODES } from "../../preferences/schema";
+import { LANGUAGE_NATIVE_NAMES, LANGUAGE_OPTIONS, useI18n } from "../../i18n";
+import { EDITOR_FONT_SIZE, EDITOR_MODES, TEXT_SCALE } from "../../preferences/schema";
 import { confirmAction } from "../ConfirmDialog";
+import { openShortcutsHelp, replayTour } from "../topbar/actions";
 import type { SettingsNotify } from "./notify";
-import { ViewPacksEditor } from "./ViewPacksEditor";
 
-/** Local preferences only — nothing here reaches the project files. */
-export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
+/** Local preferences only — nothing here reaches the project files. The
+ * theme, the language, the tour and help; the rest of the local preferences
+ * are LayoutEditor's, a row of their own in Settings. */
+export function AppearanceEditor() {
   const { language, setLanguage, t } = useI18n();
-  const resetUIPreferences = useApp((s) => s.resetUIPreferences);
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
   const updateUIPreference = useApp((s) => s.updateUIPreference);
-  const editorMode = usePreference("editorMode");
-  const editorFontSize = usePreference("editorFontSize");
-  const editorOutline = usePreference("editorOutline");
-  const fontSizes = Array.from(
-    { length: EDITOR_FONT_SIZE.max - EDITOR_FONT_SIZE.min + 1 },
-    (_, index) => EDITOR_FONT_SIZE.min + index,
-  );
+  const textScale = usePreference("textScale");
+  const percent = `${Math.round(textScale * 100)}%`;
 
   return (
     <section className="settings-section">
@@ -40,25 +35,67 @@ export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
           onChange={(event) => setLanguage(event.target.value as typeof language)}
         >
           {LANGUAGE_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {t(`language.option.${option}`)}
+            <option key={option} value={option} lang={option}>
+              {LANGUAGE_NATIVE_NAMES[option]}
             </option>
           ))}
         </select>
       </div>
       <div className="settings-row">
-        <span>{t("appearance.tour")}</span>
+        <span>{t("appearance.textSize")}</span>
+        <input
+          type="range"
+          className="settings-text-size"
+          min={TEXT_SCALE.min}
+          max={TEXT_SCALE.max}
+          step={0.05}
+          value={textScale}
+          aria-label={t("appearance.textSize")}
+          aria-valuetext={percent}
+          onChange={(event) => updateUIPreference("textScale", Number(event.target.value))}
+        />
+        <output className="settings-text-size-value">{percent}</output>
         <button
           type="button"
-          onClick={() => {
-            // The tour points at the board, so it plays in Info.
-            setProjectMode("info");
-            window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
-          }}
+          disabled={textScale === TEXT_SCALE.fallback}
+          onClick={() => updateUIPreference("textScale", TEXT_SCALE.fallback)}
         >
+          {t("appearance.resetTextSize")}
+        </button>
+      </div>
+      <div className="settings-row">
+        <span>{t("appearance.tour")}</span>
+        {/* The tour points at the board, so it plays there. */}
+        <button type="button" onClick={replayTour}>
           {t("appearance.replayTour")}
         </button>
       </div>
+      <div className="settings-row">
+        <span>{t("appearance.help")}</span>
+        <button type="button" onClick={openShortcutsHelp}>
+          {t("topbar.helpShortcuts")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** The editor's defaults and the layout resets: local preferences too,
+ * less often changed. */
+export function LayoutEditor({ notify }: { notify: SettingsNotify }) {
+  const { t } = useI18n();
+  const resetUIPreferences = useApp((s) => s.resetUIPreferences);
+  const updateUIPreference = useApp((s) => s.updateUIPreference);
+  const editorMode = usePreference("editorMode");
+  const editorFontSize = usePreference("editorFontSize");
+  const editorOutline = usePreference("editorOutline");
+  const fontSizes = Array.from(
+    { length: EDITOR_FONT_SIZE.max - EDITOR_FONT_SIZE.min + 1 },
+    (_, index) => EDITOR_FONT_SIZE.min + index,
+  );
+
+  return (
+    <section className="settings-section">
       {/* The same preferences the drawer's toolbar changes: a default here is
           whatever the editor was last left at. */}
       <p className="settings-hint">{t("appearance.editorHint")}</p>
@@ -146,7 +183,6 @@ export function AppearanceEditor({ notify }: { notify: SettingsNotify }) {
           {t("appearance.resetAll")}
         </button>
       </div>
-      <ViewPacksEditor notify={notify} />
     </section>
   );
 }

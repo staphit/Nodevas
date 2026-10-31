@@ -1,24 +1,18 @@
 /**
- * The top bar's phone-width overflow menu.
+ * The phone-width breakpoint the shell shares.
  *
- * On a 393px screen the five action buttons are what push the bar onto a
- * second and third row, and they are also the least urgent thing there: the
- * explorer toggle, the project switch and search are used constantly, while
- * settings, backup and the theme are reached a few times a session. So they
- * collapse into one button here and stay untouched everywhere else.
+ * This file used to hold the top bar's phone-width overflow menu as well. The
+ * bar has since shed the buttons that menu stood in for: Settings, help, the
+ * tour, the theme and sign-out live in its account menu at every width (see
+ * topbar/AccountMenu). What is left is the breakpoint, which the explorer, the
+ * drawer, the lane view and the presence cluster still read.
  *
  * The trigger is width-driven, not pointer-driven: a phone-sized window on a
  * desktop has the same problem, and a tablet with a finger and 1024px does
  * not. `useCoarsePointer` answers the wrong question for this.
- *
- * The menu itself is the shared `OverflowMenu`; this file only decides when
- * the top bar needs one.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
-
-import { useI18n } from "../i18n";
-import { OverflowMenu } from "./menus/OverflowMenu";
+import { useEffect, useState } from "react";
 
 const NARROW_QUERY = "(max-width: 720px)";
 
@@ -43,30 +37,4 @@ export function useNarrowViewport(): boolean {
   }, []);
 
   return narrow;
-}
-
-export type TopbarOverflowItem = {
-  id: string;
-  /** Same wording as the button's own label, so the two are one control. */
-  label: string;
-  icon: ReactNode;
-  onSelect: () => void;
-};
-
-export function TopbarOverflow({ items }: { items: TopbarOverflowItem[] }) {
-  const { t } = useI18n();
-  const narrow = useNarrowViewport();
-
-  // Rendered only below the breakpoint, so the desktop bar keeps the five real
-  // buttons rather than a menu that hides them behind an extra press.
-  if (!narrow) return null;
-
-  return (
-    <OverflowMenu
-      items={items}
-      label={t("topbar.moreActions")}
-      className="topbar-overflow"
-      triggerClassName="icon-btn"
-    />
-  );
 }

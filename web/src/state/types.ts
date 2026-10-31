@@ -100,6 +100,12 @@ export interface ProjectEntry {
   path: string;
   nodes: number;
   isFolder?: boolean;
+  /** graph.yaml's type: "workflow", "story" or absent. */
+  layout?: string;
+  /** Resolved office style (the project's choice or its layout's default). */
+  officeStyle?: string;
+  /** Whether the project chose its office style. */
+  officeStyleSet?: boolean;
 }
 
 export interface OperationsSlice {
@@ -150,6 +156,12 @@ export interface WorkspaceSlice {
   trash: TrashItem[];
   refreshTrash: () => Promise<void>;
   refreshProjects: () => Promise<void>;
+  /**
+   * Runs a change to the workspace's projects (create, rename, move, delete,
+   * import, copy) and reloads the project list afterwards, whether the change
+   * worked or not. Resolves or rejects as the change did.
+   */
+  changeProjects: <T>(change: () => Promise<T>) => Promise<T>;
   addWorkspace: (path: string) => Promise<{ path: string; label: string }>;
   switchWorkspace: (path: string) => Promise<void>;
   removeWorkspace: (path: string) => Promise<{ workspace: string }>;
@@ -214,6 +226,12 @@ export interface DocumentSlice {
   activeTab: string | null; // null = drawer closed
   /** Retained subpage buffers, keyed by node within the current project. */
   pageDocs: Record<string, PageDoc>;
+  /**
+   * Counts the outside changes announced for each node (its document, its
+   * subpages or their list), so a view that read something once — the
+   * subpage tabs — knows to read it again.
+   */
+  nodeDiskChanges: Record<string, number>;
   setPageDoc: (
     key: string,
     next: PageDoc | null | ((current: PageDoc | null) => PageDoc | null),
@@ -303,8 +321,18 @@ export interface GraphSlice {
   error: string | null;
   clearError: () => void;
   graph: Graph | null;
+  /** The project `graph` was loaded for. During a switch `activeProject`
+   * moves first and the old graph stays on screen until the new one lands, so
+   * anything that reads the graph as the active project's checks this. */
+  graphProject: string;
   graphRev: string;
   issues: Issue[];
+  /**
+   * The hub's reason while the active project's graph.yaml does not parse or
+   * validate (a 422 from GET /api/graph), null once it reads. The board shows
+   * it in place of the cards, so nobody is invited to write over the file.
+   */
+  graphUnreadable: string | null;
   loadAll: () => Promise<void>;
 
   // --- typed domain commands [A-04] ---------------------------------------

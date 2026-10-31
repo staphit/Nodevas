@@ -8,9 +8,12 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"nodevas/internal/engine"
 	"nodevas/internal/identity"
 	"strings"
 	"sync"
+
+	"nodevas/internal/locale"
 )
 
 // Authenticator identifies the actor behind a request.
@@ -31,23 +34,35 @@ type Authenticator interface {
 
 var (
 	// ErrUnauthenticated is returned when a request carries no valid identity.
-	ErrUnauthenticated = errors.New("authentication required")
+	ErrUnauthenticated = locale.Errorf("authentication required", "需要登入")
 	// ErrCSRF is returned when an unsafe request has no matching CSRF token.
-	ErrCSRF = errors.New("missing or invalid CSRF token")
+	ErrCSRF = locale.Errorf("missing or invalid CSRF token", "缺少 CSRF 權杖或權杖無效")
 	// ErrAdminRequired is returned when a member attempts a server-wide
 	// administrative operation.
-	ErrAdminRequired = errors.New("administrator access required")
+	ErrAdminRequired = locale.Errorf("administrator access required", "需要管理員權限")
 	// ErrUnknownAgentRole is returned when a request declares an agent role
 	// this server does not know. It surfaces as a 401 via withAuth, so the
 	// message must tell the client what to send instead.
-	ErrUnknownAgentRole = errors.New(
-		"unknown " + AgentRoleHeaderName + ": send \"worker\" or \"orchestrator\", or omit the header for a human session")
+	ErrUnknownAgentRole = locale.Errorf(
+		"unknown %s: send \"worker\" or \"orchestrator\", or omit the header for a human session",
+		"不明的 %s：請送出 \"worker\" 或 \"orchestrator\"，人的工作階段則不要帶這個標頭", AgentRoleHeaderName)
 )
 
 // AgentRoleHeaderName declares which class of agent a request acts as. It is
 // honored only by LocalOnly: on loopback the OS account is the trust boundary,
 // so a header the local user's own tools set is as trustworthy as the request.
 const AgentRoleHeaderName = "X-Nodevas-Agent-Role"
+
+// RoleHeaderName declares the agent role (engine roles: planner, qa, tester,
+// executor, reviewer, researcher, custom-role-*) an external loopback session
+// acts in. Like AgentRoleHeaderName it is honored only by LocalOnly; a role
+// never raises the declared class.
+const RoleHeaderName = "X-Nodevas-Role"
+
+// ErrInvalidRole is returned for a RoleHeaderName value that is not a
+// well-formed role id.
+var ErrInvalidRole = locale.Errorf("invalid %s: send a built-in role or custom-role-<id>",
+	"%s 無效：請送出內建角色或 custom-role-<id>", RoleHeaderName)
 
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
@@ -57,16 +72,38 @@ func (LocalOnly) Authenticate(r *http.Request) (identity.Actor, error) {
 	if r == nil {
 		return identity.Local, nil
 	}
-	switch role := identity.AgentClass(r.Header.Get(AgentRoleHeaderName)); role {
-	case identity.AgentHuman:
-		return identity.Local, nil
-	case identity.AgentWorker, identity.AgentOrchestrator:
-		actor := identity.Local
-		actor.Agent = role
-		return actor, nil
+	class := identity.AgentClass(r.Header.Get(AgentRoleHeaderName))
+	switch class {
+	case identity.AgentHuman, identity.AgentWorker, identity.AgentOrchestrator:
 	default:
 		return identity.Actor{}, ErrUnknownAgentRole
 	}
+	agentRole, present := r.Header[http.CanonicalHeaderKey(RoleHeaderName)]
+	if !present {
+		if class == identity.AgentHuman {
+			return identity.Local, nil
+		}
+		actor := identity.Local
+		actor.Agent = class
+		return actor, nil
+	}
+	// An external session in a role: the role is syntax-checked here and
+	// resolved against the project by the role guard (UNKNOWN_ROLE there).
+	// A role alone acts as a worker, and a built-in role's rank can only
+	// lower the declared class.
+	if len(agentRole) != 1 || !engine.ValidRoleID(agentRole[0]) {
+		return identity.Actor{}, ErrInvalidRole
+	}
+	if class == identity.AgentHuman {
+		class = identity.AgentWorker
+	}
+	if rank := engine.RoleClass(nil, agentRole[0]); rank != "" {
+		class = identity.LowerClass(class, rank)
+	}
+	actor := identity.Local
+	actor.Agent = class
+	actor.AgentRole = agentRole[0]
+	return actor, nil
 }
 func (LocalOnly) NeedsCSRF() bool { return false }
 func (LocalOnly) Remote() bool    { return false }
@@ -214,6 +251,16 @@ func remoteAddress(r *http.Request) (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
+// PeerIsTrustedProxy reports r's immediate peer and whether it is a proxy
+// trusted to set forwarding headers. An unparseable peer is "" and untrusted.
+func PeerIsTrustedProxy(r *http.Request) (peer string, trusted bool) {
+	address, ok := remoteAddress(r)
+	if !ok {
+		return "", false
+	}
+	return address.String(), isTrustedProxy(address)
+}
+
 func isTrustedProxy(address netip.Addr) bool {
 	trustedProxies.RLock()
 	defer trustedProxies.RUnlock()
@@ -280,9 +327,9 @@ func RequestIsSecure(r *http.Request) bool {
 var (
 	// ErrBadCredentials is deliberately the same for an unknown user and a
 	// wrong password: the difference is not the caller's business.
-	ErrBadCredentials = errors.New("invalid user name or password")
+	ErrBadCredentials = locale.Errorf("invalid user name or password", "使用者名稱或密碼錯誤")
 	// ErrTooManyLogins is returned while an account is throttled.
-	ErrTooManyLogins = errors.New("too many failed sign-ins, try again later")
+	ErrTooManyLogins = locale.Errorf("too many failed sign-ins, try again later", "登入失敗次數太多，請稍後再試")
 )
 
 // WithActor returns a context carrying the actor, which ActorFrom reads back.

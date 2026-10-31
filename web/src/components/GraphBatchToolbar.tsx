@@ -1,10 +1,23 @@
-/** Multi-selection actions on the canvas [B-06]. */
+/**
+ * Multi-selection actions on the canvas [B-06].
+ *
+ * Shown for two or more nodes only: one node has its drawer and its own menu,
+ * and a bar of batch actions over a single card only repeated them. The row
+ * keeps what is done to a whole selection — mark, assign, send elsewhere,
+ * delete, let go — and the two rarer ones (duplicate, group background) wait
+ * in its `⋯`.
+ */
 
 import { reportError, useApp } from "../store";
 import type { Graph, Status, StatusDefinition } from "../types";
+import type { GraphSelection } from "./LaneView";
 import { confirmAction } from "./ConfirmDialog";
 import { nodeLabels, sendNodesToProject } from "./canvas/nodeTransfer";
+import { OverflowMenu } from "./menus/OverflowMenu";
 import { localizedStatusLabel, useI18n } from "../i18n";
+
+/** The assignee option that clears the field: "" is the select's placeholder. */
+const UNASSIGNED = "__unassigned__";
 
 export interface GraphBatchToolbarProps {
   graph: Graph | null;
@@ -18,7 +31,7 @@ export interface GraphBatchToolbarProps {
   createGroupFromSelection: () => void;
   duplicateNode: (id: string) => Promise<string>;
   deleteNodes: (ids: string[]) => Promise<void>;
-  setGraphSelection: (selection: { kind: "node"; id: string } | null) => void;
+  setGraphSelection: (selection: GraphSelection) => void;
   onSelectedNodeChange?: (nodeId: string | null) => void;
 }
 
@@ -38,8 +51,11 @@ export function GraphBatchToolbar({
   onSelectedNodeChange,
 }: GraphBatchToolbarProps) {
   const { t } = useI18n();
-  const clipboard = useApp((state) => state.nodeClipboard);
-  const clearNodeClipboard = useApp((state) => state.clearNodeClipboard);
+
+  const clearSelection = () => {
+    setGraphSelection(null);
+    onSelectedNodeChange?.(null);
+  };
 
   const transferSelection = async (mode: "copy" | "cut") => {
     setShortcutBusy(true);
@@ -49,10 +65,25 @@ export function GraphBatchToolbar({
         nodeLabels(graph, selectedIDs),
         mode,
       );
-      if (result && mode === "cut") {
-        setGraphSelection(null);
-        onSelectedNodeChange?.(null);
-      }
+      if (result && mode === "cut") clearSelection();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setShortcutBusy(false);
+    }
+  };
+
+  // One copy per selected node, in order, and the copies become the selection
+  // so the next action lands on what was just made.
+  const duplicateSelection = async () => {
+    setShortcutBusy(true);
+    try {
+      const copies: string[] = [];
+      for (const id of selectedIDs) copies.push(await duplicateNode(id));
+      setGraphSelection(
+        copies.length === 1 ? { kind: "node", id: copies[0] } : { kind: "nodes", ids: copies },
+      );
+      onSelectedNodeChange?.(copies.length === 1 ? copies[0] : null);
     } catch (error) {
       reportError(error);
     } finally {
@@ -72,83 +103,30 @@ export function GraphBatchToolbar({
     setShortcutBusy(true);
     try {
       await deleteNodes(selectedIDs);
-      setGraphSelection(null);
-      onSelectedNodeChange?.(null);
+      clearSelection();
     } catch (error) {
       reportError(error);
     } finally {
       setShortcutBusy(false);
     }
   };
+
   return (
-    <div className="graph-batch-toolbar">
+    <div
+      className="graph-batch-toolbar"
+      role="toolbar"
+      aria-label={t("batch.selectedNodes", { count: String(selectedIDs.length) })}
+    >
       <b>{t("batch.selectedNodes", { count: String(selectedIDs.length) })}</b>
-      <button
-        type="button"
-        disabled={selectedIDs.length !== 1 || shortcutBusy}
-        onClick={() => {
-          const id = selectedIDs[0];
-          if (!id) return;
-          setShortcutBusy(true);
-          void duplicateNode(id)
-            .then((newID) => {
-              setGraphSelection({ kind: "node", id: newID });
-              onSelectedNodeChange?.(newID);
-            })
-            .catch(reportError)
-            .finally(() => setShortcutBusy(false));
-        }}
-      >
-        {t("batch.duplicate")}
-      </button>
-      <button
-        type="button"
-        disabled={shortcutBusy}
-        title={t("batch.groupBackgroundTitle")}
-        onClick={createGroupFromSelection}
-      >
-        {t("batch.groupBackground")}
-      </button>
-      <button
-        type="button"
-        disabled={shortcutBusy}
-        title={t("batch.copyProjectTitle")}
-        onClick={() => void transferSelection("copy")}
-      >
-        {t("batch.copyProject")}
-      </button>
-      <button
-        type="button"
-        disabled={shortcutBusy}
-        title={t("batch.moveProjectTitle")}
-        onClick={() => void transferSelection("cut")}
-      >
-        {t("batch.moveProject")}
-      </button>
-      {clipboard && (
-        <span className="graph-batch-clipboard">
-          {t("batch.clipboard", {
-            action: clipboard.mode === "cut" ? t("batch.cut") : t("batch.copied"),
-            count: String(clipboard.ids.length),
-            project: clipboard.project,
-          })}{" "}
-          <button
-            type="button"
-            title={t("batch.clearClipboard")}
-            onClick={() => clearNodeClipboard()}
-          >
-            {t("batch.clear")}
-          </button>
-        </span>
-      )}
+      {/* Both selects act on choice and fall back to their placeholder, so the
+          same value can be applied twice and the row never shows a stale pick. */}
       <label>
-        {t("batch.status")}
+        {t("board.batch.markStatus")}
         <select
-          defaultValue=""
+          value=""
           disabled={shortcutBusy}
           onChange={(event) => {
             if (event.target.value) applyBatchStatus(event.target.value as Status);
-            event.target.value = "";
           }}
         >
           <option value="">{t("batch.statusChange")}</option>
@@ -160,12 +138,18 @@ export function GraphBatchToolbar({
         </select>
       </label>
       <label>
-        {t("batch.assignee")}
+        {t("board.batch.assign")}
         <select
-          defaultValue=""
-          onChange={(event) => applyBatchAssignee(event.target.value)}
+          value=""
+          disabled={shortcutBusy}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (!value) return;
+            applyBatchAssignee(value === UNASSIGNED ? "" : value);
+          }}
         >
-          <option value="">{t("graphTools.unassigned")}</option>
+          <option value="">{t("board.batch.choose")}</option>
+          <option value={UNASSIGNED}>{t("graphTools.unassigned")}</option>
           {(graph?.users ?? []).map((user) => (
             <option key={user.id} value={user.id}>
               {user.name}
@@ -173,6 +157,30 @@ export function GraphBatchToolbar({
           ))}
         </select>
       </label>
+      <OverflowMenu
+        className="board-overflow"
+        triggerClassName="graph-batch-menu-trigger"
+        placement="fixed"
+        align="start"
+        label={t("board.batch.transfer")}
+        trigger={<span>{t("board.batch.transfer")} ▾</span>}
+        items={[
+          {
+            id: "move",
+            label: t("batch.moveProject"),
+            title: t("batch.moveProjectTitle"),
+            disabled: shortcutBusy,
+            onSelect: () => void transferSelection("cut"),
+          },
+          {
+            id: "copy",
+            label: t("batch.copyProject"),
+            title: t("batch.copyProjectTitle"),
+            disabled: shortcutBusy,
+            onSelect: () => void transferSelection("copy"),
+          },
+        ]}
+      />
       <button
         type="button"
         className="danger"
@@ -182,6 +190,63 @@ export function GraphBatchToolbar({
       >
         {t("batch.delete")}
       </button>
+      <OverflowMenu
+        className="board-overflow"
+        triggerClassName="graph-batch-menu-trigger"
+        placement="fixed"
+        label={t("board.batch.more")}
+        items={[
+          {
+            id: "duplicate",
+            label: t("batch.duplicate"),
+            disabled: shortcutBusy,
+            onSelect: () => void duplicateSelection(),
+          },
+          {
+            id: "group",
+            label: t("batch.groupBackground"),
+            title: t("batch.groupBackgroundTitle"),
+            disabled: shortcutBusy,
+            onSelect: createGroupFromSelection,
+          },
+        ]}
+      />
+      <NodeClipboardNotice />
+      <span className="graph-batch-spacer" aria-hidden />
+      <button type="button" onClick={clearSelection}>
+        {t("board.batch.clearSelection")}
+      </button>
     </div>
   );
+}
+
+/**
+ * What Ctrl+C / Ctrl+X is holding, so a paste in another project is expected.
+ *
+ * Inline in the batch toolbar while two or more nodes are selected; on its
+ * own as a thin `strip` otherwise, because what was copied stays armed after
+ * the selection that copied it is gone.
+ */
+export function NodeClipboardNotice({ strip = false }: { strip?: boolean }) {
+  const { t } = useI18n();
+  const clipboard = useApp((state) => state.nodeClipboard);
+  const clearNodeClipboard = useApp((state) => state.clearNodeClipboard);
+  if (!clipboard) return null;
+  const notice = (
+    <span className="graph-batch-clipboard">
+      {t("batch.clipboard", {
+        action: clipboard.mode === "cut" ? t("batch.cut") : t("batch.copied"),
+        count: String(clipboard.ids.length),
+        project: clipboard.project,
+      })}{" "}
+      <button
+        type="button"
+        title={t("batch.clearClipboard")}
+        onClick={() => clearNodeClipboard()}
+      >
+        {t("batch.clear")}
+      </button>
+    </span>
+  );
+  return strip ? <div className="graph-clipboard-strip">{notice}</div> : notice;
 }

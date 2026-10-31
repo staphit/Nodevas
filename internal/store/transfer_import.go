@@ -3,13 +3,12 @@
 package store
 
 import (
-	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // ImportNodes recreates a payload in this project under fresh node ids.
@@ -20,7 +19,7 @@ import (
 // transfer.
 func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) (*nodeTransferResult, error) {
 	if payload == nil || len(payload.nodes) == 0 {
-		return nil, errors.New("nothing to import")
+		return nil, locale.Errorf("nothing to import", "沒有可匯入的內容")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -33,8 +32,8 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	}
 
 	result := &nodeTransferResult{IDs: make(map[string]string, len(payload.nodes))}
-	warn := func(format string, args ...any) {
-		result.Warnings = append(result.Warnings, fmt.Sprintf(format, args...))
+	warn := func(english, chinese string, args ...any) {
+		result.Warnings = append(result.Warnings, locale.Say(english, chinese, args...))
 	}
 
 	// Ids first: everything else is expressed in terms of the mapping.
@@ -49,6 +48,7 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		copied.ID = newID
 		copied.Tags = append([]string(nil), node.Tags...)
 		copied.Effects = append([]engine.Effect(nil), node.Effects...)
+		copied.Refs = nil // remapped below, once every new id is known
 		result.IDs[node.ID] = newID
 		result.Order = append(result.Order, newID)
 		imported = append(imported, &copied)
@@ -59,6 +59,12 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	assignees := mergeUsers(g, payload.users, warn)
 	planStatuses := mergePlanStatuses(g, payload.planStatuses, warn)
 	mergeCustomStatuses(g, payload.customStatuses)
+	nodeTypes := mergeNodeTypes(g, payload.nodeTypes, !actor.IsAgent(), warn)
+	for _, node := range imported {
+		if mapped, ok := nodeTypes[node.Kind]; ok {
+			node.Kind = mapped
+		}
+	}
 	for name, value := range payload.flags {
 		if g.Flags == nil {
 			g.Flags = map[string]any{}
@@ -75,9 +81,11 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		}
 		requires, ok := rewriteRequires(source.Requires, payload.selection, rename)
 		if !ok {
-			warn("節點「%s」的前置條件指向未一併帶走的節點，已清除", transferNodeLabel(source))
+			warn("“%s” required nodes that did not come along; its requirement was cleared",
+				"節點「%s」的前置條件指向未一併帶走的節點，已清除", transferNodeLabel(source))
 		}
 		node.Requires = requires
+		node.Refs = rewriteRefs(source.Refs, payload.selection, rename)
 	}
 
 	for _, edge := range payload.edges {
@@ -164,7 +172,7 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 		document := rewriteNodeLinks(payload.documents[source.ID], sourceProject, result.IDs)
 		nodeFile, err := engine.ParseNodeFile(rewriteAttachmentLinks(document, source.ID, node.ID))
 		if err != nil {
-			return nil, fmt.Errorf("node %q: %w", source.ID, err)
+			return nil, locale.Errorf("node %q: %w", "節點「%s」：%w", source.ID, err)
 		}
 		engine.SyncFrontmatter(nodeFile, node)
 		data, err := engine.ComposeNodeFile(nodeFile)
@@ -215,7 +223,8 @@ func (s *Store) ImportNodes(actor identity.Actor, payload *nodeTransferPayload) 
 	// an audit trail, not structure: failing the transfer over it would
 	// discard work that is already correctly on disk.
 	if err := s.appendTransferJournal(payload.journal, result.IDs); err != nil {
-		warn("節點已複製，但生命週期紀錄未能一併寫入：%v", err)
+		warn("The nodes were copied, but their lifecycle history could not be written: %v",
+			"節點已複製，但生命週期紀錄未能一併寫入：%v", err)
 	}
 	return result, nil
 }

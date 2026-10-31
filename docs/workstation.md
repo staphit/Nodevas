@@ -7,10 +7,10 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
 - **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
 - **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens and any permission it asks for is refused, since nobody is at a headless run to grant it.
 - **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run.
-- **Agent network.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
+- **Agent chat.** Agents see who else is working, message each other, and can ask you a question (`ask_user`) through the hub.
 - **Station.** Each project's Station (the top bar's Info | Station | Settings switch) puts all of this in one place:
   - the agents and what each is doing;
-  - the war room or boss map;
+  - the war room;
   - who worked on what in the last hour;
   - what waits on you;
   - the agents' conversation, with a composer;
@@ -43,6 +43,23 @@ When a headless implement run stops because its agent hit a usage limit or a rat
 
 A model the login cannot use, or a missing CLI, fails before the agent's first turn. There is nothing to keep then and waiting would not help, so those failures only fall through the chain, as before.
 
+## Agent roles and workflow stages
+
+Each run acts in a **role**: Planner, QA, Tester, Executor, Reviewer, Researcher, or a project's own `custom-role-*`. A role decides which MCP tools the run is shown (fewer tool definitions, fewer tokens on every model call) and what the hub lets it do. The hub enforces the role on every request, whatever the agent sends: a Tester cannot claim, an Executor writes only its own node and cannot set it done while stages are pending, a Reviewer writes nothing, and no agent can change a project's roles, stages or locked acceptance criteria. A run's role comes from its run record, never from a header.
+
+Each project picks its **workflow stages** in **Settings → Agents → Workflow stages**: Light (Executor only, about 1× the tokens), Standard (Tester → Executor → Reviewer, about 2–3×), Full (Standard plus goal QA, a CI gate and a person's review of the goal, about 3–4×), or Custom. A goal can override its project's stages. New projects start on Standard; existing projects keep today's behavior until someone picks a preset.
+
+Under Standard, a task needs **acceptance criteria** (shown at the top of its Content tab) before a Tester or Executor runs. The staged pipeline is: the Tester writes failing tests and opens a draft PR → the runner runs the repository's test command and the tests must **fail** (red) → the Executor makes them pass → the test command must **pass** (green) → the hub checks the Executor's diff did not touch the Tester's files or test infrastructure → CI (Full) → review → the hub marks the node done, with the red, green and guard evidence on its history.
+
+The test command lives on the runner only; the hub learns only that one is set:
+
+```bash
+nodevas runner repo set myapp --test-command "go test ./..." [--test-timeout 20]
+nodevas runner autoaccept verify on   # optional: take verify jobs unasked, for listed repos
+```
+
+A verify job runs no agent and no model. It runs code an agent wrote, outside that agent's sandbox, as you, so it is opt-in per repository and has its own auto-accept switch (off by default). It runs in a throwaway worktree at the PR head, with no git hooks, without the runner's or GitHub's tokens in its environment, and the whole process tree is stopped at the timeout. Roles are a guardrail on the board, not an OS boundary: an agent with a shell on your account could reach another run's proxy address. The red/green runs, the diff guard and the hub's gates are checks the agent cannot touch.
+
 ## Demo videos
 
 Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent and hub data in them are staged. Click a clip for the full-size MP4.
@@ -51,7 +68,7 @@ Recorded from the real app by `npm run demo:videos` in `web/`; the runner, agent
 
 Pick a runner, agent and model; accept it at the runner; watch OpenCode work over ACP; read the diff; merge the PR.
 
-[![Dispatch a node to OpenCode, watch the run, read the diff and merge](./videos/agent-run.gif)](./videos/agent-run.mp4)
+https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
 ### Autopilot
 
@@ -59,23 +76,23 @@ The goal's **Autopilot** pill in the node panel opens it in Station. The goal is
 
 The requirement can change mid-way. Tell the voice copilot how it changes: it pauses the goal's autopilot, records the change on the goal under **Revisions**, and a replan run re-evaluates the tasks — done ones stay, obsolete ones are skipped (kept with their history), ones in progress are only flagged, new ones are added. While it runs the pill reads **Revising…**. When it ends, the copilot tells you what was kept, changed, skipped and added, and asks whether to resume; nothing resumes until you say yes. See [COPILOT.md](../COPILOT.md#revising-a-goal-mid-way-internalcopilotrevisego).
 
-[![Autopilot moving tasks through implement, review and human review](./videos/autopilot.gif)](./videos/autopilot.mp4)
+https://github.com/user-attachments/assets/1108f05c-50f3-414c-8541-ad1fab9fbbe9
 
 ### Two-factor authentication and device links
 
 In **Settings → Your account**, turn on an authenticator app and save the recovery codes. Then link a new PC from **Settings → Runners**: step-up asks the app, and the hub hands back a one-time link.
 
-[![Setting up two-factor authentication, then creating a device link](./videos/two-factor-and-device-link.gif)](./videos/two-factor-and-device-link.mp4)
+https://github.com/user-attachments/assets/f7f93bb4-304d-4c0f-b39a-5af4d7acebe8
 
 ### Token usage
 
 Tokens and API-equivalent cost by day, agent, model and session, in **Settings → Usage**; the daily budget is a part of its own.
 
-[![Settings → Usage: daily chart, sessions and prices, then the daily budget](./videos/usage.gif)](./videos/usage.mp4)
+https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
-### Agent network
+### Agent chat
 
 Who is working on what, messages between agents, and a held message waiting for your approval.
 
-[![The agent network panel approving a held message](./videos/agent-network.gif)](./videos/agent-network.mp4)
+https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 

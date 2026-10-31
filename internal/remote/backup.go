@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 // Scheduled backup [P3].
@@ -132,8 +134,8 @@ const (
 )
 
 var (
-	ErrNoRemote     = errors.New("no remote is configured")
-	ErrSyncConflict = errors.New("remote snapshot changed; explicit conflict resolution required")
+	ErrNoRemote     = locale.Errorf("no remote is configured", "沒有設定遠端備份")
+	ErrSyncConflict = locale.Errorf("remote snapshot changed; explicit conflict resolution required", "遠端快照已變更；需要明確處理衝突")
 )
 
 // SyncStatus is safe to expose to the UI: it contains hashes and opaque bundle
@@ -572,7 +574,7 @@ func workspaceScope(ctx context.Context, pm *project.ProjectManager) (project.Ex
 		return project.ExportScopeResult{}, err
 	}
 	if pm == nil {
-		return project.ExportScopeResult{}, fmt.Errorf("project manager is unavailable")
+		return project.ExportScopeResult{}, locale.Errorf("project manager is unavailable", "無法使用專案管理器")
 	}
 	scope, err := pm.ExportScope(".")
 	if err != nil {

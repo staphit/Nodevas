@@ -3,6 +3,8 @@ import {
   api,
   type Actor,
   type AgentAsk,
+  type AgentAskAnswerRequest,
+  type AgentAskDecision,
   type AgentFileUpload,
   type AgentInbound,
   type AgentMessage,
@@ -42,10 +44,64 @@ export function canManageSession(
   return !viewer || viewer.role === "admin" || session.actorId === viewer.id;
 }
 
+/**
+ * Whether the viewer may answer an ask. The hub says so on every ask it lists
+ * (canAnswer), and that decides; only without it does the session rule apply,
+ * with a permission prompt its runner owner's alone: answering it runs a tool
+ * on their machine, which an administrator was never lent.
+ */
+export function canAnswerAsk(
+  ask: Pick<AgentAsk, "actorId" | "kind" | "canAnswer">,
+  viewer: Actor | null,
+): boolean {
+  if (typeof ask.canAnswer === "boolean") return ask.canAnswer;
+  if (ask.kind === "permission") return !viewer || ask.actorId === viewer.id;
+  return canManageSession(ask, viewer);
+}
+
 /** A message the viewer wrote themselves needs no notification. */
 function sentByViewer(message: AgentMessage, viewer: Actor | null): boolean {
   if (message.senderAgent && message.senderAgent !== "human") return false;
   return !viewer || message.senderActor === viewer.id;
+}
+
+/** Where this browser remembers, per project, how far Agent chat was read. */
+export function seenKey(project: string): string {
+  return `nodevas-agent-chat-seen:${project}`;
+}
+
+function readSeen(project: string): number | null {
+  try {
+    const value = Number(localStorage.getItem(seenKey(project)));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSeen(project: string, at: number): void {
+  try {
+    localStorage.setItem(seenKey(project), String(at));
+  } catch {
+    /* this visit only */
+  }
+}
+
+/** A message's time in ms (an older hub sent seconds). */
+function messageTime(message: Pick<AgentMessage, "createdAt">): number {
+  const at = message.createdAt || 0;
+  return at < 1e12 ? at * 1000 : at;
+}
+
+/** Messages delivered after `seenAt` that the viewer did not write: what
+ * Agent chat has unread. */
+export function unseenCount(messages: AgentMessage[], seenAt: number, viewer: Actor | null): number {
+  let count = 0;
+  for (const message of messages) {
+    if (message.status && message.status !== "delivered") continue;
+    if (messageTime(message) > seenAt && !sentByViewer(message, viewer)) count++;
+  }
+  return count;
 }
 
 // Message ids already announced, so a repeated event never toasts twice.
@@ -71,6 +127,10 @@ export interface AgentStoreState {
   viewer: Actor | null;
   sending: boolean;
   error: string | null;
+  /** Agent chat was read up to here (a message's createdAt), in this
+   * browser, for `seenProject`. */
+  seenAt: number;
+  seenProject: string;
 
   setOpen: (open: boolean) => void;
   toggleOpen: () => void;
@@ -80,6 +140,11 @@ export interface AgentStoreState {
   setFilterNodeId: (nodeId: string) => void;
   setError: (error: string | null) => void;
   setViewer: (viewer: Actor | null) => void;
+  /** Reads how far this browser read the project's Agent chat; the first
+   * visit starts from now, so old messages do not count as unread. */
+  loadSeen: (project: string) => void;
+  /** Everything in the list now counts as read. */
+  markSeen: () => void;
   refreshAll: () => Promise<void>;
   refreshHeld: () => Promise<void>;
   /** Messages bound to one board node; empty when they cannot be read. */
@@ -94,9 +159,13 @@ export interface AgentStoreState {
   }) => Promise<boolean>;
   answerAsk: (
     askId: string,
-    decision: "approved" | "denied",
+    answer:
+      | AgentAskAnswerRequest
+      | AgentAskDecision
+      | "approved"
+      | "denied",
     note?: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   decideHeld: (messageId: string, decision: "approve" | "reject") => Promise<void>;
   setInbound: (sessionId: string, inbound: AgentInbound) => Promise<void>;
   /** Handles an "agent-notify" event: id is the message to announce. */
@@ -139,6 +208,8 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
   viewer: null,
   sending: false,
   error: null,
+  seenAt: 0,
+  seenProject: "",
 
   setOpen: (open) => set({ open }),
   toggleOpen: () => set((s) => ({ open: !s.open })),
@@ -154,6 +225,24 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
   },
   setError: (error) => set({ error }),
   setViewer: (viewer) => set({ viewer }),
+
+  loadSeen: (project) => {
+    let seenAt = readSeen(project);
+    if (seenAt === null) {
+      seenAt = Date.now();
+      writeSeen(project, seenAt);
+    }
+    set({ seenAt, seenProject: project });
+  },
+
+  markSeen: () => {
+    const { messages, seenAt, seenProject } = get();
+    let newest = seenAt;
+    for (const message of messages) newest = Math.max(newest, messageTime(message));
+    if (newest <= seenAt) return;
+    set({ seenAt: newest });
+    if (seenProject) writeSeen(seenProject, newest);
+  },
 
   refreshAll: async () => {
     const { showOffline, filterNodeId } = get();
@@ -230,16 +319,32 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     }
   },
 
-  answerAsk: async (askId, decision, note) => {
+  answerAsk: async (askId, answer, legacyNote) => {
     set((s) => ({
       submittingAskIds: { ...s.submittingAskIds, [askId]: true },
       error: null,
     }));
     try {
-      await api.answerAgentAsk(askId, decision, note);
+      const payload: AgentAskAnswerRequest =
+        typeof answer === "string"
+          ? {
+              decision:
+                answer === "approved"
+                  ? "approve"
+                  : answer === "denied"
+                    ? "deny"
+                    : answer,
+              ...(legacyNote !== undefined && legacyNote !== ""
+                ? { note: legacyNote }
+                : {}),
+            }
+          : answer;
+      await api.answerAgentAsk(askId, payload);
       await get().refreshAll();
+      return true;
     } catch (err) {
       set({ error: errorText(err) });
+      return false;
     } finally {
       set((s) => {
         const next = { ...s.submittingAskIds };
@@ -338,11 +443,32 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     } catch {
       /* fall through: nothing to show */
     }
-    if (!ask || ask.status !== "pending" || !canManageSession(ask, get().viewer)) return;
-    const from = ask.sessionName || ask.agent || ask.sessionId;
-    const body = excerpt(ask.question);
-    get().pushToast({ messageId: `ask:${askId}`, from, body });
-    showSystemNotification(translate("agents.ask.notifyTitle", undefined, { session: from }), body,
+    if (!ask || ask.status !== "pending" || !canAnswerAsk(ask, get().viewer)) return;
+    const sessionName = ask.sessionName || ask.agent || ask.sessionId;
+    let toastFrom = sessionName;
+    let notifyTitle = translate("agents.ask.notifyTitle", undefined, { session: sessionName });
+    let bodyText = ask.question;
+
+    if (ask.kind === "question") {
+      toastFrom = translate("agents.ask.notifyQuestionTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "choice") {
+      toastFrom = translate("agents.ask.notifyChoiceTitle", undefined, { session: sessionName });
+      notifyTitle = toastFrom;
+    } else if (ask.kind === "permission") {
+      toastFrom = translate("agents.ask.notifyPermissionTitle", undefined, {
+        session: sessionName,
+        tool: ask.tool || "tool",
+      });
+      notifyTitle = toastFrom;
+      if (ask.toolInput) {
+        bodyText = ask.toolInput;
+      }
+    }
+
+    const body = excerpt(bodyText);
+    get().pushToast({ messageId: `ask:${askId}`, from: toastFrom, body });
+    showSystemNotification(notifyTitle, body,
       `agent-ask-${askId}`, () => get().setOpen(true));
   },
 

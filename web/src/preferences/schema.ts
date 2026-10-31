@@ -101,17 +101,6 @@ function numberPref(
   };
 }
 
-/** A string that must match pattern; "" (the fallback) is always valid. */
-function stringPref(key: string, scope: PreferenceScope, pattern: RegExp): PreferenceSpec<string> {
-  return {
-    key,
-    scope,
-    fallback: () => "",
-    decode: (raw) => (raw === "" || pattern.test(raw) ? raw : undefined),
-    encode: (value) => value,
-  };
-}
-
 function stringListPref(
   key: string,
   scope: PreferenceScope,
@@ -138,11 +127,23 @@ function stringListPref(
 export const EDITOR_MODES = ["live", "source", "preview"] as const;
 export const EDITOR_FONT_SIZE = { min: 11, max: 22, fallback: 14 } as const;
 
+/** The interface's text size, as a multiple of the design size. */
+export const TEXT_SCALE = { min: 0.9, max: 1.5, fallback: 1, decimals: 2 } as const;
+
+/** Traditional Chinese for a browser that prefers Chinese, else English. */
+function browserLanguage(): "en" | "zh-TW" {
+  const preferred = typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]);
+  const first = preferred.find((tag) => /^(zh|en)(-|_|$)/i.test(tag ?? ""));
+  return first && /^zh/i.test(first) ? "zh-TW" : "en";
+}
+
 export const PREFERENCE_SCHEMA = {
   // appearance
   // Dark until the viewer picks light, whatever the OS prefers.
   theme: enumPref("vised-theme", "appearance", ["light", "dark"] as const, () => "dark" as const),
-  language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, () => "en" as const),
+  // The browser's language until the viewer picks one.
+  language: enumPref("vised-language", "appearance", ["en", "zh-TW"] as const, browserLanguage),
+  textScale: numberPref("vised-text-scale", "appearance", TEXT_SCALE),
 
   // layout (main window panes)
   paneGraph: boolPref("vised-pane-graph", "layout", true),
@@ -194,30 +195,11 @@ export const PREFERENCE_SCHEMA = {
     typeof window === "undefined" || window.innerWidth > 720,
   ),
   /**
-   * How the upper pane draws the board: the dependency cards (the default,
-   * and what every existing browser keeps), or one of the two game views —
-   * the war room (an isometric office of runners and their agents) or the
-   * boss map (the project as a dungeon). Display only; the board is the same.
-   */
-  stageSkin: enumPref(
-    "vised-stage-skin",
-    "layout",
-    ["cards", "warroom", "dungeon"] as const,
-    () => "cards" as const,
-  ),
-  /**
    * Which face of the project is shown: Info, the board as it always was
-   * (graph, board, timeline, pages), or Station, where the project's agents
-   * work together — the live war room or boss map, who is doing what, what
-   * waits on you, and what the agents say to each other. In Station, the
-   * view is stageSkin's game view; "cards" there means the war room.
+   * (graph, board, timeline, pages), Station, where the project's agents
+   * work together — the live war room, who is doing what, what waits on
+   * you, and what the agents say to each other — or Settings.
    */
-  /**
-   * The view pack Station draws with (docs/view-packs.md), by id; "" is the
-   * built-in war room or boss map. A pack that is gone falls back to the
-   * built-in view of its layout.
-   */
-  stationPack: stringPref("vised-station-pack", "layout", /^[a-z0-9-]{1,40}$/),
   projectMode: enumPref(
     "vised-project-mode",
     "layout",
@@ -236,8 +218,11 @@ export const PREFERENCE_SCHEMA = {
       "workstation",
       "runners",
       "usage",
+      "analytics",
       "budget",
       "routing",
+      "roles",
+      "stages",
       "copilot",
       "server",
       "account",
@@ -248,15 +233,24 @@ export const PREFERENCE_SCHEMA = {
 
   // explorer (sidebar)
   explorerWidth: numberPref("vised-explorer-width", "explorer", {
-    min: 200,
+    // explorerMinWidth (explorerWidth.ts): the panel's minimum beside the tab
+    // rail; narrower, the rows stop reading.
+    min: 313,
     max: 520,
-    fallback: 304,
+    fallback: 320,
   }),
   // On a phone the explorer is an overlay, so leaving it open by default would
   // hide the board behind it on first launch. Wide windows still open with it
   // showing, which is where a first-time user needs it most.
   explorerCollapsed: boolPref("vised-explorer-collapsed", "explorer", () =>
     typeof window !== "undefined" && window.innerWidth <= 720,
+  ),
+  /** The sidebar's tab: the node list, files, git, or agents. */
+  explorerTab: enumPref(
+    "vised-explorer-tab",
+    "explorer",
+    ["nodes", "files", "git", "agent"] as const,
+    () => "nodes" as const,
   ),
   explorerExpandedProjects: stringListPref(
     "vised-explorer-expanded-projects",

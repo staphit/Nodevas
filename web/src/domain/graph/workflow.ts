@@ -11,6 +11,7 @@
  */
 
 import type { Graph, PlanStatusDefinition, StatusDefinition } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 import type { CustomLifecycleStatus, MilestoneType } from "../glossary";
 
@@ -54,13 +55,13 @@ export function nextMilestoneTypeID(
 
 function assertLabel(label: string, existing: { label: string; id: string }[], id?: string) {
   const trimmed = label.trim();
-  if (!trimmed) throw invalid("名稱不可空白。");
+  if (!trimmed) throw invalid(translate("domain.error.nameEmpty"));
   const clash = existing.some(
     (definition) =>
       definition.id !== id &&
       definition.label.localeCompare(trimmed, undefined, { sensitivity: "accent" }) === 0,
   );
-  if (clash) throw invalid(`已存在名稱「${trimmed}」。`);
+  if (clash) throw invalid(translate("domain.error.nameTaken", undefined, { name: trimmed }));
   return trimmed;
 }
 
@@ -73,10 +74,10 @@ export function addLifecycleStatus(
   graph.ui = graph.ui ?? {};
   const current = graph.ui.customStatuses ?? [];
   const label = assertLabel(definition.label, current);
-  if (!SHAPES.includes(definition.shape)) throw invalid("不支援的圖形。");
+  if (!SHAPES.includes(definition.shape)) throw invalid(translate("domain.error.shapeUnsupported"));
   const id = definition.id ?? nextCustomLifecycleStatusID(current);
   if (current.some((item) => item.id === id)) {
-    throw invalid(`狀態代號「${id}」已存在。`);
+    throw invalid(translate("domain.error.statusIdTaken", undefined, { id }));
   }
   graph.ui.customStatuses = [
     ...current,
@@ -98,11 +99,11 @@ export function updateLifecycleStatus(
 ): void {
   const current = graph.ui?.customStatuses ?? [];
   const target = current.find((definition) => definition.id === id);
-  if (!target) throw notFound(`狀態「${id}」`);
+  if (!target) throw notFound(translate("domain.subject.status", undefined, { id }));
   if (patch.label !== undefined) target.label = assertLabel(patch.label, current, id);
   if (patch.color !== undefined) target.color = patch.color;
   if (patch.shape !== undefined) {
-    if (!SHAPES.includes(patch.shape)) throw invalid("不支援的圖形。");
+    if (!SHAPES.includes(patch.shape)) throw invalid(translate("domain.error.shapeUnsupported"));
     target.shape = patch.shape;
   }
   if (patch.settled !== undefined) {
@@ -132,7 +133,7 @@ export function addMilestoneType(
   const label = assertLabel(definition.label, current);
   const id = definition.id ?? nextMilestoneTypeID(current);
   if (current.some((item) => item.id === id)) {
-    throw invalid(`里程碑代號「${id}」已存在。`);
+    throw invalid(translate("domain.error.milestoneIdTaken", undefined, { id }));
   }
   graph.ui.planStatuses = [...current, { id, label }];
   return id;
@@ -145,7 +146,7 @@ export function updateMilestoneType(
 ): void {
   const current = graph.ui?.planStatuses ?? [];
   const target = current.find((definition) => definition.id === id);
-  if (!target) throw notFound(`里程碑類型「${id}」`);
+  if (!target) throw notFound(translate("domain.subject.milestoneType", undefined, { id }));
   if (patch.label !== undefined) target.label = assertLabel(patch.label, current, id);
 }
 

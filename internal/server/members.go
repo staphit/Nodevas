@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/members"
 	"nodevas/internal/project"
 )
@@ -27,6 +27,7 @@ import (
 // to every signed-in account, so turning this on changes nothing until
 // someone restricts a project.
 func (s *Server) UseMembersDB(database *db.DB) {
+	s.useDatabase(database)
 	store := members.NewStore(database)
 	if err := store.Load(context.Background()); err != nil {
 		// Failing open here would expose every restricted project, so the
@@ -67,8 +68,11 @@ var accountLevelPaths = []string{
 	"/api/usage/prices",
 	"/api/notify/",
 	"/api/audit",
-	// View packs are the workspace's; admins install them for everyone.
-	"/api/packs/",
+	// Agent analytics across projects: the actor's own runs.
+	"/api/analytics/scorecards",
+	"/api/analytics/tiers",
+	"/api/analytics/overview",
+	"/api/analytics/retention",
 }
 
 // readOnlyPosts are POST routes that change nothing: a viewer may use them.
@@ -106,14 +110,14 @@ func (s *Server) withProjectAccess(c *gin.Context) {
 	access := s.members.Access(auth.ActorFrom(r), project.Key(st.Root()))
 	if !access.CanRead() {
 		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
-			errors.New("you are not a member of this project"), nil)
+			locale.Errorf("you are not a member of this project", "你不是這個專案的成員"), nil)
 		c.Abort()
 		return
 	}
 	writes := (isUnsafeMethod(r.Method) && !readOnlyPosts[r.URL.Path]) || stateChangingGET(r)
 	if writes && !access.CanWrite() {
 		httpx.Coded(c, http.StatusForbidden, "PROJECT_READ_ONLY",
-			errors.New("you can view this project but not change it"), nil)
+			locale.Errorf("you can view this project but not change it", "你可以檢視這個專案，但不能修改"), nil)
 		c.Abort()
 		return
 	}

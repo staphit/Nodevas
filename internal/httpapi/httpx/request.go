@@ -3,10 +3,22 @@ package httpx
 import (
 	"context"
 	"net/http"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/store"
 	"strings"
 )
+
+// Language is the interface language the request's reader uses. The app
+// sends it as Accept-Language, and also as ?language= where it cannot set a
+// header (a plain download link); the query wins, being the app's setting
+// rather than the browser's. A caller that sends neither reads English.
+func Language(r *http.Request) locale.Language {
+	if named := strings.TrimSpace(r.URL.Query().Get("language")); named != "" {
+		return locale.FromTag(named)
+	}
+	return locale.FromTag(r.Header.Get("Accept-Language"))
+}
 
 // ProjectHeader names the target project for clients that cannot add a query
 // string to the request.
@@ -29,6 +41,8 @@ var projectScopedPathExempt = []string{
 	// Runners belong to their owner, not to a project.
 	"/api/runners",
 	"/api/runner/",
+	// Station's building reads every project the viewer may, checking each.
+	"/api/station/",
 }
 
 // requestProjectName reads the per-request project override. Empty means the

@@ -18,8 +18,10 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 // Device links (runnerwire/link.go):
@@ -75,7 +77,7 @@ func (a *API) registerLinks(api *gin.RouterGroup) {
 }
 
 // ErrStepUpRequired refuses a request that needs a fresh step-up.
-var ErrStepUpRequired = errors.New("verify it's you first (step-up), then try again")
+var ErrStepUpRequired = locale.Errorf("verify it's you first (step-up), then try again", "請先驗證身分（step-up），再試一次")
 
 const linkMailTimeout = 30 * time.Second
 
@@ -105,7 +107,7 @@ func (a *API) freshStepUp(c *gin.Context) bool {
 func person(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() || strings.TrimSpace(actor.ID) == "" {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("only a signed-in person can link a device"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("only a signed-in person can link a device", "只有已登入的人可以連結裝置"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -114,7 +116,7 @@ func person(c *gin.Context) (identity.Actor, bool) {
 func admin(c *gin.Context) (identity.Actor, bool) {
 	actor := auth.ActorFrom(c.Request)
 	if actor.IsAgent() || !actor.IsAdmin() {
-		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", errors.New("only an administrator can manage the runner access token"), nil)
+		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("only an administrator can manage the runner access token", "只有管理員可以管理 runner 存取權杖"), nil)
 		return actor, false
 	}
 	return actor, true
@@ -138,14 +140,14 @@ func (a *API) createLink(c *gin.Context) {
 	if a.link.Owner != nil {
 		account, ok := a.link.Owner(c.Request.Context(), actor.ID)
 		if !ok {
-			httpx.Err(c, http.StatusUnauthorized, errors.New("this account no longer exists"))
+			httpx.Err(c, http.StatusUnauthorized, locale.Errorf("this account no longer exists", "這個帳號已不存在"))
 			return
 		}
 		revision = account.Revision
 	}
 	clientID, clientSecret, err := a.link.Access.Get()
 	if err != nil {
-		httpx.Err(c, http.StatusInternalServerError, fmt.Errorf("runner access token: %w", err))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("runner access token: %w", "runner 存取權杖：%w", err))
 		return
 	}
 	// The service token passes the Cloudflare edge for the whole hostname, so
@@ -154,7 +156,7 @@ func (a *API) createLink(c *gin.Context) {
 	if !actor.IsAdmin() {
 		clientID, clientSecret = "", ""
 	}
-	code, expires, err := a.link.Links.Issue(actor, revision, name)
+	code, expires, err := a.link.Links.Issue(actor, revision, name, httpx.Language(c.Request))
 	if errors.Is(err, runners.ErrTooManyLinks) {
 		httpx.Coded(c, http.StatusTooManyRequests, "RESOURCE_EXHAUSTED", err, nil)
 		return
@@ -231,26 +233,42 @@ func (a *API) redeemLink(c *gin.Context) {
 		"name": runner.Name, "device": device, "os": deviceOS,
 	})
 	if a.link.Mail != nil && email != "" {
-		go a.mailRedeem(email, runner, device, deviceOS, source, time.Now())
+		at := time.Now()
+		safego.Go("device link mail", func() { a.mailRedeem(email, runner, device, deviceOS, source, at, link.Language) })
 	}
 	c.JSON(http.StatusCreated, runnerwire.RedeemLinkResponse{RunnerID: runner.ID, Name: runner.Name, Token: token})
 }
 
-func (a *API) mailRedeem(to string, runner runnerwire.Runner, device, deviceOS, source string, at time.Time) {
+func (a *API) mailRedeem(to string, runner runnerwire.Runner, device, deviceOS, source string, at time.Time, language locale.Language) {
 	ctx, cancel := context.WithTimeout(context.Background(), linkMailTimeout)
 	defer cancel()
+	subject, body := redeemMail(runner, device, deviceOS, source, at, language)
+	if err := a.link.Mail(ctx, to, subject, body); err != nil {
+		slog.Warn("device link notice not sent", slog.String("runner", runner.ID), slog.Any("error", err))
+	}
+}
+
+// redeemMail is the new-device notice in language: the owner's alarm that a
+// link of theirs was used, and from where.
+func redeemMail(runner runnerwire.Runner, device, deviceOS, source string, at time.Time, language locale.Language) (subject, body string) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "A new device was linked to your Nodevas account as runner %q.\n", runner.Name)
-	fmt.Fprintf(&b, "一台新裝置已用「%s」這個 runner 名稱連結到你的 Nodevas 帳號。\n\n", runner.Name)
+	when := at.UTC().Format(time.RFC1123)
+	if language == locale.Chinese {
+		fmt.Fprintf(&b, "一台新裝置已用「%s」這個 runner 名稱連結到你的 Nodevas 帳號。\n\n", runner.Name)
+		if device != "" || deviceOS != "" {
+			fmt.Fprintf(&b, "裝置：%s %s\n", device, deviceOS)
+		}
+		fmt.Fprintf(&b, "來源：%s\n時間：%s\n\n", source, when)
+		b.WriteString("如果不是你，請立即到 Runners 頁面撤銷它：它能以你的名義執行 agent。\n")
+		return "Nodevas 新裝置已連結", b.String()
+	}
+	fmt.Fprintf(&b, "A new device was linked to your Nodevas account as runner %q.\n\n", runner.Name)
 	if device != "" || deviceOS != "" {
 		fmt.Fprintf(&b, "Device: %s %s\n", device, deviceOS)
 	}
-	fmt.Fprintf(&b, "From: %s\nAt: %s\n\n", source, at.UTC().Format(time.RFC1123))
+	fmt.Fprintf(&b, "From: %s\nAt: %s\n\n", source, when)
 	b.WriteString("If this was not you, revoke the runner on the Runners page now: it can run agents on your behalf.\n")
-	b.WriteString("如果不是你，請立即到 Runners 頁面撤銷它：它能以你的名義執行 agent。\n")
-	if err := a.link.Mail(ctx, to, "Nodevas 新裝置已連結 / New device linked", b.String()); err != nil {
-		slog.Warn("device link notice not sent", slog.String("runner", runner.ID), slog.Any("error", err))
-	}
+	return "Nodevas: new device linked", b.String()
 }
 
 func (a *API) accessStatus() (runnerwire.AccessTokenStatus, error) {

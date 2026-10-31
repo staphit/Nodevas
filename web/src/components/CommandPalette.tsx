@@ -5,6 +5,7 @@ import {
   IconClock,
   IconCompass,
   IconDoc,
+  IconFolderOpen,
   IconGear,
   IconHelp,
   IconMoon,
@@ -14,24 +15,41 @@ import {
   IconSave,
   IconSaveAll,
   IconSidebar,
+  IconSpark,
   IconSun,
   IconTree,
   IconUndo,
+  IconWarning,
 } from "../icons";
 import { reportError, useApp, usePreference } from "../store";
 import { useI18n } from "../i18n";
+import { nodeTypeLabel, useNodeTypes } from "../nodeTypeTheme";
 import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
-import { packName, usePacks } from "../game/packStore";
-import {
-  setProjectMode,
-  setStageSkin,
-  setStationPack,
-  STAGE_SKIN_LABEL,
-  useStageSkinChoices,
-  useStationView,
-} from "../game/stageSkin";
+import { openSettings, type SettingsSection } from "../settings/openSettings";
+import { useControl } from "../station/controlStore";
+import { setProjectMode } from "../station/projectMode";
+import { confirmAction } from "./ConfirmDialog";
+import { useNodeDetailView } from "./drawer/openNodeDetail";
 import { OPEN_START_SCREEN_EVENT } from "./StartScreen";
-import { useViewer } from "./SignIn";
+import { useTeamServer, useViewer } from "./SignIn";
+import { COMMAND_PALETTE_EVENT, replayTour, type CommandPaletteView } from "./topbar/actions";
+
+/**
+ * Station's emergency stop, from the palette: confirmed, then the same
+ * pause-all Station sends, leaving running runs running (Station's own dialog
+ * can cancel those too). Station opens to show what it did.
+ */
+async function pauseAllAgents(t: (key: string, values?: Record<string, string | number>) => string) {
+  const confirmed = await confirmAction({
+    title: t("station.control.pauseAllTitle"),
+    description: `${t("station.control.pauseAllIntro")} ${t("topbar.cmd.pauseAllKeepsRunning")}`,
+    confirmLabel: t("station.control.pauseAll"),
+    tone: "danger",
+  });
+  if (!confirmed) return;
+  setProjectMode("station");
+  await useControl.getState().pauseAll(false);
+}
 
 type SearchResult = Awaited<ReturnType<typeof api.search>>["results"][number];
 
@@ -55,6 +73,7 @@ type PaletteItem =
       resultKind: SearchResult["kind"];
       project: string;
       nodeId?: string;
+      pageId?: string;
       title: string;
       snippet?: string;
     };
@@ -106,7 +125,9 @@ export function CommandPalette() {
   const { language, t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
   const openTab = useApp((state) => state.openTab);
+  const revealNode = useApp((state) => state.revealNode);
   const createNode = useApp((state) => state.createNode);
+  const nodeTypes = useNodeTypes();
   const togglePane = useApp((state) => state.togglePane);
   const toggleTheme = useApp((state) => state.toggleTheme);
   const updateUIPreference = useApp((state) => state.updateUIPreference);
@@ -118,6 +139,9 @@ export function CommandPalette() {
   const refreshProjects = useApp((state) => state.refreshProjects);
   const refreshTrash = useApp((state) => state.refreshTrash);
   const activeProject = useApp((state) => state.activeProject);
+  // graph.yaml does not parse or validate: a new node would be refused, as
+  // the board says, so none is offered here either.
+  const graphReadable = useApp((state) => state.graphUnreadable === null);
   const activeTab = useApp((state) => state.activeTab);
   const theme = useApp((state) => state.theme);
   const paneOpen = useApp((state) => state.paneOpen);
@@ -129,21 +153,40 @@ export function CommandPalette() {
   const canCreateProjects = !viewer || viewer.role === "admin";
   const workstation = useWorkstationVisible();
   const workstationInUse = useWorkstationInUse();
-  const stationView = useStationView();
   const projectMode = usePreference("projectMode");
-  const skinChoices = useStageSkinChoices();
-  const packs = usePacks((s) => s.packs);
-  const stationPack = usePreference("stationPack");
+  const projects = useApp((state) => state.projects);
+  const workspaces = useApp((state) => state.workspaces);
+  const switchWorkspace = useApp((state) => state.switchWorkspace);
+  const teamServer = useTeamServer();
+  // The parts of Settings without a command of their own above, offered as
+  // Settings offers them (SettingsView's PARTS): the Agents ones only with the
+  // workstation shown, the server ones only to who may see them.
+  const settingsParts = useMemo<SettingsSection[]>(() => {
+    const parts: SettingsSection[] = ["appearance", "backup", "copilot", "workstation"];
+    if (teamServer && viewer) parts.push("account");
+    if (teamServer && viewer?.role === "admin") parts.push("server", "audit");
+    return parts;
+  }, [teamServer, viewer]);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "help">("list");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  /** The query the shown results answer; until it is the current one, the
+   * search is still on its way and "no results" would be premature. */
+  const [answered, setAnswered] = useState("");
   const [selected, setSelected] = useState(0);
+  /** The query Enter was pressed on before anything matched it: its first
+   * result opens once the search answers, instead of the key being lost. */
+  const [enterWaitsFor, setEnterWaitsFor] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
+    // Settings' "Help and shortcuts" opens straight on the help view.
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ view?: CommandPaletteView } | null>).detail;
+      if (detail?.view === "help") setView("help");
+      setOpen(true);
+    };
     const onKey = (event: KeyboardEvent) => {
       if (
         (event.ctrlKey || event.metaKey) &&
@@ -154,10 +197,10 @@ export function CommandPalette() {
         setOpen((value) => !value);
       }
     };
-    window.addEventListener("nodevas-command-palette", onOpen);
+    window.addEventListener(COMMAND_PALETTE_EVENT, onOpen);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("nodevas-command-palette", onOpen);
+      window.removeEventListener(COMMAND_PALETTE_EVENT, onOpen);
       window.removeEventListener("keydown", onKey);
     };
   }, []);
@@ -167,6 +210,7 @@ export function CommandPalette() {
       setQuery("");
       setResults([]);
       setSelected(0);
+      setEnterWaitsFor(null);
       setView("list");
       return;
     }
@@ -189,12 +233,11 @@ export function CommandPalette() {
     const normalized = query.trim();
     if (normalized.length < 2) {
       setResults([]);
-      setLoading(false);
+      setAnswered("");
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      setLoading(true);
       void api
         .search(normalized)
         .then((response) => {
@@ -204,7 +247,7 @@ export function CommandPalette() {
           if (!cancelled) reportError(error);
         })
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) setAnswered(normalized);
         });
     }, 180);
     return () => {
@@ -214,7 +257,7 @@ export function CommandPalette() {
   }, [query]);
 
   const commands = useMemo<Command[]>(() => {
-    const list: Command[] = [
+    const create: Command[] = [
       {
         key: "new-node",
         title: t("palette.newNode"),
@@ -225,6 +268,23 @@ export function CommandPalette() {
           await createNode({ title: t("palette.untitledNode"), kind: "task" });
         },
       },
+      // One per type, so "new review" or a custom type's name finds it.
+      ...nodeTypes.map<Command>((type) => {
+        const label = nodeTypeLabel(type, t);
+        return {
+          key: `new-node-${type.id}`,
+          title: t("palette.newNodeOfType", { type: label }),
+          detail: t("palette.createIn", { project: activeProject || t("topbar.project") }),
+          keywords: `node create add type ${type.id} ${type.label} ${label} 建立 類型`,
+          icon: <IconPlus size={15} />,
+          run: async () => {
+            await createNode({ title: t("palette.untitledNode"), kind: type.id });
+          },
+        };
+      }),
+    ];
+    const list: Command[] = [
+      ...(graphReadable ? create : []),
       {
         key: "toggle-graph",
         title: paneOpen.graph ? t("palette.hideGraph") : t("palette.showGraph"),
@@ -257,6 +317,18 @@ export function CommandPalette() {
         icon: theme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />,
         run: () => toggleTheme(),
       },
+      ...(projectMode !== "settings"
+        ? [
+            {
+              key: "open-settings",
+              title: t("topbar.cmd.openSettings"),
+              detail: t("mode.settings.detail"),
+              keywords: "settings preferences options 設定 偏好 選項",
+              icon: <IconGear size={15} />,
+              run: () => setProjectMode("settings"),
+            },
+          ]
+        : []),
       {
         key: "project-settings",
         title: t("palette.settings"),
@@ -312,40 +384,29 @@ export function CommandPalette() {
           ]
         : []),
     ];
-    // Info and Station, and Station's views; what is showing is not offered
-    // again.
-    if (projectMode === "station") {
+    // Board and Station; what is showing is not offered again.
+    if (projectMode !== "info") {
       list.push({
         key: "project-mode-info",
-        title: t("mode.toInfo"),
+        title: t("topbar.cmd.openBoard"),
         detail: t("mode.info.detail"),
         keywords: "info board graph timeline cards 資訊 看板 圖 時間軸 卡片",
         icon: <IconTree size={15} />,
         run: () => setProjectMode("info"),
       });
     }
-    for (const skin of skinChoices) {
-      if (projectMode === "station" && !stationPack && skin === stationView) continue;
+    if (projectMode !== "station") {
       list.push({
-        key: `stage-skin-${skin}`,
-        title: t("game.menu.openInStation", { name: t(STAGE_SKIN_LABEL[skin]) }),
-        detail: t(`game.palette.${skin}`),
-        keywords: "station agents view skin game war room boss dungeon 工作站 檢視 遊戲 戰情室 地城 頭目",
-        icon: <IconTree size={15} />,
-        run: () => setStageSkin(skin),
+        key: "open-station",
+        title: t("topbar.cmd.openStation"),
+        detail: t("mode.station.detail"),
+        keywords: "station agents waiting runs today war room 工作站 等你 執行 戰情室",
+        icon: <IconSpark size={15} />,
+        run: () => setProjectMode("station"),
       });
     }
-    for (const pack of packs) {
-      if (projectMode === "station" && stationPack === pack.id) continue;
-      list.push({
-        key: `view-pack-${pack.id}`,
-        title: t("game.menu.openInStation", { name: packName(pack, language) }),
-        detail: t("packs.paletteDetail"),
-        keywords: `station pack view skin ${pack.id} 工作站 主題包`,
-        icon: <IconTree size={15} />,
-        run: () => setStationPack(pack),
-      });
-    }
+    // The top bar's Runners and Usage icons went into its runner pill; these
+    // reach their pages, and the agent controls with them, by name.
     if (workstation) {
       list.push(
         {
@@ -353,16 +414,57 @@ export function CommandPalette() {
           title: t("topbar.runners"),
           detail: t("palette.runnersDetail"),
           keywords: "runner agent machine 執行器 agent",
-          run: () => void window.dispatchEvent(new Event("nodevas-open-runners")),
+          run: () => openSettings("runners"),
+        },
+        {
+          key: "add-runner",
+          title: t("topbar.cmd.addRunner"),
+          detail: t("topbar.cmd.addRunnerDetail"),
+          keywords: "add new pair runner machine device 新增 配對 執行器 電腦",
+          icon: <IconPlus size={15} />,
+          run: () => openSettings("runners", { add: true }),
         },
         {
           key: "usage",
           title: t("topbar.usage"),
           detail: t("palette.usageDetail"),
-          keywords: "usage tokens cost 用量 費用",
-          run: () => void window.dispatchEvent(new Event("nodevas-open-usage")),
+          keywords: "usage tokens cost spend today 用量 費用 花費 今天",
+          run: () => openSettings("usage"),
+        },
+        {
+          key: "budget",
+          title: t("topbar.cmd.budget"),
+          detail: t("topbar.cmd.budgetDetail"),
+          keywords: "budget daily limit cost spend 預算 每日 上限 花費",
+          run: () => openSettings("budget"),
+        },
+        {
+          key: "routing",
+          title: t("topbar.cmd.routing"),
+          detail: t("topbar.cmd.routingDetail"),
+          keywords: "routing rules route agent model 路由 規則 分派",
+          run: () => openSettings("routing"),
+        },
+        {
+          key: "pause-all",
+          title: t("topbar.cmd.pauseAll"),
+          detail: t("topbar.cmd.pauseAllDetail"),
+          keywords: "pause stop emergency halt agents autopilot runs 暫停 停止 緊急 全部",
+          icon: <IconWarning size={15} />,
+          run: () => pauseAllAgents(t),
         },
       );
+    }
+    // Every other part of Settings, by its own name.
+    for (const part of settingsParts) {
+      list.push({
+        key: `settings-${part}`,
+        title: t("topbar.cmd.settingsPart", { part: t(`settingsPage.part.${part}`) }),
+        detail: t("topbar.cmd.settingsPartDetail"),
+        keywords: `settings ${part} 設定`,
+        icon: <IconGear size={15} />,
+        run: () => openSettings(part),
+      });
     }
     // Off until asked for or in use; once in use it cannot be hidden, since
     // seeing a runner or a run turns it straight back on.
@@ -448,18 +550,51 @@ export function CommandPalette() {
         detail: t("palette.tourDetail"),
         keywords: "tour onboarding guide 導覽 教學 新手 引導",
         icon: <IconCompass size={15} />,
-        run: () => {
-          window.dispatchEvent(new CustomEvent("nodevas-tour-start"));
-        },
+        run: replayTour,
       },
     );
+    // Last, since there can be many: the other projects and workspaces, which
+    // the top bar's project menu also lists.
+    for (const project of projects) {
+      if (project.isFolder || project.name === activeProject) continue;
+      list.push({
+        key: `switch-project-${project.name}`,
+        title: t("topbar.cmd.switchProject", { name: project.label || project.name }),
+        detail: t("topbar.nodeCount", { count: project.nodes }),
+        keywords: `project switch open ${project.name} 專案 切換`,
+        icon: <IconTree size={15} />,
+        run: async () => {
+          await switchProject(project.name);
+        },
+      });
+    }
+    for (const entry of workspaces) {
+      if (entry.active) continue;
+      list.push({
+        key: `switch-workspace-${entry.path}`,
+        title: t("topbar.cmd.switchWorkspace", { name: entry.label || entry.path }),
+        detail: entry.path,
+        keywords: "workspace switch open folder 工作區 切換",
+        icon: <IconFolderOpen size={15} />,
+        run: async () => {
+          await switchWorkspace(entry.path);
+        },
+      });
+    }
     return list;
   }, [
     activeProject,
     activeTab,
     canCreateProjects,
     createNode,
+    graphReadable,
+    nodeTypes,
     explorerCollapsed,
+    projects,
+    workspaces,
+    switchProject,
+    switchWorkspace,
+    settingsParts,
     loadAll,
     minimap,
     paneOpen.graph,
@@ -471,11 +606,7 @@ export function CommandPalette() {
     saveTab,
     snapGuides,
     snapToGrid,
-    skinChoices,
-    stationView,
     projectMode,
-    packs,
-    stationPack,
     language,
     theme,
     toggleTheme,
@@ -488,6 +619,9 @@ export function CommandPalette() {
   ]);
 
   const normalized = query.trim().toLowerCase();
+  // From the first keystroke of a searchable query until its answer: the
+  // debounce plus the request, ~190 ms that used to read "nothing found".
+  const searching = query.trim().length >= 2 && answered !== query.trim();
   // Commands stay reachable while typing: a query filters them instead of
   // replacing them with search results, which used to hide every command
   // after the second character.
@@ -505,18 +639,28 @@ export function CommandPalette() {
       group: normalized ? t("palette.command") : t("palette.commands"),
     })),
     ...results.map((result, index) => ({
-      key: `${result.project}:${result.nodeId ?? ""}:${index}`,
+      key: `${result.project}:${result.nodeId ?? ""}:${result.pageId ?? ""}:${index}`,
       kind: "result" as const,
       group: t("palette.searchResults"),
       resultKind: result.kind,
       project: result.project,
       nodeId: result.nodeId,
+      pageId: result.pageId,
       title: result.title,
       snippet: result.snippet,
     })),
   ];
 
   useEffect(() => setSelected(0), [query, results.length]);
+
+  useEffect(() => {
+    if (enterWaitsFor === null || searching) return;
+    setEnterWaitsFor(null);
+    if (enterWaitsFor !== query.trim()) return;
+    void choose(items[0]).catch(reportError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per answer;
+    // items and choose are this render's, the ones the answer filled.
+  }, [enterWaitsFor, searching]);
 
   const choose = async (item: PaletteItem | undefined) => {
     if (!item) return;
@@ -529,7 +673,16 @@ export function CommandPalette() {
     }
     setOpen(false);
     if (item.project !== activeProject) await switchProject(item.project);
-    if (item.nodeId) await openTab(item.nodeId);
+    if (!item.nodeId) return;
+    await openTab(item.nodeId);
+    // As with following a link: the board shows wherever the reader was, so
+    // the jump scrolls it to the node too.
+    revealNode(item.nodeId);
+    // A hit opens the page it lives on. A main-page hit still asks for main,
+    // so the drawer leaves whatever subpage was open.
+    if (item.resultKind === "node") {
+      useNodeDetailView.getState().requestPage(item.nodeId, item.pageId || "main");
+    }
   };
 
   if (!open) return null;
@@ -595,9 +748,15 @@ export function CommandPalette() {
               <input
                 ref={inputRef}
                 value={query}
+                // The placeholder is the short form that fits at any text
+                // size; the name and tooltip say everything it searches.
                 placeholder={t("palette.searchPlaceholder")}
                 aria-label={t("palette.search")}
-                onChange={(event) => setQuery(event.target.value)}
+                title={t("palette.search")}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setEnterWaitsFor(null);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
                     event.preventDefault();
@@ -617,7 +776,12 @@ export function CommandPalette() {
                   }
                   if (event.key === "Enter") {
                     event.preventDefault();
-                    void choose(items[selected]).catch(reportError);
+                    const item = items[selected];
+                    if (!item && searching) {
+                      setEnterWaitsFor(query.trim());
+                      return;
+                    }
+                    void choose(item).catch(reportError);
                   }
                 }}
               />
@@ -660,8 +824,8 @@ export function CommandPalette() {
                   </button>
                 </div>
               ))}
-              {loading && <div className="command-palette-empty">{t("palette.searching")}</div>}
-              {!loading && normalized.length >= 2 && items.length === 0 && (
+              {searching && <div className="command-palette-empty">{t("palette.searching")}</div>}
+              {!searching && normalized.length >= 2 && items.length === 0 && (
                 <div className="command-palette-empty">{t("palette.noResults")}</div>
               )}
             </div>

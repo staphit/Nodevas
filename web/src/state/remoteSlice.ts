@@ -20,6 +20,7 @@ import {
   type RemoteBundle,
   type RemoteConfig,
 } from "../api";
+import { translate } from "../i18n";
 import { coalesceRequest } from "./coalesce";
 import {
   commandFailed,
@@ -111,7 +112,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     // retention count below its floor comes back clamped up. Adopting the reply
     // is what shows the user the number that will actually be used.
     saveRemoteConfig: (config: RemoteConfigInput) =>
-      command(remoteScope.config(), "remote.saveConfig", "儲存備份設定失敗", async () => {
+      command(remoteScope.config(), "remote.saveConfig", translate("remote.error.saveConfigFailed"), async () => {
         const next = await api.putRemoteConfig(config);
         // A git remote holds branches, not bundles: there is nothing to list.
         const bundles = next.kind === "folder" ? {} : { remoteBundles: null };
@@ -125,7 +126,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
       }),
 
     pushRemoteBundle: (project) =>
-      command(remoteScope.bundle(), "remote.push", "備份失敗", async () => {
+      command(remoteScope.bundle(), "remote.push", translate("remote.error.backupFailed"), async () => {
         const result = await api.pushRemote(project);
         await reread(
           get().refreshRemoteConfig,
@@ -139,7 +140,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     // conflict when the newest remote snapshot came from somewhere else; that
     // refusal is the sync model working, so it is reported and not retried.
     flushRemoteSync: () =>
-      command(remoteScope.bundle(), "remote.flush", "備份失敗", async () => {
+      command(remoteScope.bundle(), "remote.flush", translate("remote.error.backupFailed"), async () => {
         await api.flushRemoteSync();
         await reread(
           get().refreshRemoteConfig,
@@ -151,7 +152,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     // A restore never overwrites: the bundle lands as a new project, and the
     // user is taken to it so the result is visible rather than claimed.
     importRemoteBundle: (bundleId) =>
-      command(remoteScope.bundle(), "remote.import", "還原失敗", async () => {
+      command(remoteScope.bundle(), "remote.import", translate("remote.error.restoreFailed"), async () => {
         const result = await api.importRemote(bundleId);
         await get().refreshProjects();
         await get().switchProject(result.active);
@@ -161,7 +162,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     // Save first, as the mail test does: what is tested is then exactly what
     // the backups will use, and a refused save stops here.
     testRemoteGit: (config: RemoteConfigInput) =>
-      command(remoteScope.config(), "remote.testGit", "連線測試失敗", async () => {
+      command(remoteScope.config(), "remote.testGit", translate("remote.error.testFailed"), async () => {
         const saved = await get().saveRemoteConfig(config);
         if (!saved.ok) throw new Error(saved.message);
         const result = await api.testRemoteGit();
@@ -171,14 +172,14 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
     // The remote branch is left as it is; the side branch is new, so this
     // can never overwrite anything.
     keepLocalRemoteGit: (project: string) =>
-      command(remoteScope.bundle(), "remote.keepLocal", "推送失敗", async () => {
+      command(remoteScope.bundle(), "remote.keepLocal", translate("remote.error.pushFailed"), async () => {
         const result = await api.keepLocalRemoteGit(project);
         await reread(get().refreshRemoteSyncStatus);
         return result.branch;
       }),
 
     saveNotifySettings: (settings: NotifySettings) =>
-      command(remoteScope.notify(), "notify.save", "儲存失敗", async () => {
+      command(remoteScope.notify(), "notify.save", translate("remote.error.saveFailed"), async () => {
         await api.putNotifySettings(settings);
         // An empty password field means "keep the stored one", so saving a
         // filled-in field is the moment one starts existing.
@@ -189,7 +190,7 @@ export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
       }),
 
     sendNotifyTest: (settings: NotifySettings) =>
-      command(remoteScope.notify(), "notify.test", "測試寄送失敗", async () => {
+      command(remoteScope.notify(), "notify.test", translate("remote.error.testMailFailed"), async () => {
         // Persist first, so the server tests exactly what the user is looking
         // at. A save that was refused must stop here: the mail would otherwise
         // go out through the transport the user just failed to change.

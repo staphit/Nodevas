@@ -11,10 +11,13 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/logging"
+	"nodevas/internal/safego"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // authMode describes how the server identifies callers, so the UI can show a
@@ -43,7 +46,7 @@ func (a *API) getAuthStatus(c *gin.Context) {
 func (a *API) postLogin(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	var body struct {
@@ -175,7 +178,7 @@ func refusedSignIn(reason, method string, refusal auth.SignInRefusal) audit.Even
 func (a *API) postRequestOTP(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	if a.mailer == nil {
@@ -232,7 +235,8 @@ func (a *API) postRequestOTP(c *gin.Context) {
 		// registered it, however the person at the door chose to type it.
 		// The row is written now; the line once the relay has answered.
 		sent := a.recordAuthLater(c, requested)
-		go a.deliverPasscode(challenge, sent)
+		language := httpx.Language(c.Request)
+		safego.Go("passcode mail", func() { a.deliverPasscode(challenge, language, sent) })
 	}
 	// Unknown address, malformed address, or a passcode that could not be
 	// generated: none of these are the client's business, and a delivered one
@@ -247,10 +251,13 @@ func (a *API) postRequestOTP(c *gin.Context) {
 // through that line; it never reaches the client, because "the mail bounced"
 // would confirm the address. The error says what the relay answered; the
 // message itself, passcode and all, is not in it.
-func (a *API) deliverPasscode(challenge auth.Challenge, sent func(error)) {
+//
+// It is written in the language of the browser that asked: that is the
+// person about to type the passcode.
+func (a *API) deliverPasscode(challenge auth.Challenge, language locale.Language, sent func(error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 	defer cancel()
-	sent(a.mailer.Send(ctx, challenge.Email, otpSubject, otpBody(challenge)))
+	sent(a.mailer.Send(ctx, challenge.Email, otpSubject(language), otpBody(challenge, language)))
 }
 
 // recordAuthEvent writes a sign-in-related event to the trail. These belong to
@@ -362,7 +369,13 @@ func authFailureReason(ctx context.Context, err error) string {
 
 const otpMailTimeout = 20 * time.Second
 
-const otpSubject = "Nodevas 登入驗證碼"
+// otpSubject is the sign-in passcode mail's subject in language.
+func otpSubject(language locale.Language) string {
+	if language == locale.Chinese {
+		return "Nodevas 登入驗證碼"
+	}
+	return "Your Nodevas sign-in code"
+}
 
 // otpBody is plain text on purpose: an HTML mail invites a client to make the
 // code a link, and there is nothing here worth styling.
@@ -371,7 +384,19 @@ const otpSubject = "Nodevas 登入驗證碼"
 // to be sent to any address, so an unrequested one is not by itself a break-in
 // — but it is worth an administrator knowing about, and the passcode is the
 // only thing between that request and the account.
-func otpBody(challenge auth.Challenge) string {
+func otpBody(challenge auth.Challenge, language locale.Language) string {
+	if language != locale.Chinese {
+		return strings.Join([]string{
+			"Your Nodevas sign-in code:",
+			"",
+			"    " + challenge.Code,
+			"",
+			fmt.Sprintf("It works once, until %s.", challenge.Expires.Format("15:04")),
+			"Signing in with it signs this account out on other devices.",
+			"",
+			"If you did not ask for it, ignore this mail, tell nobody the code, and let your administrator know.",
+		}, "\n")
+	}
 	return strings.Join([]string{
 		"你的 Nodevas 登入驗證碼：",
 		"",
@@ -390,7 +415,7 @@ func (a *API) postLogout(c *gin.Context) {
 		if cookie, err := c.Request.Cookie(auth.SessionCookieName); err == nil {
 			if err := accounts.Logout(cookie.Value); err != nil {
 				httpx.Err(c, http.StatusInternalServerError,
-					fmt.Errorf("sign out could not be persisted: %w", err))
+					locale.Errorf("sign out could not be persisted: %w", "登出無法儲存：%w", err))
 				return
 			}
 			// The session is gone, but who it belonged to is still on the

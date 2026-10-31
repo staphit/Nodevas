@@ -73,6 +73,19 @@ func runnerAutoAccept(args []string, stdout, stderr io.Writer) error {
 		default:
 			return fmt.Errorf("step-up must be required or optional")
 		}
+	case "verify":
+		if len(rest) != 1 {
+			return errUsage
+		}
+		switch strings.ToLower(rest[0]) {
+		case "on":
+			cfg.SetAllowVerify(true)
+			note = "verify jobs run this repository's test command on code an agent wrote; they are taken unasked only in the repos listed here"
+		case "off":
+			cfg.SetAllowVerify(false)
+		default:
+			return fmt.Errorf("verify must be on or off")
+		}
 	case "allow-shell", "remote-typing":
 		if len(rest) != 1 {
 			return errUsage
@@ -205,6 +218,11 @@ func printAutoAccept(w io.Writer, cfg *runner.Config) {
 		row("allowShell", "ON (runs whose agent may run any shell command are auto-accepted too)")
 	} else {
 		row("allowShell", "off (a run whose agent may run any shell command is asked about here)")
+	}
+	if policy.AllowVerify {
+		row("verify", "ON (verify jobs, the repo's test command, are auto-accepted in the listed repos)")
+	} else {
+		row("verify", "off (a verify job, the repo's test command, is asked about here)")
 	}
 	if policy.AllowRemoteTyping {
 		row("remoteTyping", "ON (the dispatcher may type into auto-accepted interactive runs)")

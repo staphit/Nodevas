@@ -15,6 +15,7 @@ import type {
   NodeKind,
   NodeStyle,
 } from "../../types";
+import { translate } from "../../i18n";
 import { invalid, notFound } from "../errors";
 
 import {
@@ -23,11 +24,13 @@ import {
   logicGateOwningEdge,
 } from "./logicGate";
 import { edgeRelation } from "./edgeStyle";
+import { isKnownKind, normalizeKind } from "./nodeTypes";
 import { appendRequirement, editableGateOperator, topLevelOp } from "./requires";
 
 export interface NodeMetadataPatch {
   title?: string;
-  kind?: NodeKind;
+  /** A type id; normalized and checked against the project's types. */
+  kind?: NodeKind | string;
   priority?: GraphNode["priority"];
   /** "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm", local time. Empty clears it. */
   deadline?: string;
@@ -42,7 +45,7 @@ const WRITE_ACCESS_VALUES = new Set(["worker", "orchestrator", "human-only"]);
 
 export function findNode(graph: Graph, nodeId: string): GraphNode {
   const node = graph.nodes?.find((candidate) => candidate.id === nodeId);
-  if (!node) throw notFound(`節點「${nodeId}」`);
+  if (!node) throw notFound(translate("domain.subject.node", undefined, { id: nodeId }));
   return node;
 }
 
@@ -59,21 +62,29 @@ export function updateNodeMetadata(
 ): void {
   const node = findNode(graph, nodeId);
   if ("title" in patch) node.title = blankToUndefined(patch.title);
-  if ("kind" in patch) node.kind = (blankToUndefined(patch.kind) as NodeKind) ?? undefined;
+  if ("kind" in patch) {
+    const kind = normalizeKind(patch.kind);
+    // A legacy free-form kind may be written back unchanged; a new value has
+    // to name a type this project knows.
+    if (kind !== (node.kind ?? "") && !isKnownKind(graph, kind)) {
+      throw invalid(translate("domain.error.unknownNodeType"));
+    }
+    node.kind = (kind as NodeKind) || undefined;
+  }
   if ("priority" in patch) {
     node.priority = blankToUndefined(patch.priority) as GraphNode["priority"];
   }
   if ("deadline" in patch) {
     const deadline = blankToUndefined(patch.deadline);
     if (deadline && !DEADLINE_PATTERN.test(deadline)) {
-      throw invalid("死線格式須為 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm。");
+      throw invalid(translate("domain.error.deadlineFormat"));
     }
     node.deadline = deadline;
   }
   if ("writeAccess" in patch) {
     const writeAccess = blankToUndefined(patch.writeAccess);
     if (writeAccess && !WRITE_ACCESS_VALUES.has(writeAccess)) {
-      throw invalid("寫入權限須為 worker、orchestrator 或 human-only。");
+      throw invalid(translate("domain.error.writeAccess"));
     }
     node.writeAccess = writeAccess as GraphNode["writeAccess"];
   }
@@ -134,7 +145,7 @@ function nextUserID(users: GraphUser[]): string {
     const candidate = `user-${String(sequence).padStart(4, "0")}`;
     if (!used.has(candidate)) return candidate;
   }
-  throw invalid("使用者數量已達上限");
+  throw invalid(translate("domain.error.usersFull"));
 }
 
 /**
@@ -172,7 +183,7 @@ export function assignNodes(
   userId: string | undefined,
 ): void {
   if (userId && !(graph.users ?? []).some((user) => user.id === userId)) {
-    throw notFound(`使用者「${userId}」`);
+    throw notFound(translate("domain.subject.user", undefined, { id: userId }));
   }
   const targets = new Set(nodeIds);
   for (const node of graph.nodes ?? []) {
@@ -186,7 +197,7 @@ export function setUserEmail(
   email: string | undefined,
 ): void {
   const user = graph.users?.find((candidate) => candidate.id === userId);
-  if (!user) throw notFound(`使用者「${userId}」`);
+  if (!user) throw notFound(translate("domain.subject.user", undefined, { id: userId }));
   user.email = blankToUndefined(email);
 }
 
@@ -205,7 +216,13 @@ export function addDependency(
   const edges = graph.edges ?? [];
   const gate = logicGateOwningEdge(graph, sourceId, targetId);
   if (gate) {
-    throw invalid(`關係線「${sourceId} → ${targetId}」由邏輯閘「${gate.id}」控制。`);
+    throw invalid(
+      translate("dependency.error.edgeOwnedByGate", undefined, {
+        source: sourceId,
+        target: targetId,
+        gate: gate.id,
+      }),
+    );
   }
   const error = dependencyConnectionError(edges, sourceId, targetId);
   if (error) throw invalid(error);
@@ -213,7 +230,12 @@ export function addDependency(
   if (!relation) {
     const owner = booleanLogicGateForOutput(graph, targetId);
     if (owner) {
-      throw invalid(`「${targetId}」由邏輯閘「${owner.id}」控制，請改為編輯該閘門。`);
+      throw invalid(
+        translate("dependency.error.targetOwnedByGate", undefined, {
+          target: targetId,
+          gate: owner.id,
+        }),
+      );
     }
     const chosen = options.operator ?? editableGateOperator(topLevelOp(target.requires));
     target.requires = appendRequirement(target.requires ?? "", sourceId, chosen);
@@ -244,8 +266,8 @@ export function setNodeLinks(
   for (const link of links.slice(0, 64)) {
     const target = link.node.trim();
     const label = link.label.trim();
-    if (!target) throw invalid("連結必須指向一個節點。");
-    if (!label) throw invalid("連結名稱不可空白。");
+    if (!target) throw invalid(translate("domain.error.linkTarget"));
+    if (!label) throw invalid(translate("domain.error.linkLabel"));
     const key = `${link.project ?? ""}/${target}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -273,13 +295,15 @@ export function setNodeRequires(
   const node = findNode(graph, nodeId);
   const owner = booleanLogicGateForOutput(graph, nodeId);
   if (owner) {
-    throw invalid(`「${nodeId}」由邏輯閘「${owner.id}」控制，請改為編輯該閘門。`);
+    throw invalid(translate("dependency.error.targetOwnedByGate", undefined, { target: nodeId, gate: owner.id }));
   }
   if (refs !== null) {
     for (const ref of refs) {
       const gate = logicGateOwningEdge(graph, ref, nodeId);
       if (gate) {
-        throw invalid(`關係線「${ref} → ${nodeId}」由邏輯閘「${gate.id}」控制。`);
+        throw invalid(
+          translate("dependency.error.edgeOwnedByGate", undefined, { source: ref, target: nodeId, gate: gate.id }),
+        );
       }
     }
   }
@@ -302,4 +326,34 @@ export function setNodeRequires(
       graph.edges.push({ from: ref, to: nodeId });
     }
   }
+}
+
+/** Mirrors `maxNodeRefs` in internal/store/store.go. */
+export const MAX_NODE_REFS = 32;
+
+/**
+ * Makes `nodeId` use `ref` as context — a Note it should be read with. Never a
+ * dependency: nothing about readiness changes. Adding one already there is a
+ * no-op, the same as the server's `add-ref` op.
+ */
+export function addNodeRef(graph: Graph, nodeId: string, ref: string): void {
+  const node = findNode(graph, nodeId);
+  findNode(graph, ref);
+  if (ref === nodeId) throw invalid(translate("domain.error.refSelf"));
+  const refs = node.refs ?? [];
+  if (refs.includes(ref)) return;
+  if (refs.length >= MAX_NODE_REFS) {
+    throw invalid(translate("domain.error.refsTooMany", undefined, { max: MAX_NODE_REFS }));
+  }
+  node.refs = [...refs, ref];
+}
+
+/**
+ * Drops a reference. The target need not exist any more: a reference left
+ * dangling by a hand edit has to be removable too.
+ */
+export function removeNodeRef(graph: Graph, nodeId: string, ref: string): void {
+  const node = findNode(graph, nodeId);
+  const refs = (node.refs ?? []).filter((candidate) => candidate !== ref);
+  node.refs = refs.length ? refs : undefined;
 }

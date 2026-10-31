@@ -346,8 +346,12 @@ async function openBoard(page: Page) {
     const x = box.x + box.width / 2;
     await drag(page, { x, y: box.y + box.height / 2 }, { x, y: VH - 110 });
   }
-  const fit = page.getByRole("button", { name: "Fit all" }).first();
-  if (await fit.isVisible().catch(() => false)) await fit.click();
+  // Fit all lives in the graph header's ⋯ menu.
+  const more = page.getByRole("button", { name: "More graph tools" }).first();
+  if (await more.isVisible().catch(() => false)) {
+    await more.click();
+    await page.getByRole("menuitem", { name: "Fit all" }).click();
+  }
   await page.mouse.move(VW / 2, VH / 2);
   mouse = { x: VW / 2, y: VH / 2 };
   await pause(page, 900);
@@ -618,8 +622,8 @@ test("agent-run", async ({ page }) => {
   await pause(page, 1300);
   await focus(page, page.getByText("Add rate limiting middleware").first(), { pad: 140, minW: 760, hold: 700 });
   const drawer = await openNode(page, "Add rate limiting middleware");
-  const runsTab = drawer.getByRole("tab", { name: "Runs" });
-  await focus(page, [runsTab, drawer.getByRole("heading").first()], { pad: 40, minW: 760, hold: 300 });
+  const runsTab = drawer.getByRole("tab", { name: "Activity", exact: true });
+  await focus(page, [runsTab, drawer.getByLabel("Title", { exact: true })], { pad: 40, minW: 760, hold: 300 });
   await glide(page, runsTab);
   await pause(page, 400);
   const dispatch = drawer.getByRole("button", { name: "Dispatch to agent…" });
@@ -824,9 +828,13 @@ test("autopilot", async ({ page }) => {
   await pause(page, 2600);
   await focus(page, page.getByText("Ship the rate-limited public API").first(), { pad: 140, minW: 760, hold: 500 });
   const drawer = await openNode(page, "Ship the rate-limited public API");
-  const pill = drawer.getByRole("button", { name: /^Autopilot/ });
-  say("Open its autopilot", "The goal's Autopilot pill opens it in Station.");
-  await focus(page, pill, { pad: 120, minW: 720, hold: 1400 });
+  // Autopilot sits beside Dispatch, in the menu under its caret.
+  const caret = drawer.getByRole("button", { name: "More agent actions" });
+  say("Open its autopilot", "Next to Dispatch: Autopilot opens it in Station.");
+  await focus(page, caret, { pad: 120, minW: 720, hold: 900 });
+  await glide(page, caret);
+  const pill = drawer.getByRole("menuitem", { name: "Autopilot…" });
+  await focus(page, pill, { pad: 120, minW: 720, hold: 600 });
   const table = page.locator(".station-goal").getByRole("table");
   await cut(page, async () => {
     await glide(page, pill);
@@ -940,20 +948,21 @@ test("usage", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Usage", "What every run and agent session spends, in tokens and dollars.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
-  const settings = modes.getByRole("button", { name: "Settings" });
-  say("Usage lives in Settings", "Next to runners, routing and the daily budget.");
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  say("Usage lives in Settings", "Agents › Advanced, beside routing and the daily budget.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 600 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 600 });
   const parts = page.getByRole("navigation", { name: "Settings" });
-  const region = page.getByRole("region", { name: "Usage" });
+  const region = page.getByRole("region", { name: "Usage", exact: true });
   await cut(page, async () => {
     await glide(page, settings);
     await expect(parts).toBeVisible();
     await pause(page, 300);
     await focus(page, parts, { pad: 40, minW: 720, d: 0 });
   });
-  await glide(page, parts.getByRole("button", { name: "Usage", exact: true }));
+  await glide(page, parts.getByRole("button", { name: /^Agents/ }));
+  await glide(page, page.getByRole("button", { name: /^Advanced/ }));
+  await glide(page, page.getByRole("button", { name: /^Usage details/ }));
   await expect(region).toBeVisible();
   await pause(page, 600);
   say("By day, agent and model", "Tokens and API-equivalent cost for the last 30 days.");
@@ -975,9 +984,9 @@ test("usage", async ({ page }) => {
   await pause(page, 500);
   await focus(page, region, { pad: 16, hold: 2400 });
   say("A daily budget", "Past the limit, the hub refuses new runs.");
-  const budget = parts.getByRole("button", { name: "Daily budget" });
+  const budget = page.getByRole("button", { name: /^Daily budget/ });
   await glide(page, budget);
-  const budgetRegion = page.getByRole("region", { name: "Daily budget" });
+  const budgetRegion = page.getByRole("region", { name: "Daily budget", exact: true });
   await expect(budgetRegion).toBeVisible();
   await pause(page, 400);
   await focus(page, [budgetRegion.getByText(/^Limits on your runs/), budgetRegion.getByRole("button", { name: "Save budget" })], {
@@ -1058,13 +1067,13 @@ test("agent-network", async ({ page }) => {
   });
 
   await openBoard(page);
-  await begin(page, "Agent network", "See the other agents at work, and what they tell each other.");
-  const fab = page.getByRole("button", { name: "Open Agent Network" });
+  await begin(page, "Agent chat", "See the other agents at work, and what they tell each other.");
+  const fab = page.getByRole("button", { name: /^Open Agent chat/ });
   say("Every agent session, in one place", "Claude Code, Codex and OpenCode on the same project.");
   await pause(page, 1400);
   await focus(page, fab, { pad: 160, minW: 720, hold: 400 });
   await glide(page, fab);
-  const panel = page.getByRole("dialog", { name: "Agent Network" });
+  const panel = page.getByRole("dialog", { name: "Agent chat" });
   await expect(panel).toBeVisible();
   await pause(page, 400);
   await hidePointer(page);
@@ -1147,15 +1156,15 @@ test("two-factor-and-device-link", async ({ page }) => {
 
   await openBoard(page);
   await begin(page, "Two-factor and device links", "Lock your account down, then link a new runner.");
-  const modes = page.getByRole("navigation", { name: "Project view" });
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
   const parts = page.getByRole("navigation", { name: "Settings" });
   say("Your account, in Settings", "Turn on an authenticator app as a second factor.");
   await pause(page, 1200);
-  await focus(page, modes, { pad: 80, minW: 640, hold: 400 });
+  await focus(page, settings, { pad: 80, minW: 640, hold: 400 });
   await cut(page, async () => {
-    await glide(page, modes.getByRole("button", { name: "Settings" }));
+    await glide(page, settings);
     await expect(parts).toBeVisible();
-    await glide(page, parts.getByRole("button", { name: "Your account" }));
+    await glide(page, parts.getByRole("button", { name: /^Account/ }));
     await pause(page, 600);
     await hidePointer(page);
     await focus(page, page.getByRole("button", { name: "Set up" }), { pad: 200, minW: 760, d: 0 });
@@ -1179,10 +1188,10 @@ test("two-factor-and-device-link", async ({ page }) => {
   await glide(page, saved);
   await pause(page, 900);
 
-  say("Link a new runner", "A one-time device link from Settings, Runners.");
-  const runners = page.getByRole("region", { name: "Runners" });
+  say("Link a new runner", "A one-time device link from Settings, Agents.");
+  const runners = page.getByRole("region", { name: "Agents", exact: true });
   await cut(page, async () => {
-    await glide(page, parts.getByRole("button", { name: "Runners" }));
+    await glide(page, parts.getByRole("button", { name: /^Agents/ }));
     await expect(runners).toBeVisible();
     await pause(page, 500);
     await hidePointer(page);

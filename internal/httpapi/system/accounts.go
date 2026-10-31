@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // The server's accounts, for its administrators, from the web UI: what
@@ -108,13 +109,13 @@ const inviteMailTimeout = 15 * time.Second
 const maxAccountBody = 4 << 10
 
 var (
-	errNoAccounts = errors.New("this server does not use accounts; add people on a networked server")
-	errAdminOnly  = errors.New("only a server administrator can manage accounts")
-	errNoSuchUser = errors.New("no such account")
-	errSelfRemove = errors.New("you cannot remove your own account; ask another administrator")
-	errSelfDemote = errors.New("you cannot change your own role; ask another administrator")
-	errNeedsEmail = errors.New("an email address is required: it is how the person signs in")
-	errInviteRole = errors.New("role must be admin or member")
+	errNoAccounts = locale.Errorf("this server does not use accounts; add people on a networked server", "這個伺服器不使用帳號；請在網路伺服器上加入成員")
+	errAdminOnly  = locale.Errorf("only a server administrator can manage accounts", "只有伺服器管理員可以管理帳號")
+	errNoSuchUser = locale.Errorf("no such account", "沒有這個帳號")
+	errSelfRemove = locale.Errorf("you cannot remove your own account; ask another administrator", "你不能移除自己的帳號；請找另一位管理員")
+	errSelfDemote = locale.Errorf("you cannot change your own role; ask another administrator", "你不能更改自己的角色；請找另一位管理員")
+	errNeedsEmail = locale.Errorf("an email address is required: it is how the person signs in", "需要電子郵件地址：對方用它登入")
+	errInviteRole = locale.Errorf("role must be admin or member", "角色須為 admin 或 member")
 )
 
 // UseUsers enables the account routes. Without it (loopback) they answer 404.
@@ -245,12 +246,12 @@ func (a *API) postAccount(c *gin.Context) {
 	id, _, found := a.users.FindAccount(ctx, strings.TrimSpace(body.Name))
 	created, readBack := a.findAccount(ctx, id)
 	if !found || !readBack {
-		httpx.Err(c, http.StatusInternalServerError, errors.New("the account was created but could not be read back"))
+		httpx.Err(c, http.StatusInternalServerError, locale.Errorf("the account was created but could not be read back", "帳號已建立，但無法讀回"))
 		return
 	}
 
 	address := signInURL(c.Request)
-	status := a.mailInvitation(created, actor, address)
+	status := a.mailInvitation(created, actor, address, httpx.Language(c.Request))
 	a.recordAccountEvent(c, audit.ActionAccountInvite, actor, created.ID, map[string]any{
 		"account": created.Name, "role": string(created.Role),
 		"emailSent": status == inviteSent, "delivery": status,
@@ -281,42 +282,56 @@ func inviteRole(value string) (identity.Role, bool) {
 // relay, unlike a sign-in passcode: an administrator asked, the answer is
 // about an account they just made, and "it did not go out" is exactly what
 // they need to hear. The relay's own words go to the log, not the client.
-func (a *API) mailInvitation(account accountView, inviter identity.Actor, address string) string {
+//
+// The invitee has no browser here yet to say what they read, so it is
+// written in the inviting administrator's language: the one person known to
+// share a workplace with them.
+func (a *API) mailInvitation(account accountView, inviter identity.Actor, address string, language locale.Language) string {
 	if a.mailer == nil {
 		return inviteUnconfigured
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inviteMailTimeout)
 	defer cancel()
-	if err := a.mailer.Send(ctx, account.Email, inviteSubject, inviteText(account, inviter, address)); err != nil {
+	if err := a.mailer.Send(ctx, account.Email, inviteSubject(language), inviteText(account, inviter, address, language)); err != nil {
 		log.Printf("invitation to account %s was not sent: %v", account.ID, err)
 		return inviteFailed
 	}
 	return inviteSent
 }
 
-const inviteSubject = "You're invited to Nodevas / Nodevas 邀請"
+// inviteSubject is the invitation's subject in language.
+func inviteSubject(language locale.Language) string {
+	if language == locale.Chinese {
+		return "Nodevas 邀請"
+	}
+	return "You're invited to Nodevas"
+}
 
 // inviteText is plain text, as every mail this server sends: there is no link
 // to sign in with, only the address of the server, so nothing in it is worth
 // stealing and nothing in it can be made to look like a sign-in button.
-func inviteText(account accountView, inviter identity.Actor, address string) string {
-	role := "member"
+func inviteText(account accountView, inviter identity.Actor, address string, language locale.Language) string {
+	if language != locale.Chinese {
+		role := "member"
+		if account.Role == identity.RoleAdmin {
+			role = "administrator"
+		}
+		return strings.Join([]string{
+			fmt.Sprintf("%s added you to a Nodevas server as %s %q.", inviter.Name, role, account.Name),
+			"",
+			"To sign in:",
+			"  1. Open " + address,
+			"  2. Enter this email address: " + account.Email,
+			"  3. Type the one-time passcode that is then emailed to you.",
+			"",
+			"There is no password. If you did not expect this, ignore this mail and tell " + inviter.Name + ".",
+		}, "\n")
+	}
 	roleZH := "成員"
 	if account.Role == identity.RoleAdmin {
-		role, roleZH = "administrator", "管理員"
+		roleZH = "管理員"
 	}
 	return strings.Join([]string{
-		fmt.Sprintf("%s added you to a Nodevas server as %s %q.", inviter.Name, role, account.Name),
-		"",
-		"To sign in:",
-		"  1. Open " + address,
-		"  2. Enter this email address: " + account.Email,
-		"  3. Type the one-time passcode that is then emailed to you.",
-		"",
-		"There is no password. If you did not expect this, ignore this mail and tell " + inviter.Name + ".",
-		"",
-		"——",
-		"",
 		fmt.Sprintf("%s 已把你加入一台 Nodevas 伺服器，帳號為 %q，角色是%s。", inviter.Name, account.Name, roleZH),
 		"",
 		"登入方式：",

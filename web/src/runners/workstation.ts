@@ -4,7 +4,7 @@
  * The workstation — runners, agent runs, autopilot, the agent network and
  * usage — is a large part of the interface and none of it does anything on a
  * board used as a local planner. So it is out of sight until there is a reason
- * for it: the person turned it on (Settings → Agent workstation, or the
+ * for it: the person turned it on (Settings → Agents, or the
  * command palette), or this workspace already has a runner, a run, or an agent
  * connected to the network. The second kind of reason is written down as the
  * first (`agentWorkstation` = on) the moment it is seen, so a board never loses

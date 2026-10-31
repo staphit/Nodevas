@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,19 @@ const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
 // NodevasMCPTools is the --allowedTools rule for every tool of the run's
 // nodevas MCP server.
 const NodevasMCPTools = "mcp__nodevas"
+
+// ClaudeApproveTool is the --permission-prompt-tool of a run with
+// permissionRelay: the hub's approve_tool on the run's nodevas MCP server.
+const ClaudeApproveTool = NodevasMCPTools + "__" + ApproveToolName
+
+// ClaudeMCPTimeoutEnv is Claude Code's MCP tool-call timeout, in ms.
+const ClaudeMCPTimeoutEnv = "MCP_TOOL_TIMEOUT"
+
+// claudeRelayMCPTimeoutMs is ClaudeMCPTimeoutEnv in a run with
+// permissionRelay: past the hub's longest wait for a person (ask_user's ten
+// minutes; a permission ask's five) plus the long poll's slack, so the CLI
+// never cuts a call that is still waiting for an answer.
+const claudeRelayMCPTimeoutMs = 11 * 60 * 1000
 
 func (Claude) Kind() string { return "claude" }
 
@@ -85,24 +99,75 @@ func (Claude) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		args = append(args, "--setting-sources", "user")
 		args = append(args, "--disallowedTools", ClaudeReadOnlyDeny)
 	}
+	// permissionRelay: what would need a yes goes to the hub's approve_tool,
+	// which waits for a person. It is consulted only after the deny rules
+	// above and the permission mode, so it never widens them; plan and
+	// dontAsk never ask at all.
+	relay := ClaudeRelays(env)
+	if relay {
+		args = append(args, "--permission-prompt-tool", ClaudeApproveTool)
+	}
 	args = append(args, "--allowedTools", NodevasMCPTools)
+	if relay {
+		args = append(args, ClaudeApproveTool)
+	}
 	args = append(args, env.AllowedTools...)
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	// On stdin, not as an argument: no command-line length limit and no
 	// cmd.exe quoting for a prompt full of quotes and percent signs.
 	cmd.Stdin = strings.NewReader(Prompt(job, env.Branch))
-	cmd.Env = jobEnv(job)
+	var extra []string
+	if relay && !claudeMCPTimeoutAtLeast(claudeRelayMCPTimeoutMs) {
+		extra = append(extra, ClaudeMCPTimeoutEnv+"="+strconv.Itoa(claudeRelayMCPTimeoutMs))
+	}
+	cmd.Env = jobEnv(job, extra...)
 	return cmd, nil
+}
+
+// ClaudeRelays reports whether a Claude Code run under env sends its
+// permission prompts to the hub's approve_tool (--permission-prompt-tool):
+// permissionRelay on, in a mode that asks at all.
+func ClaudeRelays(env RunEnv) bool {
+	mode := env.PermissionMode
+	if mode == "" {
+		mode = DefaultClaudePermissionMode
+	}
+	return env.PermissionRelay && PermissionRelayApplies("claude", mode, false)
+}
+
+// ApproveToolName is the nodevas MCP tool ClaudeApproveTool names.
+const ApproveToolName = "approve_tool"
+
+// RelayMCPTools are the nodevas tools a run's sidecar must serve, whatever
+// its role's allowlist, for the run's permission relay: approve_tool for a
+// Claude Code run that relays, since the CLI refuses to start when the tool
+// --permission-prompt-tool names is not listed. The other CLIs relay through
+// the runner, not the sidecar.
+func RelayMCPTools(kind string, env RunEnv) []string {
+	if kind == "claude" && ClaudeRelays(env) {
+		return []string{ApproveToolName}
+	}
+	return nil
+}
+
+// claudeMCPTimeoutAtLeast reports whether the runner's own environment
+// already gives MCP tool calls at least ms; the owner's longer setting wins.
+func claudeMCPTimeoutAtLeast(ms int) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(ClaudeMCPTimeoutEnv)))
+	return err == nil && n >= ms
 }
 
 // childEnv is the runner's environment minus what an agent must not have:
 //   - the markers Claude Code sets for its own children (a runner started from
 //     inside a Claude Code session would otherwise hand them on, and the CLI
 //     refuses to start "inside" another one);
+//   - any outer agent's session and markers (outerAgentEnv): the run's
+//     `nodevas mcp` would take the outer session's id for its own, and the
+//     run's asks and heartbeats would land on that session;
 //   - every NODEVAS_* variable: the runner's token, its Cloudflare Access
 //     secret, the copilot and advisor keys. jobEnv adds back the few a run
-//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP);
+//     needs (NODEVAS_RUN_ID, NODEVAS_RUN_MCP, NODEVAS_RUN_NODE);
 //   - GitHub tokens: the runner pushes and opens pull requests itself, an
 //     agent never needs them.
 //
@@ -122,15 +187,29 @@ func childEnv() []string {
 	return out
 }
 
+// outerAgentEnv are the variables an agent sets for what it starts, naming
+// its session (the ones `nodevas mcp` reads to tell which session it serves)
+// or saying it is the parent. An agent the runner starts sets its own.
+var outerAgentEnv = []string{
+	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+	// Claude Code's channel to the session (a socket and its token).
+	"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SSE_PORT", "CLAUDE_PID",
+	"CODEX_THREAD_ID", "CODEX_SANDBOX",
+	"OPENCODE_SESSION_ID", "OPENCODE",
+	"GEMINI_SESSION_ID", "GEMINI_CLI",
+	"COPILOT_AGENT_SESSION_ID", "GROK_SESSION_ID",
+	"CURSOR_TRACE_ID", "CURSOR_AGENT",
+}
+
 // strippedEnv reports whether childEnv drops the variable called name.
 func strippedEnv(name string) bool {
 	upper := strings.ToUpper(name)
 	switch upper {
-	case "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
+	case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
 		return true
 	}
-	return strings.HasPrefix(upper, "NODEVAS_")
+	return slices.Contains(outerAgentEnv, upper) || strings.HasPrefix(upper, "NODEVAS_")
 }
 
 // RunIDEnv names the run an agent process belongs to. `nodevas hook` does

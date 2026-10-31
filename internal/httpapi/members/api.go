@@ -23,6 +23,7 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/members"
 	"nodevas/internal/project"
 )
@@ -68,7 +69,7 @@ func (a *API) target(c *gin.Context, name string) (string, string, members.Acces
 	if name == "" && a.current != nil {
 		name = a.current(c.Request)
 		if name == "" {
-			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 			return "", "", members.Access{}, false
 		}
 	}
@@ -76,14 +77,14 @@ func (a *API) target(c *gin.Context, name string) (string, string, members.Acces
 	if name == "" {
 		active, err := a.pm.ActiveProject()
 		if err != nil {
-			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("no project selected"), nil)
+			httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("no project selected", "沒有選擇專案"), nil)
 			return "", "", members.Access{}, false
 		}
 		name, dir = active.Name, active.Path
 	} else {
 		st, err := a.pm.StoreFor(name)
 		if err != nil {
-			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such project"), nil)
+			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such project", "沒有這個專案"), nil)
 			return "", "", members.Access{}, false
 		}
 		dir = st.Root()
@@ -91,7 +92,7 @@ func (a *API) target(c *gin.Context, name string) (string, string, members.Acces
 	key := project.Key(dir)
 	access := a.store.Access(auth.ActorFrom(c.Request), key)
 	if !access.CanRead() {
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such project"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such project", "沒有這個專案"), nil)
 		return "", "", members.Access{}, false
 	}
 	// These routes name their project themselves, so the audit row of a
@@ -160,12 +161,12 @@ func (a *API) put(c *gin.Context) {
 	}
 	if a.find == nil {
 		httpx.Coded(c, http.StatusConflict, "FAILED_PRECONDITION",
-			errors.New("project members need accounts; this server has none"), nil)
+			locale.Errorf("project members need accounts; this server has none", "專案成員需要帳號；這個伺服器沒有帳號"), nil)
 		return
 	}
 	role, valid := members.ParseRole(body.Role)
 	if !valid {
-		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", errors.New("role must be owner, editor or viewer"), nil)
+		httpx.Coded(c, http.StatusBadRequest, "INVALID_ARGUMENT", locale.Errorf("role must be owner, editor or viewer", "角色須為 owner、editor 或 viewer"), nil)
 		return
 	}
 	actor := auth.ActorFrom(c.Request)
@@ -177,14 +178,14 @@ func (a *API) put(c *gin.Context) {
 	if userID == "" {
 		id, _, found := a.find(c.Request.Context(), body.User)
 		if !found {
-			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no account has that name or sign-in address"), nil)
+			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no account has that name or sign-in address", "沒有帳號使用這個名稱或登入信箱"), nil)
 			return
 		}
 		userID = id
 	} else if !a.isMember(c.Request.Context(), key, userID) {
 		// An id is only accepted for someone already on the list (changing
 		// their role); new members are named, so ids cannot be guessed at.
-		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", errors.New("no such member"), nil)
+		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such member", "沒有這位成員"), nil)
 		return
 	}
 	if err := a.store.Set(c.Request.Context(), actor, key, userID, role); err != nil {

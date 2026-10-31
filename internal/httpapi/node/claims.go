@@ -13,6 +13,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -43,12 +44,12 @@ func (a *API) postClaim(c *gin.Context) {
 	}
 	if body.Owner == "" {
 		httpx.Coded(c, http.StatusBadRequest, codeInvalid,
-			errors.New("body must be {owner, leaseSeconds?, requestId?}"), nil)
+			locale.Errorf("body must be {owner, leaseSeconds?, requestId?}", "內容須為 {owner, leaseSeconds?, requestId?}"), nil)
 		return
 	}
 	if len(body.Owner) > 128 || len(body.RequestID) > maxRequestID {
 		httpx.Coded(c, http.StatusBadRequest, codeInvalid,
-			errors.New("owner or requestId is too long"), nil)
+			locale.Errorf("owner or requestId is too long", "owner 或 requestId 太長"), nil)
 		return
 	}
 
@@ -89,7 +90,7 @@ func (a *API) postRelease(c *gin.Context) {
 	}
 	if body.Owner == "" {
 		httpx.Coded(c, http.StatusBadRequest, codeInvalid,
-			errors.New("body must be {owner}"), nil)
+			locale.Errorf("body must be {owner}", "內容須為 {owner}"), nil)
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)

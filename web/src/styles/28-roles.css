@@ -1,0 +1,567 @@
+/* Agent roles and workflow stages: a node's acceptance criteria and a goal's
+   stage override (node panel), the stage chain and override (dispatch),
+   run role badges and red/green evidence (node runs), and the Roles and
+   Workflow stages rows of Settings › Agents. */
+
+/* ---- Node panel: acceptance criteria, above the editor ---- */
+.acceptance {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow: auto;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.acceptance-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.acceptance-head h3 {
+  margin: 0;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.acceptance-lock {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--st-locked-fg);
+  background: var(--st-locked-bg);
+}
+.acceptance-by {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.acceptance-required {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.acceptance-list {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.acceptance-item {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.acceptance-id {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.acceptance-text,
+.acceptance-add input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.acceptance-text:hover {
+  border-color: var(--border);
+}
+.acceptance-text:focus-visible,
+.acceptance-add input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.acceptance-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.acceptance-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.acceptance-icon:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.acceptance-icon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.acceptance-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.acceptance-add input {
+  border-color: var(--border);
+  background: var(--surface);
+}
+.acceptance-add button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+.acceptance-add button:hover:not(:disabled) {
+  background: var(--hover);
+}
+.acceptance-add button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.acceptance-error {
+  margin: 6px 0 0;
+  color: var(--st-failed-fg);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+/* A goal's stage override, under its criteria. */
+.goal-stages {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.goal-stages-summary {
+  color: var(--text-2);
+}
+.goal-stages-presets {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- Workflow stages (Settings) ---- */
+.stages-settings {
+  display: grid;
+  gap: 10px;
+}
+.stages-legacy {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.stages-group-label {
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--text-2);
+}
+.stages-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+}
+.stages-preset {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: calc(13px * var(--font-scale, 1));
+  cursor: pointer;
+  transition: border-color 140ms var(--ease-out), background 140ms var(--ease-out);
+}
+.stages-preset:hover {
+  border-color: var(--border-strong);
+}
+.stages-preset.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.stages-preset input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.stages-preset-name {
+  font-weight: 600;
+}
+/* The cost reads from the attribute: the radio's name already carries it. */
+.stages-preset-cost::after {
+  content: attr(data-cost);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.stages-preset-what {
+  grid-column: 2 / -1;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.stages-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.stages-toggles legend {
+  padding: 0 4px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+.stages-cost {
+  margin: 0;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+.stages-levers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 12px;
+}
+.stages-lever input {
+  max-width: 120px;
+}
+.stages-globs {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+
+/* ---- Roles (Settings) ---- */
+.roles-settings {
+  display: grid;
+  gap: 8px;
+}
+.role-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.role-item {
+  border-bottom: 1px solid var(--border);
+}
+.role-item:last-child {
+  border-bottom: 0;
+}
+.role-toggle .settings-disclosure-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.role-based {
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 400;
+}
+.role-job {
+  margin: 0 2px 8px;
+  color: var(--text-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.role-vendor {
+  margin: 0 2px 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.role-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 2px 12px;
+}
+.role-body h4 {
+  margin: 0 0 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.role-who,
+.role-what,
+.role-custom {
+  display: grid;
+  gap: 6px;
+}
+.role-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.role-tools legend {
+  padding: 0 4px;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--text-2);
+}
+.role-tool span {
+  font-family: var(--mono);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.role-add {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ---- Dispatch: the stage chain, criteria block and override ---- */
+.run-stages {
+  display: grid;
+  gap: 8px;
+}
+.stage-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stage-step {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--font-scale, 1));
+  font-weight: 600;
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.stage-step + .stage-step::before {
+  content: "→";
+  margin: 0 6px 0 -2px;
+  color: var(--text-2);
+  font-weight: 400;
+}
+.stage-step.is-red {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+  box-shadow: none;
+}
+.stage-step.is-green {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+  box-shadow: none;
+}
+.run-stage-block,
+.run-stage-warning {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-stage-block {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-stage-block .run-inline-link {
+  justify-self: start;
+}
+.run-stage-warning {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-stage-warning code {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+  overflow-wrap: anywhere;
+}
+
+/* ---- Node runs: role badges, evidence, guard, checks ---- */
+.run-role {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--hover);
+}
+.run-verdict-pass {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.run-verdict-fail {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-row-evidence {
+  display: block;
+  padding: 0 10px 6px;
+}
+.run-evidence {
+  position: relative;
+  display: inline-block;
+}
+.run-evidence-button {
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: calc(11px * var(--font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+.run-evidence-button.is-good {
+  color: var(--st-done-fg);
+  background: var(--st-done-bg);
+}
+.run-evidence-button.is-red.is-good {
+  color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.run-evidence-button.is-bad {
+  color: var(--st-ready-fg);
+  background: var(--st-ready-bg);
+}
+.run-evidence-pop {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(420px, 80vw);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.run-evidence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-evidence-output {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+  white-space: pre-wrap;
+}
+.run-guard {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-guard.is-violation {
+  background: var(--st-ready-bg);
+}
+.run-guard-title {
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-guard-state,
+.run-guard-sub {
+  color: var(--text-2);
+}
+.run-guard-files {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run-guard-files code {
+  font-family: var(--mono);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.run-guard-files .is-touched code {
+  color: var(--st-ready-fg);
+}
+.run-guard-mark {
+  margin-left: 6px;
+  color: var(--st-ready-fg);
+}
+.run-checks {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.run-checks .is-pass code {
+  color: var(--st-done-fg);
+}
+.run-checks .is-fail {
+  color: var(--st-failed-fg);
+}
+.run-override {
+  margin: 4px 0;
+  font-size: calc(12px * var(--font-scale, 1));
+  color: var(--st-ready-fg);
+}
+
+/* ---- Autopilot: a staged goal's phase ---- */
+.ap-goal-phase {
+  margin: 4px 0;
+  font-size: calc(13px * var(--font-scale, 1));
+  font-weight: 600;
+}
+.ap-goal-phase.is-human {
+  color: var(--st-ready-fg);
+}
+.ap-stages-line {
+  margin: 0;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stages-preset {
+    transition: none;
+  }
+}

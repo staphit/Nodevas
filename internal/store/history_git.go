@@ -17,12 +17,15 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
 	"nodevas/internal/engine"
 	"nodevas/internal/gitrepo"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
+	"nodevas/internal/safego"
 )
 
 // historyImportMarker says the .vised/history copies are in the repository.
@@ -40,7 +43,7 @@ const importChunk = 200
 
 // errProjectGone is a project folder that was deleted or moved away while a
 // commit was waiting. There is nothing left to record.
-var errProjectGone = errors.New("project folder is gone")
+var errProjectGone = locale.Errorf("project folder is gone", "專案資料夾已不存在")
 
 // gitHistory batches saves into commits: at most one per window per project,
 // plus one at once for a restore, a delete or a conversion.
@@ -62,6 +65,9 @@ type gitHistory struct {
 
 	gitMu sync.Mutex
 	repo  *gitrepo.Repo
+	// opened is repo once it is ready, for readers: they only read the
+	// repository, so they never wait on gitMu behind a commit.
+	opened atomic.Pointer[gitrepo.Repo]
 }
 
 // gitPending is what the next commit records: who saved, and any earlier
@@ -98,6 +104,7 @@ func newGitHistory(s *Store, window time.Duration) *gitHistory {
 	g.inflight.Add(1)
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history open")
 		if _, err := g.ready(context.Background()); err != nil && !errors.Is(err, errProjectGone) {
 			log.Printf("history for %s: %v", s.root, err)
 		}
@@ -111,16 +118,20 @@ func newGitHistory(s *Store, window time.Duration) *gitHistory {
 // version an editing session started from. Later writes in the same session
 // need nothing: the window coalesces them on purpose.
 //
-// Caller holds s.mu. History never fails a save, so errors are logged.
-func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
-	data, err := g.s.ReadFile(abs)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("history for %s: read before overwrite: %v", g.s.root, err)
+// Caller holds s.mu, exclusively or (a page save) for reading together with
+// abs's path lock. History never fails a save, so errors are logged.
+func (g *gitHistory) beforeOverwrite(abs string, data []byte, always bool) error {
+	if data == nil {
+		var err error
+		data, err = g.s.ReadFile(abs)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("history for %s: read before overwrite: %v", g.s.root, err)
+			}
+			return nil
 		}
-		return nil
 	}
-	mark, known := g.s.historyMarks[abs]
+	mark, known := g.s.loadHistoryMark(abs)
 	own := known && mark.rev == Rev(data)
 	now := time.Now()
 	if own && !always && !mark.snapshotAt.IsZero() && now.Sub(mark.snapshotAt) < g.window {
@@ -138,7 +149,7 @@ func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 		// created and then edited within one window is not lost to the
 		// window's single commit.
 		mark.snapshotAt = now
-		g.s.historyMarks[abs] = mark
+		g.s.storeHistoryMark(abs, mark)
 		g.mu.Lock()
 		pending := g.pendingLocked()
 		pending.segments = append(pending.segments, gitSegment{changes: []gitrepo.Change{change}, at: now})
@@ -147,11 +158,8 @@ func (g *gitHistory) beforeOverwrite(abs string, always bool) error {
 		return nil
 	}
 	// Content this store did not write starts a session too.
-	if g.s.historyMarks == nil {
-		g.s.historyMarks = map[string]historyMark{}
-	}
 	mark.snapshotAt = now
-	g.s.historyMarks[abs] = mark
+	g.s.storeHistoryMark(abs, mark)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	pending := g.pendingLocked()
@@ -221,9 +229,16 @@ func (g *gitHistory) pendingLocked() *gitPending {
 		g.pending = &gitPending{kinds: map[string]string{}}
 	}
 	if g.timer == nil && !g.closed {
-		g.timer = time.AfterFunc(g.window, g.commitSoon)
+		g.timer = time.AfterFunc(g.window, g.commitSoonSafely)
 	}
 	return g.pending
+}
+
+// commitSoonSafely is commitSoon as the window's timer calls it: a timer
+// callback is a bare goroutine, and a panic there would end the server.
+func (g *gitHistory) commitSoonSafely() {
+	defer safego.Recover("history commit window")
+	g.commitSoon()
 }
 
 func (g *gitHistory) commitSoon() {
@@ -242,6 +257,7 @@ func (g *gitHistory) commitSoon() {
 	g.mu.Unlock()
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history commit")
 		if err := g.commit(context.Background(), false); err != nil {
 			log.Printf("history for %s: %v", g.s.root, err)
 		}
@@ -261,6 +277,7 @@ func (g *gitHistory) commitStartsSoon() {
 	g.mu.Unlock()
 	go func() {
 		defer g.inflight.Done()
+		defer safego.Recover("history commit segments")
 		if err := g.commitSegments(context.Background()); err != nil {
 			log.Printf("history for %s: %v", g.s.root, err)
 		}
@@ -272,24 +289,44 @@ func (g *gitHistory) commitStartsSoon() {
 func (g *gitHistory) commitSegments(ctx context.Context) error {
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
-	g.mu.Lock()
-	var segments []gitSegment
-	if g.pending != nil {
-		segments, g.pending.segments = g.pending.segments, nil
-	}
-	g.mu.Unlock()
-	if len(segments) == 0 {
+	if !g.hasSegments() {
 		return nil
 	}
+	// Opened before the segments are taken: a repository opening now commits
+	// them ahead of the work tree (importCopies), which is newer than they are.
 	repo, err := g.readyLocked(ctx)
 	if errors.Is(err, errProjectGone) {
+		g.takeSegments()
 		return nil
 	}
 	if err != nil {
-		g.requeue(&gitPending{kinds: map[string]string{}, segments: segments})
 		return err
 	}
+	segments := g.takeSegments()
+	if len(segments) == 0 {
+		return nil
+	}
 	return g.commitSegmentsLocked(ctx, repo, g.titlesWithCommitted(ctx, repo), segments)
+}
+
+// hasSegments reports whether earlier versions wait in the batch.
+func (g *gitHistory) hasSegments() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.pending != nil && len(g.pending.segments) > 0
+}
+
+// takeSegments removes the earlier versions waiting in the batch and returns
+// them, oldest first.
+func (g *gitHistory) takeSegments() []gitSegment {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending == nil {
+		return nil
+	}
+	segments := g.pending.segments
+	g.pending.segments = nil
+	return segments
 }
 
 // commitSegmentsLocked commits earlier versions in order. Caller holds gitMu.
@@ -302,7 +339,7 @@ func (g *gitHistory) commitSegmentsLocked(ctx context.Context, repo *gitrepo.Rep
 		}
 		message := commitMessage(titles, nil, outside, coAuthors)
 		if _, err := repo.CommitChanges(ctx, seg.changes, message, author, seg.at); err != nil {
-			return fmt.Errorf("record earlier versions: %w", err)
+			return locale.Errorf("record earlier versions: %w", "記錄先前版本：%w", err)
 		}
 	}
 	return nil
@@ -341,17 +378,15 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
 	g.mu.Lock()
-	pending := g.pending
-	g.pending = nil
-	if g.timer != nil {
-		g.timer.Stop()
-		g.timer = nil
-	}
+	idle := g.pending == nil
 	g.mu.Unlock()
-	if pending == nil && !force {
+	if idle && !force {
 		return nil
 	}
+	// Opened before the batch is taken: a repository opening now commits the
+	// batch's earlier versions ahead of the work tree (importCopies).
 	repo, err := g.readyLocked(ctx)
+	pending := g.takePending()
 	if errors.Is(err, errProjectGone) {
 		return nil
 	}
@@ -370,7 +405,7 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	}
 	paths, err := g.s.historyTrackedFiles()
 	if err != nil {
-		return fmt.Errorf("list tracked files: %w", err)
+		return locale.Errorf("list tracked files: %w", "列出追蹤的檔案：%w", err)
 	}
 	authors := append([]gitrepo.Person(nil), pending.authors...)
 	for _, person := range pending.carried {
@@ -380,7 +415,7 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	}
 	author, coAuthors := splitAuthors(authors)
 	if _, err := repo.CommitTracked(ctx, paths, commitMessage(titles, pending.kinds, "", coAuthors), author, time.Now()); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return locale.Errorf("commit: %w", "提交：%w", err)
 	}
 	// A commit every few minutes leaves loose objects behind; --auto packs
 	// them once there are enough, and does nothing until then.
@@ -388,6 +423,19 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 		log.Printf("history for %s: gc: %v", g.s.root, err)
 	}
 	return nil
+}
+
+// takePending removes the open batch, and its window, and returns it.
+func (g *gitHistory) takePending() *gitPending {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	pending := g.pending
+	g.pending = nil
+	if g.timer != nil {
+		g.timer.Stop()
+		g.timer = nil
+	}
+	return pending
 }
 
 // requeue puts a batch that could not be committed back in front of
@@ -416,12 +464,26 @@ func (g *gitHistory) requeue(batch *gitPending) {
 	}
 	g.pending = batch
 	if g.timer == nil && !g.closed {
-		g.timer = time.AfterFunc(g.window, g.commitSoon)
+		g.timer = time.AfterFunc(g.window, g.commitSoonSafely)
 	}
 }
 
 // ready is the repository with the old copies imported.
+//
+// Once it is open, ready does not take gitMu: its callers only read the
+// repository (log, show, a status that takes no lock), which git allows while
+// a commit runs, and a history panel must not wait out every commit a stream
+// of saves keeps starting.
 func (g *gitHistory) ready(ctx context.Context) (*gitrepo.Repo, error) {
+	if repo := g.opened.Load(); repo != nil {
+		if _, err := g.s.statPath(g.s.GraphPath()); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, errProjectGone
+			}
+			return nil, err
+		}
+		return repo, nil
+	}
 	g.gitMu.Lock()
 	defer g.gitMu.Unlock()
 	return g.readyLocked(ctx)
@@ -443,14 +505,68 @@ func (g *gitHistory) readyLocked(ctx context.Context) (*gitrepo.Repo, error) {
 	}
 	repo, err := gitrepo.Open(ctx, g.s.root)
 	if err != nil {
-		return nil, fmt.Errorf("open repository: %w", err)
+		return nil, locale.Errorf("open repository: %w", "開啟儲存庫：%w", err)
 	}
 	if err := g.importCopies(ctx, repo); err != nil {
-		return nil, fmt.Errorf("import .vised/history: %w", err)
+		return nil, locale.Errorf("import .vised/history: %w", "匯入 .vised/history：%w", err)
 	}
 	g.repo = repo
+	g.opened.Store(repo)
 	return repo, nil
 }
+
+// firstCommitState takes the versions waiting in the batch and reads every
+// tracked file but theirs, as one cut: under s.mu, held exclusively, so no
+// write is halfway. started is the paths the versions are of. Caller holds
+// gitMu, which is the order the two locks are always taken in.
+func (g *gitHistory) firstCommitState() (segments []gitSegment, files []gitrepo.Change, started []string, err error) {
+	g.s.mu.Lock()
+	defer g.s.mu.Unlock()
+	segments = g.takeSegments()
+	for _, seg := range segments {
+		for _, change := range seg.changes {
+			if !containsString(started, change.Path) {
+				started = append(started, change.Path)
+			}
+		}
+	}
+	paths, err := g.s.historyTrackedFiles()
+	if err != nil {
+		g.requeueSegments(segments)
+		return nil, nil, nil, err
+	}
+	for _, rel := range paths {
+		if containsString(started, rel) {
+			continue
+		}
+		data, err := g.s.ReadFile(filepath.Join(g.s.root, filepath.FromSlash(rel)))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			g.requeueSegments(segments)
+			return nil, nil, nil, err
+		}
+		files = append(files, gitrepo.Change{Path: rel, Data: data})
+	}
+	return segments, files, started, nil
+}
+
+// requeueSegments puts versions taken from the batch back in front of any
+// queued since, for the next try.
+func (g *gitHistory) requeueSegments(segments []gitSegment) {
+	if len(segments) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	pending := g.pendingLocked()
+	pending.segments = append(append([]gitSegment(nil), segments...), pending.segments...)
+}
+
+// firstCommitHook is a seam: tests save while the repository's first commit
+// is being made. Nil outside tests.
+var firstCommitHook func()
 
 // historyCopy is one file under .vised/history.
 type historyCopy struct {
@@ -528,11 +644,34 @@ func (g *gitHistory) importCopies(ctx context.Context, repo *gitrepo.Repo) error
 		}
 		imported += len(batch)
 	}
-	paths, err := g.s.historyTrackedFiles()
+	// The first commit is the project at one moment, and the versions
+	// saved while the repository was opening are older than that moment:
+	// committed after it, they would read as a change undoing what it holds.
+	// So the queued versions are taken and the work tree read together,
+	// under the store's lock: a save landing between the two had its content
+	// in this commit and its older version committed after it, which is how
+	// a blank document came to be the newest version of what was typed. The
+	// lock covers file reads, never git, so a save still never waits on it.
+	//
+	// Each queued version is also where an editing session started, and that
+	// session is still open: the file holds somewhere in the middle of it,
+	// and the window's commit is where that is recorded. Taken here it would
+	// be a version of whatever had been typed by the time git started, one
+	// more than the session gets when the repository opens first. Those
+	// files stay at their earlier version in this commit.
+	segments, files, started, err := g.firstCommitState()
 	if err != nil {
 		return err
 	}
-	if _, err := repo.CommitTracked(ctx, paths, commitMessage(titles, nil, "", nil), gitrepo.Person{}, time.Now()); err != nil {
+	if firstCommitHook != nil {
+		firstCommitHook()
+	}
+	if len(segments) > 0 {
+		if err := g.commitSegmentsLocked(ctx, repo, titles, segments); err != nil {
+			return err
+		}
+	}
+	if _, err := repo.CommitSnapshot(ctx, files, started, commitMessage(titles, nil, "", nil), gitrepo.Person{}, time.Now()); err != nil {
 		return err
 	}
 	note := fmt.Sprintf("%d versions imported from .vised/history at %s\n", imported, time.Now().UTC().Format(time.RFC3339))
@@ -683,7 +822,7 @@ func (g *gitHistory) read(rel, version string) ([]byte, error) {
 		return nil, err
 	}
 	if !gitrepo.ValidSHA(version) {
-		return nil, fmt.Errorf("invalid version name")
+		return nil, locale.Errorf("invalid version name", "版本名稱無效")
 	}
 	ctx := context.Background()
 	repo, err := g.ready(ctx)
@@ -704,7 +843,7 @@ func (g *gitHistory) read(rel, version string) ([]byte, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("version %.12s of %s: %w", version, rel, err)
+	return nil, locale.Errorf("version %.12s of %s: %w", "%[2]s 的版本 %.12[1]s：%[3]v", version, rel, err)
 }
 
 func (g *gitHistory) restoreTarget(rel string) (string, error) {
@@ -734,7 +873,7 @@ func (g *gitHistory) actualRel(rel string) (string, error) {
 	}
 	actual, ok := g.rel(abs)
 	if !ok {
-		return "", fmt.Errorf("history not tracked for %q", rel)
+		return "", locale.Errorf("history not tracked for %q", "「%s」沒有追蹤歷史紀錄", rel)
 	}
 	return actual, nil
 }

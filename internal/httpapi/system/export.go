@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/document"
 	"nodevas/internal/document/docx"
 	dochtml "nodevas/internal/document/html"
+	"nodevas/internal/locale"
 )
 
 func (a *API) postExport(c *gin.Context) {
@@ -27,10 +28,11 @@ func (a *API) postExport(c *gin.Context) {
 	}
 	spec, ok := export.Formats[strings.ToLower(strings.TrimSpace(request.Format))]
 	if !ok {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("unsupported format %q", request.Format))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("unsupported format %q", "不支援的格式「%s」", request.Format))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
+	request.Language = httpx.Language(c.Request)
 	markdown, title, err := export.BuildMarkdown(st, request)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -40,7 +42,12 @@ func (a *API) postExport(c *gin.Context) {
 		httpx.Err(c, status, err)
 		return
 	}
-	options := document.Options{Title: title, Assets: st.DocumentAssets()}
+	// The document names its own language; one with no words to tell by
+	// takes the reader's.
+	options := document.Options{Title: title, Assets: st.DocumentAssets(), Language: "en"}
+	if request.Language == locale.Chinese {
+		options.Language = "zh-Hant"
+	}
 	var data []byte
 	switch strings.ToLower(request.Format) {
 	case "md":

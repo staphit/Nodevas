@@ -1,3 +1,4 @@
+import { localizedStatusLabel } from "./i18n";
 import type { BuiltinStatus, Status, StatusDefinition } from "./types";
 
 export interface StatusTheme {
@@ -10,17 +11,18 @@ export interface StatusTheme {
 
 // Warm monochrome base + muted pastel accents; actual values live in CSS
 // custom properties (app.css) with light/dark variants.
-export const STATUS_THEME: Record<BuiltinStatus, StatusTheme> = {
+// Labels are read from the catalog when asked for (statusTheme), so they
+// follow the interface language.
+export const STATUS_THEME: Record<BuiltinStatus, Omit<StatusTheme, "label">> = {
   // The server's decode-only locked state renders like not-started.
-  locked: { label: "未開始", color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
-  ready: { label: "未開始", color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
-  started: { label: "開始", color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
-  in_progress: { label: "進行中", color: "var(--st-progress-fg)", bg: "var(--st-progress-bg)", shape: "diamond" },
-  done: { label: "完成", color: "var(--st-done-fg)", bg: "var(--st-done-bg)", shape: "square" },
-  skipped: { label: "略過", color: "var(--st-skipped-fg)", bg: "var(--st-skipped-bg)", shape: "dash" },
-  failed: { label: "失敗", color: "var(--st-failed-fg)", bg: "var(--st-failed-bg)", shape: "triangle" },
+  locked: { color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
+  ready: { color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
+  started: { color: "var(--st-ready-fg)", bg: "var(--st-ready-bg)", shape: "circle" },
+  in_progress: { color: "var(--st-progress-fg)", bg: "var(--st-progress-bg)", shape: "diamond" },
+  done: { color: "var(--st-done-fg)", bg: "var(--st-done-bg)", shape: "square" },
+  skipped: { color: "var(--st-skipped-fg)", bg: "var(--st-skipped-bg)", shape: "dash" },
+  failed: { color: "var(--st-failed-fg)", bg: "var(--st-failed-bg)", shape: "triangle" },
   deprecated: {
-    label: "棄用",
     color: "var(--st-deprecated-fg)",
     bg: "var(--st-deprecated-bg)",
     shape: "dash",
@@ -47,7 +49,7 @@ export function statusTheme(
   definitions: StatusDefinition[] = [],
 ): StatusTheme {
   const builtin = STATUS_THEME[status as BuiltinStatus];
-  if (builtin) return builtin;
+  if (builtin) return { ...builtin, label: localizedStatusLabel(status) };
   const definition = definitions.find((candidate) => candidate.id === status);
   const color = definition?.color || "#8b7cf6";
   return {

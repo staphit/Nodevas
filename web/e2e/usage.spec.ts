@@ -100,7 +100,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 async function expectInViewport(page: Page, width: number) {
-  const dialog = page.getByRole("region", { name: "用量" });
+  const dialog = page.getByRole("region", { name: "用量", exact: true });
   const box = await dialog.boundingBox();
   expect(box).not.toBeNull();
   const gutter = width < 640 ? 15 : 0;
@@ -123,7 +123,7 @@ for (const [name, viewport] of Object.entries({
     await freshProject(page, ["設計稿"]);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("nodevas-open-usage")));
 
-    const dialog = page.getByRole("region", { name: "用量" });
+    const dialog = page.getByRole("region", { name: "用量", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("$42.37").first()).toBeVisible();
     await expect(dialog.getByText(/token 沒有價格/)).toBeVisible();
@@ -136,7 +136,7 @@ for (const [name, viewport] of Object.entries({
     await expect(dialog.locator(".usage-tooltip")).toBeVisible();
     await shot(page, `${name}-tooltip`);
 
-    await dialog.getByRole("tab", { name: "Session" }).click();
+    await dialog.getByRole("tab", { name: "工作階段" }).click();
     await expect(dialog.getByText("patrick")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, `${name}-sessions`);
@@ -158,9 +158,12 @@ test("usage opens from the agents panel", async ({ page }) => {
   await page.evaluate(() => {
     document.documentElement.dataset.theme = "dark";
   });
-  await page.getByRole("button", { name: "開啟 Agent 協作面板" }).click();
-  await page.getByRole("dialog", { name: "Agent 協作網路" }).getByRole("button", { name: "用量" }).click();
-  const dialog = page.getByRole("region", { name: "用量" });
+  // With no agent online and nothing unread the floating button stays away;
+  // the shortcut still opens Agent chat.
+  await expect(page.getByRole("button", { name: /^開啟 Agent 對話/ })).toHaveCount(0);
+  await page.keyboard.press("Control+Shift+A");
+  await page.getByRole("dialog", { name: "Agent 對話" }).getByRole("button", { name: "用量" }).click();
+  const dialog = page.getByRole("region", { name: "用量", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("$42.37").first()).toBeVisible();
   await shot(page, "desktop-dark");

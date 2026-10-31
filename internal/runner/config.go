@@ -40,6 +40,11 @@ type Config struct {
 	// Repos are the repositories the owner allowed runs in, added with
 	// `nodevas runner repo add` on this machine and nowhere else.
 	Repos []runnerwire.Repo `json:"repos,omitempty"`
+	// repoTests are the repos' test commands and timeouts (verify.go),
+	// stored in each repo's runner.json entry and read once at start: an
+	// agent that rewrites runner.json mid-run changes nothing until the
+	// runner restarts. They never go into the hello.
+	repoTests map[string]repoTest
 	// Models replaces the built-in model list for an agent kind.
 	Models map[string][]runnerwire.Model `json:"models,omitempty"`
 
@@ -78,6 +83,12 @@ type Config struct {
 	// AntigravityMode is the Antigravity CLI's --mode for every run, or full
 	// (adapter.AntigravityModes).
 	AntigravityMode string `json:"antigravityMode,omitempty"`
+	// PermissionRelay sends a headless run's tool-permission prompts to
+	// Nodevas, where a person allows or denies them, instead of refusing
+	// them: Claude Code (--permission-prompt-tool), the Antigravity CLI (its
+	// gate) and OpenCode over ACP. Off by default; the runner's own limits
+	// (read-only runs, plan modes, the gate's denials) stay either way.
+	PermissionRelay bool `json:"permissionRelay,omitempty"`
 	// AutoAccept is the auto-accept allowlist (W6; autoaccept.go): which
 	// offers are taken without asking at the terminal. nil means off. W1's
 	// boolean form is migrated on load.
@@ -92,6 +103,10 @@ type Config struct {
 	// whose modes are headless only unless the owner adds interactive, and
 	// typing from the hub stays off unless the owner allows it.
 	Interactive *bool `json:"interactive,omitempty"`
+	// RepoBrowse answers the hub's read-only repo browsing for the
+	// Explorer (repobrowse.go): nil means the default, on; false refuses it
+	// and leaves runnerwire.CapRepoBrowse out of the hello.
+	RepoBrowse *bool `json:"repoBrowse,omitempty"`
 
 	// Pull requests, from W3 on.
 
@@ -330,10 +345,17 @@ func (c *Config) PermissionModeFor(kind string) string {
 	return c.ClaudePermissionMode()
 }
 
+// RelaysPermissions reports whether a headless run of an agent kind, under
+// this runner's settings, sends its permission prompts to Nodevas
+// (permissionRelay and adapter.PermissionRelayApplies).
+func (c *Config) RelaysPermissions(kind string) bool {
+	return c.PermissionRelay && adapter.PermissionRelayApplies(kind, c.PermissionModeFor(kind), c.OpenCodeProtocol == "acp")
+}
+
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"autoAccept", "interactive",
+	"permissionRelay", "autoAccept", "interactive", "repoBrowse",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
@@ -483,6 +505,16 @@ func (c *Config) Set(key string, values []string) error {
 			return err
 		}
 		c.AntigravityMode = mode
+	case "permissionRelay":
+		if reset {
+			c.PermissionRelay = false
+			return nil
+		}
+		on, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("permissionRelay must be true or false")
+		}
+		c.PermissionRelay = on
 	case "allowedTools":
 		if reset || (len(values) == 1 && (strings.EqualFold(value, "none") || value == "")) {
 			c.AllowedTools = nil
@@ -524,6 +556,16 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("interactive must be true or false")
 		}
 		c.Interactive = &on
+	case "repoBrowse":
+		if reset {
+			c.RepoBrowse = nil
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("repoBrowse must be on or off")
+		}
+		c.RepoBrowse = &on
 	case "autoPR":
 		if reset {
 			c.AutoPR = nil
@@ -759,4 +801,15 @@ func ValidateToken(token string) error {
 		return errors.New("runner token must not contain whitespace")
 	}
 	return nil
+}
+
+// onOff reads a switch: on/off, true/false, yes/no, 1/0.
+func onOff(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "true", "yes", "1":
+		return true, true
+	case "off", "false", "no", "0":
+		return false, true
+	}
+	return false, false
 }

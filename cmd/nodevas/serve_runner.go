@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"nodevas/internal/runner"
+	"nodevas/internal/runnerwire"
 )
 
 // A standalone `serve` (loopback --listen, no proxy, no TLS, no Cloudflare
@@ -41,8 +43,9 @@ func (r *repoFlags) Set(value string) error {
 	return nil
 }
 
-// localRunnerName is the local runner's name on the Runners page.
-const localRunnerName = "this machine"
+// localRunnerName is the local runner's name on the hub: a fixed id the web
+// translates, never shown as stored.
+const localRunnerName = runnerwire.LocalRunnerName
 
 // localRunnerMode is whether serve starts a runner beside its hub, and how
 // much a failure to start it matters.
@@ -176,6 +179,9 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	}
 	cmd := exec.Command(exe, "runner", "start", "--config", path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stderr, stderr
+	// Serve owns Ctrl+C on the terminal they share (it asks for a second
+	// one); the runner ends when serve stops it.
+	cmd.Env = append(os.Environ(), localRunnerUnderServeEnv+"=1")
 	endWithServe(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the local runner: %w", err)
@@ -199,8 +205,9 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	}()
 	return func() {
 		close(stopping)
-		// Windows has no interrupt to send another process.
-		if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		// SIGTERM, since the runner leaves Ctrl+C to serve. Windows has no
+		// signal to send another process, so there it is killed.
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 			_ = cmd.Process.Kill()
 		}
 		select {

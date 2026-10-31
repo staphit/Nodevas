@@ -56,8 +56,15 @@ export function useCanvasDecorations({
     setContextMenu(null);
   };
 
-  const createGroupFromSelection = () => {
-    const selected = cols.filter((column) => selectedGraphNodeIDs.has(column.node.id));
+  /**
+   * A group background around the selection, or around `ids` when given: a
+   * node's own menu names its node, since the selection it just set has not
+   * rendered yet.
+   */
+  const createGroupFromSelection = (ids?: readonly string[]) => {
+    // Called straight from a menu item's handler too, which passes no array.
+    const chosen = Array.isArray(ids) ? new Set(ids) : selectedGraphNodeIDs;
+    const selected = cols.filter((column) => chosen.has(column.node.id));
     if (selected.length === 0) return;
     const left = Math.min(...selected.map((c) => c.index * COL_W + COL_W / 2 - c.width / 2));
     const right = Math.max(...selected.map((c) => c.index * COL_W + COL_W / 2 + c.width / 2));

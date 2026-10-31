@@ -3,20 +3,16 @@ package agents
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"nodevas/internal/db"
+	"nodevas/internal/testpg"
 )
 
 func openTestHub(t *testing.T) *Hub {
 	t.Helper()
-	database, err := db.OpenAt(filepath.Join(t.TempDir(), db.FileName))
-	if err != nil {
-		t.Fatalf("OpenAt: %v", err)
-	}
+	database := testpg.New(t)
 	t.Cleanup(func() { _ = database.Close() })
 	return NewHub(database, nil)
 }
@@ -227,16 +223,18 @@ func TestAskUserAndAboutApprovalForwarding(t *testing.T) {
 			Question:    "Bob's agent wants to drop legacy column. Approve?",
 			AboutMsgID:  msgID,
 			NodeID:      "node-7",
-		}, 2*time.Second)
+		}, 10*time.Second)
 		if askErr != nil {
 			t.Errorf("CreateAndWait: %v", askErr)
 		}
 		resultCh <- decided
 	}()
 
-	// Wait until pending ask is visible, then answer as human.
+	// Wait until pending ask is visible, then answer as human. The budget is
+	// a deadline, not a fixed number of tries: under a full parallel go test
+	// run the ask's insert can take far longer than a few hundred ms.
 	var pending []Ask
-	for range 20 {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		pending, _ = hub.ListAsks(ctx, "alpha", AskPending)
 		if len(pending) == 1 {
 			break
@@ -257,7 +255,7 @@ func TestAskUserAndAboutApprovalForwarding(t *testing.T) {
 		if got.Status != AskApproved || got.Note != "Proceed after backup" {
 			t.Fatalf("decided ask = %+v", got)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("CreateAndWait did not unblock after Answer")
 	}
 

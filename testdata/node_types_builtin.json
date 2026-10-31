@@ -1,0 +1,11 @@
+{ "types": [
+ {"id":"task", "label":"Task",    "builtin":true,"shape":"round",  "color":"",       "agentMode":"dispatch", "completion":"anyone","countsInProgress":true},
+ {"id":"goal", "label":"Goal",    "builtin":true,"shape":"thick",  "color":"#62b2c1","agentMode":"autopilot","completion":"people","countsInProgress":true},
+ {"id":"scene","label":"Scene",   "builtin":true,"shape":"round",  "color":"",       "agentMode":"dispatch", "completion":"anyone","countsInProgress":true},
+ {"id":"event","label":"Event",   "builtin":true,"shape":"ellipse","color":"",       "agentMode":"dispatch", "completion":"anyone","countsInProgress":true},
+ {"id":"gate", "label":"Review",  "builtin":true,"shape":"hexagon","color":"#f0a35e","agentMode":"none",     "completion":"people","countsInProgress":true},
+ {"id":"choice","label":"Decision","builtin":true,"shape":"diamond","color":"",      "agentMode":"none",     "completion":"people","countsInProgress":true},
+ {"id":"start","label":"Start",   "builtin":true,"shape":"pill",   "color":"",       "agentMode":"none",     "completion":"auto",  "countsInProgress":false},
+ {"id":"end",  "label":"End",     "builtin":true,"shape":"pill",   "color":"",       "agentMode":"none",     "completion":"auto",  "countsInProgress":false},
+ {"id":"note", "label":"Note",    "builtin":true,"shape":"dashed", "color":"",       "agentMode":"none",     "completion":"none",  "countsInProgress":false}
+]}

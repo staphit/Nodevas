@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { DialogFrame, useInlineDialog } from "./DialogFrame";
-import { operationScope, reportError, useApp, useOperation } from "../store";
-import { IconClose } from "../icons";
-import { useI18n } from "../i18n";
+import { useMemo, useState } from "react";
+import { operationScope, reportError, useOperation } from "../store";
 import { OperationStatus, InlineNotice } from "./InteractionPrimitives";
-import { AppearanceEditor } from "./settings/AppearanceEditor";
+import { AppearanceEditor, LayoutEditor } from "./settings/AppearanceEditor";
 import { CopilotEditor } from "./settings/CopilotEditor";
 import { MilestoneTypeEditor } from "./settings/MilestoneTypeEditor";
+import { NodeTypeEditor } from "./settings/NodeTypeEditor";
+import { OfficeStylePicker } from "./settings/OfficeStylePicker";
 import { PeopleEditor } from "./settings/PeopleEditor";
 import { StatusVocabularyEditor } from "./settings/StatusVocabularyEditor";
 import { TwoFactorEditor } from "./settings/TwoFactorEditor";
@@ -15,75 +14,57 @@ import { MembersEditor } from "../members/MembersEditor";
 import { ServerMembersPanel } from "../members/ServerMembersPanel";
 import type { SettingsNotify } from "./settings/notify";
 
-export type SettingsTab = "workflow" | "milestones" | "people" | "members" | "server" | "appearance" | "copilot" | "account";
-
-const TABS: { id: SettingsTab; labelKey: string; hintKey: string }[] = [
-  { id: "workflow", labelKey: "settings.workflow", hintKey: "settings.workflowHint" },
-  { id: "milestones", labelKey: "settings.milestones", hintKey: "settings.milestonesHint" },
-  { id: "people", labelKey: "settings.people", hintKey: "settings.peopleHint" },
-  { id: "members", labelKey: "members.tab", hintKey: "members.tabHint" },
-  { id: "appearance", labelKey: "settings.appearance", hintKey: "settings.appearanceHint" },
-  { id: "copilot", labelKey: "settings.copilot", hintKey: "settings.copilotHint" },
-];
-
-/** The signed-in person's own account, not the project's: only on a server
- * with accounts. */
-const ACCOUNT_TAB = { id: "account" as const, labelKey: "auth.totp.tab", hintKey: "auth.totp.tabHint" };
-
-/** The server's own accounts, for its administrators. */
-const SERVER_TAB = { id: "server" as const, labelKey: "serverMembers.tab", hintKey: "serverMembers.tabHint" };
+export type SettingsTab =
+  | "workflow"
+  | "nodeTypes"
+  | "officeStyle"
+  | "milestones"
+  | "people"
+  | "server"
+  | "appearance"
+  | "layout"
+  | "copilot"
+  | "account";
 
 /**
- * The single entry point for project-wide definitions [B-05].
+ * One of the project-wide definitions [B-05] (or one of the viewer's own
+ * settings), as a part of the Settings page: the editor and the one pair of
+ * banners it reports through.
  *
- * Each tab edits a different persisted domain, so the tabs are separate
- * components; this frame owns only the chrome and the one pair of banners they
- * all report through.
+ * Each editor edits a different persisted domain, so they are separate
+ * components; this owns only the banners. People also carries the project's
+ * members on a server with accounts. Server accounts and account security
+ * only mean something with accounts, and server accounts only to an
+ * administrator; elsewhere those draw nothing.
  */
 export function ProjectSettings({
-  onClose,
-  only,
+  tab,
+  onInvite,
 }: {
-  onClose: () => void;
-  /** The tabs to offer, in their usual order; the Settings view shows one
-   * part at a time. Unset: every tab this viewer may use. */
-  only?: readonly SettingsTab[];
+  tab: SettingsTab;
+  /** Members' "invite to the server": opens the server's accounts. */
+  onInvite?: () => void;
 }) {
-  const { t } = useI18n();
-  const inline = useInlineDialog();
-  const activeProject = useApp((s) => s.activeProject);
   const viewer = useViewer();
-  // Members, server accounts and account security only mean something with
-  // accounts; a standalone install has one person and the OS decided who that is.
   const teamServer = useTeamServer();
-  const serverAdmin = viewer?.role === "admin";
-  const projectTabs = teamServer ? TABS : TABS.filter((entry) => entry.id !== "members");
-  const allowed = viewer && teamServer ? [...projectTabs, ...(serverAdmin ? [SERVER_TAB] : []), ACCOUNT_TAB] : projectTabs;
-  const tabs = only ? allowed.filter((entry) => only.includes(entry.id)) : allowed;
+  const serverAdmin = Boolean(teamServer && viewer?.role === "admin");
   const workflowOperation = useOperation(operationScope.workflow());
 
-  const [tab, setTab] = useState<SettingsTab>(tabs[0]?.id ?? "workflow");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !inline) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, inline]);
-
   // Stable so an editor's effects do not restart every time a banner changes.
   const notify: SettingsNotify = useMemo(() => ({ onError: setError, onNotice: setNotice }), []);
+  const workflow =
+    tab === "workflow" ||
+    tab === "nodeTypes" ||
+    tab === "officeStyle" ||
+    tab === "milestones" ||
+    tab === "people";
 
   return (
-    <DialogFrame className="project-settings-dialog" label={t("settings.title")} onDismiss={onClose}>
-      <div className="settings-head">
-        <div>
-          <b>{t("settings.title")}</b>
-          <small>{activeProject || t("settings.currentProject")}</small>
-        </div>
+    <div className="settings-editor">
+      {workflow && (
         <OperationStatus
           status={workflowOperation.status}
           message={
@@ -92,54 +73,35 @@ export function ProjectSettings({
               : undefined
           }
         />
-        <button type="button" data-dialog-close aria-label={t("settings.close")} onClick={onClose}>
-          <IconClose size={14} />
-        </button>
-      </div>
+      )}
+      {error && <InlineNotice kind="error">{error}</InlineNotice>}
+      {notice && !error && <InlineNotice kind="success">{notice}</InlineNotice>}
 
-      <div className="settings-tabs" role="tablist" aria-label={t("settings.categories")} hidden={tabs.length < 2}>
-        {tabs.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry.id}
-            className={tab === entry.id ? "active" : ""}
-            onClick={() => {
-              setTab(entry.id);
-              setError(null);
-              setNotice(null);
-            }}
-            title={t(entry.hintKey)}
-          >
-            {t(entry.labelKey)}
-          </button>
-        ))}
-      </div>
+      {tab === "workflow" && <StatusVocabularyEditor notify={notify} />}
 
-      <div className="settings-body">
-        {error && <InlineNotice kind="error">{error}</InlineNotice>}
-        {notice && !error && <InlineNotice kind="success">{notice}</InlineNotice>}
+      {tab === "nodeTypes" && <NodeTypeEditor notify={notify} />}
 
-        {tab === "workflow" && <StatusVocabularyEditor notify={notify} />}
+      {tab === "officeStyle" && <OfficeStylePicker notify={notify} />}
 
-        {tab === "milestones" && <MilestoneTypeEditor notify={notify} />}
+      {tab === "milestones" && <MilestoneTypeEditor notify={notify} />}
 
-        {tab === "people" && <PeopleEditor notify={notify} />}
+      {tab === "people" && (
+        <>
+          <PeopleEditor notify={notify} />
+          {teamServer && <MembersEditor notify={notify} onInvite={serverAdmin ? onInvite : undefined} />}
+        </>
+      )}
 
-        {tab === "members" && (
-          <MembersEditor notify={notify} onInvite={serverAdmin ? () => setTab("server") : undefined} />
-        )}
+      {tab === "server" && serverAdmin && <ServerMembersPanel notify={notify} />}
 
-        {tab === "server" && serverAdmin && <ServerMembersPanel notify={notify} />}
+      {tab === "appearance" && <AppearanceEditor />}
 
-        {tab === "appearance" && <AppearanceEditor notify={notify} />}
+      {tab === "layout" && <LayoutEditor notify={notify} />}
 
-        {tab === "copilot" && <CopilotEditor notify={notify} />}
+      {tab === "copilot" && <CopilotEditor notify={notify} />}
 
-        {tab === "account" && viewer && <TwoFactorEditor notify={notify} />}
-      </div>
-    </DialogFrame>
+      {tab === "account" && teamServer && viewer && <TwoFactorEditor notify={notify} />}
+    </div>
   );
 }
 

@@ -2,10 +2,11 @@ package engine
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
+
+	"nodevas/internal/locale"
 )
 
 // NodeFile is a parsed nodes/<id>.md: YAML frontmatter + markdown body.
@@ -40,11 +41,11 @@ func ParseNodeFile(data []byte) (*NodeFile, error) {
 		if fmText, ok := strings.CutSuffix(trimmed, "\n"+fmDelim); ok {
 			meta := map[string]any{}
 			if err := yaml.Unmarshal([]byte(fmText), &meta); err != nil {
-				return nil, fmt.Errorf("frontmatter: %w", err)
+				return nil, locale.Errorf("frontmatter: %w", "前置資料：%w", err)
 			}
 			return &NodeFile{Meta: meta, Body: ""}, nil
 		}
-		return nil, fmt.Errorf("frontmatter: missing closing delimiter")
+		return nil, locale.Errorf("frontmatter: missing closing delimiter", "前置資料：缺少結尾分隔線")
 	}
 	fmText := rest[:idx]
 	body := rest[idx:]
@@ -57,7 +58,7 @@ func ParseNodeFile(data []byte) (*NodeFile, error) {
 
 	meta := map[string]any{}
 	if err := yaml.Unmarshal([]byte(fmText), &meta); err != nil {
-		return nil, fmt.Errorf("frontmatter: %w", err)
+		return nil, locale.Errorf("frontmatter: %w", "前置資料：%w", err)
 	}
 	return &NodeFile{Meta: meta, Body: body}, nil
 }
@@ -96,6 +97,9 @@ func SyncFrontmatter(nf *NodeFile, n *Node) {
 	setOrDelete(nf.Meta, "write_access", n.WriteAccess, n.WriteAccess != "")
 	setOrDelete(nf.Meta, "requires", n.Requires, n.Requires != "")
 	setOrDelete(nf.Meta, "tags", n.Tags, len(n.Tags) > 0)
+	// refs is a snapshot only; hydrateNodeFromMeta never reads it back. A
+	// note's own "summary" key is the author's and is never touched here.
+	setOrDelete(nf.Meta, "refs", n.Refs, len(n.Refs) > 0)
 	if len(n.Effects) > 0 {
 		effs := make([]map[string]any, 0, len(n.Effects))
 		for _, e := range n.Effects {

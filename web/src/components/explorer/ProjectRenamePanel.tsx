@@ -12,6 +12,7 @@ import { useI18n } from "../../i18n";
 import { reportError, useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
 import type { ProjectMenuTarget } from "./ProjectContextMenu";
+import { projectNameClash, projectNameClashMessage } from "./projectNameTaken";
 
 export function useProjectRename({
   projectByName,
@@ -24,7 +25,7 @@ export function useProjectRename({
   persistExpandedProjects: (next: Set<string>) => void;
   setProjectTransferNotice: (notice: string | null) => void;
 }) {
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const loadAll = useApp((state) => state.loadAll);
   const { t } = useI18n();
   const [projectRenameTarget, setProjectRenameTarget] =
@@ -84,15 +85,16 @@ export function useProjectRename({
     const separator = target.name.lastIndexOf("/");
     const parent = separator >= 0 ? target.name.slice(0, separator) : "";
     const nextName = parent ? `${parent}/${nextLabel}` : nextLabel;
-    if (projectByName.has(nextName) && nextName !== target.name) {
-      setProjectRenameError(t("explorer.renameDuplicate"));
+    const clash = projectNameClash(projectByName.keys(), nextName, target.name);
+    if (clash !== null) {
+      setProjectRenameError(projectNameClashMessage(clash, nextName, t("explorer.renameDuplicate"), t));
       return;
     }
 
     setProjectRenameBusy(true);
     setProjectRenameError(null);
     try {
-      const result = await api.moveProject(target.name, parent, nextLabel);
+      const result = await changeProjects(() => api.moveProject(target.name, parent, nextLabel));
       const remapExpandedName = (name: string) =>
         name === target.name
           ? result.name
@@ -102,7 +104,6 @@ export function useProjectRename({
       persistExpandedProjects(
         new Set([...expandedProjects].map(remapExpandedName)),
       );
-      await refreshProjects();
       if (result.active) await loadAll();
       setProjectTransferNotice(
         t("explorer.renamed", {

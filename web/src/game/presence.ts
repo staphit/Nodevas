@@ -9,7 +9,7 @@ import type { AgentSession } from "../api/agents";
 /** internal/agents/registry.go SessionTTL (90s). */
 export const SESSION_TTL_MS = 90_000;
 
-/** How often a mounted game view re-derives presence. A third of the TTL: a
+/** How often a mounted war room re-derives presence. A third of the TTL: a
  * session that went quiet shows offline at most 30s late. */
 export const PRESENCE_TICK_MS = 30_000;
 

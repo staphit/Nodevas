@@ -11,7 +11,8 @@ import { openNodeRuns } from "../../runs/RunsRoot";
 import { openAutopilot } from "../../autopilot/openAutopilot";
 import { useRuns } from "../../runs/runStore";
 import { useWorkstationVisible } from "../../runners/workstation";
-import { useI18n } from "../../i18n";
+import { formatList, useI18n } from "../../i18n";
+import { useNodeType } from "../../nodeTypeTheme";
 import { reportError, useApp } from "../../store";
 import { confirmAction } from "../ConfirmDialog";
 
@@ -40,6 +41,9 @@ export function NodeContextMenu({
   const { t } = useI18n();
   const workstation = useWorkstationVisible();
   const [nodeMenuBusy, setNodeMenuBusy] = useState(false);
+  // Same rule as the board's node menu: no agent actions for a type agents
+  // cannot work, and Autopilot instead of a dispatch for a Goal.
+  const { agentMode } = useNodeType({ nodeId: menu.nodeId });
 
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -107,7 +111,7 @@ export function NodeContextMenu({
           </b>
           <small>
             {menu.ids.length > 1
-              ? menu.ids.join(", ")
+              ? formatList(menu.ids)
               : t("explorer.nodeDocument")}
           </small>
         </span>
@@ -156,9 +160,10 @@ export function NodeContextMenu({
               <small>{t("explorer.duplicateHint")}</small>
             </span>
           </button>
-          {workstation && (
+          {workstation && agentMode !== "none" && (
           <>
           <div className="project-context-separator" />
+          {agentMode === "dispatch" && (
           <button
             type="button"
             role="menuitem"
@@ -176,6 +181,7 @@ export function NodeContextMenu({
               <small>{t("explorer.dispatchHint")}</small>
             </span>
           </button>
+          )}
           <button
             type="button"
             role="menuitem"

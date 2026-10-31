@@ -1,0 +1,301 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../api";
+import { readPreferences } from "../preferences";
+import { useSettingsRequest } from "../settings/openSettings";
+import { useControl } from "../station/controlStore";
+import { useApp } from "../store";
+import { CommandPalette } from "./CommandPalette";
+import { useNodeDetailView } from "./drawer/openNodeDetail";
+import { openCommandPalette } from "./topbar/actions";
+
+const confirm = vi.hoisted(() => ({ answer: true }));
+vi.mock("./ConfirmDialog", () => ({
+  confirmAction: vi.fn(async () => confirm.answer),
+}));
+
+const switchProject = vi.fn(async () => {});
+const pauseAll = vi.fn(async () => true);
+
+beforeEach(() => {
+  confirm.answer = true;
+  switchProject.mockClear();
+  pauseAll.mockClear();
+  useApp.setState({
+    preferences: { ...readPreferences(), language: "en", projectMode: "info", agentWorkstation: true },
+    activeProject: "beta",
+    projects: [
+      { name: "alpha", label: "Alpha", depth: 0, path: "alpha", nodes: 3 },
+      { name: "beta", label: "Beta", depth: 0, path: "beta", nodes: 7 },
+    ],
+    workspaces: [],
+    switchProject,
+  });
+  useControl.setState({ pauseAll });
+});
+
+function open(view?: "help") {
+  render(<CommandPalette />);
+  act(() => openCommandPalette(view));
+}
+
+function search(text: string) {
+  fireEvent.change(screen.getByRole("textbox", { name: /^Search/ }), { target: { value: text } });
+}
+
+describe("CommandPalette: what the top bar no longer shows", () => {
+  it("finds every relocated control by name", () => {
+    open();
+    for (const name of [
+      "Open settings",
+      "Open Station",
+      "Pause all agents",
+      "Add a runner",
+      "Daily budget",
+      "Routing rules",
+      "Usage",
+      "Replay tour",
+      "Switch to light mode",
+      "Settings: Appearance and language",
+      "Settings: Backup and history",
+      "Switch to Alpha",
+    ]) {
+      expect(screen.getByRole("option", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
+    }
+    // The project on screen is not offered as a switch.
+    expect(screen.queryByRole("option", { name: /^Switch to Beta/ })).toBeNull();
+  });
+
+  it("opens a part of Settings", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Daily budget/ }));
+    const prefs = useApp.getState().preferences;
+    expect(prefs.projectMode).toBe("settings");
+    expect(prefs.settingsSection).toBe("budget");
+  });
+
+  it("asks Settings for the add-runner form from Add a runner", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Add a runner/ }));
+    expect(useApp.getState().preferences.settingsSection).toBe("runners");
+    expect(useSettingsRequest.getState().add).toBe(true);
+  });
+
+  it("switches project", async () => {
+    const user = userEvent.setup();
+    open();
+    search("alpha");
+    await user.click(screen.getByRole("option", { name: /^Switch to Alpha/ }));
+    expect(switchProject).toHaveBeenCalledWith("alpha");
+  });
+
+  it("pauses all agents once confirmed, leaving running runs, and opens Station", async () => {
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Pause all agents/ }));
+    expect(pauseAll).toHaveBeenCalledWith(false);
+    expect(useApp.getState().preferences.projectMode).toBe("station");
+  });
+
+  it("does nothing when the pause is declined", async () => {
+    confirm.answer = false;
+    const user = userEvent.setup();
+    open();
+    await user.click(screen.getByRole("option", { name: /^Pause all agents/ }));
+    expect(pauseAll).not.toHaveBeenCalled();
+  });
+
+  it("hides the agent commands while the workstation is hidden", () => {
+    useApp.setState({ preferences: { ...useApp.getState().preferences, agentWorkstation: false } });
+    open();
+    expect(screen.queryByRole("option", { name: /^Pause all agents/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /^Daily budget/ })).toBeNull();
+  });
+
+  it("opens straight on the help view when asked", () => {
+    open("help");
+    expect(screen.getByText("Keyboard shortcuts and help")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /^Search/ })).toBeNull();
+  });
+});
+
+describe("CommandPalette: new nodes by type", () => {
+  it("creates a Review from \"New node: Review\"", async () => {
+    const createNode = vi.fn(async () => "n1");
+    useApp.setState({
+      createNode,
+      graph: { version: 1, nodes: [], edges: [] },
+    });
+    const user = userEvent.setup();
+    open();
+    search("Review");
+    await user.click(screen.getByRole("option", { name: /^New node: Review/ }));
+    expect(createNode).toHaveBeenCalledWith({ title: expect.any(String), kind: "gate" });
+  });
+});
+
+describe("CommandPalette: jumping to a node", () => {
+  it("opens a found node and scrolls the board to it", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "far-card", title: "Far card", kind: "node" }],
+    });
+    try {
+      const user = userEvent.setup();
+      open();
+      search("Far card");
+      await user.click(await screen.findByRole("option", { name: /Far card/ }));
+      expect(openTab).toHaveBeenCalledWith("far-card");
+      // The board may be showing anywhere else: the jump has to reach it too.
+      expect(useApp.getState().revealRequest?.nodeId).toBe("far-card");
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+});
+
+describe("CommandPalette: a hit inside a subpage", () => {
+  function nodeTab(id: string, content: string) {
+    return {
+      id, pinned: false, content, rev: "r1", dirty: false, loaded: true,
+      diskChanged: false, draftPending: null, conflict: null,
+    };
+  }
+
+  it("opens the subpage named by the search result without fetching subpages", async () => {
+    const openTab = vi.fn(async (id: string) => {
+      useApp.setState({ tabs: [nodeTab(id, ["# 設計說明", "", "**粗體**"].join("\n"))], activeTab: id });
+    });
+    useApp.setState({ openTab, revealRequest: null, tabs: [] });
+    useNodeDetailView.setState({ pageRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "design", pageId: "cast", title: "設計", snippet: "主角：小明", kind: "node" }],
+    });
+    const listSpy = vi.spyOn(api, "listNodePages").mockResolvedValue({ pages: [] });
+    const pageSpy = vi.spyOn(api, "getNodePage");
+    try {
+      const user = userEvent.setup();
+      open();
+      search("小明");
+      await user.click(await screen.findByRole("option", { name: /設計/ }));
+      expect(openTab).toHaveBeenCalledWith("design");
+      expect(useNodeDetailView.getState().pageRequest).toMatchObject({ nodeId: "design", pageId: "cast" });
+      expect(listSpy).not.toHaveBeenCalled();
+      expect(pageSpy).not.toHaveBeenCalled();
+    } finally {
+      searchSpy.mockRestore();
+      listSpy.mockRestore();
+      pageSpy.mockRestore();
+    }
+  });
+
+  it("requests the main page when the search result names no subpage", async () => {
+    const openTab = vi.fn(async (id: string) => {
+      useApp.setState({ tabs: [nodeTab(id, "# 設計說明")], activeTab: id });
+    });
+    useApp.setState({ openTab, revealRequest: null, tabs: [] });
+    useNodeDetailView.setState({ pageRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "design", title: "設計", kind: "node" }],
+    });
+    const listSpy = vi.spyOn(api, "listNodePages").mockResolvedValue({ pages: [{ id: "cast", title: "角色設定" }] });
+    try {
+      const user = userEvent.setup();
+      open();
+      search("小明");
+      await user.click(await screen.findByRole("option", { name: /設計/ }));
+      expect(openTab).toHaveBeenCalledWith("design");
+      expect(listSpy).not.toHaveBeenCalled();
+      // The drawer may be on a subpage: the main-page hit has to bring it back.
+      expect(useNodeDetailView.getState().pageRequest).toMatchObject({ nodeId: "design", pageId: "main" });
+    } finally {
+      searchSpy.mockRestore();
+      listSpy.mockRestore();
+    }
+  });
+});
+
+describe("CommandPalette: while a search is on its way", () => {
+  it("says it is searching, not that nothing matched, until the answer arrives", async () => {
+    let answer: (value: Awaited<ReturnType<typeof api.search>>) => void = () => {};
+    const searchSpy = vi
+      .spyOn(api, "search")
+      .mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    vi.useFakeTimers();
+    try {
+      open();
+      search("zzqx");
+      // Inside the debounce, and while the request is out: no "no results".
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(searchSpy).toHaveBeenCalledWith("zzqx");
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+      await act(async () => {
+        answer({ results: [] });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("No matching commands or content")).toBeTruthy();
+      expect(screen.queryByText("Searching…")).toBeNull();
+      // A new query is pending again until its own answer arrives.
+      search("zzqxy");
+      expect(screen.queryByText("No matching commands or content")).toBeNull();
+      expect(screen.getByText("Searching…")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+      searchSpy.mockRestore();
+    }
+  });
+});
+
+describe("CommandPalette: Enter before the results arrive", () => {
+  it("opens the first result once it lands", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    let answer: (value: Awaited<ReturnType<typeof api.search>>) => void = () => {};
+    const searchSpy = vi
+      .spyOn(api, "search")
+      .mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    try {
+      open();
+      search("Zulu card");
+      // Straight away: the debounce has not even sent the search yet.
+      fireEvent.keyDown(screen.getByRole("textbox", { name: /^Search/ }), { key: "Enter" });
+      expect(openTab).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(searchSpy).toHaveBeenCalledWith("Zulu card"));
+      await act(async () => {
+        answer({ results: [{ project: "beta", nodeId: "zulu", title: "Zulu card", kind: "node" }] });
+      });
+      await vi.waitFor(() => expect(openTab).toHaveBeenCalledWith("zulu"));
+      expect(openTab).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+
+  it("forgets the Enter when the query changes before the answer", async () => {
+    const openTab = vi.fn(async () => {});
+    useApp.setState({ openTab, revealRequest: null });
+    const searchSpy = vi.spyOn(api, "search").mockResolvedValue({
+      results: [{ project: "beta", nodeId: "zulu", title: "Zulu card", kind: "node" }],
+    });
+    try {
+      open();
+      search("Zulu card");
+      fireEvent.keyDown(screen.getByRole("textbox", { name: /^Search/ }), { key: "Enter" });
+      search("Zulu car");
+      await screen.findByRole("option", { name: /Zulu card/ });
+      expect(openTab).not.toHaveBeenCalled();
+    } finally {
+      searchSpy.mockRestore();
+    }
+  });
+});

@@ -188,7 +188,14 @@ func describeOffer(o Offer) string {
 	fmt.Fprintf(&b, "  project:      %s\n", orDash(job.Project))
 	fmt.Fprintf(&b, "  node:         %s  %s\n", job.NodeID, job.NodeTitle)
 	fmt.Fprintf(&b, "  repository:   %s  (%s)\n", o.Repo.Name, o.Repo.Path)
-	fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
+	if job.Kind == runnerwire.JobVerify {
+		b.WriteString("  agent:        none: runs this repository's test command (runner.json), no model\n")
+	} else {
+		fmt.Fprintf(&b, "  agent:        %s, model %s\n", job.Agent, orDash(job.Model))
+	}
+	if job.Role != "" {
+		fmt.Fprintf(&b, "  role:         %s\n", job.Role)
+	}
 	if interactive {
 		b.WriteString("  mode:         INTERACTIVE: the agent runs in a terminal on this machine; the\n" +
 			"                dispatcher watches it, and types into it only if you allow that next\n")
@@ -201,6 +208,17 @@ func describeOffer(o Offer) string {
 		fmt.Fprintf(&b, "  kind:         REVIEW of %s (branch %s); posts a PR comment, changes nothing\n", job.PRURL, job.Branch)
 	case runnerwire.JobRevise:
 		fmt.Fprintf(&b, "  kind:         REVISE %s: pushes to its branch %s\n", job.PRURL, job.Branch)
+	case runnerwire.JobVerify:
+		phase, head := "", ""
+		if job.Verify != nil {
+			phase, head = job.Verify.Phase, job.Verify.Head
+		}
+		fmt.Fprintf(&b, "  kind:         VERIFY (%s) %s at %s: runs the test command on code an agent wrote, in a throwaway worktree\n",
+			phase, job.PRURL, short(head))
+	case runnerwire.JobJudge:
+		fmt.Fprintf(&b, "  kind:         JUDGE: checks %d acceptance criteria; reads, changes no files\n", len(job.Acceptance))
+	case runnerwire.JobTest:
+		b.WriteString("  kind:         TEST: writes failing tests only, opens a draft pull request\n")
 	case runnerwire.JobPlan:
 		if strings.TrimSpace(job.Review) != "" {
 			fmt.Fprintf(&b, "  kind:         REPLAN: reconciles the goal's tasks with a revised requirement; reads the code, changes no files\n")

@@ -210,6 +210,55 @@ func (h *Hub) ListHeld(ctx context.Context, project string, v Viewer) ([]Message
 	return out, nil
 }
 
+// HeldIn returns the held messages of several projects that v may decide,
+// oldest first, in one query. Project keys are store roots, as for
+// ListHeld. File details are not attached: the building only counts them.
+func (h *Hub) HeldIn(ctx context.Context, projects []string, v Viewer) ([]Message, error) {
+	projects = normalizeProjectKeys(projects)
+	out := []Message{}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	if h.database == nil {
+		want := make(map[string]bool, len(projects))
+		for _, p := range projects {
+			want[p] = true
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for _, m := range h.memMessages {
+			if want[m.Project] && m.Status == StatusHeld && v.mayDecide(m) {
+				out = append(out, m)
+			}
+		}
+		return out, nil
+	}
+	args := make([]any, 0, len(projects)+2)
+	for _, p := range projects {
+		args = append(args, p)
+	}
+	args = append(args, StatusHeld, maxBuildingRows)
+	rows, err := h.database.QueryContext(ctx, `
+		SELECT `+messageColumns+`
+		  FROM agent_messages
+		 WHERE project IN (?`+strings.Repeat(", ?", len(projects)-1)+`) AND status = ?
+		 ORDER BY created_at, id LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		if v.mayDecide(m) {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
+}
+
 // Decide approves (delivers) or rejects a held message. Only the recipient's
 // actor or an admin may; to anyone else the message does not exist. Deciding
 // a message that is no longer held is ErrNotHeld, so two people clicking at
@@ -324,4 +373,48 @@ func (h *Hub) FileContent(ctx context.Context, project, id, name string, v Viewe
 		return FileInfo{}, "", err
 	}
 	return f, content, nil
+}
+
+// Shown is a as v may see it in a listing, with CanAnswer set. Everyone
+// who can open the project sees that an agent waits and on what kind of
+// ask, but a permission prompt's input and question (command lines with
+// tokens, file contents) and a person's answer and note are for those who
+// may answer it (MayAnswer).
+func (v Viewer) Shown(a Ask) Ask {
+	may := v.MayAnswer(a)
+	can := may && !v.Agent
+	a.CanAnswer = &can
+	if may {
+		return a
+	}
+	a.ToolInput = ""
+	a.ToolInputTruncated = false
+	a.Note = ""
+	if a.Kind == AskKindPermission {
+		// The relay's question quotes the input; the answer is only
+		// whether it was allowed for the run.
+		a.Question = fmt.Sprintf("Allow %s?", a.Tool)
+	} else {
+		a.Answer = ""
+	}
+	return a
+}
+
+// MayAnswer reports whether v may answer ask a: the person whose session
+// asked, or an administrator. A permission prompt is its runner owner's
+// alone: answering it runs a tool on their machine, which an administrator
+// of the hub was never lent. Without accounts the one local person owns
+// every machine, whatever actor a run's sidecar names.
+func (v Viewer) MayAnswer(a Ask) bool {
+	id := strings.TrimSpace(v.ID)
+	if id == "" {
+		id = "local"
+	}
+	if strings.EqualFold(a.ActorID, id) {
+		return true
+	}
+	if a.Kind == AskKindPermission {
+		return id == "local"
+	}
+	return v.Admin
 }

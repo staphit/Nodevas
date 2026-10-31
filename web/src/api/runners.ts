@@ -24,6 +24,9 @@ export interface RunnerRepo {
   name: string;
   path?: string;
   remote?: string;
+  /** Agent roles: the repo has a test command on its runner (the command
+   * itself never leaves the runner). */
+  verify?: boolean;
 }
 
 /** Mirrors runnerwire.AutoAcceptPolicy (W6): what the runner takes without
@@ -50,6 +53,10 @@ export interface RunnerInfo {
   capabilities?: string[];
   /** W6: absent from a runner that predates auto-accept policies. */
   autoAccept?: AutoAcceptPolicy | null;
+  /** How many runs it takes at once; absent from an older runner. */
+  maxConcurrent?: number;
+  /** Relay permission prompts to Nodevas (Claude Code, Antigravity, OpenCode ACP). */
+  permissionRelay?: boolean;
 }
 
 export interface Runner {

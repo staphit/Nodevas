@@ -62,12 +62,49 @@ function applyOne(graph: Graph, op: GraphOp): boolean {
       // semantic ops are broadcast as graph-changed and an old server event
       // deliberately falls back to a reload.
       return false;
+    case "add-ref": {
+      // A reference is a plain list on the node: nothing else is derived
+      // from it, so replaying it is exact.
+      if (!node || !op.ref || !nodes.some((item) => item.id === op.ref)) return false;
+      if (!(node.refs ?? []).includes(op.ref)) node.refs = [...(node.refs ?? []), op.ref];
+      return true;
+    }
+    case "remove-ref": {
+      // The target need not exist: the server removes a dangling ref too.
+      if (!node || !op.ref) return false;
+      const refs = (node.refs ?? []).filter((ref) => ref !== op.ref);
+      node.refs = refs.length ? refs : undefined;
+      return true;
+    }
     case "timeline-order": {
       if (!op.order) return false;
       if (op.order.some((id) => !nodes.some((item) => item.id === id))) return false;
       ui(graph).timelineOrder = [...op.order];
       return true;
     }
+    // Agent roles: the server validated these, and each carries the whole
+    // new value, so replaying them is exact.
+    case "acceptance": {
+      if (!node) return false;
+      if (op.acceptance && (op.acceptance.items?.length || op.acceptance.locked)) {
+        node.acceptance = structuredClone(op.acceptance);
+      } else {
+        delete node.acceptance;
+      }
+      return true;
+    }
+    case "node-workflow": {
+      if (!node) return false;
+      if (op.workflow) node.workflow = structuredClone(op.workflow);
+      else delete node.workflow;
+      return true;
+    }
+    case "workflow":
+      graph.workflow = op.workflow ? structuredClone(op.workflow) : null;
+      return true;
+    case "agent-roles":
+      graph.agentRoles = structuredClone(op.agentRoles ?? []);
+      return true;
     default:
       return false;
   }

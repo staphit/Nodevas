@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"nodevas/internal/identity"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/locale"
 )
 
 const (
@@ -117,13 +118,12 @@ func NewSessionAuth(users *UserStore) *SessionAuth {
 // taken by other people. It is deliberately distinguishable from bad
 // credentials: the person got the passcode right, and telling them the server
 // is full is not a fact an attacker did not already have.
-var ErrTooManyActiveUsers = errors.New(
-	"the maximum number of people are already signed in; ask one of them to sign out")
+var ErrTooManyActiveUsers = locale.Errorf("the maximum number of people are already signed in; ask one of them to sign out", "已登入的人數已達上限；請其中一人登出")
 
 // ErrSessionPersistence means a destructive session transaction did not
 // commit. Callers can distinguish infrastructure failure from rejected
 // credentials without exposing the database error to a remote client.
-var ErrSessionPersistence = errors.New("session persistence is unavailable")
+var ErrSessionPersistence = locale.Errorf("session persistence is unavailable", "無法保存工作階段")
 
 // SetMaxActiveUsers caps how many distinct accounts may be signed in at once.
 // Zero, the default, means no cap.
@@ -235,8 +235,8 @@ func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, st
 	a.mu.Unlock()
 
 	// The request's context, so a client that disconnects mid-request releases
-	// the read slot this query is holding instead of pinning it until SQLite's
-	// busy timeout gives up. A cancelled read reads as "no such revision" and
+	// the read slot this query is holding instead of pinning it until the
+	// query gives up on its own. A cancelled read reads as "no such revision" and
 	// the request is refused, which is the direction an authentication check
 	// must fail in anyway.
 	currentRevision, email, exists := a.users.revisionAndEmail(r.Context(), actor.ID)

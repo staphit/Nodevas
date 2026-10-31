@@ -14,21 +14,22 @@ package runs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sync"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/safego"
 )
 
 var (
 	// ErrTermGone is an interactive run whose terminal is no longer kept: it
 	// ended, and its output expired (or the hub restarted since).
-	ErrTermGone = errors.New("the run's terminal output is no longer kept")
+	ErrTermGone = locale.Errorf("the run's terminal output is no longer kept", "這次執行的終端機輸出已不再保留")
 	// ErrTermBusy is a terminal with as many viewers as it takes.
-	ErrTermBusy = errors.New("too many viewers on this terminal")
+	ErrTermBusy = locale.Errorf("too many viewers on this terminal", "這個終端機的觀看者太多")
 	// ErrTermClosed is a viewer the hub let go; see TermViewer.Reason.
-	ErrTermClosed = errors.New("terminal viewer closed")
+	ErrTermClosed = locale.Errorf("terminal viewer closed", "終端機觀看已關閉")
 )
 
 // Terminal limits.
@@ -241,7 +242,7 @@ func (t *Terminal) setStatus(status string) {
 		v.push(frame)
 	}
 	if runnerwire.RunFinal(status) && t.expiry == nil {
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 
@@ -365,7 +366,7 @@ func (t *Terminal) setFinal(status string) {
 	defer t.mu.Unlock()
 	if t.expiry == nil && !t.gone {
 		t.status = status
-		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { t.owner.expire(t) })
+		t.expiry = time.AfterFunc(t.owner.keepTime(), func() { defer safego.Recover("terminal relay expiry"); t.owner.expire(t) })
 	}
 }
 

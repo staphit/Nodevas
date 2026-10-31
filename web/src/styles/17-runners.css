@@ -9,7 +9,7 @@
   max-height: min(62vh, 620px);
   padding: 0 18px 16px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .runner-empty {
   margin: 0;
@@ -53,6 +53,12 @@
   background: var(--st-done-fg);
   opacity: 1;
 }
+/* Offline: the last list is stale, so neither up nor down — hollow grey. */
+.runner-dot.unknown {
+  border: 1px dashed var(--text-2);
+  background: transparent;
+  opacity: 0.8;
+}
 .runner-card-title {
   display: flex;
   min-width: 0;
@@ -69,7 +75,7 @@
 .runner-hint,
 .runner-empty-inline {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .runner-revoke,
 .runner-copy {
@@ -84,7 +90,7 @@
   color: var(--text-2);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .runner-revoke:hover {
   color: var(--st-failed-fg);
@@ -99,9 +105,13 @@
   flex-direction: column;
   gap: 4px;
 }
+.runner-permission-relay {
+  gap: 6px;
+  padding: 6px 0;
+}
 .runner-section-label {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -131,7 +141,7 @@
 .runner-agent-version {
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .runner-models {
   display: flex;
@@ -142,7 +152,7 @@
   padding: 1px 7px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .runner-model.default {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
@@ -153,11 +163,11 @@
   min-width: 0;
   gap: 8px;
 }
-.runner-repos li span {
-  overflow: hidden;
+.runner-repo-path {
+  min-width: 0;
   color: var(--text-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 .runner-token {
   display: flex;
@@ -171,7 +181,7 @@
 .runner-token-warning {
   margin: 0;
   color: var(--st-failed-fg);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .runner-token-row {
   display: flex;
@@ -190,7 +200,7 @@
   color: var(--text);
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .runner-add input {
   font-family: inherit;
@@ -203,7 +213,7 @@
   border-radius: 6px;
   background: var(--surface);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .runner-steps {
@@ -228,7 +238,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .runner-add button.primary {
   border-color: var(--accent);
@@ -242,7 +252,7 @@
 }
 .runner-add label {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 
 @media (max-width: 640px) {

@@ -48,9 +48,16 @@ const (
 // capabilities is the hello's Capabilities: headless always, interactive when
 // this machine has a pseudo-terminal and the owner has not turned it off.
 func capabilities(cfg *Config) []string {
-	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan}
+	// Roles, verify and judge (agent roles): the runner understands role
+	// jobs and their toolsets, runs a repo's test command for verify jobs
+	// (only where the owner configured one; Repo.Verify says where), and
+	// runs judge jobs.
+	caps := []string{runnerwire.CapHeadless, runnerwire.CapPlan, runnerwire.CapRoles, runnerwire.CapVerify, runnerwire.CapJudge}
 	if (cfg == nil || cfg.InteractiveOn()) && ptySupported() {
 		caps = append(caps, runnerwire.CapInteractive)
+	}
+	if cfg.RepoBrowseOn() {
+		caps = append(caps, runnerwire.CapRepoBrowse)
 	}
 	if _, _, reason := cfg.CopilotLLM(); reason == "" {
 		caps = append(caps, runnerwire.CapLLM)
@@ -146,8 +153,10 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog,
 			Text: "view only: the runner's owner did not allow typing into this terminal from the hub"})
 	}
+	// modeText, not permissionText: the person at the terminal answers the
+	// CLI's permission prompts, which are never relayed here.
 	text := fmt.Sprintf("started %s interactively in a %dx%d terminal (model %s, %s)",
-		job.Agent, initialCols, initialRows, orDash(job.Model), permissionText(cfg, job.Agent))
+		job.Agent, initialCols, initialRows, orDash(job.Model), modeText(cfg, job.Agent))
 	if job.Agent == "codex" && cfg.CodexIgnoreUserConfig {
 		text += "; codexIgnoreUserConfig does not apply to the interactive CLI"
 	}

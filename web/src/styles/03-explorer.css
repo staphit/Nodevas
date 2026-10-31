@@ -10,7 +10,7 @@
   border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   flex-shrink: 0;
   background: var(--surface);
 }
@@ -18,7 +18,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--text-2);
   letter-spacing: 0.05em;
@@ -68,7 +68,7 @@
 }
 .node-list-assignee {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -86,7 +86,7 @@
   margin-bottom: 4px;
   cursor: pointer;
   line-height: 1.4;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .issue-list li svg {
   flex-shrink: 0;
@@ -105,7 +105,7 @@
   align-items: center;
   gap: 5px;
   color: var(--st-done-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 .trash-list li {
   display: flex;
@@ -115,7 +115,7 @@
   padding: 3px 6px;
 }
 .trash-id {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -128,7 +128,7 @@
   background: var(--surface);
   border-radius: 4px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .trash-list button:hover {
@@ -156,10 +156,38 @@
   gap: 8px;
   padding: 2px 5px 0;
 }
+/* Folds the explorer away; the board header's » brings it back. */
+.explorer-collapse {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: calc(13px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.explorer-collapse:hover,
+.explorer-collapse:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+@media (pointer: coarse) {
+  .explorer-collapse {
+    width: 36px;
+    height: 36px;
+  }
+}
 .explorer-heading h3 {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   letter-spacing: 0;
   text-transform: none;
 }
@@ -170,19 +198,25 @@
   overflow: hidden;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .explorer-project-count {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .explorer-create-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
+}
+/* As many tools per row as fit at their natural width, the row's slack shared
+   out; a tool that does not fit starts the next row whole. A fixed three
+   columns cut 新增子專案 at text size 150% in a 220px sidebar. */
+.explorer-create-actions > * {
+  flex: 1 1 auto;
 }
 .explorer-create-actions button {
   display: inline-flex;
@@ -196,9 +230,14 @@
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
-  white-space: nowrap;
+  /* Only a label wider than the whole row wraps, inside its own button. */
+  white-space: normal;
+  text-align: center;
+}
+.explorer-create-actions button > svg {
+  flex: none;
 }
 .explorer-create-actions button.primary {
   border-color: var(--accent);
@@ -217,10 +256,10 @@
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .explorer-create-actions .workspace-connect-action {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
@@ -231,28 +270,44 @@
 }
 .explorer-transfer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
   margin-top: 7px;
   padding: 5px 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
+}
+/* Every label whole, however large the text or narrow the sidebar: when the
+   row runs out of room the buttons move under the caption, then onto as many
+   rows as they need. Cutting labels to an ellipsis made 匯入 and 匯出 both
+   read "匯…" at 150%. */
+.explorer-transfer-actions > span {
+  flex: 1 0 auto;
+  white-space: nowrap;
 }
 .explorer-transfer-actions > div {
   display: flex;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  justify-content: flex-end;
   gap: 4px;
+  margin-left: auto;
 }
 .explorer-transfer-actions button {
+  flex: none;
+  white-space: nowrap;
   padding: 2px 7px;
   border: 0;
   border-radius: 4px;
   color: var(--text-2);
   background: transparent;
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .explorer-transfer-actions button:hover:not(:disabled) {
   color: var(--text);
@@ -264,13 +319,14 @@
 /* Import/export menus: one entry point each, described in words. */
 .transfer-menu {
   position: relative;
+  flex: none;
 }
 .transfer-menu > summary {
   padding: 2px 7px;
   border-radius: 4px;
   color: var(--text-2);
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   list-style: none;
   white-space: nowrap;
 }
@@ -317,12 +373,12 @@
 }
 .transfer-menu-panel b {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 650;
 }
 .transfer-menu-panel small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .transfer-menu-separator {
@@ -333,7 +389,7 @@
 .transfer-menu-label {
   padding: 2px 7px 4px;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   letter-spacing: 0.04em;
 }
 .explorer-project-actions {
@@ -343,7 +399,7 @@
 }
 .explorer-project-actions > span {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .explorer-project-actions > button {
   padding: 3px 6px;
@@ -352,7 +408,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .explorer-project-actions > button:hover:not(:disabled) {
   color: var(--text);
@@ -363,18 +419,18 @@
   cursor: wait;
   opacity: 0.5;
 }
+/* A failure's reason runs longer than the sidebar is wide; it wraps whole
+   rather than being cut, and a path or a word with no break still breaks. */
 .project-transfer-notice {
   margin: 7px 0 0;
   padding: 6px 8px;
-  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .project-create-panel {
   position: relative;
@@ -415,12 +471,12 @@
   line-height: 1.35;
 }
 .project-create-heading strong {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .project-create-heading span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -444,7 +500,7 @@
   display: block;
   margin-bottom: 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
 }
 .project-create-panel > input,
@@ -455,7 +511,7 @@
   border-radius: 6px;
   color: var(--text);
   background: var(--surface);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .project-create-panel > select {
   margin-top: 2px;
@@ -467,7 +523,7 @@
 .project-create-error {
   margin: 5px 0 0;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .project-create-error {
@@ -497,7 +553,7 @@
   border-radius: 5px;
   color: var(--text);
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   outline: none;
 }
 .explorer-search:focus {
@@ -526,11 +582,11 @@
   border-radius: 4px;
   color: var(--text);
   background: transparent;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   text-align: left;
 }
 .workspace-root {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .workspace-root-group {
@@ -561,7 +617,7 @@
 /* Says why an expanded project shows nothing: its nodes are not loaded. */
 .tree-empty-row {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .tree-empty-row:disabled {
   cursor: wait;
@@ -639,12 +695,15 @@ div.tree-empty-row {
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
+/* The 目前/資料夾 tag wraps under the name rather than eating into it: at a
+   large text size in a narrow sidebar the name is what has to stay readable. */
 .project-tree-open {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 5px;
+  gap: 2px 5px;
   padding: 0;
   border: 0;
   color: inherit;
@@ -693,7 +752,7 @@ div.tree-empty-row {
 }
 .project-context-heading b {
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -702,7 +761,7 @@ div.tree-empty-row {
   overflow: hidden;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -733,12 +792,12 @@ div.tree-empty-row {
   opacity: 0.45;
 }
 .project-context-menu > button b {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-weight: 600;
 }
 .project-context-menu > button small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .project-context-icon {
@@ -763,7 +822,7 @@ div.tree-empty-row {
   justify-content: center;
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   line-height: 1;
   transition: transform 120ms var(--ease-out);
 }
@@ -771,8 +830,11 @@ div.tree-empty-row {
   transform: translateY(-1px);
 }
 .project-tree-name {
-  flex: 1;
+  /* Basis auto: the name claims its own width, so a tag that does not fit
+     beside it goes to the next line; only a name wider than the row is cut. */
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -786,7 +848,7 @@ div.tree-empty-row {
   color: var(--text-2);
   background: var(--bg);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-align: center;
 }
 .current-project-tag {
@@ -795,7 +857,7 @@ div.tree-empty-row {
   border-radius: 3px;
   color: var(--st-progress-fg);
   background: var(--st-progress-bg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
 }
 .tree-loading {
   color: var(--st-progress-fg);
@@ -841,6 +903,14 @@ div.tree-empty-row {
 .tree-node-list.node-list li > button > .status-shape {
   color: inherit;
 }
+/* A long node list is windowed (NodeRows): one box as tall as every row,
+   holding only the rows in view. The box itself is not a row — no hover. */
+.node-list .node-rows-window,
+.node-list .node-rows-window:hover {
+  padding: 0;
+  background: none;
+  cursor: default;
+}
 .tree-indent {
   flex: 0 0 8px;
   width: 8px;
@@ -850,8 +920,14 @@ div.tree-empty-row {
 .tree-empty {
   padding: 7px 8px 7px 27px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-style: italic;
+}
+/* In a node list the row rule above (li: padding 0) outranks .tree-empty and
+   left the line at the list's edge, left of the folder it belongs to. It lines
+   up with node titles: row padding 5, indent mark 8, icon 13, gaps 10. */
+.tree-node-list.node-list li.tree-empty {
+  padding: 7px 8px 7px 36px;
 }
 .project-empty {
   padding-left: 8px;
@@ -879,7 +955,7 @@ div.tree-empty-row {
 }
 .tree-special-folder .issue-list li {
   margin: 2px 0;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .tree-special-folder .trash-list li {
   min-width: 0;
@@ -887,7 +963,7 @@ div.tree-empty-row {
 }
 .tree-special-folder .trash-list button {
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .tree-ok-msg {
   display: flex;
@@ -895,7 +971,7 @@ div.tree-empty-row {
   gap: 4px;
   padding: 4px 6px;
   color: var(--st-done-fg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .sidebar-legend {
   flex: 0 0 auto;
@@ -905,7 +981,7 @@ div.tree-empty-row {
   border-top: 1px solid var(--border);
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .sidebar-legend > summary {
   cursor: pointer;
@@ -918,7 +994,7 @@ div.tree-empty-row {
 }
 .sidebar-legend .legend li {
   padding: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-add {
   display: inline-flex;
@@ -931,7 +1007,7 @@ div.tree-empty-row {
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-add:hover {
   border-color: var(--accent);
@@ -951,7 +1027,7 @@ div.tree-empty-row {
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .custom-status-create > input:focus {
   border-color: var(--accent);
@@ -984,7 +1060,7 @@ div.tree-empty-row {
   border-radius: 4px;
   background: var(--surface);
   color: var(--text);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .custom-status-options button {
   cursor: pointer;
@@ -1001,7 +1077,7 @@ div.tree-empty-row {
 .custom-status-create p {
   margin: 0;
   color: var(--danger);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 
 /* Node folders [B-06]. They group files in the explorer and nothing else, so
@@ -1021,7 +1097,7 @@ div.tree-empty-row {
   border-radius: 4px;
   color: var(--text-2);
   background: transparent;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   cursor: pointer;
 }
 .node-folder-create:hover {
@@ -1193,7 +1269,7 @@ div.tree-empty-row {
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .explorer-primary-actions button.primary {
   flex: 1;
@@ -1217,5 +1293,5 @@ div.tree-empty-row {
   margin-top: 6px;
 }
 .explorer-create-actions .explorer-example-action {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
 }

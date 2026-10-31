@@ -65,6 +65,10 @@ export interface UsageReport {
   byDay: UsageGroup[];
   /** Most recently active first. */
   sessions: UsageSession[];
+  /** By the run's role (legacy runs by their kind; "session", "copilot"). */
+  byRole: UsageGroup[];
+  /** The top nodes by cost, across all their runs. */
+  byNode: UsageGroup[];
 }
 
 export type PriceSource = "builtin" | "custom";
@@ -155,6 +159,8 @@ export function normalizeUsage(raw: unknown): UsageReport {
       firstAt: str(s.firstAt),
       lastAt: str(s.lastAt),
     })),
+    byRole: list(r.byRole, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
+    byNode: list(r.byNode, (g) => ({ ...normalizeBucket(g), key: str(g.key) })),
   };
 }
 

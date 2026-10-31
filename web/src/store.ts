@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { RemoteCaret } from "./editor/remoteCarets";
+import { connectLanguageSource, translate } from "./i18n";
 import {
   readPreferences,
   subscribePreferences,
@@ -47,6 +48,23 @@ export const useApp = create<AppState>((...args) => ({
   ...createRemoteSlice(...args),
   ...createUndoSlice(...args),
 }));
+
+// The catalog reads the reader's language from here (i18n.ts stays clear of
+// the store so non-component modules can import it without a cycle).
+connectLanguageSource({
+  get: () => useApp.getState().preferences.language,
+  subscribe: (listener) => useApp.subscribe(listener),
+  set: (language) => useApp.getState().updateUIPreference("language", language),
+});
+
+// Why graph.yaml cannot be read is the hub's sentence, worded in the language
+// the request asked in; a reader who changes language asks again rather than
+// keep reading the old one until Reload.
+useApp.subscribe((state, previous) => {
+  if (state.preferences.language === previous.preferences.language) return;
+  if (state.graphUnreadable === null) return;
+  void state.loadAll().catch(() => undefined);
+});
 
 // Undo depth lives outside the store (it holds graph snapshots); mirror just
 // the summary the UI needs [A-05].
@@ -174,7 +192,7 @@ export function useRemoteCarets(nodeId: string | null, pageId: string | null) {
 
 export function reportError(error: unknown): void {
   useApp.setState({
-    error: error instanceof Error ? error.message : "發生未預期的錯誤",
+    error: error instanceof Error ? error.message : translate("app.error.unexpected"),
   });
 }
 

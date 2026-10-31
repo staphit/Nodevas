@@ -7,17 +7,22 @@
  * update can never survive a rejected write.
  */
 
-import { api, ConflictError, type GraphOp } from "../api";
+import { api, ConflictError, RequestError, type GraphOp } from "../api";
 import { applyGraphCommand, commandTarget, describeGraphCommand } from "../domain";
 import { applyGraphOps } from "../domain/graph/ops";
+import { LANGUAGE_OPTIONS, translate } from "../i18n";
+import { officeStyleErrorMessage } from "../nodeTypeErrors";
 import type { Graph } from "../types";
 import {
   commandFailed,
   commandSucceeded,
   describeFailure,
+  IDLE_OPERATION,
   operationScope,
+  withOperation,
   type CommandResult,
   type OperationScope,
+  type OperationState,
 } from "./operations";
 import { graphCommandToOps, graphOpsNeedServerGraph } from "./graphOps";
 import { coalesceRequest } from "./coalesce";
@@ -29,7 +34,40 @@ type SetGraphState = (
   partial: Partial<AppState> | ((state: AppState) => Partial<AppState>),
 ) => void;
 
-const CONFLICT_MESSAGE = "圖譜已被外部修改，已重新載入；請再套用一次變更。";
+/** Read when it is shown, so it follows the reader's language. */
+const conflictMessage = () => translate("graph.error.conflict");
+
+/**
+ * graph.yaml on disk does not parse or validate. The hub refuses every write
+ * over it (a PUT answers 409, and the reload after it 422), so a write is not
+ * sent and a refused one is not called a conflict: applying it again could
+ * never work, and the reader has a file to fix instead.
+ */
+const unreadableMessage = () => translate("graph.error.unreadable");
+
+/**
+ * Once graph.yaml reads again, the refusals it caused no longer hold: a panel
+ * or the status line must not keep asking the reader to fix a fixed file.
+ * Matched in every language, since the reader may have switched since. Other
+ * errors are left as they are.
+ */
+function withoutUnreadableRefusals(
+  state: AppState,
+): Pick<AppState, "operations" | "lastOperation"> {
+  const refusals = new Set(
+    LANGUAGE_OPTIONS.map((language) => translate("graph.error.unreadable", language)),
+  );
+  const refused = (entry: OperationState | null) =>
+    entry?.status === "error" && refusals.has(entry.message ?? "");
+  let operations = state.operations;
+  for (const [scope, entry] of Object.entries(state.operations)) {
+    if (refused(entry)) operations = withOperation(operations, scope, IDLE_OPERATION);
+  }
+  return {
+    operations,
+    lastOperation: refused(state.lastOperation) ? null : state.lastOperation,
+  };
+}
 
 
 /**
@@ -51,13 +89,17 @@ function writeGraph(
   const operation = queues.graphSave.then(async () => {
     const { graph, graphRev } = get();
     if (!graph) return;
+    if (get().graphUnreadable !== null) {
+      get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+      throw new Error(unreadableMessage());
+    }
     get().beginOperation(scope, name);
     const previous = graph;
     const copy: Graph = structuredClone(graph);
     try {
       mutate(copy);
     } catch (e) {
-      const message = describeFailure(e, "無法套用變更");
+      const message = describeFailure(e, translate("graph.error.applyFailed"));
       get().settleOperation(scope, { status: "error", operation: name, message });
       set({ error: message });
       throw e;
@@ -71,15 +113,21 @@ function writeGraph(
     } catch (e) {
       if (e instanceof ConflictError) {
         await get().loadAll();
-        set({ error: CONFLICT_MESSAGE });
+        if (get().graphUnreadable !== null) {
+          // The board says why; the write only reports that it was refused.
+          set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
+          get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+          throw new Error(unreadableMessage(), { cause: e });
+        }
+        set({ error: conflictMessage() });
         get().settleOperation(scope, {
           status: "conflict",
           operation: name,
-          message: CONFLICT_MESSAGE,
+          message: conflictMessage(),
         });
         return;
       }
-      const message = describeFailure(e, "儲存圖譜失敗");
+      const message = describeFailure(e, translate("graph.error.saveFailed"));
       set((state) => ({
         graph: state.graph === copy ? previous : state.graph,
         error: message,
@@ -90,19 +138,38 @@ function writeGraph(
     try {
       await get().refreshState();
     } catch (e) {
-      set({ error: describeFailure(e, "更新狀態失敗") });
+      set({ error: describeFailure(e, translate("graph.error.refreshFailed")) });
     }
   });
   queues.graphSave = operation.catch(() => undefined);
   return operation;
 }
 
+/**
+ * A logic gate's inputs are always an array here. An older or hand-edited
+ * graph.yaml, or a peer's op, can carry a gate whose inputs are null or
+ * missing, and the board iterates them without checking.
+ */
+export function normalizeGraph<G extends Graph | null | undefined>(graph: G): G {
+  const gates = graph?.ui?.logicGates;
+  if (!graph || !gates || gates.every((gate) => Array.isArray(gate.inputs))) return graph;
+  return {
+    ...graph,
+    ui: {
+      ...graph.ui,
+      logicGates: gates.map((gate) => (Array.isArray(gate.inputs) ? gate : { ...gate, inputs: [] })),
+    },
+  };
+}
+
 export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   error: null,
   clearError: () => set({ error: null }),
   graph: null,
+  graphProject: "",
   graphRev: "",
   issues: [],
+  graphUnreadable: null,
 
   // Reloading a project is two independent reads, and the second one is also
   // what a `state-changed` event asks for on its own. Going through the same
@@ -112,21 +179,44 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     await Promise.all([
       coalesceRequest("graph", async () => {
         const generation = ++generations.load;
-        const g = await api.getGraph();
+        let g;
+        try {
+          g = await api.getGraph();
+        } catch (e) {
+          // graph.yaml on disk does not parse or validate: the reader's file
+          // to fix. The board says so in place of the cards and the load
+          // settles, so the error bar does not say it again; the watcher's
+          // graph-changed reloads once the file is fixed.
+          if (!(e instanceof RequestError) || e.status !== 422) throw e;
+          if (generation !== generations.load) return;
+          set({ graphUnreadable: e.message, graphProject: get().activeProject });
+          return;
+        }
         // Dropped when a project switch happened while this was in flight.
         if (generation !== generations.load) return;
-        set({
-          graph: g.graph,
+        set((state) => ({
+          ...(state.graphUnreadable !== null ? withoutUnreadableRefusals(state) : {}),
+          graphUnreadable: null,
+          graph: normalizeGraph(g.graph),
+          // The generation check above means no switch happened in flight, so
+          // the read was answered for the project that is active now.
+          graphProject: state.activeProject,
           graphRev: g.rev,
           issues: g.issues ?? [],
           error: null,
-        });
+        }));
         // Where the node files sit is disk state rather than part of the graph,
         // so it is fetched alongside rather than inside the graph response. A
         // failure here only costs the folder grouping, never the graph.
         await get().refreshNodeFolders().catch(() => undefined);
       }),
-      get().refreshState(),
+      // The run state is read against the graph: while graph.yaml cannot be
+      // read the hub refuses it with the same 422, which the board says.
+      get()
+        .refreshState()
+        .catch((e) => {
+          if (!(e instanceof RequestError) || e.status !== 422) throw e;
+        }),
     ]);
   },
 
@@ -138,7 +228,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     // Only the graph: statuses and issues are derived from it plus the run
     // state, and a move or a rename changes neither. A peer edit that could
     // change them arrives as graph-changed instead.
-    set({ graph: next });
+    set({ graph: normalizeGraph(next) });
     return true;
   },
 
@@ -146,16 +236,21 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     const scope = scopeForCommand(commandTarget(command));
     const name = command.type;
     const label = describeGraphCommand(command);
+    const failed = () => translate("operation.commandFailed", undefined, { action: label });
     const run = queues.graphSave.then(async (): Promise<CommandResult> => {
       const { graph, graphRev } = get();
-      if (!graph) return commandFailed(name, scope, "尚未載入專案。");
+      if (!graph) return commandFailed(name, scope, translate("graph.error.notLoaded"));
+      if (get().graphUnreadable !== null) {
+        get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+        return commandFailed(name, scope, unreadableMessage());
+      }
       get().beginOperation(scope, name);
       const previous = graph;
       const copy: Graph = structuredClone(graph);
       try {
         applyGraphCommand(copy, command);
       } catch (e) {
-        const message = describeFailure(e, `${label}失敗`);
+        const message = describeFailure(e, failed());
         get().settleOperation(scope, { status: "error", operation: name, message });
         return commandFailed(name, scope, message);
       }
@@ -174,13 +269,18 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // The peer id travels with the write so the server can tell the room
           // what changed without this browser being told about its own edit.
           const res = await api.graphOps(ops, get().selfPeerID);
-          set({
-            graph: res.graph,
-            graphRev: res.rev,
-            statuses: res.statuses,
-            issues: res.issues ?? [],
-            error: null,
-          });
+          // A reply without a graph (never from the hub) keeps what is shown.
+          set((state) =>
+            res?.graph
+              ? {
+                  graph: normalizeGraph(res.graph),
+                  graphRev: res.rev,
+                  statuses: res.statuses,
+                  issues: res.issues ?? [],
+                  error: null,
+                }
+              : { graph: state.graph, error: null },
+          );
           if (options.recordUndo !== false) {
             pushUndo({ kind: "graph", graph: structuredClone(previous), label });
           }
@@ -199,14 +299,19 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // Someone else wrote graph.yaml. Reload rather than clobber, and let
           // the caller decide whether to re-apply.
           await get().loadAll().catch(() => undefined);
+          if (get().graphUnreadable !== null) {
+            set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
+            get().settleOperation(scope, { status: "error", operation: name, message: unreadableMessage() });
+            return commandFailed(name, scope, unreadableMessage());
+          }
           get().settleOperation(scope, {
             status: "conflict",
             operation: name,
-            message: CONFLICT_MESSAGE,
+            message: conflictMessage(),
           });
-          return commandFailed(name, scope, CONFLICT_MESSAGE, "conflict");
+          return commandFailed(name, scope, conflictMessage(), "conflict");
         }
-        const message = describeFailure(e, `${label}失敗`);
+        const message = officeStyleErrorMessage(e) ?? describeFailure(e, failed());
         set((state) => ({ graph: state.graph === copy ? previous : state.graph }));
         get().settleOperation(scope, { status: "error", operation: name, message });
         return commandFailed(name, scope, message);
@@ -257,6 +362,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   },
 
   createNode: async (node, options = {}) => {
+    if (get().graphUnreadable !== null) throw new Error(unreadableMessage());
     const created = await api.createNode(node);
     const id = created.id;
     pushUndo({ kind: "create-node", ids: [id] });
@@ -324,7 +430,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
       kind: "delete-node",
       graph: before,
       trashFiles: result.trashFiles.filter(Boolean),
-      label: ids.length > 1 ? `刪除 ${ids.length} 個節點` : undefined,
+      label: ids.length > 1 ? translate("undo.label.deleteNodes", undefined, { count: ids.length }) : undefined,
     });
     for (const id of ids) get().closeTab(id);
     await Promise.all([get().loadAll(), get().refreshTrash()]);

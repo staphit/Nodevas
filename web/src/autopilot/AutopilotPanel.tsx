@@ -22,6 +22,31 @@ import { usePlanningRun } from "./planningRun";
 import { PolicyEditor } from "./PolicyEditor";
 import { useAutopilotControl } from "./useAutopilotControl";
 import { defaultPolicy, normalizePolicy, policyProblems, type ImplementChoice } from "./policy";
+import { effectiveWorkflow, WORKFLOW_DEFAULTS } from "../domain/graph/stages";
+
+/** "QA verification · round 1/2", "Waiting for your review of the goal"…:
+ * where a staged goal is; "" for a legacy run. */
+export function goalPhaseText(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  run: AutopilotView["run"],
+): string {
+  if (!run.stages || !run.goalPhase) return "";
+  switch (run.goalPhase) {
+    case "qa":
+      return t("autopilot.goalPhase.qa", {
+        round: Math.max(1, run.qaRound ?? 1),
+        max: run.stages.maxQaRounds ?? WORKFLOW_DEFAULTS.maxQaRounds,
+      });
+    case "acceptance":
+    case "plan":
+    case "tasks":
+    case "human":
+    case "done":
+      return t(`autopilot.goalPhase.${run.goalPhase}`);
+    default:
+      return run.goalPhase;
+  }
+}
 
 const KNOWN_STATUS = new Set(["running", "paused", "succeeded", "failed", "cancelled"]);
 
@@ -84,6 +109,7 @@ function StartForm({
   const start = useAutopilot((s) => s.start);
   const problems = policyProblems(value, choice);
   const titleId = useId();
+  const stages = useApp((s) => effectiveWorkflow(s.graph, goalNodeId));
 
   const submit = async () => {
     setShowErrors(true);
@@ -116,6 +142,7 @@ function StartForm({
         runners={mine}
         showErrors={showErrors}
         problems={problems}
+        stages={stages}
       />
       {showErrors && problems.length > 0 && (
         <ul className="autopilot-error ap-problems" role="alert">
@@ -178,6 +205,7 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
   };
 
   const review = run.policy.review;
+  const phase = goalPhaseText(t, run);
   return (
     <div className="ap-run">
       <header className="ap-run-head">
@@ -229,9 +257,16 @@ function RunView({ view, onNewRun }: { view: AutopilotView; onNewRun: () => void
         </div>
       </header>
       <CountsLine view={view} />
+      {phase && (
+        <p className={`ap-goal-phase is-${run.goalPhase}`} role="status">
+          {phase}
+        </p>
+      )}
       <p className="ap-policy-line">
         {t("autopilot.policyLine", {
-          review: t(`autopilot.reviewMode.${review.mode}`),
+          review: run.stages
+            ? t("stages.goal.runStages", { preset: t(`stages.preset.${run.stages.preset}`) })
+            : t(`autopilot.reviewMode.${review.mode}`),
           parallel: run.policy.maxParallel,
           rounds: run.policy.maxRounds,
         })}

@@ -1,3 +1,4 @@
+import { markServerReachable, markServerUnreachable } from "./connectivity";
 import { notifyUnauthorized } from "./http";
 import type { Actor } from "./auth";
 import type { GraphOp } from "./graph";
@@ -65,8 +66,6 @@ export type WSEvent = {
     | "agent-notify"
     // A new question from an agent; the id is the ask's.
     | "agent-ask"
-    // A view pack was installed or removed (docs/view-packs.md).
-    | "packs-changed"
     | "runners-changed"
     | "runs-changed"
     | "run-events"
@@ -77,9 +76,15 @@ export type WSEvent = {
     | "autopilot-changed"
     // The copilot followed up in one of this account's conversations (a plan
     // run it started ended); the id is the conversation's.
-    | "copilot-followup";
+    | "copilot-followup"
+    // Something changed in a project this viewer may read, any of them:
+    // Station's building refetches. No id.
+    | "building-changed";
   id?: string;
   project?: string;
+  /** run-events: "ask" when one of the run's asks started waiting or ended
+   * (refetch its asks, not its events). */
+  kind?: string;
   /** autopilot-changed: the goal node the autopilot run belongs to. */
   goalNodeId?: string;
   peers?: Peer[];
@@ -169,11 +174,29 @@ export function documentKey(nodeId: string, pageId?: string): string {
   return pageId ? `${nodeId}/${pageId}` : nodeId;
 }
 
-/** Opens the live-update socket; reconnects with backoff. */
+/** How often the hub's health is asked while the socket is down. */
+export const HEALTH_PROBE_MS = 1000;
+const HEALTH_PATH = "/api/healthz";
+
+/**
+ * Opens the live-update socket; reconnects with backoff.
+ *
+ * The backoff grows to 10 s while the hub is down, which alone kept a page
+ * offline for up to ~12 s after a restart. So while the socket is down the
+ * hub's health is asked about once a second, and the moment it answers after
+ * having not, the socket reconnects without waiting the backoff out. If the
+ * hub answered all along — the socket fails while the server is up — the
+ * probe stops and the backoff stands, so a broken /ws is not hammered.
+ */
 export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 500;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
+  let probing = false;
+  /** Whether this round of probing has seen the hub not answer. */
+  let probeSawDown = false;
   // What this client asked for, replayed after a reconnect: a dropped socket
   // otherwise leaves the browser in no room and holding no lock, silently.
   let project = "";
@@ -186,6 +209,46 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
 
   const post = (message: Record<string, unknown>) => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+  };
+
+  const stopProbe = () => {
+    probing = false;
+    clearTimeout(probeTimer);
+  };
+
+  const probe = async () => {
+    if (!probing || closed) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), HEALTH_PROBE_MS * 3);
+    let up = false;
+    try {
+      const res = await fetch(HEALTH_PATH, { cache: "no-store", signal: controller.signal });
+      // Healthy is a 2xx. Whatever stands in front of a down hub answers
+      // something else — a reverse proxy's 502, a dev server's 500.
+      up = res.ok;
+    } catch {
+      up = false;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!probing || closed) return;
+    if (!up) {
+      probeSawDown = true;
+      probeTimer = setTimeout(() => void probe(), HEALTH_PROBE_MS);
+      return;
+    }
+    stopProbe();
+    if (!probeSawDown) return;
+    // Back after being down: reconnect now rather than when the backoff says.
+    clearTimeout(reconnectTimer);
+    open();
+  };
+
+  const startProbe = () => {
+    if (probing || closed) return;
+    probing = true;
+    probeSawDown = false;
+    probeTimer = setTimeout(() => void probe(), HEALTH_PROBE_MS);
   };
 
   const open = () => {
@@ -201,6 +264,8 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
     };
     ws.onopen = () => {
       retry = 500;
+      stopProbe();
+      markServerReachable();
       if (project) post({ type: "subscribe", project });
       if (presenceState) post({ type: "presence", ...presenceState });
       for (const nodeId of heldLocks) post({ type: "lock", nodeId });
@@ -209,26 +274,39 @@ export function connectWS(onEvent: (ev: WSEvent) => void): LiveConnection {
       for (const doc of openDocs.values()) post({ type: "doc-open", ...doc });
     };
     ws.onclose = (event: CloseEvent) => {
-      // StatusPolicyViolation (1008). Policy violations are non-recoverable client
-      // misbehaviors or auth expirations; do not reconnect in a tight loop.
-      if (event.code === 1008) {
-        if (event.reason?.includes("authorization expired")) {
-          notifyUnauthorized();
-        }
+      // StatusPolicyViolation (1008). Only an expired authorization is final:
+      // reconnecting cannot help until the user signs in again.
+      if (event.code === 1008 && event.reason?.includes("authorization expired")) {
+        notifyUnauthorized();
         return;
       }
-      if (!closed) {
-        retry = Math.min(retry * 1.5, 10000);
+      if (closed) return;
+      if (event.code === 1008) {
+        // Any other policy close (rate limit, a rejected message) comes from a
+        // hub that is up: reconnect, but back off from at least 2 s so a
+        // client that keeps tripping it does not loop.
+        retry = Math.min(Math.max(retry * 1.5, 2000), 10000);
         const jitter = 0.8 + Math.random() * 0.4;
-        const delay = Math.round(retry * jitter);
-        setTimeout(open, delay);
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(open, Math.round(retry * jitter));
+        return;
       }
+      // Dropped, not closed on purpose: out of reach until the reopen.
+      markServerUnreachable();
+      retry = Math.min(retry * 1.5, 10000);
+      const jitter = 0.8 + Math.random() * 0.4;
+      const delay = Math.round(retry * jitter);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(open, delay);
+      startProbe();
     };
   };
   open();
   return {
     close: () => {
       closed = true;
+      clearTimeout(reconnectTimer);
+      stopProbe();
       ws?.close();
     },
     subscribe: (next: string) => {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"nodevas/internal/identity"
 	"sync"
 	"sync/atomic"
@@ -29,7 +30,9 @@ type Hub struct {
 	actorConns map[string]int
 	ipConns    map[string]int
 	reserved   int
-	closed     bool
+	// limits caps reserved, actorConns and ipConns; see ConnectionLimits.
+	limits ConnectionLimits
+	closed bool
 	// removals counts connection cleanups after a client has left conns but
 	// before leaveAllDocs has durably handed its last document to the sidecar.
 	// Close waits for it so a workspace is never torn down underneath that I/O.
@@ -166,13 +169,74 @@ func NewHub() *Hub {
 		docEncode:            make(chan struct{}, 1),
 		snapshotActorCadence: map[string]*snapshotCadence{},
 		snapshotDocCadence:   map[docPersistenceKey]*snapshotCadence{},
+		limits:               DefaultConnectionLimits(),
 	}
 }
 
+// ConnectionLimits caps live WebSocket connections: in all, per account (an
+// unauthenticated loopback client counts by name), and per client IP.
+//
+// A connection is cheap to keep (broadcasts are small and fan out from one
+// goroutine), so the caps are about runaway clients, not load. A person with
+// several tabs, devices and the desktop app open can hold a dozen, and behind
+// a proxy every user arrives from a few addresses, hence the generous per-IP
+// cap.
+type ConnectionLimits struct {
+	Total      int
+	PerAccount int
+	PerIP      int
+}
+
+// DefaultConnectionLimits is what a hub enforces unless told otherwise.
+func DefaultConnectionLimits() ConnectionLimits {
+	return ConnectionLimits{
+		Total:      maxWSConnections,
+		PerAccount: maxWSConnectionsPerActor,
+		PerIP:      maxWSConnectionsPerIP,
+	}
+}
+
+// SetConnectionLimits replaces the caps. A zero or negative field keeps its
+// default. Connections already open stay open; the caps apply to new ones.
+func (h *Hub) SetConnectionLimits(limits ConnectionLimits) {
+	defaults := DefaultConnectionLimits()
+	if limits.Total <= 0 {
+		limits.Total = defaults.Total
+	}
+	if limits.PerAccount <= 0 {
+		limits.PerAccount = defaults.PerAccount
+	}
+	if limits.PerIP <= 0 {
+		limits.PerIP = defaults.PerIP
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.limits = limits
+}
+
+// ConnectionLimits reports the caps in force.
+func (h *Hub) ConnectionLimits() ConnectionLimits {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.limits
+}
+
+// ConnectionCount is the number of live websocket connections, for
+// /api/metrics. A nil hub has none.
+func (h *Hub) ConnectionCount() int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.conns)
+}
+
 const (
-	maxWSConnections         = 128
-	maxWSConnectionsPerActor = 8
-	maxWSConnectionsPerIP    = 16
+	// Default connection caps (ConnectionLimits); serve can change them.
+	maxWSConnections         = 512
+	maxWSConnectionsPerActor = 16
+	maxWSConnectionsPerIP    = 32
 	wsMessageBurst           = 20
 	wsMessagesPerSecond      = 2
 	wsPingInterval           = 30 * time.Second
@@ -219,9 +283,9 @@ func (h *Hub) reserveConnection(actor identity.Actor, ip string) bool {
 	actorKey := actorConnectionKey(actor)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || h.reserved >= maxWSConnections ||
-		h.actorConns[actorKey] >= maxWSConnectionsPerActor ||
-		h.ipConns[ip] >= maxWSConnectionsPerIP {
+	if h.closed || h.reserved >= h.limits.Total ||
+		h.actorConns[actorKey] >= h.limits.PerAccount ||
+		h.ipConns[ip] >= h.limits.PerIP {
 		return false
 	}
 	h.reserved++
@@ -262,6 +326,10 @@ func (h *Hub) SetProjectResolver(resolve func(name string) (string, error)) {
 type Event struct {
 	Type string `json:"type"` // graph-changed | node-changed | state-changed | presence | locks | awareness | graph-drag | graph-ops
 	ID   string `json:"id,omitempty"`
+	// agent-ask: the new ask's kind (approval, question, choice,
+	// permission) and the run asking, if any.
+	Kind  string `json:"kind,omitempty"`
+	RunID string `json:"runId,omitempty"`
 
 	Project string          `json:"project,omitempty"`
 	Peers   []Peer          `json:"peers,omitempty"`
@@ -345,7 +413,13 @@ type Lock struct {
 
 // Broadcast queues an event for every client, whatever project they watch. Use
 // it for workspace-level news; project changes belong in BroadcastRoom.
+//
+// Every broadcast method is safe on a nil *Hub, which is what a store or a
+// watcher running without a server (tests, the remote package) hands in.
 func (h *Hub) Broadcast(evType, id string) {
+	if h == nil {
+		return // no hub (tests, tools): nobody to tell
+	}
 	h.send(Event{Type: evType, ID: id}, func(*wsClient) bool { return true })
 }
 
@@ -353,6 +427,9 @@ func (h *Hub) Broadcast(evType, id string) {
 // whatever project they watch: news that is that person's alone, such as
 // their current project moving, which nobody else should be pulled along by.
 func (h *Hub) BroadcastActor(actorID, evType, id string) {
+	if h == nil {
+		return
+	}
 	if actorID == "" {
 		return
 	}
@@ -369,6 +446,35 @@ func (h *Hub) BroadcastActor(actorID, evType, id string) {
 // the popout editor) do not send a subscription, and going silent on them
 // would look like the server stopped noticing their edits.
 func (h *Hub) BroadcastRoom(room, evType, id string) {
+	h.BroadcastRoomEvent(room, Event{Type: evType, ID: id})
+}
+
+// BroadcastRoomEvent is BroadcastRoom for an event with more than an id;
+// an empty room reaches every client, as Broadcast does.
+func (h *Hub) BroadcastRoomEvent(room string, event Event) {
+	if h == nil {
+		return
+	}
+	if room == "" {
+		h.send(event, func(*wsClient) bool { return true })
+		return
+	}
+	h.send(event, func(client *wsClient) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+	})
+}
+
+// BroadcastReaders queues an event for every client that may read a project,
+// whatever room it watches: the room's own watchers, and anyone else the
+// access check lets watch it. It is for views that span projects (Station's
+// building), which must hear about a project they are not in, and only from
+// projects they may read. Keep the id free of anything about the project.
+func (h *Hub) BroadcastReaders(room, evType, id string) {
+	if h == nil {
+		return
+	}
 	if room == "" {
 		h.Broadcast(evType, id)
 		return
@@ -376,7 +482,7 @@ func (h *Hub) BroadcastRoom(room, evType, id string) {
 	h.send(Event{Type: evType, ID: id}, func(client *wsClient) bool {
 		client.mu.Lock()
 		defer client.mu.Unlock()
-		return client.room == room || (client.room == "" && h.mayWatch(client.actor, room))
+		return client.room == room || h.mayWatch(client.actor, room)
 	})
 }
 
@@ -404,6 +510,9 @@ func (h *Hub) relay(from *wsClient, event Event) {
 // where it stands instead of reloading the graph. `from` is the peer that made
 // the change, echoed back so it can ignore its own.
 func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
+	if h == nil {
+		return
+	}
 	if len(ops) == 0 {
 		h.BroadcastRoom(room, "graph-changed", "")
 		return
@@ -421,6 +530,9 @@ func (h *Hub) BroadcastOps(room, from string, ops json.RawMessage) {
 }
 
 func (h *Hub) send(event Event, want func(*wsClient) bool) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)
@@ -445,6 +557,9 @@ func (h *Hub) send(event Event, want func(*wsClient) bool) {
 
 // sendTo delivers one event to a single client.
 func (h *Hub) sendTo(client *wsClient, event Event) {
+	if h == nil {
+		return
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("ws marshal: %v", err)
@@ -487,9 +602,7 @@ func (h *Hub) releaseSnapshotBlobLocked(blob *docSnapshotBlob) {
 	blob.refs--
 	if blob.refs == 0 {
 		h.snapshotBytes -= len(blob.payload)
-		if h.snapshotBytes < 0 {
-			panic("realtime snapshot accounting underflow")
-		}
+		h.clampSnapshotBytesLocked("snapshot blob release")
 	}
 }
 
@@ -499,15 +612,27 @@ func (h *Hub) releaseSnapshotJobLocked(snapshot *docOutboundSnapshot) {
 	}
 	h.releaseSnapshotBlobLocked(snapshot.blob)
 	h.snapshotBytes -= snapshot.tailBytes
-	if h.snapshotBytes < 0 {
-		panic("realtime snapshot accounting underflow")
+	h.clampSnapshotBytesLocked("snapshot job release")
+}
+
+// clampSnapshotBytesLocked repairs a negative snapshot byte count. Releasing
+// more than was charged is a bug, but not one worth the hub: it used to panic
+// here, with h.mu held, and the writer's recover then deadlocked on h.mu in
+// remove. Logging and clamping keeps the cap working (a count too low lets
+// through at most one cap's worth more) and every other client connected.
+func (h *Hub) clampSnapshotBytesLocked(where string) {
+	if h.snapshotBytes >= 0 {
+		return
 	}
+	slog.Error("realtime snapshot accounting underflow; clamping to zero",
+		slog.String("where", where), slog.Int("bytes", h.snapshotBytes))
+	h.snapshotBytes = 0
 }
 
 func (h *Hub) releaseSnapshotJob(snapshot *docOutboundSnapshot) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.releaseSnapshotJobLocked(snapshot)
-	h.mu.Unlock()
 }
 
 // queueSnapshotLocked enqueues one logical snapshot job. It must be called

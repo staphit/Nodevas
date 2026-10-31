@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"nodevas/internal/db"
 	"nodevas/internal/engine"
+	"nodevas/internal/testpg"
 )
 
 type fixtureNode struct {
@@ -63,21 +65,14 @@ func writeGraph(t *testing.T, root string, nodes ...fixtureNode) {
 	}
 }
 
-// openDB gives a test its own workspace database.
-func openDB(t *testing.T, path string) *db.DB {
-	t.Helper()
-	database, err := db.OpenAt(path)
-	if err != nil {
-		t.Fatalf("open database: %v", err)
-	}
-	t.Cleanup(func() { database.Close() })
-	return database
-}
-
-// newManager is the usual setup: a manager over a real database file.
+// newManager is the usual setup: a manager over a fresh PostgreSQL database.
 func newManager(t *testing.T) *Manager {
 	t.Helper()
-	return NewManagerWithDB(openDB(t, filepath.Join(t.TempDir(), db.FileName)))
+	m := NewManagerWithDB(testpg.New(t))
+	// Background index work must be over before the fixture directories are
+	// removed: Windows will not delete a file a walk still has open.
+	t.Cleanup(func() { _ = m.Close() })
+	return m
 }
 
 func ids(matches []Match) []string {
@@ -114,12 +109,12 @@ func count(t *testing.T, database *db.DB, query string, args ...any) int {
 // process that reads it again gets a different answer from one that trusts the
 // row, and only the second answer can pass.
 func TestStoredRowsAreReusedWhenTheStampIsUnchanged(t *testing.T) {
-	path := filepath.Join(t.TempDir(), db.FileName)
+	database := testpg.New(t)
 	root := writeProject(t,
 		fixtureNode{id: "alpha", title: "Alpha", body: "the quick brown fox"},
 		fixtureNode{id: "beta", title: "Beta", body: "北京大學的研究"},
 	)
-	first := NewManagerWithDB(openDB(t, path))
+	first := NewManagerWithDB(database)
 	if got := ids(search(t, first, root, "quick")); len(got) != 1 {
 		t.Fatalf("first search = %v", got)
 	}
@@ -136,7 +131,7 @@ func TestStoredRowsAreReusedWhenTheStampIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second := NewManagerWithDB(openDB(t, path))
+	second := NewManagerWithDB(database)
 	if got := ids(search(t, second, root, "brown fox")); len(got) != 1 || got[0] != "alpha" {
 		t.Fatalf("the stored row was not reused: %v", got)
 	}
@@ -148,15 +143,15 @@ func TestStoredRowsAreReusedWhenTheStampIsUnchanged(t *testing.T) {
 // A changed file is picked up across a restart even though nothing told the
 // index about it, which is the other half of what modified_at is for.
 func TestAChangedFileIsReindexedOnReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), db.FileName)
+	database := testpg.New(t)
 	root := writeProject(t, fixtureNode{id: "alpha", title: "Alpha", body: "before body"})
-	first := NewManagerWithDB(openDB(t, path))
+	first := NewManagerWithDB(database)
 	search(t, first, root, "before")
 
 	if err := os.WriteFile(filepath.Join(root, "nodes", "alpha.md"), []byte("after body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second := NewManagerWithDB(openDB(t, path))
+	second := NewManagerWithDB(database)
 	if got := ids(search(t, second, root, "after")); len(got) != 1 || got[0] != "alpha" {
 		t.Fatalf("an edit made while the index was closed was missed: %v", got)
 	}
@@ -165,8 +160,8 @@ func TestAChangedFileIsReindexedOnReopen(t *testing.T) {
 	}
 }
 
-// The tables are derived data an operator is allowed to delete, empty or drop.
-// None of that may surface as an error, and a rescan has to put it back.
+// The table is derived data an operator is allowed to empty or drop. Neither
+// may surface as an error, and a rescan has to put it back.
 func TestDamagedTablesAreRebuiltByARescan(t *testing.T) {
 	cases := map[string]func(t *testing.T, database *db.DB){
 		"documents emptied": func(t *testing.T, database *db.DB) {
@@ -174,44 +169,34 @@ func TestDamagedTablesAreRebuiltByARescan(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
-		"postings emptied": func(t *testing.T, database *db.DB) {
-			if _, err := database.Exec(`INSERT INTO search_fts (search_fts) VALUES ('delete-all')`); err != nil {
+		"table dropped": func(t *testing.T, database *db.DB) {
+			if _, err := database.Exec(`DROP TABLE search_documents`); err != nil {
 				t.Fatal(err)
-			}
-		},
-		"content dropped": func(t *testing.T, database *db.DB) {
-			if _, err := database.Exec(`DROP TABLE search_content`); err != nil {
-				t.Fatal(err)
-			}
-		},
-		"fts dropped": func(t *testing.T, database *db.DB) {
-			if _, err := database.Exec(`DROP TABLE search_fts`); err != nil {
-				t.Fatal(err)
-			}
-		},
-		"everything dropped": func(t *testing.T, database *db.DB) {
-			for _, table := range []string{"search_content", "search_fts", "search_documents"} {
-				if _, err := database.Exec(`DROP TABLE ` + table); err != nil {
-					t.Fatal(err)
-				}
 			}
 		},
 	}
 	for name, damage := range cases {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), db.FileName)
 			root := writeProject(t, fixtureNode{id: "alpha", title: "Alpha", body: "buried needle 埋著的針"})
-			database := openDB(t, path)
+			database := testpg.New(t)
 			first := NewManagerWithDB(database)
 			search(t, first, root, "needle")
 
 			damage(t, database)
 
-			second := NewManagerWithDB(openDB(t, path))
-			for _, query := range []string{"needle", "著的"} {
-				got := ids(search(t, second, root, query))
-				if len(got) != 1 || got[0] != "alpha" {
-					t.Fatalf("after %s, query %q = %v", name, query, got)
+			// A new manager rescans. The one that was running notices a dropped
+			// table (the query fails) but not an emptied one, which it has no
+			// reason to read again before something changes.
+			managers := []*Manager{NewManagerWithDB(database)}
+			if name == "table dropped" {
+				managers = append(managers, first)
+			}
+			for _, manager := range managers {
+				for _, query := range []string{"needle", "著的"} {
+					got := ids(search(t, manager, root, query))
+					if len(got) != 1 || got[0] != "alpha" {
+						t.Fatalf("after %s, query %q = %v", name, query, got)
+					}
 				}
 			}
 		})
@@ -234,16 +219,6 @@ func TestRebuildEmptiesTheIndexAndTheNextSearchRestoresIt(t *testing.T) {
 	}
 }
 
-// A manager with no database of its own still answers, it just starts cold.
-func TestManagerWithoutADatabaseStillSearches(t *testing.T) {
-	root := writeProject(t, fixtureNode{id: "alpha", title: "Alpha", body: "私有記憶體 index"})
-	manager := NewManager()
-	t.Cleanup(func() { manager.Close() })
-	if got := ids(search(t, manager, root, "記憶")); len(got) != 1 || got[0] != "alpha" {
-		t.Fatalf("in-memory manager = %v", got)
-	}
-}
-
 // ---------- one document, one row ----------
 
 func TestReindexingTheSameDocumentDoesNotDoubleIt(t *testing.T) {
@@ -261,19 +236,14 @@ func TestReindexingTheSameDocumentDoesNotDoubleIt(t *testing.T) {
 	if n := count(t, manager.database, `SELECT count(*) FROM search_documents`); n != 1 {
 		t.Fatalf("search_documents holds %d rows for one node", n)
 	}
-	if n := count(t, manager.database, `SELECT count(*) FROM search_content`); n != 1 {
-		t.Fatalf("search_content holds %d rows for one node", n)
-	}
 	if n := count(t, manager.database,
-		`SELECT count(*) FROM search_fts WHERE search_fts MATCH ?`, matchExpression([]string{"重複"})); n != 1 {
-		t.Fatalf("search_fts matched %d rows for one node", n)
+		`SELECT count(*) FROM search_documents WHERE body_tokens @@ ?::tsquery`, tsqueryLiteral("重複")); n != 1 {
+		t.Fatalf("the tokens matched %d rows for one node", n)
 	}
 }
 
-// A node that vanishes from the graph takes its rows and its postings with it.
-// Whether the postings really went is asserted by the consistency check a fresh
-// store runs: it wipes the index when the tables disagree about how many
-// documents there are, so a leftover posting shows up as an empty index.
+// A node that vanishes from the graph takes its row, and so its tokens, with
+// it.
 func TestADeletedNodeLeavesNothingBehind(t *testing.T) {
 	root := writeProject(t,
 		fixtureNode{id: "alpha", title: "Alpha", body: "shared body"},
@@ -291,13 +261,9 @@ func TestADeletedNodeLeavesNothingBehind(t *testing.T) {
 	if n := count(t, manager.database, `SELECT count(*) FROM search_documents`); n != 1 {
 		t.Fatalf("search_documents kept %d rows", n)
 	}
-
-	fresh := &docStore{sql: manager.database.Writer(), read: manager.database.Reader()}
-	if err := fresh.ensure(context.Background()); err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	if n := count(t, manager.database, `SELECT count(*) FROM search_documents`); n != 1 {
-		t.Fatalf("the consistency check wiped the index: %d rows left", n)
+	if n := count(t, manager.database,
+		`SELECT count(*) FROM search_documents WHERE body_tokens @@ ?::tsquery`, tsqueryLiteral("sh")); n != 1 {
+		t.Fatalf("the deleted node's tokens are still indexed: %d rows match", n)
 	}
 }
 
@@ -358,12 +324,11 @@ func TestGraphUpdateAddsRemovesAndRetitles(t *testing.T) {
 	}
 }
 
-// The server marks its own writes so the watcher never re-emits them, so the
-// walk-based net is the only thing that sees an edit the API made.
+// An edit nothing announced (no watcher, no store write) is only seen by the
+// walk-based net. The query that notices the index is old asks for the walk
+// and answers from what it has; a query a moment later sees the edit.
 func TestReconcileCatchesAnUnannouncedEdit(t *testing.T) {
-	previous := revalidateAfter
-	revalidateAfter = 0
-	t.Cleanup(func() { revalidateAfter = previous })
+	pinRevalidate(t, 0)
 
 	root := writeProject(t, fixtureNode{id: "alpha", title: "Alpha", body: "before body"})
 	manager := newManager(t)
@@ -373,18 +338,12 @@ func TestReconcileCatchesAnUnannouncedEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "nodes", "alpha.md"), []byte("after body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "after")); len(got) != 1 {
-		t.Fatalf("unannounced edit not picked up: %v", got)
-	}
-	if got := ids(search(t, manager, root, "before")); len(got) != 0 {
-		t.Fatalf("stale content after unannounced edit: %v", got)
-	}
+	eventually(t, manager, root, "after", []string{"alpha"}, time.Second)
+	eventually(t, manager, root, "before", nil, time.Second)
 }
 
 func TestSubpagesAreIndexedAndRefreshed(t *testing.T) {
-	previous := revalidateAfter
-	revalidateAfter = 0
-	t.Cleanup(func() { revalidateAfter = previous })
+	pinRevalidate(t, 0)
 
 	root := writeProject(t, fixtureNode{
 		id: "alpha", title: "Alpha", body: "body",
@@ -398,16 +357,82 @@ func TestSubpagesAreIndexedAndRefreshed(t *testing.T) {
 	if err := os.WriteFile(page, []byte("subpage beacon"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "beacon")); len(got) != 1 {
-		t.Fatalf("edited subpage not picked up: %v", got)
-	}
+	eventually(t, manager, root, "beacon", []string{"alpha"}, time.Second)
 	// A deleted subpage leaves no newer file behind, so only the file count in
 	// the stamp can notice it.
 	if err := os.Remove(page); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(search(t, manager, root, "beacon")); len(got) != 0 {
-		t.Fatalf("a deleted subpage is still searchable: %v", got)
+	eventually(t, manager, root, "beacon", nil, time.Second)
+}
+
+func TestSubpageSearchReturnsMatchingPageID(t *testing.T) {
+	database := testpg.New(t)
+	root := writeProject(t,
+		fixtureNode{
+			id: "design", title: "設計", body: "# 設計說明\n\n**粗體**與共用詞",
+			pages: map[string]string{
+				"pages.json": `{"pages":[{"id":"notes","title":"Notes"},{"id":"cast","title":"角色設定"},{"id":" appendix","title":"***"}]}`,
+				"notes.md":   "# Notes\n\n筆記內容",
+				"cast.md":    "# 角色設定\n\n主角：小明與共用詞",
+				"sym.md":     "符號附錄內容",
+			},
+		},
+		fixtureNode{
+			id: "plain", title: "Plain", body: "main body",
+			pages: map[string]string{
+				"one.md": "subpage lantern",
+			},
+		},
+	)
+	// Rewrite pages.json with valid page id "sym" whose title is symbol-only "***"
+	// so rankTokens("") is empty and RankContext exercises its fallback title scan.
+	if err := os.WriteFile(
+		filepath.Join(root, "nodes", "design.pages", "pages.json"),
+		[]byte(`{"pages":[{"id":"notes","title":"Notes"},{"id":"cast","title":"角色設定"},{"id":"sym","title":"***"}]}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	first := NewManagerWithDB(database)
+	t.Cleanup(func() { _ = first.Close() })
+	second := NewManagerWithDB(database)
+	t.Cleanup(func() { _ = second.Close() })
+
+	for _, manager := range []*Manager{first, second} {
+		// Subpage-only hit in a node with pages.json.
+		matches := search(t, manager, root, "小明")
+		if len(matches) != 1 || matches[0].NodeID != "design" || matches[0].PageID != "cast" {
+			t.Fatalf("search 小明 = %+v, want design/cast", matches)
+		}
+		// Subpage-only hit in a node without pages.json.
+		matches = search(t, manager, root, "lantern")
+		if len(matches) != 1 || matches[0].NodeID != "plain" || matches[0].PageID != "one" {
+			t.Fatalf("search lantern = %+v, want plain/one", matches)
+		}
+		// Hits in the main body, node title, or shared by both stay on the main page (PageID "").
+		for _, q := range []string{"粗體", "設計", "共用詞"} {
+			matches = search(t, manager, root, q)
+			if len(matches) != 1 || matches[0].NodeID != "design" || matches[0].PageID != "" {
+				t.Fatalf("search %q = %+v, want design with empty PageID", q, matches)
+			}
+		}
+		// Ranked phrase hit in a subpage.
+		ranked := rank(t, manager, root, "小明")
+		if len(ranked) == 0 || ranked[0].NodeID != "design" || ranked[0].PageID != "cast" {
+			t.Fatalf("rank 小明 = %+v, want design/cast", ranked)
+		}
+		// Ranked terms hit in a subpage.
+		ranked = rank(t, manager, root, "主角小明的名字是什麼？")
+		if len(ranked) == 0 || ranked[0].NodeID != "design" || ranked[0].PageID != "cast" {
+			t.Fatalf("rank question = %+v, want design/cast", ranked)
+		}
+		// Ranked exact-title fallback scan for a subpage title with no rank tokens.
+		ranked = rank(t, manager, root, "***")
+		if len(ranked) != 1 || ranked[0].NodeID != "design" || ranked[0].PageID != "sym" || ranked[0].Match != MatchTitle {
+			t.Fatalf("rank *** = %+v, want design/sym MatchTitle", ranked)
+		}
 	}
 }
 
@@ -445,7 +470,7 @@ func TestMixedChineseAndEnglishQuery(t *testing.T) {
 }
 
 // Bigrams cannot tell "abc" from a document that merely holds "ab" and "bc"
-// somewhere, and FTS5 indexing those bigrams inherits the problem exactly. The
+// somewhere, and a tsvector of those bigrams inherits the problem exactly. The
 // verification pass is what keeps it from reaching anyone.
 func TestBigramFalsePositivesAreFilteredOut(t *testing.T) {
 	root := writeProject(t,
@@ -465,7 +490,7 @@ func TestBigramFalsePositivesAreFilteredOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(candidates) != 2 {
-		t.Fatalf("FTS5 offered %d candidates; the fixture no longer tests the filter", len(candidates))
+		t.Fatalf("the index offered %d candidates; the fixture no longer tests the filter", len(candidates))
 	}
 
 	for _, query := range []string{"甲乙丙", "abc"} {
@@ -499,9 +524,10 @@ func TestQueryOfPunctuationOnlyStillVerifies(t *testing.T) {
 	}
 }
 
-// FTS5 has a query language of its own, and none of it may be reachable from
-// the search box: a quote, a star, a minus, parentheses or the word NEAR are
-// text to be found, not syntax to be obeyed.
+// Full-text engines have query languages of their own (FTS5 had one, tsquery
+// has another), and none of it may be reachable from the search box: a quote,
+// a star, a minus, parentheses or the word NEAR are text to be found, not
+// syntax to be obeyed.
 func TestFTS5SyntaxInAQueryIsTreatedAsText(t *testing.T) {
 	root := writeProject(t,
 		fixtureNode{id: "alpha", title: "Alpha", body: `release "v2" NEAR (beta) OR -x AND * done`},
@@ -541,18 +567,43 @@ func TestContainsFoldMatchesStringsToLower(t *testing.T) {
 	}
 }
 
-// Retracting a document from a contentless FTS5 table means handing back the
-// same string that was indexed, so the token order cannot come from a map.
-func TestIndexTokensAreDeterministic(t *testing.T) {
-	text := "甲乙丙丁 the quick brown fox 北京大學"
-	first := indexTokens(text)
+// A document's tokens are distinct, hold both its bigrams and its single
+// characters, and come out the same every time.
+func TestDocumentTokensHoldBigramsAndCharacters(t *testing.T) {
+	text := "甲乙丙丁 the quick brown fox 北京大學 甲乙"
+	first, count, cut := documentTokens(text)
+	if cut || count != len(first) {
+		t.Fatalf("a short text was cut: count %d, kept %d", count, len(first))
+	}
+	seen := map[string]bool{}
+	for _, token := range first {
+		if seen[token] {
+			t.Fatalf("token %q twice", token)
+		}
+		seen[token] = true
+	}
+	if !seen["甲乙"] || !seen["甲"] || !seen["qu"] {
+		t.Fatalf("bigrams and single characters are not both present: %q", first)
+	}
 	for range 20 {
-		if got := indexTokens(text); got != first {
-			t.Fatalf("indexTokens is not deterministic:\n%q\n%q", first, got)
+		if again, _, _ := documentTokens(text); strings.Join(again, " ") != strings.Join(first, " ") {
+			t.Fatalf("documentTokens is not deterministic:\n%q\n%q", first, again)
 		}
 	}
-	if !strings.Contains(" "+first+" ", " 甲乙 ") || !strings.Contains(" "+first+" ", " 甲 ") {
-		t.Fatalf("bigrams and single characters are not both present: %q", first)
+}
+
+// A token is letters and digits only, which is what makes quoting it into a
+// tsquery safe; assert it over hostile input rather than trust it.
+func TestTokensAreLettersAndDigitsOnly(t *testing.T) {
+	text := `'a' & !b | c:* <-> \ '' "q" (x) 林雨:A 1=1; DROP -- é` + "\x00"
+	tokens, _, _ := documentTokens(text)
+	all := append(append(tokens, queryTokens(text)...), rankTokens(text)...)
+	for _, token := range all {
+		for _, r := range token {
+			if !unicode.IsLetter(r) && !unicode.IsNumber(r) {
+				t.Fatalf("token %q holds %q", token, r)
+			}
+		}
 	}
 }
 
@@ -633,20 +684,8 @@ func TestPruneDropsProjectsThatAreNoLongerListed(t *testing.T) {
 	if n := count(t, manager.database, `SELECT count(*) FROM search_documents`); n != 1 {
 		t.Fatalf("prune left %d rows", n)
 	}
-	if n := count(t, manager.database, `SELECT count(*) FROM search_content`); n != 1 {
-		t.Fatalf("prune left %d content rows", n)
-	}
 	if got := ids(search(t, manager, kept, "保留")); len(got) != 1 {
 		t.Fatalf("the surviving project = %v", got)
-	}
-	// The postings went with the rows: a consistency check that found otherwise
-	// would empty the index.
-	fresh := &docStore{sql: manager.database.Writer(), read: manager.database.Reader()}
-	if err := fresh.ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if n := count(t, manager.database, `SELECT count(*) FROM search_documents`); n != 1 {
-		t.Fatalf("prune left orphaned postings: %d rows after the check", n)
 	}
 }
 
@@ -698,7 +737,7 @@ func TestOversizedDocumentIsTruncatedNotFatal(t *testing.T) {
 	}
 }
 
-// A long query is more tokens than the MATCH expression carries. Dropping the
+// A long query is more tokens than the candidate filter carries. Dropping the
 // surplus can only widen the candidate set, never lose a document, because the
 // verification pass decides either way.
 func TestAQueryLongerThanTheTokenBudgetStillMatches(t *testing.T) {
@@ -723,5 +762,19 @@ func TestFreshnessStampReadsAsATime(t *testing.T) {
 	}
 	if freshness(fileStamp{}, nil) != "" {
 		t.Fatal("a node with no files must have an empty stamp")
+	}
+}
+
+func TestStoredBodyKeepsOnlyPageHeaders(t *testing.T) {
+	body := "main text" + pageBreak + "p1\tPlan\nlong plan text" + pageBreak + "p2\nmore text"
+	got := pageHeaders(body)
+	if strings.Contains(got, "long plan text") || strings.Contains(got, "main text") {
+		t.Fatalf("pageHeaders kept page text: %q", got)
+	}
+	if titles := extractPageTitles(got); len(titles) != 1 || titles[0] != "Plan" {
+		t.Fatalf("titles from headers = %v, want [Plan]", titles)
+	}
+	if pageHeaders("no pages here") != "" {
+		t.Fatal("a body without subpages should keep nothing")
 	}
 }

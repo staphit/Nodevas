@@ -11,8 +11,10 @@ import { formatLocalizedDateTime, useI18n } from "../i18n";
 import { IconBell, IconClose, IconComputer, IconPaperclip, IconUsage } from "../icons";
 import { WaitingForYouButton } from "../autopilot/HumanReview";
 import { useApp } from "../store";
+import { AgentChatEmpty } from "./AgentChatEmpty";
 import { AskCard } from "./AskCard";
-import { canManageSession, useAgents } from "./agentStore";
+import { canAnswerAsk, canManageSession, useAgents } from "./agentStore";
+import { drawerAsks } from "./askList";
 import {
   addAttachments,
   formatFileSize,
@@ -122,11 +124,22 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
   );
   const [promptHidden, setPromptHidden] = useState(promptDismissed);
 
-  const pendingAsks = asks.filter((a) => a.status === "pending");
+  // Settled asks age out of the list: a clock re-reads it now and then.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const visibleAsks = drawerAsks(asks, viewer, now);
 
   useEffect(() => {
     if (!docked) inputRef.current?.focus();
   }, [docked]);
+
+  // Open, the panel is being read: what is in it is no longer unread.
+  useEffect(() => {
+    useAgents.getState().markSeen();
+  }, [messages]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented && onClose) {
@@ -194,14 +207,19 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
     >
       <header className="copilot-header">
         <div className="copilot-header-row">
-          <h2 id={headingId} className="copilot-heading">
+          {/* Docked, the Station card's toggle right above already reads
+              "Agent chat · N online"; the heading stays only to name the
+              region for screen readers. */}
+          <h2 id={headingId} className={docked ? "copilot-heading sr-only" : "copilot-heading"}>
             {t("agents.title")}
           </h2>
-          <span className="copilot-model">
-            {t("agents.onlineCount", {
-              count: sessions.filter((s) => s.online).length,
-            })}
-          </span>
+          {!docked && (
+            <span className="copilot-model">
+              {t("agents.onlineCount", {
+                count: sessions.filter((s) => s.online).length,
+              })}
+            </span>
+          )}
           <label className="agent-toggle-offline">
             <input
               type="checkbox"
@@ -237,7 +255,7 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
               className="copilot-icon-btn"
               onClick={onClose}
               aria-label={t("agents.close")}
-              title={`${t("agents.close")} (Esc)`}
+              title={t("common.withHint", { label: t("agents.close"), hint: "Esc" })}
             >
               <IconClose size={14} />
             </button>
@@ -280,16 +298,16 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
         </div>
       )}
 
-      {pendingAsks.length > 0 && (
+      {visibleAsks.length > 0 && (
         <section className="agent-asks-section" aria-label={t("agents.ask.section")}>
-          {pendingAsks.map((ask) => (
+          {visibleAsks.map((ask) => (
             <AskCard
               key={ask.id}
               ask={ask}
               submitting={submittingAskIds[ask.id]}
-              canAnswer={canManageSession(ask, viewer)}
+              canAnswer={canAnswerAsk(ask, viewer)}
               onSelectNode={(nodeId) => void openTab(nodeId)}
-              onAnswer={(decision, note) => void answerAsk(ask.id, decision, note)}
+              onAnswer={(payload) => void answerAsk(ask.id, payload)}
             />
           ))}
         </section>
@@ -336,9 +354,12 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
         </section>
       )}
 
-      <section className="agent-roster-section" aria-label={t("agents.roster")}>
+      <section
+        className={`agent-roster-section${sessions.length === 0 ? " is-intro" : ""}`}
+        aria-label={t("agents.roster")}
+      >
         {sessions.length === 0 ? (
-          <div className="agent-roster-empty">{t("agents.emptyRoster")}</div>
+          <AgentChatEmpty />
         ) : (
           <div className="agent-roster-list">
             {sessions.map((s) => {

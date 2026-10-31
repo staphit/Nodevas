@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"fmt"
 	"log"
 	"time"
 
 	"nodevas/internal/db"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // sessionKey is how a session is named everywhere but the cookie itself: the
@@ -127,7 +127,7 @@ func (s sessionStore) remove(keys ...string) error {
 	})
 	if err != nil {
 		log.Printf("session delete: %v", err)
-		return fmt.Errorf("%w: delete session: %w", ErrSessionPersistence, err)
+		return locale.Errorf("%w: delete session: %w", "%w：刪除工作階段：%w", ErrSessionPersistence, err)
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func (s sessionStore) removeUser(userID string) error {
 	})
 	if err != nil {
 		log.Printf("session revoke: %v", err)
-		return fmt.Errorf("%w: revoke sessions: %w", ErrSessionPersistence, err)
+		return locale.Errorf("%w: revoke sessions: %w", "%w：撤銷工作階段：%w", ErrSessionPersistence, err)
 	}
 	return nil
 }

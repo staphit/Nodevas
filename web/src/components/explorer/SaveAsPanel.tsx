@@ -11,6 +11,7 @@ import { api } from "../../api";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import type { ProjectEntry } from "../../state/types";
+import { projectNameClash, projectNameClashMessage } from "./projectNameTaken";
 
 export function useSaveAs({
   activeProject,
@@ -27,6 +28,7 @@ export function useSaveAs({
 }) {
   const { t } = useI18n();
   const switchProject = useApp((state) => state.switchProject);
+  const changeProjects = useApp((state) => state.changeProjects);
   const saveAllTabs = useApp((state) => state.saveAllTabs);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
@@ -65,8 +67,9 @@ export function useSaveAs({
       ? activeProject.slice(0, activeProject.lastIndexOf("/"))
       : "";
     const fullName = parent ? `${parent}/${name}` : name;
-    if (projectByName.has(fullName)) {
-      setSaveAsError(t("explorer.saveAsDuplicate"));
+    const clash = projectNameClash(projectByName.keys(), fullName);
+    if (clash !== null) {
+      setSaveAsError(projectNameClashMessage(clash, fullName, t("explorer.saveAsDuplicate"), t));
       return;
     }
 
@@ -75,8 +78,10 @@ export function useSaveAs({
     try {
       // Write pending edits first, or the copy silently loses them.
       await saveAllTabs();
-      await api.copyProject(activeProject, name, parent, true);
-      await switchProject(fullName);
+      await changeProjects(async () => {
+        await api.copyProject(activeProject, name, parent, true);
+        await switchProject(fullName);
+      });
       const next = new Set(expandedProjects);
       next.add(fullName);
       if (parent) next.add(parent);

@@ -272,11 +272,64 @@ describe("NodeCreateMenu", () => {
     // button immediately is a race the test loses whenever that render has not
     // flushed yet.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "矩形" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "類型預設（圓角）" })).toHaveAttribute(
         "aria-pressed",
         "true",
       ),
     );
+  });
+
+  it("creates a Task unless another type is picked", async () => {
+    const user = userEvent.setup();
+    render(<CreateForm />);
+
+    await user.type(screen.getByLabelText("節點標題"), "第五章{Enter}");
+    await waitFor(() => expect(api.createNode).toHaveBeenCalledTimes(1));
+    expect(api.createNode).toHaveBeenCalledWith(expect.objectContaining({ kind: "task" }));
+  });
+
+  it("creates the type picked in the form, custom types included", async () => {
+    useApp.setState({
+      graph: {
+        ...structuredClone(served.graph),
+        nodeTypes: [
+          {
+            id: "custom-type-1",
+            label: "伏筆",
+            shape: "diamond",
+            agentMode: "none",
+            completion: "none",
+            countsInProgress: false,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    render(<CreateForm />);
+
+    const type = screen.getByRole("combobox", { name: "類型" });
+    expect(within(type).getByRole("option", { name: "審核" })).toBeInTheDocument();
+    await user.selectOptions(type, "custom-type-1");
+    await user.type(screen.getByLabelText("節點標題"), "暗線");
+    await user.click(screen.getByRole("button", { name: "建立節點" }));
+
+    await waitFor(() => expect(api.createNode).toHaveBeenCalledTimes(1));
+    expect(api.createNode).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "custom-type-1", title: "暗線" }),
+    );
+  });
+
+  // A Note has no status and a Start sets its own: neither takes one here.
+  it("offers no initial status for a type without one", async () => {
+    const user = userEvent.setup();
+    render(<CreateForm />);
+    await openAdvanced(user);
+
+    expect(screen.getByRole("combobox", { name: "實際狀態" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "類型" }), "note");
+    expect(screen.queryByRole("combobox", { name: "實際狀態" })).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: "類型" }), "start");
+    expect(screen.queryByRole("combobox", { name: "實際狀態" })).toBeNull();
   });
 
   // Someone who sets looks on one node usually wants to on the next, and the

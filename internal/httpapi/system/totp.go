@@ -15,6 +15,8 @@ import (
 	"nodevas/internal/audit"
 	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
+	"nodevas/internal/safego"
 )
 
 // Two-factor authentication (an authenticator app, TOTP). See
@@ -77,7 +79,7 @@ func clearSignInTicket(c *gin.Context) {
 func (a *API) postLoginTOTP(c *gin.Context) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts", "這個伺服器不使用帳號"))
 		return
 	}
 	var body struct {
@@ -149,7 +151,7 @@ func (a *API) recordAuthEventAs(c *gin.Context, action, actorID, actorName strin
 func (a *API) totpAccounts(c *gin.Context) (*auth.SessionAuth, bool) {
 	accounts, ok := a.auth.(*auth.SessionAuth)
 	if !ok {
-		httpx.Err(c, http.StatusNotFound, errors.New("this server does not use accounts, so there is no second factor to set up"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("this server does not use accounts, so there is no second factor to set up", "這個伺服器不使用帳號，所以沒有雙重驗證可設定"))
 		return nil, false
 	}
 	return accounts, true
@@ -310,6 +312,7 @@ func (a *API) noticeTOTPChange(c *gin.Context, accounts *auth.SessionAuth, what 
 		"\n\nIf this was not you, sign in, check Settings > Account, and ask an administrator to reset " +
 		"two-factor authentication (nodevas account totp-reset) if you are locked out.\n"
 	go func() {
+		defer safego.Recover("two-factor notice mail")
 		ctx, cancel := context.WithTimeout(context.Background(), otpMailTimeout)
 		defer cancel()
 		if err := a.mailer.Send(ctx, to, "Nodevas: two-factor authentication changed", body); err != nil {

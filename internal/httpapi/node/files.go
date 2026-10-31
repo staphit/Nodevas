@@ -4,8 +4,6 @@
 package node
 
 import (
-	"errors"
-	"fmt"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -14,23 +12,24 @@ import (
 	"github.com/gin-gonic/gin"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
 func (a *API) postNodeFile(c *gin.Context) {
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, http.StatusBadRequest, errors.New("invalid node id"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
 	if info, err := store.StatProjectPath(st.Root(), st.NodePath(id)); err != nil || !info.Mode().IsRegular() {
-		httpx.Err(c, http.StatusNotFound, fmt.Errorf("node %q not found", id))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("node %q not found", "找不到節點「%s」", id))
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, store.MaxAttachmentBytes)
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf("read upload: %w", err))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("read upload: %w", "讀取上傳檔案：%w", err))
 		return
 	}
 	if c.Request.MultipartForm != nil {
@@ -38,7 +37,7 @@ func (a *API) postNodeFile(c *gin.Context) {
 	}
 	upload, header, err := c.Request.FormFile("file")
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, errors.New("file is required"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("file is required", "需要提供檔案"))
 		return
 	}
 	defer upload.Close()
@@ -59,11 +58,11 @@ func (a *API) getNodeFile(c *gin.Context) {
 	id := c.Param("id")
 	file := c.Param("file")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, http.StatusBadRequest, errors.New("invalid node id"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	if file == "" || file != filepath.Base(file) || strings.Contains(file, "..") {
-		httpx.Err(c, http.StatusBadRequest, errors.New("invalid file name"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("invalid file name", "檔名無效"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
@@ -71,7 +70,7 @@ func (a *API) getNodeFile(c *gin.Context) {
 	path := filepath.Join(dir, file)
 	attachment, info, err := store.OpenProjectFile(st.Root(), path)
 	if err != nil {
-		httpx.Err(c, http.StatusNotFound, errors.New("attachment not found"))
+		httpx.Err(c, http.StatusNotFound, locale.Errorf("attachment not found", "找不到附件"))
 		return
 	}
 	defer attachment.Close()

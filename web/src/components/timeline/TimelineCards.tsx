@@ -9,6 +9,7 @@
 import { reportError } from "../../store";
 import { StatusShape, statusTheme } from "../../statusTheme";
 import {
+  formatLocalizedDate,
   formatLocalizedDateTime,
   formatLocalizedTime,
   localizedPlanStatusLabel,
@@ -26,6 +27,17 @@ import type {
 } from "../../types";
 import type { Col } from "../canvas/geometry";
 import type { ActualDragState, PlanDragState } from "./useMilestoneDrag";
+
+/**
+ * A milestone's local calendar date and optional "HH:mm" as one local moment,
+ * so it is written by the same helpers as an actual record's timestamp
+ * rather than as the stored strings.
+ */
+function planMoment(plan: PlanMilestone): Date {
+  const [year, month, day] = plan.date.split("-").map(Number);
+  const [hour, minute] = (plan.time ?? "").split(":").map(Number);
+  return new Date(year, month - 1, day, hour || 0, minute || 0);
+}
 
 export interface TimelineCardsProps {
   column: Col;
@@ -88,6 +100,7 @@ export function TimelineCards({
       {plans.map((plan) => {
         const builtinStatus = isBuiltinPlanStatus(plan.status);
         const label = localizedPlanStatusLabel(plan.status, planStatusDefinitions, language);
+        const moment = planMoment(plan);
         const lifting =
           planDrag?.nodeId === column.node.id &&
           planDrag.status === plan.status &&
@@ -130,8 +143,10 @@ export function TimelineCards({
             }
             title={t("timeline.card.planTitle", {
               label,
-              date: plan.date,
-              time: plan.time ? ` ${plan.time}` : "",
+              date: plan.time
+                ? formatLocalizedDateTime(moment, language)
+                : formatLocalizedDate(moment, language, { dateStyle: "short" }),
+              time: "",
             })}
           >
             <span className="snap-card-head">
@@ -142,7 +157,9 @@ export function TimelineCards({
                 <span className="custom-plan-shape" aria-hidden>＋</span>
               )}
               <b>{label}</b>
-              {plan.time && <span className="plan-time mono">{plan.time}</span>}
+              {plan.time && (
+                <span className="plan-time mono">{formatLocalizedTime(moment, language)}</span>
+              )}
             </span>
             <span className="snap-card-title">
               {column.node.title || column.node.id}

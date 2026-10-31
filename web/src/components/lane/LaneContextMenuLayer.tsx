@@ -1,14 +1,15 @@
 /**
- * The board's right-click menu: one floating panel, six bodies.
+ * The board's right-click menu: one floating panel, seven bodies.
  *
  * Which body is shown follows the menu kind. The panel measures itself to stay
  * on screen, and the node form — the one big enough to cover what it is about
  * to create — can be dragged out of the way by its heading.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { useFloatingPanel } from "../floatingPanel";
-import type { Graph, LogicGate, PlanStatusDefinition } from "../../types";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { clampToViewport, useFloatingPanel } from "../floatingPanel";
+import { useI18n } from "../../i18n";
+import type { Graph, GraphEdge, LogicGate, PlanStatusDefinition } from "../../types";
 import type { useGraphWiring } from "../canvas/useGraphWiring";
 import type { useNodeConditions } from "../canvas/useNodeConditions";
 import type { useNodeCreation } from "../canvas/useNodeCreation";
@@ -17,9 +18,12 @@ import { EdgeMenu, type EdgeMenuProps } from "../menus/EdgeMenu";
 import { GraphMenu, type GraphMenuProps } from "../menus/GraphMenu";
 import { LogicGateMenu } from "../menus/LogicGateMenu";
 import { NodeCreateMenu } from "../menus/NodeCreateMenu";
-import { NodeMenu, type NodeMenuProps } from "../menus/NodeMenu";
+import { NodeActionsMenu, type NodeActionsMenuProps } from "../menus/NodeActionsMenu";
+import { NodeMenu } from "../menus/NodeMenu";
 import { PlanMenu } from "../menus/PlanMenu";
 import type { LaneContextMenu } from "../LaneView";
+
+const NO_EDGES: readonly GraphEdge[] = [];
 
 /**
  * The open menu, and the two ways of dismissing one: pressing Escape or
@@ -32,13 +36,17 @@ export function useLaneContextMenu() {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      // Claimed in the capture phase, so the drawer and the board below do not
+      // also read it as theirs: one Escape closes one thing.
+      event.stopPropagation();
+      close();
     };
     window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [contextMenu]);
 
@@ -52,10 +60,11 @@ export interface LaneContextMenuLayerProps {
   nodeTitle: (id: string | undefined) => string;
   logicGates: LogicGate[];
   planStatusDefinitions: PlanStatusDefinition[];
-  openTab: NodeMenuProps["openTab"];
+  openTab: NodeActionsMenuProps["openTab"];
   selectNode: (id: string) => void;
-  duplicateNode: NodeMenuProps["duplicateNode"];
-  deleteNode: NodeMenuProps["deleteNode"];
+  duplicateNode: NodeActionsMenuProps["duplicateNode"];
+  deleteNode: NodeActionsMenuProps["deleteNode"];
+  createGroupFromSelection: NodeActionsMenuProps["createGroupFromSelection"];
   openNodeCreationMenu: GraphMenuProps["openNodeCreationMenu"];
   createCanvasGroup: GraphMenuProps["createCanvasGroup"];
   createCanvasAnnotation: GraphMenuProps["createCanvasAnnotation"];
@@ -77,6 +86,7 @@ export function LaneContextMenuLayer({
   selectNode,
   duplicateNode,
   deleteNode,
+  createGroupFromSelection,
   openNodeCreationMenu,
   createCanvasGroup,
   createCanvasAnnotation,
@@ -86,6 +96,7 @@ export function LaneContextMenuLayer({
   nodeCreation,
   planMenu,
 }: LaneContextMenuLayerProps) {
+  const { t } = useI18n();
   // Below the phone breakpoint there is no room to place a form beside where it
   // was opened from: the menu is nearly as wide as the screen and the tallest of
   // them is taller than it, so there is no placement that both fits and stays
@@ -98,16 +109,45 @@ export function LaneContextMenuLayer({
   );
   const { ref, placement, dragging, dragHandleProps } =
     useFloatingPanel<HTMLDivElement>(anchor);
+  // The panel is placed by the size it opens at, and its content can grow
+  // after that: an error under the New node form, the plan menu's message.
+  // Clamped again by the size it grows to, so the part that grew — and the
+  // buttons below it — stay on screen.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const panel = ref.current;
+    if (!panel) return;
+    const measure = () => {
+      const width = panel.offsetWidth;
+      const height = panel.offsetHeight;
+      setSize((current) =>
+        current?.width === width && current.height === height ? current : { width, height },
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [ref]);
+  const position = size ? clampToViewport(placement, size.width, size.height) : placement;
   return (
     <div
       ref={ref}
       className={`lane-context-menu${
         contextMenu.kind === "node-create" ? " node-create-menu" : ""
       }${contextMenu.kind === "node" ? " condition-menu" : ""}${
+        contextMenu.kind === "node-actions" ? " node-actions-menu" : ""
+      }${
         contextMenu.kind === "logic-gate" ? " standalone-gate-menu" : ""
       }${dragging ? " dragging" : ""}`}
       role="menu"
-      style={placement}
+      // The node's menu is named after its node; the others carry their own
+      // heading, read as part of the menu.
+      aria-label={
+        contextMenu.kind === "node-actions"
+          ? t("board.nodeMenu.label", { title: nodeTitle(contextMenu.nodeId) })
+          : undefined
+      }
+      style={position}
       onPointerDown={(event) => event.stopPropagation()}
     >
       {contextMenu.kind === "graph" ? (
@@ -148,6 +188,19 @@ export function LaneContextMenuLayer({
           toggleLogicGateOutput={wiring.toggleLogicGateOutput}
           deleteStandaloneLogicGate={wiring.deleteStandaloneLogicGate}
         />
+      ) : contextMenu.kind === "node-actions" ? (
+        <NodeActionsMenu
+          key={contextMenu.nodeId}
+          contextMenu={contextMenu}
+          graph={graph}
+          nodeTitle={nodeTitle}
+          openTab={openTab}
+          selectNode={selectNode}
+          duplicateNode={duplicateNode}
+          deleteNode={deleteNode}
+          createGroupFromSelection={createGroupFromSelection}
+          setContextMenu={setContextMenu}
+        />
       ) : contextMenu.kind === "node" ? (
         <NodeMenu
           // A fresh menu per node, so "Advanced conditions" opens or closes
@@ -156,11 +209,8 @@ export function LaneContextMenuLayer({
           {...conditions}
           contextMenu={contextMenu}
           nodeTitle={nodeTitle}
+          edges={graph?.edges ?? NO_EDGES}
           assignExistingLogicGateToNode={wiring.assignExistingLogicGateToNode}
-          openTab={openTab}
-          selectNode={selectNode}
-          duplicateNode={duplicateNode}
-          deleteNode={deleteNode}
           setContextMenu={setContextMenu}
         />
       ) : (

@@ -7,12 +7,16 @@
  * to, so the two never fork.
  */
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useApp } from "../../store";
 import type { Graph } from "../../types";
 import { ROW_H, type Col } from "../canvas/geometry";
 import type { GraphSelection } from "../LaneView";
 import { RULER_W } from "./boardGeometry";
+
+/** A horizontal timeline's sticky date header (TimelineGrid's HORIZONTAL_HEADER_H). */
+const HORIZONTAL_HEADER_H = 48;
+import { visibleBoardCentre } from "./boardVisibleArea";
 
 export function useBoardReveal({
   isGraph,
@@ -22,6 +26,9 @@ export function useBoardReveal({
   colOf,
   timelineColOf,
   timelineCellWidth,
+  timelineCellHeight,
+  timelineOrientation,
+  timelineDateAxis,
   zoom,
   centerX,
   rowTop,
@@ -37,6 +44,9 @@ export function useBoardReveal({
   colOf: Map<string, Col>;
   timelineColOf: Map<string, Col>;
   timelineCellWidth: number;
+  timelineCellHeight: number;
+  timelineOrientation: "vertical" | "horizontal";
+  timelineDateAxis: "top" | "bottom";
   zoom: number;
   centerX: (column: Col) => number;
   rowTop: (row: number) => number;
@@ -58,6 +68,28 @@ export function useBoardReveal({
     }
   }, [isGraph, selectedNodeId]);
 
+  // And the other way: a node the drawer comes to show — a click on one of its
+  // tabs, the tab left when another closes, the explorer's tree — becomes the
+  // selection, so dependency and timeline actions aim at the open page. Moved
+  // through the shared selection, which the timeline follows; the graph pane
+  // owns it so the two never fork. A multi-selection that already holds the
+  // node (a plain click on one of its cards) is kept, and a drawer closing
+  // leaves the selection where it is.
+  const activeTab = useApp((state) => state.activeTab);
+  const shownTab = useRef(activeTab);
+  useEffect(() => {
+    if (activeTab === shownTab.current) return;
+    shownTab.current = activeTab;
+    if (!isGraph || activeTab === null) return;
+    const held =
+      graphSelection?.kind === "node"
+        ? graphSelection.id === activeTab
+        : graphSelection?.kind === "nodes" && graphSelection.ids.includes(activeTab);
+    if (held) return;
+    setGraphSelection({ kind: "node", id: activeTab });
+    onSelectedNodeChange?.(activeTab);
+  }, [activeTab, isGraph]);
+
   // Following a link opens the document; the board answers by selecting the
   // node and scrolling it into view, so the jump is visible on the canvas too.
   const revealRequest = useApp((state) => state.revealRequest);
@@ -72,22 +104,44 @@ export function useBoardReveal({
     if (!column || !board) return;
     setGraphSelection({ kind: "node", id: revealRequest.nodeId });
     onSelectedNodeChange?.(revealRequest.nodeId);
+    // Centred in what is showing, not on the whole board: the drawer this
+    // jump just opened is laid over the board's right side.
+    const centre = visibleBoardCentre(board);
     board.scrollTo({
-      left: Math.max(0, (centerX(column) - board.clientWidth / 2 / zoom) * zoom),
-      top: Math.max(
-        0,
-        (rowTop(column.row) + ROW_H / 2 - board.clientHeight / 2 / zoom) * zoom,
-      ),
+      left: Math.max(0, centerX(column) * zoom - centre.x),
+      top: Math.max(0, (rowTop(column.row) + ROW_H / 2) * zoom - centre.y),
       behavior: "smooth",
     });
     clearRevealRequest();
   }, [revealRequest, collapsed, isGraph, colOf, zoom]);
 
+  // A node selected on the timeline brings its lane into view — along the
+  // lane axis only. The other axis is the dates, and the reader's place in
+  // them (today, usually) is theirs: a horizontal timeline once scrolled its
+  // dates by the lane's index, a fortnight back for any selection.
   useEffect(() => {
     if (isGraph || collapsed || !selectedNodeId) return;
     const selectedColumn = timelineColOf.get(selectedNodeId);
     const board = boardRef.current;
     if (!selectedColumn || !board) return;
+    if (timelineOrientation === "horizontal") {
+      // Lanes run down under the sticky date header (TimelineGrid's 48px),
+      // which sits above them or, with the date axis at the bottom, below.
+      const headerTop = timelineDateAxis === "bottom" ? 0 : HORIZONTAL_HEADER_H * zoom;
+      const headerBottom = timelineDateAxis === "bottom" ? HORIZONTAL_HEADER_H * zoom : 0;
+      const size = timelineCellHeight * zoom;
+      const top = headerTop + selectedColumn.index * size;
+      const visibleTop = board.scrollTop + headerTop;
+      const visibleBottom = board.scrollTop + board.clientHeight - headerBottom;
+      if (top >= visibleTop && top + size <= visibleBottom) return;
+      const room = board.clientHeight - headerTop - headerBottom;
+      board.scrollTo({
+        left: board.scrollLeft,
+        top: Math.max(0, top - headerTop - Math.max(0, (room - size) / 2)),
+        behavior: "smooth",
+      });
+      return;
+    }
     const left = selectedColumn.index * timelineCellWidth;
     const right = left + timelineCellWidth;
     const visibleLeft = board.scrollLeft;
@@ -106,7 +160,11 @@ export function useBoardReveal({
     isGraph,
     selectedNodeId,
     timelineCellWidth,
+    timelineCellHeight,
+    timelineOrientation,
+    timelineDateAxis,
     timelineColOf,
+    zoom,
   ]);
 
   useEffect(() => {

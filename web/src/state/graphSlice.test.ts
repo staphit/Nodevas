@@ -90,7 +90,7 @@ describe("runGraphCommand", () => {
       operation: "node.updateMetadata",
     });
     expect(useApp.getState().canUndo).toBe(true);
-    expect(useApp.getState().undoLabel).toBe("修改節點資料");
+    expect(useApp.getState().undoLabel).toBe("Edit node details");
   });
 
   it("routes a write-access edit through ops", async () => {
@@ -329,6 +329,34 @@ describe("undo", () => {
   });
 });
 
+describe("logic gate inputs", () => {
+  // A gate written without inputs, or sent by a peer with null, must not reach
+  // the board as anything but an array.
+  const gateless = (): Graph => ({
+    ...baseGraph(),
+    ui: {
+      logicGates: [
+        { id: "g1", operator: "and", x: 0, y: 0, inputs: null as unknown as string[] },
+        { id: "g2", operator: "or", x: 0, y: 0, inputs: ["a"] },
+      ],
+    },
+  });
+
+  it("are an array after a load", async () => {
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: gateless(), rev: "rev-1", statuses: {}, issues: null });
+    await useApp.getState().loadAll();
+    const gates = useApp.getState().graph!.ui!.logicGates!;
+    expect(gates[0].inputs).toEqual([]);
+    expect(gates[1].inputs).toEqual(["a"]);
+  });
+
+  it("are an array after a peer's ops", () => {
+    resetStore(gateless());
+    expect(useApp.getState().applyPeerGraphOps([{ kind: "move", nodeId: "a", x: 1, y: 2 }])).toBe(true);
+    expect(useApp.getState().graph!.ui!.logicGates![0].inputs).toEqual([]);
+  });
+});
+
 describe("loadAll", () => {
   // A reload is triggered from several places at once — the mutation itself,
   // the WebSocket echo of it, the effect that re-runs — and every one of those
@@ -371,6 +399,14 @@ describe("loadAll", () => {
 
     expect(useApp.getState().graph!.nodes![0].title).toBe("A");
     expect(useApp.getState().graphRev).toBe("rev-1");
+  });
+
+  // The explorer's project badge reads the graph on screen, which it may only
+  // do while that graph is the active project's and not the one before it.
+  it("records which project the graph on screen belongs to", async () => {
+    useApp.setState({ activeProject: "board", graphProject: "" });
+    await useApp.getState().loadAll();
+    expect(useApp.getState().graphProject).toBe("board");
   });
 });
 

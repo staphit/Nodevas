@@ -270,6 +270,25 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if !found {
 		return repo, fmt.Sprintf("repository %q is not on this runner's allowlist", job.RepoID)
 	}
+	// A verify job runs no agent: the repo's own test command (verify.go).
+	if job.Kind == runnerwire.JobVerify {
+		if job.Mode != runnerwire.ModeHeadless {
+			return repo, "a verify job is headless"
+		}
+		if reason := checkKind(job, cfg); reason != "" {
+			return repo, reason
+		}
+		busy := 0
+		for _, r := range j.runs {
+			if r.finish == nil {
+				busy++
+			}
+		}
+		if limit := cfg.MaxConcurrentRuns(); busy >= limit {
+			return repo, fmt.Sprintf("runner is busy: it runs at most %d at once", limit)
+		}
+		return repo, ""
+	}
 	if j.c.adapterFor(job.Agent) == nil {
 		return repo, fmt.Sprintf("agent %q not supported yet", job.Agent)
 	}
@@ -352,7 +371,7 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 	// repository's, open, and on the branch the job names, before anyone is
 	// asked to accept.
 	var check prCheck
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise {
+	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobRevise || job.Kind == runnerwire.JobVerify {
 		var reason string
 		check, reason = j.checkPR(ctx, r)
 		if ctx.Err() != nil {
@@ -391,6 +410,12 @@ func (j *jobs) execute(ctx context.Context, r *run) {
 		return
 	case runnerwire.JobPlan:
 		j.executePlan(ctx, r)
+		return
+	case runnerwire.JobVerify:
+		j.executeVerify(ctx, r, check)
+		return
+	case runnerwire.JobJudge:
+		j.executeJudge(ctx, r)
 		return
 	}
 
@@ -567,17 +592,24 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
+		MCP:            adapter.MCPServer{Command: exe},
 		PermissionMode: mode,
 		// Each adapter reads only the settings meant for it.
 		AllowedTools:     cfg.AllowedTools,
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
+		PermissionRelay:  cfg.PermissionRelay,
 	}
-	cmd, err := ad.Command(job, runEnv)
+	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
+	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
+	}
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && relayOff {
+		// The adapter could not set the relay up (agy: no session settings,
+		// no hook that runs nodevas): the log says what the run really does.
+		modeText = claimed + notRelayedText
 	}
 	parser := ad.NewParser()
 	// An ACP agent is spoken to while it runs (adapter/acp.go).
@@ -631,6 +663,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		waitErr = <-done
 	}
 	stdout.flush()
+	if ender, ok := conv.(interface{ End() }); ok {
+		// Permission requests still waiting for a person stop waiting.
+		ender.End()
+	}
 
 	outcome := parser.Outcome()
 	exitCode := -1
@@ -701,8 +737,23 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
 
+// relayedText ends the start line of a run whose permission prompts are
+// relayed; notRelayedText that of one whose adapter could not relay them.
+const (
+	relayedText    = ", permission prompts relayed to Nodevas"
+	notRelayedText = ", permission prompts not relayed (denied headless)"
+)
+
 // permissionText says how freely the agent may act, for the run's log.
 func permissionText(cfg *Config, kind string) string {
+	text := modeText(cfg, kind)
+	if cfg.RelaysPermissions(kind) {
+		text += relayedText
+	}
+	return text
+}
+
+func modeText(cfg *Config, kind string) string {
 	switch kind {
 	case "codex":
 		text := "sandbox " + cfg.CodexSandboxMode()
@@ -728,7 +779,7 @@ func permissionText(cfg *Config, kind string) string {
 // runner's proxy, as a worker, under a session name that says which run it is,
 // with only the tools a run uses: each definition is paid for on every model
 // call.
-func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
+func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
 	model := job.Model
 	if model == "" {
 		model = "default"
@@ -741,15 +792,20 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo) []string {
 	if repoName == "" {
 		repoName = "repo"
 	}
-	return []string{
+	args := []string{
 		"mcp",
 		"--server", server,
 		"--project", job.Project,
-		"--agent-role", "worker",
+		"--agent-role", roleAgentClass(job),
 		"--actor", "run:" + job.Agent,
 		"--session-name", repoName + "-" + job.Agent + "-" + slug(model) + "-" + runID,
-		"--toolset", "run",
 	}
+	// A role job is served its role's tools only (the hub's allowlist); a
+	// legacy job keeps the run toolset, exactly as before.
+	if role := roleArgs(job, relayTools...); role != nil {
+		return append(args, role...)
+	}
+	return append(args, "--toolset", "run")
 }
 
 func (j *jobs) proxyFor() (*Proxy, error) {

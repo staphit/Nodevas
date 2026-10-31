@@ -4,6 +4,7 @@
 package agents
 
 import (
+	"context"
 	"errors"
 	"mime"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/project"
 	"nodevas/internal/usage"
 )
@@ -38,6 +40,9 @@ type API struct {
 	// usage records session token usage; nil leaves the route answering 503.
 	usage       *usage.Store
 	usageNotify func(projectKey string)
+	// runUsage records an interactive run's usage from its session's
+	// report (UseRunUsage); nil records none.
+	runUsage func(ctx context.Context, runID string, models []usage.ModelUsage) error
 	// isRun reports whether a request comes from a run through its runner's
 	// proxy (UseRunCheck); nil means none does.
 	isRun func(*http.Request) bool
@@ -288,17 +293,17 @@ func humanViewer(r *http.Request) agents.Viewer {
 // refuseAgent answers 403 for a request from an agent and reports whether it
 // did. Holding, approving and rejecting are what a person does about agents;
 // an agent that could do them could let its own mail through.
-func refuseAgent(c *gin.Context, what string) bool {
+func refuseAgent(c *gin.Context, what *locale.Message) bool {
 	if !auth.ActorFrom(c.Request).IsAgent() {
 		return false
 	}
 	httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-		errors.New("only a person may "+what), nil)
+		locale.Errorf("only a person may %s", "只有人可以%s", what), nil)
 	return true
 }
 
 func (a *API) postInbound(c *gin.Context) {
-	if refuseAgent(c, "change a session's inbound policy") {
+	if refuseAgent(c, locale.Say("change a session's inbound policy", "更改工作階段的收信政策")) {
 		return
 	}
 	var body struct {
@@ -325,7 +330,7 @@ func (a *API) getMessages(c *gin.Context) {
 	if status == agents.StatusHeld {
 		// The held queue is what a person decides on; an agent reading it
 		// would read its mail before anyone let it through.
-		if refuseAgent(c, "list held messages") {
+		if refuseAgent(c, locale.Say("list held messages", "列出被擱置的訊息")) {
 			return
 		}
 		msgs, err = a.hub.ListHeld(c.Request.Context(), projectKey, humanViewer(c.Request))
@@ -358,7 +363,7 @@ func (a *API) postApprove(c *gin.Context) { a.decide(c, true) }
 func (a *API) postReject(c *gin.Context)  { a.decide(c, false) }
 
 func (a *API) decide(c *gin.Context, approve bool) {
-	if refuseAgent(c, "approve or reject held messages") {
+	if refuseAgent(c, locale.Say("approve or reject held messages", "核准或拒絕被擱置的訊息")) {
 		return
 	}
 	msg, err := a.hub.Decide(c.Request.Context(), a.projectKey(c.Request), c.Param("id"), approve, humanViewer(c.Request))
@@ -410,7 +415,7 @@ func (a *API) postMessage(c *gin.Context) {
 	fromRun := a.fromRun(c.Request, actorID)
 	if fromRun && a.hub.PersonSession(projectKey, body.FromSession) {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("a run may not send as a person's session"), nil)
+			locale.Errorf("a run may not send as a person's session", "執行不能以人的工作階段身分傳送"), nil)
 		return
 	}
 	if fromRun {
@@ -473,7 +478,7 @@ func (a *API) postInbox(c *gin.Context) {
 	}
 	if a.fromRun(c.Request, actorID) && a.hub.PersonSession(projectKey, body.Session) {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("a run may not read a person's session inbox"), nil)
+			locale.Errorf("a run may not read a person's session inbox", "執行不能讀取人的工作階段收件匣"), nil)
 		return
 	}
 	checkInbox := a.hub.CheckInbox
@@ -507,19 +512,31 @@ func (a *API) getAsks(c *gin.Context) {
 	if asks == nil {
 		asks = []agents.Ask{}
 	}
+	// Each ask as the caller may see it, and whether they may answer it.
+	viewer := humanViewer(c.Request)
+	for i := range asks {
+		asks[i] = viewer.Shown(asks[i])
+	}
 	c.JSON(http.StatusOK, map[string]any{"asks": asks})
 }
 
 func (a *API) postAsk(c *gin.Context) {
 	var body struct {
-		SessionID      string `json:"sessionId"`
-		SessionName    string `json:"sessionName"`
-		Actor          string `json:"actor"`
-		Agent          string `json:"agent"`
-		Question       string `json:"question"`
-		AboutMsgID     string `json:"aboutMsgId"`
-		NodeID         string `json:"nodeId"`
-		TimeoutSeconds int    `json:"timeoutSeconds"`
+		SessionID      string   `json:"sessionId"`
+		SessionName    string   `json:"sessionName"`
+		Actor          string   `json:"actor"`
+		Agent          string   `json:"agent"`
+		Question       string   `json:"question"`
+		AboutMsgID     string   `json:"aboutMsgId"`
+		NodeID         string   `json:"nodeId"`
+		Kind           string   `json:"kind"`
+		Options        []string `json:"options"`
+		Tool           string   `json:"tool"`
+		ToolInput      string   `json:"toolInput"`
+		TimeoutSeconds int      `json:"timeoutSeconds"`
+
+		// ToolInputTruncated: the relay cut toolInput to fit.
+		ToolInputTruncated bool `json:"toolInputTruncated"`
 	}
 	if !httpx.DecodeJSONLimit(c, &body, maxAskBody) {
 		return
@@ -534,13 +551,16 @@ func (a *API) postAsk(c *gin.Context) {
 	if fromRun && a.hub.PersonSession(projectKey, sessionName) {
 		// The answer, and any approval it forwards, would be the person's.
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("a run may not ask as a person's session"), nil)
+			locale.Errorf("a run may not ask as a person's session", "執行不能以人的工作階段身分提問"), nil)
 		return
 	}
-	timeout := time.Duration(body.TimeoutSeconds) * time.Second
-	if timeout <= 0 || timeout > agents.MaxAskTimeout {
-		timeout = agents.MaxAskTimeout
+	// An agent seldom names the node it asks about; a run's is the one its
+	// runner's proxy vouches it was dispatched on.
+	nodeID := strings.TrimSpace(body.NodeID)
+	if nodeID == "" {
+		nodeID = auth.ActorFrom(c.Request).RunNodeID
 	}
+	timeout := agents.AskTimeout(body.Kind, time.Duration(body.TimeoutSeconds)*time.Second)
 	controller := http.NewResponseController(c.Writer)
 	_ = controller.SetWriteDeadline(time.Now().Add(timeout + 30*time.Second))
 
@@ -552,8 +572,18 @@ func (a *API) postAsk(c *gin.Context) {
 		Agent:       body.Agent,
 		Question:    body.Question,
 		AboutMsgID:  body.AboutMsgID,
-		NodeID:      body.NodeID,
-		FromRun:     fromRun,
+		NodeID:      nodeID,
+		Kind:        body.Kind,
+		Options:     body.Options,
+		Tool:        body.Tool,
+		ToolInput:   body.ToolInput,
+		// The hub ORs in its own cut.
+		ToolInputTruncated: body.ToolInputTruncated,
+
+		// The run is the transport's word, never the body's: an allow for
+		// the run is keyed on it.
+		RunID:   a.runIDOf(c.Request),
+		FromRun: fromRun,
 	}, timeout)
 	if err != nil {
 		if errors.Is(err, c.Request.Context().Err()) {
@@ -573,18 +603,22 @@ func (a *API) postAskAnswer(c *gin.Context) {
 	authed := auth.ActorFrom(c.Request)
 	if authed.Agent != "" {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED",
-			errors.New("only a human session may answer ask_user requests"), nil)
+			locale.Errorf("only a human session may answer ask_user requests", "只有人的工作階段可以回答 ask_user 請求"), nil)
 		return
 	}
 	var body struct {
 		Decision string `json:"decision"`
 		Note     string `json:"note"`
+		Answer   string `json:"answer"`
 	}
-	if !httpx.DecodeJSONLimit(c, &body, maxInboxBody) {
+	// A text answer runs to MaxAskAnswerRunes characters of any script.
+	if !httpx.DecodeJSONLimit(c, &body, maxAskBody) {
 		return
 	}
 	projectKey := a.projectKey(c.Request)
-	ask, err := a.hub.Answer(c.Request.Context(), projectKey, c.Param("id"), body.Decision, body.Note, humanViewer(c.Request))
+	ask, err := a.hub.AnswerWith(c.Request.Context(), projectKey, c.Param("id"), agents.AnswerInput{
+		Decision: body.Decision, Note: body.Note, Answer: body.Answer,
+	}, humanViewer(c.Request))
 	if err != nil {
 		fail(c, err)
 		return

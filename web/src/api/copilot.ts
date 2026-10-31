@@ -14,6 +14,7 @@ import {
   getProjectOverride,
   notifyUnauthorized,
   req,
+  setRequestLanguage,
   UnauthorizedError,
 } from "./http";
 
@@ -304,6 +305,7 @@ export async function* streamTurn(
     "Content-Type": "application/json",
     Accept: "application/x-ndjson",
   });
+  setRequestLanguage(headers);
   const project = getProjectOverride();
   if (project) headers.set("X-Nodevas-Project", project);
   const token = csrfToken();

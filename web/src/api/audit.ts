@@ -1,4 +1,12 @@
-import { AuthError, notifyUnauthorized, req, RequestError, UnauthorizedError } from "./http";
+import {
+  AuthError,
+  notifyUnauthorized,
+  req,
+  RequestError,
+  setRequestLanguage,
+  UnauthorizedError,
+} from "./http";
+import { translate } from "../i18n";
 
 /**
  * The server's audit trail and its health, for administrators
@@ -78,9 +86,12 @@ async function getAuditHealth(): Promise<AuditHealth> {
   const timeout = window.setTimeout(() => controller.abort(), 30_000);
   let res: Response;
   try {
-    res = await fetch("/api/audit/health", { signal: controller.signal });
+    // Its refusals (a member's 403) are worded for the app's language.
+    const headers = new Headers();
+    setRequestLanguage(headers);
+    res = await fetch("/api/audit/health", { headers, signal: controller.signal });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw new Error("請求逾時");
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error(translate("api.error.timeout"));
     throw error;
   } finally {
     window.clearTimeout(timeout);

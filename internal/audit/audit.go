@@ -8,8 +8,8 @@
 // and that a project deletion takes with it. It also gives server-wide events —
 // a sign-in has no project — somewhere to live at all.
 //
-// Everything here is written so an operator can read it in DB Browser for
-// SQLite without this program: timestamps are RFC3339 UTC text, and Detail is
+// Everything here is written so an operator can read it in a database tool
+// (psql, TablePlus, DBeaver) without this program: timestamps are RFC3339 UTC text, and Detail is
 // JSON text that is sanitised on the way in so a row is never a wall of escaped
 // control characters, and never a credential.
 package audit
@@ -92,14 +92,14 @@ const (
 const (
 	DefaultLimit = 200
 	MaxLimit     = 1000
-	// MaxOffset is how deep paging may go. SQLite reaches OFFSET n by counting
+	// MaxOffset is how deep paging may go. The database reaches OFFSET n by counting
 	// out n rows and throwing them away, so an unbounded offset is a full table
 	// scan a caller can order by typing a large number into a query string.
 	MaxOffset = 100_000
 )
 
 // Filter string bounds. A filter value is a bound parameter and cannot inject,
-// but ActionPrefix becomes a LIKE pattern that SQLite evaluates once per
+// but ActionPrefix becomes a LIKE pattern the database evaluates once per
 // candidate row, so a megabyte of it is a megabyte of comparison per row. These
 // are refused rather than truncated: a truncated filter silently answers a
 // different question than the one that was asked.
@@ -173,6 +173,11 @@ type Health struct {
 type Store struct {
 	db *db.DB
 
+	// queue, when a Queue writes for this store, is waited for by Query
+	// and Health so a read sees the writes made before it.
+	queueMu sync.Mutex
+	queue   *Queue
+
 	healthMu                   sync.RWMutex
 	writesDegraded             bool
 	fallbackEvents             uint64
@@ -189,6 +194,7 @@ func (s *Store) Health() Health {
 	if s == nil || s.db == nil {
 		return Health{Status: HealthUnconfigured, WriteStatus: HealthUnconfigured}
 	}
+	s.flushQueue(context.Background(), queuedReadWait)
 	s.healthMu.RLock()
 	health := s.healthLocked()
 	s.healthMu.RUnlock()
@@ -370,6 +376,12 @@ func (s *Store) recordOrFallBack(ctx context.Context, event Event) {
 		}
 		return
 	}
+	s.recordFailed(ctx, event, err)
+}
+
+// recordFailed is the fallback for a row that could not be written: the
+// whole event at error level in the process log, and degraded health.
+func (s *Store) recordFailed(ctx context.Context, event Event, err error) {
 	failureAt := time.Now().UTC()
 	health := s.markFallback(failureAt, err)
 	detail, _ := encodeDetail(event.Detail)
@@ -397,6 +409,7 @@ func (s *Store) Query(ctx context.Context, filter Filter) ([]Event, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("audit store is not configured")
 	}
+	s.flushQueue(ctx, queuedReadWait)
 	if err := checkFilterBounds(filter); err != nil {
 		return nil, err
 	}

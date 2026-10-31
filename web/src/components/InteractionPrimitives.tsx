@@ -282,15 +282,17 @@ export function OperationStatus({
     error: t("operation.error"),
     conflict: t("operation.conflict"),
   };
+  const text = message || labels[status];
   return (
     // A conflict needs a decision, so it is announced like an error, not as
-    // passive progress.
+    // passive progress. Where a long message is cut short, the tooltip has it.
     <span
       className={`operation-status ${status}`}
       role={status === "error" || status === "conflict" ? "alert" : "status"}
+      title={text}
     >
       <span className="operation-status-dot" aria-hidden="true" />
-      {message || labels[status]}
+      <span className="operation-status-text">{text}</span>
     </span>
   );
 }

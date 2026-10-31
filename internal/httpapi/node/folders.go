@@ -7,6 +7,8 @@ import (
 	"nodevas/internal/store"
 
 	"github.com/gin-gonic/gin"
+
+	"nodevas/internal/locale"
 )
 
 // HTTP surface for node folders. Every handler here touches files only — none
@@ -106,7 +108,7 @@ func (a *API) postNodesFolder(c *gin.Context) {
 		return
 	}
 	if len(body.IDs) == 0 {
-		httpx.Err(c, http.StatusBadRequest, errors.New("no nodes given"))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf("no nodes given", "沒有提供節點"))
 		return
 	}
 	if err := httpx.StoreFor(c.Request, a.pm).MoveNodesToFolder(body.IDs, body.Folder); err != nil {

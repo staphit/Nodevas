@@ -30,7 +30,7 @@ export function DocumentPreview({
   return (
     <div
       className="md-preview"
-      style={{ fontSize }}
+      style={{ fontSize: `calc(${fontSize}px * var(--font-scale, 1))` }}
       // Node links are internal navigation, not URLs: the anchor carries
       // its target in data attributes and the app opens it.
       onClick={(event) => {

@@ -21,10 +21,10 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
-	"errors"
 	"net/http"
 	"time"
 
+	"nodevas/internal/locale"
 	"nodevas/internal/runnerwire"
 )
 
@@ -39,11 +39,11 @@ const MaxStepUpWindow = 12 * time.Hour
 var (
 	// ErrStepUpAgent refuses a step-up from an agent: the point is a person
 	// reading their mailbox.
-	ErrStepUpAgent = errors.New("only a person at a browser can step up")
+	ErrStepUpAgent = locale.Errorf("only a person at a browser can step up", "只有在瀏覽器前的人可以驗證身分")
 	// ErrStepUpNoEmail is an account with no address to send a passcode to.
-	ErrStepUpNoEmail = errors.New("this account has no email address to send a step-up passcode to")
+	ErrStepUpNoEmail = locale.Errorf("this account has no email address to send a step-up passcode to", "這個帳號沒有可寄送身分驗證碼的電子郵件地址")
 	// ErrStepUpCode is a wrong, expired or missing step-up passcode.
-	ErrStepUpCode = errors.New("that step-up passcode is wrong or has expired; request a new one")
+	ErrStepUpCode = locale.Errorf("that step-up passcode is wrong or has expired; request a new one", "身分驗證碼錯誤或已過期；請重新索取")
 )
 
 // SetStepUpWindow sets how long a step-up lasts. Zero or less restores the

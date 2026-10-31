@@ -40,8 +40,8 @@ export type UndoPolicy = "command" | "editor" | "compensating" | "reset" | "none
 
 export interface DomainDescriptor {
   id: DomainId;
-  /** Domain name in UI copy. */
-  title: string;
+  /** Catalog key of the domain's name in UI copy (`translate(titleKey)`). */
+  titleKey: string;
   /** Single source of truth, in prose. */
   sourceOfTruth: string;
   /** Path relative to the project root; empty when not a project file. */
@@ -63,12 +63,12 @@ export interface DomainDescriptor {
 export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   "node-metadata": {
     id: "node-metadata",
-    title: "節點 metadata",
+    titleKey: "domain.title.nodeMetadata",
     sourceOfTruth:
-      "graph.yaml → nodes[] / ui.entryOverrides，同步至 nodes/{id}.md frontmatter",
+      "graph.yaml → nodes[] / ui.entryOverrides, mirrored to nodes/{id}.md front matter",
     diskPath: "graph.yaml",
     api: ["GET /api/graph", "PUT /api/graph"],
-    owner: "Node Inspector／基本資料",
+    owner: "Node Inspector / Details",
     readers: ["Graph", "Timeline", "Sidebar", "Command Palette"],
     writers: [
       "updateNodeMetadata",
@@ -82,11 +82,11 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   "plan-milestone": {
     id: "plan-milestone",
-    title: "預期里程碑",
+    titleKey: "term.planMilestone",
     sourceOfTruth: "graph.yaml → ui.plans",
     diskPath: "graph.yaml",
     api: ["GET /api/graph", "PUT /api/graph"],
-    owner: "Node Inspector／預期計畫",
+    owner: "Node Inspector / Planned schedule",
     readers: ["Timeline", "Node Inspector"],
     writers: ["upsertPlanMilestone", "removePlanMilestone", "movePlanMilestone"],
     savePolicy: "commit-autosave",
@@ -94,15 +94,15 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   lifecycle: {
     id: "lifecycle",
-    title: "實際狀態",
-    sourceOfTruth: "run/journal.jsonl（append-only）",
+    titleKey: "term.lifecycleStatus",
+    sourceOfTruth: "run/journal.jsonl (append-only)",
     diskPath: "run/journal.jsonl",
     api: [
       "GET /api/state",
       "POST /api/nodes/{id}/status",
       "POST /api/events/move",
     ],
-    owner: "Node Inspector／實際狀態",
+    owner: "Node Inspector / Actual status",
     readers: ["Graph", "Timeline", "Sidebar", "Analysis"],
     writers: ["setLifecycleStatus", "moveActualEvent"],
     savePolicy: "explicit-apply",
@@ -111,8 +111,8 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   document: {
     id: "document",
-    title: "文件內容",
-    sourceOfTruth: "nodes/{id}.md（子頁：nodes/{id}/{page}.md）",
+    titleKey: "domain.title.document",
+    sourceOfTruth: "nodes/{id}.md (subpages: nodes/{id}/{page}.md)",
     diskPath: "nodes/",
     api: [
       "GET /api/nodes/{id}",
@@ -120,7 +120,7 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
       "GET|PUT /api/nodes/{id}/pages/{page}",
       "GET|PUT|DELETE /api/drafts/{id}",
     ],
-    owner: "Node Inspector／文件、Popout",
+    owner: "Node Inspector / Document, Popout",
     readers: ["Drawer", "Popout", "Search"],
     writers: ["setTabContent", "saveTab", "saveDraft", "applyDraft", "resolveConflict"],
     savePolicy: "manual-save",
@@ -129,24 +129,24 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   workflow: {
     id: "workflow",
-    title: "工作流程定義",
-    sourceOfTruth: "graph.yaml → ui.customStatuses / ui.planStatuses",
+    titleKey: "term.workflow",
+    sourceOfTruth: "graph.yaml → ui.customStatuses / ui.planStatuses / node_types",
     diskPath: "graph.yaml",
     api: ["GET /api/graph", "PUT /api/graph"],
-    owner: "Project Settings／Workflow",
-    readers: ["Graph", "Timeline", "Node Inspector", "Sidebar 圖例"],
+    owner: "Project Settings / Workflow",
+    readers: ["Graph", "Timeline", "Node Inspector", "Sidebar legend"],
     writers: ["updateWorkflowDefinition"],
     savePolicy: "commit-autosave",
     undo: "command",
   },
   "project-layout": {
     id: "project-layout",
-    title: "專案版面",
+    titleKey: "term.projectLayout",
     sourceOfTruth:
       "graph.yaml → ui.positions / ui.timelineOrder / ui.groups / ui.annotations / ui.savedViews / ui.wireVertices / ui.gates / ui.logicGates / ui.edgeLabels / ui.nodeStyles",
     diskPath: "graph.yaml",
     api: ["GET /api/graph", "PUT /api/graph"],
-    owner: "Graph／Timeline 工具",
+    owner: "Graph / Timeline tools",
     readers: ["Graph", "Timeline"],
     writers: ["updateCanvasLayout"],
     savePolicy: "commit-autosave",
@@ -154,11 +154,11 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   "ui-preference": {
     id: "ui-preference",
-    title: "個人版面偏好",
-    sourceOfTruth: "localStorage（versioned adapter）",
+    titleKey: "domain.title.uiPreference",
+    sourceOfTruth: "localStorage (versioned adapter)",
     diskPath: "",
     api: [],
-    owner: "Settings／Appearance",
+    owner: "Settings / Appearance",
     readers: ["App", "Drawer", "Timeline", "Sidebar"],
     writers: ["updateUIPreference", "resetUIPreferences"],
     savePolicy: "instant-local",
@@ -166,12 +166,12 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
   },
   "ui-ephemeral": {
     id: "ui-ephemeral",
-    title: "UI 暫態",
-    sourceOfTruth: "component state 或 UI slice",
+    titleKey: "domain.title.uiEphemeral",
+    sourceOfTruth: "component state or a UI slice",
     diskPath: "",
     api: [],
-    owner: "當前畫面",
-    readers: ["當前畫面"],
+    owner: "Current screen",
+    readers: ["Current screen"],
     writers: [],
     savePolicy: "none",
     undo: "none",

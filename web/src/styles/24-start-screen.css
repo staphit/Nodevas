@@ -25,12 +25,12 @@
 }
 .start-screen h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: calc(20px * var(--font-scale, 1));
 }
 .start-screen h3 {
   margin: 6px 0 0;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -38,11 +38,11 @@
 .start-screen-note {
   margin: 0;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.5;
 }
 .start-screen-note {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .start-screen-close {
   position: absolute;
@@ -90,12 +90,12 @@
 }
 .start-screen-blank b,
 .start-screen-examples b {
-  font-size: 13.5px;
+  font-size: calc(13.5px * var(--font-scale, 1));
 }
 .start-screen-blank small,
 .start-screen-examples small {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .start-screen-blank:hover,

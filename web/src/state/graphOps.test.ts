@@ -95,3 +95,14 @@ describe("graphCommandToOps", () => {
     ).toBeNull();
   });
 });
+
+describe("reference commands", () => {
+  it("map onto add-ref / remove-ref and need no server graph", () => {
+    const add = graphCommandToOps({ type: "node.addRef", nodeId: "scene", ref: "note" });
+    const remove = graphCommandToOps({ type: "node.removeRef", nodeId: "scene", ref: "note" });
+    expect(add).toEqual([{ kind: "add-ref", nodeId: "scene", ref: "note" }]);
+    expect(remove).toEqual([{ kind: "remove-ref", nodeId: "scene", ref: "note" }]);
+    expect(graphOpsNeedServerGraph(add)).toBe(false);
+    expect(graphOpsNeedServerGraph(remove)).toBe(false);
+  });
+});

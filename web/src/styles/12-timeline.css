@@ -6,16 +6,23 @@
  */
 /* ---------- graph view: plain alignment grid ---------- */
 .board-inner.graph-bg {
-  background-image: repeating-linear-gradient(
+  /* One cell per tile, each line drawn once at its leading edge, and the tile
+     repeated. Repeating gradients made each layer a single image the size of
+     the board, and Chrome rasterises those only up to its texture limit: on a
+     board tens of thousands of pixels wide the lines gave way to a few pale
+     vertical bands. */
+  background-image: linear-gradient(
       90deg,
       color-mix(in srgb, var(--border) 70%, transparent) 0 1px,
-      transparent 1px var(--col-w)
+      transparent 1px
     ),
-    repeating-linear-gradient(
-      0deg,
+    linear-gradient(
+      180deg,
       color-mix(in srgb, var(--border) 45%, transparent) 0 1px,
-      transparent 1px var(--step)
+      transparent 1px
   );
+  background-size: var(--col-w) var(--step);
+  background-repeat: repeat;
   /* The graph centres its content in the viewport, so the cells start a
      fraction of a cell in from the element origin. Lines painted from 0 would
      be a ruler for a different board: a snapped card would sit at a constant
@@ -85,7 +92,7 @@
   border-radius: 3px;
   background: var(--peer-color);
   color: #fff;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -98,6 +105,24 @@
   display: flex;
   background: var(--surface);
   border-bottom: 2px solid var(--border);
+}
+/* A large timeline mounts only the lanes near the view; each run of lanes
+   left out is one of these, as wide as the lanes it stands for, ruled like
+   them so a fast scroll that outruns the next frame still reads as grid. */
+.lane-skip,
+.board-skip {
+  flex-shrink: 0;
+}
+.board-skip {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(var(--col-w) - 1px),
+    color-mix(in srgb, var(--border) 55%, transparent) calc(var(--col-w) - 1px) var(--col-w)
+  );
+}
+.board-today .board-skip {
+  background-color: color-mix(in srgb, var(--st-progress-bg) 25%, transparent);
 }
 /* vertical timeline axis positions */
 .board-inner.timeline-vertical {
@@ -132,7 +157,7 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   overflow: hidden;
 }
 .lane-head-cell.order-dragging {
@@ -161,7 +186,7 @@
   border-radius: 3px;
   color: var(--accent-text);
   background: var(--st-progress-fg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 14px;
 }
@@ -187,7 +212,7 @@
 }
 .lane-head-assignee {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -213,13 +238,26 @@
   border-bottom: 0;
   border-top: 2px solid var(--border);
 }
-.horizontal-timeline.node-axis-right .horizontal-corner,
+.horizontal-timeline.date-axis-bottom .horizontal-corner {
+  order: 3;
+  top: auto;
+  bottom: 0;
+  border-bottom: 0;
+  border-top: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-date-lead,
 .horizontal-timeline.node-axis-right .horizontal-node-head {
   order: 99;
+}
+.horizontal-timeline.node-axis-right .horizontal-corner,
+.horizontal-timeline.node-axis-right .horizontal-node-head {
   left: auto;
   right: 0;
   border-right: 0;
   border-left: 2px solid var(--border);
+}
+.horizontal-timeline.node-axis-right .horizontal-corner {
+  align-self: flex-end;
 }
 .horizontal-timeline.node-axis-right .horizontal-node-head.active,
 .horizontal-timeline.node-axis-right .horizontal-node-head.node-selected {
@@ -235,19 +273,40 @@
   border-bottom: 2px solid var(--border);
   background: var(--surface);
 }
+/* Stacking, bottom to top: day cells; the date header with its full-height
+   day grips (8); the node heads (9), which cover the grips' lines where the
+   node column sits; the corner (11), over the header and the node heads alike.
+   The node heads only reach the header's band under the corner. */
 .horizontal-corner {
   position: sticky;
+  top: 0;
   left: 0;
-  z-index: 10;
+  z-index: 11;
   display: flex;
   flex: 0 0 auto;
+  align-self: flex-start;
   align-items: center;
   padding: 0 10px;
   border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 650;
+}
+/* The corner is 48px tall: beside an open drawer at large text the column is
+   too narrow for one line ("Nodes / da…"), so the label takes a second. */
+.horizontal-corner-label {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.horizontal-date-lead {
+  flex: 0 0 auto;
 }
 .horizontal-date-label {
   position: relative;
@@ -259,7 +318,7 @@
   border-right: 1px solid var(--border);
   color: var(--text-2);
   background: var(--surface);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .timeline-column-resize {
   position: absolute;
@@ -363,11 +422,11 @@
 }
 .horizontal-date-label b {
   color: var(--text);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
 }
 .horizontal-date-label small {
   color: var(--st-progress-fg);
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
 }
 .horizontal-date-label.today {
   background: color-mix(in srgb, var(--st-progress-bg) 60%, var(--surface));
@@ -400,7 +459,7 @@
 }
 .horizontal-node-row.order-dragging {
   position: relative;
-  z-index: 8;
+  z-index: 10;
   opacity: 0.9;
   box-shadow: 0 8px 22px var(--shadow);
 }
@@ -410,7 +469,7 @@
 .horizontal-node-head {
   position: sticky;
   left: 0;
-  z-index: 7;
+  z-index: 9;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -435,6 +494,20 @@
 .horizontal-node-head.node-selected {
   background: color-mix(in srgb, var(--st-progress-bg) 72%, var(--surface));
   box-shadow: inset 3px 0 0 var(--st-progress-fg);
+}
+/* Beside an open node drawer the column is narrowed (timelineNodeColumnWidth)
+   so the dates keep the room: names are cut short, in full in the head's
+   tooltip, and the selection shows by its tint alone. */
+.horizontal-timeline.node-column-compact .horizontal-node-head {
+  gap: 4px;
+  padding: 6px 6px;
+  overflow: hidden;
+}
+.horizontal-timeline.node-column-compact .horizontal-corner {
+  padding: 0 6px;
+}
+.horizontal-timeline.node-column-compact .horizontal-node-head .lane-selected-tag {
+  display: none;
 }
 .horizontal-date-cell {
   flex: 0 0 auto;
@@ -508,7 +581,7 @@
   min-width: 0;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .snap-card-head b {
   min-width: 0;
@@ -517,12 +590,12 @@
   white-space: nowrap;
 }
 .snap-time {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   color: var(--text-2);
   margin-left: auto;
 }
 .snap-card-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -596,19 +669,19 @@
   border: 1px solid var(--accent);
   border-radius: 50%;
   color: var(--accent);
-  font-size: 8px;
+  font-size: calc(8px * var(--font-scale, 1));
   font-weight: 800;
   line-height: 1;
 }
 .plan-card b {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   color: var(--text);
 }
 .record-kind {
   flex: 0 0 auto;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
   font-weight: 700;
   line-height: 15px;
   letter-spacing: 0.08em;
@@ -627,7 +700,7 @@
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.25;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -648,6 +721,10 @@
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: 0 10px 30px var(--shadow);
+  /* A menu taller than the window keeps its top edge (floatingPanel) and
+     scrolls the rest, rather than running off the bottom. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .lane-context-menu.node-create-menu {
   width: min(380px, calc(100vw - 16px));
@@ -672,7 +749,7 @@
   padding: 5px 8px 7px;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -684,14 +761,14 @@
 .lane-context-group-label {
   padding: 6px 8px 2px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.06em;
 }
 .lane-context-menu button > small {
   display: block;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 400;
 }
 .condition-menu-title {
@@ -702,13 +779,13 @@
 }
 .condition-menu-title span {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 650;
 }
 .condition-menu-title small {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -720,7 +797,7 @@
   border-radius: 2px 5px 5px 2px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -743,12 +820,12 @@
 .logic-gate-create-grid > button > b {
   color: var(--text);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .logic-gate-create-grid > button > span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -778,12 +855,12 @@
 }
 .node-create-heading b {
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   letter-spacing: 0.02em;
 }
 .node-create-heading small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-icon {
   display: grid;
@@ -796,7 +873,7 @@
   color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 78%, var(--surface));
   box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
-  font-size: 18px;
+  font-size: calc(18px * var(--font-scale, 1));
   font-weight: 500;
 }
 .node-create-field {
@@ -807,7 +884,7 @@
 .node-create-field input {
   padding: 9px 10px;
   border-color: var(--border-strong);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   outline: none;
 }
 .node-create-field input:focus {
@@ -823,7 +900,7 @@
   border-radius: 6px;
   color: var(--text-2);
   background: var(--surface-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .node-create-id-hint > span {
@@ -852,11 +929,11 @@
 }
 .node-create-section-head b {
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-create-section-head small {
   color: var(--text-2);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .node-create-section-head > button {
   flex: 0 0 auto;
@@ -866,7 +943,7 @@
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-section-head > button:hover:not(:disabled) {
   border-color: var(--st-progress-fg);
@@ -890,7 +967,7 @@
 .node-create-plan-row > span {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -903,7 +980,7 @@
   color: var(--text);
   background: var(--surface);
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   outline: none;
 }
 .node-create-plan-row input:focus,
@@ -957,17 +1034,17 @@
   gap: 1px;
 }
 .node-create-disclosure b {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .node-create-disclosure small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
 }
 .node-create-disclosure-mark {
   width: 12px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .node-create-advanced-body {
   display: flex;
@@ -984,7 +1061,7 @@
   border-radius: 5px;
   color: var(--text);
   background: var(--surface-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .node-create-status-preview {
   display: flex;
@@ -992,7 +1069,7 @@
   gap: 6px;
   padding: 0 8px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -1035,7 +1112,7 @@
   gap: 4px;
   padding: 5px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .lane-context-label {
   color: var(--text);
@@ -1052,7 +1129,7 @@
 }
 .lane-context-field-help {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .standalone-gate-state {
@@ -1067,12 +1144,12 @@
 }
 .standalone-gate-state b {
   align-self: center;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .standalone-gate-state span,
 .standalone-gate-state small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .standalone-gate-state.complete {
   border-color: color-mix(in srgb, var(--st-done-fg) 48%, var(--border));
@@ -1121,7 +1198,7 @@
 .standalone-gate-inputs small {
   color: var(--text-2);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
 }
 .lane-context-menu > .standalone-gate-delete {
   margin: 2px 0 0;
@@ -1148,7 +1225,7 @@
 .assign-existing-gate small,
 .controlled-by-standalone-gate small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .assign-existing-gate select,
@@ -1172,13 +1249,13 @@
 .controlled-by-standalone-gate span {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .lane-context-summary,
 .lane-context-help {
   padding: 5px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.4;
 }
 .lane-context-summary {
@@ -1193,7 +1270,7 @@
 .lane-context-summary > p {
   margin: -1px 0 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-relation {
@@ -1218,7 +1295,7 @@
   gap: 8px;
   padding: 7px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   border-radius: 5px;
   cursor: pointer;
 }
@@ -1238,13 +1315,13 @@
 }
 .lane-context-check small {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-error {
   padding: 5px 8px;
   color: var(--st-failed-fg);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .lane-context-menu > button {
@@ -1284,7 +1361,8 @@
   transform: translateY(-1px);
 }
 .lane-context-menu > .condition-primary-action:active {
-  transform: translateY(0) scale(0.985);
+  transform: translateY(0);
+  scale: 0.985;
 }
 .lane-context-menu > .condition-primary-action:disabled {
   border-color: var(--border);
@@ -1309,19 +1387,19 @@
   min-width: 0;
 }
 .condition-primary-copy b {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   font-weight: 650;
 }
 .condition-primary-copy small {
   overflow: hidden;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   opacity: 0.82;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .condition-primary-arrow {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 
 /* ---------- split panes: graph + timeline stacked, each collapsible ---------- */
@@ -1346,8 +1424,10 @@
   cursor: grab;
   touch-action: none;
 }
+/* Inherited from the board, so a pan's start and end restyle the board and
+   its cards — which set a cursor of their own — not every element on it. */
 .board.panning,
-.board.panning * {
+.board.panning .col-card {
   cursor: grabbing !important;
   user-select: none !important;
 }
@@ -1400,7 +1480,7 @@ body.pane-resizing * {
   background: none;
   cursor: pointer;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 0 4px;
 }
 .pane-toggle:hover {
@@ -1451,7 +1531,7 @@ body.pane-resizing * {
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1466,7 +1546,7 @@ body.pane-resizing * {
   gap: 6px;
   padding: 6px 8px;
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   font-weight: 600;
   cursor: pointer;
   list-style: none;
@@ -1476,7 +1556,7 @@ body.pane-resizing * {
 }
 .dependency-advanced > summary::before {
   content: "▸";
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   transition: transform 120ms ease;
 }
 .dependency-advanced[open] > summary::before {
@@ -1486,7 +1566,7 @@ body.pane-resizing * {
   margin-left: auto;
   overflow: hidden;
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1528,7 +1608,7 @@ body.pane-resizing * {
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   overflow-wrap: anywhere;
 }
 @media (prefers-reduced-motion: reduce) {

@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"sync"
 
 	"nodevas/internal/engine"
+	"nodevas/internal/locale"
 )
 
 // Node folders [B-06].
@@ -40,10 +40,10 @@ const (
 )
 
 var (
-	ErrFolderName     = errors.New("invalid folder name")
-	ErrFolderExists   = errors.New("folder already exists")
-	ErrFolderMissing  = errors.New("folder not found")
-	ErrFolderIntoSelf = errors.New("cannot move a folder into itself")
+	ErrFolderName     = locale.Errorf("invalid folder name", "資料夾名稱無效")
+	ErrFolderExists   = locale.Errorf("folder already exists", "資料夾已存在")
+	ErrFolderMissing  = locale.Errorf("folder not found", "找不到資料夾")
+	ErrFolderIntoSelf = locale.Errorf("cannot move a folder into itself", "不能把資料夾搬進自己裡面")
 )
 
 // windowsReserved are names Windows refuses to create regardless of extension.
@@ -217,22 +217,31 @@ func (t *nodeTree) load(root string) {
 // nodeFolder returns the folder a node's document sits in ("" for the root of
 // nodes/). Unknown nodes resolve to the root, which is where a new document is
 // created.
+//
+// Every path the store resolves for a node comes through here, readers' and
+// writers' alike, so the check that the document is still where the index
+// says runs outside the tree's lock: held across that stat, the lock would
+// queue every request in the project behind every other one's filesystem
+// call.
 func nodeFolder(root, id string) string {
 	tree := treeFor(root)
 	tree.mu.Lock()
-	defer tree.mu.Unlock()
 	tree.load(root)
 	folder, ok := tree.locations[id]
-	if ok {
-		if _, err := StatProjectPath(root, filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")); err == nil {
-			return folder
-		}
-		// The file moved behind our back: rescan rather than serve a path
-		// that no longer exists.
-		tree.loaded = false
-		tree.load(root)
-		folder, ok = tree.locations[id]
+	tree.mu.Unlock()
+	if !ok {
+		return ""
 	}
+	if _, err := StatProjectPath(root, filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")); err == nil {
+		return folder
+	}
+	// The file moved behind our back: rescan rather than serve a path that
+	// no longer exists.
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+	tree.loaded = false
+	tree.load(root)
+	folder, ok = tree.locations[id]
 	if !ok {
 		return ""
 	}
@@ -242,6 +251,19 @@ func nodeFolder(root, id string) string {
 // NodeDocPath is the absolute path of a node's Markdown document.
 func NodeDocPath(root, id string) string {
 	return filepath.Join(root, "nodes", filepath.FromSlash(nodeFolder(root, id)), id+".md")
+}
+
+// NodeDocPaths maps every node id with a document under nodes/ to that
+// document's absolute path, as NodeDocPath resolves it, from one walk of the
+// tree. NodeDocPath checks the file is still there with a stat per call; a
+// caller resolving thousands of nodes at once takes this map instead.
+func NodeDocPaths(root string) map[string]string {
+	locations, _ := scanNodeTree(root)
+	paths := make(map[string]string, len(locations))
+	for id, folder := range locations {
+		paths[id] = filepath.Join(root, "nodes", filepath.FromSlash(folder), id+".md")
+	}
+	return paths
 }
 
 // NodePagesPath is the absolute path of a node's subpage directory.
@@ -345,8 +367,8 @@ func NodeFolderAssignments(root string) map[string]string {
 
 // NodeFolders reports the folder tree and which node sits in which folder.
 func (s *Store) NodeFolders() ([]string, map[string]string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return ListNodeFolders(s.root), NodeFolderAssignments(s.root)
 }
 
@@ -493,7 +515,7 @@ func (s *Store) DeleteNodeFolder(rel string) error {
 		from := filepath.Join(source, entry.Name())
 		to := filepath.Join(s.folderAbs(parent), entry.Name())
 		if _, statErr := s.statPath(to); statErr == nil {
-			return fmt.Errorf("上層已有同名項目 %q，請先改名", entry.Name())
+			return locale.Errorf("the parent already has an item named %q; rename it first", "上層已有同名項目 %q，請先改名", entry.Name())
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
@@ -526,7 +548,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 	moved := false
 	for _, id := range ids {
 		if !engine.ValidNodeID(id) {
-			return fmt.Errorf("invalid node id %q", id)
+			return locale.Errorf("invalid node id %q", "節點代號「%s」無效", id)
 		}
 		from := nodeFolder(s.root, id)
 		if from == clean {
@@ -536,7 +558,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 		targetDir := s.folderAbs(clean)
 		// The document must exist; the payload directories are optional.
 		if _, err := s.statPath(filepath.Join(sourceDir, id+".md")); err != nil {
-			return fmt.Errorf("node %q not found", id)
+			return locale.Errorf("node %q not found", "找不到節點「%s」", id)
 		}
 		for _, name := range []string{id + ".md", id + ".pages", id + ".files"} {
 			source := filepath.Join(sourceDir, name)
@@ -548,7 +570,7 @@ func (s *Store) MoveNodesToFolder(ids []string, folder string) error {
 			}
 			target := filepath.Join(targetDir, name)
 			if _, err := s.statPath(target); err == nil {
-				return fmt.Errorf("目標資料夾已有 %q", name)
+				return locale.Errorf("the target folder already has %q", "目標資料夾已有 %q", name)
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}

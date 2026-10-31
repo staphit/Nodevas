@@ -19,6 +19,7 @@
  */
 
 import { api, ConflictError } from "../api";
+import { translate } from "../i18n";
 import { describeFailure, operationScope } from "./operations";
 import { enqueuePageSave, patchTab, queues } from "./internals";
 import type { AppSlice, DocumentSlice } from "./types";
@@ -36,6 +37,14 @@ import type { AppSlice, DocumentSlice } from "./types";
 const selfWrittenRevs = new Map<string, string>();
 
 /**
+ * The same, for the subpage open on each node (keyed like `pageDocs`). A
+ * subpage save is announced as its node's `node-changed`, so without this the
+ * echo of every subpage autosave would cost a read of the page and of the
+ * node's own document.
+ */
+const selfWrittenPageRevs = new Map<string, string>();
+
+/**
  * Body size above which an unload save stops asking for `keepalive`. The spec's
  * budget is 64 KB across every keepalive request in flight; staying well under
  * it leaves room for the JSON envelope and for a second document being flushed
@@ -43,10 +52,63 @@ const selfWrittenRevs = new Map<string, string>();
  */
 const UNLOAD_BODY_LIMIT = 48_000;
 
+type SliceSet = Parameters<AppSlice<DocumentSlice>>[0];
+type SliceGet = Parameters<AppSlice<DocumentSlice>>[1];
+
+async function reloadTabFromDisk(set: SliceSet, get: SliceGet, id: string) {
+  const tab = get().tabs.find((t) => t.id === id);
+  if (!tab || !tab.loaded) return;
+  if (tab.dirty) {
+    set((st) => ({ tabs: patchTab(st.tabs, id, { diskChanged: true }) }));
+    return;
+  }
+  const file = await api.getNode(id);
+  set((st) => ({
+    tabs: st.tabs.map((current) =>
+      current.id !== id
+        ? current
+        : current.dirty
+          ? { ...current, diskChanged: true }
+          : { ...current, content: file.content, rev: file.rev, diskChanged: false },
+    ),
+  }));
+}
+
+// A clean subpage takes the file as it is now, which is what lets an edit
+// made in the pop-out show up in the main window and back. A dirty one is
+// left alone: its next save meets the newer revision and the conflict banner
+// asks which version to keep, rather than this throwing typing away.
+async function reloadPageFromDisk(set: SliceSet, get: SliceGet, id: string) {
+  const page = get().pageDocs[id];
+  if (!page || page.nodeId !== id || page.loading || page.dirty) return;
+  const file = await api.getNodePage(id, page.id);
+  if (file.rev === page.rev) return;
+  set((state) => {
+    const current = state.pageDocs[id];
+    // Typed into, switched away from or reloaded while the read was out.
+    if (!current || current.id !== page.id || current.dirty || current.rev !== page.rev) {
+      return {};
+    }
+    return {
+      pageDocs: {
+        ...state.pageDocs,
+        [id]: {
+          ...current,
+          content: file.content,
+          rev: file.rev,
+          format: file.format ?? current.format,
+          conflict: null,
+        },
+      },
+    };
+  });
+}
+
 export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   tabs: [],
   activeTab: null,
   pageDocs: {},
+  nodeDiskChanges: {},
 
   setPageDoc: (key, next) => {
     set((state) => {
@@ -77,6 +139,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         snapshot.rev,
       );
       get().settleOperation(scope, { status: "saved", operation: "document.save" });
+      selfWrittenPageRevs.set(key, response.rev);
       set((state) => {
         const current = state.pageDocs[key];
         if (!current || current.id !== snapshot.id) return {};
@@ -116,11 +179,11 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         get().settleOperation(scope, {
           status: "conflict",
           operation: "document.save",
-          message: "子頁已被外部修改；請選擇保留哪一版。",
+          message: translate("document.error.pageConflict"),
         });
         return { ok: false };
       }
-      const message = error instanceof Error ? error.message : "子頁儲存失敗";
+      const message = error instanceof Error ? error.message : translate("document.error.pageSaveFailed");
       get().settleOperation(scope, {
         status: "error",
         operation: "document.save",
@@ -134,13 +197,13 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
     const state = get();
     if (project && project !== state.activeProject) {
       if (!state.projects.some((entry) => entry.name === project)) {
-        throw new Error(`找不到專案「${project}」`);
+        throw new Error(translate("document.error.projectMissing", undefined, { project }));
       }
       await state.switchProject(project);
     }
     const graph = get().graph;
     if (graph && !(graph.nodes ?? []).some((node) => node.id === nodeId)) {
-      throw new Error(`找不到節點「${nodeId}」`);
+      throw new Error(translate("document.error.nodeMissing", undefined, { node: nodeId }));
     }
     await get().openTab(nodeId);
     // Opening the document is only half the jump: the board still shows
@@ -279,10 +342,10 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
 
     if (retained.length > 0) {
       const subject =
-        retained.length === 1 ? `分頁「${retained[0]}」` : `${retained.length} 個分頁`;
-      throw new Error(
-        `無法安全關閉${subject}：最新內容尚未儲存，分頁與編輯內容已保留。請檢查連線或磁碟空間後重試。`,
-      );
+        retained.length === 1
+          ? translate("document.error.closeOneTab", undefined, { tab: retained[0] })
+          : translate("document.error.closeTabs", undefined, { count: retained.length });
+      throw new Error(translate("document.error.closeUnsaved", undefined, { subject }));
     }
   },
 
@@ -354,31 +417,37 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   },
 
   // ws said the file changed on disk. Clean tab: reload silently.
-  // Dirty tab: flag it — never clobber unsaved edits.
+  // Dirty tab: flag it — never clobber unsaved edits. The event names the node,
+  // not the file, so the subpage open on it (if any) is checked the same way.
   notifyDiskChange: async (id) => {
+    // The subpage list is not one of the files compared below: a page added,
+    // renamed or removed elsewhere only shows up when the list is read again.
+    set((state) => ({
+      nodeDiskChanges: { ...state.nodeDiskChanges, [id]: (state.nodeDiskChanges[id] ?? 0) + 1 },
+    }));
+    // The hub broadcasts before it answers the PUT, so our own echo usually
+    // arrives mid-save. Judged then, it looks foreign (the revision it wrote
+    // is not known yet), and the revision remembered afterwards is never
+    // consumed — swallowing the next real change instead. Waiting for the save
+    // in flight lets the echo be recognised for what it is.
+    const inFlight = [queues.tabSave.get(id), queues.pageSave.get(id)];
+    await Promise.all(inFlight.map((save) => save?.catch(() => undefined)));
     const tab = get().tabs.find((t) => t.id === id);
-    if (!tab || !tab.loaded) return;
-    // Our own save coming back around. Nothing changed that this tab does not
-    // already have, so reading it again would be a request per save and would
-    // flag the document as externally modified against its own author [C-03].
-    if (selfWrittenRevs.get(id) === tab.rev) {
+    const page = get().pageDocs[id];
+    // Our own save coming back around. Nothing changed that this window does
+    // not already have, so reading it again would be a request per save and
+    // would flag the document as externally modified against its own author
+    // [C-03]. One event is one write, so recognising it as ours for either
+    // file settles the event for both.
+    if (tab?.loaded && selfWrittenRevs.get(id) === tab.rev) {
       selfWrittenRevs.delete(id);
       return;
     }
-    if (tab.dirty) {
-      set((st) => ({ tabs: patchTab(st.tabs, id, { diskChanged: true }) }));
+    if (page && !page.loading && selfWrittenPageRevs.get(id) === page.rev) {
+      selfWrittenPageRevs.delete(id);
       return;
     }
-    const file = await api.getNode(id);
-    set((st) => ({
-      tabs: st.tabs.map((current) =>
-        current.id !== id
-          ? current
-          : current.dirty
-            ? { ...current, diskChanged: true }
-            : { ...current, content: file.content, rev: file.rev, diskChanged: false },
-      ),
-    }));
+    await Promise.all([reloadTabFromDisk(set, get, id), reloadPageFromDisk(set, get, id)]);
   },
 
   saveTab: (id, options = {}) => {
@@ -460,15 +529,15 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
             status: "conflict",
             operation: "document.save",
             message: draftSaved
-              ? "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中，也已存為草稿。"
-              : "檔案已被外部修改；請選擇保留哪一版。你的內容仍在編輯器中。",
+              ? translate("document.error.fileConflictDrafted")
+              : translate("document.error.fileConflict"),
           });
           return;
         }
         get().settleOperation(scope, {
           status: "error",
           operation: "document.save",
-          message: describeFailure(e, "文件儲存失敗"),
+          message: describeFailure(e, translate("document.error.saveFailed")),
         });
         // A failed automatic save also goes to a draft, so the work survives
         // the tab being closed before the retry succeeds.
@@ -551,22 +620,35 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         }),
       }));
     } else {
-      // overwrite disk with mine (disk version is snapshotted in history)
+      // overwrite disk with mine (disk version is snapshotted in history).
+      // A write like any save: queued with them, so an echo that beats the
+      // answer waits for it, and its rev remembered, so the echo costs no GET.
       const submitted = tab.content;
-      const res = await api.putNode(id, submitted, tab.conflict.diskRev);
-      set((st) => ({
-        tabs: st.tabs.map((current) =>
-          current.id !== id
-            ? current
-            : {
-                ...current,
-                rev: res.rev,
-                dirty: current.content !== submitted,
-                diskChanged: false,
-                conflict: null,
-              },
-        ),
-      }));
+      const diskRev = tab.conflict.diskRev;
+      const previous = queues.tabSave.get(id) ?? Promise.resolve();
+      const operation = previous.catch(() => undefined).then(async () => {
+        const res = await api.putNode(id, submitted, diskRev);
+        selfWrittenRevs.set(id, res.rev);
+        set((st) => ({
+          tabs: st.tabs.map((current) =>
+            current.id !== id
+              ? current
+              : {
+                  ...current,
+                  rev: res.rev,
+                  dirty: current.content !== submitted,
+                  diskChanged: false,
+                  conflict: null,
+                },
+          ),
+        }));
+      });
+      queues.tabSave.set(id, operation);
+      const cleanup = () => {
+        if (queues.tabSave.get(id) === operation) queues.tabSave.delete(id);
+      };
+      void operation.then(cleanup, cleanup);
+      await operation;
     }
   },
 });

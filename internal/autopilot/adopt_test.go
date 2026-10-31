@@ -73,8 +73,8 @@ func TestAdoptARevisedGoal(t *testing.T) {
 		t.Fatalf("after a: %s", states(v))
 	}
 	if h.runs.startsFor("b") == 1 {
-		if _, body, _, _ := h.runs.lastStart("b").LoadNode(); !strings.Contains(body, "SSO button") {
-			t.Fatalf("b runs its old content: %q", body)
+		if node, _, _ := h.runs.lastStart("b").LoadNode(); !strings.Contains(node.Content, "SSO button") {
+			t.Fatalf("b runs its old content: %q", node.Content)
 		}
 	}
 	if h.runs.startsFor("c") != 0 {

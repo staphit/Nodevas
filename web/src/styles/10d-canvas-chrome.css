@@ -18,15 +18,47 @@
 .content-page-manage input {
   min-width: 120px;
   flex: 1;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.content-page-manage input:focus-visible {
+  outline: 2px solid var(--st-progress-fg);
+  outline-offset: 0;
+  border-color: transparent;
 }
 .content-page-manage button {
   min-width: 27px;
+}
+/* ← / →: the same box as the format select beside them. */
+.content-page-manage button:not(.danger) {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.content-page-manage button:not(.danger):hover:not(:disabled) {
+  background: var(--hover);
+}
+.content-page-manage button:not(.danger):disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .board-title-opt {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale, 1));
   color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
@@ -50,7 +82,7 @@
   border-radius: 4px;
   color: var(--text-2);
   background: transparent;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   cursor: pointer;
 }
 .timeline-orientation button:hover {
@@ -79,7 +111,7 @@
   border-radius: 4px;
   color: var(--text-2);
   background: transparent;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 .gesture-mode button.active {
@@ -110,7 +142,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   cursor: pointer;
-  font: 600 10.5px/1.25 var(--mono);
+  font: 600 calc(10.5px * var(--font-scale, 1))/1.25 var(--mono);
   white-space: nowrap;
 }
 .timeline-size-control > summary::-webkit-details-marker,
@@ -145,7 +177,7 @@
 }
 .timeline-size-heading b {
   grid-column: 1 / 3;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .timeline-size-heading button {
   padding: 3px 6px;
@@ -154,7 +186,7 @@
   color: var(--text-2);
   background: var(--surface-2);
   cursor: pointer;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   white-space: nowrap;
 }
 .timeline-size-heading button.active {
@@ -163,7 +195,7 @@
 }
 .timeline-size-popover label span {
   color: var(--text-2);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
 }
 .timeline-size-popover input[type="range"] {
   width: 100%;
@@ -172,12 +204,12 @@
 }
 .timeline-size-popover output {
   color: var(--text);
-  font: 600 10px/1.2 var(--mono);
+  font: 600 calc(10px * var(--font-scale, 1))/1.2 var(--mono);
   text-align: right;
 }
 .timeline-size-popover small {
   color: var(--text-2);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .timeline-width-stepper {
@@ -202,7 +234,7 @@
   color: var(--text);
   background: transparent;
   cursor: pointer;
-  font: 600 13px/1 var(--sans);
+  font: 600 calc(13px * var(--font-scale, 1))/1 var(--sans);
 }
 .timeline-width-stepper button:hover:not(:disabled),
 .timeline-width-stepper button:focus-visible {
@@ -221,7 +253,7 @@
 .timeline-width-stepper output {
   border-left: 1px solid var(--border);
   color: var(--text);
-  font: 600 9.5px/1 var(--mono);
+  font: 600 calc(9.5px * var(--font-scale, 1))/1 var(--mono);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -232,7 +264,7 @@
   border-radius: 4px;
   color: var(--text-2);
   background: var(--surface-2);
-  font: 600 10.5px/1.4 var(--mono);
+  font: 600 calc(10.5px * var(--font-scale, 1))/1.4 var(--mono);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -252,7 +284,7 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   background: var(--surface-2);
   border-left: 1px solid var(--border);
@@ -268,7 +300,7 @@
   gap: 0;
 }
 .now-time {
-  font-size: 8.5px;
+  font-size: calc(8.5px * var(--font-scale, 1));
   line-height: 1.2;
 }
 .now-line {
@@ -292,7 +324,7 @@
   background: var(--st-progress-fg);
 }
 .today-tag {
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   font-weight: 600;
   border: 1px solid currentColor;
   border-radius: 3px;
@@ -313,7 +345,7 @@
   cursor: help;
 }
 .tl-marker-label {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -353,3 +385,86 @@
   backdrop-filter: none;
 }
 
+
+/* graph.yaml does not parse or validate: the reason in place of the board.
+   The parser's words can be one long unbroken line; they wrap rather than
+   widen the card past the pane. The background fills the pane; the card is
+   laid out in the part of it the reader can see (UnreadableGraphState
+   measures it, less an open drawer or a phone's sheet), so neither its text
+   nor its Reload button is under the drawer. */
+.board-unreadable {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  overflow: auto;
+  background: var(--bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--notice-top, 0px) var(--notice-right, 0px) var(--notice-bottom, 0px) var(--notice-left, 0px);
+}
+/* As wide as what shows allows, up to a reading width that grows with the
+   text; never a strip narrower than a short sentence. */
+.board-unreadable-state {
+  width: min(calc(100% - 32px), calc(640px * var(--font-scale, 1)));
+  min-width: min(calc(100% - 16px), calc(240px * var(--font-scale, 1)));
+  border-style: solid;
+  border-color: var(--st-failed-fg);
+  background: var(--st-failed-bg);
+}
+.board-unreadable-state .ui-empty-state-action button {
+  white-space: nowrap;
+}
+/* Too narrow for Reload beside the words (an open drawer, a phone, larger
+   text): the words take the card's width and Reload goes under them. */
+.board-unreadable[data-layout="stacked"] .board-unreadable-state {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 12px;
+  margin: 16px auto;
+  padding: 14px 16px;
+}
+.board-unreadable[data-layout="stacked"] .ui-empty-state-action {
+  grid-column: 2;
+}
+.board-unreadable-state .ui-empty-state-mark {
+  border-color: var(--st-failed-fg);
+}
+.board-unreadable-state p {
+  max-width: none;
+  color: var(--text);
+}
+.board-unreadable-detail {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: calc(10px * var(--font-scale, 1));
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* A validator can list many problems: they scroll here, so Reload under or
+     beside them stays in view. */
+  max-height: min(40vh, calc(180px * var(--font-scale, 1)));
+  overflow: auto;
+}
+/* Too little of the board shows beside the drawer to hold the card (a phone's
+   sheet leaves ~110px above it): the card goes full width across the foot of
+   the board, over the drawer, as a band no taller than it needs. At the foot
+   it keeps clear of the drawer's head — its title, menu and close button, and
+   a sheet's drag handle — and covers only the end of the read-only node. A
+   band taller than the pane scrolls, so Reload is always reachable. */
+.board-unreadable[data-above-drawer] {
+  top: auto;
+  bottom: 0;
+  max-height: 100%;
+  z-index: calc(var(--z-drawer, 40) + 1);
+  box-shadow: 0 -10px 24px var(--shadow);
+}
+.board-unreadable[data-above-drawer] .board-unreadable-state {
+  width: min(calc(100% - 16px), calc(640px * var(--font-scale, 1)));
+  margin: 8px auto;
+}
+.board-unreadable[data-above-drawer] .board-unreadable-detail {
+  max-height: min(24vh, calc(120px * var(--font-scale, 1)));
+}

@@ -38,13 +38,15 @@ test.describe("explorer", () => {
   test("collapses and restores the explorer", async ({ page }) => {
     await openApp(page);
 
-    await page.getByRole("button", { name: "摺疊專案總管" }).click();
+    // Folded from the explorer's own heading, brought back from the board's.
+    await page.locator(".explorer-heading").getByRole("button", { name: "摺疊專案總管" }).click();
     await expect(page.getByRole("tree", { name: "工作區檔案樹" })).toBeHidden();
 
     await page.reload();
     // The collapsed state is a local preference, so it survives a reload.
-    await expect(page.getByRole("button", { name: "展開專案總管" })).toBeVisible();
-    await page.getByRole("button", { name: "展開專案總管" }).click();
+    const expand = page.locator(".lane-wrap.graph").getByRole("button", { name: "展開專案總管" });
+    await expect(expand).toBeVisible();
+    await expand.click();
     await expect(page.getByRole("tree", { name: "工作區檔案樹" })).toBeVisible();
   });
 });

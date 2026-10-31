@@ -26,6 +26,58 @@
   flex-shrink: 0;
   flex-wrap: wrap;
 }
+/* An open node drawer lies over the pane's right side; the toolbar keeps
+   Problems, the timeline switch, ? and ⋯ left of it (useDrawerCover measures
+   the reach). On a phone the drawer is a sheet below the toolbars and the
+   reach is never set. What is left is about 320px at 1280×800: wrapping kept
+   every control in it but took 4 rows at 150% text, ~200px of a 366px
+   timeline pane. So it stays one row and scrolls sideways, as the phone strip
+   does; every control is still there, in the tab order. Menus open fixed, and
+   the ? hint hangs from .board-title, so the strip clips neither. */
+.lane-wrap[data-drawer-cover] > .board-title {
+  padding-right: calc(14px + var(--drawer-cover));
+  flex-wrap: nowrap;
+}
+.lane-wrap[data-drawer-cover] > .board-title > .board-title-controls {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  /* A mouse needs the bar to reach the far end; thin keeps it off the row. */
+  scrollbar-width: thin;
+}
+/* .timeline-layout-controls is display: contents, so its children are this
+   strip's items too. */
+.lane-wrap[data-drawer-cover] .board-title-controls > *,
+.lane-wrap[data-drawer-cover] .board-title-controls .timeline-layout-controls > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* A ⋯ menu's panel sits inside its control (fixed to the window) and would
+   inherit that nowrap: its hints ran past its width and it scrolled sideways.
+   Out of the strip it is a menu again; its items keep their own nowrap. The
+   phone strip sets the same nowrap, so this is not tied to the drawer. */
+.board-title-controls .board-overflow-panel {
+  white-space: normal;
+}
+/* The pane name and the followed node's title can lose characters without
+   losing a control, so they shrink first. */
+.lane-wrap[data-drawer-cover] .board-title-controls > .board-title-main {
+  flex: 0 1 auto;
+  min-width: 3.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lane-wrap[data-drawer-cover] .board-title-controls > .board-title-message.selection {
+  flex: 0 1 auto;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* Transparent to layout everywhere the header fits on one line: on a desktop
    every control inside sits directly in .board-title exactly as it did before
    this wrapper existed, so nothing about the wide header changes. It only
@@ -34,13 +86,13 @@
   display: contents;
 }
 .board-title-main {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
 .board-title-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--text-2);
   line-height: 1.5;
   flex: 1;
@@ -50,7 +102,7 @@
   max-width: 320px;
   padding: 3px 7px;
   border-radius: 4px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .board-title-message.ok {
@@ -75,7 +127,7 @@
   padding: 3px 7px;
   border: 1px solid transparent;
   border-radius: 5px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale, 1));
   line-height: 1.35;
 }
 .inline-notice.success,
@@ -153,7 +205,7 @@
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
 }
 .command-palette kbd {
   padding: 1px 6px;
@@ -161,7 +213,7 @@
   border-radius: 4px;
   background: var(--surface-2);
   color: var(--text-2);
-  font: 10px var(--mono);
+  font: calc(10px * var(--font-scale, 1)) var(--mono);
 }
 .command-palette-results {
   max-height: min(52vh, 460px);
@@ -171,7 +223,9 @@
 .command-palette-results button {
   width: 100%;
   display: grid;
-  grid-template-columns: 28px 1fr auto;
+  /* minmax(0, …): a bare 1fr never shrinks below the unwrapped snippet, so a
+     long one would scroll the list sideways instead of ending in "…". */
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 9px 10px;
@@ -179,6 +233,8 @@
   border-radius: 8px;
   background: transparent;
   color: var(--text);
+  font: inherit;
+  font-size: calc(13px * var(--font-scale, 1));
   text-align: left;
 }
 .command-palette-results button.selected {
@@ -189,7 +245,7 @@
 .command-palette-group {
   padding: 8px 10px 4px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -207,7 +263,7 @@
   border-radius: 7px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .command-palette-help {
   max-height: min(58vh, 500px);
@@ -217,7 +273,7 @@
 .command-palette-help h3 {
   margin: 12px 0 6px;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   letter-spacing: 0.06em;
 }
 .command-palette-help section:first-child h3 {
@@ -239,7 +295,7 @@
 .command-palette-help li {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.6;
 }
 .command-palette-help ol {
@@ -253,10 +309,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.command-palette-results b {
+  font-size: calc(13px * var(--font-scale, 1));
+}
 .command-palette-results small,
 .command-palette-empty {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .command-palette-empty {
   padding: 24px;
@@ -268,7 +327,7 @@
   padding: 7px 14px;
   border-top: 1px solid var(--border);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 
 /* ---------- graph productivity tools ---------- */
@@ -282,7 +341,7 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
   color: var(--accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -292,6 +351,25 @@
 .board-primary-action:active {
   transform: translateY(1px);
 }
+/* "+ New node" and its type caret read as one split button. */
+.board-new-node {
+  display: inline-flex;
+  align-items: stretch;
+}
+.board-new-node > .board-primary-action {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.board-new-node > .board-overflow {
+  display: inline-flex;
+}
+.board-new-node .board-new-node-caret {
+  height: 100%;
+  padding-inline: 5px;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 
 .board-tool-button {
   padding: 3px 8px;
@@ -299,7 +377,7 @@
   border-radius: 5px;
   background: var(--surface-2);
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .board-tool-button.active {
   border-color: var(--accent);
@@ -332,7 +410,7 @@
   align-items: center;
   gap: 9px;
   padding: 6px 14px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .graph-batch-toolbar label {
   display: inline-flex;
@@ -350,7 +428,7 @@
   border-radius: 5px;
   background: var(--surface);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 /* What Ctrl+C / Ctrl+X is holding, so a paste in another project is expected. */
 .graph-batch-clipboard {
@@ -367,15 +445,279 @@
   min-height: 20px;
   padding: 0 6px;
 }
+/* The same notice with no selection to sit beside: a thin strip of its own. */
+.graph-clipboard-strip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--accent) 8%);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.graph-clipboard-strip button {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: calc(11px * var(--font-scale, 1));
+}
 
-/* The destructive action sits apart from the rest and reads as destructive. */
+/* The destructive action reads as destructive. Clear selection is the one
+   pushed to the far end, by the spacer, so it is never next to Delete. */
 .graph-batch-toolbar button.danger {
-  margin-left: auto;
   border-color: var(--st-failed-fg);
   color: var(--st-failed-fg);
 }
 .graph-batch-toolbar button.danger:hover:not(:disabled) {
   background: var(--st-failed-bg);
+}
+.graph-batch-spacer {
+  flex: 1;
+}
+/* The two menus in the row reuse the board's ⋯ menu, which otherwise pushes
+   itself to the end of its header. */
+.graph-batch-toolbar .board-overflow {
+  margin-left: 0;
+}
+.graph-batch-toolbar .graph-batch-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---------- a node's short menu (NodeActionsMenu) ---------- */
+.lane-context-menu.node-actions-menu {
+  width: min(240px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+.node-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.node-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: calc(12px * var(--font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.node-actions-item > span:first-of-type {
+  flex: 1;
+}
+.node-actions-item svg {
+  flex: none;
+  color: var(--text-2);
+}
+.node-actions-item:hover,
+.node-actions-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.node-actions-item[aria-expanded="true"] {
+  background: var(--surface-2);
+}
+.node-actions .node-actions-item.danger {
+  border: 0;
+  background: transparent;
+  color: var(--st-failed-fg);
+}
+.node-actions .node-actions-item.danger:hover,
+.node-actions .node-actions-item.danger:focus-visible {
+  background: var(--st-failed-bg);
+}
+.node-actions-chevron {
+  color: var(--text-2);
+  font-size: calc(10px * var(--font-scale, 1));
+}
+.node-actions-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 2px 12px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+.node-actions-separator {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border);
+}
+
+/* ---------- board body: the canvas and, beside it, the Problems panel ---------- */
+.lane-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.lane-body > .board {
+  flex: 1;
+  min-width: 0;
+}
+.problems-panel {
+  --problems-w: 320px;
+  display: flex;
+  flex: 0 0 var(--problems-w);
+  flex-direction: column;
+  gap: 12px;
+  width: var(--problems-w);
+  min-height: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  outline: none;
+}
+/* With Problems open there is no corner free for the minimap: stepped left
+   onto the narrower board it covered cards the opening had framed clear of
+   it, and over the panel's foot it covered the panel's own rows whenever the
+   pane was short (a 330px graph pane above an open timeline). It is not shown
+   while the panel is, and comes back with the board. The panel keeps room at
+   its end for the Copilot button: its 48px over its 18px lift. */
+.lane-body.problems-open .graph-minimap {
+  display: none;
+}
+.lane-body.problems-open .problems-panel {
+  padding-bottom: calc(48px + 18px + 12px);
+}
+.problems-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.problems-panel-head h3 {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.problems-count {
+  margin-left: 4px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.problems-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.problems-close:hover,
+.problems-close:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+.problems-empty {
+  margin: 0;
+  color: var(--st-done-fg);
+  font-size: calc(12px * var(--font-scale, 1));
+}
+.problems-section h4 {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: calc(10.5px * var(--font-scale, 1));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.problems-issues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.problems-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  font-size: calc(11.5px * var(--font-scale, 1));
+  line-height: 1.4;
+  text-align: left;
+}
+button.problems-issue {
+  cursor: pointer;
+}
+button.problems-issue:hover,
+button.problems-issue:focus-visible {
+  outline: 1px solid currentColor;
+}
+.problems-issue svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+/* The name and the part at fault share one line ("Bravo · Prerequisites");
+   a block name pushed " · field" onto a line that began with the dot. */
+.problems-issue-title,
+.problems-issue small {
+  display: block;
+}
+.problems-issue small {
+  color: var(--text);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.problems-issue.issue-error {
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+}
+.problems-issue.issue-warning {
+  background: var(--st-ready-bg);
+  color: var(--st-ready-fg);
+}
+/* The analysis was a strip above the board; in the panel it is one column
+   and as tall as it needs. */
+.problems-panel .graph-analysis-panel {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.problems-panel .analysis-items {
+  grid-template-columns: minmax(0, 1fr);
+}
+.problems-panel .analysis-path {
+  font-size: calc(11px * var(--font-scale, 1));
+  line-height: 1.6;
+}
+@media (max-width: 720px) {
+  /* No room beside the board on a phone: the panel covers it, and closing it
+     gives the board back. */
+  .problems-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    width: auto;
+    border-left: 0;
+  }
+  .lane-body.problems-open .problems-panel {
+    padding-bottom: 12px;
+  }
 }
 .graph-tools-panel {
   display: flex;
@@ -387,6 +729,92 @@
 .graph-tools-panel > input {
   width: 230px;
   padding: 3px 8px;
+}
+/* In the header's Filter popover: one column of full-width fields. */
+.board-filter .board-overflow-panel {
+  width: 280px;
+}
+.board-filter .graph-tools-panel {
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: stretch;
+  overflow: visible;
+  border-bottom: 0;
+  background: transparent;
+  padding: 10px;
+}
+.board-filter .graph-tools-panel > input,
+.board-filter .graph-tools-panel > select,
+.board-filter .graph-tools-more-fields > input,
+.board-filter .graph-tools-more-fields > select {
+  width: 100%;
+}
+/* Status first, as a column of checkboxes: one press each, several at once. */
+.graph-tools-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.graph-tools-statuses legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.graph-tools-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  font-size: calc(12px * var(--font-scale, 1));
+  cursor: pointer;
+}
+.graph-tools-panel .graph-tools-status input {
+  min-height: 0;
+  margin: 0;
+}
+/* The rest of the fields wait under one disclosure. */
+.graph-tools-panel .graph-tools-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.graph-tools-panel .graph-tools-more:hover,
+.graph-tools-panel .graph-tools-more:focus-visible {
+  color: var(--text);
+}
+.graph-tools-more-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-filter .graph-tools-more-fields {
+  flex-direction: column;
+  align-items: stretch;
+}
+.graph-tools-more-fields[hidden] {
+  display: none;
+}
+.board-filter .saved-view-create {
+  display: flex;
+  margin-top: 4px;
+}
+.board-filter .saved-view-create input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.board-filter .saved-view-chip {
+  align-self: flex-start;
 }
 .saved-view-create,
 .saved-view-chip {
@@ -423,7 +851,7 @@
   flex-wrap: wrap;
   gap: 7px 14px;
   align-items: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
 }
 .analysis-summary span {
   color: var(--text-2);
@@ -434,7 +862,7 @@
 .analysis-path {
   margin-top: 6px;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
 }
 .analysis-path button {
   border: 0;
@@ -478,24 +906,6 @@
 .col-card.analysis-violation {
   outline: 2px solid var(--st-failed-fg);
   outline-offset: 2px;
-}
-.col-card.analysis-blocked::after {
-  content: attr(data-blocked-label);
-  position: absolute;
-  right: 5px;
-  bottom: 4px;
-  color: var(--st-failed-fg);
-  font-size: calc(8px * var(--card-font-scale, 1));
-  font-weight: 700;
-}
-.col-card.analysis-blocking::before {
-  content: attr(data-blocking-label);
-  position: absolute;
-  right: 5px;
-  top: 4px;
-  color: var(--st-ready-fg);
-  font-size: calc(8px * var(--card-font-scale, 1));
-  font-weight: 700;
 }
 /* Only reachable through a deprecated wire: kept on the board, out of play. */
 .col-card.is-deprecated {
@@ -544,4 +954,12 @@
   font-size: calc(8px * var(--card-font-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Hints: a legacy type that reads as Task, say. Listed last, never counted. */
+.problems-issue.issue-info {
+  background: transparent;
+  color: var(--text-2);
+}
+.problems-issue.issue-info small {
+  color: var(--text-2);
 }

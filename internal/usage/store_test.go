@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"nodevas/internal/db"
-	"nodevas/internal/db/dbtest"
+	"nodevas/internal/testpg"
 )
 
 // testNow is the clock every store test runs at.
@@ -16,7 +16,7 @@ var testNow = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 
 func newTestStore(t *testing.T) (*Store, *db.DB) {
 	t.Helper()
-	database := dbtest.Open(t)
+	database := testpg.New(t)
 	s := NewStore(database)
 	s.SetClock(func() time.Time { return testNow })
 	return s, database
@@ -114,10 +114,11 @@ func TestReport(t *testing.T) {
 	// bea's claude run: Claude Code said what it cost.
 	seedRun(t, database, "run-claude", "p", "bea", "bea", "claude", "default",
 		`{"inputTokens":1000,"outputTokens":200,"cacheReadTokens":5000,"costUsd":0.42,"model":"claude-opus-5-5"}`, yesterday)
-	// bea's codex run: nobody prices gpt-5.5.
+	// bea's codex run: gpt-5.5 at its estimate price.
 	seedRun(t, database, "run-codex", "p", "bea", "bea", "codex", "gpt-5.5",
 		`{"inputTokens":3000,"outputTokens":300}`, testNow.Add(-time.Hour))
-	// An agy run dispatched as "default" that never named its model.
+	// An agy run dispatched as "default" that never named its model: costed
+	// at Antigravity's default model.
 	seedRun(t, database, "run-agy", "p", "bea", "bea", "antigravity", "default",
 		`{"inputTokens":10,"outputTokens":1}`, testNow.Add(-2*time.Hour))
 	// cal's run, out of the window, in another project, and one with no usage.
@@ -154,11 +155,13 @@ func TestReport(t *testing.T) {
 	if tot.Runs != 3 || tot.Sessions != 2 || tot.TotalTokens != 6200+3300+11+3_100_000+110 {
 		t.Fatalf("totals = %+v", tot)
 	}
-	// Estimated: opus 1M×4 + 0.1M×20 = 6; haiku 2M×0.10 = 0.2. Reported: 0.42 + 0.05.
-	if !near(tot.EstimatedCostUSD, 6.2) || !near(tot.ReportedCostUSD, 0.47) || !near(tot.CostUSD, 6.67) {
+	// Estimated: opus 1M×4 + 0.1M×20 = 6; haiku 2M×0.10 = 0.2; codex
+	// gpt-5.5 3000×1.25 + 300×10 = 0.00675; agy gemini-2.5-pro 10×1.25 + 1×10
+	// = 0.0000225. Reported: 0.42 + 0.05.
+	if !near(tot.EstimatedCostUSD, 6.2067725) || !near(tot.ReportedCostUSD, 0.47) || !near(tot.CostUSD, 6.6767725) {
 		t.Fatalf("costs = %+v", tot)
 	}
-	if tot.UnpricedTokens != 3300+11 {
+	if tot.UnpricedTokens != 0 {
 		t.Fatalf("unpriced = %d", tot.UnpricedTokens)
 	}
 
@@ -172,10 +175,10 @@ func TestReport(t *testing.T) {
 	if m := models["claude/claude-opus-5-5"]; m.Runs != 1 || m.Sessions != 1 || !near(m.CostUSD, 6.42) {
 		t.Fatalf("opus = %+v", m)
 	}
-	if m := models["antigravity/unknown"]; m.UnpricedTokens != 11 {
+	if m := models["antigravity/unknown"]; m.UnpricedTokens != 0 || !near(m.EstimatedCostUSD, 0.0000225) {
 		t.Fatalf("agy = %+v", m)
 	}
-	if m := models["codex/gpt-5.5"]; m.UnpricedTokens != 3300 || m.CostUSD != 0 {
+	if m := models["codex/gpt-5.5"]; m.UnpricedTokens != 0 || !near(m.CostUSD, 0.00675) {
 		t.Fatalf("codex = %+v", m)
 	}
 
@@ -219,7 +222,7 @@ func TestReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	priced, _ := s.Report(ctx, Query{Project: "p", Viewer: "bea", Days: 7})
-	if !near(priced.Totals.EstimatedCostUSD, 6.2+0.003+0.003) || priced.Totals.UnpricedTokens != 11 {
+	if !near(priced.Totals.EstimatedCostUSD, 6.2+0.003+0.003+0.0000225) || priced.Totals.UnpricedTokens != 0 {
 		t.Fatalf("with a gpt price = %+v", priced.Totals)
 	}
 	// The window clamps.

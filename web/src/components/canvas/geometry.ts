@@ -270,6 +270,36 @@ export function nearestClearRatio(
   return candidates.find(isClear) ?? preferred;
 }
 
+/**
+ * The middle of the longest stretch of the segment that no obstacle covers,
+ * as a ratio along it, or null when the obstacles cover all of it. Where no
+ * point on a line holds a whole box clear of the cards, this is the spot that
+ * leaves the least of it over them: the gap between two neighbouring cards.
+ */
+export function widestOpeningRatio(
+  start: Point,
+  end: Point,
+  obstacles: readonly Rect[],
+): number | null {
+  const covered = obstacles
+    .flatMap((rect) => {
+      const interval = segmentRectInterval(start, end, rect);
+      return interval ? [interval] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let bestFrom = 0;
+  let bestLength = 0;
+  let from = 0;
+  for (const [low, high] of [...covered, [1, 1] as const]) {
+    if (low - from > bestLength) {
+      bestFrom = from;
+      bestLength = low - from;
+    }
+    from = Math.max(from, high);
+  }
+  return bestLength > 0 ? bestFrom + bestLength / 2 : null;
+}
+
 export function averagePoint(points: Point[]): Point {
   const total = points.reduce(
     (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),

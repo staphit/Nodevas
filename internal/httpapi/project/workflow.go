@@ -8,7 +8,6 @@
 package project
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 	"nodevas/internal/store"
 )
 
@@ -81,8 +81,8 @@ func (a *API) PutWorkspaceStatuses(c *gin.Context) {
 		return
 	}
 	if len(body.CustomStatuses) > store.MaxWorkspaceStatuses {
-		httpx.Err(c, http.StatusBadRequest, fmt.Errorf(
-			"共用狀態過多（上限 %d）", store.MaxWorkspaceStatuses))
+		httpx.Err(c, http.StatusBadRequest, locale.Errorf(
+			"too many shared statuses (at most %d)", "共用狀態過多（上限 %d）", store.MaxWorkspaceStatuses))
 		return
 	}
 	seenID := map[string]bool{}
@@ -91,28 +91,28 @@ func (a *API) PutWorkspaceStatuses(c *gin.Context) {
 		if !strings.HasPrefix(definition.ID, "custom-status-") ||
 			!engine.ValidNodeID(definition.ID) {
 			httpx.Err(c, http.StatusBadRequest,
-				fmt.Errorf("狀態代號無效：%q", definition.ID))
+				locale.Errorf("invalid status id: %q", "狀態代號無效：%q", definition.ID))
 			return
 		}
 		label := strings.TrimSpace(definition.Label)
 		if label == "" || len(label) > 128 {
 			httpx.Err(c, http.StatusBadRequest,
-				fmt.Errorf("狀態「%s」的名稱空白或過長", definition.ID))
+				locale.Errorf("status “%s” has an empty or too long name", "狀態「%s」的名稱空白或過長", definition.ID))
 			return
 		}
 		if !statusShapes[definition.Shape] {
 			httpx.Err(c, http.StatusBadRequest,
-				fmt.Errorf("不支援的圖形：%q", definition.Shape))
+				locale.Errorf("unsupported shape: %q", "不支援的圖形：%q", definition.Shape))
 			return
 		}
 		if seenID[definition.ID] {
 			httpx.Err(c, http.StatusBadRequest,
-				fmt.Errorf("重複的狀態代號：%q", definition.ID))
+				locale.Errorf("duplicate status id: %q", "重複的狀態代號：%q", definition.ID))
 			return
 		}
 		lowered := strings.ToLower(label)
 		if seenLabel[lowered] {
-			httpx.Err(c, http.StatusBadRequest, fmt.Errorf("重複的狀態名稱：%q", label))
+			httpx.Err(c, http.StatusBadRequest, locale.Errorf("duplicate status name: %q", "重複的狀態名稱：%q", label))
 			return
 		}
 		seenID[definition.ID] = true

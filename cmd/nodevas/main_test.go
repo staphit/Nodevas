@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/auth"
+	"nodevas/internal/testpg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,11 +243,7 @@ func TestProtectHTTPTransportCapsEverySignInBody(t *testing.T) {
 // so its shape is pinned: name, role and address, tab-separated, with the
 // address empty rather than missing for an account that cannot sign in.
 func TestUserListPrintsNameRoleAndEmail(t *testing.T) {
-	users, err := auth.NewUserStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = users.Close() })
+	users := auth.NewUserStoreDB(testpg.New(t))
 	ctx := context.Background()
 	if err := users.AddWithEmail(ctx, "ann", "correct-horse-battery", "", "Ann@Example.test"); err != nil {
 		t.Fatal(err)

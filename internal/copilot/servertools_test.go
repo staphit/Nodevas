@@ -146,7 +146,7 @@ func TestStartBreakdownFilesTheGoalAndDispatchesAPlanRun(t *testing.T) {
 	}
 	node := api.find(http.MethodPost, "/api/nodes")
 	if node == nil || node.body["title"] != "Add CSV export to the reports page" ||
-		!strings.Contains(node.body["body"].(string), "header row") || node.body["kind"] != "task" {
+		!strings.Contains(node.body["body"].(string), "header row") || node.body["kind"] != "goal" {
 		t.Fatalf("node request = %+v", node)
 	}
 	run := api.find(http.MethodPost, "/api/runs")
@@ -459,5 +459,15 @@ func TestDispatchToolsAlwaysAsk(t *testing.T) {
 	}
 	if len(plan.calls()) != 0 {
 		t.Fatalf("plan mode reached the API: %+v", plan.calls())
+	}
+}
+
+func TestSystemPromptExplainsNodeTypes(t *testing.T) {
+	prompt := systemPrompt("Bea", "main", ModeDefault, TurnContext{}, nil)
+	for _, want := range []string{"scene/event", "gate (review by a person)", "note (reference, no status)",
+		"agentMode is none"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("system prompt missing %q", want)
+		}
 	}
 }

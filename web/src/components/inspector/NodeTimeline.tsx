@@ -147,7 +147,7 @@ export function NodeTimeline({ id }: { id: string }) {
   const doneAssessment = assessment("done");
 
   return (
-    <div className="node-timeline" role="tabpanel" aria-label={t("timeline.aria")}>
+    <section className="node-timeline" aria-label={t("timeline.aria")}>
       <div className="node-timeline-assessments">
         {[
           [t("timeline.assessment.start"), startAssessment],
@@ -204,7 +204,7 @@ export function NodeTimeline({ id }: { id: string }) {
                   title={t("timeline.timeTitle")}
                   onChange={(event) => commitPlan(status, { time: event.target.value })}
                 />
-                {plan?.note && <small>「{plan.note}」</small>}
+                {plan?.note && <small>{t("common.quoted", { text: plan.note })}</small>}
               </label>
             );
           })}
@@ -263,7 +263,7 @@ export function NodeTimeline({ id }: { id: string }) {
                     {event.event === "move" && event.recordedAt && (
                       <small>{t("timeline.recordedAt", { date: formatLocalizedDateTime(event.recordedAt, language) })}</small>
                     )}
-                    {event.note && <small>「{event.note}」</small>}
+                    {event.note && <small>{t("common.quoted", { text: event.note })}</small>}
                   </div>
                 </li>
               );
@@ -303,6 +303,6 @@ export function NodeTimeline({ id }: { id: string }) {
       <div className="node-timeline-help">
         {t("timeline.help")}
       </div>
-    </div>
+    </section>
   );
 }

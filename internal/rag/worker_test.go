@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,12 @@ func TestMiniLMHelperProcess(t *testing.T) {
 		case "bad":
 			os.Stdout.WriteString("invalid JSON\n")
 			continue
+		case "stderr":
+			os.Stderr.WriteString("Traceback (most recent call last):\nRuntimeError: boom\n")
+			os.Exit(5)
+		case "import":
+			os.Stderr.WriteString("ModuleNotFoundError: No module named 'chromadb'\n")
+			os.Exit(5)
 		}
 		vectors := testVectors(input)
 		for _, vector := range vectors {
@@ -142,5 +149,39 @@ func TestWorkerIdleAndCloseReleaseProcess(t *testing.T) {
 	}
 	if _, err := w.Embed(context.Background(), []string{"closed"}); err == nil {
 		t.Fatal("closed worker accepted work")
+	}
+}
+
+func TestWorkerFailureQuotesTheHelpersReason(t *testing.T) {
+	w := testWorker(t)
+	_, err := w.Embed(context.Background(), []string{"stderr"})
+	if err == nil || !strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "rag-requirements") {
+		t.Fatalf("runtime failure: %v", err)
+	}
+	_, err = w.Embed(context.Background(), []string{"import"})
+	if err == nil || !strings.Contains(err.Error(), "rag-requirements.txt") {
+		t.Fatalf("import failure: %v", err)
+	}
+	if _, err := w.Embed(context.Background(), []string{"recovered"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHelperFailureWithoutDiagnosticsMakesNoInstallClaim(t *testing.T) {
+	if err := helperFailure(""); strings.Contains(err.Error(), "rag-requirements") {
+		t.Fatalf("error: %v", err)
+	}
+	long := strings.Repeat("界", 400)
+	if err := helperFailure("first\n" + long + "\n\n"); !strings.Contains(err.Error(), strings.Repeat("界", 300)+"…") ||
+		strings.Contains(err.Error(), strings.Repeat("界", 301)) {
+		t.Fatalf("error not cut at 300 runes: %v", err)
+	}
+}
+
+func TestMiniLMRunsPythonInUTF8Mode(t *testing.T) {
+	args := MiniLM("python", nil).newCommand().Args
+	got := strings.Join(args[:5], " ")
+	if got != "python -I -X utf8 -u" {
+		t.Fatalf("args = %q", got)
 	}
 }

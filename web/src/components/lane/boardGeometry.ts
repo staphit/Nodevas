@@ -7,13 +7,19 @@
  */
 
 import type { LogicGate } from "../../types";
+import type { TimelineRowItem } from "../timeline/TimelineGrid";
 import { LOGIC_GATE_H, LOGIC_GATE_W } from "../canvas/LogicGate";
 import { MAX_COL, MAX_ROW } from "../canvas/useBoardColumns";
 import {
+  CARD_GAP_X,
+  CARD_GAP_Y,
+  CARD_H,
+  CARD_W,
   COL_W,
   MAX_ZOOM,
   MIN_ZOOM,
   ROW_H,
+  dayKey,
   type Col,
   type Rect,
 } from "../canvas/geometry";
@@ -25,6 +31,35 @@ const GRAPH_PAN_BUFFER_COLS = 8;
 const GRAPH_PAN_BUFFER_ROWS = 8;
 export const GRAPH_PAN_BUFFER_X = GRAPH_PAN_BUFFER_COLS * COL_W;
 export const GRAPH_PAN_BUFFER_Y = GRAPH_PAN_BUFFER_ROWS * ROW_H;
+
+/** The narrowest a horizontal timeline's node column gets beside a drawer. */
+export const TIMELINE_NODE_COLUMN_MIN_W = 112;
+
+/**
+ * How wide a horizontal timeline's sticky node column is, in board pixels.
+ * On its own it is a whole date cell (200–360px). An open node drawer leaves
+ * the board some 360px at 1280px, and a cell-wide column took nearly all of
+ * it: beside the drawer it is a third of what the drawer leaves uncovered
+ * (never under 112px), names cut short and in full on hover, so the dates
+ * beside it stay in view.
+ */
+export function timelineNodeColumnWidth({
+  cellWidth,
+  viewportWidth,
+  cover,
+  zoom,
+}: {
+  cellWidth: number;
+  /** The board's scrollport width, in screen pixels. */
+  viewportWidth: number;
+  /** How far an open drawer reaches into that scrollport, in screen pixels. */
+  cover: number;
+  zoom: number;
+}): number {
+  if (cover <= 0 || viewportWidth <= 0 || zoom <= 0) return cellWidth;
+  const uncovered = Math.max(0, viewportWidth - cover) / zoom;
+  return Math.round(Math.min(cellWidth, Math.max(TIMELINE_NODE_COLUMN_MIN_W, uncovered / 3)));
+}
 
 export interface BoardMetrics {
   boardW: number;
@@ -91,6 +126,231 @@ export function boardMetrics({
   return { boardW, graphOffsetX, graphCanvasH, graphOffsetY };
 }
 
+/** Room the opening scroll leaves between the view's edge and the first card. */
+const OPENING_PADDING = 72;
+/** Past this many cards the opening does not search for room beside the minimap. */
+const CORNER_SEARCH_MAX_CARDS = 80;
+
+/**
+ * Where a board this session has not shown opens. With no content it is the
+ * buffer origin, where logical (0,0) is. With content — cards, groups and
+ * annotations — it frames it: centred
+ * along an axis they fit in, else starting, with a little room, at the card
+ * nearest their top-left corner, which is then always in view. Saved
+ * positions need not start at the origin, and opening on the origin showed
+ * nothing but margin when they did not.
+ *
+ * `cards` are the content's rectangles, in board pixels before the zoom.
+ * `corner` is what floats over the view's bottom-right corner — the minimap —
+ * in view pixels: content that fits is moved within its room in the view, as
+ * little as will do, so no card sits under it — or, with no such room, so as
+ * little of the cards as can be does.
+ */
+export function openingScroll(
+  cards: readonly Rect[],
+  zoom: number,
+  viewport: { width: number; height: number },
+  corner?: { width: number; height: number } | null,
+): { left: number; top: number } {
+  if (cards.length === 0) {
+    return { left: GRAPH_PAN_BUFFER_X * zoom, top: GRAPH_PAN_BUFFER_Y * zoom };
+  }
+  const bounds = {
+    left: Math.min(...cards.map((card) => card.left)),
+    right: Math.max(...cards.map((card) => card.right)),
+    top: Math.min(...cards.map((card) => card.top)),
+    bottom: Math.max(...cards.map((card) => card.bottom)),
+  };
+  let anchor = cards[0];
+  let nearest = Infinity;
+  for (const card of cards) {
+    const distance = Math.hypot(card.left - bounds.left, card.top - bounds.top);
+    if (distance < nearest) {
+      nearest = distance;
+      anchor = card;
+    }
+  }
+  // Content that fits is centred even when that leaves less than the usual
+  // room around it: a four-quadrant template 20px narrower than the view
+  // otherwise opened from its left edge with its right-hand quadrants cut.
+  const axis = (start: number, end: number, from: number, size: number) => {
+    const padding = Math.min(OPENING_PADDING, size / 8);
+    const scroll =
+      (end - start) * zoom <= size
+        ? ((start + end) / 2) * zoom - size / 2
+        : from * zoom - padding;
+    return Math.max(0, scroll);
+  };
+  const opening = {
+    left: axis(bounds.left, bounds.right, anchor.left, viewport.width),
+    top: axis(bounds.top, bounds.bottom, anchor.top, viewport.height),
+  };
+  if (!corner || corner.width <= 0 || corner.height <= 0) return opening;
+  if (cards.length > CORNER_SEARCH_MAX_CARDS) return opening;
+  const cornerLeft = viewport.width - corner.width;
+  const cornerTop = viewport.height - corner.height;
+  // How much of the content the corner covers with the view scrolled here.
+  const covered = (left: number, top: number) => {
+    let area = 0;
+    for (const card of cards) {
+      const width = card.right * zoom - left - Math.max(cornerLeft, card.left * zoom - left);
+      const height = card.bottom * zoom - top - Math.max(cornerTop, card.top * zoom - top);
+      if (width > 0 && height > 0) area += width * height;
+    }
+    return area;
+  };
+  const openingCovered = covered(opening.left, opening.top);
+  if (openingCovered === 0) return opening;
+  // Scrolling further right or down moves the content away from the corner;
+  // along an axis the content fits, as far as keeps all of it in view. The
+  // covered area only turns where a card's edge crosses the corner's, so
+  // those scrolls and the two ends are the only ones worth trying.
+  const candidates = (
+    from: number,
+    start: number,
+    end: number,
+    size: number,
+    cornerStart: number,
+    edges: number[],
+  ) => {
+    const most = (end - start) * zoom <= size ? Math.max(from, start * zoom) : from;
+    const values = new Set([from, most]);
+    for (const edge of edges) {
+      const value = edge * zoom - cornerStart;
+      if (value > from && value < most) values.add(value);
+    }
+    return [...values];
+  };
+  const lefts = candidates(
+    opening.left,
+    bounds.left,
+    bounds.right,
+    viewport.width,
+    cornerLeft,
+    cards.flatMap((card) => [card.left, card.right]),
+  );
+  const tops = candidates(
+    opening.top,
+    bounds.top,
+    bounds.bottom,
+    viewport.height,
+    cornerTop,
+    cards.flatMap((card) => [card.top, card.bottom]),
+  );
+  // Least covered first, then the least moved from the plain opening.
+  let best = opening;
+  let leastCovered = openingCovered;
+  let leastMoved = 0;
+  for (const left of lefts) {
+    for (const top of tops) {
+      const area = covered(left, top);
+      const moved = left - opening.left + (top - opening.top);
+      if (area < leastCovered || (area === leastCovered && moved < leastMoved)) {
+        best = { left, top };
+        leastCovered = area;
+        leastMoved = moved;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Where the timeline opens. Its range starts two weeks before today (further
+ * back for older records), so scroll 0 is a fortnight of empty days. It opens
+ * on today instead — or, when nothing recorded or planned is in view from
+ * there, on the first such day after today, else on the latest one before it.
+ *
+ * Positions run along the date axis from where the days start: the lane
+ * headers above (vertical) or beside (horizontal) them are sticky, so a day
+ * scrolled to offset 0 sits just past them. `daySize` is a day's length along
+ * that axis and `gapSize` a collapsed run of empty days'; both before the zoom.
+ *
+ * Across the lanes it opens on the ones with something on the opening day
+ * (else on any day in view): all of them when they fit, scrolled no further
+ * than that takes, else starting at the first. Opening on today's row alone
+ * left today's plans in lanes behind the date ruler, the lanes in view empty.
+ * `lanes` holds each lane's days with a record or a plan, in lane order;
+ * `laneSize` is a lane's size across and `laneInset` what the sticky date
+ * ruler (vertical) or header (horizontal) takes of the view across them.
+ */
+export function timelineOpeningScroll({
+  days,
+  rowItems,
+  todayKey,
+  contentDays,
+  orientation,
+  daySize,
+  gapSize,
+  viewport,
+  zoom,
+  lanes = [],
+  laneSize = 0,
+  laneInset = 0,
+}: {
+  days: readonly Date[];
+  rowItems: readonly TimelineRowItem[];
+  todayKey: string;
+  /** Days that carry a record or a plan. */
+  contentDays: ReadonlySet<string>;
+  orientation: "vertical" | "horizontal";
+  daySize: number;
+  gapSize: number;
+  viewport: { width: number; height: number };
+  zoom: number;
+  lanes?: readonly ReadonlySet<string>[];
+  laneSize?: number;
+  laneInset?: number;
+}): { left: number; top: number } {
+  // Every day's start, a collapsed one at its gap's; the same walk as dayY.
+  const starts: number[] = new Array(days.length).fill(0);
+  let position = 0;
+  let next = 0;
+  for (const item of rowItems) {
+    if (item.kind === "day") {
+      starts[item.dayIndex] = position;
+      next = item.dayIndex + 1;
+      position += daySize;
+    } else {
+      for (let k = 0; k < item.count; k++) starts[next + k] = position;
+      next += item.count;
+      position += gapSize;
+    }
+  }
+  const keys = days.map(dayKey);
+  const todayIndex = keys.indexOf(todayKey);
+  let target = todayIndex >= 0 ? starts[todayIndex] : 0;
+  const marked = keys.flatMap((key, index) => (contentDays.has(key) ? [starts[index]] : []));
+  const span = (orientation === "vertical" ? viewport.height : viewport.width) / zoom;
+  const inView = (start: number) => start >= target && start + daySize <= target + span;
+  if (marked.length > 0 && !marked.some(inView)) {
+    target = marked.find((start) => start > target) ?? marked[marked.length - 1];
+  }
+  const scroll = Math.max(0, target * zoom);
+
+  let laneScroll = 0;
+  if (laneSize > 0) {
+    const openingDay = keys.filter((_, index) => starts[index] === target);
+    const inViewDays = keys.filter((_, index) => inView(starts[index]));
+    const lanesWith = (dayKeys: string[]) =>
+      lanes.flatMap((laneDays, index) =>
+        dayKeys.some((key) => laneDays.has(key)) ? [index] : [],
+      );
+    let shown = lanesWith(openingDay);
+    if (shown.length === 0) shown = lanesWith(inViewDays);
+    if (shown.length > 0) {
+      const across = (orientation === "vertical" ? viewport.width : viewport.height) / zoom;
+      const room = across - laneInset;
+      const first = shown[0] * laneSize;
+      const end = (shown[shown.length - 1] + 1) * laneSize;
+      laneScroll = Math.max(0, end - first <= room ? end - room : first) * zoom;
+    }
+  }
+  return orientation === "vertical"
+    ? { left: laneScroll, top: scroll }
+    : { left: scroll, top: laneScroll };
+}
+
 /** The grid cell a board-space point falls in, clamped to the legal range. */
 export function graphCellAt(
   contentX: number,
@@ -100,6 +360,52 @@ export function graphCellAt(
     col: Math.max(0, Math.min(MAX_COL, Math.floor(contentX / COL_W))),
     row: Math.max(0, Math.min(MAX_ROW, Math.floor(contentY / ROW_H))),
   };
+}
+
+/**
+ * The free grid cell nearest to anchor for a new card of the default size:
+ * the anchor itself when nothing overlaps it, else the closest cell ring by
+ * ring (right, below, left, above first). Without it every card made from the
+ * toolbar landed on the middle of the view, exactly on top of the last one.
+ */
+export function nearestFreeGraphCell(
+  anchor: { col: number; row: number },
+  cols: readonly Col[],
+): { col: number; row: number } {
+  const overlaps = (col: number, row: number) =>
+    cols.some(
+      (card) =>
+        Math.abs((col - card.index) * COL_W) < (CARD_W + card.width) / 2 + CARD_GAP_X &&
+        Math.abs((row - card.row) * ROW_H) < (CARD_H + card.height) / 2 + CARD_GAP_Y,
+    );
+  const inBoard = (col: number, row: number) =>
+    col >= 0 && col <= MAX_COL && row >= 0 && row <= MAX_ROW;
+  const maxRing = 24;
+  for (let ring = 0; ring <= maxRing; ring++) {
+    const candidates: { col: number; row: number }[] = [];
+    for (let dc = -ring; dc <= ring; dc++) {
+      for (let dr = -ring; dr <= ring; dr++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== ring) continue;
+        candidates.push({ col: anchor.col + dc, row: anchor.row + dr });
+      }
+    }
+    // Nearest first by grid distance; the four direct neighbours win ties,
+    // right and below before left and above.
+    const order = (c: { col: number; row: number }) => {
+      const dc = c.col - anchor.col;
+      const dr = c.row - anchor.row;
+      const manhattan = Math.abs(dc) + Math.abs(dr);
+      const side = dc > 0 ? 0 : dr > 0 ? 1 : dc < 0 ? 2 : 3;
+      return manhattan * 4 + side;
+    };
+    candidates.sort((a, b) => order(a) - order(b));
+    for (const candidate of candidates) {
+      if (inBoard(candidate.col, candidate.row) && !overlaps(candidate.col, candidate.row)) {
+        return candidate;
+      }
+    }
+  }
+  return anchor;
 }
 
 /** Everything a wire has to route around: the cards and the logic gates. */

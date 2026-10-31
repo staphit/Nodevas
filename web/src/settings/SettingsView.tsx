@@ -1,101 +1,46 @@
 // Settings: the third face, beside Info and Station. Everything that used to
 // be a dialog of its own (project settings, deadline reminders, backup,
-// runners, usage, budget, routing, account security) is a part of one page,
-// with a list of the parts on the left. The dialogs draw themselves inline
-// here (InlineDialogContext) and stay dialogs nowhere else.
+// runners, usage, budget, routing, account security) is a part of one page:
+// four sections in a list on the left, with a search box over them that
+// finds any setting by name. Each section keeps what is changed often on its
+// first layer and the rest in rows that open in place; Agents keeps the
+// rarely changed under Advanced. The dialogs draw themselves inline here
+// (InlineDialogContext) and stay dialogs nowhere else.
+//
+// Where the page is (a section and the row open in it) is remembered as one
+// of the old parts (SETTINGS_PLACES), so openSettings(part) keeps working.
 //
 // Loaded on demand (App's React.lazy).
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AuditPanel } from "../audit/AuditPanel";
-import { useSignOut, useTeamServer, useViewer } from "../components/SignIn";
-import { BackupModal } from "../components/BackupModal";
+import { useTeamServer, useViewer } from "../components/SignIn";
 import { InlineDialogContext } from "../components/DialogFrame";
-import { NotifySettingsModal } from "../components/NotifySettingsModal";
-import { ProjectSettings } from "../components/ProjectSettings";
-import { setProjectMode } from "../game/stageSkin";
+import { setProjectMode } from "../station/projectMode";
 import { useI18n } from "../i18n";
-import { RunnersModal } from "../runners/RunnersModal";
-import { useWorkstationInUse, useWorkstationVisible } from "../runners/workstation";
-import { BudgetSettings } from "../runs/BudgetSettings";
-import { RoutingSettings } from "../runs/RoutingSettings";
-import { RunNotifySettings } from "../runs/RunToasts";
+import { useWorkstationVisible } from "../runners/workstation";
 import { useApp, usePreference } from "../store";
-import { UsageModal } from "../usage/UsageModal";
-import type { SettingsSection } from "./openSettings";
+import { AgentsSection } from "./AgentsSection";
+import {
+  ADVANCED_ROWS,
+  SETTINGS_PAGES,
+  SETTINGS_PLACES,
+  sectionFor,
+  type SettingsPage,
+  type SettingsRow,
+  type SettingsSection,
+  useSettingsRequest,
+} from "./openSettings";
+import { searchSettings, type SettingsHit, type SettingsNeed } from "./settingsSearch";
+import { AccountSection, GeneralSection, ProjectSection } from "./SettingsSections";
 
-interface Part {
-  id: SettingsSection;
-  group: "project" | "you" | "agents" | "server";
-}
-
-/** Every part, in the order the list shows them; which are offered depends on
- * the workstation and on the server (below). */
-const PARTS: readonly Part[] = [
-  { id: "project", group: "project" },
-  { id: "notifications", group: "project" },
-  { id: "backup", group: "project" },
-  { id: "appearance", group: "you" },
-  { id: "copilot", group: "you" },
-  { id: "workstation", group: "agents" },
-  { id: "runners", group: "agents" },
-  { id: "usage", group: "agents" },
-  { id: "budget", group: "agents" },
-  { id: "routing", group: "agents" },
-  { id: "server", group: "server" },
-  { id: "account", group: "server" },
-  { id: "audit", group: "server" },
-];
-
-/** The switch that shows or hides everything else in the Agents group. */
-function WorkstationPart() {
-  const { t } = useI18n();
-  const enabled = usePreference("agentWorkstation");
-  const inUse = useWorkstationInUse();
-  const on = enabled || inUse;
-  return (
-    <section className="settings-page-pane" aria-label={t("workstation.label")}>
-      <h3>{t("workstation.label")}</h3>
-      <div className="settings-section">
-        <p className="settings-hint">{t("workstation.hint")}</p>
-        <div className="settings-row">
-          {/* Once this workspace uses it, it stays: a runner or a run would
-              turn it straight back on. */}
-          <button
-            type="button"
-            aria-pressed={on}
-            disabled={inUse}
-            onClick={() => useApp.getState().updateUIPreference("agentWorkstation", !on)}
-          >
-            {on ? t("workstation.disable") : t("workstation.enable")}
-          </button>
-        </div>
-        {inUse && <p className="settings-hint">{t("workstation.inUse")}</p>}
-      </div>
-    </section>
-  );
-}
-
-/** Signing out from the account part; the top bar keeps its own button. */
-function SignOutPart() {
-  const { t } = useI18n();
-  const viewer = useViewer();
-  const signOut = useSignOut();
-  if (!viewer) return null;
-  return (
-    <section className="settings-page-pane" aria-label={t("settingsPage.signOut")}>
-      <h3>{t("settingsPage.signOut")}</h3>
-      <div className="settings-section">
-        <div className="settings-row">
-          <span>{t("settingsPage.signedInAs", { name: viewer.name || viewer.role })}</span>
-          <button type="button" onClick={signOut}>
-            {t("settingsPage.signOut")}
-          </button>
-        </div>
-      </div>
-    </section>
-  );
+/** What the page has open beyond what the remembered part says: a row
+ * without a part of its own, Advanced with no row open. Tied to the part it
+ * was set under, so asking for another part from outside starts afresh. */
+interface Local {
+  section: SettingsSection;
+  row: SettingsRow | null;
+  advanced: boolean;
 }
 
 export default function SettingsView() {
@@ -105,99 +50,153 @@ export default function SettingsView() {
   const workstation = useWorkstationVisible();
   const section = usePreference("settingsSection");
   const activeProject = useApp((s) => s.activeProject);
+  const [local, setLocal] = useState<Local | null>(null);
+  const [query, setQuery] = useState("");
+  const [addRequested, setAddRequested] = useState(false);
+  const addOpened = useCallback(() => setAddRequested(false), []);
+  // "Add a runner" from the palette or Station: taken once, here.
+  const addAsked = useSettingsRequest((s) => s.add);
+  useEffect(() => {
+    if (!addAsked) return;
+    setAddRequested(true);
+    useSettingsRequest.getState().clearRequest();
+  }, [addAsked]);
 
-  const parts = useMemo(
-    () =>
-      PARTS.filter((part) => {
-        // With the workstation off, its switch is all the Agents group holds.
-        if (part.group === "agents") return part.id === "workstation" || workstation;
-        if (part.id === "server" || part.id === "audit") return Boolean(teamServer && viewer?.role === "admin");
-        if (part.id === "account") return Boolean(teamServer && viewer);
-        return true;
-      }),
-    [workstation, teamServer, viewer],
-  );
-  // A part that is not offered (an Agents part with the workstation off, a
-  // server part on a standalone install) opens the first part of its group,
-  // so "adjust budget" with the workstation hidden lands on its switch.
-  const wantedGroup = PARTS.find((part) => part.id === section)?.group;
-  const current =
-    parts.find((part) => part.id === section) ??
-    parts.find((part) => part.group === wantedGroup) ??
-    parts[0];
-  const pick = (id: SettingsSection) => useApp.getState().updateUIPreference("settingsSection", id);
+  const place = SETTINGS_PLACES[section] ?? SETTINGS_PLACES.project;
+  const page = place.page;
+  const mine = local?.section === section ? local : null;
+  const row = mine ? mine.row : (place.row ?? null);
+  const inAdvanced = (candidate: SettingsRow | null) => candidate !== null && ADVANCED_ROWS.includes(candidate);
+  const advanced = inAdvanced(row) || Boolean(mine?.advanced);
+
+  // Remembered as the part the row had, or its section's first, so the
+  // next openSettings of any part moves the page.
+  const go = (nextPage: SettingsPage, nextRow: SettingsRow | null, nextAdvanced = inAdvanced(nextRow)) => {
+    const next = sectionFor(nextPage, nextRow);
+    useApp.getState().updateUIPreference("settingsSection", next);
+    setLocal({ section: next, row: nextRow, advanced: nextPage === "agents" && nextAdvanced });
+  };
+  const toggleRow = (target: SettingsRow) => go(page, row === target ? null : target, advanced);
+  const toggleAdvanced = () => go("agents", null, !advanced);
+
+  const offered = (need: SettingsNeed): boolean => {
+    if (need === "workstation") return workstation;
+    if (need === "team") return teamServer;
+    if (need === "account") return Boolean(teamServer && viewer);
+    return Boolean(teamServer && viewer?.role === "admin");
+  };
+  const hits = searchSettings(query, t, offered);
+  const searching = query.trim() !== "";
+  // The hit just picked, until focus has moved to it: the search box gives
+  // way to its hits' list, so focus follows the reader to what they asked for.
+  const [picked, setPicked] = useState<SettingsHit | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const pick = (hit: SettingsHit) => {
+    go(hit.entry.page, hit.entry.row ?? null);
+    if (hit.entry.add) setAddRequested(true);
+    setQuery("");
+    setPicked(hit);
+  };
+  // To the opened row's toggle, or else the section's heading. The add form
+  // takes focus itself (its name field).
+  useEffect(() => {
+    if (!picked) return;
+    setPicked(null);
+    if (picked.entry.add) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    const toggle = body.querySelector<HTMLElement>(".settings-disclosure.is-open > .settings-disclosure-toggle");
+    if (toggle) {
+      toggle.focus();
+      return;
+    }
+    const heading = body.querySelector<HTMLElement>("h2");
+    if (!heading) return;
+    heading.setAttribute("tabindex", "-1");
+    heading.focus();
+  }, [picked]);
+
   // A dialog's close, inline: a part that sends you to a node goes back to
   // the board. Escape does nothing here; the mode switch leaves the page.
   const leave = () => setProjectMode("info");
+  const sectionProps = { row, toggleRow, go, leave };
 
-  const groups: Part["group"][] = ["project", "you", "agents", "server"];
+  const sub: Record<SettingsPage, string> = {
+    general: t("settingsPage.sub.general"),
+    agents: t("settingsPage.sub.agents"),
+    project: activeProject || t("settingsPage.sub.project"),
+    account: teamServer ? t("settingsPage.sub.account") : t("settingsPage.sub.accountStandalone"),
+  };
+
   return (
     <div className="settings-page" role="main" aria-label={t("mode.settings")}>
       <nav className="settings-page-nav" aria-label={t("settingsPage.parts")}>
-        {groups.map((group) => {
-          const items = parts.filter((part) => part.group === group);
-          if (items.length === 0) return null;
-          return (
-            <div key={group} className="settings-page-group">
-              <h2>
-                {t(`settingsPage.group.${group}`)}
-                {group === "project" && activeProject && <small>{activeProject}</small>}
-              </h2>
-              {items.map((part) => (
-                <button
-                  key={part.id}
-                  type="button"
-                  className={part.id === current.id ? "active" : ""}
-                  aria-current={part.id === current.id ? "page" : undefined}
-                  onClick={() => pick(part.id)}
-                >
-                  {t(`settingsPage.part.${part.id}`)}
-                </button>
-              ))}
-            </div>
-          );
-        })}
+        <input
+          type="search"
+          className="settings-search"
+          value={query}
+          // The placeholder is the short name, so it fits the column at any
+          // text size; what the search finds is said on hover.
+          placeholder={t("settingsPage.search")}
+          title={t("settingsPage.searchHint")}
+          aria-label={t("settingsPage.search")}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && query) {
+              event.stopPropagation();
+              setQuery("");
+            }
+            if (event.key === "Enter" && hits[0]) pick(hits[0]);
+          }}
+        />
+        {searching ? (
+          <div className="settings-page-group">
+            {hits.map((hit) => (
+              <button key={`${hit.entry.label}-${hit.entry.page}`} type="button" onClick={() => pick(hit)}>
+                <span>{hit.label}</span>
+                <small title={hit.where}>{hit.where}</small>
+              </button>
+            ))}
+            {hits.length === 0 && (
+              <p className="settings-hint settings-search-empty" role="status">
+                {t("settingsPage.noHits")}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="settings-page-group">
+            {SETTINGS_PAGES.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={id === page ? "active" : ""}
+                aria-current={id === page ? "page" : undefined}
+                onClick={() => go(id, null, false)}
+              >
+                <span>{t(`settingsPage.page.${id}`)}</span>
+                {/* Cut with an ellipsis where the list is narrow; whole on hover. */}
+                <small title={sub[id]}>{sub[id]}</small>
+              </button>
+            ))}
+          </div>
+        )}
       </nav>
-      <div className="settings-page-body">
+      <div className="settings-page-body" ref={bodyRef}>
         <InlineDialogContext.Provider value={true}>
-          {current.id === "project" && (
-            <ProjectSettings onClose={leave} only={["workflow", "milestones", "people", "members"]} />
+          {page === "general" && <GeneralSection {...sectionProps} />}
+          {page === "agents" && (
+            <AgentsSection
+              row={row}
+              toggleRow={toggleRow}
+              advanced={advanced}
+              toggleAdvanced={toggleAdvanced}
+              addRequested={addRequested}
+              onAddOpened={addOpened}
+              leave={leave}
+            />
           )}
-          {current.id === "appearance" && <ProjectSettings onClose={leave} only={["appearance"]} />}
-          {current.id === "copilot" && <ProjectSettings onClose={leave} only={["copilot"]} />}
-          {current.id === "server" && <ProjectSettings onClose={leave} only={["server"]} />}
-          {current.id === "account" && (
-            <>
-              <ProjectSettings onClose={leave} only={["account"]} />
-              <SignOutPart />
-            </>
-          )}
-          {current.id === "notifications" && (
-            <>
-              <section className="settings-page-pane" aria-label={t("settingsPage.browserNotifications")}>
-                <h3>{t("settingsPage.browserNotifications")}</h3>
-                <RunNotifySettings />
-              </section>
-              <NotifySettingsModal onClose={leave} />
-            </>
-          )}
-          {current.id === "backup" && <BackupModal onClose={leave} />}
-          {current.id === "workstation" && <WorkstationPart />}
-          {current.id === "runners" && <RunnersModal onClose={leave} />}
-          {current.id === "usage" && <UsageModal onClose={leave} />}
-          {current.id === "audit" && <AuditPanel />}
-          {current.id === "budget" && (
-            <section className="settings-page-pane" aria-label={t("budget.title")}>
-              <h3>{t("budget.title")}</h3>
-              <BudgetSettings />
-            </section>
-          )}
-          {current.id === "routing" && (
-            <section className="settings-page-pane" aria-label={t("routing.title")}>
-              <h3>{t("routing.title")}</h3>
-              <RoutingSettings />
-            </section>
-          )}
+          {page === "project" && <ProjectSection {...sectionProps} />}
+          {page === "account" && <AccountSection {...sectionProps} />}
         </InlineDialogContext.Provider>
       </div>
     </div>

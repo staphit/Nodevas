@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/engine"
 	projectdomain "nodevas/internal/project"
 	"nodevas/internal/realtime"
+	"nodevas/internal/testpg"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,6 +50,14 @@ func searchTestWorkspace(t *testing.T, count int) *projectdomain.ProjectManager 
 		t.Fatal(err)
 	}
 	t.Cleanup(pm.Close)
+	// The index lives in the workspace database, as serve wires it; without
+	// one every search is the direct scan and nothing is ranked.
+	pm.UseDatabase(testpg.New(t))
+	// Until its first build is in, a search answers from titles alone; these
+	// tests are about the index.
+	if !pm.AwaitSearchIndex(root, 30*time.Second) {
+		t.Fatal("the project's search index was not built")
+	}
 	return pm
 }
 
@@ -133,5 +143,39 @@ func TestRemoteSearchStillRedactsHostPaths(t *testing.T) {
 		if strings.Contains(result.Snippet, workspace) {
 			t.Fatalf("remote search leaked the workspace path: %q", result.Snippet)
 		}
+	}
+}
+
+func TestSearchEndpointReturnsPageIDForSubpageHits(t *testing.T) {
+	pm := searchTestWorkspace(t, 2)
+	pageDir := filepath.Join(pm.Workspace(), "proj", "nodes", "n000.pages")
+	if err := os.MkdirAll(pageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "cast.md"), []byte("小明是唯一的角色"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pm.FlushSearchIndex()
+	api := New(pm)
+
+	began := time.Now()
+	var subpageResults []projectdomain.SearchResult
+	for {
+		subpageResults = runSearch(t, api, "小明")
+		if len(subpageResults) == 1 {
+			break
+		}
+		if time.Since(began) > 2*time.Second {
+			t.Fatalf("subpage search did not find n000: %+v", subpageResults)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if subpageResults[0].NodeID != "n000" || subpageResults[0].PageID != "cast" {
+		t.Fatalf("subpage result = %+v, want n000/cast", subpageResults[0])
+	}
+
+	mainResults := runSearch(t, api, "body 0")
+	if len(mainResults) != 1 || mainResults[0].NodeID != "n000" || mainResults[0].PageID != "" {
+		t.Fatalf("main page result = %+v, want empty pageId", mainResults)
 	}
 }

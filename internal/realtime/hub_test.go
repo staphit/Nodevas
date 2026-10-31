@@ -117,6 +117,10 @@ func TestValidClientMessageRejectsOversizedAndUnknownInput(t *testing.T) {
 		{Type: "unlock", NodeID: "node"},
 		{Type: "awareness", Payload: "AQID"},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DX: 1, DY: -1},
+		// The end of a gesture names nothing: it only tells peers to drop
+		// the ghost, and refusing it hung up on every card drag.
+		{Type: "graph-drag", IDs: []string{}, Active: false},
+		{Type: "graph-drag"},
 	}
 	for _, message := range valid {
 		if !validClientMessage(message) {
@@ -131,8 +135,10 @@ func TestValidClientMessageRejectsOversizedAndUnknownInput(t *testing.T) {
 		{Type: "subscribe", Project: "bad\nname"},
 		{Type: "awareness"},
 		{Type: "awareness", Payload: strings.Repeat("A", maxAwarenessBytes+1)},
-		{Type: "graph-drag"},
+		{Type: "graph-drag", Active: true},
 		{Type: "graph-drag", IDs: make([]string, maxDragIDs+1)},
+		{Type: "graph-drag", IDs: []string{"alpha"}, DX: math.NaN()},
+		{Type: "graph-drag", DX: math.Inf(-1)},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DX: math.NaN()},
 		{Type: "graph-drag", IDs: []string{"alpha"}, DY: math.Inf(1)},
 		{Type: "graph-drag", IDs: []string{"bad\nid"}},
@@ -829,5 +835,26 @@ func TestAnEmptySessionSurvivesAReloadAndNotAnAbandonment(t *testing.T) {
 	hub.mu.Unlock()
 	if remaining != 0 {
 		t.Fatalf("an abandoned session was kept: %d remain", remaining)
+	}
+}
+
+// ConnectionCount is the live sockets /api/metrics reports.
+func TestConnectionCountFollowsTheSockets(t *testing.T) {
+	var none *Hub
+	if got := none.ConnectionCount(); got != 0 {
+		t.Fatalf("a nil hub counts %d connections", got)
+	}
+	hub := NewHub()
+	if got := hub.ConnectionCount(); got != 0 {
+		t.Fatalf("a new hub counts %d connections", got)
+	}
+	first := docClient(hub, "aaa", identity.RoleMember)
+	docClient(hub, "bbb", identity.RoleMember)
+	if got := hub.ConnectionCount(); got != 2 {
+		t.Fatalf("two clients counted as %d", got)
+	}
+	hub.remove(first)
+	if got := hub.ConnectionCount(); got != 1 {
+		t.Fatalf("after one left, %d connections", got)
 	}
 }

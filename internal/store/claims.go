@@ -19,8 +19,8 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,6 +28,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/locale"
 )
 
 // claimClock is time.Now, replaced in tests that need a lease to expire
@@ -216,7 +217,7 @@ func (s *Store) ClaimNode(actor identity.Actor, nodeID, owner string, lease time
 
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
-		return nil, errors.New("a claim needs an owner")
+		return nil, locale.Errorf("a claim needs an owner", "認領需要指定擁有者")
 	}
 	now := claimClock()
 	file := s.loadClaimsLocked()
@@ -235,10 +236,20 @@ func (s *Store) ClaimNode(actor identity.Actor, nodeID, owner string, lease time
 		return nil, err
 	}
 	if g.NodeByID(nodeID) == nil {
-		return nil, fmt.Errorf("node %q not found", nodeID)
+		return nil, locale.Errorf("node %q not found", "找不到節點「%s」", nodeID)
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
 		return nil, err
+	}
+	if err := checkRole(actor, g, engine.CapClaim, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
+	if nodeType := g.TypeOf(g.NodeByID(nodeID)); actor.IsAgent() && nodeType.AgentMode == engine.AgentNone {
+		return nil, &ErrNodeTypeDenied{
+			NodeID: nodeID, Type: nodeType.ID, Code: CodeNodeTypeForbidsAgent, Status: http.StatusForbidden,
+			said: locale.Say("node %q is a %s node: agents cannot take it",
+				"節點「%s」是 %s 節點：agent 不能接手", nodeID, typeName(nodeType)),
+		}
 	}
 	rs, err := s.LoadState()
 	if err != nil {
@@ -359,8 +370,8 @@ func (s *Store) ReleaseClaim(nodeID, owner string) error {
 
 // ClaimFor returns the live claim on a node, if any.
 func (s *Store) ClaimFor(nodeID string) *Claim {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	claim := s.loadClaimsLocked().Claims[nodeID]
 	if !claim.Live(claimClock()) {
 		return nil
@@ -370,8 +381,8 @@ func (s *Store) ClaimFor(nodeID string) *Claim {
 
 // LiveClaims lists every node currently held.
 func (s *Store) LiveClaims() []*Claim {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	now := claimClock()
 	var live []*Claim
 	for _, claim := range s.loadClaimsLocked().Claims {
@@ -402,6 +413,15 @@ func (s *Store) ReportStatus(
 		return nil, err
 	}
 	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
+	if err := checkStatusWrite(actor, g, g.NodeByID(nodeID), status); err != nil {
+		return nil, err
+	}
+	if err := checkRole(actor, g, engine.CapStatus, g.NodeByID(nodeID)); err != nil {
+		return nil, err
+	}
+	if err := checkStatusGate(actor, g, g.NodeByID(nodeID), status); err != nil {
 		return nil, err
 	}
 

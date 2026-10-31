@@ -15,6 +15,7 @@
  */
 
 import { api } from "../api";
+import { translate } from "../i18n";
 import { queues } from "./internals";
 import {
   clearRedo,
@@ -35,10 +36,11 @@ type Direction = "undo" | "redo";
 type Setter = Parameters<AppSlice<UndoSlice>>[0];
 type Getter = Parameters<AppSlice<UndoSlice>>[1];
 
-/** Notes on compensating writes say which gesture produced them. */
+/** Notes on compensating writes say which gesture produced them (catalog
+ * keys, written in the language of the moment). */
 const NOTES = {
-  undo: { status: "撤銷：回到先前的實際狀態", move: "撤銷：回到先前的時間" },
-  redo: { status: "重做：重新套用實際狀態", move: "重做：重新套用時間調整" },
+  undo: { status: "undo.note.undoStatus", move: "undo.note.undoMove" },
+  redo: { status: "undo.note.redoStatus", move: "undo.note.redoMove" },
 } as const;
 
 /**
@@ -66,7 +68,7 @@ async function applyEntry(
     const result = await get().setLifecycleStatus(
       entry.nodeId,
       entry.previousStatus,
-      notes.status,
+      translate(notes.status),
       { recordUndo: false },
     );
     if (!result.ok) throw new Error(result.message);
@@ -83,7 +85,7 @@ async function applyEntry(
     const result = await get().moveActualEvent(
       entry.eventId,
       entry.previousTimestamp,
-      notes.move,
+      translate(notes.move),
       { recordUndo: false },
     );
     if (!result.ok) throw new Error(result.message);
@@ -153,7 +155,7 @@ async function applyEntry(
   try {
     await Promise.all([get().loadAll(), get().refreshTrash()]);
   } catch (error) {
-    set({ error: error instanceof Error ? error.message : "重新載入失敗" });
+    set({ error: error instanceof Error ? error.message : translate("undo.error.reloadFailed") });
   }
   return inverse;
 }
@@ -177,6 +179,9 @@ function revert(
         else pushRedo(entry);
         return false;
       }
+      // The board moved on: an error the top bar shows about the step before
+      // no longer describes what is on screen.
+      set((state) => (state.lastOperation?.status === "error" ? { lastOperation: null } : {}));
       if (!inverse) {
         // The step landed but cannot describe its own reverse. Everything on
         // the opposite stack assumed that reverse, so it goes too.
@@ -191,7 +196,7 @@ function revert(
         if (direction === "undo") pushUndo(attempt.retry, { keepRedo: true });
         else pushRedo(attempt.retry);
       }
-      set({ error: error instanceof Error ? error.message : "還原失敗" });
+      set({ error: error instanceof Error ? error.message : translate("undo.error.revertFailed") });
       throw error;
     }
   });

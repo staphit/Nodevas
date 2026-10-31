@@ -2,12 +2,12 @@ package node
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"nodevas/internal/engine"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/locale"
 )
 
 // getDocuments returns revisions without transferring document bodies or UI state.
@@ -40,12 +40,15 @@ func (a *API) getDocuments(c *gin.Context) {
 	c.JSON(200, map[string]any{"documents": documents})
 }
 
+// maxReferencedBy caps the users of a note a context lists.
+const maxReferencedBy = 50
+
 // getNodeContext projects one node's metadata, body and prerequisites. Unlike
 // getNode, graph membership is required: a deleted node is a 404, not an empty file.
 func (a *API) getNodeContext(c *gin.Context) {
 	id := c.Param("id")
 	if !engine.ValidNodeID(id) {
-		httpx.Err(c, 400, errors.New("invalid node id"))
+		httpx.Err(c, 400, locale.Errorf("invalid node id", "節點代號無效"))
 		return
 	}
 	st := httpx.StoreFor(c.Request, a.pm)
@@ -56,7 +59,7 @@ func (a *API) getNodeContext(c *gin.Context) {
 	}
 	n := g.NodeByID(id)
 	if n == nil {
-		httpx.Err(c, 404, fmt.Errorf("no node %q in this project", id))
+		httpx.Err(c, 404, locale.Errorf("no node %q in this project", "這個專案沒有節點「%s」", id))
 		return
 	}
 	content, rev, err := st.LoadNodeContent(id)
@@ -81,9 +84,23 @@ func (a *API) getNodeContext(c *gin.Context) {
 			downstream = append(downstream, edge.To)
 		}
 	}
+	references, referencesTruncated, err := st.ReferenceSummaries(g, id)
+	if err != nil {
+		httpx.Err(c, 500, err)
+		return
+	}
+	referencedBy := g.ReferencedBy(id)
+	if len(referencedBy) > maxReferencedBy {
+		referencedBy = referencedBy[:maxReferencedBy]
+	}
 	c.JSON(200, map[string]any{
 		"node": n, "content": content, "rev": rev,
 		"status":   engine.ComputeStatuses(g, state)[id],
+		"nodeType": g.TypeOf(n),
 		"upstream": upstream, "downstream": downstream,
+		// references are the notes this node uses as context, summarized;
+		// referencedBy the nodes that use this one.
+		"references": references, "referencesTruncated": referencesTruncated,
+		"referencedBy": referencedBy,
 	})
 }

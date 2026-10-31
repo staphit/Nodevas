@@ -75,7 +75,7 @@ export function ProjectContextMenu({
   onMove: (target: ProjectMenuTarget) => void;
 }) {
   const switchProject = useApp((state) => state.switchProject);
-  const refreshProjects = useApp((state) => state.refreshProjects);
+  const changeProjects = useApp((state) => state.changeProjects);
   const { t } = useI18n();
   const [projectRemoveBusy, setProjectRemoveBusy] = useState(false);
   const menuTop = Math.max(8, Math.min(menu.y, window.innerHeight - 250));
@@ -152,15 +152,18 @@ export function ProjectContextMenu({
       // One request each: projects are separate directories, so a failure part
       // way through still leaves every earlier removal valid — the notice says
       // exactly what went and what did not.
-      for (const name of targets) {
-        try {
-          const result = await api.removeProject(name, mode);
-          removed.push(name);
-          if (result.active) active = result.active;
-        } catch (error) {
-          failed.push(`${name}: ${(error as Error).message}`);
+      await changeProjects(async () => {
+        for (const name of targets) {
+          try {
+            const result = await api.removeProject(name, mode);
+            removed.push(name);
+            if (result.active) active = result.active;
+          } catch (error) {
+            failed.push(`${name}: ${(error as Error).message}`);
+          }
         }
-      }
+        if (active && active !== activeProject) await switchProject(active);
+      });
       const nextExpanded = new Set(
         [...expandedProjects].filter(
           (name) =>
@@ -171,11 +174,6 @@ export function ProjectContextMenu({
       );
       persistExpandedProjects(nextExpanded);
       clearProjectSelection();
-      if (active && active !== activeProject) {
-        await switchProject(active);
-      } else {
-        await refreshProjects();
-      }
       const what = mode === "disk" ? t("explorer.permanentlyDelete") : t("explorer.detached");
       if (failed.length === 0) {
         setProjectTransferNotice(
@@ -335,7 +333,7 @@ export function ProjectContextMenu({
       <button
         type="button"
         role="menuitem"
-        disabled={transfer.markdownImportBusy}
+        disabled={transfer.markdownImportBusy || (transfer.nodeImportBlocked && menu.name === activeProject)}
         onClick={() => {
           const target = menu.name;
           onClose();
@@ -353,7 +351,7 @@ export function ProjectContextMenu({
       <button
         type="button"
         role="menuitem"
-        disabled={transfer.jsonCanvasBusy}
+        disabled={transfer.jsonCanvasBusy || (transfer.nodeImportBlocked && menu.name === activeProject)}
         onClick={() => {
           const target = menu.name;
           onClose();

@@ -218,6 +218,10 @@ type Options struct {
 	Server    string
 	Project   string
 	AgentRole string
+	// Role is the agent role (planner, qa, tester, executor, reviewer,
+	// researcher or custom-role-*) every MCP command line declares with
+	// --role; empty is a legacy session with every tool.
+	Role string
 	// Actor is the attribution for every agent; empty gives each its own,
 	// `mcp:<agent>`. An agent's MCP server and its hooks always share one,
 	// because the server binds a session to the actor that registered it.
@@ -365,7 +369,11 @@ func (s *setup) mcpArgs() []string {
 	if role == "" {
 		role = "worker"
 	}
-	return append(args, "--actor", s.actor(), "--agent-role", role)
+	args = append(args, "--actor", s.actor(), "--agent-role", role)
+	if r := strings.TrimSpace(s.opts.Role); r != "" {
+		args = append(args, "--role", r)
+	}
+	return args
 }
 
 // hookFlags are the flags after `hook <agent> <event>` on every hook line.
