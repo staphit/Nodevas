@@ -282,8 +282,11 @@ type askShape struct {
 	tool           string
 	toolInput      string
 	inputTruncated bool
-	runKey         string
-	question       string
+	// runKey is stored with the ask: what allowing it for the run covers.
+	runKey string
+	// lookupKey is what an earlier allow for the run must match to cover it.
+	lookupKey string
+	question  string
 }
 
 // shapeAsk validates in's kind and the fields that go with it.
@@ -308,10 +311,16 @@ func shapeAsk(in AskInput) (askShape, error) {
 		shape.toolInput = capBytes(input, MaxAskToolInputBytes)
 		shape.inputTruncated = in.ToolInputTruncated || len(shape.toolInput) < len(input)
 		shape.runKey = runKeyFor(shape.tool, input)
+		shape.lookupKey = shape.runKey
 		if shape.inputTruncated {
-			// Nobody saw the whole call: an allow for the run covers it
-			// alone, whatever the tool.
+			// Nobody saw the whole call: allowing it for the run covers it
+			// alone, whatever the tool. An earlier tool-wide allow still
+			// covers it (it covers every input); a shell command cut to fit
+			// matches no allowed command, since its end is unknown.
 			shape.runKey = runKeyOnce + newID()
+			if shellTools[strings.ToLower(shape.tool)] {
+				shape.lookupKey = shape.runKey
+			}
 		}
 		if shape.question == "" {
 			shape.question = fmt.Sprintf("Allow %s?", shape.tool)
@@ -410,7 +419,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		runID = h.sessionRunID(project, sessionID)
 	}
 	if shape.kind == AskKindPermission && runID != "" {
-		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.runKey); decidedBy != "" {
+		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.lookupKey); decidedBy != "" {
 			return h.allowForRun(ctx, Ask{
 				ID:          newID(),
 				Project:     project,
@@ -426,6 +435,8 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 				Tool:        shape.tool,
 				ToolInput:   shape.toolInput,
 				runKey:      shape.runKey,
+
+				ToolInputTruncated: shape.inputTruncated,
 			}, decidedBy)
 		}
 	}
@@ -478,7 +489,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	// allow stored later releases it.
 	released := false
 	if shape.kind == AskKindPermission && runID != "" {
-		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.runKey); decidedBy != "" {
+		if decidedBy := h.runAllowedBy(ctx, project, runID, shape.tool, shape.lookupKey); decidedBy != "" {
 			updated, _, decided, err := h.decideAsk(ctx, project, ask.ID, AskApproved, DecisionApproveRun, AllowedForRunNote, decidedBy, false)
 			if err == nil && decided {
 				h.deliverDecision(ctx, updated, false, decidedBy)
@@ -645,24 +656,32 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 }
 
 // releaseRunPrompts allows the permission prompts of run, tool and runKey
-// still waiting, now that decidedBy allowed them for the run.
+// still waiting, now that decidedBy allowed them for the run. A tool-wide
+// allow also releases that tool's prompts whose input was cut, as it covers
+// every input.
 func (h *Hub) releaseRunPrompts(ctx context.Context, project, runID, tool, runKey, decidedBy string) {
 	if strings.HasPrefix(runKey, runKeyOnce) {
 		return
 	}
+	toolWide := runKey == "" && !shellTools[strings.ToLower(tool)]
 	var ids []string
 	if h.database == nil {
 		h.mu.Lock()
 		for _, a := range h.memAsks {
-			if a.Project == project && a.RunID == runID && a.Tool == tool && a.runKey == runKey && a.Kind == AskKindPermission && a.Status == AskPending {
+			covered := a.runKey == runKey || (toolWide && strings.HasPrefix(a.runKey, runKeyOnce))
+			if a.Project == project && a.RunID == runID && a.Tool == tool && covered && a.Kind == AskKindPermission && a.Status == AskPending {
 				ids = append(ids, a.ID)
 			}
 		}
 		h.mu.Unlock()
 	} else {
+		keyMatch := "run_key = ?"
+		if toolWide {
+			keyMatch = "(run_key = ? OR run_key LIKE 'once:%')"
+		}
 		rows, err := h.database.QueryContext(ctx, `
 			SELECT id FROM agent_asks
-			 WHERE project = ? AND run_id = ? AND tool = ? AND run_key = ? AND kind = 'permission' AND status = 'pending'
+			 WHERE project = ? AND run_id = ? AND tool = ? AND `+keyMatch+` AND kind = 'permission' AND status = 'pending'
 		`, project, runID, tool, runKey)
 		if err != nil {
 			return
