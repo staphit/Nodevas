@@ -164,4 +164,19 @@ describe("Station ask dialog answering", () => {
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  it("shows another person's ask without answer controls to a member", () => {
+    const answerAsk = vi.fn(async () => true);
+    useAgents.setState({
+      asks: [permission],
+      answerAsk,
+      viewer: { id: "bob", name: "bob", role: "member" },
+      error: null,
+    });
+    open("ask-perm");
+    expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Allow|Deny/ })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("group", { name: /tool permission/ }), { key: "1" });
+    expect(answerAsk).not.toHaveBeenCalled();
+  });
 });
