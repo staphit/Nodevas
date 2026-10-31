@@ -241,6 +241,22 @@ describe("AskCard by kind", () => {
     expect(screen.getByText("antigravity wants to run run_command")).toBeInTheDocument();
   });
 
+  it("settles a dismissed question or choice as not answered, not denied", () => {
+    const dismissed: AgentAsk = { ...baseAsk, kind: "question", status: "denied", decision: "deny" };
+    const { rerender } = render(<AskCard ask={dismissed} onAnswer={vi.fn()} />);
+    expect(screen.getByText("Dismissed")).toBeInTheDocument();
+    expect(screen.queryByText("Denied")).toBeNull();
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    rerender(<AskCard ask={{ ...dismissed, kind: "choice", options: ["a", "b"] }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("未回答")).toBeInTheDocument();
+    expect(screen.queryByText("已拒絕")).toBeNull();
+
+    // An approval or a permission prompt is still denied.
+    rerender(<AskCard ask={{ ...dismissed, kind: "approval" }} onAnswer={vi.fn()} />);
+    expect(screen.getByText("已拒絕")).toBeInTheDocument();
+  });
+
   it("renders 不回答 for dismiss button in zh-TW", () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
     const questionAsk: AgentAsk = {
