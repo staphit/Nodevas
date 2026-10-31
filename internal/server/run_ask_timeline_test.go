@@ -148,3 +148,50 @@ func TestRunAsksShowThePromptToItsOwnerAndTheToolToOthers(t *testing.T) {
 		t.Fatalf("after the deny = %+v", got)
 	}
 }
+
+// A run cancelled while its agent waits on a prompt ends that wait: the
+// prompt expires, so the run view stops offering to answer it and the open
+// views hear of it.
+func TestCancellingARunExpiresThePromptItWaitsOn(t *testing.T) {
+	f := newRunsFixture(t)
+	ctx := context.Background()
+	f.connect(t, runsHello(1))
+	run := f.dispatch(t, f.bea, f.runBody(""))
+	record, err := f.server.runs.Store().Get(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := f.server.pm.Store().Root()
+	done := make(chan agents.Ask, 1)
+	go func() {
+		ask, _ := f.server.agents.CreateAndWait(ctx, agents.AskInput{
+			Project: root, SessionID: "r1", SessionName: "app-claude-r1", ActorID: record.OwnerID, Agent: "claude",
+			Kind: agents.AskKindPermission, Tool: "Bash", RunID: run.ID, ToolInput: `{"command":"go test ./..."}`,
+		}, 5*time.Second)
+		done <- ask
+	}()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if got, _ := f.runAsks(t, f.bea, run.ID); len(got.Asks) == 1 && got.Asks[0].Status == agents.AskPending {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the prompt never reached the run's timeline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got, code := f.cancel(t, f.bea, run.ID); code != http.StatusOK || got.Status != runnerwire.RunCancelled {
+		t.Fatalf("cancel = %d %+v", code, got)
+	}
+	select {
+	case ask := <-done:
+		if ask.Status != agents.AskExpired {
+			t.Fatalf("the cancelled run's prompt returned %+v, want it expired", ask)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the cancelled run's prompt still waits")
+	}
+	if got, _ := f.runAsks(t, f.bea, run.ID); len(got.Asks) != 1 || got.Asks[0].Status != agents.AskExpired || got.Asks[0].CanAnswer {
+		t.Fatalf("the cancelled run's timeline = %+v, want its prompt expired", got)
+	}
+}

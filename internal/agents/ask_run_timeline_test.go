@@ -178,3 +178,47 @@ func TestRunTimelineShowsOnlyTheToolToWhoCannotAnswer(t *testing.T) {
 		}
 	})
 }
+
+// A run that ends leaves nobody to act on what its agent asked: its asks
+// still waiting expire at once and their waiters return, instead of the
+// run's timeline saying "Waiting on you" for minutes. Another run's asks,
+// and asks already answered, are left as they are.
+func TestARunThatEndsExpiresWhatItStillWaitsOn(t *testing.T) {
+	eachHub(t, func(t *testing.T, hub *Hub) {
+		ctx := context.Background()
+		alice := Viewer{ID: "alice"}
+		registerRun(t, hub, "r1", "app-claude-r1", "run-1")
+		registerRun(t, hub, "r2", "app-claude-r2", "run-2")
+
+		edit, editDone := startAsk(t, hub, shellIn("Edit", `{"file_path":"a.go"}`, "Edit a.go?"), 5*time.Second)
+		if _, err := hub.Answer(ctx, "alpha", edit.ID, "approve", "", alice); err != nil {
+			t.Fatal(err)
+		}
+		waitDecided(t, editDone)
+		bash, bashDone := startAsk(t, hub, shellIn("Bash", `{"command":"go test ./..."}`, "Run go test?"), 5*time.Second)
+		other, otherDone := startAsk(t, hub, AskInput{
+			Project: "alpha", SessionID: "r2", SessionName: "app-claude-r2", ActorID: "alice", Agent: "claude",
+			Kind: AskKindPermission, Tool: "Edit", ToolInput: `{"file_path":"b.go"}`, Question: "Edit b.go?",
+		}, 5*time.Second)
+
+		hub.ExpireRunAsks(ctx, "/alpha/", "run-1")
+
+		got := timelineOf(t, hub, "run-1", alice)
+		if len(got) != 2 || got[0].ID != edit.ID || got[0].Status != AskApproved {
+			t.Fatalf("run-1's timeline = %+v, want the answered prompt kept", got)
+		}
+		if got[1].ID != bash.ID || got[1].Status != AskExpired || got[1].CanAnswer || got[1].DecidedAt == 0 {
+			t.Fatalf("the prompt the ended run waited on = %+v, want it expired", got[1])
+		}
+		if returned := waitDecided(t, bashDone); returned.ID != bash.ID || returned.Status != AskExpired {
+			t.Fatalf("the ended run's waiter got %+v, want its prompt expired", returned)
+		}
+		if got := timelineOf(t, hub, "run-2", alice); len(got) != 1 || got[0].ID != other.ID || got[0].Status != AskPending {
+			t.Fatalf("run-2's timeline = %+v, want its prompt still waiting", got)
+		}
+		if _, err := hub.Answer(ctx, "alpha", other.ID, "deny", "", alice); err != nil {
+			t.Fatal(err)
+		}
+		waitDecided(t, otherDone)
+	})
+}

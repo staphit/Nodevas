@@ -188,3 +188,7 @@ func previewLine(s string) string {
 	runes := []rune(s)
 	return strings.TrimRight(string(runes[:RunAskPreviewRunes-1]), " ") + "…"
 }
+
+// ExpireRunAsks expires the asks of run runID in project still waiting, now
+// that the run has ended.
+func (h *Hub) ExpireRunAsks(ctx context.Context, project, runID string) {}
