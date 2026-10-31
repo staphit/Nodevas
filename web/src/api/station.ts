@@ -71,7 +71,6 @@ export interface BuildingAsk {
   question: string;
   options?: string[];
   tool?: string;
-  toolInput?: string;
   runId?: string;
   nodeId: string;
   createdAt: number;
