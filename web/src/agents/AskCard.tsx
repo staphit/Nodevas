@@ -19,7 +19,8 @@ export function askQuestionText(
 }
 
 /** The hub, runner and MCP server each cut a permission prompt's input to
- * this many bytes, and say nothing when they do. */
+ * this many bytes. A hub that says so sets toolInputTruncated; an older one
+ * says nothing, and toolInputMayBeCut guesses. */
 export const TOOL_INPUT_MAX_BYTES = 4096;
 
 /**
@@ -39,6 +40,15 @@ export function toolInputMayBeCut(input: string | undefined): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Whether a permission prompt's input was cut: the hub's toolInputTruncated
+ * when it says, else the guess from the input itself (an older hub).
+ */
+export function toolInputCut(ask: Pick<AgentAsk, "toolInput" | "toolInputTruncated">): boolean {
+  if (typeof ask.toolInputTruncated === "boolean") return ask.toolInputTruncated;
+  return toolInputMayBeCut(ask.toolInput);
 }
 
 function ToolInput({
@@ -115,7 +125,7 @@ export function AskCard({
 
   const kind = ask.kind ?? "approval";
   const isPending = ask.status === "pending";
-  const inputCut = kind === "permission" && toolInputMayBeCut(ask.toolInput);
+  const inputCut = kind === "permission" && toolInputCut(ask);
   // The hub remembers "allow for this run" per run: outside one it would
   // allow this prompt alone, while the card claimed more. A runScope of
   // "once" (a shell command cut to fit) is the same: nothing to remember.

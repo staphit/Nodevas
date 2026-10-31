@@ -120,6 +120,9 @@ export interface AgentAsk {
   runId?: string;
   tool?: string;
   toolInput?: string;
+  /** True when the hub, the MCP server or the runner relay cut toolInput to
+   * fit: the agent may run more than it shows. */
+  toolInputTruncated?: boolean;
   /** A permission prompt's: what "allow for this run" covers. Absent from an
    * older hub, where it covered the tool. */
   runScope?: AgentAskRunScope;
