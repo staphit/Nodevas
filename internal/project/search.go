@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/db"
@@ -210,6 +211,11 @@ func (pm *ProjectManager) getSearchIndex() *searchIndex {
 // build before it answers from searchWhileIndexing instead. A var so tests
 // can pin it.
 var coldSearchWait = 50 * time.Millisecond
+
+// coldSearchWaited is a test seam: told how long a search is about to wait
+// for a project's first index build, so a test can check the wait itself
+// rather than time a search under load. One atomic load when unset.
+var coldSearchWaited atomic.Pointer[func(projectPath string, within time.Duration)]
 
 func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
 	index := pm.getSearchIndex()
