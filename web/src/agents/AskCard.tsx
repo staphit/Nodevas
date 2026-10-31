@@ -96,6 +96,9 @@ export function AskCard({
   const kind = ask.kind ?? "approval";
   const isPending = ask.status === "pending";
   const inputCut = kind === "permission" && toolInputMayBeCut(ask.toolInput);
+  // The hub remembers "allow for this run" per run: outside one it would
+  // allow this prompt alone, while the card claimed more.
+  const canAllowRun = Boolean(ask.runId) && !inputCut;
 
   useEffect(() => {
     if (!isPending) return;
@@ -127,6 +130,7 @@ export function AskCard({
     } else if (kind === "permission") {
       // A cut input is allowed with a deliberate click, never a stray key.
       if (inputCut && (event.key === "1" || event.key === "2")) return;
+      if (event.key === "2" && !canAllowRun) return;
       if (event.key === "1") {
         event.preventDefault();
         onAnswer({ decision: "approve" });
@@ -316,7 +320,7 @@ export function AskCard({
           >
             {t("agents.ask.allow")} {!inputCut && <kbd>1</kbd>}
           </button>
-          {!inputCut && (
+          {canAllowRun && (
             <button
               type="button"
               disabled={busy}
