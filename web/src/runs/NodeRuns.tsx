@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { runCancellable, runFinal, runWaitsForLimit, type PipelineState, type Run, type RunEvent } from "../api";
+import {
+  runCancellable,
+  runFinal,
+  runWaitsForLimit,
+  type PipelineState,
+  type Run,
+  type RunAsk,
+  type RunEvent,
+} from "../api";
+import { useAgents } from "../agents/agentStore";
 import { confirmCancelRun } from "./confirmCancelRun";
 import { IconFork, IconSend, IconTerminal } from "../icons";
 
@@ -21,6 +30,7 @@ import { MergeControl } from "./MergeApproval";
 import { NodeSessions } from "./NodeSessions";
 import { RunChangesSummary } from "./RunChanges";
 import { RunModeTabs } from "./RunModeTabs";
+import { askOutcome, askSubject, interleaveAsks } from "./runAsks";
 import { useRuns } from "./runStore";
 import { useNodeType } from "../nodeTypeTheme";
 import { GuardView, JudgeChecks, RoleBadge, VerifyEvidence } from "./RunEvidence";
@@ -472,6 +482,38 @@ export function RunEventItem({
   }
 }
 
+/** One of the run's asks in its timeline: what it waits on, or how that
+ * ended. Waiting on the viewer, it opens the agent panel, where its card is
+ * answered. */
+export function RunAskItem({ ask }: { ask: RunAsk }) {
+  const { t } = useI18n();
+  const what = askSubject(t, ask);
+  if (ask.status === "pending") {
+    const text = t(ask.canAnswer ? "runs.ask.waitingYou" : "runs.ask.waiting", { what });
+    return (
+      <li className="run-ev run-ev-ask is-pending">
+        {ask.canAnswer ? (
+          <button
+            type="button"
+            className="run-ev-ask-open"
+            title={t("runs.ask.open")}
+            onClick={() => useAgents.getState().setOpen(true)}
+          >
+            {text}
+          </button>
+        ) : (
+          text
+        )}
+      </li>
+    );
+  }
+  return (
+    <li className={`run-ev run-ev-ask is-${ask.decision || ask.status}`}>
+      {t("runs.ask.settled", { what, outcome: askOutcome(t, ask) })}
+    </li>
+  );
+}
+
 /** Whether a scroll box is (nearly) scrolled to its end. */
 function atEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
@@ -497,6 +539,7 @@ export function RunDetail({
 }) {
   const { t, language } = useI18n();
   const events = useRuns((s) => s.eventsByRun[run.id]);
+  const asks = useRuns((s) => s.asksByRun[run.id]);
   const eventError = useRuns((s) => s.eventErrors[run.id]);
   const cancelError = useRuns((s) => s.cancelErrors[run.id]);
   const cancelling = useRuns((s) => Boolean(s.cancelling[run.id]));
@@ -517,6 +560,7 @@ export function RunDetail({
   }, [final, run.id, loadEvents]);
 
   const list = events ?? [];
+  const items = useMemo(() => interleaveAsks(list, asks), [list, asks]);
   const toolNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const event of list) {
@@ -535,7 +579,7 @@ export function RunDetail({
     if (!element) return;
     if (following.current) element.scrollTop = element.scrollHeight;
     else setBehind(true);
-  }, [list.length]);
+  }, [items.length]);
 
   const onCancel = async () => {
     if (await confirmCancelRun(t, run)) await cancelRun(run.id);
@@ -687,14 +731,18 @@ export function RunDetail({
             if (end) setBehind(false);
           }}
         >
-          {list.length === 0 ? (
+          {items.length === 0 ? (
             <li className="run-ev run-ev-empty">
               {eventError ? "" : events === undefined ? t("common.loading") : t("runs.noEvents")}
             </li>
           ) : (
-            list.map((event) => (
-              <RunEventItem key={event.seq} event={event} toolNames={toolNames} />
-            ))
+            items.map((item) =>
+              item.kind === "ask" ? (
+                <RunAskItem key={`ask-${item.ask.id}`} ask={item.ask} />
+              ) : (
+                <RunEventItem key={item.event.seq} event={item.event} toolNames={toolNames} />
+              ),
+            )
           )}
         </ol>
         {behind && (

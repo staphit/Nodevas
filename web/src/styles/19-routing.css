@@ -461,6 +461,33 @@
   color: var(--accent);
 }
 
+/* A run's asks in its timeline: what it waits on (amber, a button when it
+   waits on the viewer), then how that ended (muted). */
+.run-ev-ask {
+  padding: 5px 9px;
+  border-left: 2px solid var(--border);
+  border-radius: 2px 6px 6px 2px;
+  color: var(--text-2);
+  font-size: calc(11.5px * var(--font-scale, 1));
+  overflow-wrap: anywhere;
+}
+.run-ev-ask.is-pending {
+  border-left-color: var(--st-ready-fg);
+  background: color-mix(in srgb, var(--st-ready-fg) 10%, var(--surface));
+  color: var(--text);
+}
+.run-ev-ask-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .run-toast.is-pipeline-failed .run-toast-dot {
   background: var(--st-failed-fg);
 }

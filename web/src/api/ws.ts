@@ -82,6 +82,9 @@ export type WSEvent = {
     | "building-changed";
   id?: string;
   project?: string;
+  /** run-events: "ask" when one of the run's asks started waiting or ended
+   * (refetch its asks, not its events). */
+  kind?: string;
   /** autopilot-changed: the goal node the autopilot run belongs to. */
   goalNodeId?: string;
   peers?: Peer[];
