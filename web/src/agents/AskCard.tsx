@@ -245,6 +245,8 @@ export function AskCard({
         <>
           <textarea
             className="agent-ask-textarea agent-ask-note"
+            name="answer"
+            aria-label={t("agents.ask.answerLabel")}
             placeholder={t("agents.ask.answerPlaceholder")}
             value={answerText}
             disabled={busy}
@@ -306,6 +308,8 @@ export function AskCard({
           <input
             type="text"
             className="agent-ask-note"
+            name="note"
+            aria-label={t("agents.ask.noteLabel")}
             placeholder={t("agents.ask.notePlaceholder")}
             value={note}
             disabled={busy}
@@ -345,6 +349,8 @@ export function AskCard({
           <input
             type="text"
             className="agent-ask-note"
+            name="note"
+            aria-label={t("agents.ask.noteLabel")}
             placeholder={t("agents.ask.notePlaceholder")}
             value={note}
             disabled={busy}
