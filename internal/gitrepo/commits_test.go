@@ -193,25 +193,28 @@ func TestHistoryFollowsRenamesAndSkipsDeletions(t *testing.T) {
 	}
 }
 
-// A path kept stays as HEAD has it, whatever the work tree holds now: neither
-// committed from disk nor dropped as a deletion. A kept path HEAD lacks stays
-// out of the commit.
-func TestCommitTrackedKeepingLeavesKeptPathsAtHead(t *testing.T) {
+// A snapshot commits the content it is given, not what the work tree holds
+// by now; a kept path stays as HEAD has it, and one HEAD lacks stays out;
+// anything else HEAD had is removed. The work tree's index follows.
+func TestCommitSnapshotCommitsWhatItIsGiven(t *testing.T) {
 	r, dir := newRepo(t)
 	ctx := context.Background()
 	at := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 
-	if _, err := r.CommitChanges(ctx, []Change{{Path: "nodes/n1.md", Data: []byte("start")}},
-		fixed("start"), Person{}, at); err != nil {
+	if _, err := r.CommitChanges(ctx, []Change{
+		{Path: "nodes/n1.md", Data: []byte("start")},
+		{Path: "nodes/gone.md", Data: []byte("old")},
+	}, fixed("start"), Person{}, at); err != nil {
 		t.Fatal(err)
 	}
-	write(t, dir, "graph.yaml", "nodes: []\n")
+	write(t, dir, "graph.yaml", "moved on\n")
 	write(t, dir, "nodes/n1.md", "halfway")
 	write(t, dir, "nodes/n2.md", "new")
-	commit, err := r.CommitTrackedKeeping(ctx,
-		[]string{"graph.yaml", "nodes/n1.md", "nodes/n2.md"}, []string{"nodes/n1.md", "nodes/n2.md"},
+	commit, err := r.CommitSnapshot(ctx,
+		[]Change{{Path: "graph.yaml", Data: []byte("nodes: []\n")}, {Path: "nodes/n1.md", Data: []byte("halfway")}},
+		[]string{"nodes/n1.md", "nodes/n2.md"},
 		fixed("baseline"), Person{}, at.Add(time.Minute))
-	if err != nil || commit == "" {
+	if err != nil || !ValidSHA(commit) {
 		t.Fatalf("commit %q, %v", commit, err)
 	}
 	tracked, err := r.Run(ctx, nil, "ls-tree", "-r", "--name-only", "HEAD")
@@ -221,8 +224,18 @@ func TestCommitTrackedKeepingLeavesKeptPathsAtHead(t *testing.T) {
 	if got := strings.Fields(string(tracked)); strings.Join(got, ",") != "graph.yaml,nodes/n1.md" {
 		t.Fatalf("HEAD tracks %v, want graph.yaml and the kept nodes/n1.md only", got)
 	}
-	kept, err := r.Run(ctx, nil, "show", "HEAD:nodes/n1.md")
-	if err != nil || string(kept) != "start" {
-		t.Fatalf("kept path is %q, %v; want HEAD's %q", kept, err, "start")
+	for path, want := range map[string]string{"graph.yaml": "nodes: []\n", "nodes/n1.md": "start"} {
+		got, err := r.Run(ctx, nil, "show", "HEAD:"+path)
+		if err != nil || string(got) != want {
+			t.Fatalf("HEAD:%s is %q, %v; want %q", path, got, err, want)
+		}
+	}
+	staged, err := r.Run(ctx, nil, "diff-index", "--cached", "--name-only", "HEAD")
+	if err != nil || strings.TrimSpace(string(staged)) != "" {
+		t.Fatalf("the work tree's index differs from HEAD: %q, %v", staged, err)
+	}
+	if again, err := r.CommitSnapshot(ctx, []Change{{Path: "graph.yaml", Data: []byte("nodes: []\n")}},
+		[]string{"nodes/n1.md"}, fixed("same"), Person{}, at.Add(2*time.Minute)); err != nil || again != "" {
+		t.Fatalf("unchanged snapshot committed %q, %v", again, err)
 	}
 }

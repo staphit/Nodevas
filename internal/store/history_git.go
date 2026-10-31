@@ -515,6 +515,55 @@ func (g *gitHistory) readyLocked(ctx context.Context) (*gitrepo.Repo, error) {
 	return repo, nil
 }
 
+// firstCommitState takes the versions waiting in the batch and reads every
+// tracked file but theirs, as one cut: under s.mu, held exclusively, so no
+// write is halfway. started is the paths the versions are of. Caller holds
+// gitMu, which is the order the two locks are always taken in.
+func (g *gitHistory) firstCommitState() (segments []gitSegment, files []gitrepo.Change, started []string, err error) {
+	g.s.mu.Lock()
+	defer g.s.mu.Unlock()
+	segments = g.takeSegments()
+	for _, seg := range segments {
+		for _, change := range seg.changes {
+			if !containsString(started, change.Path) {
+				started = append(started, change.Path)
+			}
+		}
+	}
+	paths, err := g.s.historyTrackedFiles()
+	if err != nil {
+		g.requeueSegments(segments)
+		return nil, nil, nil, err
+	}
+	for _, rel := range paths {
+		if containsString(started, rel) {
+			continue
+		}
+		data, err := g.s.ReadFile(filepath.Join(g.s.root, filepath.FromSlash(rel)))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			g.requeueSegments(segments)
+			return nil, nil, nil, err
+		}
+		files = append(files, gitrepo.Change{Path: rel, Data: data})
+	}
+	return segments, files, started, nil
+}
+
+// requeueSegments puts versions taken from the batch back in front of any
+// queued since, for the next try.
+func (g *gitHistory) requeueSegments(segments []gitSegment) {
+	if len(segments) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	pending := g.pendingLocked()
+	pending.segments = append(append([]gitSegment(nil), segments...), pending.segments...)
+}
+
 // firstCommitHook is a seam: tests save while the repository's first commit
 // is being made. Nil outside tests.
 var firstCommitHook func()
@@ -595,22 +644,34 @@ func (g *gitHistory) importCopies(ctx context.Context, repo *gitrepo.Repo) error
 		}
 		imported += len(batch)
 	}
-	// Earlier versions saved while the repository was opening are older than
-	// the work tree: committed after it, they would read as a change undoing
-	// what the work tree holds.
-	if segments := g.takeSegments(); len(segments) > 0 {
-		if err := g.commitSegmentsLocked(ctx, repo, titles, segments); err != nil {
-			return err
-		}
+	// The first commit is the project at one moment, and the versions
+	// saved while the repository was opening are older than that moment:
+	// committed after it, they would read as a change undoing what it holds.
+	// So the queued versions are taken and the work tree read together,
+	// under the store's lock: a save landing between the two had its content
+	// in this commit and its older version committed after it, which is how
+	// a blank document came to be the newest version of what was typed. The
+	// lock covers file reads, never git, so a save still never waits on it.
+	//
+	// Each queued version is also where an editing session started, and that
+	// session is still open: the file holds somewhere in the middle of it,
+	// and the window's commit is where that is recorded. Taken here it would
+	// be a version of whatever had been typed by the time git started, one
+	// more than the session gets when the repository opens first. Those
+	// files stay at their earlier version in this commit.
+	segments, files, started, err := g.firstCommitState()
+	if err != nil {
+		return err
 	}
 	if firstCommitHook != nil {
 		firstCommitHook()
 	}
-	paths, err := g.s.historyTrackedFiles()
-	if err != nil {
-		return err
+	if len(segments) > 0 {
+		if err := g.commitSegmentsLocked(ctx, repo, titles, segments); err != nil {
+			return err
+		}
 	}
-	if _, err := repo.CommitTracked(ctx, paths, commitMessage(titles, nil, "", nil), gitrepo.Person{}, time.Now()); err != nil {
+	if _, err := repo.CommitSnapshot(ctx, files, started, commitMessage(titles, nil, "", nil), gitrepo.Person{}, time.Now()); err != nil {
 		return err
 	}
 	note := fmt.Sprintf("%d versions imported from .vised/history at %s\n", imported, time.Now().UTC().Format(time.RFC3339))

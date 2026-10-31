@@ -131,6 +131,123 @@ func (r *Repo) CommitChanges(ctx context.Context, changes []Change, message Mess
 	return commit, nil
 }
 
+// CommitSnapshot is CommitTracked for a state the caller read earlier: files
+// with the content given, each path in keep as HEAD has it (left out if HEAD
+// has none), and every other path removed. The work tree may have moved on
+// since, and what it holds now is not taken. The work tree's index follows
+// the commit, as after CommitChanges. It returns "" with no error when the
+// tree is unchanged.
+func (r *Repo) CommitSnapshot(ctx context.Context, files []Change, keep []string, message Message, author Person, at time.Time) (string, error) {
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		return "", err
+	}
+	index := filepath.Join(r.gitDir, "nodevas-index-"+hex.EncodeToString(token))
+	defer os.Remove(index)
+	env := []string{"GIT_INDEX_FILE=" + index}
+	if _, err := r.run(ctx, nil, env, "read-tree", "--empty"); err != nil {
+		return "", err
+	}
+	held := make(map[string]bool, len(keep))
+	var info bytes.Buffer
+	if len(keep) > 0 {
+		list := make([]string, 0, len(keep))
+		for _, path := range keep {
+			path, err := cleanPath(path)
+			if err != nil {
+				return "", err
+			}
+			if !held[path] {
+				held[path] = true
+				list = append(list, path)
+			}
+		}
+		if r.hasHead(ctx) {
+			// ls-tree's lines are a form --index-info reads as they are.
+			entries, err := r.run(ctx, nil, []string{"GIT_LITERAL_PATHSPECS=1"},
+				append([]string{"ls-tree", "-z", "--full-tree", "HEAD", "--"}, list...)...)
+			if err != nil {
+				return "", err
+			}
+			info.Write(entries)
+		}
+	}
+	var taken []Change
+	for _, file := range files {
+		path, err := cleanPath(file.Path)
+		if err != nil {
+			return "", err
+		}
+		if !held[path] {
+			taken = append(taken, Change{Path: path, Data: file.Data})
+		}
+	}
+	blobs, err := r.writeBlobs(ctx, taken)
+	if err != nil {
+		return "", err
+	}
+	for i, file := range taken {
+		fmt.Fprintf(&info, "100644 %s\t%s\x00", blobs[i], file.Path)
+	}
+	if info.Len() > 0 {
+		if _, err := r.run(ctx, info.Bytes(), env, "update-index", "-z", "--index-info"); err != nil {
+			return "", err
+		}
+	}
+	commit, err := r.commitIndex(ctx, env, message, author, at)
+	if err != nil || commit == "" {
+		return commit, err
+	}
+	// As after CommitChanges, best effort: the entries carry no stat data,
+	// so status compares content until the next CommitTracked.
+	_, _ = r.run(ctx, nil, nil, "read-tree", "HEAD")
+	return commit, nil
+}
+
+// writeBlobs stores each file's content as a blob, in one git process
+// however many there are, and returns their IDs in order. The bytes are
+// stored exactly, with no filter applied.
+func (r *Repo) writeBlobs(ctx context.Context, files []Change) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		return nil, err
+	}
+	marks := filepath.Join(r.gitDir, "nodevas-marks-"+hex.EncodeToString(token))
+	defer os.Remove(marks)
+	var stream bytes.Buffer
+	for i, file := range files {
+		fmt.Fprintf(&stream, "blob\nmark :%d\ndata %d\n", i+1, len(file.Data))
+		stream.Write(file.Data)
+		stream.WriteString("\n")
+	}
+	stream.WriteString("done\n")
+	if _, err := r.run(ctx, stream.Bytes(), nil, "fast-import", "--quiet", "--done", "--export-marks="+filepath.ToSlash(marks)); err != nil {
+		return nil, err
+	}
+	out, err := os.ReadFile(marks)
+	if err != nil {
+		return nil, err
+	}
+	blobs := make([]string, len(files))
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		mark, sha, ok := strings.Cut(strings.TrimSpace(line), " ")
+		number, err := strconv.Atoi(strings.TrimPrefix(mark, ":"))
+		if !ok || err != nil || number < 1 || number > len(files) || !ValidSHA(sha) {
+			return nil, locale.Errorf("unexpected blob mark %q", "無法辨識的 blob 標記「%s」", line)
+		}
+		blobs[number-1] = sha
+	}
+	for i, blob := range blobs {
+		if blob == "" {
+			return nil, locale.Errorf("no blob written for %s", "未寫入 %s 的 blob", files[i].Path)
+		}
+	}
+	return blobs, nil
+}
+
 // commitIndex commits the index env points at (the repository's own when env
 // is nil) as a child of HEAD. Plumbing rather than `git commit`, so the same
 // path serves an index that is not the work tree's.
