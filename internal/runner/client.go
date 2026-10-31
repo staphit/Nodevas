@@ -56,6 +56,10 @@ type Client struct {
 	FlushInterval time.Duration
 	// RunTimeout overrides the config's run timeout; tests shorten it.
 	RunTimeout time.Duration
+	// runTimer starts the timer that ends a run at its timeout; nil means
+	// time.NewTimer. Tests fire it themselves once the run is where they
+	// want it to time out, instead of racing a short timeout.
+	runTimer func(time.Duration) (expired <-chan time.Time, stop func() bool)
 	// PRPollInterval overrides the config's PR polling interval; tests
 	// shorten it.
 	PRPollInterval time.Duration
@@ -431,6 +435,15 @@ func (c *Client) flushInterval() time.Duration {
 		return c.FlushInterval
 	}
 	return defaultFlush
+}
+
+// startRunTimer starts the timer that ends a run after timeout.
+func (c *Client) startRunTimer(timeout time.Duration) (<-chan time.Time, func() bool) {
+	if c.runTimer != nil {
+		return c.runTimer(timeout)
+	}
+	timer := time.NewTimer(timeout)
+	return timer.C, timer.Stop
 }
 
 func (c *Client) runTimeout(kind string) time.Duration {

@@ -984,14 +984,37 @@ const slowHangStart = time.Second
 // its grandchild, as on a busy machine; the tree that is killed must still be
 // the whole one, grandchild included.
 func TestRunTimeout(t *testing.T) {
-	env := startJobRunner(t, func(c *Client) { c.RunTimeout = 500 * time.Millisecond })
+	fire := make(chan time.Time)
+	started := make(chan time.Duration, 1)
+	env := startJobRunner(t, func(c *Client) {
+		c.RunTimeout = 500 * time.Millisecond
+		// The timeout fires when the test says, not 500 ms after the start:
+		// on a busy machine those 500 ms can pass before the helper has
+		// started the grandchild whose death this test checks.
+		c.runTimer = func(d time.Duration) (<-chan time.Time, func() bool) {
+			started <- d
+			return fire, func() bool { return true }
+		}
+	})
 	env.hub.hello()
 	env.hub.offer(testJob("run-slow", "slow-hang:"))
+	if d := <-started; d != 500*time.Millisecond {
+		t.Fatalf("run timer started for %s, want the 500ms run timeout", d)
+	}
+	env.recorded(t, "run-slow", "child-pid")
+	fire <- time.Now()
 	result := env.hub.wait("run-slow", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.Error != "timed out after 500ms" {
 		t.Fatalf("result = %+v", result)
 	}
 	waitDead(t, env, "run-slow")
+}
+
+// Without a test's timer, a run's timeout is a real timer that fires.
+func TestRunTimerIsARealTimerByDefault(t *testing.T) {
+	expired, stop := (&Client{}).startRunTimer(time.Millisecond)
+	defer stop()
+	<-expired
 }
 
 func TestRunDedupeBusyAndReconnect(t *testing.T) {

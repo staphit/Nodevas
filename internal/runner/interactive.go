@@ -180,8 +180,8 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		done <- err
 	}()
 	timeout := j.c.runTimeout(job.Kind)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	expired, stopTimer := j.c.startRunTimer(timeout)
+	defer stopTimer()
 	var waitErr error
 	stopped := ""
 	select {
@@ -190,7 +190,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		stopped = "cancel"
 		term.Kill()
 		waitErr = <-done
-	case <-timer.C:
+	case <-expired:
 		stopped = "timeout"
 		term.Kill()
 		waitErr = <-done

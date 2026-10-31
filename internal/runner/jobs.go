@@ -647,8 +647,8 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	timeout := j.c.runTimeout(job.Kind)
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	expired, stopTimer := j.c.startRunTimer(timeout)
+	defer stopTimer()
 	var waitErr error
 	stopped := ""
 	select {
@@ -657,7 +657,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		stopped = "cancel"
 		tree.kill()
 		waitErr = <-done
-	case <-timer.C:
+	case <-expired:
 		stopped = "timeout"
 		tree.kill()
 		waitErr = <-done
