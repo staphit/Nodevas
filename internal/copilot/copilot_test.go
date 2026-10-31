@@ -318,6 +318,30 @@ func TestPlainAnswerStreamsAndStoresTheTranscript(t *testing.T) {
 	}
 }
 
+// slowStart is longer than a fixed wait for a turn's first event used to
+// be: how long a turn can take to start (bridge, transcript rows) on a
+// machine a parallel "go test ./..." saturates.
+const slowStart = 6 * time.Second
+
+// The harness waits for a turn that is slow to start instead of calling it
+// stuck.
+func TestATurnSlowToStartIsWaitedFor(t *testing.T) {
+	h := newHarness(t, func(opts *Options) {
+		open := opts.OpenBridge
+		opts.OpenBridge = func(ctx context.Context, options toolbridge.Options) (toolbridge.Bridge, error) {
+			time.Sleep(slowStart)
+			return open(ctx, options)
+		}
+	})
+	conversation := h.conversation(alice, ModeDefault)
+	h.model.steps = []step{answer("hello")}
+	turn := h.start(h.turn(conversation, ModeDefault))
+	turn.until(EventTurnStarted)
+	if last(turn.finish()).Type != EventTurnFinished {
+		t.Fatalf("events = %v", types(turn.seen))
+	}
+}
+
 func TestTitleIsTheFirstFortyCharacters(t *testing.T) {
 	long := strings.Repeat("字", 60)
 	if got := titleFrom(long); []rune(got)[39] != '字' || len([]rune(got)) != 41 {
