@@ -118,6 +118,13 @@ describe("a run's asks in its timeline", () => {
     expect(useAgents.getState().open).toBe(true);
   });
 
+  it("offers no button in Station, whose Agent chat is docked and not opened from here", async () => {
+    useApp.setState({ preferences: { ...readPreferences(), language: "en", projectMode: "station" } });
+    const { timeline } = await timelineWith([ask({ preview: "go test ./...", canAnswer: true })]);
+    expect(await within(timeline).findByText("Waiting on you: Bash · go test ./...")).toBeInTheDocument();
+    expect(within(timeline).queryByRole("button", { name: /Waiting/ })).toBeNull();
+  });
+
   it("says how each ask ended, and who else waits sees no button", async () => {
     const { timeline } = await timelineWith([
       ask({ id: "a1", status: "approved", decision: "approve_run", preview: "go test", decidedAt: 1 }),
