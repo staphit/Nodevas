@@ -279,6 +279,11 @@ describe("AskCard by kind", () => {
     expect(screen.getByRole("textbox", { name: "Note for the agent" })).toHaveAttribute("name");
   });
 
+  it("caps a question's answer at the hub's 4000 characters", () => {
+    render(<AskCard ask={{ ...baseAsk, kind: "question" }} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveAttribute("maxLength", "4000");
+  });
+
   it("renders 不回答 for dismiss button in zh-TW", () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
     const questionAsk: AgentAsk = {

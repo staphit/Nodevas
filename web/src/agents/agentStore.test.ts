@@ -449,6 +449,18 @@ describe("answerAsk", () => {
     });
   });
 
+  it("says whether the answer was taken, so a dialog stays open on failure", async () => {
+    mockFetch({
+      ...baseRoutes,
+      "POST /api/agents/asks/ask-ok/answer": () => ({ ok: true, ask: { id: "ask-ok", status: "approved" } }),
+      "POST /api/agents/asks/ask-long/answer": () =>
+        new Response(JSON.stringify({ error: "answer exceeds 4000 characters" }), { status: 400 }),
+    });
+    expect(await useAgents.getState().answerAsk("ask-ok", { decision: "approve" })).toBe(true);
+    expect(await useAgents.getState().answerAsk("ask-long", { decision: "answer", answer: "x" })).toBe(false);
+    expect(useAgents.getState().error).toMatch(/4000/);
+  });
+
   it("sends approve_run for permission asks", async () => {
     const calls = mockFetch({
       ...baseRoutes,

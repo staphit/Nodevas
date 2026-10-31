@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgents } from "../agents/agentStore";
 import type { AgentAsk } from "../api";
@@ -146,5 +146,22 @@ describe("Station ask dialog answering", () => {
     expect(card.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: "2" });
     expect(answerAsk).toHaveBeenCalledWith("ask-perm", { decision: "approve_run" });
+  });
+
+  it("stays open and shows why when the answer fails, and closes once it is taken", async () => {
+    let ok = false;
+    const answerAsk = vi.fn(async () => {
+      if (!ok) useAgents.setState({ error: "answer exceeds 4000 characters" });
+      return ok;
+    });
+    useAgents.setState({ asks: [permission], answerAsk, viewer: null, error: null });
+    open("ask-perm");
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("answer exceeds 4000 characters");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    ok = true;
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
