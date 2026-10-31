@@ -89,15 +89,26 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	// refuse, ending the turn, into a denial the agent can work around.
 	readOnly := ReadOnly(job)
 	relay := env.PermissionRelay && !readOnly && PermissionRelayApplies("antigravity", env.PermissionMode, false)
+	var settings string
+	if relay {
+		var err error
+		if settings, err = writeAntigravityRelaySettings(env.TempDir); err != nil {
+			return nil, err
+		}
+		// Without session settings there is no allow rule, and agy refuses
+		// a command even after a person allowed it: nobody is asked in vain,
+		// the plain gate denies it instead.
+		relay = settings != ""
+	}
 	root, relayGate, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode) || readOnly, readOnly, relay)
 	if err != nil {
 		return nil, err
 	}
-	var settings string
-	if relayGate {
-		if settings, err = writeAntigravityRelaySettings(env.TempDir); err != nil {
-			return nil, err
-		}
+	if !relayGate && settings != "" {
+		// The grant goes only with the gate that asks about every command
+		// (none when no hook can run the nodevas binary).
+		_ = os.Remove(settings)
+		settings = ""
 	}
 	modeArgs, err := antigravityModeArgs(env.PermissionMode)
 	if err != nil {
@@ -224,7 +235,7 @@ var antigravityOwnerSettingsPath = func() (string, error) {
 // replaces the owner's permissions for the session, so their rules (the
 // nodevas MCP allow rule, any deny rules) are carried over; an owner file
 // whose permissions do not read as such gets no grant, which leaves the
-// owner's rules to agy as they are.
+// owner's rules to agy as they are and the run to the plain gate.
 func writeAntigravityRelaySettings(tempDir string) (string, error) {
 	perms := map[string]any{}
 	if path, err := antigravityOwnerSettingsPath(); err == nil {
