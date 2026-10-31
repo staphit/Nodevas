@@ -188,6 +188,7 @@ describe("StationWaiting", () => {
           kind: "permission",
           tool: "Bash",
           toolInput: "npm test",
+          runId: "run-1",
           question: "Run command?",
           status: "pending",
           createdAt: 1,
