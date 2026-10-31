@@ -85,7 +85,7 @@ func testMCPArgs(server string) []string {
 func TestHubAskerPermission(t *testing.T) {
 	hub, srv := newFakeHub(t,
 		`{"id":"a1","status":"approved","decidedBy":"patrick"}`,
-		`{"id":"a2","status":"approved","decision":"approve_run"}`,
+		`{"id":"a2","status":"approved","decision":"approve_run","runScope":"command"}`,
 		`{"id":"a3","status":"denied","decidedBy":"patrick","note":"use go test instead"}`,
 		`{"id":"a4","status":"expired"}`)
 	asker, ok := HubAskerFromMCPArgs(testMCPArgs(srv.URL))
@@ -118,7 +118,8 @@ func TestHubAskerPermission(t *testing.T) {
 		t.Errorf("request: path %q query %q role %q", path, query, role)
 	}
 
-	if got := asker.AskPermission(context.Background(), req); !got.Allow || !got.ForRun {
+	// The hub's runScope says how far "for the run" reaches (one command).
+	if got := asker.AskPermission(context.Background(), req); !got.Allow || !got.ForRun || got.RunScope != "command" {
 		t.Errorf("approved for the run: %+v", got)
 	}
 	if got := asker.AskPermission(context.Background(), req); got.Allow || !strings.Contains(got.Reason, "use go test instead") {
