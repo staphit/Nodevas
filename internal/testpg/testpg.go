@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -80,7 +81,35 @@ func AdminURL(t testing.TB) string {
 	if serverErr != nil {
 		t.Fatalf("testpg: %v", serverErr)
 	}
-	return serverURL
+	return patient(t, serverURL)
+}
+
+// noDeadline stands in for the connect timeout of a run without -timeout.
+const noDeadline = 24 * time.Hour
+
+// patient gives a URL a connect_timeout as long as what is left of the
+// test run (-timeout). The server is one the tests started, or were pointed
+// at, and have just used: a new connection slow to be answered means the
+// machine is busy (a backend starting while "go test ./..." saturates it can
+// take longer than the 5 s the embedded server's URLs say), not that the
+// server is gone. A server that is gone refuses or resets the connection at
+// once; one that hangs ends the run at its deadline with every goroutine's
+// stack, instead of failing one test as "postgres unreachable".
+func patient(t testing.TB, raw string) string {
+	location, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	left := noDeadline
+	if run, ok := t.(interface{ Deadline() (time.Time, bool) }); ok {
+		if deadline, set := run.Deadline(); set {
+			left = time.Until(deadline)
+		}
+	}
+	query := location.Query()
+	query.Set("connect_timeout", strconv.Itoa(max(1, int(left/time.Second))))
+	location.RawQuery = query.Encode()
+	return location.String()
 }
 
 func withDatabase(raw, name string) (string, error) {
