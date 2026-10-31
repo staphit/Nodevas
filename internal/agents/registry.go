@@ -164,6 +164,10 @@ type Hub struct {
 	// Loop guard state
 	senderHistory map[string][]int64 // key: project+"\x00"+from -> timestamps
 	threadTurns   map[string]int     // key: project+"\x00"+threadID -> consecutive agent turns
+
+	// beforeAskInsert, set by tests only, runs as CreateAndWait is about to
+	// store a pending ask.
+	beforeAskInsert func()
 }
 
 // NewHub constructs an agent network hub backed by database (which may be nil

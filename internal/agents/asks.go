@@ -435,6 +435,9 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 		h.mu.Unlock()
 	}()
 
+	if h.beforeAskInsert != nil {
+		h.beforeAskInsert()
+	}
 	if err := h.insertPendingAsk(ctx, ask); err != nil {
 		return Ask{}, err
 	}
