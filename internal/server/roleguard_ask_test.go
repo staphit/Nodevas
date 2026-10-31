@@ -52,6 +52,13 @@ func TestRunWithoutMessageCapabilityMayRelayPermissionPrompts(t *testing.T) {
 		t.Fatalf("permission prompt with a spaced kind: %d %s", code, body)
 	}
 
+	// A permission ask never carries aboutMsgId: allowing it would go out as
+	// a verified approval of a message the person never saw.
+	about := `{"sessionId":"claude:quiet","sessionName":"quiet","kind":"permission","tool":"Bash","toolInput":"ls","aboutMsgId":"m-1","timeoutSeconds":1}`
+	if code, body := f.proxied(t, run.ID, http.MethodPost, "agents/asks", about, nil); code != http.StatusBadRequest {
+		t.Fatalf("permission prompt with aboutMsgId: %d %s, want 400", code, body)
+	}
+
 	for name, ask := range map[string]string{
 		"approval": `{"sessionId":"claude:quiet","sessionName":"quiet","question":"Deploy?","timeoutSeconds":1}`,
 		"question": `{"sessionId":"claude:quiet","sessionName":"quiet","kind":"question","question":"Which?","timeoutSeconds":1}`,
