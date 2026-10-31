@@ -63,7 +63,14 @@ func TestACPSessionRelaysPermission(t *testing.T) {
 		option   string
 	}{
 		{"allow", PermissionDecision{Allow: true}, "once"},
-		{"allow for the run", PermissionDecision{Allow: true, ForRun: true}, "always"},
+		// allow_always lets OpenCode remember its own rule for the tool, so
+		// only the hub's whole-tool scope gets it; one command, one call, or
+		// a scope the hub did not name is allow_once.
+		{"allow the tool for the run", PermissionDecision{Allow: true, ForRun: true, RunScope: "tool"}, "always"},
+		{"allow the command for the run", PermissionDecision{Allow: true, ForRun: true, RunScope: "command"}, "once"},
+		{"allow for the run, once", PermissionDecision{Allow: true, ForRun: true, RunScope: "once"}, "once"},
+		{"allow for the run, no scope", PermissionDecision{Allow: true, ForRun: true}, "once"},
+		{"allow for the run, unknown scope", PermissionDecision{Allow: true, ForRun: true, RunScope: "everything"}, "once"},
 		{"deny", PermissionDecision{Reason: "no"}, "no"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
