@@ -81,9 +81,17 @@ func (Antigravity) Kind() string { return "antigravity" }
 
 func (Antigravity) NewParser() Parser { return &antigravityParser{} }
 
-func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+func (a Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
+	cmd, _, err := a.CommandRelay(job, env)
+	return cmd, err
+}
+
+// CommandRelay is Command, and whether the run's gate relays shell commands
+// to Nodevas: only with the relay gate and the session settings that grant
+// what it allows (RelayLauncher).
+func (Antigravity) CommandRelay(job runnerwire.Job, env RunEnv) (*exec.Cmd, bool, error) {
 	if env.Binary == "" || env.Workdir == "" || env.TempDir == "" {
-		return nil, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
+		return nil, false, fmt.Errorf("antigravity: binary, workdir and temp dir are required")
 	}
 	// Headless, nobody can approve a command: the gate turns what agy would
 	// refuse, ending the turn, into a denial the agent can work around.
@@ -93,7 +101,7 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	if relay {
 		var err error
 		if settings, err = writeAntigravityRelaySettings(env.TempDir); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Without session settings there is no allow rule, and agy refuses
 		// a command even after a person allowed it: nobody is asked in vain,
@@ -102,7 +110,7 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	root, relayGate, err := writeAntigravityRoot(env, antigravityGated(env.PermissionMode) || readOnly, readOnly, relay)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !relayGate && settings != "" {
 		// The grant goes only with the gate that asks about every command
@@ -112,7 +120,7 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 	}
 	modeArgs, err := antigravityModeArgs(env.PermissionMode)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	args := []string{"--input-format=stream-json", "--output-format=stream-json"}
 	args = append(args, modeArgs...)
@@ -129,20 +137,20 @@ func (Antigravity) Command(job runnerwire.Job, env RunEnv) (*exec.Cmd, error) {
 		"message": map[string]string{"content": Prompt(job, env.Branch)},
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	extra, err := antigravityEnv(job, env)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	cmd := exec.Command(env.Binary, args...)
 	cmd.Dir = env.Workdir
 	cmd.Stdin = bytes.NewReader(append(input, '\n'))
 	cmd.Env = jobEnv(job, extra...)
 	if err := wrapBatch(cmd); err != nil {
-		return nil, fmt.Errorf("antigravity: %w", err)
+		return nil, false, fmt.Errorf("antigravity: %w", err)
 	}
-	return cmd, nil
+	return cmd, settings != "", nil
 }
 
 // antigravityModeArgs are the flags for the owner's mode setting.

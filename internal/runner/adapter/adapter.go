@@ -33,6 +33,28 @@ type Adapter interface {
 	Classify(text string) string
 }
 
+// RelayLauncher is an Adapter whose command can leave the permission relay
+// off although RunEnv.PermissionRelay asked for it: agy without session
+// settings, or without a hook that can run the nodevas binary.
+type RelayLauncher interface {
+	// CommandRelay is Command, and whether that command relays permission
+	// prompts to Nodevas.
+	CommandRelay(job runnerwire.Job, env RunEnv) (cmd *exec.Cmd, relays bool, err error)
+}
+
+// Launch is ad's command for job, and whether the adapter switched the
+// permission relay env asked for off at launch. An adapter that cannot do
+// so never reports it off.
+func Launch(ad Adapter, job runnerwire.Job, env RunEnv) (cmd *exec.Cmd, relayOff bool, err error) {
+	rl, ok := ad.(RelayLauncher)
+	if !ok {
+		cmd, err = ad.Command(job, env)
+		return cmd, false, err
+	}
+	cmd, relays, err := rl.CommandRelay(job, env)
+	return cmd, env.PermissionRelay && !relays, err
+}
+
 // RunEnv is what the runner decided for a run: where it runs and how freely.
 // None of it comes from the hub; the job carries no permission settings.
 type RunEnv struct {

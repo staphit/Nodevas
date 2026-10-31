@@ -602,9 +602,14 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		PermissionRelay:  cfg.PermissionRelay,
 	}
 	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
-	cmd, err := ad.Command(job, runEnv)
+	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
+	}
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && relayOff {
+		// The adapter could not set the relay up (agy: no session settings,
+		// no hook that runs nodevas): the log says what the run really does.
+		modeText = claimed + notRelayedText
 	}
 	parser := ad.NewParser()
 	// An ACP agent is spoken to while it runs (adapter/acp.go).
@@ -732,11 +737,18 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
 
+// relayedText ends the start line of a run whose permission prompts are
+// relayed; notRelayedText that of one whose adapter could not relay them.
+const (
+	relayedText    = ", permission prompts relayed to Nodevas"
+	notRelayedText = ", permission prompts not relayed (denied headless)"
+)
+
 // permissionText says how freely the agent may act, for the run's log.
 func permissionText(cfg *Config, kind string) string {
 	text := modeText(cfg, kind)
 	if cfg.RelaysPermissions(kind) {
-		text += ", permission prompts relayed to Nodevas"
+		text += relayedText
 	}
 	return text
 }
