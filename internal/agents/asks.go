@@ -69,6 +69,11 @@ const (
 	// AskEvent is emitted with the Ask when one is created, answered or
 	// expires.
 	AskEvent = "agent-ask"
+	// AskAllowedForRunEvent is emitted with a permission prompt the hub
+	// allowed without asking, on an earlier "allow for this run". It waits
+	// on nobody, and a run makes one per tool call: no panel needs to
+	// reload for it.
+	AskAllowedForRunEvent = "agent-ask-allowed-for-run"
 )
 
 // Ask represents one human-in-the-loop approval/question from an agent session.
@@ -611,7 +616,7 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 		return Ask{}, err
 	}
 	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(ask.Question, 200))
-	h.emit(ask.Project, AskEvent, ask)
+	h.emit(ask.Project, AskAllowedForRunEvent, ask)
 	return ask, nil
 }
 

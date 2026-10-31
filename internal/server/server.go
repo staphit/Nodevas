@@ -183,6 +183,12 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 			return
 		}
 		projectRoot = agentsRoom(projectRoot)
+		// A prompt allowed on an earlier "allow for this run" waits on
+		// nobody, and a run makes one per tool call: reloading every
+		// browser's panel for each would refetch it all per command.
+		if eventType == agents.AskAllowedForRunEvent {
+			return
+		}
 		// Asks, mail and presence changes are news for Station's building in
 		// every project that may read this one. A presence change is only
 		// that: the agents-changed every heartbeat sends covers the panel.
