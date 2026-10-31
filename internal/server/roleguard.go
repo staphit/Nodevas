@@ -158,7 +158,8 @@ const maxPeekedAskBody = 64 << 10
 // runPermissionAsk reports whether c is a run relaying one of its agent CLI's
 // permission prompts: POST /api/agents/asks of kind permission, through its
 // runner's proxy from one of that runner's runs. Any role may: the ask only
-// puts the run's own tool call to a person and grants nothing by itself,
+// puts the run's own tool call to a person and grants nothing by itself (the
+// hub refuses aboutMsgId on it, so it forwards no verified approval),
 // whereas refusing it denies every prompt without asking anyone. The body is
 // put back exactly as it came, and its kind read as the asks API reads it.
 func runPermissionAsk(c *gin.Context) bool {

@@ -306,6 +306,10 @@ func shapeAsk(in AskInput) (askShape, error) {
 			return askShape{}, fmt.Errorf("%w: tool exceeds %d characters", ErrInvalid, MaxAskToolRunes)
 		case len(in.Options) > 0:
 			return askShape{}, fmt.Errorf("%w: options belong to kind choice", ErrInvalid)
+		case strings.TrimSpace(in.AboutMsgID) != "":
+			// Allowing the run's own tool call must never go out as a
+			// verified approval of a message the person did not see.
+			return askShape{}, fmt.Errorf("%w: aboutMsgId does not belong to permission asks", ErrInvalid)
 		}
 		input := strings.TrimSpace(in.ToolInput)
 		shape.toolInput = capBytes(input, MaxAskToolInputBytes)
