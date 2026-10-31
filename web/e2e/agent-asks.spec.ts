@@ -484,8 +484,11 @@ test("Station: Waiting on you and the war room list a permission ask, each with 
   await expect(asking).toHaveAccessibleName(/e2e-claude wants to run Bash/);
   await expect(asking).not.toHaveAccessibleName(/Allow Bash\?/);
   await asking.click();
+  // Its menu names the kind of answer it waits for, as the dialog does.
+  // Soft, so the rest of the flow is still checked when it does not.
   const item = page.getByRole("menuitem", { name: /^(Review permission|Answer question)$/ });
   await expect(item).toBeVisible();
+  await expect.soft(item, "the war room menu names a permission ask by its kind").toHaveText("Review permission");
   await item.click();
   const fromRoom = page.getByRole("dialog", { name: "Review permission" });
   await expect(fromRoom).toBeVisible();
