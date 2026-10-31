@@ -84,6 +84,10 @@ type PermissionDecision struct {
 	Allow bool
 	// ForRun: the person allowed this tool for the rest of the run.
 	ForRun bool
+	// RunScope is what ForRun covers, the hub's runScope: "tool" the whole
+	// tool, "command" this shell command only, "once" this call only; ""
+	// when the hub did not say. Only "tool" reaches past this call's input.
+	RunScope string
 	// Reason says why not, for the agent, when !Allow.
 	Reason string
 }
@@ -219,6 +223,7 @@ func (h HubAsker) AskPermission(ctx context.Context, req PermissionRequest) Perm
 			Answer    string `json:"answer"`
 			DecidedBy string `json:"decidedBy"`
 			Note      string `json:"note"`
+			RunScope  string `json:"runScope"`
 		} `json:"ask"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -227,7 +232,12 @@ func (h HubAsker) AskPermission(ctx context.Context, req PermissionRequest) Perm
 	ask := out.Ask
 	switch ask.Status {
 	case "approved":
-		return PermissionDecision{Allow: true, ForRun: ask.Decision == "approve_run" || ask.Answer == "approve_run"}
+		forRun := ask.Decision == "approve_run" || ask.Answer == "approve_run"
+		scope := ""
+		if forRun {
+			scope = ask.RunScope
+		}
+		return PermissionDecision{Allow: true, ForRun: forRun, RunScope: scope}
 	case "expired":
 		return PermissionDecision{Reason: "Nobody answered the permission request in Nodevas in time, so it is denied. " +
 			"Do without it, or call ask_user if you are blocked."}
