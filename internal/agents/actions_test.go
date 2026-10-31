@@ -59,6 +59,9 @@ func TestSessionActionLog(t *testing.T) {
 	}
 	askCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
+	// On a loaded machine the ask's insert can start only after its whole
+	// wait has run out. Force that: the ask must be logged all the same.
+	hub.beforeAskInsert = func() { <-askCtx.Done() }
 	_, _ = hub.CreateAndWait(askCtx, AskInput{Project: "alpha", SessionID: "claude:1", ActorID: "mcp:alice", Agent: "claude",
 		Question: strings.Repeat("Should I keep the old endpoint? ", 20)}, 50*time.Millisecond)
 	if err := hub.Leave("alpha", "claude:1", "mcp:alice"); err != nil {
