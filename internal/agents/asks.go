@@ -106,7 +106,19 @@ type Ask struct {
 	// ExpiresAt is when a pending ask stops waiting (unix ms).
 	ExpiresAt int64 `json:"expiresAt,omitempty"`
 	DecidedAt int64 `json:"decidedAt,omitempty"`
+	// runKey narrows an "allow for this run" of a permission prompt.
+	runKey string
 }
+
+// The scopes an "allow for this run" of a permission prompt covers.
+const (
+	RunScopeTool    = "tool"
+	RunScopeCommand = "command"
+	RunScopeOnce    = "once"
+)
+
+// RunScope is what allowing a for the rest of its run covers.
+func (a Ask) RunScope() string { return "" }
 
 // DecisionOf is the decision that settled a: approve, approve_run, deny or
 // answer, or "" while it is pending or once it expired.
