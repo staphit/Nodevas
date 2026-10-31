@@ -192,3 +192,37 @@ func TestHistoryFollowsRenamesAndSkipsDeletions(t *testing.T) {
 		t.Fatalf("history after delete %+v, %v", versions, err)
 	}
 }
+
+// A path kept stays as HEAD has it, whatever the work tree holds now: neither
+// committed from disk nor dropped as a deletion. A kept path HEAD lacks stays
+// out of the commit.
+func TestCommitTrackedKeepingLeavesKeptPathsAtHead(t *testing.T) {
+	r, dir := newRepo(t)
+	ctx := context.Background()
+	at := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+
+	if _, err := r.CommitChanges(ctx, []Change{{Path: "nodes/n1.md", Data: []byte("start")}},
+		fixed("start"), Person{}, at); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "graph.yaml", "nodes: []\n")
+	write(t, dir, "nodes/n1.md", "halfway")
+	write(t, dir, "nodes/n2.md", "new")
+	commit, err := r.CommitTrackedKeeping(ctx,
+		[]string{"graph.yaml", "nodes/n1.md", "nodes/n2.md"}, []string{"nodes/n1.md", "nodes/n2.md"},
+		fixed("baseline"), Person{}, at.Add(time.Minute))
+	if err != nil || commit == "" {
+		t.Fatalf("commit %q, %v", commit, err)
+	}
+	tracked, err := r.Run(ctx, nil, "ls-tree", "-r", "--name-only", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Fields(string(tracked)); strings.Join(got, ",") != "graph.yaml,nodes/n1.md" {
+		t.Fatalf("HEAD tracks %v, want graph.yaml and the kept nodes/n1.md only", got)
+	}
+	kept, err := r.Run(ctx, nil, "show", "HEAD:nodes/n1.md")
+	if err != nil || string(kept) != "start" {
+		t.Fatalf("kept path is %q, %v; want HEAD's %q", kept, err, "start")
+	}
+}

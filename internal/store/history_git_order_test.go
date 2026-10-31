@@ -113,3 +113,79 @@ func TestWorkspaceGitListsNoDeletionAfterAnEarlierVersionCommit(t *testing.T) {
 		}
 	}
 }
+
+// A project is created, a node added and the node saved twice in one editing
+// session, all before the history repository has finished opening (a slow
+// first `git init` on a busy machine). The session's starting version was
+// queued, and the repository's first commit then took the work tree as it was
+// by then: halfway through the session. The node's history showed two
+// versions where one session is one, and which half-typed state became a
+// version depended on how fast git started.
+func TestGitHistoryFirstCommitDoesNotSplitASession(t *testing.T) {
+	requireGit(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nodes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(root)
+	g := newGitHistory(s, time.Hour)
+	s.historyMu.Lock()
+	s.historyImpl = g
+	s.historyMu.Unlock()
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	// Held while the project is written: the repository opens after all of
+	// it, which is what a slow first open looks like.
+	g.gitMu.Lock()
+	created, err := engine.MarshalGraph(&engine.Graph{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateGraph(created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateNode(ann, &engine.Node{ID: "alpha", Title: "Alpha"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	start, err := os.ReadFile(s.NodePath("alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveNode(t, s, ann, "alpha", "first\n")
+	saveNode(t, s, ann, "alpha", "second\n")
+	g.gitMu.Unlock()
+	// The open and the session-start commit run in the background.
+	g.inflight.Wait()
+
+	versions, err := s.ListHistory("nodes/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contents []string
+	for _, version := range versions {
+		data, err := s.ReadHistory("nodes/alpha.md", version.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents = append(contents, string(data))
+	}
+	if len(contents) != 1 || contents[0] != string(start) {
+		t.Fatalf("node has versions %q before the window closed, want one: as created %q", contents, start)
+	}
+
+	// The window's own commit then records where the session ended.
+	if err := s.FlushHistory(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	versions, err = s.ListHistory("nodes/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("node has %d versions after the window, want 2: as created, then as saved", len(versions))
+	}
+	newest, err := s.ReadHistory("nodes/alpha.md", versions[0].Name)
+	if err != nil || !strings.Contains(string(newest), "second") {
+		t.Fatalf("newest version %q, %v; want the last save", newest, err)
+	}
+}
