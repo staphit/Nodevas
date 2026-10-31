@@ -388,3 +388,53 @@ func TestAntigravityRelayWithoutSettingsKeepsThePlainGate(t *testing.T) {
 		t.Errorf("good owner file: settings %v, gate %q", settings, command)
 	}
 }
+
+// The run's start line says whether prompts are relayed, so the runner must
+// learn what the adapter decided at launch, not what the owner asked for: agy
+// keeps the plain gate without session settings, and has no gate at all
+// when no hook can run the nodevas binary.
+func TestAntigravityLaunchReportsTheRelayDecision(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "nodevas.exe")
+	if antigravityGateHooks(exe, false, true) == nil {
+		t.Skip("no hook path on this machine")
+	}
+	owner := filepath.Join(t.TempDir(), "settings.json")
+	old := antigravityOwnerSettingsPath
+	antigravityOwnerSettingsPath = func() (string, error) { return owner, nil }
+	t.Cleanup(func() { antigravityOwnerSettingsPath = old })
+
+	launch := func(t *testing.T, ownerFile, hookExe string, relay bool) (relayOff, settings bool) {
+		t.Helper()
+		if err := os.WriteFile(owner, []byte(ownerFile), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		job := runnerwire.Job{RunID: "run-1", NodeID: "node-1", Prompt: "do it"}
+		env := RunEnv{Binary: "agy", Workdir: t.TempDir(), Branch: "b", TempDir: t.TempDir(),
+			MCP: MCPServer{Command: hookExe, Args: []string{"mcp"}}, PermissionMode: "accept-edits", PermissionRelay: relay}
+		cmd, off, err := Launch(Antigravity{}, job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, settings = agyArg(cmd.Args, "--settings")
+		return off, settings
+	}
+	good, bad := `{"permissions":{"allow":["mcp(nodevas/*)"]}}`, `{"permissions":[]}`
+	if off, settings := launch(t, good, exe, true); off || !settings {
+		t.Errorf("relay on: off %v, settings %v", off, settings)
+	}
+	if off, settings := launch(t, bad, exe, true); !off || settings {
+		t.Errorf("no session settings: off %v, settings %v", off, settings)
+	}
+	if off, settings := launch(t, good, "", true); !off || settings {
+		t.Errorf("no hook path: off %v, settings %v", off, settings)
+	}
+	if off, _ := launch(t, good, exe, false); off {
+		t.Error("a relay nobody asked for reported as switched off")
+	}
+	// An adapter that cannot switch the relay off never reports it off.
+	claude := RunEnv{Binary: "claude", Workdir: t.TempDir(), TempDir: t.TempDir(),
+		MCP: MCPServer{Command: exe, Args: []string{"mcp"}}, PermissionRelay: true}
+	if _, off, err := Launch(Claude{}, runnerwire.Job{RunID: "run-2", Prompt: "x"}, claude); err != nil || off {
+		t.Errorf("claude: off %v, err %v", off, err)
+	}
+}
