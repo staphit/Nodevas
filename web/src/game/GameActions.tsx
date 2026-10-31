@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 import type { SessionChange } from "../api/runs";
 import type { AgentAskKind } from "../api";
 import { AskCard } from "../agents/AskCard";
-import { useAgents } from "../agents/agentStore";
+import { canManageSession, useAgents } from "../agents/agentStore";
 import { openAutopilot } from "../autopilot/openAutopilot";
 import { useI18n } from "../i18n";
 import { RunDiffDialog } from "../runs/DiffViewer";
@@ -222,6 +222,7 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
   const ask = useAgents((s) => s.asks.find((item) => item.id === askId));
   const submitting = useAgents((s) => Boolean(s.submittingAskIds[askId]));
   const answerAsk = useAgents((s) => s.answerAsk);
+  const viewer = useAgents((s) => s.viewer);
   // Why the last answer failed: shown here, since the drawer that shows the
   // store's error is closed behind the dialog.
   const [failure, setFailure] = useState<string | null>(null);
@@ -236,6 +237,7 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
         <AskCard
           ask={ask}
           submitting={submitting}
+          canAnswer={canManageSession(ask, viewer)}
           onSelectNode={(nodeId) => {
             onClose();
             void useApp.getState().openTab(nodeId).catch(reportError);
