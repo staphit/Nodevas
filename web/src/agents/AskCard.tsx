@@ -74,6 +74,9 @@ function ToolInput({
   );
 }
 
+/** The hub refuses a longer answer (agents.MaxAskAnswerRunes). */
+const MAX_ANSWER_CHARS = 4000;
+
 export function AskCard({
   ask,
   submitting,
@@ -247,6 +250,7 @@ export function AskCard({
           <textarea
             className="agent-ask-textarea agent-ask-note"
             name="answer"
+            maxLength={MAX_ANSWER_CHARS}
             aria-label={t("agents.ask.answerLabel")}
             placeholder={t("agents.ask.answerPlaceholder")}
             value={answerText}

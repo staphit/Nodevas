@@ -1214,6 +1214,15 @@
   white-space: pre-wrap;
   font-size: calc(13px * var(--font-scale, 1));
 }
+.game-dialog-error {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-failed-fg) 45%, var(--border));
+  border-radius: 6px;
+  background: var(--st-failed-bg);
+  color: var(--st-failed-fg);
+  overflow-wrap: anywhere;
+}
 .game-dialog-actions {
   display: flex;
   gap: 8px;

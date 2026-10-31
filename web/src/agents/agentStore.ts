@@ -150,7 +150,7 @@ export interface AgentStoreState {
       | "approved"
       | "denied",
     note?: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   decideHeld: (messageId: string, decision: "approve" | "reject") => Promise<void>;
   setInbound: (sessionId: string, inbound: AgentInbound) => Promise<void>;
   /** Handles an "agent-notify" event: id is the message to announce. */
@@ -326,8 +326,10 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
           : answer;
       await api.answerAgentAsk(askId, payload);
       await get().refreshAll();
+      return true;
     } catch (err) {
       set({ error: errorText(err) });
+      return false;
     } finally {
       set((s) => {
         const next = { ...s.submittingAskIds };

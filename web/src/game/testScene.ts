@@ -105,7 +105,7 @@ export function seedScene(now = NOW): SceneSpies {
     openDispatch: vi.fn(),
     showAutopilot: vi.fn(),
     decideHeld: vi.fn(async () => undefined),
-    answerAsk: vi.fn(async () => undefined),
+    answerAsk: vi.fn(async () => true),
     loadSessions: vi.fn(async () => undefined),
     loadChanges: vi.fn(async () => undefined),
     setLifecycleStatus: vi.fn(async () => ({ ok: true })),

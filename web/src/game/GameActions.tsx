@@ -222,8 +222,16 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
   const ask = useAgents((s) => s.asks.find((item) => item.id === askId));
   const submitting = useAgents((s) => Boolean(s.submittingAskIds[askId]));
   const answerAsk = useAgents((s) => s.answerAsk);
+  // Why the last answer failed: shown here, since the drawer that shows the
+  // store's error is closed behind the dialog.
+  const [failure, setFailure] = useState<string | null>(null);
   return (
     <GameDialog title={askDialogTitle(t, ask?.kind)} onClose={onClose} initialFocus={ASK_FOCUS}>
+      {failure && (
+        <p className="game-dialog-error" role="alert">
+          {failure}
+        </p>
+      )}
       {ask && ask.status === "pending" ? (
         <AskCard
           ask={ask}
@@ -233,7 +241,11 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
             void useApp.getState().openTab(nodeId).catch(reportError);
           }}
           onAnswer={(payload) => {
-            void answerAsk(ask.id, payload).then(onClose);
+            setFailure(null);
+            void answerAsk(ask.id, payload).then((ok) => {
+              if (ok) onClose();
+              else setFailure(useAgents.getState().error || t("game.dialog.answerFailed"));
+            });
           }}
         />
       ) : (
@@ -310,7 +322,6 @@ export function GameDialog({
       .find(Boolean);
     first?.focus();
     return () => window.removeEventListener("keydown", onKey, true);
-    // Focus is placed once, when the dialog opens.
   }, [onClose]);
   return createPortal(
     <div className="confirm-backdrop game-dialog-backdrop" onClick={onClose}>
