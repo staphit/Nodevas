@@ -9,8 +9,10 @@ import { expect, freshProject, test } from "./fixture";
 
 // Agent interaction against the real binary: an agent raises its hand
 // (ask_user: approval, question, choice) or relays a tool-permission prompt
-// (approve_tool: allow / allow for this run / deny), a person answers in the
-// web UI, and the answer reaches the live agent.
+// (approve_tool: allow / deny), a person answers in the web UI, and the
+// answer reaches the live agent. "Allow for this run" is offered only on a
+// run's prompts, and a run needs a runner, which these servers run without;
+// the hub's side of it is covered in internal/httpapi/agents.
 //
 // The agent is real too: `nodevas mcp`, the very sidecar Claude Code,
 // Antigravity and OpenCode start, spoken to over stdio JSON-RPC exactly as an
@@ -270,7 +272,7 @@ test("approval: approve and deny reach the agent; settled cards stay with their 
   // The panel opens itself on the new ask.
   const panel = page.locator("#agent-network-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
-  const section = panel.getByRole("region", { name: "Pending human approvals" });
+  const section = panel.getByRole("region", { name: "Agent asks" });
   const card = cardOf(page, first);
   await expect(section.locator(`[data-ask-id="${first.id}"]`)).toBeVisible();
   await expect(card.getByText("e2e-claude asks for approval")).toBeVisible();
@@ -324,7 +326,8 @@ test("question and choice: send a text answer, 不回答, pick an option (zh-TW)
   const secondCard = cardOf(page, second);
   await secondCard.getByRole("button", { name: "不回答" }).click();
   expect((await dismissed).status).toBe("denied");
-  await expect(secondCard.locator(".agent-ask-status-denied")).toHaveText("已拒絕");
+  // To the person, a question left unanswered reads so, not as a refusal.
+  await expect(secondCard.locator(".agent-ask-status-denied")).toHaveText("未回答");
 
   // A choice: one button per option; the one clicked is the answer.
   const chosen = agent.askUser({ kind: "choice", question: "主色用哪個？", options: ["藍色", "綠色", "橘色"] });
@@ -345,7 +348,7 @@ test("question and choice: send a text answer, 不回答, pick an option (zh-TW)
   for (const ask of [question, second, choice]) await expect(cardOf(page, ask)).toBeVisible();
 });
 
-test("permission: tool, collapsible input, Allow / Allow for this run / Deny and keys 1/2/3 (zh-TW)", async ({ page }) => {
+test("permission: tool, input in view, Allow / Deny and keys 1/3; no allow for this run outside a run (zh-TW)", async ({ page }) => {
   const project = await freshProject(page, ["設計稿"]);
   const agent = await startAgent(page, project);
   const panel = page.locator("#agent-network-panel");
@@ -369,24 +372,25 @@ test("permission: tool, collapsible input, Allow / Allow for this run / Deny and
   await expect(bash.card.locator(".copilot-badge", { hasText: /^Bash$/ })).toBeVisible();
   await expect(bash.card).not.toContainText("Allow Bash?");
   await expect(bash.card).not.toContainText("wants to run");
-  // The input is folded until asked for.
-  const input = bash.card.locator("details pre");
-  await expect(input).toBeHidden();
-  await bash.card.getByText("輸入", { exact: true }).click();
+  // The input is in view from the start: what is approved is never folded
+  // away.
+  await expect(bash.card.locator(".agent-ask-tool-input-label")).toHaveText("輸入");
+  const input = bash.card.locator(".agent-ask-tool-input pre");
   await expect(input).toBeVisible();
   await expect(input).toHaveText('{"command":"npm test -- --run agents"}');
-  await bash.card.getByText("輸入", { exact: true }).click();
-  await expect(input).toBeHidden();
+  // Not a run's prompt: nothing to allow for the run.
+  await expect(bash.card.getByRole("button", { name: /^本次執行一律允許/ })).toHaveCount(0);
   await bash.card.getByRole("button", { name: /^允許/ }).click();
   expect(await bash.reply).toEqual({ behavior: "allow", updatedInput: { command: "npm test -- --run agents" } });
   await expect(bash.card.locator(".agent-ask-status-approved")).toHaveText("已允許");
   await expect(bash.card.getByRole("button")).toHaveCount(0);
 
-  // Allow for this run.
+  // A file tool outside a run: allow and deny only.
   const edit = await relay("Edit", { file_path: "web/src/a.ts", old_string: "a", new_string: "b" });
-  await edit.card.getByRole("button", { name: /^本次執行一律允許/ }).click();
+  await expect(edit.card.getByRole("button", { name: /^(允許|拒絕|本次執行一律允許)/ })).toHaveText([/^允許/, /^拒絕/]);
+  await edit.card.getByRole("button", { name: /^允許/ }).click();
   expect((await edit.reply).behavior).toBe("allow");
-  await expect(edit.card.locator(".agent-ask-status-approved")).toHaveText("本次執行一律允許");
+  await expect(edit.card.locator(".agent-ask-status-approved")).toHaveText("已允許");
 
   // Deny: the CLI is told who said no.
   const rm = await relay("Bash", { command: "rm -rf build" });
@@ -396,22 +400,26 @@ test("permission: tool, collapsible input, Allow / Allow for this run / Deny and
   expect(no.message).toBeTruthy();
   await expect(rm.card.locator(".agent-ask-status-denied")).toHaveText("已拒絕");
 
-  // The keys answer once the card has focus: 1 allow, 2 allow for this run,
-  // 3 deny.
-  const keyed: [string, string, "allow" | "deny", string][] = [
-    ["1", "Read", "allow", "已允許"],
-    ["2", "Write", "allow", "本次執行一律允許"],
-    ["3", "WebFetch", "deny", "已拒絕"],
-  ];
-  for (const [key, tool, behavior, badge] of keyed) {
-    const prompt = await relay(tool, { key });
-    await prompt.card.focus();
-    await page.keyboard.press(key);
-    expect((await prompt.reply).behavior).toBe(behavior);
-    await expect(prompt.card.locator(".agent-ask-result .copilot-badge")).toHaveText(badge);
-  }
+  // The keys answer once the card has focus: 1 allow, 3 deny. 2 (allow for
+  // this run) does nothing on a prompt that is not a run's.
+  const write = await relay("Write", { key: "2" });
+  await write.card.focus();
+  await page.keyboard.press("2");
+  await page.waitForTimeout(500);
+  expect((await pendingAsk(page, (a) => a.id === write.ask.id)).status).toBe("pending");
+  await expect(write.card.getByRole("button", { name: /^允許/ })).toBeVisible();
+  await write.card.focus();
+  await page.keyboard.press("1");
+  expect((await write.reply).behavior).toBe("allow");
+  await expect(write.card.locator(".agent-ask-result .copilot-badge")).toHaveText("已允許");
 
-  // Every settled prompt is still listed (the panel keeps the last five).
+  const webFetch = await relay("WebFetch", { key: "3" });
+  await webFetch.card.focus();
+  await page.keyboard.press("3");
+  expect((await webFetch.reply).behavior).toBe("deny");
+  await expect(webFetch.card.locator(".agent-ask-result .copilot-badge")).toHaveText("已拒絕");
+
+  // Every settled prompt is still listed: all five of them.
   await expect(panel.locator(".agent-ask-kind-permission")).toHaveCount(5);
 });
 
@@ -473,7 +481,8 @@ test("Station: Waiting on you and the war room list a permission ask, each with 
   const dialog = page.getByRole("dialog", { name: "Review permission" });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(`[data-ask-id="${ask.id}"]`)).toContainText("e2e-claude wants to run Bash");
-  await expect(dialog.getByRole("button", { name: /^Allow for this run/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Allow/ }).first()).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Allow for this run/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);
 
@@ -485,10 +494,9 @@ test("Station: Waiting on you and the war room list a permission ask, each with 
   await expect(asking).not.toHaveAccessibleName(/Allow Bash\?/);
   await asking.click();
   // Its menu names the kind of answer it waits for, as the dialog does.
-  // Soft, so the rest of the flow is still checked when it does not.
   const item = page.getByRole("menuitem", { name: /^(Review permission|Answer question)$/ });
   await expect(item).toBeVisible();
-  await expect.soft(item, "the war room menu names a permission ask by its kind").toHaveText("Review permission");
+  await expect(item, "the war room menu names a permission ask by its kind").toHaveText("Review permission");
   await item.click();
   const fromRoom = page.getByRole("dialog", { name: "Review permission" });
   await expect(fromRoom).toBeVisible();
@@ -555,23 +563,25 @@ test("a permission card fits a phone (390 px) without clipping (zh-TW)", async (
   const reply = agent.approveTool("Bash", { command });
   const ask = await pendingAsk(page, (a) => a.kind === "permission");
 
-  const card = cardOf(page, ask);
-  // At phone width the panel may need opening by hand.
-  if (!(await card.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    await page.keyboard.press("Control+Shift+A");
-  }
-  await expect(card).toBeVisible();
-  await card.getByText("輸入", { exact: true }).click();
-  await expect(card.locator("details pre")).toBeVisible();
-
   const inside = async (locator: Locator) => {
     const box = await locator.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390 + 1);
   };
+  const card = cardOf(page, ask);
+  // At phone width the panel may need opening by hand.
+  if (!(await card.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    await page.keyboard.press("Control+Shift+A");
+  }
+  await expect(card).toBeVisible();
+  // The command is in view, inside the card, with no click needed.
+  const input = card.locator(".agent-ask-tool-input pre");
+  await expect(input).toBeVisible();
+  await inside(input);
+
   await inside(card);
-  for (const name of [/^允許/, /^本次執行一律允許/, /^拒絕/]) {
+  for (const name of [/^允許/, /^拒絕/]) {
     const button = card.getByRole("button", { name });
     await expect(button).toBeVisible();
     await inside(button);
