@@ -139,6 +139,7 @@ describe("AgentPanel", () => {
           status: "answered",
           answer: "Port 5432",
           createdAt: 1700000001000,
+          decidedAt: Date.now() - 60_000,
         },
         {
           id: "ask-expired",
@@ -152,6 +153,7 @@ describe("AgentPanel", () => {
           question: "Run command?",
           status: "expired",
           createdAt: 1700000002000,
+          decidedAt: Date.now() - 30_000,
         },
       ],
     });
@@ -162,6 +164,63 @@ describe("AgentPanel", () => {
     expect(screen.getByText("Answered")).toBeInTheDocument();
     expect(screen.getByText("Answer: Port 5432")).toBeInTheDocument();
     expect(screen.getByText("Expired")).toBeInTheDocument();
+  });
+});
+
+describe("AgentPanel settled asks", () => {
+  const settled = (over: Record<string, unknown>) => ({
+    project: "alpha",
+    sessionId: "claude:1",
+    sessionName: "api-claude",
+    actorId: "alice",
+    agent: "claude",
+    kind: "question" as const,
+    status: "answered" as const,
+    createdAt: Date.now() - 120_000,
+    decidedAt: Date.now() - 60_000,
+    ...over,
+  });
+
+  it("keeps only the viewer's own recent answers, not old, auto-allowed or other people's asks", () => {
+    useAgents.setState({
+      viewer: { id: "alice", name: "alice", role: "member" },
+      asks: [
+        settled({ id: "recent", question: "Recent answer?", answer: "yes" }),
+        settled({ id: "old", question: "Last week's question?", decidedAt: Date.now() - 7 * 86_400_000 }),
+        settled({
+          id: "auto",
+          kind: "permission",
+          tool: "Bash",
+          question: "claude wants to run Bash",
+          status: "approved",
+          decision: "approve_run",
+          answer: "approve_run",
+          note: "allowed for this run",
+          runId: "run-1",
+        }),
+        settled({ id: "bobs", actorId: "bob", sessionId: "codex:2", question: "Bob's question?" }),
+      ],
+    });
+
+    render(<AgentPanel onClose={vi.fn()} />);
+
+    expect(screen.getByText("Recent answer?")).toBeInTheDocument();
+    expect(screen.queryByText("Last week's question?")).toBeNull();
+    expect(screen.queryByText("Allowed for this run")).toBeNull();
+    expect(screen.queryByText("Bob's question?")).toBeNull();
+  });
+
+  it("shows no asks section once nothing is pending or recently settled", () => {
+    useAgents.setState({
+      asks: [settled({ id: "old", question: "Last week's question?", decidedAt: Date.now() - 7 * 86_400_000 })],
+    });
+    const { container } = render(<AgentPanel onClose={vi.fn()} />);
+    expect(container.querySelector(".agent-asks-section")).toBeNull();
+  });
+
+  it("names the section for what it holds, pending and just answered", () => {
+    render(<AgentPanel onClose={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Agent asks" })).toBeInTheDocument();
   });
 });
 
