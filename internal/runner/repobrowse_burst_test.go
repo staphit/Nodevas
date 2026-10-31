@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
 
@@ -30,13 +31,20 @@ func untilTestDeadline(t *testing.T) time.Duration {
 // Clicking through folders fast is normal use, not abuse: a burst far past
 // the concurrency limit queues and every request is answered.
 //
-// The burst's callers listen until the test's deadline: how fast 200 reads
-// get through 4 slots is the machine's load (beside a full parallel test run
-// the last ones waited past repoSlotWait), and what is checked here is that
-// they queue, not how fast. TestRepoBrowseWaitEndsAtRepoSlotWait checks the
-// bound.
+// A queued read waits its turn for as long as the hub waits for its answer
+// (runners.DefaultRepoTimeout): a shorter repoSlotWait refuses a burst busy
+// while the hub is still listening. That is checked on the real value first.
+// The burst's callers then listen until the test's deadline: how fast 200
+// reads get through 4 slots is the machine's load (beside a full parallel
+// test run the last ones waited past repoSlotWait), and what is checked here
+// is that they queue, not how fast. TestRepoBrowseWaitEndsAtRepoSlotWait
+// checks the bound.
 func TestRepoBrowseBurstQueuesInsteadOfRefusing(t *testing.T) {
 	cfg, _ := browseRepo(t)
+	if repoSlotWait < runners.DefaultRepoTimeout {
+		t.Fatalf("repoSlotWait is %v, under the hub's %v: a burst is refused busy while the hub still waits for it",
+			repoSlotWait, runners.DefaultRepoTimeout)
+	}
 	pinRepoSlotWait(t, untilTestDeadline(t))
 	const n = 200
 	var wg sync.WaitGroup
