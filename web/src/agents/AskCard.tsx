@@ -244,7 +244,9 @@ export function AskCard({
           )}
         </div>
       ) : !canAnswer ? (
-        <p className="agent-ask-not-yours">{t("agents.ask.notYours")}</p>
+        <p className="agent-ask-not-yours">
+          {t(kind === "permission" ? "agents.ask.notYoursPermission" : "agents.ask.notYours")}
+        </p>
       ) : kind === "question" ? (
         <>
           <textarea

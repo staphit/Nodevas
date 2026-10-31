@@ -174,7 +174,7 @@ describe("Station ask dialog answering", () => {
       error: null,
     });
     open("ask-perm");
-    expect(screen.getByText(/Only the person whose session asked/)).toBeInTheDocument();
+    expect(screen.getByText(/Only the runner's owner/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Allow|Deny/ })).toBeNull();
     fireEvent.keyDown(screen.getByRole("group", { name: /tool permission/ }), { key: "1" });
     expect(answerAsk).not.toHaveBeenCalled();

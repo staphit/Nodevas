@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 
-import { canManageSession, useAgents } from "../agents/agentStore";
+import { canAnswerAsk, useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { useBudget } from "../runs/budgetStore";
 import { useRuns } from "../runs/runStore";
@@ -28,7 +28,7 @@ export function useWaitingItems(): WaitingItem[] {
         held,
         reviews,
         budgetExceeded: exceeded,
-        canAnswer: (ask) => canManageSession(ask, viewer),
+        canAnswer: (ask) => canAnswerAsk(ask, viewer),
         now: Date.now(),
       }),
     [runs, active, asks, held, reviews, exceeded, viewer],

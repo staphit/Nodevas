@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 import type { SessionChange } from "../api/runs";
 import type { AgentAskKind } from "../api";
 import { AskCard } from "../agents/AskCard";
-import { canManageSession, useAgents } from "../agents/agentStore";
+import { canAnswerAsk, useAgents } from "../agents/agentStore";
 import { openAutopilot } from "../autopilot/openAutopilot";
 import { useI18n } from "../i18n";
 import { RunDiffDialog } from "../runs/DiffViewer";
@@ -237,7 +237,7 @@ function AskDialog({ askId, onClose }: { askId: string; onClose: () => void }) {
         <AskCard
           ask={ask}
           submitting={submitting}
-          canAnswer={canManageSession(ask, viewer)}
+          canAnswer={canAnswerAsk(ask, viewer)}
           onSelectNode={(nodeId) => {
             onClose();
             void useApp.getState().openTab(nodeId).catch(reportError);

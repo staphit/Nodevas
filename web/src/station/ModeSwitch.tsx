@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 
-import { canManageSession, useAgents } from "../agents/agentStore";
+import { canAnswerAsk, useAgents } from "../agents/agentStore";
 import { useAutopilot } from "../autopilot/autopilotStore";
 import { setProjectMode } from "./projectMode";
 import { useI18n } from "../i18n";
@@ -42,7 +42,7 @@ export function useWaitingCount(): number {
         held,
         reviews,
         budgetExceeded: exceeded,
-        canAnswer: (ask) => canManageSession(ask, viewer),
+        canAnswer: (ask) => canAnswerAsk(ask, viewer),
         now: Date.now(),
       }).length,
     [runs, runsProject, activeProject, active, asks, held, reviews, exceeded, viewer],

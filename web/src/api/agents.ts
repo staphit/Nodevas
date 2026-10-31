@@ -115,6 +115,9 @@ export interface AgentAsk {
   runId?: string;
   tool?: string;
   toolInput?: string;
+  /** Whether the viewer may answer it: set on an ask the hub lists for a
+   * person (GET /api/agents/asks). Absent elsewhere. */
+  canAnswer?: boolean;
 }
 
 export interface AgentRosterResponse {

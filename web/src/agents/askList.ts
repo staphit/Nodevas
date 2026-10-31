@@ -1,5 +1,5 @@
 import type { Actor, AgentAsk } from "../api";
-import { canManageSession } from "./agentStore";
+import { canAnswerAsk } from "./agentStore";
 
 /** The note on a permission prompt the hub allowed without asking, on an
  * earlier "allow for this run" (agents.AllowedForRunNote). */
@@ -28,7 +28,7 @@ export function drawerAsks(asks: AgentAsk[], viewer: Actor | null, now: number):
       (a) =>
         a.status !== "pending" &&
         !isAutoAllowedAsk(a) &&
-        canManageSession(a, viewer) &&
+        canAnswerAsk(a, viewer) &&
         (a.decidedAt ?? a.createdAt) >= now - SETTLED_ASK_WINDOW_MS,
     )
     .sort((a, b) => (b.decidedAt ?? b.createdAt) - (a.decidedAt ?? a.createdAt))

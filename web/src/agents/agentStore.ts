@@ -44,6 +44,21 @@ export function canManageSession(
   return !viewer || viewer.role === "admin" || session.actorId === viewer.id;
 }
 
+/**
+ * Whether the viewer may answer an ask. The hub says so on every ask it lists
+ * (canAnswer), and that decides; only without it does the session rule apply,
+ * with a permission prompt its runner owner's alone: answering it runs a tool
+ * on their machine, which an administrator was never lent.
+ */
+export function canAnswerAsk(
+  ask: Pick<AgentAsk, "actorId" | "kind" | "canAnswer">,
+  viewer: Actor | null,
+): boolean {
+  if (typeof ask.canAnswer === "boolean") return ask.canAnswer;
+  if (ask.kind === "permission") return !viewer || ask.actorId === viewer.id;
+  return canManageSession(ask, viewer);
+}
+
 /** A message the viewer wrote themselves needs no notification. */
 function sentByViewer(message: AgentMessage, viewer: Actor | null): boolean {
   if (message.senderAgent && message.senderAgent !== "human") return false;
@@ -428,7 +443,7 @@ export const useAgents = create<AgentStoreState>((set, get) => ({
     } catch {
       /* fall through: nothing to show */
     }
-    if (!ask || ask.status !== "pending" || !canManageSession(ask, get().viewer)) return;
+    if (!ask || ask.status !== "pending" || !canAnswerAsk(ask, get().viewer)) return;
     const sessionName = ask.sessionName || ask.agent || ask.sessionId;
     let toastFrom = sessionName;
     let notifyTitle = translate("agents.ask.notifyTitle", undefined, { session: sessionName });

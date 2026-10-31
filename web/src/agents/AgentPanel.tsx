@@ -13,7 +13,7 @@ import { WaitingForYouButton } from "../autopilot/HumanReview";
 import { useApp } from "../store";
 import { AgentChatEmpty } from "./AgentChatEmpty";
 import { AskCard } from "./AskCard";
-import { canManageSession, useAgents } from "./agentStore";
+import { canAnswerAsk, canManageSession, useAgents } from "./agentStore";
 import { drawerAsks } from "./askList";
 import {
   addAttachments,
@@ -305,7 +305,7 @@ export function AgentPanel({ onClose, docked = false }: { onClose?: () => void; 
               key={ask.id}
               ask={ask}
               submitting={submittingAskIds[ask.id]}
-              canAnswer={canManageSession(ask, viewer)}
+              canAnswer={canAnswerAsk(ask, viewer)}
               onSelectNode={(nodeId) => void openTab(nodeId)}
               onAnswer={(payload) => void answerAsk(ask.id, payload)}
             />
