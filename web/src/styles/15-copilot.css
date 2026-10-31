@@ -489,6 +489,12 @@
   white-space: nowrap;
   font-weight: 600;
 }
+/* An ask's head carries agent, tool, run, node and countdown chips: the title
+   keeps a real width and the chips wrap to the next line around it. */
+.copilot-permission-title {
+  flex: 1 1 auto;
+  min-width: min(100%, 12ch);
+}
 .copilot-tool-name {
   display: block;
   margin-top: 2px;

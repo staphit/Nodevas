@@ -169,14 +169,14 @@ export function AskCard({
       data-ask-id={ask.id}
     >
       <div className="copilot-permission-head">
-        <span id={titleId} className="copilot-permission-title">
+        <span id={titleId} className="copilot-permission-title" title={getTitle()}>
           {getTitle()}
         </span>
         {ask.agent && <span className="copilot-badge">{ask.agent}</span>}
         {kind === "permission" && ask.tool && <span className="copilot-badge">{ask.tool}</span>}
         {ask.runId && (
-          <span className="agent-node-chip">
-            {t("agents.ask.run", { runId: ask.runId })}
+          <span className="agent-node-chip" title={t("agents.ask.run", { runId: ask.runId })}>
+            {t("agents.ask.run", { runId: ask.runId.slice(0, 8) })}
           </span>
         )}
         {ask.nodeId && (
