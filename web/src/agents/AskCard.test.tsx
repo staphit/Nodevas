@@ -257,6 +257,18 @@ describe("AskCard by kind", () => {
     expect(screen.getByText("已拒絕")).toBeInTheDocument();
   });
 
+  it("labels its answer and note fields for screen readers and autofill, not by placeholder alone", () => {
+    const { rerender } = render(<AskCard ask={{ ...baseAsk, kind: "question" }} onAnswer={vi.fn()} />);
+    const answer = screen.getByRole("textbox", { name: "Your answer" });
+    expect(answer).toHaveAttribute("name");
+
+    rerender(<AskCard ask={{ ...baseAsk, kind: "choice", options: ["a", "b"] }} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "Note for the agent" })).toHaveAttribute("name");
+
+    rerender(<AskCard ask={{ ...baseAsk, kind: "approval" }} onAnswer={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "Note for the agent" })).toHaveAttribute("name");
+  });
+
   it("renders 不回答 for dismiss button in zh-TW", () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
     const questionAsk: AgentAsk = {
