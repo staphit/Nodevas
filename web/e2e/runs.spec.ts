@@ -71,6 +71,20 @@ const events = [
   { seq: 6, type: "usage", at, usage: { inputTokens: 120345, outputTokens: 4567, costUsd: 0.4211 } },
 ];
 
+// The run waits on the viewer: a permission prompt for a long command, cut to
+// one line by the hub.
+const asks = [
+  {
+    id: "ask1",
+    kind: "permission",
+    status: "pending",
+    tool: "Bash",
+    preview: "go test ./internal/... -run TestAVeryLongTestNameThatKeepsGoingAndGoingUntilTheHubCutsItToOneLineOfAHundredAndTw…",
+    createdAt: Date.parse("2026-10-24T08:00:02Z"),
+    canAnswer: true,
+  },
+];
+
 async function mockRuns(page: Page) {
   // The dialog offers only the viewer's own runners, so the fake one belongs
   // to whoever this server says the browser is.
@@ -82,6 +96,7 @@ async function mockRuns(page: Page) {
   await page.route(/\/api\/runs\/run1\/events/, (route) =>
     route.fulfill({ json: { events, more: false } }),
   );
+  await page.route(/\/api\/runs\/run1\/asks/, (route) => route.fulfill({ json: { asks } }));
   await page.route(/\/api\/runs\?/, (route) => route.fulfill({ json: { runs: [run] } }));
 }
 
@@ -127,6 +142,7 @@ for (const [name, viewport] of Object.entries({
     const timeline = drawer.getByRole("list", { name: "執行過程" });
     await expect(timeline.getByText("I will add the route.")).toBeVisible();
     await expect(timeline.getByText("錯誤結果 · Bash")).toBeVisible();
+    await expect(timeline.getByRole("button", { name: /^等你回覆：Bash · go test \.\/internal/ })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "取消執行" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
