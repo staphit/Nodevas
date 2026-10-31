@@ -189,3 +189,83 @@ func TestGitHistoryFirstCommitDoesNotSplitASession(t *testing.T) {
 		t.Fatalf("newest version %q, %v; want the last save", newest, err)
 	}
 }
+
+// The node is saved while the repository's first commit is being made: after
+// the versions queued so far were taken, before the work tree was read. That
+// save's session start was committed after the first commit, which had
+// already taken the save's own content from disk. History read: the typed
+// text, then a change taking it away again, which nobody made; and the newest
+// version, the one a restore offers first, was the blank document. This is
+// what e2e editor.spec.ts "previews a file version before restoring it" hit
+// under load.
+func TestGitHistorySaveDuringTheFirstCommitIsNotUndone(t *testing.T) {
+	requireGit(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "nodes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(root)
+	g := newGitHistory(s, time.Hour)
+	s.historyMu.Lock()
+	s.historyImpl = g
+	s.historyMu.Unlock()
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	g.gitMu.Lock()
+	created, err := engine.MarshalGraph(&engine.Graph{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateGraph(created); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateNode(ann, &engine.Node{ID: "alpha", Title: "Alpha"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	start, err := os.ReadFile(s.NodePath("alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := false
+	firstCommitHook = func() {
+		if saved {
+			return
+		}
+		saved = true
+		saveNode(t, s, ann, "alpha", "first\n")
+		saveNode(t, s, ann, "alpha", "second\n")
+	}
+	t.Cleanup(func() { firstCommitHook = nil })
+	g.gitMu.Unlock()
+	g.inflight.Wait()
+	if !saved {
+		t.Fatal("the first commit never ran")
+	}
+
+	versions, err := s.ListHistory("nodes/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contents []string
+	for _, version := range versions {
+		data, err := s.ReadHistory("nodes/alpha.md", version.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents = append(contents, string(data))
+	}
+	if len(contents) != 1 || contents[0] != string(start) {
+		t.Fatalf("node has versions %q (newest first) before the window closed, want one: as created %q", contents, start)
+	}
+	if err := s.FlushHistory(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	versions, err = s.ListHistory("nodes/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newest, err := s.ReadHistory("nodes/alpha.md", versions[0].Name)
+	if err != nil || len(versions) != 2 || !strings.Contains(string(newest), "second") {
+		t.Fatalf("after the window: %d versions, newest %q, %v; want 2, the last save newest", len(versions), newest, err)
+	}
+}

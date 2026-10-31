@@ -515,6 +515,10 @@ func (g *gitHistory) readyLocked(ctx context.Context) (*gitrepo.Repo, error) {
 	return repo, nil
 }
 
+// firstCommitHook is a seam: tests save while the repository's first commit
+// is being made. Nil outside tests.
+var firstCommitHook func()
+
 // historyCopy is one file under .vised/history.
 type historyCopy struct {
 	// rel is the file it is a version of; name is the copy's file name,
@@ -598,6 +602,9 @@ func (g *gitHistory) importCopies(ctx context.Context, repo *gitrepo.Repo) error
 		if err := g.commitSegmentsLocked(ctx, repo, titles, segments); err != nil {
 			return err
 		}
+	}
+	if firstCommitHook != nil {
+		firstCommitHook()
 	}
 	paths, err := g.s.historyTrackedFiles()
 	if err != nil {
