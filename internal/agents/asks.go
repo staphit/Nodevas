@@ -490,7 +490,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if err := h.insertPendingAsk(ctx, ask); err != nil {
 		return Ask{}, err
 	}
-	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(question, 200))
+	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(askActionDetail(ask), 200))
 
 	// The person may have allowed the tool for the run between the check
 	// above and the insert, after releaseRunPrompts listed what waited:
@@ -659,9 +659,20 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 	} else if err := h.database.Tx(ctx, func(tx *sql.Tx) error { return insertAsk(ctx, tx, ask) }); err != nil {
 		return Ask{}, err
 	}
-	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(ask.Question, 200))
+	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(askActionDetail(ask), 200))
 	h.emit(ask.Project, AskAllowedForRunEvent, ask)
 	return ask, nil
+}
+
+// askActionDetail is what the session action log keeps of ask. The log is
+// served to everyone who can read the project, so a permission prompt is
+// logged as Viewer.Shown shows it to them: by its tool, never its question,
+// which quotes the call's input.
+func askActionDetail(ask Ask) string {
+	if ask.Kind == AskKindPermission {
+		return fmt.Sprintf("Allow %s?", ask.Tool)
+	}
+	return ask.Question
 }
 
 // releaseRunPrompts allows the permission prompts of run, tool and runKey
