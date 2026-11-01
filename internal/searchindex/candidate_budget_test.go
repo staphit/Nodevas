@@ -18,8 +18,9 @@ import (
 // each, marked oversize as the indexer marks a document whose tokens did not
 // fit, every one ending in "zq marker". It writes the rows directly: indexing
 // that much text takes a second a document. It returns the view a search runs
-// on, and keeps none of the text.
-func plantOversizeDocs(t *testing.T, count int) *indexView {
+// on, and keeps none of the text. adjust, when set, changes each row before
+// it is written.
+func plantOversizeDocs(t *testing.T, count int, adjust func(*putRow)) *indexView {
 	t.Helper()
 	ctx := context.Background()
 	store := newDocStore(testpg.New(t))
@@ -36,6 +37,9 @@ func plantOversizeDocs(t *testing.T, count int) *indexView {
 		row := putRow{nodeID: id, path: "nodes/" + id + ".md", stamp: "1", title: id,
 			meta: "title " + id, body: body.String(), oversize: true,
 			metaTokens: []string{}, bodyTokens: []string{}}
+		if adjust != nil {
+			adjust(&row)
+		}
 		if err := store.writeRows(ctx, "p", []putRow{row}); err != nil {
 			t.Fatalf("plant %s: %v", id, err)
 		}
@@ -81,7 +85,7 @@ func peakHeapGrowth(fn func()) uint64 {
 // project per request: hundreds of megabytes for a query that matches
 // nothing, a few gigabytes at the cap.
 func TestSearchMemoryIsBoundedWithManyOversizeDocuments(t *testing.T) {
-	view := plantOversizeDocs(t, 72)
+	view := plantOversizeDocs(t, 72, nil)
 	ctx := context.Background()
 
 	t.Run("no match holds no text", func(t *testing.T) {
@@ -108,6 +112,53 @@ func TestSearchMemoryIsBoundedWithManyOversizeDocuments(t *testing.T) {
 		if len(matches) == 0 || total > maxCandidateBytes {
 			t.Fatalf("%d matches holding %d MiB, want some and at most %d MiB",
 				len(matches), total>>20, maxCandidateBytes>>20)
+		}
+	})
+}
+
+// The ranked search fetches a few times its limit of the best-scoring
+// documents whole, up to 300, and every node whose title is the query
+// besides: as many megabyte documents as a member cares to plant.
+func TestRankedSearchMemoryIsBounded(t *testing.T) {
+	view := plantOversizeDocs(t, 72, func(row *putRow) {
+		row.title = "same title"
+		row.bodyTokens = []string{"zq"}
+	})
+	view.titles = map[string]string{}
+	for _, id := range view.order {
+		view.titles[id] = "same title"
+	}
+	ctx := context.Background()
+
+	t.Run("candidates stop at the byte budget", func(t *testing.T) {
+		ranked, err := view.rank(ctx, "zq", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total := 0
+		for _, match := range ranked {
+			total += len(match.Text)
+		}
+		if len(ranked) == 0 || total > maxCandidateBytes {
+			t.Fatalf("%d results holding %d MiB, want some and at most %d MiB",
+				len(ranked), total>>20, maxCandidateBytes>>20)
+		}
+	})
+
+	t.Run("exact titles are read only up to the limit", func(t *testing.T) {
+		var ranked []Ranked
+		var err error
+		growth := peakHeapGrowth(func() { ranked, err = view.rank(ctx, "same title", 3) })
+		if err != nil || len(ranked) != 3 {
+			t.Fatalf("rank = %d results, %v", len(ranked), err)
+		}
+		for i, match := range ranked {
+			if match.NodeID != view.order[i] || match.Match != MatchTitle {
+				t.Fatalf("result %d = %s (%s), want %s by title in graph order", i, match.NodeID, match.Match, view.order[i])
+			}
+		}
+		if growth > 32<<20 {
+			t.Fatalf("three title results raised the heap by %d MiB", growth>>20)
 		}
 	})
 }
