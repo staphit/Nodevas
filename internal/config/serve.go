@@ -268,7 +268,8 @@ func LoadServeConfig(path string, optional bool) (ServeConfig, error) {
 // That file is workspace content, as likely shared or cloned as the notes
 // beside it, so it may not widen whom the server trusts: the names it
 // answers on, proxies and Access, the transport, copilot bypass, or where
-// the copilot sends its API key. Those belong to the operator, in a file
+// the copilot's API key or the SMTP password and sign-in passcodes go.
+// Those belong to the operator, in a file
 // named with --config (or NODEVAS_CONFIG), the environment, or flags.
 func LoadWorkspaceServeConfig(path string) (ServeConfig, error) {
 	cfg, err := LoadServeConfig(path, true)
@@ -278,7 +279,7 @@ func LoadWorkspaceServeConfig(path string) (ServeConfig, error) {
 	if keys := trustSettings(cfg); len(keys) > 0 {
 		return cfg, fmt.Errorf(
 			"server config %q is the workspace's own nodevas.yaml and may not set %s: "+
-				"these decide whom the server trusts, so move them to a file given with --config "+
+				"these decide whom the server trusts or where its secrets go, so move them to a file given with --config "+
 				"(or NODEVAS_CONFIG), the NODEVAS_SERVE_* / NODEVAS_COPILOT_* environment, or flags",
 			path, strings.Join(keys, ", "))
 	}
@@ -286,7 +287,7 @@ func LoadWorkspaceServeConfig(path string) (ServeConfig, error) {
 }
 
 // trustSettings lists the keys of cfg that differ from the defaults in a
-// way that widens whom the server trusts.
+// way that widens whom the server trusts or sends its secrets to.
 func trustSettings(cfg ServeConfig) []string {
 	defaults := DefaultServeConfig()
 	var keys []string
@@ -304,6 +305,7 @@ func trustSettings(cfg ServeConfig) []string {
 	add(cfg.Access != AccessConfig{}, "access")
 	add(cfg.Copilot.AllowBypass != nil && *cfg.Copilot.AllowBypass, "copilot.allow_bypass")
 	add(strings.TrimSpace(cfg.Copilot.BaseURL) != "" && !loopbackURL(cfg.Copilot.BaseURL), "copilot.base_url")
+	add(strings.TrimSpace(cfg.SMTP.Host) != "" && !loopbackHost(strings.TrimSpace(cfg.SMTP.Host)), "smtp.host")
 	return keys
 }
 
