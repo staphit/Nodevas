@@ -64,7 +64,7 @@ Metadata is saved as fields change. A status change is staged until you press **
 - Multiple projects and subprojects in one workspace tree.
 - Ctrl/⌘+K searches the nodes and pages of every project you can open, subpages included, and runs commands.
 - **Problems** (board header) lists validation warnings, schedule issues such as overdue nodes, and hints.
-- Markdown, plain text, HTML, and Word document pages. Previews drop anything that could pose as the app (image maps, dialogs, `background` attributes, class names of their own), Markdown nested more than 64 levels deep shows as plain text past that depth, and in a Word document tables nested more than 32 deep become text and list levels past 32 join level 32.
+- Markdown, plain text, HTML, and Word document pages. Previews drop anything that could pose as the app (image maps, dialogs, `background` attributes, class names of their own), Markdown nested more than 64 levels deep shows as plain text past that depth, and in a Word document tables nested more than 32 deep become text and list levels past 32 join level 32. A Word file that does not decode is refused (`400`) on import and creates no page.
 - Imports from Markdown, JSON Canvas, and `.veproj` or `.zip` project bundles; exports to `.veproj` (a project or the whole workspace), JSON Canvas, and, for documents, Word, plain text, HTML, Markdown, and PDF.
 - Filters for status, assignee, tag, priority and text, and saved views per project.
 - Drafts, history, trash, conflict detection, and filesystem change notifications.

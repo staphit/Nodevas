@@ -6,7 +6,7 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
 
 - **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
 - **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens; permission prompts are covered under [Permission prompts](#permission-prompts-off-by-default).
-- **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run.
+- **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run. A runner pushes revisions only to branches its own runs opened for that node (its PR watch list); revising another member's PR, or one whose watch entry is gone (a closed PR reopened, say), is declined.
 - **Agent chat.** Agents see who else is working, message each other, and can stop to ask you something through the hub (`ask_user`); see [Answering your agents](#answering-your-agents).
 - **Station.** Each project's Station (the top bar's Board | Station | Settings switch) puts all of this in one place:
   - **Pause everything**, at the top: it pauses the autopilots you started and cancels runs that have not started (optionally the running ones too). **Resume all** then resumes those autopilots where they stopped;
@@ -21,7 +21,7 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
   - Runs need your acceptance at the runner's terminal. Remote dispatch needs a step-up passcode and an auto-accept allowlist you set on the runner.
   - Remote merge is off until you turn it on.
   - Reviews, plans and judges (goal QA and checklist checks) run read only, without the repository's own agent config; Claude Code also gets no WebFetch, WebSearch or Monitor there.
-  - Agent config a run adds or changes (`.claude/settings.json`, `.mcp.json`, `.codex/`, `.gemini/`, `opencode.json` and the like) is left out of its commit, and the worktree is kept so you can commit it yourself.
+  - Agent config a run adds or changes (`.claude/settings.json`, `.mcp.json`, `.codex/`, `.gemini/`, `opencode.json` and the like) is left out of its commit, and the worktree is kept so you can commit it yourself. `nodevas runner status` lists kept worktrees; `nodevas runner prune-kept [--dry-run]` removes those with nothing but the left-out config (branches stay); nothing removes them on its own.
   - Permission prompts are refused at a headless run unless you [relay them](#permission-prompts-off-by-default), and an auto-accepted run is relayed only with `allow-shell` on.
   - The project explorer's **Files** tab shows your runners' repositories to you alone, read-only, and hides files that look like secrets (`.env`, keys, `.ssh`, credentials). `nodevas runner set repoBrowse off` and a runner restart turn that off.
   - Put the hub behind Cloudflare Access; the runner connects with a service token.
@@ -70,7 +70,7 @@ When a headless implement run stops because its agent hit a usage limit or a rat
 - It writes a **handoff note**: what the agent was asked, its last messages, the files changed, its last command, and what was left of its own plan. Secrets are redacted and the note is capped at 8 KB.
 - The next run of the task continues from that branch, whether it is the next model in the fallback chain or the same model after the limit resets. The note goes into its prompt as data, not instructions. The PR still targets the original base, and the review covers the whole diff.
 - With no fallback left, the run waits for the limit to reset. The time comes from the agent's own message ("resets 3pm", "try again in 2 hours", Retry-After) or a default backoff (5 minutes for a rate limit, 1 hour for a quota). The run shows **Waiting for limit reset · retry at HH:MM** with **Retry now** and **Cancel**. The wait survives a hub restart. When it ends, the run is offered like any other: the runner still has to accept it, and the daily budget still applies. A task waits at most three times. Autopilot counts a waiting task as queued, not failed.
-- The runner only continues from handoff branches it made itself, for the same repository, still at the commit it recorded. The hub can name such a branch but not any other ref. Each time the runner makes a handoff branch, it deletes those older than 30 days or beyond the newest 200, if they are still at their recorded commit.
+- The runner only continues from handoff branches it made itself, for the same repository and node, still at the commit it recorded. The hub can name such a branch but not any other ref. Each time the runner makes a handoff branch, it deletes those older than 30 days or beyond the newest 200, if they are still at their recorded commit.
 
 A model the login cannot use, or a missing CLI, fails before the agent's first turn. There is nothing to keep then and waiting would not help, so those failures only fall through the chain, as before.
 
@@ -99,7 +99,7 @@ A verify job runs no agent and no model. It runs code an agent wrote, outside th
 
 Under **Tiers & routing**, **Auto routing in this project** (off by default) picks the agent and model for a dispatch or an autopilot task when none of your routing rules matches: the cheapest combination that meets the role's required tier, with a share of tasks (10% by default) given to Probation combinations to gather samples. Budgets still apply.
 
-Every 6 hours the hub deletes raw events older than 180 days (finished runs' log lines, agent session actions and routing picks) and blanks old diffs; runs, usage, verdicts and scorecards stay. Administrators change this under **Keep raw events for** (30 to 3650 days, or Forever).
+Every 6 hours the hub deletes raw events older than 180 days (finished runs' log lines, agent session actions and routing picks, and the audit rows of refused sign-ins, step-ups, authenticator codes and device links) and blanks old diffs; runs, usage, verdicts, scorecards and the rest of the audit log stay. Administrators change this under **Keep raw events for** (30 to 3650 days, or Forever).
 
 ## Demo videos
 
