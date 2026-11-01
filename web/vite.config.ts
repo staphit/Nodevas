@@ -14,12 +14,19 @@ function hostName(host: string): string {
   return name.toLowerCase();
 }
 
+// Headers a proxy or tunnel adds to say whom it forwards for. A browser
+// never sends them.
+const forwardingHeaders = ["x-forwarded-for", "x-forwarded-host", "forwarded", "x-real-ip", "cf-connecting-ip"];
+
 // devPageOnly refuses (404) a request that is not from a page this dev
 // server served: a Host that is not this machine or an IP literal (a name
 // rebound to this machine; Vite checks Host on plain requests but not on
 // proxied WebSocket upgrades), an Origin other than the dev server's own,
-// or a browser saying the request came from another site.
+// a browser saying the request came from another site, or a loopback peer
+// that is a tunnel or proxy forwarding someone else (presentToBackend would
+// make it look like the local person).
 const devPageOnly: ProxyOptions["bypass"] = (req) => {
+  if (loopbackPeer(req) && forwardingHeaders.some((header) => req.headers[header] !== undefined)) return false;
   const host = req.headers.host ?? "";
   const name = hostName(host);
   if (name !== "localhost" && !name.endsWith(".localhost") && isIP(name) === 0) return false;
