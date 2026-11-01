@@ -418,3 +418,8 @@ func (v Viewer) MayAnswer(a Ask) bool {
 	}
 	return v.Admin
 }
+
+// ShownMessage is m as v may see it in the project's message list.
+func (v Viewer) ShownMessage(m Message) Message {
+	return m
+}
