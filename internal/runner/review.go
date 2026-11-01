@@ -461,7 +461,7 @@ func (j *jobs) postReview(r *run, text, verdict string) error {
 	fmt.Fprintf(&b, "**Nodevas review** (%s/%s) — verdict: %s\n\n", job.Agent, model, shown)
 	b.WriteString(strings.TrimSpace(text))
 	fmt.Fprintf(&b, "\n\n---\n\nNodevas-Node: %s\nNodevas-Run: %s\n", oneLine(job.NodeID), oneLine(job.RunID))
-	body := truncateUTF8(redact.String(b.String()), maxReviewComment)
+	body := truncateUTF8(redact.Output(b.String()), maxReviewComment)
 	if _, err := gh.call(j.ctx, r.repo.Path, body, "pr", "comment", job.PRURL, "--body-file", "-"); err != nil {
 		return ghError("gh pr comment", err)
 	}

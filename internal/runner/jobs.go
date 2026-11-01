@@ -871,8 +871,8 @@ func minutesText(d time.Duration) string {
 // emit stamps an event and queues it.
 func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 	// Whatever the agent read or printed, a key does not reach the hub.
-	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
-	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
+	ev.Text = adapter.Truncate(redact.Output(ev.Text), runnerwire.MaxEventText)
+	ev.Input = adapter.Truncate(redact.Output(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
 	r.trail.see(ev)
 	r.seq++
@@ -901,9 +901,9 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	// Every failed run says why in a word the hub can route on; a failure
 	// nothing recognised (a worktree git refused, a push) is the task's.
-	result.Summary, result.Error = redact.String(result.Summary), redact.String(result.Error)
+	result.Summary, result.Error = redact.Output(result.Summary), redact.Output(result.Error)
 	if pr != nil {
-		pr.Error = redact.String(pr.Error)
+		pr.Error = redact.Output(pr.Error)
 	}
 	switch {
 	case result.Status != runnerwire.RunFailed:

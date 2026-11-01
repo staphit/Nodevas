@@ -31,13 +31,34 @@ var patterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bxox[abposr]-[A-Za-z0-9-]{10,}`),
 	// JSON Web Tokens.
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
-	// Nodevas runner tokens (runnerwire.TokenPrefix).
+	// Nodevas runner tokens (runnerwire.TokenPrefix) and device links
+	// (runnerwire.LinkPrefix).
 	regexp.MustCompile(`\bnvr_[A-Za-z0-9_-]{16,}`),
+	regexp.MustCompile(`\bnvlink1\.[A-Za-z0-9_-]{16,}=*`),
+	// Google API keys (Gemini among them).
+	regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`),
+	// Stripe live secret and restricted keys.
+	regexp.MustCompile(`\b[rs]k_live_[0-9A-Za-z]{16,}`),
+	// GitLab personal access tokens, Hugging Face and npm tokens.
+	regexp.MustCompile(`\bglpat-[0-9A-Za-z_-]{20,}`),
+	regexp.MustCompile(`\bhf_[A-Za-z0-9]{30,}`),
+	regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`),
+}
+
+// kept are secrets whose surroundings stay: the password of a URL
+// (scheme://user:password@host) and an HTTP bearer value.
+var kept = []struct {
+	re   *regexp.Regexp
+	with string
+}{
+	{regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@\s/]+@`), "${1}" + Placeholder + "@"},
+	{regexp.MustCompile(`(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}`), "${1}" + Placeholder},
 }
 
 // quick are substrings one of which every pattern's match contains: text
 // without any of them is not scanned.
-var quick = []string{"PRIVATE KEY", "sk-", "gh", "github_pat_", "AKIA", "ASIA", "xox", "eyJ", "nvr_"}
+var quick = []string{"PRIVATE KEY", "sk-", "gh", "github_pat_", "AKIA", "ASIA", "xox", "eyJ", "nvr_",
+	"nvlink1.", "AIza", "k_live_", "glpat-", "hf_", "npm_", "://", "earer", "EARER"}
 
 // String is s with every secret-looking string replaced by Placeholder.
 func String(s string) string {
@@ -46,6 +67,9 @@ func String(s string) string {
 	}
 	for _, re := range patterns {
 		s = re.ReplaceAllString(s, Placeholder)
+	}
+	for _, k := range kept {
+		s = k.re.ReplaceAllString(s, k.with)
 	}
 	return s
 }
@@ -59,6 +83,18 @@ func mayContain(s string) bool {
 	return false
 }
 
-// Output is String for a run's output (events, summary, errors, PR bodies,
-// review comments).
-func Output(s string) string { return String(s) }
+// secretAssignment is an environment-style assignment to a secret-sounding
+// name, as an `env` dump or a printed .env file has them: the name in
+// capitals, so prose ("the token: it expires") keeps its words.
+var secretAssignment = regexp.MustCompile(`\b([A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH)[A-Z0-9_]*)(\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|\S+)`)
+
+// Output is String for a run's output on its way off the machine (events,
+// summary, errors, PR bodies, review comments), plus the values of secret
+// assignments. A diff keeps String alone: an assignment there is code.
+func Output(s string) string {
+	s = String(s)
+	if !strings.ContainsAny(s, "=:") {
+		return s
+	}
+	return secretAssignment.ReplaceAllString(s, "${1}${2}"+Placeholder)
+}
