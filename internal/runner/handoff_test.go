@@ -137,7 +137,7 @@ func TestRunHandoffRejectsForeignBranches(t *testing.T) {
 	gitT(t, env.repo, "branch", "nodevas/handoff/moved", "main")
 	dataDir := env.client.Config.DataDir
 	if err := registerHandoff(context.Background(), dataDir, handoffEntry{
-		Branch: "nodevas/handoff/moved", RepoID: "r1", RepoPath: env.repo, Commit: strings.Repeat("0", 40),
+		Branch: "nodevas/handoff/moved", RepoID: "r1", RepoPath: env.repo, NodeID: "n-1", Commit: strings.Repeat("0", 40),
 		RunID: "moved", CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatal(err)

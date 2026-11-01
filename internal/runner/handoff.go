@@ -51,7 +51,8 @@ type handoffEntry struct {
 	RepoID   string `json:"repoId"`
 	RepoPath string `json:"repoPath"`
 	// NodeID is the node the run was for; a handoff is continued only for
-	// it. Records from before it was kept have none.
+	// it. Records from before it was kept have none and are continued for
+	// no node; they expire like any other.
 	NodeID    string `json:"nodeId,omitempty"`
 	Commit    string `json:"commit"`
 	RunID     string `json:"runId"`
@@ -166,7 +167,12 @@ func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, no
 		if head != e.Commit {
 			return handoffEntry{}, fmt.Errorf("handoff branch %s moved since this runner made it", branch)
 		}
-		if e.NodeID != "" && e.NodeID != nodeID {
+		if e.NodeID == "" {
+			// Written before records named their node: it cannot be told
+			// apart from another node's, so it is continued for none.
+			return handoffEntry{}, fmt.Errorf("handoff branch %s has no node on record, so it is not continued", branch)
+		}
+		if e.NodeID != nodeID {
 			return handoffEntry{}, fmt.Errorf("handoff branch %s was made for another node, not %s", branch, nodeID)
 		}
 		return e, nil
