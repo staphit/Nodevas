@@ -380,6 +380,28 @@ func TestServeRefusesAPublicHostnameOnLoopbackWithoutAProxy(t *testing.T) {
 	}
 }
 
+// The nodevas.yaml serve finds in the workspace is workspace content: serve
+// refuses one that sets a public hostname, and points to --config. The same
+// file named with NODEVAS_CONFIG is the operator's and is applied.
+func TestServeRefusesTrustSettingsFromTheWorkspaceConfig(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "nodevas.yaml")
+	if err := os.WriteFile(file, []byte("hostname: rebind.attacker.example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"serve", "--project", root, "--port", fmt.Sprint(freePort(t)), "--no-runner"}
+	noDB := []string{"NODEVAS_REQUIRE_DATABASE_URL=1", db.URLEnv + "=", db.URLFileEnv + "="}
+	out, code := runNodevas(t, isolatedEnv(t, append(noDB, "NODEVAS_CONFIG=")...), "", args...)
+	if code == 0 || !strings.Contains(out, "hostname") || !strings.Contains(out, "--config") {
+		t.Fatalf("serve took hostname from the workspace nodevas.yaml (exit %d):\n%s", code, out)
+	}
+	out, code = runNodevas(t, isolatedEnv(t, append(noDB, "NODEVAS_CONFIG="+file)...), "", args...)
+	// Applied, the public name on loopback now needs --behind-proxy.
+	if code == 0 || !strings.Contains(out, "--behind-proxy") {
+		t.Fatalf("serve ignored the hostname in the file NODEVAS_CONFIG named (exit %d):\n%s", code, out)
+	}
+}
+
 // Every sign-in endpoint gets the same body cap, not just the one that was
 // there first.
 func TestProtectHTTPTransportCapsEverySignInBody(t *testing.T) {
