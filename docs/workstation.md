@@ -72,7 +72,7 @@ When a headless implement run stops because its agent hit a usage limit or a rat
 - With no fallback left, the run waits for the limit to reset. The time comes from the agent's own message ("resets 3pm", "try again in 2 hours", Retry-After) or a default backoff (5 minutes for a rate limit, 1 hour for a quota). The run shows **Waiting for limit reset · retry at HH:MM** with **Retry now** and **Cancel**. The wait survives a hub restart. When it ends, the run is offered like any other: the runner still has to accept it, and the daily budget still applies. A task waits at most three times. Autopilot counts a waiting task as queued, not failed.
 - The runner only continues from handoff branches it made itself, for the same repository and node, still at the commit it recorded. The hub can name such a branch but not any other ref. A handoff branch recorded without its node, by a runner from before node checks, is not continued; the job is declined ("has no node on record"). Each time the runner makes a handoff branch, it deletes those older than 30 days or beyond the newest 200, if they are still at their recorded commit.
 
-A model the login cannot use, or a missing CLI, fails before the agent's first turn. There is nothing to keep then and waiting would not help, so those failures only fall through the chain, as before.
+A model the login cannot use, or a missing CLI, fails before the agent's first turn. There is nothing to keep then and waiting would not help, so those failures only fall through the chain.
 
 ## Agent roles and workflow stages
 

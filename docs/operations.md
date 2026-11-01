@@ -124,8 +124,6 @@ Accounts, sessions, the audit trail, settings, runs, the copilot's conversations
 
 **Upgrading from a SQLite release.** Earlier releases kept this data in `<workspace>/.vised/nodevas.db`. On the first start of this release, a workspace whose new database is empty imports that file in one transaction and renames it `nodevas.db.imported` (with its `-wal` and `-shm` files); it is never deleted. If the import fails, `serve` stops without changing anything: `nodevas db import-sqlite --report` compares the file with the database, and `NODEVAS_SKIP_SQLITE_IMPORT=1` starts without it (`nodevas db import-sqlite` imports it later). The importer is removed in the next release.
 
-**Upgrading to the security round 2 release.** Two schema steps run on the first start: permission-prompt rows already in the action log are rewritten to `Allow <tool>?` (they quoted the tool's input), and agent mail gains a `hub_notice` flag that only the hub's own notices carry. Approvals delivered before the upgrade therefore show to agents as escaped text (`&lt;nodevas-approval`), not as a verified approval.
-
 **Upgrading a server that already uses PostgreSQL.**
 
 1. Back up first: `pg_dump -Fc nodevas > nodevas-before-upgrade.dump`.
