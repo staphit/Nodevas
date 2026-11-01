@@ -12,13 +12,13 @@ A copilot inside the Nodevas UI that you talk to or type to. It reads and edits 
 
 ## Which model answers
 
-A configured provider or key always wins: **Anthropic** or **OpenAI-compatible** chosen as the **Model** in **Settings → General → Voice copilot** (or with `copilot.provider` or `NODEVAS_COPILOT_PROVIDER`); a key on the server, whose vendor answers while the provider is left automatic (Anthropic for a key that does not say); or `copilotProvider` set on your runner. With none of them, the default, it uses a free model and no key, in this order:
+A configured provider or key always wins: **Anthropic** or **OpenAI-compatible** chosen by an administrator as the **Model** in **Settings → General → Voice copilot** (or with `copilot.provider` or `NODEVAS_COPILOT_PROVIDER`); a key on the server, whose vendor answers while the provider is left automatic (Anthropic for a key that does not say); or `copilotProvider` set on your runner (unless **API key lives on**, below, is **This server**). With none of them, the default, it uses a free model and no key, in this order:
 
 1. the browser's built-in model (Gemini Nano in Chrome 148 or later on a desktop), when it is ready;
 2. Ollama (`127.0.0.1:11434`) or LM Studio (`127.0.0.1:1234`) on your runner's PC, else on the server, preferring a model that can call tools;
 3. the browser's model again, once you click **Download the on-device model**.
 
-When none is available, the button opens a help panel: use Chrome on a desktop, install Ollama and `ollama pull qwen3:8b`, or set a key.
+When none is available, the button opens a help panel: use Chrome on a desktop, install Ollama and `ollama pull qwen3:8b`, or set a key on the server or your runner.
 
 ### A key on the server
 
@@ -27,7 +27,7 @@ Set `NODEVAS_COPILOT_API_KEY` (or `NODEVAS_COPILOT_API_KEY_FILE`), `ANTHROPIC_AP
 
 ### Key on the runner (`keySource`)
 
-**API key lives on**, in the same Settings row, decides where the model calls run: **Each person's runner (recommended)**, **Automatic** (the server's key when it has one, otherwise each person's runner) or **This server**. Only an administrator changes it. With the runner, the turn, the tools and the permission checks stay on the server; each model call goes to the speaker's own runner, which makes it with a key kept on that PC:
+**API key lives on**, in the same Settings section, decides where the model calls run: **Each person's runner (recommended)**, **Automatic** (the default: the server's key when it has one, otherwise each person's runner) or **This server**. Only an administrator changes it. With **Each person's runner**, only the runner's model answers: the browser's model and a local model on the server are not used. With the runner, the turn, the tools and the permission checks stay on the server; each model call goes to the speaker's own runner, which makes it with a key kept on that PC:
 
 ```sh
 nodevas runner set copilotProvider anthropic   # or openai
@@ -67,7 +67,7 @@ You need not ask how it went. When the plan run ends, the copilot writes the out
 
 ### Revising a goal mid-way
 
-Tell the copilot how the requirement changes. Once you confirm, it pauses the goal's autopilot (yours only; running tasks carry on), records the change on the goal under a dated **Revisions** heading, and starts a replan run; the pill reads **Revising…**. Done tasks stay, pending ones may be changed or skipped (a skipped task keeps its history), ones in progress are only flagged, and new ones are added. When it ends, the copilot tells you what was kept, changed, skipped and added and asks whether to resume; nothing resumes until you say yes or press **Resume with revised tasks** in the goal's Autopilot panel.
+Tell the copilot how the requirement changes. Once you confirm, it pauses the goal's autopilot (running tasks carry on; only whoever started that autopilot can revise the goal), records the change on the goal under a dated **Revisions** heading, and starts a replan run; the pill reads **Revising…**. Done tasks stay, pending ones may be changed or skipped (a skipped task keeps its history), ones in progress are only flagged, and new ones are added. When it ends, the copilot tells you what was kept, changed, skipped and added and asks whether to resume; nothing resumes until you say yes or press **Resume with revised tasks** in the goal's Autopilot panel.
 
 ## The autopilot's advisor model
 
