@@ -93,13 +93,38 @@ nodevas runner autoaccept verify on   # 選用：auto-accept 打開時，在白�
 
 verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在 agent 沙箱之外執行 agent 寫的程式碼，所以必須逐一 repo 開啟，並有獨立的自動接受開關（預設關閉）。它在 PR head 的拋棄式 worktree 中執行，不跑 git hook，環境變數中不含 runner 與 GitHub 的 token，逾時會停止整個程序樹。目標 QA 評審也會跑測試指令：在它的 base 上、agent 開始前執行，所以只有打開 `autoaccept verify on` 時才會被自動接受；在終端機上，它的派工會多顯示 `base:` 與 `tests:` 兩行。角色是看板上的防護欄，不是作業系統的隔離：在你帳號下擁有 shell 的 agent 仍可能碰到其他 run 的 proxy 位址。紅綠驗證、diff 檢查與 hub 的關卡才是 agent 無法干預的檢查。
 
+## 自動推進的合併
+
+開啟 **合併已核可的 PR** 後，任務的 PR 核可且檢查通過時，自動推進會由你的 runner 以你的 `gh` 登入合併。這需要人工審查（**由誰核可 PR** 選 **由人審查** 或 **先 agent 共識，再由人審查**），除非另外開啟 **不經人工審查就合併**。沒有人工審查時，符合下列任一情況的 PR 會等你處理（「未經你核可不會合併：…」；按 **核可** 合併，或 **要求修改**）：
+
+- 動到敏感路徑（見下方）；原因最多列出 8 個；
+- 讀不到它變更的檔案、runner 沒有回報任何檔案，或變更了 2000 個以上的檔案；
+- PR 的 head 不是自動推進自己的 run 做出的 commit。
+
+路徑中任一資料夾或檔案本身的名稱是下列之一時，就是敏感路徑：`.github`、`.gitlab`、`.circleci`、`.buildkite`、`.husky`、`.devcontainer`、`.claude`、`.cursor`、`.vscode`、`scripts`、`.codex`、`.gemini`、`.agents`、`_agents`、`.agent`、`.opencode`。下列檔案不論在哪個資料夾，都依檔名視為敏感：
+
+- CI 與 hook：`.gitlab-ci.yml`、`.travis.yml`、`azure-pipelines.yml`、`Jenkinsfile`、`bitbucket-pipelines.yml`、`.drone.yml`、`appveyor.yml`、`.pre-commit-config.yaml`（或 `.yml`）、`lefthook.yml`；
+- git：任何以 `.git` 開頭的名稱（`.gitignore`、`.gitattributes`、`.gitmodules`）；
+- 環境變數：`.env`、`.env.*`、`.envrc`；
+- 容器：以 `Dockerfile`、`Containerfile` 或 `docker-compose` 開頭的名稱、以 `.dockerfile` 結尾的名稱、`compose.yaml`、`compose.yml`、`.dockerignore`；
+- 建置：`Makefile`、`GNUmakefile`、`justfile`、`Taskfile.yml`；
+- agent 指示與設定：`CLAUDE.md`、`AGENTS.md`、`GEMINI.md`、`.mcp.json`、`opencode.json`、`opencode.jsonc`、`tui.json`、`tui.jsonc`；
+- JavaScript：`package.json`、`package-lock.json`、`npm-shrinkwrap.json`、`yarn.lock`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`bun.lock`、`bun.lockb`、`.npmrc`、`.yarnrc`、`.yarnrc.yml`、`.pnpmfile.cjs`；
+- Go：`go.mod`、`go.sum`、`go.work`、`go.work.sum`；
+- Rust：`Cargo.toml`、`Cargo.lock`、`build.rs`；
+- Python：`pyproject.toml`、`poetry.lock`、`uv.lock`、`Pipfile`、`Pipfile.lock`、`setup.py`、`setup.cfg`、`tox.ini`、`noxfile.py`、`conftest.py`、`pytest.ini`、`requirements*.txt`；
+- Ruby、PHP、JVM 與 .NET：`Gemfile`、`Gemfile.lock`、`composer.json`、`composer.lock`、`pom.xml`、`build.gradle`、`build.gradle.kts`、`settings.gradle`、`settings.gradle.kts`、`gradle-wrapper.properties`、`NuGet.config`、`Directory.Build.props`、`Directory.Build.targets`、`packages.lock.json`；
+- 測試執行器，名稱開頭為：`vitest.config.`、`vitest.workspace.`、`vite.config.`、`jest.config.`、`playwright.config.`、`cypress.config.`、`karma.conf.`、`.mocharc`、`phpunit.xml`。
+
+名稱比對不分大小寫，改名時新舊路徑都會檢查。分段管線的 diff 檢查也用同一份清單：執行者動到這些路徑時，需要審查者核可；階段裡沒有審查者時，則需要人工核可。
+
 ## Agent 表現
 
 **設定 → Agent 與 Runner → 進階 → Agent 表現** 把 run 的歷史整理成 **洞察**（每個交付任務的費用、一次通過率、重工、浪費）、依角色、agent 與模型的 **成績單**，以及等級（資深、中階、試用），全部依固定規則計算：不呼叫模型，也不花 token。它的建議要等你確認後，才會改動路由規則、角色的每日預算或自動分派。
 
 在 **等級與分派** 中，**這個專案自動分派**（預設關閉）會在沒有任何路由規則符合時，替派工或自動推進的任務挑選 agent 與模型：達到該角色要求等級中最便宜的組合，並把一部分任務（預設 10%）交給試用組合以累積樣本。預算照常套用。
 
-hub 每 6 小時刪除超過 180 天的原始事件（已結束 run 的紀錄行、agent session 的動作與分派紀錄，以及稽核紀錄中的 `auth.signin.failed`、`auth.stepup.failed`、`auth.totp.failed`、`runner.link.failed`），並清空舊的 diff；run、用量、判定、成績單與其餘稽核紀錄都會保留。管理員可在 **原始事件保留** 修改（30 到 3650 天，或永久）。
+hub 每 6 小時刪除超過 180 天的原始事件（已結束 run 的紀錄行、agent session 的動作與分派紀錄，以及稽核紀錄中的 `auth.signin.failed`、`auth.stepup.failed`、`auth.totp.failed`、`runner.link.failed`），並清空舊的 diff，但保留檔案清單與行數（diff 畫面會註明是歷史保留期限清除的）；run、用量、判定、成績單與其餘稽核紀錄都會保留。管理員可在 **原始事件保留** 修改（30 到 3650 天，或永久）。
 
 ## 示範影片
 
