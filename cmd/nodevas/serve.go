@@ -67,9 +67,25 @@ func isWildcardHost(host string) bool {
 }
 
 // isRemoteDeployment reports whether the hub is reachable from anywhere but
-// this machine, which is what makes accounts mandatory.
+// this machine, which is what makes accounts mandatory: a listener beyond
+// loopback, or a loopback one that something on this machine forwards to. A
+// proxy (--behind-proxy), a name that is not this machine's (--hostname) and
+// Cloudflare Access in front of the hub each say that something does.
 func isRemoteDeployment(host string, behindProxy bool, hostNames []string, access bool) bool {
-	return behindProxy || !isLoopbackHost(host)
+	if behindProxy || access || !isLoopbackHost(host) {
+		return true
+	}
+	return publicHostName(hostNames) != ""
+}
+
+// publicHostName is the first of names that is not this machine's, or "".
+func publicHostName(names []string) string {
+	for _, name := range names {
+		if !isLoopbackHost(name) {
+			return name
+		}
+	}
+	return ""
 }
 
 // hostList splits the --hostname value into the names to accept.
@@ -178,6 +194,22 @@ func validateServeFlags(
 	proxyOnlyTransport := behindProxy && isLoopbackHost(listen)
 	if remote && isWildcardHost(listen) && len(hostNames) == 0 {
 		return fmt.Errorf("refusing wildcard listen %s without --hostname; configure the public Host name to prevent DNS rebinding", listen)
+	}
+	// A loopback listener with a public name or Access in front is reached
+	// through a tunnel or proxy on this machine. Unless the transport is
+	// settled otherwise (TLS, or plaintext accepted), that proxy is the
+	// HTTPS edge, and the hub has to be told so.
+	if remote && isLoopbackHost(listen) && !behindProxy && !useTLS && !allowPlaintext {
+		reason := "Cloudflare Access is configured"
+		drop := "remove the access settings"
+		if name := publicHostName(hostNames); name != "" {
+			reason = "--hostname " + name + " is not this machine"
+			drop = "drop --hostname"
+		}
+		return fmt.Errorf(
+			"refusing to serve %s: %s, so requests reach it through a proxy or tunnel on this machine; "+
+				"pass --behind-proxy (the hub then requires accounts), or %s to keep it to this machine",
+			listen, reason, drop)
 	}
 	if remote && !useTLS && !proxyOnlyTransport && !allowPlaintext {
 		return fmt.Errorf(
@@ -332,7 +364,8 @@ func serve(args []string) {
 	listen := fs.String("listen", serveConfig.Listen,
 		"listen address; anything other than loopback requires accounts (nodevas user add)")
 	hostname := fs.String("hostname", serveConfig.Hostname,
-		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy)")
+		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy); "+
+			"a name other than this machine's makes it a networked hub, which requires accounts")
 	behindProxy := fs.Bool("behind-proxy", serveConfig.BehindProxy,
 		"trust X-Forwarded-Proto from a terminating reverse proxy")
 	trustedProxy := fs.String("trusted-proxy", serveConfig.TrustedProxy,
