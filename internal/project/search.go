@@ -217,6 +217,12 @@ var coldSearchWait = 50 * time.Millisecond
 // rather than time a search under load. One atomic load when unset.
 var coldSearchWaited atomic.Pointer[func(projectPath string, within time.Duration)]
 
+// maxConcurrentSearches bounds the searches running at once.
+const maxConcurrentSearches = 4
+
+// searchRunning is a test seam: called as each search starts its work.
+var searchRunning atomic.Pointer[func()]
+
 // warmingForSearch reports whether the project's first index build is still
 // running after a search has waited coldSearchWait for it.
 func (pm *ProjectManager) warmingForSearch(index *searchIndex, projectPath string) bool {
@@ -226,7 +232,10 @@ func (pm *ProjectManager) warmingForSearch(index *searchIndex, projectPath strin
 	return index.indexes().Warming(projectPath, coldSearchWait)
 }
 
-func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
+func (pm *ProjectManager) SearchProjectNodes(ctx context.Context, project ProjectInfo, normalized string) ([]SearchResult, error) {
+	if hook := searchRunning.Load(); hook != nil {
+		(*hook)()
+	}
 	index := pm.getSearchIndex()
 	if pm.warmingForSearch(index, project.Path) {
 		return pm.searchWhileIndexing(project, normalized), nil
@@ -332,7 +341,10 @@ func nodeSearchMetadata(node *engine.Node, userNames map[string]string) string {
 //
 // While the project's first index build runs, it answers from
 // searchWhileIndexing: hits whose title holds the query first.
-func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit int) ([]SearchResult, error) {
+func (pm *ProjectManager) RankProjectNodes(ctx context.Context, info ProjectInfo, query string, limit int) ([]SearchResult, error) {
+	if hook := searchRunning.Load(); hook != nil {
+		(*hook)()
+	}
 	index := pm.getSearchIndex()
 	if pm.warmingForSearch(index, info.Path) {
 		normalized := strings.ToLower(strings.TrimSpace(query))

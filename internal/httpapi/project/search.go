@@ -57,7 +57,7 @@ func (a *API) GetSearch(c *gin.Context) {
 				Kind:    "project",
 			})
 		}
-		nodeResults, searchErr := a.pm.SearchProjectNodes(info, normalized)
+		nodeResults, searchErr := a.pm.SearchProjectNodes(c.Request.Context(), info, normalized)
 		if searchErr != nil {
 			nodeResults = project.SearchProjectNodesDirect(info, normalized)
 		}
@@ -103,7 +103,7 @@ func (a *API) getRankedSearch(c *gin.Context, query string) {
 		if info.IsFolder || (only != "" && info.Name != only) || !a.readable(c.Request, info.Path) {
 			continue
 		}
-		ranked, err := a.pm.RankProjectNodes(info, query, limit)
+		ranked, err := a.pm.RankProjectNodes(c.Request.Context(), info, query, limit)
 		if err != nil {
 			continue
 		}

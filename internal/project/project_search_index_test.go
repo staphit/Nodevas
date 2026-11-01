@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -115,7 +116,7 @@ func TestAStoreWriteIsSearchableWithinASecond(t *testing.T) {
 	}
 	began := time.Now()
 	for {
-		results, err := pm.SearchProjectNodes(info, "lighthouse")
+		results, err := pm.SearchProjectNodes(context.Background(), info, "lighthouse")
 		if err != nil {
 			t.Fatal(err)
 		}
