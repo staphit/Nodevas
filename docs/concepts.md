@@ -30,7 +30,7 @@ When "wait for all of them" is not what you mean, open **Advanced conditions** i
 
 Connections can also be marked *optional* (does not block) or *deprecated* (kept as a line, not a prerequisite). Standalone logic gates, created from the canvas context menu under **Advanced conditions**, take over a node's whole condition; `AND`, `OR`, `XOR`, `NAND`, and `NOR` gates need at least two inputs. **Convert to logic gate** in a connection's menu turns optional or deprecated connections into one. An incomplete gate remains a visible draft and does not accidentally make a node ready.
 
-The same conditions can be written in a node's `requires` expression in `graph.yaml`; the Dependencies tab shows it read-only as **Condition expression**. Expressions support parentheses, `and`, `or`, `xor`, `nand`, `nor`, `not`, `all(…)`, `any(…)`, node references, and flags, including comparisons such as `flag(karma >= 3)`. The expression is the executable condition; canvas wires are its visual projection.
+The same conditions can be written in a node's `requires` expression in `graph.yaml`; the Dependencies tab shows it read-only as **Condition expression**. Expressions support parentheses, `and`, `or`, `xor`, `nand`, `nor`, `not`, `all(…)`, `any(…)`, node references, and flags, including comparisons such as `flag(karma >= 3)`. The expression is the executable condition; canvas wires are its visual projection. An expression nested more than 256 levels deep is refused.
 
 Example:
 
@@ -60,12 +60,11 @@ Metadata is saved as fields change. A status change is staged until you press **
 
 ## Also included
 
-<!-- sec-pass: Project explorer browses runner repositories (first bullet) -->
-- **Project explorer** (left of the board): **Nodes**; **Files** (the project folder and your runners' repositories, read-only); **Git** (this project's uncommitted changes and version history, agents' branches, and uncommitted changes in your runners' repositories); **Agent** (running, external and recently finished agent sessions).
+- **Project explorer** (left of the board): **Nodes**; **Files** (the project folder, without projects nested in it, and your runners' repositories, read-only); **Git** (this project's uncommitted changes and version history, agents' branches, and uncommitted changes in your runners' repositories); **Agent** (running, external and recently finished agent sessions).
 - Multiple projects and subprojects in one workspace tree.
 - Ctrl/⌘+K searches the nodes and pages of every project you can open, subpages included, and runs commands.
 - **Problems** (board header) lists validation warnings, schedule issues such as overdue nodes, and hints.
-- Markdown, plain text, HTML, and Word document pages.
+- Markdown, plain text, HTML, and Word document pages. Previews drop anything that could pose as the app (image maps, dialogs, `background` attributes, class names of their own), Markdown nested more than 64 levels deep shows as plain text past that depth, and in a Word document tables nested more than 32 deep become text and list levels past 32 join level 32.
 - Imports from Markdown, JSON Canvas, and `.veproj` or `.zip` project bundles; exports to `.veproj` (a project or the whole workspace), JSON Canvas, and, for documents, Word, plain text, HTML, Markdown, and PDF.
 - Filters for status, assignee, tag, priority and text, and saved views per project.
 - Drafts, history, trash, conflict detection, and filesystem change notifications.
