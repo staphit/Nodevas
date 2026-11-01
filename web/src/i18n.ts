@@ -2051,6 +2051,8 @@ const messages: Record<Language, MessageCatalog> = {
     "copilot.send": "Send",
     "copilot.error.generic": "Something went wrong.",
     "copilot.error.streamEnded": "The connection closed before the reply finished.",
+    "copilot.error.serverBusy":
+      "The copilot is busy with your other turns on the server's model. Wait for one of them to finish, then send this again.",
     "copilot.conversation.label": "Conversation",
     "copilot.conversation.new": "New conversation",
     "copilot.conversation.untitled": "Untitled",
@@ -5732,6 +5734,7 @@ const messages: Record<Language, MessageCatalog> = {
     "copilot.send": "送出",
     "copilot.error.generic": "發生錯誤。",
     "copilot.error.streamEnded": "回覆完成前連線就中斷了。",
+    "copilot.error.serverBusy": "Copilot 正在處理你其他的回合（使用伺服器的模型）。請等其中一個完成後，再送出這一則。",
     "copilot.conversation.label": "對話",
     "copilot.conversation.new": "新對話",
     "copilot.conversation.untitled": "未命名",

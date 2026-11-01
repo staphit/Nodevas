@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { onUnauthorized, setProjectOverride, UnauthorizedError } from "./http";
 import {
   copilotApi,
+  CopilotBusyError,
   NdjsonParser,
   parseTurnEventLine,
   readTurnEvents,
@@ -128,6 +129,17 @@ describe("streamTurn", () => {
       vi.fn(async () => new Response(JSON.stringify({ error: "turn already running" }), { status: 409 })),
     );
     await expect(collect(streamTurn("c", request))).rejects.toThrow("turn already running");
+  });
+
+  it("tells a 429 copilot_busy from other refusals", async () => {
+    const respond = (status: number, code: string) =>
+      vi.fn(async () => new Response(JSON.stringify({ error: "busy", code }), { status }));
+    vi.stubGlobal("fetch", respond(429, "copilot_busy"));
+    await expect(collect(streamTurn("c", request))).rejects.toBeInstanceOf(CopilotBusyError);
+    vi.stubGlobal("fetch", respond(429, "rate_limited"));
+    await expect(collect(streamTurn("c", request))).rejects.not.toBeInstanceOf(CopilotBusyError);
+    vi.stubGlobal("fetch", respond(409, "copilot_busy"));
+    await expect(collect(streamTurn("c", request))).rejects.not.toBeInstanceOf(CopilotBusyError);
   });
 });
 
