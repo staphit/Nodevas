@@ -731,7 +731,11 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 // set to go over ACP goes through `opencode run` instead (withoutOpenCode2ACP).
 func runPermission(cfg *Config, job runnerwire.Job, acp bool) (mode, text string) {
 	if !adapter.ReadOnly(job) {
-		return cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
+		text = permissionText(cfg, job.Agent)
+		if claimed, ok := strings.CutSuffix(text, relayedText); ok && job.Agent == "opencode" && !acp {
+			text = claimed + notRelayedText
+		}
+		return cfg.PermissionModeFor(job.Agent), text
 	}
 	// A plan or a judge reads the code as a review does; what a plan writes
 	// goes on the board, through MCP, not into files.
