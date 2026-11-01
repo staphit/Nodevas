@@ -26,6 +26,7 @@ type archiveEntry struct {
 	name     string
 	body     string
 	linkname string // a symlink when set
+	hardlink string // a hard link to this earlier entry when set
 	dir      bool
 }
 
@@ -41,6 +42,8 @@ func tarGz(t *testing.T, entries ...archiveEntry) []byte {
 		switch {
 		case entry.linkname != "":
 			header.Typeflag, header.Linkname, header.Size = tar.TypeSymlink, entry.linkname, 0
+		case entry.hardlink != "":
+			header.Typeflag, header.Linkname, header.Size = tar.TypeLink, entry.hardlink, 0
 		case entry.dir:
 			header.Typeflag, header.Size = tar.TypeDir, 0
 		}
@@ -180,6 +183,66 @@ func TestInstallRejectsTraversalAndEscapingSymlinks(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(filepath.Dir(home), "evil")); err == nil {
 				t.Fatal("an entry was written outside the install root")
+			}
+		})
+	}
+}
+
+// The Linux and macOS archives store identical time zone files once and the
+// rest as hard links to them (share/timezone/America/Dominica is
+// America/Port_of_Spain). Refusing every hard link refused the whole
+// archive, so the embedded server could not be installed there at all.
+func TestInstallKeepsHardLinkedFiles(t *testing.T) {
+	r := testRoot + "/"
+	archive := tarGz(t,
+		archiveEntry{name: r + "bin/postgres", body: "pg"},
+		archiveEntry{name: r + "share/timezone/America/Port_of_Spain", body: "AST"},
+		archiveEntry{name: r + "share/timezone/America/Dominica", hardlink: r + "share/timezone/America/Port_of_Spain"},
+		archiveEntry{name: r + "include/server/a.h", body: "header"},
+		// A link to a file the allowlist dropped is dropped with it.
+		archiveEntry{name: r + "share/timezone/Header", hardlink: r + "include/server/a.h"},
+	)
+	server, _ := archiveServer(t, archive)
+	dir, err := install(t, t.TempDir(), targetFor(archive, server.URL+"/a.tar.gz"), server)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	for _, name := range []string{"Port_of_Spain", "Dominica"} {
+		data, err := os.ReadFile(filepath.Join(dir, "share", "timezone", "America", name))
+		if err != nil || string(data) != "AST" {
+			t.Fatalf("America/%s = %q, %v; want the linked file's contents", name, data, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "share", "timezone", "Header")); !os.IsNotExist(err) {
+		t.Fatalf("a hard link to a dropped file was written (%v)", err)
+	}
+}
+
+// A hard link names another entry of the same archive, already written:
+// one outside the archive's root, or not seen yet, is refused.
+func TestInstallRejectsEscapingHardLinks(t *testing.T) {
+	r := testRoot + "/"
+	for name, link := range map[string]string{
+		"dotdot":         r + "../../etc/passwd",
+		"absolute":       "/etc/passwd",
+		"outsideTheRoot": "other-root/share/timezone/UTC",
+		"notYetWritten":  r + "share/timezone/Later",
+		"itself":         r + "share/timezone/Self",
+	} {
+		t.Run(name, func(t *testing.T) {
+			archive := tarGz(t,
+				archiveEntry{name: r + "bin/postgres", body: "pg"},
+				archiveEntry{name: r + "share/timezone/Self", hardlink: link},
+				archiveEntry{name: r + "share/timezone/Later", body: "later"},
+			)
+			server, _ := archiveServer(t, archive)
+			home := t.TempDir()
+			_, err := install(t, home, targetFor(archive, server.URL+"/a.tar.gz"), server)
+			if !errors.Is(err, ErrUnsafeArchive) {
+				t.Fatalf("Install = %v, want ErrUnsafeArchive", err)
+			}
+			if files := tree(t, filepath.Join(home, "dist")); len(files) != 0 {
+				t.Fatalf("unsafe archive left %v", files)
 			}
 		})
 	}
