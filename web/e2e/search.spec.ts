@@ -1,7 +1,7 @@
 import { type APIRequestContext, request as playwrightRequest } from "@playwright/test";
 import { rmSync } from "node:fs";
 import { createDatabase, dropDatabase } from "./database";
-import { expect, freshProject, portBase, seedWorkspace, startServer, test } from "./fixture";
+import { expect, freshProject, portBase, removeRetrying, seedWorkspace, startServer, test } from "./fixture";
 
 interface Ranked {
   nodeId: string;
@@ -135,6 +135,6 @@ test("ranked results survive a server restart", async ({}, workerInfo) => {
     await server.stop();
   } finally {
     dropDatabase(name);
-    rmSync(workspace, { recursive: true, force: true });
+    rmSync(workspace, removeRetrying);
   }
 });

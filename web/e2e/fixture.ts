@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,14 +88,28 @@ export async function startServer(opts: {
     baseURL,
     logs: () => output,
     stop: async () => {
-      server.kill();
-      await new Promise((resolve) => {
-        server.once("exit", resolve);
-        setTimeout(resolve, 5_000);
-      });
+      if (server.exitCode !== null || server.signalCode !== null) return;
+      const exited = new Promise((resolve) => server.once("exit", resolve));
+      // serve's children work inside the workspace (git, committing its
+      // history a moment after an edit). On Windows, ending serve alone
+      // leaves them running there, and the workspace cannot be removed;
+      // the whole tree goes. Elsewhere serve ends its children itself.
+      if (process.platform === "win32" && server.pid !== undefined) {
+        spawnSync("taskkill", ["/pid", String(server.pid), "/t", "/f"], { stdio: "ignore" });
+      } else {
+        server.kill();
+      }
+      await exited;
     },
   };
 }
+
+/**
+ * Removes a workspace a server just used. On Windows a process's files and
+ * folder are let go a moment after it ends, so a removal right after is
+ * retried until they are, instead of failing on the first EPERM or EBUSY.
+ */
+export const removeRetrying = { recursive: true, force: true, maxRetries: 20, retryDelay: 100 } as const;
 
 /** Same seed as serve.mjs: one project with two nodes and one dependency. */
 export function seedWorkspace(): string {
@@ -167,7 +181,7 @@ export const test = base.extend<{}, { workerServer: { baseURL: string } }>({
       await server.stop();
       dropDatabase(database);
       try {
-        rmSync(workspace, { recursive: true, force: true });
+        rmSync(workspace, removeRetrying);
       } catch {
         /* best effort */
       }
