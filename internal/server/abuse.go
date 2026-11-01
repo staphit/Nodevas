@@ -839,18 +839,18 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 
 // sourceOnlyPreAuth reports a request that is charged to its own source's
 // pre-auth bucket and not to the hub-wide one, so a flood of strangers cannot
-// refuse it: a signed-in browser asking who it is (the first request of every
-// app load; a made-up cookie buys nothing but its own source's budget), and
-// this machine's health probe.
+// refuse it: the sign-in door (asking who one is, the first request of every
+// app load; asking for a passcode; signing in), and this machine's health
+// probe. Guessing and mail at the door are bounded per source, per address
+// and per passcode (internal/auth); a hub-wide budget there would only hand
+// a stranger the means to lock every member out.
 func sourceOnlyPreAuth(r *http.Request) bool {
-	switch r.URL.Path {
-	case "/api/auth/status":
-		_, ok := auth.SessionToken(r)
-		return ok
-	case healthzPath:
-		return (r.Method == http.MethodGet || r.Method == http.MethodHead) && auth.DirectLoopback(r)
+	path := r.URL.Path
+	if auth.SignInPaths[path] || path == "/api/auth/status" {
+		return true
 	}
-	return false
+	return path == healthzPath &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead) && auth.DirectLoopback(r)
 }
 
 // chargePreAuth takes one token from the pre-auth buckets for c's address,
