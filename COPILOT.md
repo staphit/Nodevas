@@ -71,7 +71,7 @@ Tell the copilot how the requirement changes. Once you confirm, it pauses the go
 
 ## The autopilot's advisor model
 
-With **Choose per task** in the goal's Autopilot panel, **Chosen by** picks each task's implementer: **Routing rules**, **A fast model on your runner** or **System One (Laya / Jev)**. An autopilot the copilot starts without named implementers uses what your runner offers, System One first. An advisor picks only among the agents and models your runners report; on an error, an offline runner or no answer within 6 seconds (10 for System One), the routing rules decide. The fast model, on the runner:
+With **Choose per task** in the goal's Autopilot panel, **Chosen by** picks each task's implementer: **Routing rules**, **A fast model on your runner** or **System One (Laya / Jev)**. An autopilot the copilot starts without named implementers uses what your runner offers, System One first. An advisor picks only among the agents and models your runners report; on an error, an offline runner or no answer within 5 seconds (10 for System One), the routing rules decide. The fast model, on the runner:
 
 ```sh
 nodevas runner set advisorProvider openai        # or anthropic

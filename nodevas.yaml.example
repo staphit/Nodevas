@@ -29,6 +29,7 @@ logging:
 # saves in Settings or with PUT /api/copilot/settings overrides them at runtime.
 # provider auto uses a free model (the browser's own, or a local Ollama or
 # LM Studio) unless a key is configured, whose vendor it then uses.
+# sec-pass: copilot key storage (machine key)
 # The API key never goes here. Set NODEVAS_COPILOT_API_KEY (or the file-backed
 # NODEVAS_COPILOT_API_KEY_FILE), or ANTHROPIC_API_KEY / OPENAI_API_KEY, or store
 # one with PUT /api/copilot/settings, which keeps it encrypted under the machine
@@ -41,6 +42,7 @@ copilot:
   model: ""                  # anthropic or openai only; empty: the provider's default model
   base_url: ""               # anthropic or openai only, e.g. http://127.0.0.1:11434/v1 (Ollama, no key)
   effort: low                # low | medium | high; voice favours latency
+  # sec-pass: copilot.allow_bypass in the workspace nodevas.yaml
   # allow_bypass: false      # unset: allowed on a loopback-only server, refused with accounts
   max_tool_calls_per_turn: 25
   agent_role: orchestrator   # orchestrator | worker, enforced against node write_access
