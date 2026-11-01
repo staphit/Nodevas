@@ -1,6 +1,6 @@
 # Voice Copilot
 
-A copilot inside the Nodevas UI that you talk to or type to. It reads and edits the board with the same tools agents get over MCP, asks before changing things as its permission mode says, and keeps each conversation's transcript, per account and project. With one of your runners online, it also turns a requirement you dictate into tasks and starts the autopilot on them.
+A copilot inside the Nodevas UI that you talk to or type to. It reads and edits the board with the same tools agents get over MCP, less those that need files or a run (it cannot attach files to `send_message`, and has no `save_attachment`, `set_acceptance` or `submit_verdict`; its roster entry shows no repository or folder), asks before changing things as its permission mode says, and keeps each conversation's transcript, per account and project. With one of your runners online, it also turns a requirement you dictate into tasks and starts the autopilot on them.
 
 ## Using it
 
@@ -22,8 +22,7 @@ When none is available, the button opens a help panel: use Chrome on a desktop, 
 
 ### A key on the server
 
-<!-- sec-pass: copilot key storage on the server (machine key) -->
-Set `NODEVAS_COPILOT_API_KEY` (or `NODEVAS_COPILOT_API_KEY_FILE`), `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `serve`'s environment, or have an administrator store one with `PUT /api/copilot/settings` (`{"apiKey": "…"}`), which keeps it encrypted under the machine key, never in the database or `nodevas.yaml`. Anyone who breaks into the server can take a key kept there. An OpenAI-compatible server that needs no key (Ollama or vLLM on another machine) takes `provider: openai` and its `base_url` instead.
+Set `NODEVAS_COPILOT_API_KEY` (or `NODEVAS_COPILOT_API_KEY_FILE`), `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `serve`'s environment, or have an administrator store one with `PUT /api/copilot/settings` (`{"apiKey": "…"}`), which keeps it encrypted under the machine key (or `NODEVAS_SECRET_KEY` / `NODEVAS_SECRET_KEY_FILE`; see [Operations](./docs/operations.md#database)), never in the database or `nodevas.yaml`. Anyone who breaks into the server can take a key kept there. A key does not follow an endpoint change: saving another `baseUrl` while a key is stored answers `400` until the key is entered again, and a key from the environment is used only for the vendor's own endpoint or the base URL the operator set (`copilot.base_url` or `NODEVAS_COPILOT_BASE_URL`). On a server with accounts, each account runs at most two turns at once on the server's model (its key, or a model on the server's machine); a third answers `429` `copilot_busy` until one ends. An OpenAI-compatible server that needs no key (Ollama or vLLM on another machine) takes `provider: openai` and its `base_url` instead.
 
 ### Key on the runner (`keySource`)
 
@@ -37,7 +36,6 @@ nodevas runner copilot-key                     # the key on stdin, never a flag
 
 Then restart the runner. `NODEVAS_COPILOT_API_KEY` in the runner's environment works instead of a stored key. `copilotBaseURL` points at an OpenAI-compatible server (Ollama and LM Studio need no key) or a proxy; it must be https, or http to this machine or the local network. With no `copilotProvider`, the runner offers a local Ollama or LM Studio it finds; `nodevas runner set copilotProvider off` stops that.
 
-<!-- sec-pass: runner-held copilot key guarantees -->
 The key never reaches the server: the runner names its provider and model, never the key. It refuses a call that names another provider, base URL or model, or that is for anyone but its owner. A server that is broken into can still spend the owner's quota, within limits: two calls at once, 40 a minute, 64 000 output tokens and ten minutes per call, each logged. While the runner is offline, the button stays and says how to start it.
 
 ## Permission modes
@@ -53,10 +51,8 @@ Reads always run; whatever changes something follows the conversation's mode. Pi
 
 Writes are ordinary edits: creating and linking nodes, changing a node's fields or status, claiming or releasing a task. Replacing a page wholesale, or any tool not classed as read or write, is risky. An ask is a card in the transcript: **Allow**, **Allow for this conversation** or **Deny** (keys `1`, `2`, `3`), or say "yes" or "no" ("確認" or "取消" in Chinese); after a spoken request it listens for the answer. No answer within 120 seconds is a deny.
 
-<!-- sec-pass: copilot bypassPermissions default -->
-`bypassPermissions` is offered only when the server allows it (`copilot.allow_bypass`; unset, it is allowed on a loopback-only server and refused with accounts). A bypass request the server does not allow runs as `acceptEdits`.
+`bypassPermissions` is offered only when the server allows it (`copilot.allow_bypass`; unset, it is allowed on a loopback-only server and refused with accounts). A bypass request the server does not allow runs as `acceptEdits`. `allow_bypass: true` is refused in the workspace's own `nodevas.yaml`: an administrator sets it in a file given with `--config` (or `NODEVAS_CONFIG`).
 
-<!-- sec-pass: no bypass with the browser's model -->
 With the browser's built-in model, bypass is never offered and a turn that asks for it is refused: node content can carry prompt injection, and a small model is the easiest to mislead.
 
 ## Planning by voice
@@ -106,7 +102,6 @@ With the copilot's provider, the copilot key serves both. Restart the runner aft
 
 ## Configuration (`nodevas.yaml`)
 
-<!-- sec-pass: copilot.allow_bypass in the workspace nodevas.yaml -->
 ```yaml
 copilot:
   enabled: true
@@ -119,4 +114,4 @@ copilot:
   agent_role: orchestrator   # orchestrator | worker, enforced against node write_access
 ```
 
-`NODEVAS_COPILOT_PROVIDER`, `NODEVAS_COPILOT_MODEL`, `NODEVAS_COPILOT_BASE_URL` and `NODEVAS_COPILOT_ENABLED` override these keys, and `nodevas serve --copilot=false` turns the copilot off. What an administrator saves in Settings or with `PUT /api/copilot/settings` overrides the file without a restart.
+The workspace's own `nodevas.yaml` may not set `allow_bypass: true` or a `base_url` off this machine (a local Ollama or LM Studio is fine): `serve` refuses to start. Put those in a file given with `--config` (or `NODEVAS_CONFIG`), or use `NODEVAS_COPILOT_BASE_URL`. `NODEVAS_COPILOT_PROVIDER`, `NODEVAS_COPILOT_MODEL`, `NODEVAS_COPILOT_BASE_URL` and `NODEVAS_COPILOT_ENABLED` override these keys, and `nodevas serve --copilot=false` turns the copilot off. What an administrator saves in Settings or with `PUT /api/copilot/settings` overrides the file without a restart.
