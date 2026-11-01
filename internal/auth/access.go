@@ -384,16 +384,25 @@ func AccessEmailFrom(ctx context.Context) string {
 	return email
 }
 
+// forwardingHeaders are the headers a proxy adds to a request it relays: any
+// one of them means the loopback peer is passing on somebody else's request.
+// A minimal nginx sets only X-Forwarded-Proto, and some proxies only Via.
+var forwardingHeaders = []string{
+	"X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "X-Forwarded-Port",
+	"X-Real-Ip", "Forwarded", "Via", "Cf-Connecting-Ip", "True-Client-Ip", AccessHeaderName,
+}
+
 // DirectLoopback reports whether a request came straight from this machine:
 // a loopback peer that relayed nobody else's request. A proxy on the same
 // host (cloudflared beside the server) adds forwarding headers, so its
-// requests do not count.
+// requests do not count. One that adds none at all cannot be told apart;
+// see Server.accessExempt for where that matters.
 func DirectLoopback(r *http.Request) bool {
 	peer, ok := remoteAddress(r)
 	if !ok || !peer.IsLoopback() {
 		return false
 	}
-	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded", "Cf-Connecting-Ip", AccessHeaderName} {
+	for _, h := range forwardingHeaders {
 		if r.Header.Get(h) != "" {
 			return false
 		}
