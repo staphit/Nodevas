@@ -413,7 +413,11 @@ func ValidProjectPath(name string) bool {
 	}
 	for _, segment := range strings.Split(name, "/") {
 		if segment == "." || segment == ".." || ignoredProjectDirectories[segment] ||
-			!ProjectNamePattern.MatchString(segment) {
+			!ProjectNamePattern.MatchString(segment) ||
+			// Windows drops a trailing dot or space: "other." opens "other"
+			// under another name, and another membership key. No folder there
+			// can carry such a name, so none may anywhere.
+			strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
 			return false
 		}
 	}
@@ -461,7 +465,45 @@ func (pm *ProjectManager) Resolve(name string) (string, error) {
 	if _, err := store.StatProjectPath(pm.workspace, candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", locale.Errorf("project %q: %w", "專案「%s」：%w", name, err)
 	}
-	return candidate, nil
+	return onDiskSpelling(pm.workspace, rel), nil
+}
+
+// onDiskSpelling joins rel to root naming each existing folder as it is
+// spelled on disk. A filesystem that ignores case or Unicode normalization
+// (Windows, macOS, a case-insensitive dataset) opens "MAIN" as "main", and
+// a project's directory is its identity (Key): membership and the store
+// cache must see one spelling. A segment spelled as on disk, or one that
+// does not exist yet, is kept as asked.
+func onDiskSpelling(root, rel string) string {
+	dir := root
+	segments := strings.Split(rel, string(filepath.Separator))
+	for i, segment := range segments {
+		info, err := os.Lstat(filepath.Join(dir, segment))
+		if err != nil {
+			return filepath.Join(append([]string{dir}, segments[i:]...)...)
+		}
+		dir = filepath.Join(dir, entrySpelling(dir, segment, info))
+	}
+	return dir
+}
+
+// entrySpelling is the name in dir of the entry segment opened (info).
+func entrySpelling(dir, segment string, info os.FileInfo) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return segment
+	}
+	for _, entry := range entries {
+		if entry.Name() == segment {
+			return segment
+		}
+	}
+	for _, entry := range entries {
+		if other, err := os.Lstat(filepath.Join(dir, entry.Name())); err == nil && os.SameFile(info, other) {
+			return entry.Name()
+		}
+	}
+	return segment
 }
 
 func pathParent(name string) string {
