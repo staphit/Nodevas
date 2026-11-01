@@ -332,3 +332,20 @@ func TestLoopbackRunnerSocketStillNeedsAToken(t *testing.T) {
 		t.Fatalf("owner = %q, want local", created.Runner.OwnerID)
 	}
 }
+
+// Removing an account ends everything it lent out: its runners' tokens stop
+// opening the runner socket, not only the proxy.
+func TestRemovedAccountsRunnerCannotConnect(t *testing.T) {
+	s := newRunnerTestServer(t)
+	bea := s.signIn(t, "bea@example.test")
+	created := s.create(t, bea, "bea-pc")
+	if err := s.server.users.Remove(context.Background(), "bea"); err != nil {
+		t.Fatal(err)
+	}
+	header := map[string]string{"Authorization": "Bearer " + created.Token}
+	for _, path := range []string{runnerwire.ConnectPath, runnerwire.VersionPath} {
+		if response := s.do(t, nil, http.MethodGet, path, "", header); response.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s with a removed account's runner token = %d %s, want 401", path, response.Code, response.Body)
+		}
+	}
+}
