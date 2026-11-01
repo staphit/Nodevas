@@ -99,7 +99,7 @@ verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在
 
 - 動到敏感路徑（見下方）；原因最多列出 8 個；
 - 讀不到它變更的檔案、runner 沒有回報任何檔案，或變更了 2000 個以上的檔案；
-- PR 的 head 不是自動推進自己的 run 做出的 commit。
+- PR 的 head 不是自動推進自己的 run 做出的 commit，或不知道是哪個 run 開了這個 PR。
 
 路徑中任一資料夾或檔案本身的名稱是下列之一時，就是敏感路徑：`.github`、`.gitlab`、`.circleci`、`.buildkite`、`.husky`、`.devcontainer`、`.claude`、`.cursor`、`.vscode`、`scripts`、`.codex`、`.gemini`、`.agents`、`_agents`、`.agent`、`.opencode`。下列檔案不論在哪個資料夾，都依檔名視為敏感：
 

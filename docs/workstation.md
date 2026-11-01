@@ -99,7 +99,7 @@ With **Merge approved PRs** on, the autopilot merges a task's approved PR once i
 
 - it changes a sensitive path (below); the reason names up to 8 of them;
 - its changed files cannot be read, its runner reported none, or it changes 2000 files or more;
-- its head is not a commit the autopilot's own runs made.
+- its head is not a commit the autopilot's own runs made, or the run that opened it is not known.
 
 A path is sensitive when any folder in it, or the file itself, has one of these names: `.github`, `.gitlab`, `.circleci`, `.buildkite`, `.husky`, `.devcontainer`, `.claude`, `.cursor`, `.vscode`, `scripts`, `.codex`, `.gemini`, `.agents`, `_agents`, `.agent`, `.opencode`. A file is sensitive in any folder by its name:
 
