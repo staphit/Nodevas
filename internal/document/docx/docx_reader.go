@@ -24,6 +24,12 @@ const (
 	maxDOCXPartBytes              = 64 << 20
 	maxDOCXImageBytes             = 16 << 20
 	maxDOCXImages                 = 256
+
+	// Nesting bounds: every nested table costs reader frames and every list
+	// level a renderer frame, and a Go stack overflow is fatal, not a panic.
+	// Word itself stops at nine list levels.
+	maxDOCXTableDepth = 32
+	maxDOCXListDepth  = 32
 )
 
 // ReadDOCX converts a Word document into the block model. It reads the subset
@@ -136,6 +142,8 @@ type docxReader struct {
 	sink      MediaSink
 	imageSeq  int
 	imageData map[string][]byte
+	// tableDepth counts the tables being read, outermost included.
+	tableDepth int
 }
 
 // ---------- side parts ----------
@@ -599,6 +607,8 @@ func (r *docxReader) readDrawing(decoder *xml.Decoder, closing string) (*documen
 }
 
 func (r *docxReader) readTable(decoder *xml.Decoder) (*document.Table, error) {
+	r.tableDepth++
+	defer func() { r.tableDepth-- }()
 	table := &document.Table{}
 	var rows [][]document.TableCell
 	headerRow := -1
@@ -710,6 +720,17 @@ func (r *docxReader) readTableCell(decoder *xml.Decoder) (document.TableCell, do
 				}
 				cell.Inlines = append(cell.Inlines, paragraph.inlines...)
 			case "tbl":
+				if r.tableDepth >= maxDOCXTableDepth {
+					// Too deep to read as a table: keep only its text.
+					text, err := tableText(decoder)
+					if err != nil {
+						return cell, align, err
+					}
+					if text != "" {
+						cell.Inlines = append(cell.Inlines, &document.Text{Value: text})
+					}
+					continue
+				}
 				// A nested table flattens into the cell's text.
 				nested, err := r.readTable(decoder)
 				if err != nil {
@@ -730,6 +751,47 @@ func (r *docxReader) readTableCell(decoder *xml.Decoder) (document.TableCell, do
 		}
 	}
 	return cell, align, nil
+}
+
+// tableText reads the rest of a w:tbl without recursing, however deep the
+// tables inside it nest, and returns its text one paragraph per space.
+func tableText(decoder *xml.Decoder) (string, error) {
+	var parts []string
+	var paragraph strings.Builder
+	depth := 1
+	for depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", err
+		}
+		switch element := token.(type) {
+		case xml.StartElement:
+			switch element.Name.Local {
+			case "tbl":
+				depth++
+			case "t":
+				text, err := elementText(decoder)
+				if err != nil {
+					return "", err
+				}
+				paragraph.WriteString(text)
+			}
+		case xml.EndElement:
+			switch element.Name.Local {
+			case "tbl":
+				depth--
+			case "p":
+				if text := strings.TrimSpace(paragraph.String()); text != "" {
+					parts = append(parts, text)
+				}
+				paragraph.Reset()
+			}
+		}
+	}
+	if text := strings.TrimSpace(paragraph.String()); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, " "), nil
 }
 
 // unboldRow drops the bold that a header row carries by convention — a
@@ -952,6 +1014,10 @@ func (s *listStack) drain() []document.Block {
 }
 
 func (s *listStack) push(reader *docxReader, numID, level int, item *document.ListItem) {
+	if depth := len(s.lists); depth >= maxDOCXListDepth && s.levels[depth-1] < level {
+		// Deeper levels join the innermost list instead of nesting further.
+		level = s.levels[depth-1]
+	}
 	for len(s.lists) > 0 && s.levels[len(s.lists)-1] > level {
 		s.pop()
 	}

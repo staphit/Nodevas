@@ -18,27 +18,37 @@ func MatchGlob(pattern, p string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(p, "/"))
 }
 
+// matchSegments fills the table "pat[i:] matches segs[j:]" one pattern
+// segment at a time, from the last one back, so it costs at most
+// len(pat)*len(segs) segment matches. Trying every split of the path for every
+// "**" instead is exponential in their number, and the hub matches
+// editor-written globs against runner-reported paths.
 func matchSegments(pat, segs []string) bool {
-	for len(pat) > 0 {
-		if pat[0] == "**" {
-			rest := pat[1:]
-			for i := 0; i <= len(segs); i++ {
-				if matchSegments(rest, segs[i:]) {
-					return true
+	// next[j]: pat[i+1:] matches segs[j:]. The empty pattern matches only the
+	// empty path.
+	next := make([]bool, len(segs)+1)
+	cur := make([]bool, len(segs)+1)
+	next[len(segs)] = true
+	for i := len(pat) - 1; i >= 0; i-- {
+		if pat[i] == "**" {
+			// "**" takes no segment (next[j]) or one more (cur[j+1]).
+			cur[len(segs)] = next[len(segs)]
+			for j := len(segs) - 1; j >= 0; j-- {
+				cur[j] = next[j] || cur[j+1]
+			}
+		} else {
+			cur[len(segs)] = false
+			for j := len(segs) - 1; j >= 0; j-- {
+				cur[j] = false
+				if next[j+1] {
+					ok, err := path.Match(pat[i], segs[j])
+					cur[j] = err == nil && ok
 				}
 			}
-			return false
 		}
-		if len(segs) == 0 {
-			return false
-		}
-		ok, err := path.Match(pat[0], segs[0])
-		if err != nil || !ok {
-			return false
-		}
-		pat, segs = pat[1:], segs[1:]
+		next, cur = cur, next
 	}
-	return len(segs) == 0
+	return next[0]
 }
 
 // MatchAnyGlob reports whether path matches any pattern.

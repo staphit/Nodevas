@@ -539,12 +539,13 @@ func TestBigramFalsePositivesAreFilteredOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidates, err := docs.candidates(context.Background(), cleanRoot(root), queryTokens("甲乙丙"))
+	candidates := 0
+	err = docs.candidates(context.Background(), cleanRoot(root), queryTokens("甲乙丙"), func(*storedDoc) { candidates++ })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 2 {
-		t.Fatalf("the index offered %d candidates; the fixture no longer tests the filter", len(candidates))
+	if candidates != 2 {
+		t.Fatalf("the index offered %d candidates; the fixture no longer tests the filter", candidates)
 	}
 
 	for _, query := range []string{"甲乙丙", "abc"} {
