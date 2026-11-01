@@ -13,6 +13,7 @@ package realtime
 import (
 	"errors"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -327,33 +328,74 @@ func (h *Hub) lockDocPersistence(room, key string) func() {
 // sweepDocSessions drops the sessions nobody has come back to. Takes the clock
 // as an argument so the lifetime can be tested without waiting a minute for it.
 func (h *Hub) sweepDocSessions(now time.Time) {
-	type candidate struct {
-		room    string
-		key     string
-		session *docSession
-	}
-
+	due := func(session *docSession) bool { return now.Sub(session.emptyAt) >= docSessionGrace }
 	h.mu.Lock()
-	var candidates []candidate
+	var candidates []emptyDoc
 	for room, sessions := range h.docs {
 		for key, session := range sessions {
 			h.expireCompactionLocked(session, now)
 			if len(session.members) > 0 || session.emptyAt.IsZero() {
 				continue
 			}
-			if now.Sub(session.emptyAt) >= docSessionGrace {
-				candidates = append(candidates, candidate{room: room, key: key, session: session})
+			if due(session) {
+				candidates = append(candidates, emptyDoc{room: room, key: key, session: session})
 			}
 		}
 	}
 	h.mu.Unlock()
+	h.retireEmptyDocs(candidates, now, due)
+}
 
+// retireActorEmptyDocs is the sweep for one account at its share of the table,
+// about to open a document nobody has open. The empty sessions it left last,
+// oldest first, make way for the new one, as the sweep would have a little
+// later: somebody clicking through documents is never refused the next one,
+// and the document it just left keeps its reload grace. Sessions with people
+// in them are never touched.
+func (h *Hub) retireActorEmptyDocs(actorKey, room, key string, now time.Time) {
+	h.mu.Lock()
+	if h.docs[room][key] != nil {
+		// Joining takes no slot.
+		h.mu.Unlock()
+		return
+	}
+	excess := h.actorDocSessionsLocked(actorKey) - maxDocSessionsPerActor + 1
+	var candidates []emptyDoc
+	if excess > 0 {
+		for sessionRoom, sessions := range h.docs {
+			for sessionKey, session := range sessions {
+				if len(session.members) == 0 && !session.emptyAt.IsZero() && session.emptiedBy == actorKey {
+					candidates = append(candidates, emptyDoc{room: sessionRoom, key: sessionKey, session: session, emptyAt: session.emptyAt})
+				}
+			}
+		}
+	}
+	h.mu.Unlock()
+	if len(candidates) == 0 {
+		return
+	}
+	slices.SortFunc(candidates, func(a, b emptyDoc) int { return a.emptyAt.Compare(b.emptyAt) })
+	candidates = candidates[:min(excess, len(candidates))]
+	h.retireEmptyDocs(candidates, now, func(session *docSession) bool { return session.emptiedBy == actorKey })
+}
+
+// emptyDoc is a session that had nobody in it when it was picked to retire.
+type emptyDoc struct {
+	room    string
+	key     string
+	session *docSession
+	emptyAt time.Time
+}
+
+// retireEmptyDocs saves and drops each candidate that is still the same empty
+// session, and still due, once its document turn is free.
+func (h *Hub) retireEmptyDocs(candidates []emptyDoc, now time.Time, due func(*docSession) bool) {
 	for _, candidate := range candidates {
 		unlockPersistence := h.lockDocPersistence(candidate.room, candidate.key)
 		h.mu.Lock()
 		sessions := h.docs[candidate.room]
 		session := sessions[candidate.key]
-		ready := session == candidate.session && len(session.members) == 0 && !session.emptyAt.IsZero() && now.Sub(session.emptyAt) >= docSessionGrace
+		ready := session == candidate.session && len(session.members) == 0 && !session.emptyAt.IsZero() && due(session)
 		var card docSidecar
 		if ready {
 			card = session.sidecarLocked()
@@ -458,7 +500,9 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 		return
 	}
 
-	h.sweepDocSessions(time.Now())
+	now := time.Now()
+	h.sweepDocSessions(now)
+	h.retireActorEmptyDocs(actorConnectionKey(actor), room, key, now)
 	unlockPersistence := h.lockDocPersistence(room, key)
 
 	h.mu.Lock()
