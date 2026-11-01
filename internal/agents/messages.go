@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -69,14 +70,33 @@ func (m Message) HubNotice() bool {
 
 // trustMarker matches the opening of a <nodevas-...> tag, or its closing,
 // as the text an agent reads mail in wraps it (<nodevas-message>,
-// <nodevas-approval ... verified>).
-var trustMarker = regexp.MustCompile(`(?i)<(\s*/?\s*)nodevas-`)
+// <nodevas-approval ... verified>), in the spellings a model still reads as
+// one: any case, lookalike brackets and slashes, fullwidth letters, and
+// spaces or invisible (zero-width, combining) characters anywhere up to the
+// end of "nodevas".
+var trustMarker = func() *regexp.Regexp {
+	const gap = `[\s\v\p{Z}\p{Cf}\p{Mn}]*`
+	var b strings.Builder
+	b.WriteString(`(?i)[<\x{FF1C}\x{FE64}\x{2039}\x{2329}\x{3008}\x{27E8}][\s\v\p{Z}\p{Cf}\p{Mn}/\x{FF0F}\x{2044}\x{2215}]*`)
+	for i, c := range "nodevas" {
+		if i > 0 {
+			b.WriteString(gap)
+		}
+		// The letter, or its fullwidth form (any case, as (?i) folds).
+		fmt.Fprintf(&b, `[%c\x{%X}]`, c, c-'a'+0xFF41)
+	}
+	return regexp.MustCompile(b.String())
+}()
 
 // EscapeTrustMarkers neutralizes the <nodevas-...> tags in s, so text a
 // sender wrote can neither close the envelope it is read in nor forge one of
-// the hub's (as </handoff-note is escaped in a handoff).
+// the hub's (as </handoff-note is escaped in a handoff): the bracket that
+// opens one becomes "&lt;".
 func EscapeTrustMarkers(s string) string {
-	return trustMarker.ReplaceAllString(s, "&lt;${1}nodevas-")
+	return trustMarker.ReplaceAllStringFunc(s, func(m string) string {
+		_, size := utf8.DecodeRuneInString(m)
+		return "&lt;" + m[size:]
+	})
 }
 
 // SendInput describes an outbound message from an agent session or human.
