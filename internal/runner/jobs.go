@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -901,7 +902,22 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	// Every failed run says why in a word the hub can route on; a failure
 	// nothing recognised (a worktree git refused, a push) is the task's.
+	// Every text in the result goes through redaction here, whatever its
+	// source already did.
 	result.Summary, result.Error = redact.Output(result.Summary), redact.Output(result.Error)
+	result.HandoffNote = redact.Output(result.HandoffNote)
+	if result.Verify != nil {
+		v := *result.Verify
+		v.Output = redact.Output(v.Output)
+		result.Verify = &v
+	}
+	if len(result.Checks) > 0 {
+		checks := slices.Clone(result.Checks)
+		for i := range checks {
+			checks[i].Note = redact.Output(checks[i].Note)
+		}
+		result.Checks = checks
+	}
 	if pr != nil {
 		pr.Error = redact.Output(pr.Error)
 	}

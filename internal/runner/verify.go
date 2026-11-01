@@ -107,7 +107,7 @@ func RunVerify(ctx context.Context, req VerifyRequest) (runnerwire.VerifyResult,
 	exit, output, timedOut, duration := runTestCommand(ctx, dir, req.Command, timeout)
 	result.ExitCode = exit
 	result.DurationMs = max(duration.Milliseconds(), 1)
-	text := redact.String(output)
+	text := redact.Output(output)
 	note := ""
 	if timedOut {
 		note = fmt.Sprintf("\n[verify timed out after %s; the test command and everything it started were stopped]", timeout)
