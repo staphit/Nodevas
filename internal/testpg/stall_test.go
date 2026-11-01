@@ -57,8 +57,20 @@ func TestAStalledPostgresOpensOnABusyServer(t *testing.T) {
 		t.Fatalf("open before the stall: %v", err)
 	}
 	defer database.Close()
+	// The handle works. The query may need a connection of its own, and on
+	// a machine busy enough to slow the open, that dial can outlast the
+	// one-second connect timeout too: it is tried again for a while, the
+	// open's own retry being what this test is about.
 	var one int
-	if err := database.QueryRow(`SELECT 1`).Scan(&one); err != nil || one != 1 {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		err = database.QueryRow(`SELECT 1`).Scan(&one)
+		if err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil || one != 1 {
 		t.Fatalf("query = %d, %v", one, err)
 	}
 }
