@@ -1069,6 +1069,32 @@ ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS run_key TEXT COLLATE "C" NOT NUL
 ALTER TABLE agent_asks ADD COLUMN IF NOT EXISTS tool_input_truncated BOOLEAN NOT NULL DEFAULT FALSE;
 `,
 	},
+	{
+		// The action log used to record a permission prompt by its question,
+		// which quotes the tool's input (a path, a command); it now records
+		// "Allow <tool>?" (agents.askActionDetail). Old rows get the same
+		// form: by their stored ask's tool, or, once ask retention pruned
+		// the ask, by the tool a run's relayed prompt named ("<agent> wants
+		// to run <tool>[: <input>]"). Rewritten rows match neither again.
+		name: "0033_permission_prompt_action_details",
+		stmt: `
+UPDATE agent_session_actions AS a
+SET detail = 'Allow ' || k.tool || '?'
+FROM agent_asks AS k
+WHERE a.action = 'ask'
+  AND k.kind = 'permission' AND k.tool <> ''
+  AND k.session_id = a.session_id
+  AND a.detail <> '' AND starts_with(k.question, a.detail)
+  AND a.detail <> 'Allow ' || k.tool || '?';
+UPDATE agent_session_actions AS a
+SET detail = 'Allow ' || substring(a.detail from '^[^:\n]* wants to run ([^ :\n]+)') || '?'
+WHERE a.action = 'ask' AND a.run_id <> ''
+  AND a.detail ~ '^[^:\n]* wants to run [^ :\n]+(:|$)'
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_asks AS k
+    WHERE k.session_id = a.session_id AND starts_with(k.question, a.detail));
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

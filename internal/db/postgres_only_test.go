@@ -117,8 +117,8 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 			t.Errorf("step %s is gone: the NAS database has it recorded", kept)
 		}
 	}
-	if n := len(names); n < 7 || names[n-7] != "0026_search_index" || names[n-6] != "0027_legacy_imports" || names[n-5] != "0028_agent_analytics" || names[n-4] != "0029_search_gin_fastupdate" || names[n-3] != "0030_agent_ask_kinds" || names[n-2] != "0031_agent_ask_run_key" || names[n-1] != "0032_agent_ask_input_truncated" {
-		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate, 0030_agent_ask_kinds, 0031_agent_ask_run_key, 0032_agent_ask_input_truncated", names[max(0, len(names)-8):])
+	if n := len(names); n < 8 || names[n-8] != "0026_search_index" || names[n-7] != "0027_legacy_imports" || names[n-6] != "0028_agent_analytics" || names[n-5] != "0029_search_gin_fastupdate" || names[n-4] != "0030_agent_ask_kinds" || names[n-3] != "0031_agent_ask_run_key" || names[n-2] != "0032_agent_ask_input_truncated" || names[n-1] != "0033_permission_prompt_action_details" {
+		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate, 0030_agent_ask_kinds, 0031_agent_ask_run_key, 0032_agent_ask_input_truncated, 0033_permission_prompt_action_details", names[max(0, len(names)-9):])
 	}
 }
 
