@@ -632,10 +632,16 @@ func (g *abuseGuard) allowPreAuth(ip string, now time.Time, global bool) (bool, 
 }
 
 func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip string, now time.Time) (bool, int) {
+	return g.allowRoute(class, cost, actorID, ip, true, now)
+}
+
+// allowRoute is AllowRoute, charging the class's hub-wide bucket only when
+// global is set (see routeChecks).
+func (g *abuseGuard) allowRoute(class RouteClass, cost float64, actorID, ip string, global bool, now time.Time) (bool, int) {
 	if class == ClassPublicAuth {
 		return true, 0
 	}
-	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip), now)
+	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip, global), now)
 	if !ok {
 		g.recordRejection(class)
 		return false, retry
@@ -652,12 +658,12 @@ const readQueueWait = 10 * time.Second
 // ReserveRoute is AllowRoute for a request that waits its turn rather than
 // fail: it reports how long to wait (up to maxWait) and a cancel that gives
 // the place back when the request stops waiting. Past maxWait it refuses,
-// taking nothing, like AllowRoute.
-func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
+// taking nothing, like AllowRoute. global is as for allowRoute.
+func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, global bool, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
 	if class == ClassPublicAuth {
 		return 0, true, 0, func() {}
 	}
-	checks := g.routeChecks(class, cost, actorID, ip)
+	checks := g.routeChecks(class, cost, actorID, ip, global)
 	wait, ok, retry := g.store.reserveMulti(checks, now, maxWait)
 	if !ok {
 		g.recordRejection(class)
@@ -667,8 +673,11 @@ func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip st
 }
 
 // routeChecks is the buckets a request of class is charged to: the class's
-// global one, its address's and its actor's.
-func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string) []bucketCheck {
+// global one when global is set, its address's and its actor's. A request
+// nobody signed in to is not charged to the global one: signed-in members'
+// requests share it, and strangers spread over a few addresses could empty
+// it for all of them. The pre-auth buckets already bound strangers.
+func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string, global bool) []bucketCheck {
 	var gRate, gBurst, ipRate, ipBurst, actRate, actBurst float64
 	switch class {
 	case ClassRead:
@@ -697,8 +706,9 @@ func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip str
 		actRate, actBurst = g.readActorRate, g.readActorBurst
 	}
 
-	checks := []bucketCheck{
-		{key: string(class) + ":global", rate: gRate, burst: gBurst, cost: cost},
+	var checks []bucketCheck
+	if global {
+		checks = append(checks, bucketCheck{key: string(class) + ":global", rate: gRate, burst: gBurst, cost: cost})
 	}
 	if ip != "" {
 		checks = append(checks, bucketCheck{
@@ -917,8 +927,9 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 
 	// A request nobody signed in to (a device-link redeem) has no actor
 	// bucket: strangers are not one person, and charging them all to one
-	// would let one of them refuse the rest. The global and per-source
-	// buckets still apply.
+	// would let one of them refuse the rest. Nor is it charged to the
+	// class's hub-wide bucket, which members' requests share (routeChecks);
+	// the pre-auth buckets and the per-source one still apply.
 	actor, attached := auth.AttachedActor(c.Request)
 	actorID := actor.ID
 	if attached && actorID == "" {
@@ -944,14 +955,14 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	if class == ClassRead {
 		var wait time.Duration
 		var cancel func()
-		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, source, now, readQueueWait)
+		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, source, attached, now, readQueueWait)
 		if allowed && wait > 0 && !waitTurn(c.Request.Context(), wait) {
 			cancel()
 			c.Abort()
 			return
 		}
 	} else {
-		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, source, now)
+		allowed, retrySec = s.abuse.allowRoute(class, cost, actorID, source, attached, now)
 	}
 	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
