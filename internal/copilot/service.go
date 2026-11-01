@@ -31,6 +31,9 @@ var (
 	// Two turns interleaving their tool calls and transcript entries would
 	// leave a history no model can replay.
 	ErrBusy = errors.New("this conversation already has a turn in progress")
+	// ErrTurnLimit is a turn past the account's share of the server's key
+	// (429): maxServerTurnsPerAccount turns already run on it.
+	ErrTurnLimit = errors.New("you already have copilot turns running on the server's key; wait for one to finish")
 	// ErrUnavailable wraps the reasons the copilot cannot answer at all: it is
 	// switched off, has no key, or its provider could not be built (503).
 	ErrUnavailable = errors.New("the copilot is unavailable")
@@ -43,6 +46,10 @@ const (
 	defaultPermissionTimeout = 120 * time.Second
 	defaultClientToolTimeout = 60 * time.Second
 	defaultMaxToolCalls      = 25
+	// maxServerTurnsPerAccount bounds the turns one account runs at once
+	// on the server's own key on a server with accounts, where every
+	// member's turns are billed to it.
+	maxServerTurnsPerAccount = 2
 	// maxTurnTextBytes bounds one utterance. Speech recognition produces a
 	// sentence or two; a pasted essay is still welcome, a megabyte is not.
 	maxTurnTextBytes = 32 << 10
