@@ -128,7 +128,10 @@ func runnerUsage(w io.Writer) {
                                              agent TUI the dispatcher watches, typing only if allowed;
                                              each still accepted here or by autoaccept),
                                              repoBrowse (on|off, default on: the hub's Explorer may list
-                                             and read the repos added here, read-only, secrets hidden);
+                                             and read the repos added here, read-only, secrets hidden),
+                                             httpLoopbackHub (on|off, default off: a runner serve did not
+                                             start sends its token to a plain-http hub on this machine;
+                                             only if nobody else can run programs here);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
