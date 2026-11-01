@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
+	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
 
@@ -877,13 +878,16 @@ func (s *Server) chargeRefusedCredential(c *gin.Context) bool {
 }
 
 // claimsIdentity reports a request that will be signed in by withAuth if
-// its claim holds: a session cookie on a guarded route, or a direct
-// loopback request to a standalone hub. Sign-in routes never qualify: the
-// pre-auth bucket is their only limit.
+// its claim holds: a session cookie on a guarded route, a runner token on a
+// runner route, or a direct loopback request to a standalone hub. Sign-in
+// routes never qualify: the pre-auth bucket is their only limit.
 func (s *Server) claimsIdentity(r *http.Request) bool {
 	path := r.URL.Path
-	if auth.PublicPaths[path] || path == runnerwire.LinkPath || strings.HasPrefix(path, runnerPathPrefix) {
+	if auth.PublicPaths[path] || path == runnerwire.LinkPath {
 		return false
+	}
+	if strings.HasPrefix(path, runnerPathPrefix) {
+		return strings.HasPrefix(runners.BearerToken(r), runnerwire.TokenPrefix)
 	}
 	if class, _ := ClassifyRoute(r.Method, path); class == ClassPublicAuth {
 		return false

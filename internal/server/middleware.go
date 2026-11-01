@@ -236,10 +236,15 @@ func (s *Server) authenticate(r *http.Request) (identity.Actor, string, error) {
 const runnerPathPrefix = "/api/runner/"
 
 // withRunnerAuth admits a request carrying a valid runner token, acting as
-// the runner's owner marked as a worker agent.
+// the runner's owner marked as a worker agent. A token it refuses is charged
+// to the pre-auth bucket it skipped (claimsIdentity), as a refused session
+// cookie is.
 func (s *Server) withRunnerAuth(c *gin.Context) {
 	r := c.Request
 	if s.runners == nil {
+		if s.chargeRefusedCredential(c) {
+			return
+		}
 		httpx.Err(c, http.StatusNotFound, locale.Errorf("runners are not enabled on this server", "這個伺服器沒有啟用 runner"))
 		return
 	}
@@ -247,6 +252,9 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 	if err != nil {
 		if !errors.Is(err, runners.ErrUnauthenticated) {
 			httpx.Err(c, http.StatusInternalServerError, err)
+			return
+		}
+		if s.chargeRefusedCredential(c) {
 			return
 		}
 		httpx.Err(c, http.StatusUnauthorized, err)
@@ -263,6 +271,9 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 	// checks the same in runnerProxyActor.
 	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
 		if _, _, found := accounts.CurrentActor(r.Context(), runner.OwnerID); !found {
+			if s.chargeRefusedCredential(c) {
+				return
+			}
 			httpx.Err(c, http.StatusUnauthorized, runners.ErrUnauthenticated)
 			return
 		}
