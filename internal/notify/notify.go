@@ -80,8 +80,10 @@ func (n *Notifier) UseReaders(readers func(projectPath, address string) (string,
 // Recipient reports where a reminder about the project at projectPath may
 // go for address, an assignee's email from the project's graph. Anyone who
 // edits the graph chooses those addresses, so on a server with accounts the
-// hub's mail only goes to an account that can read the project; a loopback
-// server's graph is its one person's own.
+// hub's mail only goes to an account that can read the project, and to the
+// address stored on that account, never the typed one with whatever display
+// name an editor wrapped around it; a loopback server's graph is its one
+// person's own.
 func (n *Notifier) Recipient(projectPath, address string) (string, bool) {
 	if address == "" {
 		return "", false
@@ -95,8 +97,11 @@ func (n *Notifier) Recipient(projectPath, address string) (string, bool) {
 	if readers == nil {
 		return "", false
 	}
-	_, ok := readers(projectPath, address)
-	return address, ok
+	stored, ok := readers(projectPath, address)
+	if !ok || stored == "" {
+		return "", false
+	}
+	return stored, true
 }
 
 func (n *Notifier) settingsPath() string {
