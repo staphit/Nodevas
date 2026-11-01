@@ -36,3 +36,13 @@ func ApplyPGMigrationsThrough(ctx context.Context, handle *sql.DB, last string) 
 	}
 	return fmt.Errorf("no step %s", last)
 }
+
+// PGMigrationStatement is the SQL of the step named name ("" if none).
+func PGMigrationStatement(name string) string {
+	for _, step := range pgMigrations {
+		if step.name == name {
+			return step.stmt
+		}
+	}
+	return ""
+}
