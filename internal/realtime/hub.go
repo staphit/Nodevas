@@ -295,6 +295,12 @@ const (
 	wsRelayByteBurst   = wsPayloadByteBurst
 	wsRelayBytesPerSec = wsPayloadBytesPerSec
 	maxRelayBudgets    = 1024
+
+	// A window holds one soft lock, on the document its editor shows, and an
+	// account may open maxWSConnectionsPerActor windows: twice that is far
+	// past what a person holds. The lock table goes whole to everybody in the
+	// room on every change, which is why it needs a bound at all.
+	maxLocksPerActor = 2 * maxWSConnectionsPerActor
 	// One frame's ceiling. Big enough for an awareness update carrying a
 	// selection in a long document, small enough that 128 connections cannot
 	// each park a megabyte in the read buffer.
