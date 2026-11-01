@@ -1156,8 +1156,8 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 		_, _ = h.Send(ctx, SendInput{
 			Project:        project,
 			SenderActor:    decidedBy,
-			SenderSession:  "web",
-			SenderAgent:    "human",
+			SenderSession:  WebSession,
+			SenderAgent:    HumanAgent,
 			IsHuman:        true,
 			To:             updated.SessionName,
 			NodeID:         updated.NodeID,
@@ -1176,6 +1176,9 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 			if updated.Answer != "" {
 				text = strings.TrimSpace("Answer: " + updated.Answer + "\n" + updated.Note)
 			}
+			// The person's words, inside the hub's verified block: they must
+			// not close it.
+			text = EscapeTrustMarkers(text)
 			approvalBody := fmt.Sprintf(
 				"<nodevas-approval from=%q about=%q decision=%q verified>\n%s\n</nodevas-approval>",
 				shortActor(decidedBy), updated.AboutMsgID, updated.Status, text,
@@ -1184,7 +1187,7 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 				Project:       project,
 				SenderActor:   decidedBy,
 				SenderSession: updated.SessionName,
-				SenderAgent:   "human",
+				SenderAgent:   HumanAgent,
 				IsHuman:       true,
 				To:            orig.SenderSession,
 				ReplyTo:       orig.ID,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -49,6 +50,33 @@ type Message struct {
 	// decides who may approve the message or read its files, so it is not
 	// something to hand to every browser in the project.
 	RecipientActor string `json:"-"`
+}
+
+// A person's own mail is sent as HumanAgent from WebSession; only the
+// hub's notices of a person's decision are sent as HumanAgent from another
+// session (Message.HubNotice). Send refuses both to everyone else.
+const (
+	HumanAgent = "human"
+	WebSession = "web"
+)
+
+// HubNotice reports whether m is the hub's own notice of a person's
+// decision (a verified approval, AnswerWith), as only the hub may send:
+// as HumanAgent, from a session other than WebSession.
+func (m Message) HubNotice() bool {
+	return strings.EqualFold(m.SenderAgent, HumanAgent) && !strings.EqualFold(m.SenderSession, WebSession)
+}
+
+// trustMarker matches the opening of a <nodevas-...> tag, or its closing,
+// as the text an agent reads mail in wraps it (<nodevas-message>,
+// <nodevas-approval ... verified>).
+var trustMarker = regexp.MustCompile(`(?i)<(\s*/?\s*)nodevas-`)
+
+// EscapeTrustMarkers neutralizes the <nodevas-...> tags in s, so text a
+// sender wrote can neither close the envelope it is read in nor forge one of
+// the hub's (as </handoff-note is escaped in a handoff).
+func EscapeTrustMarkers(s string) string {
+	return trustMarker.ReplaceAllString(s, "&lt;${1}nodevas-")
 }
 
 // SendInput describes an outbound message from an agent session or human.
@@ -122,9 +150,9 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		senderActor = "local"
 	}
 	senderSession := strings.TrimSpace(in.SenderSession)
-	if senderSession == "" {
+	if senderSession == "" || (in.IsHuman && !in.system) {
 		if in.IsHuman {
-			senderSession = "web"
+			senderSession = WebSession
 		} else {
 			senderSession = shortActor(senderActor)
 		}
@@ -132,10 +160,17 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	senderAgent := strings.TrimSpace(in.SenderAgent)
 	if senderAgent == "" {
 		if in.IsHuman {
-			senderAgent = "human"
+			senderAgent = HumanAgent
 		} else {
 			senderAgent = "agent"
 		}
+	}
+	// "human" from "web" is a person's own message; "human" from a session
+	// is the hub's notice of their decision (HubNotice). An agent or a run
+	// claiming either would put words in a person's mouth.
+	if !in.IsHuman && !in.system &&
+		(strings.EqualFold(senderAgent, HumanAgent) || strings.EqualFold(senderSession, WebSession)) {
+		return SendResult{}, fmt.Errorf("%w: only a person sends as %q or from %q", ErrRefused, HumanAgent, WebSession)
 	}
 
 	replyTo := strings.TrimSpace(in.ReplyTo)

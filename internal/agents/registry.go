@@ -619,6 +619,8 @@ func (h *Hub) uniqueNameLocked(project, sessionID, actorID, base, mailedTo strin
 	if !known && mailedTo != "" && !sameActor(mailedTo, actorID) {
 		held[strings.ToLower(base)] = true
 	}
+	// Mail from "web" is a person's (WebSession): no agent goes by it.
+	held[WebSession] = true
 	taken := func(candidate string) bool { return held[strings.ToLower(candidate)] }
 	if !taken(base) {
 		return base
