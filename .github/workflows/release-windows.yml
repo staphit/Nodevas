@@ -39,6 +39,11 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
           fetch-tags: true
+          # The token stays out of the clone's git config: the build steps
+          # below run npm, vite and electron-builder code, and only the
+          # publish step gets the token, as GH_TOKEN (its ls-remote of this
+          # public repository needs none).
+          persist-credentials: false
 
       - name: Verify release provenance
         id: release
