@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -58,25 +60,30 @@ func TestRunnerTextSaysWhereThePermissionRelayStops(t *testing.T) {
 }
 
 // Runners are added, linked and revoked under Settings → Agents; there is
-// no Runners page to send anyone to.
+// no Runners page to send anyone to, from the CLI or from the hub's own
+// messages and mail.
 func TestRunnerTextNamesNoRunnersPage(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(name)
+	for _, root := range []string{".", filepath.Join("..", "..", "internal")} {
+		err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				return nil
+			}
+			raw, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			for i, line := range strings.Split(string(raw), "\n") {
+				if strings.Contains(line, "Runners page") || strings.Contains(line, "Runners 頁面") {
+					t.Errorf("%s:%d sends people to a Runners page: %s", name, i+1, strings.TrimSpace(line))
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, "Runners page") {
-				t.Errorf("%s:%d sends people to a Runners page: %s", name, i+1, strings.TrimSpace(line))
-			}
 		}
 	}
 }
