@@ -1,5 +1,5 @@
 /**
- * Explorer ordering [B-03].
+ * Explorer ordering.
  *
  * The server returns projects in path order, which is a depth-first walk of
  * the tree. Any other ordering has to keep that shape — a child must still

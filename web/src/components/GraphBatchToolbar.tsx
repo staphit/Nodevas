@@ -1,5 +1,5 @@
 /**
- * Multi-selection actions on the canvas [B-06].
+ * Multi-selection actions on the canvas.
  *
  * Shown for two or more nodes only: one node has its drawer and its own menu,
  * and a bar of batch actions over a single card only repeated them. The row

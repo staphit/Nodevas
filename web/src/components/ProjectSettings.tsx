@@ -27,7 +27,7 @@ export type SettingsTab =
   | "account";
 
 /**
- * One of the project-wide definitions [B-05] (or one of the viewer's own
+ * One of the project-wide definitions (or one of the viewer's own
  * settings), as a part of the Settings page: the editor and the one pair of
  * banners it reports through.
  *

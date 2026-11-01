@@ -1,4 +1,4 @@
-/** Domain failures [A-04]. Thrown by reducers, converted to `CommandResult`. */
+/** Domain failures. Thrown by reducers, converted to `CommandResult`. */
 
 import { translate } from "../i18n";
 

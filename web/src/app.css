@@ -186,7 +186,7 @@
   }
 }
 
-/* Live collaboration [P2]: soft lock banner and presence avatars. Both are
+/* Live collaboration: soft lock banner and presence avatars. Both are
    rows of the content view's column, above the editor and full width; they
    wrap rather than shrink, so large text grows them instead of hiding them. */
 .editor-lock-banner {

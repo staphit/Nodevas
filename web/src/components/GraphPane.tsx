@@ -1,5 +1,5 @@
 /**
- * Graph pane [B-06].
+ * Graph pane.
  *
  * Named entry point for the dependency canvas. Graph and timeline share one
  * implementation (`LaneView`) because they render the same nodes on the same

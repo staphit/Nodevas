@@ -1,5 +1,5 @@
 /**
- * Undo stack [A-06] — unit tests for the module itself.
+ * Undo stack — unit tests for the module itself.
  *
  * `stack` in ./undo is module-level state, not store state, so it survives
  * between `it()` blocks in this file unless something clears it. We reset with

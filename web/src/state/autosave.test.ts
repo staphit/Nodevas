@@ -173,7 +173,7 @@ describe("auto-save scheduling", () => {
     autosave.dispose();
   });
 
-  // Soft locks [P2]: another person has this document open. Writing in the
+  // Soft locks: another person has this document open. Writing in the
   // background while they do is the silent overwrite war the lock exists to
   // prevent, and no amount of retrying resolves it — a person has to.
   it("does not write in the background while something is blocking the document", async () => {

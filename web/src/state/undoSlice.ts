@@ -1,5 +1,5 @@
 /**
- * Undo/redo slice [A-05].
+ * Undo/redo slice.
  *
  * Both directions share the graph write queue: reverting is itself a graph
  * write, so it must not overtake a save that is still in flight. A failed

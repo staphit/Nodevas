@@ -1,5 +1,5 @@
 /**
- * Other people's carets, drawn in the editor [P2].
+ * Other people's carets, drawn in the editor.
  *
  * Positions arrive over the socket as plain document offsets and are pushed in
  * from React with `setRemoteCarets`. Nothing here reaches back out: the editor

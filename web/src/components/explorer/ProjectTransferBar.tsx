@@ -1,5 +1,5 @@
 /**
- * The project-file row of the explorer [B-06].
+ * The project-file row of the explorer.
  *
  * Saving, save-as and the two transfer menus, plus the hidden file inputs every
  * import goes through. The inputs are rendered next to the row rather than

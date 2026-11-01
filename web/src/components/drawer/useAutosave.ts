@@ -33,7 +33,7 @@ export interface AutosaveTarget {
   dirty: boolean;
   /**
    * Why writing is not allowed right now. Another person holding the soft lock
-   * [P2] is the case that matters: the editor is read-only, so there should be
+   * is the case that matters: the editor is read-only, so there should be
    * nothing to save, and if a takeover left a buffer behind then flushing it in
    * the background is exactly the silent overwrite war the lock exists to stop.
    * The user can still force the issue with Ctrl + S, which goes through the

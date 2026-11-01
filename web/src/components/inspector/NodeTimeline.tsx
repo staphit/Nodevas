@@ -1,5 +1,5 @@
 /**
- * Per-node schedule panel [B-06].
+ * Per-node schedule panel.
  *
  * Expected milestones (graph.yaml) on top, actual journal entries below, and an
  * assessment line that compares the two — the one place where plan and record
@@ -75,7 +75,7 @@ export function NodeTimeline({ id }: { id: string }) {
   const agentMessages = useNodeAgentMessages(id);
 
   // Expected milestones go through the plan commands: clearing the date removes
-  // the milestone, and the note survives a reschedule [A-04].
+  // the milestone, and the note survives a reschedule.
   const commitPlan = (status: PlanStatus, patch: { date?: string; time?: string }) => {
     const existing = plans.find((plan) => plan.status === status);
     const date = patch.date ?? existing?.date ?? "";

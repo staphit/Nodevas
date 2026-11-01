@@ -1,5 +1,5 @@
 /**
- * Project layout reducers [A-04].
+ * Project layout reducers.
  *
  * Owns the `graph.yaml → ui.*` placement data shared by everyone opening the
  * project: node positions, timeline order, groups, annotations, saved views,

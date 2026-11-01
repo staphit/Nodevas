@@ -1,5 +1,5 @@
 /**
- * Dragging projects between places [B-06].
+ * Dragging projects between places.
  *
  * A dragged project can land on another project (re-parenting inside the open
  * workspace) or on a different workspace root (moving the directory out of this

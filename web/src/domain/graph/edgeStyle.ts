@@ -1,5 +1,5 @@
 /**
- * Edge relation and line [B-06].
+ * Edge relation and line.
  *
  * What an edge *means* and how it is *drawn* are two independent fields:
  * a required dependency may be dashed for emphasis, and a deprecated one keeps

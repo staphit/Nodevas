@@ -1,5 +1,5 @@
 /**
- * The board's Problems panel [B-06].
+ * The board's Problems panel.
  *
  * One place for everything that wants fixing: the explorer's validation
  * warnings and the schedule analysis that used to push the graph down. It

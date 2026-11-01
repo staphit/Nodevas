@@ -1,5 +1,5 @@
 /**
- * Explorer search [B-06].
+ * Explorer search.
  *
  * One query box filters both halves of the tree — the open project's nodes and
  * the project list — so the two filters have to agree about what a match is and

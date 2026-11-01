@@ -1,5 +1,5 @@
 /**
- * Node types [A-04].
+ * Node types.
  *
  * A node's type decides how it behaves — whether an agent may work it, who may
  * mark it done, whether it counts as work — and how its card looks by default.
@@ -212,7 +212,7 @@ function assertColor(color: string | undefined) {
   if (color && !safeCssColor(color)) throw invalid(translate("domain.error.colorFormat"));
 }
 
-/** §1.5 rule 4, for one custom entry. */
+/** A custom node type must pick its agent mode, completion rule and progress counting. */
 function assertCustomBehaviour(def: NodeTypeDef) {
   if (!def.agentMode || !AGENT_MODES.includes(def.agentMode)) {
     throw invalid(translate("domain.error.pickAgentMode"));

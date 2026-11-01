@@ -1,5 +1,5 @@
 /**
- * Where a workspace bundle's projects land [B-06].
+ * Where a workspace bundle's projects land.
  *
  * Only asked when the picked file turns out to hold the whole workspace: a
  * single-project archive has one sensible destination and is imported without

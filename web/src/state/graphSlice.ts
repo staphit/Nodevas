@@ -1,5 +1,5 @@
 /**
- * Graph slice [A-05].
+ * Graph slice.
  *
  * Owns `graph.yaml`: the expected plan, node metadata, workflow definitions and
  * project layout. Every write goes through the same shape — clone, apply,
@@ -71,7 +71,7 @@ function withoutUnreadableRefusals(
 
 
 /**
- * Internal whole-graph write [A-04 / plan §10.7].
+ * Internal whole-graph write.
  *
  * Not exposed on the store: components use the typed commands. It stays as the
  * primitive that `runGraphCommand` and node creation are built on, because both
@@ -174,7 +174,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
   // Reloading a project is two independent reads, and the second one is also
   // what a `state-changed` event asks for on its own. Going through the same
   // coalescing keys as those events is what lets one logical change cost one
-  // GET per resource instead of one per trigger [A-05].
+  // GET per resource instead of one per trigger.
   loadAll: async () => {
     await Promise.all([
       coalesceRequest("graph", async () => {

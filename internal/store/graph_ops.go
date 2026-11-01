@@ -1,4 +1,4 @@
-// Server-side graph commands [P2].
+// Server-side graph commands.
 //
 // A whole-file PUT with a base revision is the right shape for one editor: it
 // refuses to overwrite work it has not seen. With two editors it is the wrong

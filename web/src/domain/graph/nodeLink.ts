@@ -1,5 +1,5 @@
 /**
- * Node links [A-04].
+ * Node links.
  *
  * A document can point at another node the way a wiki does:
  *

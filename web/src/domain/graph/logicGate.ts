@@ -1,5 +1,5 @@
 /**
- * Logic gate reducers [A-04].
+ * Logic gate reducers.
  *
  * A first-class gate (`graph.yaml → ui.logicGates`) owns the `requires`
  * expression of its output node. Incomplete wiring is persisted on purpose —

@@ -1,5 +1,5 @@
 /**
- * Wire/vertex key formats [A-04].
+ * Wire/vertex key formats.
  *
  * These strings are persisted in `graph.yaml → ui.wireVertices` and
  * `ui.edgeLabels`, so the formats are part of the file contract. Build them

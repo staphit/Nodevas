@@ -1,5 +1,5 @@
 /**
- * Inline dependency gate [B-06].
+ * Inline dependency gate.
  *
  * Drawn in front of a node that has a `requires` expression but no first-class
  * logic gate. It renders the ordinary dependency fan-in that remains outside

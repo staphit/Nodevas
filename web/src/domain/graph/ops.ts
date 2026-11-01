@@ -1,5 +1,5 @@
 /**
- * Applying somebody else's graph ops [P2].
+ * Applying somebody else's graph ops.
  *
  * When a peer moves a card, the server tells the room which ops it applied
  * rather than only that the file changed. Replaying them here moves that one

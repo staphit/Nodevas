@@ -1,5 +1,5 @@
 /**
- * Local UI preference schema [A-03].
+ * Local UI preference schema.
  *
  * Every `vised-*` localStorage key the app owns is declared here once: its
  * storage key, scope, default, validation and encoding. Nothing else in the

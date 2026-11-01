@@ -15,7 +15,7 @@ import { remoteCarets } from "../../editor/remoteCarets";
 import type { NodeLinkRef } from "../../types";
 
 /**
- * How the markdown is shown while editing [B-04]:
+ * How the markdown is shown while editing:
  * - `live`: rendered as you type; the caret's line shows its raw markers
  * - `source`: plain markdown, nothing hidden
  * - `preview`: read-only render of the whole document

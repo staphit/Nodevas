@@ -1,5 +1,5 @@
 /**
- * Node history [B-06].
+ * Node history.
  *
  * Two different records side by side: journal status events (what happened) and
  * file snapshots taken before each save (what the document looked like).

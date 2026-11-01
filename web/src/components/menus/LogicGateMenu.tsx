@@ -1,4 +1,4 @@
-/** Standalone logic-gate context menu [B-06]: operator, inputs, output. */
+/** Standalone logic-gate context menu: operator, inputs, output. */
 
 import {
   logicGateIsComplete,

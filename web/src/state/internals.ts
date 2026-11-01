@@ -1,5 +1,5 @@
 /**
- * Cross-slice internals [A-05].
+ * Cross-slice internals.
  *
  * Serialization and staleness guards that must be shared by every slice:
  *

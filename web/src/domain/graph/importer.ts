@@ -1,5 +1,5 @@
 /**
- * Bulk import [A-04].
+ * Bulk import.
  *
  * Applies a whole imported canvas in one revision: placement, styling, metadata
  * and dependencies for every imported node. The nodes themselves are created

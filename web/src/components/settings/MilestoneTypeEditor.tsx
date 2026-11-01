@@ -8,7 +8,7 @@ import { runSettingsCommand, type SettingsNotify } from "./notify";
 import { localizedPlanStatusLabel, useI18n } from "../../i18n";
 
 /**
- * The milestone-type vocabulary [B-05].
+ * The milestone-type vocabulary.
  *
  * These classify the *expected* plan and live in `graph.yaml`, which is why
  * they are a separate domain from the lifecycle states next door.

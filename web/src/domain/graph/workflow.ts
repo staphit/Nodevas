@@ -1,5 +1,5 @@
 /**
- * Workflow definition reducers [A-04].
+ * Workflow definition reducers.
  *
  * Owns `graph.yaml → ui.customStatuses` (actual lifecycle states) and
  * `ui.planStatuses` (expected milestone types). Project Settings is the only

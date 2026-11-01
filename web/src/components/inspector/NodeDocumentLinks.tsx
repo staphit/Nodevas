@@ -1,5 +1,5 @@
 /**
- * Document links, in both directions [B-04].
+ * Document links, in both directions.
  *
  * These are references written in the markdown, not dependencies: they may
  * point into another project, and they never gate anything. A link whose

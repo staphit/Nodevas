@@ -1,5 +1,5 @@
 /**
- * What other people are pointing at [P2].
+ * What other people are pointing at.
  *
  * The socket relays an opaque `awareness` payload between clients; this is what
  * this app puts in it. One shape covers both surfaces — a caret in a document

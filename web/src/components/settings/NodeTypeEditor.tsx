@@ -38,7 +38,7 @@ const REFERENCE_PRESET: Omit<NodeTypeDef, "id" | "label"> = {
 };
 
 /**
- * The project's node types [B-05]: what each kind of node does and how it
+ * The project's node types: what each kind of node does and how it
  * looks by default.
  *
  * Built-in types keep their behaviour — only their shape and colour change

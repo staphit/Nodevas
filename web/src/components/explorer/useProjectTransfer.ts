@@ -1,5 +1,5 @@
 /**
- * Moving whole projects in and out of the workspace [B-06].
+ * Moving whole projects in and out of the workspace.
  *
  * Everything the explorer can import or export: project archives, Markdown
  * files, JSON Canvas graphs and whole-project documents. The file inputs live
@@ -449,7 +449,7 @@ export function useProjectTransfer({
         imported.push({ source, id });
       }
       await loadAll();
-      // One command for the whole import: one revision, one undo step [A-04].
+      // One command for the whole import: one revision, one undo step.
       const result = await runGraphCommand({
         type: "graph.applyImport",
         payload: {

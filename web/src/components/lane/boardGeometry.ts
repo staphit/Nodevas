@@ -1,5 +1,5 @@
 /**
- * Board sizing maths [B-06].
+ * Board sizing maths.
  *
  * How large the scrolling surface is, where logical (0,0) lands inside it, and
  * which grid cell a pointer is over. All of it is a pure function of the grid,

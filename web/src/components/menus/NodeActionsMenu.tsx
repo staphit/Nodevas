@@ -1,5 +1,5 @@
 /**
- * A node's short menu [B-06]: right-click on a card, or the card's `⋯`.
+ * A node's short menu: right-click on a card, or the card's `⋯`.
  *
  * The everyday actions only. Dependencies used to fill this menu as a form;
  * "Add dependency…" now opens the node's panel on its Dependencies view, and

@@ -1,5 +1,5 @@
 /**
- * Preference storage [A-03].
+ * Preference storage.
  *
  * The single writer for local UI preferences. Responsibilities:
  *

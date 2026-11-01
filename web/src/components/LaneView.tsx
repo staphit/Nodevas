@@ -221,7 +221,7 @@ export function LaneView({
   const customStatuses = graph?.ui?.customStatuses ?? [];
   const selectableStatuses = statusOptions(customStatuses);
   // Timeline layout is a personal preference: it lives in the versioned local
-  // adapter, never in the project file [A-03].
+  // adapter, never in the project file.
   const updateUIPreference = useApp((state) => state.updateUIPreference);
   const timelineOrientation = usePreference("timelineOrientation");
   const timelineDateAxis = usePreference("timelineDateAxis");
@@ -597,7 +597,7 @@ export function LaneView({
   /**
    * Fire-and-forget canvas command. Layout edits happen constantly while
    * dragging, so failures report through the shared error channel rather than
-   * interrupting the gesture [A-04].
+   * interrupting the gesture.
    */
 
   const { state: drag, handlers: cardDragHandlers } = useCardDrag({
@@ -1301,7 +1301,7 @@ export function LaneView({
   /**
    * Anchor for the toolbar's "新增節點" button: the middle of what the user is
    * currently looking at, so the node appears where they are working rather
-   * than at the origin [B-03]. What they are looking at is the board less
+   * than at the origin. What they are looking at is the board less
    * the drawer laid over it: the board's own middle can be under the drawer,
    * and the form and the card with it.
    */

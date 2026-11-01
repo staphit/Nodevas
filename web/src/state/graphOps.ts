@@ -1,5 +1,5 @@
 /**
- * Command → server-op translation [P2].
+ * Command → server-op translation.
  *
  * A whole-file PUT /api/graph refuses to overwrite a revision it has not seen,
  * which is right for one editor and wrong for two: dragging a card and renaming

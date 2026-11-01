@@ -1,5 +1,5 @@
 /**
- * Domain vocabulary [A-01].
+ * Domain vocabulary.
  *
  * The wire shapes in `../types` mirror the Go engine and must keep their JSON
  * field names. This module gives those shapes their domain names so code and
@@ -74,7 +74,7 @@ export type CustomNodeTypeId = WireCustomNodeTypeId;
 // ---------------------------------------------------------------------------
 
 /**
- * Fixed UI wording (plan §5.4). Never label a plan milestone "狀態" and never
+ * Fixed UI wording. Never label a plan milestone "狀態" and never
  * label a lifecycle status "計畫" — the two live in different files, are
  * written by different actions, and undo differently.
  */

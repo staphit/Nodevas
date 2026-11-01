@@ -1,5 +1,5 @@
 /**
- * Explorer tree selection [B-06].
+ * Explorer tree selection.
  *
  * Node rows and project rows are two independent selections that obey the same
  * file-manager rules, so the modifier handling lives here once instead of being

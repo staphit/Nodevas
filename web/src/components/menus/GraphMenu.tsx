@@ -1,4 +1,4 @@
-/** Canvas context menu [B-06]: what can be created at this spot. */
+/** Canvas context menu: what can be created at this spot. */
 
 import type { LogicGateOperator } from "../../types";
 import type { LaneContextMenu } from "../LaneView";

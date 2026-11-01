@@ -1,5 +1,5 @@
 /**
- * `requires` expression helpers [A-04].
+ * `requires` expression helpers.
  *
  * The expression on a node is the truth; edges are its visual cache. These
  * helpers are shared by the canvas (which shows the operator on the gate glyph)

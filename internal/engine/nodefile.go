@@ -84,7 +84,7 @@ func ComposeNodeFile(nf *NodeFile) ([]byte, error) {
 }
 
 // SyncFrontmatter refreshes the snapshot fields in a node file's Meta from
-// the authoritative graph definition (design doc §2.3).
+// the authoritative graph definition.
 func SyncFrontmatter(nf *NodeFile, n *Node) {
 	if nf.Meta == nil {
 		nf.Meta = map[string]any{}

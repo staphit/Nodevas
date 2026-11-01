@@ -1,5 +1,5 @@
 /**
- * Moving nodes between projects [B-06].
+ * Moving nodes between projects.
  *
  * Two gestures share this module so they cannot drift apart:
  *

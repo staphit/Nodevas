@@ -358,7 +358,7 @@ export function TabBody({
     }
   }, []);
 
-  // Soft lock [P2]: while someone else has this document open for editing,
+  // Soft lock: while someone else has this document open for editing,
   // this window is read-only by default. It is courtesy, not enforcement —
   // "強制編輯" takes it over, and the Rev check on save is what actually
   // prevents a silent overwrite.
@@ -447,7 +447,7 @@ export function TabBody({
   // answer, and a document somebody else has locked is not ours to write.
   const saveState = useOperation(operationScope.document(id));
 
-  // ---- live editing [P2] --------------------------------------------------
+  // ---- live editing --------------------------------------------------
   // A node's own document and each of its subpages are separate sessions, and
   // one only opens once somebody else is in the room: a person editing alone
   // has nobody to converge with and should not pay for loading a CRDT to find
@@ -534,7 +534,7 @@ export function TabBody({
     liveDoc.reportFlushed(rev);
   }, [activePageID, pageDoc?.rev, tab?.rev, liveDoc]);
 
-  // ---- other people's carets [P2] ----------------------------------------
+  // ---- other people's carets ----------------------------------------
   const remoteCaretList = useRemoteCarets(id, activePageID ?? null);
   const reportPresenceState = useApp((s) => s.reportPresenceState);
   useEffect(() => {
@@ -576,7 +576,7 @@ export function TabBody({
           return;
         }
         // "manual" is the only reason a person chose, so it is the only one
-        // that commits a staged lifecycle status [B-04]; the rest are the
+        // that commits a staged lifecycle status; the rest are the
         // editor tidying up behind them. `unload` asks for a request that can
         // outlive the page.
         await useApp.getState().saveTab(id, {
@@ -610,7 +610,7 @@ export function TabBody({
   // Ctrl/⌘ + S is now "save now" rather than "save at all". It is still worth
   // keeping: it is how someone forces the document out before doing something
   // they are not sure about, and — because the document saves itself on a timer
-  // and a lifecycle status deliberately does not [B-04] — it is one of the two
+  // and a lifecycle status deliberately does not — it is one of the two
   // ways to apply a staged status, the other being the panel's own button.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

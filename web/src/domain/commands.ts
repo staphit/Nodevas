@@ -1,5 +1,5 @@
 /**
- * Typed graph commands [A-04].
+ * Typed graph commands.
  *
  * One serializable description per user-visible edit. The store clones the
  * graph, calls {@link applyGraphCommand}, PUTs the result, and rolls back on

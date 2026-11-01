@@ -1,5 +1,5 @@
 /**
- * The right-click menu on a node file row [B-06].
+ * The right-click menu on a node file row.
  *
  * The menu acts on the whole tree selection when the click landed inside it, so
  * every action here has to cope with more than one node.

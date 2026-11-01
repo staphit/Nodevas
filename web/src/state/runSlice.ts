@@ -1,5 +1,5 @@
 /**
- * Actual lifecycle slice [A-05].
+ * Actual lifecycle slice.
  *
  * The journal is the source of truth: every write is an append through the API,
  * and the store only mirrors the state the server replays back. Nothing here
@@ -26,7 +26,7 @@ export const createRunSlice: AppSlice<RunSlice> = (set, get) => ({
   stagedLifecycle: {},
 
   /**
-   * Holds a chosen status until somebody explicitly applies it [B-04].
+   * Holds a chosen status until somebody explicitly applies it.
    *
    * This is the one thing the drawer's auto-save deliberately does not carry.
    * A status is an append to `run/journal.jsonl`, which is history: writing one

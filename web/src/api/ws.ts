@@ -130,7 +130,7 @@ export interface LiveConnection {
   graphDrag: (ids: string[], dx: number, dy: number, active: boolean) => void;
 
   /**
-   * Live-document session [P2]. `docOpen` joins the session for one document
+   * Live-document session. `docOpen` joins the session for one document
    * and is replayed after a reconnect — a dropped socket otherwise leaves the
    * browser editing a document the server no longer knows it has open.
    */

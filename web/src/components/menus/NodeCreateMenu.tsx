@@ -1,5 +1,5 @@
 /**
- * Node creation form [B-06].
+ * Node creation form.
  *
  * Opened from the toolbar button or the canvas menu. Expected milestones can be
  * scheduled while creating, so a new node arrives with its plan already set.

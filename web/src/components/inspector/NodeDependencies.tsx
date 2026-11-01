@@ -1,5 +1,5 @@
 /**
- * Dependencies tab [B-06]: what this node waits for, what it blocks, and how
+ * Dependencies tab: what this node waits for, what it blocks, and how
  * its conditions combine.
  *
  * The plain case — "starts when these are done" — is the whole default view:

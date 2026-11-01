@@ -19,7 +19,7 @@ import (
 	"nodevas/internal/locale"
 )
 
-// Scheduled backup [P3].
+// Scheduled backup.
 //
 // A background loop pushes the whole workspace to the configured Remote on an
 // interval. It reuses the same bundle build and Push the manual button uses, so

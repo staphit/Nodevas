@@ -1,5 +1,5 @@
 /**
- * Node metadata reducers [A-04].
+ * Node metadata reducers.
  *
  * Pure mutations of a graph draft: no network, no store, no React. The command
  * runner clones the graph before calling these, so mutating in place is safe

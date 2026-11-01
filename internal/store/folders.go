@@ -15,7 +15,7 @@ import (
 	"nodevas/internal/locale"
 )
 
-// Node folders [B-06].
+// Node folders.
 //
 // A node's identity is its id, and the graph only ever refers to that id, so
 // where the document sits on disk is presentation, not meaning: moving

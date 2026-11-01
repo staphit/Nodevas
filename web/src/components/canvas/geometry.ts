@@ -1,5 +1,5 @@
 /**
- * Canvas geometry [B-06].
+ * Canvas geometry.
  *
  * Grid constants and the pure maths the graph canvas draws with: card
  * boundaries, wire routing around obstacles, pointer↔SVG conversion. No React,

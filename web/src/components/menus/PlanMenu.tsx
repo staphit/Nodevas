@@ -1,5 +1,5 @@
 /**
- * Timeline cell context menu [B-06].
+ * Timeline cell context menu.
  *
  * Schedules an expected milestone on the day that was right-clicked, including
  * creating a project-wide milestone type on first use.

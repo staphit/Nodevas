@@ -1,5 +1,5 @@
 /**
- * The save-as panel for the open project [B-06].
+ * The save-as panel for the open project.
  *
  * Save-as copies the project directory under a new name and opens the copy, so
  * the original stays exactly as it was on disk.

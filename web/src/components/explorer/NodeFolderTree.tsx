@@ -1,5 +1,5 @@
 /**
- * Node folders in the explorer [B-06].
+ * Node folders in the explorer.
  *
  * Folders group node documents on disk and nothing more: the graph never
  * mentions them, so dragging a node between folders changes where the file

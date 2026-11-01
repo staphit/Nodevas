@@ -1,5 +1,5 @@
 /**
- * Workspace tree [B-06].
+ * Workspace tree.
  *
  * The explorer's tree: workspace roots → projects → the active project's nodes
  * and trash. Validation warnings are not here: they are in the board's
@@ -108,7 +108,7 @@ export interface WorkspaceTreeProps {
     update: string | null | ((current: string | null) => string | null),
   ) => void;
   /**
-   * Manual ordering [B-03]. A drop on the middle of a row still reparents; only
+   * Manual ordering. A drop on the middle of a row still reparents; only
    * the top and bottom edges reorder, and only among siblings.
    */
   projectDropEdge: ProjectDropEdge | null;
@@ -133,7 +133,7 @@ export interface WorkspaceTreeProps {
   setNodeContextMenu: (menu: NodeContextMenu | null) => void;
 
   /**
-   * Folders that group node files [B-06]. They organise the explorer only —
+   * Folders that group node files. They organise the explorer only —
    * none of these actions reads or writes the graph.
    */
   nodeFolders: string[];

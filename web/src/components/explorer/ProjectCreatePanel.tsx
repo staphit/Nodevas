@@ -1,5 +1,5 @@
 /**
- * The new project / new workspace directory panel [B-06].
+ * The new project / new workspace directory panel.
  *
  * Both kinds of creation share one form because they differ only in what the
  * server is asked for at the end; the validation and the placement picker are

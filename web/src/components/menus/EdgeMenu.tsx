@@ -1,5 +1,5 @@
 /**
- * Dependency wire context menu [B-06].
+ * Dependency wire context menu.
  *
  * Meaning and looks are set separately: the relation decides whether the edge
  * blocks, or counts as a prerequisite at all; the line only decides how it is

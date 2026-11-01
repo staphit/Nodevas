@@ -1,5 +1,5 @@
 /**
- * Board toolbar [B-06].
+ * Board toolbar.
  *
  * The controls above a pane: collapse, primary create action, zoom, graph
  * filters and problems, timeline orientation and cell size, and the pane's

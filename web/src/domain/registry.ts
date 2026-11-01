@@ -1,5 +1,5 @@
 /**
- * State registry [A-01].
+ * State registry.
  *
  * One row per domain: where the truth lives on disk, which API touches it, who
  * is allowed to write it, and how a write is confirmed. UI code can render it

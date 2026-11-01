@@ -1,5 +1,5 @@
 /**
- * Expected milestone reducers [A-04].
+ * Expected milestone reducers.
  *
  * Owns `graph.yaml → ui.plans`. One milestone per type per node: scheduling a
  * type that already exists replaces it, which is what every existing caller

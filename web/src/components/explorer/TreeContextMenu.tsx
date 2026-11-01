@@ -1,5 +1,5 @@
 /**
- * The right-click menu on empty space in the explorer [B-06].
+ * The right-click menu on empty space in the explorer.
  *
  * It acts on the workspace rather than on a row, so it collects the actions
  * that have no row of their own: reveal, remove, create and import.

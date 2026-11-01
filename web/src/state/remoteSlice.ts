@@ -1,5 +1,5 @@
 /**
- * Remote backup slice [A-05].
+ * Remote backup slice.
  *
  * Everything behind `/api/remote/*`: where bundles are pushed, the bundle
  * listing, and how the workspace compares to its newest backup snapshot. The deadline-mail settings sit here too — they are
@@ -44,7 +44,7 @@ export const remoteScope = {
 
 export const createRemoteSlice: AppSlice<RemoteSlice> = (set, get) => {
   /**
-   * One mutation, in the operation vocabulary [A-02]. Failure comes back by
+   * One mutation, in the operation vocabulary. Failure comes back by
    * value so a panel can print it next to the control that caused it instead of
    * throwing past it.
    */

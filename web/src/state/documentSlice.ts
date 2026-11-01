@@ -1,5 +1,5 @@
 /**
- * Document slice [A-05].
+ * Document slice.
  *
  * Documents save themselves. The drawer schedules the writes (state/autosave.ts
  * owns the timing); this slice owns what a write means, and the difference
@@ -32,7 +32,7 @@ import type { AppSlice, DocumentSlice } from "./types";
  * With a manual save that cost one wasted GET an hour. With an automatic one it
  * is a GET per save, and worse: if the user kept typing, the echo of their own
  * write raises the "檔案在磁碟上被修改了" banner against them. Remembering what
- * we wrote lets `notifyDiskChange` recognise the echo and do nothing [C-03].
+ * we wrote lets `notifyDiskChange` recognise the echo and do nothing.
  */
 const selfWrittenRevs = new Map<string, string>();
 
@@ -268,7 +268,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   },
 
   closeTab: (id) => {
-    // Closing is leaving, and leaving saves [C-03]. The write is queued rather
+    // Closing is leaving, and leaving saves. The write is queued rather
     // than awaited so the tab closes at the speed of a click; the queue in
     // internals.ts keeps it ordered, and drainWrites waits for it before a
     // project switch can cut it in half.
@@ -395,7 +395,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
   },
 
   /**
-   * Takes on a revision somebody else's session wrote [P2].
+   * Takes on a revision somebody else's session wrote.
    *
    * In a live session every participant holds the same converged text, so the
    * leader's write is this tab's write too: adopting its revision is what stops
@@ -437,7 +437,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
     // Our own save coming back around. Nothing changed that this window does
     // not already have, so reading it again would be a request per save and
     // would flag the document as externally modified against its own author
-    // [C-03]. One event is one write, so recognising it as ours for either
+    //. One event is one write, so recognising it as ours for either
     // file settles the event for both.
     if (tab?.loaded && selfWrittenRevs.get(id) === tab.rev) {
       selfWrittenRevs.delete(id);
@@ -455,7 +455,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
     const previous = queues.tabSave.get(id) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
       // A staged status change rides along with a save the *user* asked for, so
-      // it goes out even when the text itself is untouched [B-04]. An automatic
+      // it goes out even when the text itself is untouched. An automatic
       // save leaves it staged: the journal is append-only, so writing a status
       // nobody confirmed cannot be taken back. See runSlice.ts.
       if (!auto) await get().commitStagedLifecycle(id);
@@ -479,7 +479,7 @@ export const createDocumentSlice: AppSlice<DocumentSlice> = (set, get) => ({
         });
         // The store rewrites the frontmatter from the graph, so what landed is
         // not always what we sent; the PUT hands the composed file back rather
-        // than making every save cost a GET as well [C-03].
+        // than making every save cost a GET as well.
         const content = written.content ?? savedContent;
         selfWrittenRevs.set(id, written.rev);
         set((state) => ({

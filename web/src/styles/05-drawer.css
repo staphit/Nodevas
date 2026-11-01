@@ -1137,7 +1137,7 @@
 .meta-actions {
   display: flex;
 }
-/* Named sections: the user must be able to tell plan from record [B-04]. */
+/* Named sections: the user must be able to tell plan from record. */
 .section-head {
   display: flex;
   align-items: baseline;

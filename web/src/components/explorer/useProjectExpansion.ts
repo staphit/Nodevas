@@ -1,5 +1,5 @@
 /**
- * Project tree expansion [B-06].
+ * Project tree expansion.
  *
  * Which projects show their children survives a reload, so the set is mirrored
  * into the UI preferences on every change rather than kept only in React state.

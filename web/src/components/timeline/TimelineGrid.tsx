@@ -1,5 +1,5 @@
 /**
- * Timeline grid [B-06].
+ * Timeline grid.
  *
  * The day grid in both orientations: vertical (days down the page) and
  * horizontal (days across it). Rendering only — every drag, menu and card

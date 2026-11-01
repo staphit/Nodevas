@@ -1,5 +1,5 @@
 /**
- * The rename panel for a project or workspace directory [B-06].
+ * The rename panel for a project or workspace directory.
  *
  * A rename is a directory move on disk, so the expanded-project set has to be
  * remapped onto the new path or the tree would collapse under the user.

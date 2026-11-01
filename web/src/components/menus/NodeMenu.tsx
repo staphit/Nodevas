@@ -1,5 +1,5 @@
 /**
- * A node's dependency editor [B-06].
+ * A node's dependency editor.
  *
  * Reached from the node menu's "Add dependency…" and from a wire's gate. The
  * default view is plain "depends on": the nodes this one waits for, and a way

@@ -649,7 +649,7 @@ div.tree-empty-row {
   padding-left: calc(5px + var(--project-depth, 0) * 16px);
   position: relative;
 }
-/* Manual reordering [B-03]. The dashed ring means "drop onto"; a solid line
+/* Manual reordering. The dashed ring means "drop onto"; a solid line
    between rows means "drop between", so the two drops never look alike. It is
    indented to the row's own depth because a reorder only ever happens among
    siblings, and the indent is what says which level is being changed. */
@@ -1080,7 +1080,7 @@ div.tree-empty-row {
   font-size: calc(10px * var(--font-scale, 1));
 }
 
-/* Node folders [B-06]. They group files in the explorer and nothing else, so
+/* Node folders. They group files in the explorer and nothing else, so
    they borrow the project tree's vocabulary rather than inventing a second
    visual language for "a container in the tree". */
 .node-folder-actions {
@@ -1226,7 +1226,7 @@ div.tree-empty-row {
 }
 
 /* Narrow screens: the drawer stops splitting the stage and becomes a full
-   overlay, so the board keeps a usable width [B-07]. */
+   overlay, so the board keeps a usable width. */
 @media (max-width: 1024px) {
   .drawer {
     width: min(560px, 100%);

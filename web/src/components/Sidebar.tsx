@@ -96,7 +96,7 @@ export function Sidebar() {
     },
     [openTab, narrow, updateUIPreference],
   );
-  // Node folders [B-06]: file organisation only, never a graph edit.
+  // Node folders: file organisation only, never a graph edit.
   const nodeFolders = useApp((state) => state.nodeFolders);
   const nodeFolderOf = useApp((state) => state.nodeFolderOf);
   const createNodeFolder = useApp((state) => state.createNodeFolder);

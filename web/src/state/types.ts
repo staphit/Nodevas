@@ -1,5 +1,5 @@
 /**
- * Store shape [A-05].
+ * Store shape.
  *
  * `AppState` is the intersection of the slices. It stays one flat object on
  * purpose: `useApp` is the compatibility facade every existing component reads
@@ -109,7 +109,7 @@ export interface ProjectEntry {
 }
 
 export interface OperationsSlice {
-  /** Per-scope mutation state [A-02]. Read it with `useOperation`. */
+  /** Per-scope mutation state. Read it with `useOperation`. */
   operations: OperationMap;
   /** Newest transition of any scope, for a single global status line. */
   lastOperation: OperationSnapshot | null;
@@ -123,7 +123,7 @@ export interface PreferencesSlice {
   toggleTheme: () => void;
   paneOpen: { graph: boolean; timeline: boolean };
   togglePane: (p: "graph" | "timeline") => void;
-  /** Local, per-machine UI preferences [A-03]. Never written to the project. */
+  /** Local, per-machine UI preferences. Never written to the project. */
   preferences: PreferenceValues;
   updateUIPreference: <K extends PreferenceKey>(
     key: K,
@@ -287,7 +287,7 @@ export interface RunSlice {
   runState: RunState | null;
   statuses: Record<string, Status>;
   /**
-   * Status changes chosen but not yet written, keyed by node [B-04]. They are
+   * Status changes chosen but not yet written, keyed by node. They are
    * committed by whichever save the user reaches for, so a status change never
    * needs a save of its own.
    */
@@ -335,7 +335,7 @@ export interface GraphSlice {
   graphUnreadable: string | null;
   loadAll: () => Promise<void>;
 
-  // --- typed domain commands [A-04] ---------------------------------------
+  // --- typed domain commands ---------------------------------------
   // These never throw: failures come back as `CommandResult` so a panel can
   // render the message where the edit happened.
 
@@ -420,7 +420,7 @@ export interface UndoSlice {
 }
 
 /**
- * Live collaboration [P2]: who else is in this project and what they hold
+ * Live collaboration: who else is in this project and what they hold
  * open. Courtesy state — the hard guard against overwrites is the `Rev` check.
  */
 export interface CollabSlice {
@@ -479,7 +479,7 @@ export interface RemoteConfigInput {
 }
 
 /**
- * Remote backup and the settings next to it [A-05]. Server state, shared by
+ * Remote backup and the settings next to it. Server state, shared by
  * every dialog that shows it, so that two of them open at once cannot disagree
  * about what is configured.
  */
@@ -520,7 +520,7 @@ export interface RemoteSlice {
 }
 
 /**
- * Where node files sit inside nodes/ [B-06]. Purely an explorer concern: the
+ * Where node files sit inside nodes/. Purely an explorer concern: the
  * graph never refers to a folder, only to a node id.
  */
 export interface NodeFolderSlice {

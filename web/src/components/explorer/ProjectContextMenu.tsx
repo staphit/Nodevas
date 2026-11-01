@@ -1,5 +1,5 @@
 /**
- * The right-click menu on a project or workspace directory row [B-06].
+ * The right-click menu on a project or workspace directory row.
  *
  * The destructive half of the menu lives here too: removing projects is only
  * ever started from this menu, and it needs the same target list the menu was

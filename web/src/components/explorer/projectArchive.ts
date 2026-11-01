@@ -1,5 +1,5 @@
 /**
- * Reading a .veproj's manifest before it is uploaded [B-06].
+ * Reading a .veproj's manifest before it is uploaded.
  *
  * A single project and a whole-workspace bundle are the same file extension,
  * and the only question the import needs answered — does this archive hold the

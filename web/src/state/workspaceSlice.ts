@@ -1,5 +1,5 @@
 /**
- * Workspace / project slice [A-05].
+ * Workspace / project slice.
  *
  * Switching a project is the one place where every other slice has to be told
  * "that was the old project": unsaved documents are parked as drafts, pending

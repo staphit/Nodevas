@@ -1,5 +1,5 @@
 /**
- * Graph filter and saved-view panel [B-06].
+ * Graph filter and saved-view panel.
  *
  * Lives in the board header's Filter popover. Status is what a board is most
  * often narrowed by, so its checkboxes and "Clear filters" come first; search,
