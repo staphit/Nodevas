@@ -86,3 +86,31 @@ func TestOutputRedactsSecretAssignments(t *testing.T) {
 		}
 	}
 }
+
+// The shapes a URL password and an env dump also come in: an empty user (the
+// usual Redis URL), '/' or '@' in the password, a JSON key, and PowerShell's
+// `Get-ChildItem env:` table. A URL with a port and an '@' in its path is not
+// a password.
+func TestOutputRedactsOtherSecretShapes(t *testing.T) {
+	for _, tc := range []struct{ in, secret string }{
+		{"REDIS_URL=redis://:s3cr3tpw@cache:6379/0", "s3cr3tpw"},
+		{"DATABASE_URL=postgres://u:ab/cd3f@db/x", "cd3f"},
+		{"DATABASE_URL=postgres://u:p@ss@db/x", "ss@db"},
+		{`{"DB_PASSWORD": "hunter2xyz"}`, "hunter2xyz"},
+		{"Name                           Value\n----                           -----\n" +
+			"AWS_SECRET_ACCESS_KEY          wJalrXUtnFEMI/K7MDENG\r\nPATH                           C:\bin", "wJalrXUtnFEMI"},
+	} {
+		got := Output(tc.in)
+		if strings.Contains(got, tc.secret) || !strings.Contains(got, Placeholder) {
+			t.Errorf("not redacted: %q -> %q", tc.in, got)
+		}
+	}
+	for _, plain := range []string{
+		"http://localhost:5173/@vite/client", "https://registry.npmjs.org:443/@types/node", "PATH                           C:\bin",
+		"user@example.com:22", "the API_KEY  is read from the environment",
+	} {
+		if got := Output(plain); got != plain {
+			t.Errorf("changed %q -> %q", plain, got)
+		}
+	}
+}
