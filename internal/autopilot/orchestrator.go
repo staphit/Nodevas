@@ -88,8 +88,9 @@ type Options struct {
 	// MayWork reports whether the account that created an autopilot may
 	// still change its project (internal/members). An autopilot whose
 	// creator may not pauses (ReasonCreatorLostAccess) and does nothing
-	// more until they may again. Nil: always.
-	MayWork func(ctx context.Context, project, accountID string) bool
+	// more until they may again. An error means it could not tell. Nil:
+	// always.
+	MayWork func(ctx context.Context, project, accountID string) (bool, error)
 }
 
 // RouteRequest is one routing decision the orchestrator asks for.
@@ -353,7 +354,7 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 		return nil
 	}
 	before := snapshot(w)
-	if !o.mayWork(ctx, w.rec) {
+	if may, err := o.mayWork(ctx, w.rec); err != nil || !may {
 		// It works as its creator, who may no longer change the project:
 		// nothing is dispatched, merged or written on the board in their
 		// name. It waits, paused, until they may again or someone cancels it.
@@ -1283,15 +1284,18 @@ func (o *Orchestrator) Resume(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if !o.mayWork(ctx, rec) {
+	if may, err := o.mayWork(ctx, rec); err != nil || !may {
 		return errCreatorLostAccess()
 	}
 	return o.setStatus(ctx, id, runnerwire.AutopilotPaused, runnerwire.AutopilotRunning, "")
 }
 
 // mayWork is Options.MayWork for the autopilot's creator.
-func (o *Orchestrator) mayWork(ctx context.Context, rec Record) bool {
-	return o.opts.MayWork == nil || o.opts.MayWork(ctx, rec.Project, rec.CreatedBy)
+func (o *Orchestrator) mayWork(ctx context.Context, rec Record) (bool, error) {
+	if o.opts.MayWork == nil {
+		return true, nil
+	}
+	return o.opts.MayWork(ctx, rec.Project, rec.CreatedBy)
 }
 
 func errCreatorLostAccess() error {
@@ -1345,7 +1349,7 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 		unlock()
 		return err
 	}
-	if !o.mayWork(ctx, w.rec) {
+	if may, err := o.mayWork(ctx, w.rec); err != nil || !may {
 		unlock()
 		return errCreatorLostAccess()
 	}

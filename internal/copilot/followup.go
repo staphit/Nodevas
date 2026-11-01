@@ -356,6 +356,14 @@ func (s *Service) releaseLocked(conversationID, holder string) {
 	}()
 }
 
+// mayWork is Options.MayWork.
+func (s *Service) mayWork(ctx context.Context, project, accountID string) (bool, error) {
+	if s.opts.MayWork == nil {
+		return true, nil
+	}
+	return s.opts.MayWork(ctx, project, accountID)
+}
+
 // deliver writes a follow-up whose run has ended into its conversation.
 func (s *Service) deliver(ctx context.Context, f Followup) {
 	if !s.hold(f.ConversationID) {
@@ -399,7 +407,7 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 	// It reads the goal and, for a revision, writes the board as the owner,
 	// who may have been removed from the project (or made a viewer) since
 	// the run started.
-	if s.opts.MayWork != nil && !s.opts.MayWork(ctx, run.Project, current.AccountID) {
+	if may, err := s.mayWork(ctx, run.Project, current.AccountID); err != nil || !may {
 		slog.Info("copilot: follow-up's owner can no longer change the project; dropped",
 			slog.String("followup", current.ID), slog.String("run", run.ID))
 		_ = s.store.endFollowup(ctx, current.ID, followupDropped)

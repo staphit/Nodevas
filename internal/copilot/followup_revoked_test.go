@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -26,11 +27,11 @@ func TestFollowupDroppedWhenTheOwnerLostTheProject(t *testing.T) {
 			mu.Unlock()
 			return goalTasks(ctx, project, goal)
 		}
-		opts.MayWork = func(_ context.Context, project, accountID string) bool {
+		opts.MayWork = func(_ context.Context, project, accountID string) (bool, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			asked = append(asked, project+"/"+accountID)
-			return false
+			return false, nil
 		}
 	})
 	conversation := h.conversation(alice, ModeDefault)
@@ -53,5 +54,50 @@ func TestFollowupDroppedWhenTheOwnerLostTheProject(t *testing.T) {
 	}
 	if len(asked) == 0 || asked[0] != "demo/"+alice.ID {
 		t.Fatalf("MayWork asked %v, want demo/%s", asked, alice.ID)
+	}
+}
+
+// A check that could not be made (the account store failing for a moment)
+// is not a refusal: the follow-up stays pending, and is delivered when it
+// is next looked at and the check answers.
+func TestFollowupWaitsOutAFailedAccessCheck(t *testing.T) {
+	runs := newFakeRuns()
+	var mu sync.Mutex
+	failing := true
+	h := newHarness(t, func(opts *Options) {
+		withFollowups(runs)(opts)
+		opts.MayWork = func(context.Context, string, string) (bool, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if failing {
+				return false, errors.New("read accounts: connection reset")
+			}
+			return true, nil
+		}
+	})
+	conversation := h.conversation(alice, ModeDefault)
+	addFollowup(t, h, conversation, "en")
+	run := planRun(runnerwire.RunSucceeded)
+	runs.set(run)
+	h.service.RunChanged(run)
+	h.service.background.Wait()
+
+	if entries := entriesOf(t, h, conversation); len(entries) != 0 {
+		t.Fatalf("delivered without a check: %+v", entries)
+	}
+	if pending := pendingFollowups(t, h); len(pending) != 1 {
+		t.Fatalf("pending after a failed check = %+v, want the follow-up kept", pending)
+	}
+
+	mu.Lock()
+	failing = false
+	mu.Unlock()
+	h.service.RunChanged(run)
+	h.service.background.Wait()
+	if entries := entriesOf(t, h, conversation); len(entries) == 0 {
+		t.Fatal("not delivered once the check answered")
+	}
+	if pending := pendingFollowups(t, h); len(pending) != 0 {
+		t.Fatalf("still pending: %+v", pending)
 	}
 }

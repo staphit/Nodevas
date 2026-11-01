@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -117,5 +118,27 @@ func TestWorkspaceCountsOnlyReadableProjects(t *testing.T) {
 	if annCounted != annListed || danCounted != danListed || danListed != annListed-1 {
 		t.Fatalf("ann lists %d and counts %d; dan lists %d and counts %d",
 			annListed, annCounted, danListed, danCounted)
+	}
+}
+
+// Work an account handed off is stopped when the account may no longer
+// change the project, not when its account could not be read: the second is
+// reported as an error, for the caller to try again.
+func TestAccountMayWriteTellsAFailedLookupFromARefusal(t *testing.T) {
+	f := newMembersFixture(t)
+	if response := f.setMember(t, f.bea, "cal", "viewer"); response.Code != http.StatusOK {
+		t.Fatalf("restrict other: %d %s", response.Code, response.Body)
+	}
+	bea := userID(t, f, "bea")
+	if may, err := f.server.AccountMayWrite(context.Background(), "main", bea); !may || err != nil {
+		t.Fatalf("bea on main = %v, %v", may, err)
+	}
+	if may, err := f.server.AccountMayWrite(context.Background(), "main", "no-such-account"); may || err != nil {
+		t.Fatalf("a deleted account on main = %v, %v; want a refusal", may, err)
+	}
+	failing, cancel := context.WithCancel(context.Background())
+	cancel()
+	if may, err := f.server.AccountMayWrite(failing, "main", bea); may || err == nil {
+		t.Fatalf("bea on main with the account store failing = %v, %v; want an error", may, err)
 	}
 }

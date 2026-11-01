@@ -167,23 +167,23 @@ func (s *Server) projectWritable(r *http.Request, dir string) bool {
 // follow-up) runs past any request of its own and stops once it may not.
 // Without membership everyone may; an account that is gone, or a project
 // that no longer resolves, may not.
-func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) bool {
+func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) (bool, error) {
 	if s.members == nil {
-		return true
+		return true, nil
 	}
 	st, err := s.pm.StoreFor(name)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	actor := identity.Actor{ID: accountID}
 	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
 		current, _, found := accounts.CurrentActor(ctx, accountID)
 		if !found {
-			return false
+			return false, nil
 		}
 		actor = current
 	}
-	return s.members.Access(actor, project.Key(st.Root())).CanWrite()
+	return s.members.Access(actor, project.Key(st.Root())).CanWrite(), nil
 }
 
 // projectAccess is the catalog's view of membership.
