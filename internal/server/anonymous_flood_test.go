@@ -67,3 +67,27 @@ func TestAnonymousFloodLeavesRunnerTokens(t *testing.T) {
 		t.Fatal("made-up runner tokens from one address were never refused as a flood")
 	}
 }
+
+// A flood of strangers emptying the hub-wide pre-auth bucket must not shut
+// the sign-in door on a member at a quiet address: the signed-out app load,
+// the passcode request and the sign-in itself. Guessing and mail are bounded
+// per source, per address and per passcode.
+func TestAnonymousFloodLeavesTheSignInDoor(t *testing.T) {
+	s := newRunnerTestServer(t)
+	floodAnonymously(t, s)
+	const quiet = "192.0.2.77:40000"
+	if response := s.fromAddress(t, nil, quiet, http.MethodGet, "/api/auth/status", ""); response.Code != http.StatusOK {
+		t.Fatalf("a signed-out app load after the flood = %d %s", response.Code, response.Body)
+	}
+	before := s.inbox.count()
+	if response := s.fromAddress(t, nil, quiet, http.MethodPost, "/api/auth/otp/request",
+		`{"email":"cal@example.test"}`); response.Code != http.StatusAccepted {
+		t.Fatalf("cal's passcode request after the flood = %d %s", response.Code, response.Body)
+	}
+	s.inbox.waitFor(t, before+1)
+	floodAnonymously(t, s)
+	if response := s.fromAddress(t, nil, quiet, http.MethodPost, "/api/auth/login",
+		`{"email":"cal@example.test","otp":"`+s.inbox.code(t)+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("cal's right passcode after the flood = %d %s", response.Code, response.Body)
+	}
+}
