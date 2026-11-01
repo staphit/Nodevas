@@ -11,11 +11,13 @@
 package realtime
 
 import (
+	"cmp"
 	"errors"
 	"log"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/safego"
@@ -94,6 +96,10 @@ type docSession struct {
 	// still holds its slot in the table until the sweep, and the slot is
 	// charged to that account (actorDocSessionsLocked).
 	emptiedBy string
+	// emptiedSeq orders the empty sessions by when they were left. emptyAt
+	// cannot: Windows' clock moves in steps of up to 15.6 ms, so documents
+	// left in quick succession share one.
+	emptiedSeq uint64
 	// The file revision this state is consistent with: what the opener found on
 	// disk, or what the leader last reported flushing. It is what a stored
 	// session is measured against after a restart, and it is the entire
@@ -365,7 +371,7 @@ func (h *Hub) retireActorEmptyDocs(actorKey, room, key string, now time.Time) {
 		for sessionRoom, sessions := range h.docs {
 			for sessionKey, session := range sessions {
 				if len(session.members) == 0 && !session.emptyAt.IsZero() && session.emptiedBy == actorKey {
-					candidates = append(candidates, emptyDoc{room: sessionRoom, key: sessionKey, session: session, emptyAt: session.emptyAt})
+					candidates = append(candidates, emptyDoc{room: sessionRoom, key: sessionKey, session: session, emptiedSeq: session.emptiedSeq})
 				}
 			}
 		}
@@ -374,17 +380,17 @@ func (h *Hub) retireActorEmptyDocs(actorKey, room, key string, now time.Time) {
 	if len(candidates) == 0 {
 		return
 	}
-	slices.SortFunc(candidates, func(a, b emptyDoc) int { return a.emptyAt.Compare(b.emptyAt) })
+	slices.SortFunc(candidates, func(a, b emptyDoc) int { return cmp.Compare(a.emptiedSeq, b.emptiedSeq) })
 	candidates = candidates[:min(excess, len(candidates))]
 	h.retireEmptyDocs(candidates, now, func(session *docSession) bool { return session.emptiedBy == actorKey })
 }
 
 // emptyDoc is a session that had nobody in it when it was picked to retire.
 type emptyDoc struct {
-	room    string
-	key     string
-	session *docSession
-	emptyAt time.Time
+	room       string
+	key        string
+	session    *docSession
+	emptiedSeq uint64
 }
 
 // retireEmptyDocs saves and drops each candidate that is still the same empty
@@ -462,6 +468,7 @@ func (h *Hub) resetEmptyDoc(room, key string, expected *docSession, now time.Tim
 	h.mu.Lock()
 	if session := h.docs[room][key]; session == expected && len(session.members) == 0 {
 		session.emptyAt = now
+		session.emptiedSeq = docEmptiedSeq.Add(1)
 	}
 	h.mu.Unlock()
 }
@@ -767,6 +774,9 @@ func (h *Hub) closeDoc(client *wsClient, key string) {
 	}
 }
 
+// docEmptiedSeq numbers the moments sessions are left (docSession.emptiedSeq).
+var docEmptiedSeq atomic.Uint64
+
 // dropLocked removes one participant and re-elects. The session itself stays:
 // its log is the document until the grace period says otherwise. The second
 // result is whether that participant was the last one, which is the moment the
@@ -783,6 +793,7 @@ func (session *docSession) dropLocked(client *wsClient, now time.Time) ([]leader
 	if emptied {
 		session.emptyAt = now
 		session.emptiedBy = actorConnectionKey(client.actor)
+		session.emptiedSeq = docEmptiedSeq.Add(1)
 	}
 	return session.leaderNotices(previous, client), emptied
 }
