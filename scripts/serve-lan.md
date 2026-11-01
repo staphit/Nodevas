@@ -20,6 +20,7 @@ use a real phone below.
 
 ## A real phone over the LAN
 
+<!-- sec-pass: loopback backend behind the dev server's proxy -->
 The dev server serves the UI to the network; the Go server stays on loopback and
 is reached through the dev server's proxy. That is the whole point of doing it
 this way — the backend is never exposed to the network, so no accounts and no
@@ -28,7 +29,8 @@ plaintext-over-the-network trade-off are involved.
 **One terminal — the backend, loopback only:**
 
 ```powershell
-go run ./cmd/nodevas serve -project ./examples -port 5666
+mkdir -Force workspace
+go run ./cmd/nodevas serve -project ./workspace -port 5666
 ```
 
 **Another — the dev server, on the network:**
@@ -49,11 +51,13 @@ in `web/index.html` makes it open without Safari's bars.
 
 ### What this exposes
 
+<!-- sec-pass: LAN exposure of the dev server -->
 Anyone on the same network who finds port 5173 gets your workspace, with no
 password, for as long as the dev server runs. It is a development server on a
 network you trust — a home or office Wi-Fi — not something to leave running on
 a café hotspot. Stop it when you are done.
 
+<!-- sec-pass: network listen, plaintext and cookies -->
 Do not reach for `nodevas serve -listen 0.0.0.0` as a shortcut here. That binds
 the real server to the network, where it demands accounts and TLS for good
 reasons, and `--allow-plaintext` would put session cookies and passwords on the
