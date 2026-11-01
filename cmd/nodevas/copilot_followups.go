@@ -62,6 +62,8 @@ func copilotFollowups(srv *server.Server, pm *project.ProjectManager) func(*copi
 			}
 			return goal, nil
 		}
+		// A follow-up works as its owner, who may have lost the project.
+		opts.MayWork = srv.AccountMayWrite
 		opts.NotifyFollowup = func(accountID, conversationID string) {
 			srv.NotifyAccount(accountID, copilot.FollowupEvent, conversationID)
 		}

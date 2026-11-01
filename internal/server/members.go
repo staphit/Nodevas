@@ -138,6 +138,30 @@ func (s *Server) projectWritable(r *http.Request, dir string) bool {
 	return s.members.Access(auth.ActorFrom(r), project.Key(dir)).CanWrite()
 }
 
+// AccountMayWrite reports whether the account accountID may still change
+// the project named name. Work it handed off (an autopilot, a copilot
+// follow-up) runs past any request of its own and stops once it may not.
+// Without membership everyone may; an account that is gone, or a project
+// that no longer resolves, may not.
+func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) bool {
+	if s.members == nil {
+		return true
+	}
+	st, err := s.pm.StoreFor(name)
+	if err != nil {
+		return false
+	}
+	actor := identity.Actor{ID: accountID}
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		current, _, found := accounts.CurrentActor(ctx, accountID)
+		if !found {
+			return false
+		}
+		actor = current
+	}
+	return s.members.Access(actor, project.Key(st.Root())).CanWrite()
+}
+
 // projectAccess is the catalog's view of membership.
 type projectAccess struct{ s *Server }
 

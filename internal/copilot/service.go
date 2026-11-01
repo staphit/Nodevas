@@ -116,7 +116,8 @@ type Options struct {
 	SkipTask func(ctx context.Context, project, nodeID, by, note string) error
 	NoteTask func(ctx context.Context, project, nodeID, accountID, note string) error
 	// MayWork reports whether an account may still change a project
-	// (internal/members). Nil: always.
+	// (internal/members); a follow-up for an owner who may not is dropped.
+	// Nil: always.
 	MayWork func(ctx context.Context, project, accountID string) bool
 }
 

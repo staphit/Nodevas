@@ -396,6 +396,15 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 		_ = s.store.endFollowup(ctx, current.ID, followupDropped)
 		return
 	}
+	// It reads the goal and, for a revision, writes the board as the owner,
+	// who may have been removed from the project (or made a viewer) since
+	// the run started.
+	if s.opts.MayWork != nil && !s.opts.MayWork(ctx, run.Project, current.AccountID) {
+		slog.Info("copilot: follow-up's owner can no longer change the project; dropped",
+			slog.String("followup", current.ID), slog.String("run", run.ID))
+		_ = s.store.endFollowup(ctx, current.ID, followupDropped)
+		return
+	}
 	var goal Goal
 	var goalErr error
 	if goal, goalErr = s.opts.GoalTasks(ctx, run.Project, current.GoalNodeID); goalErr != nil {

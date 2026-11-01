@@ -86,7 +86,9 @@ type Options struct {
 	// rules' pick.
 	Route RouteFunc
 	// MayWork reports whether the account that created an autopilot may
-	// still change its project (internal/members). Nil: always.
+	// still change its project (internal/members). An autopilot whose
+	// creator may not pauses (ReasonCreatorLostAccess) and does nothing
+	// more until they may again. Nil: always.
 	MayWork func(ctx context.Context, project, accountID string) bool
 }
 
@@ -351,6 +353,15 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 		return nil
 	}
 	before := snapshot(w)
+	if !o.mayWork(ctx, w.rec) {
+		// It works as its creator, who may no longer change the project:
+		// nothing is dispatched, merged or written on the board in their
+		// name. It waits, paused, until they may again or someone cancels it.
+		if w.rec.Status == runnerwire.AutopilotRunning {
+			w.rec.Status, w.rec.Reason, w.dirty = runnerwire.AutopilotPaused, ReasonCreatorLostAccess, true
+		}
+		return o.save(ctx, w, before)
+	}
 	o.syncMembers(w)
 	o.refresh(ctx, w)
 	o.propagateFailures(w)
@@ -1268,7 +1279,24 @@ func (o *Orchestrator) Pause(ctx context.Context, id string) error {
 
 // Resume schedules again.
 func (o *Orchestrator) Resume(ctx context.Context, id string) error {
+	rec, err := o.opts.Store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !o.mayWork(ctx, rec) {
+		return errCreatorLostAccess()
+	}
 	return o.setStatus(ctx, id, runnerwire.AutopilotPaused, runnerwire.AutopilotRunning, "")
+}
+
+// mayWork is Options.MayWork for the autopilot's creator.
+func (o *Orchestrator) mayWork(ctx context.Context, rec Record) bool {
+	return o.opts.MayWork == nil || o.opts.MayWork(ctx, rec.Project, rec.CreatedBy)
+}
+
+func errCreatorLostAccess() error {
+	return conflictf("its creator can no longer change this project: give them the project back, or cancel the autopilot",
+		"建立者已無法修改這個專案：請讓建立者重新取得專案權限，或取消 autopilot")
 }
 
 func (o *Orchestrator) setStatus(ctx context.Context, id, from, to, reason string) error {
@@ -1316,6 +1344,10 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 	if err != nil {
 		unlock()
 		return err
+	}
+	if !o.mayWork(ctx, w.rec) {
+		unlock()
+		return errCreatorLostAccess()
 	}
 	if w.rec.Status != runnerwire.AutopilotPaused {
 		unlock()
