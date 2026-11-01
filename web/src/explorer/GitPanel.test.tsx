@@ -1,6 +1,6 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { explorerApi } from "../api/explorer";
 import { makeRun } from "../game/testFixtures";
@@ -11,7 +11,7 @@ import GitPanel from "./GitPanel";
 
 const sha = "c".repeat(40);
 
-beforeEach(() => {
+function mockWorkspace() {
   useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
   useExplorer.setState({ view: null });
   vi.spyOn(explorerApi, "workspaceGit").mockResolvedValue({
@@ -30,7 +30,23 @@ beforeEach(() => {
       makeRun({ id: "r-wait", branch: "agent/docs-3", ciStatus: "pending", repoName: "visual-editor" }),
     ],
   });
-});
+}
+
+// The first panel a worker draws, and the first role query it answers, pay
+// for warming up React, jsdom and the accessibility tree: about half a
+// second idle, and many times that on a busy machine, which ran past the
+// first test's one-second wait for its row. Drawing one up front leaves the
+// tests to time only what they check.
+beforeAll(async () => {
+  mockWorkspace();
+  vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
+  const view = render(<GitPanel />);
+  await screen.findByRole("region", { name: "Workspace · main" }, { timeout: 30_000 });
+  view.unmount();
+  vi.restoreAllMocks();
+}, 30_000);
+
+beforeEach(mockWorkspace);
 afterEach(() => vi.restoreAllMocks());
 
 // W-12: workspace changes, agent branches, commits.
