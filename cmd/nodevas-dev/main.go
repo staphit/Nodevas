@@ -196,10 +196,38 @@ func openBrowser(url string) {
 }
 
 // panelHandler is the whole control panel: its page and its API.
+//
+// It answers only on this machine's names. The listener is loopback, but a
+// page elsewhere can rebind its own name to 127.0.0.1 and then read the
+// status (paths, the child's log) same-origin; the Host it sends is still
+// its own. No page may frame the panel either: its buttons start, stop and
+// kill processes.
 func panelHandler(sup *supervisor, builds *builder) http.Handler {
 	mux := http.NewServeMux()
 	registerRoutes(mux, sup, builds)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		if !isLocalHost(r.Host) {
+			http.Error(w, "this control panel only answers on localhost", http.StatusForbidden)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// isLocalHost reports whether a Host header names this machine: localhost
+// or a loopback address, with or without a port.
+func isLocalHost(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func registerRoutes(mux *http.ServeMux, sup *supervisor, builds *builder) {
