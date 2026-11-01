@@ -13,8 +13,7 @@
 - **視覺化規劃**：每個節點是一頁 Markdown，帶有類型、狀態、負責人、優先度與標籤。可在相依關係圖與時間軸上檢視。
 - **管理依賴**：用 `AND`、`OR` 等條件連接節點，Nodevas 會告訴你哪些工作可以開始。
 - **把工作交給 agent**：把節點派給 Claude Code、Codex、Gemini CLI、OpenCode 或 Antigravity CLI，即時看它工作、看 diff、合併 PR。
-  <!-- sec-pass: permission relay -->
-- **回覆你的 agent**：agent 可以請你核准、問你問題或請你選擇；你替 runner 開啟轉發後，它也會把 Claude Code、Antigravity CLI 與 OpenCode（ACP）的權限請求轉給你。在 Agent 對話或工作站回覆。
+- **回覆你的 agent**：agent 可以請你核准、問你問題或請你選擇；你替 runner 開啟轉發後，它也會把 Claude Code、Antigravity CLI 與 OpenCode（ACP）的權限請求轉給你（預設關閉，見[安全模型](#安全模型)）。在 Agent 對話或工作站回覆。
 - **接上任何 MCP client**：agent 可以找出可做的任務、認領，並回報進度。
 
 ## 看板、工作站與設定
@@ -49,10 +48,17 @@ mkdir -p workspace && ./nodevas serve --project ./workspace
 
 https://github.com/user-attachments/assets/8e494381-8aeb-4c58-9cf8-251f4c0f3060
 
-<!-- sec-pass: runner trust -->
-server 只負責顯示看板；你電腦上的小程式 **runner** 用你自己的登入，在你自己的 repo 裡執行 agent。設定、安全、自動推進與更多示範影片：[Agent 工作站](./docs/workstation.zh-TW.md)。
+server 只負責顯示看板；你電腦上的小程式 **runner** 用你自己的登入，在你自己的 repo 裡執行 agent，而且只執行你同意的 run。設定、安全、自動推進與更多示範影片：[Agent 工作站](./docs/workstation.zh-TW.md)。
 
 agent 相關功能一開始是隱藏的。開啟 **設定 → Agent 與 Runner → 讓 agent 在這裡工作** 或進入工作站時就會出現；工作區一有 runner、執行紀錄或已連線的 agent，也會自動出現。
+
+## 安全模型
+
+- **單機版與桌面版信任這台電腦。** loopback 上的 hub 沒有帳號，所以這台電腦上任何程式（不論哪個使用者）都能連到它，並以你的身分操作。請在只有你一個人使用的電腦上使用。用每次啟動的 token 封住這點是未來可能的改動；需要的話請開 issue。
+- **團隊 hub** 需要帳號、HTTPS 與郵件。決定它信任誰的設定（公開主機名稱、proxy、TLS、Cloudflare Access、Copilot bypass、不在本機的 Copilot 或 SMTP 伺服器）只能來自 `--config`／`NODEVAS_CONFIG`、環境變數或指令列參數，不能寫在工作區自己的 `nodevas.yaml` 裡；見 [Operations](./docs/operations.md#configuration)（英文）。
+- **runner 執行 hub 送來的工作，但只在它自己的限制內。** 每個 run 都要你在它的終端機上同意，唯讀的 run 保持唯讀，能執行任意 shell 指令的 agent 一律留給人決定。自動接受預設關閉：請保持關閉，或只用在你願意讓任何掌控 hub 的人執行的 repo 與 agent 上。
+- **權限轉送是一種取捨。** 打開 `permissionRelay` 後，你按的**允許**會經由 hub 送到 runner，所以被入侵的 hub 可以偽造一個允許。它永遠不會放寬唯讀 run 或 CLI 自己的拒絕規則。它預設關閉；除非你信任這個 hub，否則請保持關閉。
+- **已知限制。** 知道某位成員登入信箱的人，可以靠輸入錯誤的驗證碼，讓那位成員每次有幾分鐘無法登入。在 proxy 後面時，如果 `trusted_proxy` 沒涵蓋那個 proxy，hub 會把 HTTPS 請求當成一般 HTTP：cookie 少了 `Secure`，也不會送出 HSTS。
 
 ## 延伸閱讀
 
