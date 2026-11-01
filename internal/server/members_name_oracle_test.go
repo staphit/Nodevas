@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -75,5 +76,46 @@ func TestSubscribeDoesNotTellRestrictedNamesFromMissingOnes(t *testing.T) {
 	f.server.hub.Broadcast("marker", "")
 	if seenBefore(t, ann, "access-denied", "marker") {
 		t.Fatal("an administrator was refused a missing project")
+	}
+}
+
+// The catalog's workspace entry counts only the projects the caller may
+// read: the full count would tell a member that restricted projects exist,
+// how many, and when one is added or removed.
+func TestWorkspaceCountsOnlyReadableProjects(t *testing.T) {
+	f := newMembersFixture(t)
+	if response := f.setMember(t, f.bea, "cal", "viewer"); response.Code != http.StatusOK {
+		t.Fatalf("restrict other: %d %s", response.Code, response.Body)
+	}
+	catalog := func(b browser) (listed, counted int) {
+		t.Helper()
+		response := f.do(t, &b, http.MethodGet, "/api/projects", "", nil)
+		var out struct {
+			Workspaces []struct {
+				Active   bool `json:"active"`
+				Projects int  `json:"projects"`
+			} `json:"workspaces"`
+			Projects []struct {
+				IsFolder bool `json:"isFolder"`
+			} `json:"projects"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &out); err != nil || response.Code != http.StatusOK {
+			t.Fatalf("GET /api/projects: %d %s", response.Code, response.Body)
+		}
+		for _, p := range out.Projects {
+			if !p.IsFolder {
+				listed++
+			}
+		}
+		if len(out.Workspaces) != 1 || !out.Workspaces[0].Active {
+			t.Fatalf("workspaces = %+v", out.Workspaces)
+		}
+		return listed, out.Workspaces[0].Projects
+	}
+	annListed, annCounted := catalog(f.ann)
+	danListed, danCounted := catalog(f.dan)
+	if annCounted != annListed || danCounted != danListed || danListed != annListed-1 {
+		t.Fatalf("ann lists %d and counts %d; dan lists %d and counts %d",
+			annListed, annCounted, danListed, danCounted)
 	}
 }
