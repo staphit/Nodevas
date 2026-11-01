@@ -270,7 +270,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	if state != StateBusy && state != StateIdle {
 		state = StateIdle
 	}
-	agentKind := sanitizeToken(hb.Agent)
+	agentKind := capName(sanitizeToken(hb.Agent))
 	if agentKind == "" {
 		agentKind = "agent"
 	}
@@ -278,7 +278,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 	if actorID == "" {
 		actorID = "local"
 	}
-	actorName := strings.TrimSpace(hb.ActorName)
+	actorName := sessionField(hb.ActorName)
 	if actorName == "" {
 		actorName = shortActor(actorID)
 	}
@@ -301,7 +301,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		wasOnline, wasState, wasNode, wasDoing = existing.Online, existing.State, existing.NodeID, existing.Doing
 	}
 	if !ok {
-		baseName := sanitizeToken(hb.Name)
+		baseName := capName(sanitizeToken(hb.Name))
 		if baseName == "" {
 			prefix := sanitizeToken(filepath.Base(hb.Repo))
 			if prefix == "" || prefix == "." {
@@ -310,11 +310,19 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			if prefix == "" || prefix == "." {
 				prefix = "work"
 			}
-			baseName = prefix + "-" + agentKind
+			baseName = capName(prefix + "-" + agentKind)
 		}
 		name := h.uniqueNameLocked(project, sessionID, actorID, baseName)
+		// Read before making room: the session giving up its place may be
+		// the one whose name and mail policy this one carries on.
+		inbound := h.inheritedInboundLocked(project, sessionID, actorID, name)
+		if !h.makeRoomLocked(project, actorID) {
+			h.mu.Unlock()
+			return Session{}, fmt.Errorf("%w: this account already has %d agent sessions online in this project; end one first",
+				ErrRateLimited, maxSessionsPerActor)
+		}
 		existing = &Session{
-			Inbound:   h.inheritedInboundLocked(project, sessionID, actorID, name),
+			Inbound:   inbound,
 			Model:     model,
 			ID:        sessionID,
 			Project:   project,
@@ -322,13 +330,13 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			ActorName: actorName,
 			Name:      name,
 			Agent:     agentKind,
-			Role:      strings.TrimSpace(hb.Role),
-			Repo:      strings.TrimSpace(hb.Repo),
-			Branch:    strings.TrimSpace(hb.Branch),
-			Cwd:       strings.TrimSpace(hb.Cwd),
+			Role:      sessionField(hb.Role),
+			Repo:      sessionField(hb.Repo),
+			Branch:    sessionField(hb.Branch),
+			Cwd:       sessionField(hb.Cwd),
 			State:     state,
 			Since:     now,
-			Doing:     strings.TrimSpace(hb.Doing),
+			Doing:     sessionField(hb.Doing),
 			NodeID:    strings.TrimSpace(hb.NodeID),
 			LastSeen:  now,
 			Online:    true,
@@ -362,7 +370,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			existing.RunID = runID
 		}
 		if hb.Name != "" {
-			if wanted := sanitizeToken(hb.Name); wanted != "" && wanted != existing.Name {
+			if wanted := capName(sanitizeToken(hb.Name)); wanted != "" && wanted != existing.Name {
 				existing.Name = h.uniqueNameLocked(project, sessionID, actorID, wanted)
 			}
 		}
@@ -376,16 +384,16 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			existing.Agent = agentKind
 		}
 		if hb.Role != "" {
-			existing.Role = strings.TrimSpace(hb.Role)
+			existing.Role = sessionField(hb.Role)
 		}
 		if hb.Repo != "" {
-			existing.Repo = strings.TrimSpace(hb.Repo)
+			existing.Repo = sessionField(hb.Repo)
 		}
 		if hb.Branch != "" {
-			existing.Branch = strings.TrimSpace(hb.Branch)
+			existing.Branch = sessionField(hb.Branch)
 		}
 		if hb.Cwd != "" {
-			existing.Cwd = strings.TrimSpace(hb.Cwd)
+			existing.Cwd = sessionField(hb.Cwd)
 		}
 		if hb.State != "" && state != existing.State {
 			existing.State = state
@@ -395,7 +403,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		// (a periodic refresh, an agent hook after a tool call) keeps it.
 		explicitIdle := strings.EqualFold(strings.TrimSpace(hb.State), StateIdle)
 		if hb.Doing != "" || explicitIdle {
-			existing.Doing = strings.TrimSpace(hb.Doing)
+			existing.Doing = sessionField(hb.Doing)
 		}
 		if hb.NodeID != "" || explicitIdle {
 			existing.NodeID = strings.TrimSpace(hb.NodeID)
@@ -421,6 +429,43 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		h.emit(project, PresenceEvent, nil)
 	}
 	return snapshot, nil
+}
+
+// sessionField is what a session keeps of a field its heartbeat reports
+// about itself: trimmed and cut to maxSessionFieldBytes.
+func sessionField(s string) string {
+	return capBytes(strings.TrimSpace(s), maxSessionFieldBytes)
+}
+
+// capName cuts a sanitized name to maxSessionNameBytes.
+func capName(name string) string {
+	return strings.TrimRight(capBytes(name, maxSessionNameBytes), "-")
+}
+
+// makeRoomLocked makes room for a new session of actorID in project: under
+// maxSessionsPerActor there is room; past it the actor's session offline
+// longest gives up its place. false when every one is online.
+func (h *Hub) makeRoomLocked(project, actorID string) bool {
+	count := 0
+	var oldestKey string
+	var oldest *Session
+	for k, s := range h.sessions {
+		if s.Project != project || !strings.EqualFold(s.ActorID, actorID) {
+			continue
+		}
+		count++
+		if !s.Online && (oldest == nil || s.LastSeen < oldest.LastSeen) {
+			oldestKey, oldest = k, s
+		}
+	}
+	if count < maxSessionsPerActor {
+		return true
+	}
+	if oldest == nil {
+		return false
+	}
+	delete(h.sessions, oldestKey)
+	return true
 }
 
 // Leave marks a session offline at once (its agent said the session ended),
@@ -542,17 +587,17 @@ func (h *Hub) SetInbound(project, sessionID, inbound, callerID string, callerAdm
 // continuing under a new conversation ID (Claude Code's /clear), and its mail
 // should follow it.
 func (h *Hub) uniqueNameLocked(project, sessionID, actorID, base string) string {
-	taken := func(candidate string) bool {
-		for _, s := range h.sessions {
-			if s.Project != project || s.ID == sessionID || !strings.EqualFold(s.Name, candidate) {
-				continue
-			}
-			if s.Online || !strings.EqualFold(s.ActorID, actorID) {
-				return true
-			}
+	// One pass over the sessions, not one per candidate.
+	held := make(map[string]bool)
+	for _, s := range h.sessions {
+		if s.Project != project || s.ID == sessionID {
+			continue
 		}
-		return false
+		if s.Online || !strings.EqualFold(s.ActorID, actorID) {
+			held[strings.ToLower(s.Name)] = true
+		}
 	}
+	taken := func(candidate string) bool { return held[strings.ToLower(candidate)] }
 	if !taken(base) {
 		return base
 	}
