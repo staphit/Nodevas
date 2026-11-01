@@ -694,6 +694,12 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 	return ask, nil
 }
 
+// lateAnswerFile names the attachment a late answer's mail carries the
+// person's answer and note in: a file only the asker's account, the person
+// and admins may read (Viewer.mayRead), where the mail itself is listed to
+// everyone in the project.
+const lateAnswerFile = "answer.txt"
+
 // errActorAsksBusy refuses an ask past maxPendingAsksPerActor.
 var errActorAsksBusy = fmt.Errorf("%w: this account already has %d asks waiting in this project; answer or end some first",
 	ErrAskBusy, maxPendingAsksPerActor)
