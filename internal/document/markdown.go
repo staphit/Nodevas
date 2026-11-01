@@ -450,14 +450,43 @@ func isWordByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c >= 0x80
 }
 
+// scanBudget bounds the bytes the delimiter searches of one inline parse may
+// read. A delimiter that opens nothing searches to the end of the text, so
+// without a bound each such delimiter rereads it and the work grows with the
+// square of the text. Once the budget is spent, delimiters stay literal text.
+type scanBudget struct{ left int }
+
+func newScanBudget(source string) *scanBudget {
+	return &scanBudget{left: 8*len(source) + 64<<10}
+}
+
+// take spends n bytes of the budget and reports whether there were enough.
+func (b *scanBudget) take(n int) bool {
+	b.left -= n
+	if b.left < 0 {
+		b.left = 0
+		return false
+	}
+	return true
+}
+
 // skipCodeSpan returns the index just past a code span starting at i, or -1.
-func skipCodeSpan(source string, i int) int {
+func skipCodeSpan(source string, i int, budget *scanBudget) int {
 	run := runLength(source, i, '`')
+	if !budget.take(run) {
+		return -1
+	}
 	for j := i + run; j < len(source); j++ {
+		if !budget.take(1) {
+			return -1
+		}
 		if source[j] != '`' {
 			continue
 		}
 		closing := runLength(source, j, '`')
+		if !budget.take(closing) {
+			return -1
+		}
 		if closing == run {
 			return j + closing
 		}
@@ -467,13 +496,16 @@ func skipCodeSpan(source string, i int) int {
 }
 
 // findClosing scans for delim, skipping escapes and code spans.
-func findClosing(source string, from int, delim string) int {
+func findClosing(source string, from int, delim string, budget *scanBudget) int {
 	for i := from; i < len(source); i++ {
+		if !budget.take(1) {
+			return -1
+		}
 		switch source[i] {
 		case '\\':
 			i++
 		case '`':
-			if end := skipCodeSpan(source, i); end > 0 {
+			if end := skipCodeSpan(source, i, budget); end > 0 {
 				i = end - 1
 			}
 		default:
@@ -486,11 +518,12 @@ func findClosing(source string, from int, delim string) int {
 }
 
 func parseInline(source string) []Inline {
-	return parseInlines(source, 0)
+	return parseInlines(source, 0, newScanBudget(source))
 }
 
-// parseInlines parses source nested depth links or emphasis deep.
-func parseInlines(source string, depth int) []Inline {
+// parseInlines parses source nested depth links or emphasis deep. The nested
+// levels share the budget of the outermost one.
+func parseInlines(source string, depth int, budget *scanBudget) []Inline {
 	if depth >= maxNesting {
 		if source == "" {
 			return nil
@@ -524,7 +557,7 @@ func parseInlines(source string, depth int) []Inline {
 			out = append(out, &LineBreak{Hard: hard})
 			i++
 		case c == '`':
-			end := skipCodeSpan(source, i)
+			end := skipCodeSpan(source, i, budget)
 			run := runLength(source, i, '`')
 			if end < 0 {
 				buf.WriteString(source[i : i+run])
@@ -539,24 +572,24 @@ func parseInlines(source string, depth int) []Inline {
 			out = append(out, &CodeSpan{Value: code})
 			i = end
 		case c == '!' && i+1 < len(source) && source[i+1] == '[':
-			label, dest, title, end, ok := parseLinkish(source, i+1)
+			label, dest, title, end, ok := parseLinkish(source, i+1, budget)
 			if !ok {
 				buf.WriteByte(c)
 				i++
 				continue
 			}
 			flush()
-			out = append(out, &Image{URL: dest, Alt: PlainText(parseInlines(label, depth+1)), Title: title})
+			out = append(out, &Image{URL: dest, Alt: PlainText(parseInlines(label, depth+1, budget)), Title: title})
 			i = end
 		case c == '[':
-			label, dest, title, end, ok := parseLinkish(source, i)
+			label, dest, title, end, ok := parseLinkish(source, i, budget)
 			if !ok {
 				buf.WriteByte(c)
 				i++
 				continue
 			}
 			flush()
-			out = append(out, &Link{URL: dest, Title: title, Kids: parseInlines(label, depth+1)})
+			out = append(out, &Link{URL: dest, Title: title, Kids: parseInlines(label, depth+1, budget)})
 			i = end
 		case c == '<':
 			inline, end := parseAngle(source, i)
@@ -571,17 +604,17 @@ func parseInlines(source string, depth int) []Inline {
 			}
 			i = end
 		case c == '~' && strings.HasPrefix(source[i:], "~~"):
-			end := findClosing(source, i+2, "~~")
+			end := findClosing(source, i+2, "~~", budget)
 			if end < 0 || end == i+2 {
 				buf.WriteString("~~")
 				i += 2
 				continue
 			}
 			flush()
-			out = append(out, &Strike{Kids: parseInlines(source[i+2:end], depth+1)})
+			out = append(out, &Strike{Kids: parseInlines(source[i+2:end], depth+1, budget)})
 			i = end + 2
 		case c == '*' || c == '_':
-			node, end := parseEmphasis(source, i, depth)
+			node, end := parseEmphasis(source, i, depth, budget)
 			if node == nil {
 				buf.WriteByte(c)
 				i++
@@ -599,7 +632,7 @@ func parseInlines(source string, depth int) []Inline {
 	return out
 }
 
-func parseEmphasis(source string, i, depth int) (Inline, int) {
+func parseEmphasis(source string, i, depth int, budget *scanBudget) (Inline, int) {
 	c := source[i]
 	// `_` inside a word (snake_case) is literal.
 	if c == '_' && i > 0 && isWordByte(source[i-1]) {
@@ -608,31 +641,34 @@ func parseEmphasis(source string, i, depth int) (Inline, int) {
 	run := runLength(source, i, c)
 	if run >= 2 {
 		delim := string(c) + string(c)
-		if end := findClosing(source, i+2, delim); end > i+2 {
+		if end := findClosing(source, i+2, delim, budget); end > i+2 {
 			if c == '_' && end+2 < len(source) && isWordByte(source[end+2]) {
 				return nil, i
 			}
-			return &Strong{Kids: parseInlines(source[i+2:end], depth+1)}, end + 2
+			return &Strong{Kids: parseInlines(source[i+2:end], depth+1, budget)}, end + 2
 		}
 	}
 	if i+1 < len(source) && source[i+1] == ' ' {
 		return nil, i
 	}
-	if end := findClosing(source, i+1, string(c)); end > i+1 {
+	if end := findClosing(source, i+1, string(c), budget); end > i+1 {
 		if c == '_' && end+1 < len(source) && isWordByte(source[end+1]) {
 			return nil, i
 		}
-		return &Emphasis{Kids: parseInlines(source[i+1:end], depth+1)}, end + 1
+		return &Emphasis{Kids: parseInlines(source[i+1:end], depth+1, budget)}, end + 1
 	}
 	return nil, i
 }
 
 // parseAngle handles <http://…> autolinks, <a@b.c> mail links and <br>.
+// None of them contains '<', so the search stops at the next one: the text
+// between two '<' is read once, however many of them stay literal.
 func parseAngle(source string, i int) (Inline, int) {
-	end := strings.IndexByte(source[i:], '>')
-	if end < 0 {
+	end := strings.IndexAny(source[i+1:], "<>")
+	if end < 0 || source[i+1+end] == '<' {
 		return nil, i
 	}
+	end++
 	inner := source[i+1 : i+end]
 	if strings.ContainsAny(inner, " \t\n") {
 		switch strings.ToLower(strings.TrimSpace(strings.TrimSuffix(inner, "/"))) {
@@ -660,15 +696,18 @@ var (
 )
 
 // parseLinkish parses `[label](dest "title")` starting at the `[`.
-func parseLinkish(source string, start int) (label, dest, title string, end int, ok bool) {
+func parseLinkish(source string, start int, budget *scanBudget) (label, dest, title string, end int, ok bool) {
 	depth := 0
 	closing := -1
 	for i := start; i < len(source) && closing < 0; i++ {
+		if !budget.take(1) {
+			return "", "", "", start, false
+		}
 		switch source[i] {
 		case '\\':
 			i++
 		case '`':
-			if next := skipCodeSpan(source, i); next > 0 {
+			if next := skipCodeSpan(source, i, budget); next > 0 {
 				i = next - 1
 			}
 		case '[':
@@ -688,6 +727,9 @@ func parseLinkish(source string, start int) (label, dest, title string, end int,
 	depth = 1
 	var raw strings.Builder
 	for ; i < len(source); i++ {
+		if !budget.take(1) {
+			return "", "", "", start, false
+		}
 		c := source[i]
 		if c == '\\' && i+1 < len(source) {
 			raw.WriteByte(source[i+1])
