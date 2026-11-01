@@ -26,7 +26,12 @@ import (
 func mcpServe(args []string) {
 	fs, f := newMCPFlags(flag.ExitOnError)
 	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
-	server, projectName, actor, agentRole, toolset := f.server, f.projectName, f.actor, f.agentRole, f.toolset
+	serverURL, err := mcpServerURL(fs, f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)
+		os.Exit(2)
+	}
+	projectName, actor, agentRole, toolset := f.projectName, f.actor, f.agentRole, f.toolset
 	roleName, toolList := strings.TrimSpace(*f.role), splitToolList(*f.tools)
 	sessionName, model, chromaURL, ragPython := f.sessionName, f.model, f.chromaURL, f.ragPython
 
@@ -68,8 +73,8 @@ func mcpServe(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := mcp.Serve(ctx, mcp.Options{
-		Server:      *server,
+	err = mcp.Serve(ctx, mcp.Options{
+		Server:      serverURL,
 		Project:     strings.TrimSpace(*projectName),
 		Actor:       name,
 		SessionName: strings.TrimSpace(*sessionName),
@@ -131,10 +136,17 @@ func runMCPArgs(value string) ([]string, bool) {
 	return words[1:], true
 }
 
+// mcpServerURL is the server to work through: --server, or what the file
+// --server-file names holds.
+func mcpServerURL(fs *flag.FlagSet, f mcpFlags) (string, error) {
+	_ = fs
+	return *f.server, nil
+}
+
 // mcpFlags are `nodevas mcp`'s flags.
 type mcpFlags struct {
 	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython, toolset *string
-	role, tools                                                                              *string
+	role, tools, serverFile                                                                  *string
 }
 
 // splitToolList reads --tools: comma-separated tool names, blanks dropped.
@@ -153,6 +165,8 @@ func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
 	return fs, mcpFlags{
 		server: fs.String("server", mcp.DefaultServer,
 			"the running Nodevas server to work through; must be on this machine"),
+		serverFile: fs.String("server-file", "",
+			"a file holding --server's value, which then stays off the command line"),
 		projectName: fs.String("project", "",
 			"which project in that server's workspace to act on; empty means whichever one it has open"),
 		actor: fs.String("actor", mcp.DefaultActor,

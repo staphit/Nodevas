@@ -58,6 +58,10 @@ func TestHelperProcess(t *testing.T) {
 		mcp, _ := os.ReadFile(path)
 		put("mcp.json", string(mcp))
 		put("mcp-path", path)
+		// What the run's `nodevas mcp --server-file` reads.
+		if server, err := os.ReadFile(filepath.Join(filepath.Dir(path), "mcp-server")); err == nil {
+			put("mcp-server", string(server))
+		}
 	}
 	put("pid", strconv.Itoa(os.Getpid()))
 
