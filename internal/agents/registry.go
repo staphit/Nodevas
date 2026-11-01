@@ -41,6 +41,15 @@ const (
 	// MaxModelLen bounds the model name a heartbeat reports.
 	MaxModelLen = 64
 
+	// maxSessionsPerActor bounds one account's sessions in a project,
+	// online or kept offline (OfflineRetention): a new one past it takes
+	// the place of the one offline longest, or waits for one to go offline.
+	maxSessionsPerActor = 64
+	// maxSessionFieldBytes cuts what a heartbeat says about its session
+	// (doing, repo, branch, cwd, role); maxSessionNameBytes its name.
+	maxSessionFieldBytes = 512
+	maxSessionNameBytes  = 64
+
 	// PresenceEvent is emitted, besides "agents-changed", when a session's
 	// presence really changes: it appears, comes back online, changes state
 	// or node, or leaves. A plain heartbeat does not emit it, so it is quiet
