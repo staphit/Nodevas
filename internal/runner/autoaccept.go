@@ -451,6 +451,9 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 		missing = append(missing, fmt.Sprintf("agent %s may run any shell command here (%s); "+
 			"auto-accept leaves that to a person (nodevas runner autoaccept allow-shell on)", job.Agent, offer.Shell))
 	}
+	if runsTests(job) && !p.AllowVerify {
+		missing = append(missing, verifyConsentMissing)
+	}
 	if len(missing) > 0 {
 		return false, strings.Join(missing, "; ")
 	}
@@ -460,6 +463,18 @@ func AutoAcceptDecision(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, strin
 	}
 	return true, fmt.Sprintf("%s; repo %s, agent %s, %s are on the auto-accept list",
 		why, offer.Repo.Name, job.Agent, ModeName(job.Mode))
+}
+
+// verifyConsentMissing is why a job that runs the repository's test command
+// is not auto-accepted without the owner's verify switch.
+const verifyConsentMissing = "verify jobs run this repository's test command on code an agent wrote; " +
+	"auto-accept them with: nodevas runner autoaccept verify on"
+
+// runsTests reports whether job, besides any agent, runs the repository's
+// test command on this machine: a goal judge does, at its base, before its
+// agent starts (executeJudge).
+func runsTests(job runnerwire.Job) bool {
+	return job.Kind == runnerwire.JobJudge && job.Verify != nil
 }
 
 // verifyAutoAccept decides a verify job: no agent runs, but the repo's test
@@ -474,8 +489,7 @@ func verifyAutoAccept(p runnerwire.AutoAcceptPolicy, offer Offer) (bool, string)
 	}
 	var missing []string
 	if !p.AllowVerify {
-		missing = append(missing, "verify jobs run this repository's test command on code an agent wrote; "+
-			"auto-accept them with: nodevas runner autoaccept verify on")
+		missing = append(missing, verifyConsentMissing)
 	}
 	if p.RequireStepUp && !job.SteppedUp {
 		missing = append(missing, ReasonNeedsStepUp)
