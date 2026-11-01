@@ -80,6 +80,11 @@ type run struct {
 	// remoteTyping: the dispatcher may type into this interactive run's
 	// terminal (auto-accepted under AllowRemoteTyping, or a yes here).
 	remoteTyping bool
+	// noRelay: auto-accepted without AllowShell, so the run's permission
+	// prompts are not relayed to the hub (denied headless) whatever
+	// permissionRelay says: a person there could otherwise approve a shell
+	// command the auto-accept policy keeps from the agent.
+	noRelay bool
 
 	// Outbound, unsent, in this order. events is bounded: a run that talks a
 	// lot while the socket is down loses its oldest events, never its finish.
@@ -485,6 +490,13 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 		if interactive {
 			j.setRemoteTyping(r, policy.AllowRemoteTyping)
 		}
+		if !policy.AllowShell {
+			// Nobody here said yes: a prompt relayed to the hub must not be
+			// how the agent gets the shell the policy leaves to a person.
+			j.mu.Lock()
+			r.noRelay = true
+			j.mu.Unlock()
+		}
 		return true, ""
 	}
 	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
@@ -578,6 +590,9 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 
 	cfg := j.c.Config
+	j.mu.Lock()
+	relay := cfg.PermissionRelay && !r.noRelay
+	j.mu.Unlock()
 	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
 	if adapter.ReadOnly(job) {
 		// A plan or a judge reads the code as a review does; what a plan
@@ -602,14 +617,16 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
-		PermissionRelay:  cfg.PermissionRelay,
+		PermissionRelay:  relay,
 	}
 	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
 	}
-	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && relayOff {
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && !relay {
+		modeText = claimed + autoAcceptedNotRelayedText
+	} else if ok && relayOff {
 		// The adapter could not set the relay up (agy: no session settings,
 		// no hook that runs nodevas): the log says what the run really does.
 		modeText = claimed + notRelayedText
@@ -759,6 +776,9 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 const (
 	relayedText    = ", permission prompts relayed to Nodevas"
 	notRelayedText = ", permission prompts not relayed (denied headless)"
+	// autoAcceptedNotRelayedText ends that of a run auto-accepted without
+	// allow-shell (run.noRelay).
+	autoAcceptedNotRelayedText = ", permission prompts not relayed: auto-accepted without allow-shell (denied headless)"
 )
 
 // permissionText says how freely the agent may act, for the run's log.
