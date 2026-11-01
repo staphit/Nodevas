@@ -49,6 +49,11 @@ const maxQueryTokens = 16
 // result.
 const maxCandidates = 2000
 
+// maxCandidateBytes bounds the text one plain search reads, so a project of
+// megabyte documents costs a search tens of megabytes, not gigabytes. See
+// candidates.
+const maxCandidateBytes = 64 << 20
+
 // maxLexemeBytes bounds the lexemes of one tsvector. PostgreSQL refuses a
 // tsvector whose lexemes add up to a megabyte or more; a megabyte of Chinese
 // holds about 350,000 distinct bigrams at six bytes each, so the biggest
