@@ -92,6 +92,42 @@ func TestHandoffIsContinuedOnlyForItsNode(t *testing.T) {
 	}
 }
 
+// A handoff record written before records named their node cannot say
+// which node it is for, so it is continued for none.
+func TestHandoffWithoutANodeIsNotContinued(t *testing.T) {
+	asked := 0
+	env := startPRRunner(t, nil, func(c *Client) {
+		c.Accepter = acceptFunc(func(context.Context, Offer) (bool, string) { asked++; return true, "" })
+	})
+	env.hub.hello()
+	gitT(t, env.repo, "branch", "nodevas/handoff/legacy", "main")
+	// The record as an older runner wrote it: no nodeId.
+	record, err := json.Marshal([]map[string]string{{
+		"branch": "nodevas/handoff/legacy", "repoId": "r1", "repoPath": env.repo,
+		"commit": gitT(t, env.repo, "rev-parse", "main"), "runId": "legacy",
+		"createdAt": time.Now().UTC().Format(time.RFC3339),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(env.client.Config.DataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(handoffPath(env.client.Config.DataDir), record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := testJob("run-legacy", "ok:")
+	job.HandoffBranch = "nodevas/handoff/legacy"
+	env.hub.offer(job)
+	if reason := env.hub.wait("run-legacy", runnerwire.TypeDecline).Reason; !strings.Contains(reason,
+		"has no node on record") {
+		t.Errorf("decline reason %q", reason)
+	}
+	if asked != 0 {
+		t.Errorf("asked %d times about continuing a handoff with no node", asked)
+	}
+}
+
 // ownPR records the review PR as one this runner's implement run opened for
 // node n-1, as publish does.
 func ownPR(env *reviewEnv) {
