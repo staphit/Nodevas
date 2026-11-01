@@ -12,7 +12,10 @@ This document describes how Nodevas release artifacts are built and signed.
   (signed and notarized with Apple credentials when configured).
 
 The bundled backend binary (`nodevas` / `nodevas.exe`) is embedded in these
-artifacts and covered by the same signatures.
+artifacts and covered by the same signatures. The artifacts also bundle the
+pinned PostgreSQL binaries: the release workflow refuses the download unless
+its SHA-256 matches the manifest compiled into `internal/embeddedpg`, and on
+macOS they are signed with the app.
 
 ## How releases are built
 
@@ -64,4 +67,7 @@ Signed Windows binaries can additionally be verified with
 
 Nodevas does not collect telemetry. The desktop app checks GitHub Releases for
 updates; no other network calls are made without explicit user configuration
-(for example mail notifications).
+(for example mail notifications). The desktop app ships PostgreSQL; the
+command-line `serve` downloads the pinned PostgreSQL from GitHub on its first
+start (this project's own release mirror, then theseus-rs), unless it uses your
+own PostgreSQL server or `NODEVAS_PG_OFFLINE=1` is set.

@@ -1,7 +1,9 @@
-# `domain/` — source of truth 與 command 層 [A-01 / A-04]
+# `domain/` — source of truth 與 command 層
 
-前端不再讓元件自行決定「這筆資料該寫去哪」。每個持久化概念都在
-`registry.ts` 有一列，命名在 `glossary.ts`，寫入方式在 `commands.ts`。
+前端不再讓元件自行決定「這筆資料該寫去哪」。持久化概念在 `registry.ts`
+有一列，命名在 `glossary.ts`，寫入方式在 `commands.ts`（各領域的純函式 reducer
+在 `graph/`）。節點類型併在 `workflow` 那一列；辦公室風格、工作流程階段、
+agent 角色與驗收條件目前還沒有自己的列。
 
 ## 1. 為什麼要分
 
@@ -40,8 +42,9 @@ UI  →  store command  →  applyGraphCommand(draft, command)   (純函式，�
                       →  operation state: pending → saved | error | conflict
 ```
 
-`state/graphOps.ts` 判斷哪些指令 op-able（畫布拖曳、節點縮放、節點欄位、時間軸排序、刪除關係）：
-這些走 `/api/graph/ops`，不帶 baseRev，所以兩人改同一張圖的不同部分不會互相 409，
+`state/graphOps.ts` 判斷哪些指令 op-able：畫布拖曳（連帶平移畫板的除外）、節點縮放、節點欄位、
+時間軸排序、刪除關係、關係樣式、新增／移除參考、驗收條件、Goal 的工作流程覆寫、專案的工作流程階段、
+agent 角色。這些走 `/api/graph/ops`，不帶 baseRev，所以兩人改同一張圖的不同部分不會互相 409，
 且套用後採用伺服器合併後的 graph。其餘指令仍走整檔 `PUT /api/graph`。
 
 Journal domain 不走 graph command：
