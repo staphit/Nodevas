@@ -17,16 +17,17 @@ cd Nodevas
 npm ci --prefix web
 npm run build --prefix web
 go build -o nodevas ./cmd/nodevas
+mkdir -p workspace
 ./nodevas serve --project ./workspace
 ```
 
 On Windows, build `nodevas.exe` and run `.\nodevas.exe serve --project .\workspace`.
 
-Open <http://127.0.0.1:5666>. There is no sign-in page: on a loopback server the local user owns everything.
+Open <http://127.0.0.1:5666>. There is no sign-in page: on a loopback server the local user owns everything, and so does any other program on this machine, so use it on a computer only you use ([Security model](../README.md#security-model)). To stop the server, press Ctrl+C twice within 3 seconds. It also writes its log to `<user config dir>/nodevas/logs/serve.log` (the path is printed at start).
 
-`--project` points to a workspace, not a single project. Every directory below that workspace containing `graph.yaml` appears as a project. Nodevas creates the required workspace data when the path does not exist. The frontend is built into `web/dist` and embedded into the binary.
+`--project` points to a workspace, not a single project, and the directory must exist. Every directory below that workspace containing `graph.yaml` appears as a project. The frontend is built into `web/dist` and embedded into the binary.
 
-Accounts, the audit trail, settings and the search index live in a PostgreSQL database that `serve` starts for you on `127.0.0.1` and stops with it. The first start downloads the pinned PostgreSQL build once (about 40–90 MB, checked against a SHA-256 compiled into the binary) and creates the database, which takes a few seconds; the desktop app ships the binaries and downloads nothing. Linux needs glibc 2.36 or newer (Debian 12, Ubuntu 23.04); elsewhere point `NODEVAS_DATABASE_URL` at a server. Back up with `nodevas db dump`. See [Operations: Database](./operations.md#database).
+Accounts, the audit trail, settings and the search index live in a PostgreSQL database that `serve` starts for you on `127.0.0.1` and stops with it. The first start downloads the pinned PostgreSQL build once (about 40–93 MB, checked against a SHA-256 compiled into the binary) and creates the database, which takes a few seconds; the desktop app ships the binaries and downloads nothing. Linux needs glibc 2.36 or newer (Debian 12, Ubuntu 23.04); elsewhere point `NODEVAS_DATABASE_URL` at a server. Back up with `nodevas db dump`. See [Operations: Database](./operations.md#database).
 
 ### Run coding agents too
 
@@ -61,13 +62,14 @@ Run the backend and frontend separately:
 
 ```bash
 # Terminal 1
+mkdir -p workspace
 go run ./cmd/nodevas serve -project ./workspace -port 5666
 
 # Terminal 2
 npm run dev --prefix web
 ```
 
-Open <http://127.0.0.1:5173>. Vite proxies `/api` and `/ws` to port `5666`.
+Open <http://127.0.0.1:5173>. Vite proxies `/api` and `/ws` to port `5666` for this machine's own pages only. It answers `404` to another origin, a Host name that is not `localhost`, a `*.localhost` name or an IP address, a page the browser marks as cross-site, and a tunnel or proxy on this machine (a loopback request that already carries forwarding headers, such as ngrok in front of port 5173; a tunnel that adds no such header is not caught). The hub has no accounts here, so it answers `401` to a request the dev server relays for another machine: the dev server opened to the network (`--host`) shows other devices the page but no workspace. See [Opening the app on a phone](../scripts/serve-lan.md).
 
 ## Team server
 
@@ -81,9 +83,9 @@ The image is `ghcr.io/staphit/nodevas`. A hub other machines can reach needs:
 - **An admin account with a sign-in email**, created with `nodevas user add` before the first start.
 - **An SMTP relay.** Web sign-in is the account's email address plus a one-time passcode sent to it, so without mail nobody can sign in.
 
-The server refuses to start on the network without a host name, TLS (or a proxy), and an account. [Operations: Allow network access](./operations.md#allow-network-access) explains each check.
+On the network the server refuses to start without an account; without TLS, unless a proxy terminates it (`--behind-proxy` on loopback, or `--allow-plaintext` for the private hop from the proxy); listening on every interface, without a host name; and listening on loopback with a public host name or Cloudflare Access, without `--behind-proxy`, TLS or `--allow-plaintext`. [Operations: Allow network access](./operations.md#allow-network-access) explains each check.
 
-The image's default command serves `/data` on loopback only, which a port mapping cannot reach, so a hub sets its own `serve` flags or the matching `NODEVAS_SERVE_*` variables. Every container that uses the data volume needs `XDG_CONFIG_HOME=/data/.config`, because the container user (uid `568`) has no home directory, and a PostgreSQL 17 server named by `NODEVAS_DATABASE_URL_FILE` (or `NODEVAS_DATABASE_URL`): the image refuses to start without one (`NODEVAS_REQUIRE_DATABASE_URL=1`).
+The image's default command serves `/data` on loopback only, which a port mapping cannot reach, so a hub sets its own `serve` flags or the matching `NODEVAS_SERVE_*` variables. `/data/nodevas.yaml` is the workspace's own file, so it may not set what decides whom the hub trusts: the host name, `behind_proxy`, `trusted_proxy`, TLS files, `allow_plaintext`, `access.*`, `copilot.allow_bypass`, or a copilot `base_url` or `smtp.host` off this machine. `serve` refuses to start if it does. Set those with `NODEVAS_SERVE_*` (and `NODEVAS_COPILOT_*`) variables or flags, as below, or in a file outside the volume named with `NODEVAS_CONFIG`. Every container that uses the data volume needs `XDG_CONFIG_HOME=/data/.config`, because the container user (uid `568`) has no home directory, and a PostgreSQL 17 server named by `NODEVAS_DATABASE_URL_FILE` (or `NODEVAS_DATABASE_URL`): the image refuses to start without one (`NODEVAS_REQUIRE_DATABASE_URL=1`).
 
 #### Behind a reverse proxy, with Docker Compose
 
@@ -110,11 +112,14 @@ services:
       NODEVAS_SERVE_SMTP_USER: nodevas@example.com
       NODEVAS_SERVE_SMTP_FROM: Nodevas <nodevas@example.com>
       NODEVAS_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      # The key that encrypts the secrets saved in the app, kept out of the data volume.
+      NODEVAS_SECRET_KEY_FILE: /run/secrets/secret_key
     volumes:
       - nodevas-data:/data
     secrets:
       - smtp_password
       - database_url
+      - secret_key
     networks:
       - nodevas
     # No "ports:": only the proxy reaches the hub, at http://nodevas:5666.
@@ -163,9 +168,11 @@ secrets:
     file: ./database-password
   database_url:
     file: ./database-url
+  secret_key:
+    file: ./secret-key
 ```
 
-1. Put the SMTP password in `smtp-password` and the database URL in `database-url`, both readable by uid `568`, and the database password in `database-password`.
+1. Put the SMTP password in `smtp-password`, the database URL in `database-url` and a new key in `secret-key` (`openssl rand -base64 32`), all three readable by uid `568`, and the database password in `database-password`. A hub that already ran without `NODEVAS_SECRET_KEY_FILE` has its key in `/data/.config/nodevas/secrets/master.key`: copy that file's content into `secret-key` instead, or the secrets saved so far and two-factor sign-in stop working.
 2. Create the admin account (the password is read from stdin):
 
    ```bash
@@ -176,7 +183,7 @@ secrets:
 
 3. Add your proxy, pointing `https://nodevas.example.com` at `http://nodevas:5666`, and run `docker compose up -d`.
 
-`NODEVAS_SERVE_TRUSTED_PROXY` trusts forwarding headers from the whole Compose network, so put only the hub and the proxy on it. Each `NODEVAS_SERVE_*` variable matches a `serve` flag and a `nodevas.yaml` key; see [Operations: Configuration](./operations.md#configuration).
+`NODEVAS_SERVE_TRUSTED_PROXY` trusts forwarding headers from the whole Compose network, so put only the hub and the proxy on it. If it misses the proxy, the hub takes HTTPS for plain HTTP: its cookies lose `Secure` and it sends no HSTS. Each `NODEVAS_SERVE_*` variable here matches a `serve` flag and a key of a `nodevas.yaml` named with `NODEVAS_CONFIG`; see [Operations: Configuration](./operations.md#configuration).
 
 #### With your own certificate
 
@@ -192,31 +199,33 @@ secrets:
      --email you@example.com --password-stdin
    ```
 
-2. Start the hub with the certificate, host name, and mail settings. The certificate, key, and password files must be readable by uid `568`:
+2. Start the hub with the certificate, host name, and mail settings. The certificate, key, password and secret-key files must be readable by uid `568`:
 
    ```bash
-   docker run -d --name nodevas --restart unless-stopped -p 443:5666 --no-healthcheck \
+   docker run -d --name nodevas --restart unless-stopped -p 443:5666 \
      -e XDG_CONFIG_HOME=/data/.config -v nodevas-data:/data \
      -v /etc/nodevas/tls:/tls:ro \
      -v /etc/nodevas/smtp-password:/run/secrets/smtp-password:ro \
      -v /etc/nodevas/database-url:/run/secrets/database-url:ro \
+     -v /etc/nodevas/secret-key:/run/secrets/secret-key:ro \
      -e NODEVAS_DATABASE_URL_FILE=/run/secrets/database-url \
+     -e NODEVAS_SECRET_KEY_FILE=/run/secrets/secret-key \
+     -e NODEVAS_SERVE_TLS_CERT=/tls/cert.pem -e NODEVAS_SERVE_TLS_KEY=/tls/key.pem \
      -e NODEVAS_SERVE_SMTP_HOST=smtp.example.com \
      -e NODEVAS_SERVE_SMTP_USER=nodevas@example.com \
      -e 'NODEVAS_SERVE_SMTP_FROM=Nodevas <nodevas@example.com>' \
      -e NODEVAS_SMTP_PASSWORD_FILE=/run/secrets/smtp-password \
      ghcr.io/staphit/nodevas:latest \
-     serve --project /data --listen 0.0.0.0 --hostname nodevas.example.com \
-     --tls-cert /tls/cert.pem --tls-key /tls/key.pem
+     serve --project /data --listen 0.0.0.0 --hostname nodevas.example.com
    ```
 
-   `/etc/nodevas/database-url` holds the `postgres://` URL of a PostgreSQL 17 server. The image's health check probes plain HTTP, so it is turned off here; with TLS it would always report unhealthy.
+   `/etc/nodevas/database-url` holds the `postgres://` URL of a PostgreSQL 17 server, and `/etc/nodevas/secret-key` the key for the app's secrets, made as in the Compose steps above. The certificate is set with variables rather than flags: the image's health check reads them too, so it probes HTTPS.
 
 Without Docker, run the binary as a service and follow [Operations: Allow network access](./operations.md#allow-network-access).
 
 ### Open the hub
 
-Open `https://nodevas.example.com` in a browser, enter the account's email address, and type the passcode it receives. There is nothing else to install to use the board. Turn on an authenticator app under **Settings → Your account** for a second factor.
+Open `https://nodevas.example.com` in a browser, enter the account's email address as it was registered (letter case aside), and type the passcode it receives. There is nothing else to install to use the board. Turn on an authenticator app under **Settings → Account** for a second factor. After an upgrade from a release before the `__Host-` cookie names, everyone signs in once more ([Operations](./operations.md#allow-network-access)).
 
 ### Add a runner
 
@@ -224,7 +233,7 @@ A runner runs coding agents on your PC with your own logins and connects out to 
 
 `scripts/install.sh` downloads the `nodevas` build that matches your hub and checks it against GitHub, or builds it from a checkout with Go 1.26 or newer (see [Install a runner](./install.md)). This PC also needs Git, the agent CLIs you want to use, and `gh` for pull requests. On Windows, run it in Git Bash.
 
-1. On the hub, open **Settings → Runners → Link a new device** and copy the one-time link. It works once, for ten minutes.
+1. On the hub, open **Settings → Agents → Link a new device** (turn on **Let agents work here** if it is off), verify it's you when asked, and copy the one-time link. It works once, for ten minutes, and you get an email when it is used.
 2. On your PC:
 
    ```bash
@@ -239,7 +248,7 @@ Options, runner tokens, and Cloudflare Access: [Install a runner](./install.md).
 
 ## Configuration
 
-Settings come from built-in defaults, then `nodevas.yaml` in the workspace root, then environment variables (`NODEVAS_SERVE_*`), then command-line flags. See [nodevas.yaml.example](../nodevas.yaml.example) and [Operations: Configuration](./operations.md#configuration).
+Settings come from built-in defaults, then `nodevas.yaml` in the workspace root (or the file `--config` / `NODEVAS_CONFIG` names instead), then environment variables (`NODEVAS_SERVE_*`), then command-line flags. The workspace's own `nodevas.yaml` may not change whom the server trusts (host name, proxy, TLS, Cloudflare Access, copilot bypass, a copilot or SMTP server off this machine); `serve` refuses to start if it does. See [nodevas.yaml.example](../nodevas.yaml.example) and [Operations: Configuration](./operations.md#configuration).
 
 Log format and audit events: [Operations: Logs and audit events](./operations.md#logs-and-audit-events).
 

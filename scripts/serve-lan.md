@@ -1,7 +1,7 @@
 # Opening the app on a phone
 
 The touch layout, the gestures and the safe-area insets are all web UI. They
-need only a phone that can reach this machine. Use this while iterating on the
+need only a phone plugged into this machine. Use this while iterating on the
 mobile layout.
 
 ## Screenshots, no phone at all
@@ -18,43 +18,59 @@ A device profile is not a device: touch is synthesised, Chromium is not iOS
 Safari, and the safe-area insets are zero because there is no notch. For those,
 use a real phone below.
 
-## A real phone over the LAN
+## A real Android phone over USB
 
-The dev server serves the UI to the network; the Go server stays on loopback and
-is reached through the dev server's proxy. That is the whole point of doing it
-this way — the backend is never exposed to the network, so no accounts and no
-plaintext-over-the-network trade-off are involved.
+The dev server serves the UI; the Go server stays on loopback with no accounts
+and answers only this machine. A USB port forward makes the phone's own
+`localhost:5173` this machine's dev server, so the phone counts as this machine
+and nothing is exposed to the network.
 
 **One terminal — the backend, loopback only:**
 
 ```powershell
-go run ./cmd/nodevas serve -project ./examples -port 5666
+mkdir -Force workspace
+go run ./cmd/nodevas serve -project ./workspace -port 5666
 ```
 
-**Another — the dev server, on the network:**
+**Another — the dev server, loopback only:**
 
 ```powershell
 cd web
-npm run dev -- --host
+npm run dev
 ```
 
-Vite prints a `Network:` URL such as `http://192.168.1.23:5173`. Open that in
-Safari on the phone. Both devices must be on the same Wi-Fi, and Windows will
-ask to allow Node through the firewall the first time — allow it on private
-networks only.
+**A third — forward the phone's port 5173 to this machine** (USB debugging on,
+`adb` from the Android platform tools):
 
-To get a full-screen view without browser chrome, use
-Share → Add to Home Screen and launch it from there: `apple-mobile-web-app-capable`
-in `web/index.html` makes it open without Safari's bars.
+```powershell
+adb reverse tcp:5173 tcp:5173
+```
 
-### What this exposes
+Open <http://localhost:5173> in Chrome on the phone. `adb reverse --remove-all`
+undoes the forward.
 
-Anyone on the same network who finds port 5173 gets your workspace, with no
-password, for as long as the dev server runs. It is a development server on a
-network you trust — a home or office Wi-Fi — not something to leave running on
-a café hotspot. Stop it when you are done.
+To get a full-screen view without browser chrome, use the browser's
+Add to Home Screen and launch it from there: `apple-mobile-web-app-capable`
+in `web/index.html` asks for it to open without the browser's bars.
+
+### Why not the LAN
+
+`npm run dev -- --host` still serves the page to the network, but the hub
+answers every `/api` and `/ws` request the dev server relays for another device
+with `401` ("this server has no accounts and answers only this machine"): a
+phone on the Wi-Fi gets the app shell and no workspace. That is on purpose. A
+hub without accounts trusts whoever reaches it, so it may only be reached from
+this machine; the dev server also refuses (`404`) other origins, other Host
+names, cross-site pages and a proxy or tunnel on this machine that adds
+forwarding headers. A raw TCP tunnel (ssh -R, `ngrok tcp`, `adb reverse`) adds
+none and is treated as this machine: never point one at a dev server or hub you
+would not hand to whoever reaches the tunnel.
+
+An iPhone has no USB port forward like `adb reverse`. Test it against a hub with
+accounts and HTTPS ([Team server](../docs/getting-started.md#team-server)), or
+use the screenshots above.
 
 Do not reach for `nodevas serve -listen 0.0.0.0` as a shortcut here. That binds
-the real server to the network, where it demands accounts and TLS for good
-reasons, and `--allow-plaintext` would put session cookies and passwords on the
-wire in clear text. The proxy above avoids the question entirely.
+the real server to the network, where it demands accounts, mail and TLS for good
+reasons, and `--allow-plaintext` would put session cookies and passcodes on the
+wire in clear text.
