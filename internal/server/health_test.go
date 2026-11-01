@@ -80,8 +80,10 @@ func TestHealthzIs503WhenTheDatabaseIsDown(t *testing.T) {
 	}
 }
 
-// /api/metrics is for administrators, or for a scraper on the same machine
-// (direct loopback, no forwarding headers).
+// /api/metrics is for administrators. Only a hub without accounts serves it
+// to a scraper on the same machine (direct loopback, no forwarding headers):
+// on a hub with accounts a proxy beside it that adds no forwarding header
+// looks exactly like that scraper, and would hand the metrics to anyone.
 func TestMetricsAreForAdminsOrLoopback(t *testing.T) {
 	server, _, inbox, database, users := accountServerPartsForTest(t)
 	server.UseAgentsDB(database)
@@ -132,10 +134,13 @@ func TestMetricsAreForAdminsOrLoopback(t *testing.T) {
 		t.Fatalf("metrics = %s, want limiter refusals by class and runs by state", response.Body)
 	}
 
-	// A scraper on the same machine needs no account; the same request
-	// through a proxy does.
-	if response := getAs(handler, "/api/metrics", "127.0.0.1", nil); response.Code != http.StatusOK {
-		t.Fatalf("direct loopback metrics = %d %s, want 200", response.Code, response.Body)
+	// A request straight from this machine is no different on a hub with
+	// accounts, and neither is one through a proxy.
+	if response := getAs(handler, "/api/metrics", "127.0.0.1", nil); response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous direct loopback metrics on a hub with accounts = %d %s, want 401", response.Code, response.Body)
+	}
+	if response := getAs(handler, "/api/metrics", "127.0.0.1", member); response.Code != http.StatusForbidden {
+		t.Fatalf("a member's direct loopback metrics = %d %s, want 403", response.Code, response.Body)
 	}
 	proxied := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	proxied.RemoteAddr = "127.0.0.1:40000"
@@ -144,5 +149,14 @@ func TestMetricsAreForAdminsOrLoopback(t *testing.T) {
 	handler.ServeHTTP(recorder, proxied)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("proxied loopback metrics = %d, want 401", recorder.Code)
+	}
+}
+
+// A hub without accounts serves its metrics to a scraper on the same
+// machine with no sign-in.
+func TestLoopbackHubServesMetricsToThisMachine(t *testing.T) {
+	server := serverForTest(t, projectManagerForTest(t), realtime.NewHub(), nil)
+	if response := getAs(server.Handler(), "/api/metrics", "127.0.0.1", nil); response.Code != http.StatusOK {
+		t.Fatalf("direct loopback metrics on a hub without accounts = %d %s, want 200", response.Code, response.Body)
 	}
 }

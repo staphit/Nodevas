@@ -260,9 +260,9 @@ func TestAccessExemptionNeedsNoForwardingHeaderAtAll(t *testing.T) {
 
 // On a hub with accounts, a proxy beside it that adds no forwarding header
 // at all (nginx's defaults, ssh -L, socat) looks like this machine. Only
-// the health probe and the metrics scraper are exempt from Access there;
-// everything else must come through the edge.
-func TestRemoteHubExemptsOnlyHealthAndMetricsFromAccess(t *testing.T) {
+// the health probe is exempt from Access there; everything else, metrics
+// included, must come through the edge.
+func TestRemoteHubExemptsOnlyHealthFromAccess(t *testing.T) {
 	f := newAccessFixture(t)
 	server, _, _ := accountServerForTest(t)
 	server.UseAccess(f.v, true)
@@ -271,7 +271,7 @@ func TestRemoteHubExemptsOnlyHealthAndMetricsFromAccess(t *testing.T) {
 		"/api/auth/status": http.StatusForbidden,
 		"/":                http.StatusForbidden,
 		"/api/healthz":     http.StatusOK,
-		"/api/metrics":     http.StatusOK,
+		"/api/metrics":     http.StatusForbidden,
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.RemoteAddr = "127.0.0.1:50000"
