@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -131,6 +132,35 @@ func checkKind(job *runnerwire.Job, cfg *Config) string {
 		return "autoPR is off on this runner, so it does not push revisions"
 	}
 	return ""
+}
+
+// ownBranchLocked vets a revise's branch: a revise pushes with the owner's
+// git credentials, so only to a branch one of this runner's own runs opened
+// its (still watched) pull request from, for the job's node, in the job's
+// repository. reason is "" when it is. j.mu is held.
+func (j *jobs) ownBranchLocked(job *runnerwire.Job, repo runnerwire.Repo) string {
+	for _, id := range j.watchOrder {
+		w := j.watched[id]
+		if w == nil || w.closing || w.NodeID == "" {
+			continue
+		}
+		if w.Branch == job.Branch && w.NodeID == job.NodeID && strings.EqualFold(w.URL, job.PRURL) &&
+			sameRepoPath(w.Repo, repo.Path) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("this runner pushes revisions only to branches its own runs opened for this node; "+
+		"%s (%s) is not one it opened for node %s in %s", job.Branch, job.PRURL, job.NodeID, repo.Name)
+}
+
+// sameRepoPath says whether two paths name the same place, as the runner's
+// config spells them: cleaned, and without letter case on Windows and macOS.
+func sameRepoPath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // prCheck is what checkPR learned about the job's pull request.

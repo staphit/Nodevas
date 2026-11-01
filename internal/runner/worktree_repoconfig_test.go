@@ -316,6 +316,7 @@ func TestWithheldConfigKeepsTheWorktree(t *testing.T) {
 	t.Run("revised", func(t *testing.T) {
 		env := startReviewRunner(t, nil)
 		env.hub.hello()
+		ownPR(env)
 		env.hub.offer(prJob("run-cfg-rvs", runnerwire.JobRevise, "plant: Fix it"))
 		result := env.hub.wait("run-cfg-rvs", runnerwire.TypeFinish).Result
 		if result.Status != runnerwire.RunSucceeded {

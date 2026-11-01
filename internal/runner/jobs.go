@@ -334,6 +334,11 @@ func (j *jobs) checkLocked(job *runnerwire.Job) (runnerwire.Repo, string) {
 	if reason := checkKind(job, cfg); reason != "" {
 		return repo, reason
 	}
+	if job.Kind == runnerwire.JobRevise {
+		if reason := j.ownBranchLocked(job, repo); reason != "" {
+			return repo, reason
+		}
+	}
 	busy := 0
 	for _, r := range j.runs {
 		if r.finish == nil {
