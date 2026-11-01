@@ -1294,6 +1294,9 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 
 	client.mu.Lock()
 	previous = client.room
+	// Staying in the room, already looking at nothing, changes nobody's
+	// table: only this socket is owed it.
+	unchanged := previous == room && client.nodeID == "" && !client.editing
 	client.room = room
 	client.project = project
 	client.nodeID = ""
@@ -1309,7 +1312,12 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 		_ = h.leaveAllDocs(client)
 		h.publishPresence(previous)
 	}
-	h.publishPresence(room)
+	// Each room whose table changed hears it once.
+	if unchanged {
+		h.sendPresence(room, client)
+	} else {
+		h.publishPresence(room)
+	}
 	// Joining changes nobody's locks: only the joiner needs the table.
 	h.sendLocks(room, client)
 }
