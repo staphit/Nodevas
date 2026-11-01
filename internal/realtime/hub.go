@@ -1185,7 +1185,8 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 		h.publishPresence(previous)
 	}
 	h.publishPresence(room)
-	h.publishLocks(room)
+	// Joining changes nobody's locks: only the joiner needs the table.
+	h.sendLocks(room, client)
 }
 
 // acquireLock takes the soft lock on a document, or reports who holds it.
@@ -1204,6 +1205,7 @@ func (h *Hub) acquireLock(client *wsClient, nodeID string, steal bool) {
 		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID})
 		return
 	}
+	actorKey := actorConnectionKey(actor)
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -1213,20 +1215,43 @@ func (h *Hub) acquireLock(client *wsClient, nodeID string, steal bool) {
 		h.mu.Unlock()
 		return
 	}
-	if h.locks[room] == nil {
-		h.locks[room] = map[string]*nodeLock{}
-	}
 	held, taken := h.locks[room][nodeID]
 	switch {
-	case !taken || held.client == client || steal:
-		h.locks[room][nodeID] = &nodeLock{client: client, actor: actor, since: time.Now()}
+	case taken && held.client == client:
+		// Already this connection's: nothing changed, so only the asker is
+		// told, not the whole room again.
 		h.mu.Unlock()
-		h.publishLocks(room)
-	default:
+		h.sendLocks(room, client)
+	case taken && !steal:
 		holder := held.actor
 		h.mu.Unlock()
 		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID, Actor: &holder})
+	case (!taken || actorConnectionKey(held.actor) != actorKey) && h.actorLockCountLocked(actorKey) >= maxLocksPerActor:
+		// Past the account's share. Moving a lock between its own windows
+		// adds none, so that is never refused here.
+		h.mu.Unlock()
+		h.sendTo(client, Event{Type: "lock-denied", ID: nodeID})
+	default:
+		if h.locks[room] == nil {
+			h.locks[room] = map[string]*nodeLock{}
+		}
+		h.locks[room][nodeID] = &nodeLock{client: client, actor: actor, since: time.Now()}
+		h.mu.Unlock()
+		h.publishLocks(room)
 	}
+}
+
+// actorLockCountLocked counts the locks one account holds, in every room.
+func (h *Hub) actorLockCountLocked(actorKey string) int {
+	count := 0
+	for _, locks := range h.locks {
+		for _, held := range locks {
+			if actorConnectionKey(held.actor) == actorKey {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func (h *Hub) releaseLock(client *wsClient, nodeID string) {
@@ -1235,11 +1260,16 @@ func (h *Hub) releaseLock(client *wsClient, nodeID string) {
 	client.mu.Unlock()
 
 	h.mu.Lock()
-	if held, ok := h.locks[room][nodeID]; ok && held.client == client {
+	held, ok := h.locks[room][nodeID]
+	released := ok && held.client == client
+	if released {
 		delete(h.locks[room], nodeID)
 	}
 	h.mu.Unlock()
-	h.publishLocks(room)
+	// An unlock of a lock this connection does not hold changes nothing.
+	if released {
+		h.publishLocks(room)
+	}
 }
 
 func (h *Hub) releaseAll(client *wsClient, room string) {
@@ -1293,6 +1323,12 @@ func (h *Hub) publishPresence(room string) {
 
 // publishLocks tells a room which documents are held, and by whom.
 func (h *Hub) publishLocks(room string) {
+	h.sendLocks(room, nil)
+}
+
+// sendLocks is publishLocks for one client of the room, or for all of them
+// when only is nil.
+func (h *Hub) sendLocks(room string, only *wsClient) {
 	h.mu.Lock()
 	held := make([]Lock, 0, len(h.locks[room]))
 	owners := make([]*wsClient, 0, len(h.locks[room]))
@@ -1306,6 +1342,9 @@ func (h *Hub) publishLocks(room string) {
 	}
 	targets := make([]*wsClient, 0, len(h.conns))
 	for client := range h.conns {
+		if only != nil && client != only {
+			continue
+		}
 		client.mu.Lock()
 		inRoom := client.room == room
 		client.mu.Unlock()
