@@ -75,6 +75,55 @@ func TestProtectHTTPTransportCapsLoginBody(t *testing.T) {
 	}
 }
 
+// shortReadTimeout shortens requestReadTimeout for one test.
+func shortReadTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	original := requestReadTimeout
+	requestReadTimeout = timeout
+	t.Cleanup(func() { requestReadTimeout = original })
+}
+
+// A download is a request without a body, and nothing is read from it while
+// the response streams. The read deadline must not cancel it: an export over a
+// slow link takes longer than that deadline. Served over a real connection,
+// because that is where Go's server reads in the background and a deadline on
+// that read is what used to end the request.
+func TestProtectHTTPTransportLetsABodilessRequestOutliveTheReadTimeout(t *testing.T) {
+	shortReadTimeout(t, 200*time.Millisecond)
+	outlived := make(chan error, 1)
+	handler := protectHTTPTransport(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		done := time.NewTimer(5 * requestReadTimeout)
+		defer done.Stop()
+		tick := time.NewTicker(requestReadTimeout / 4)
+		defer tick.Stop()
+		for {
+			select {
+			case <-request.Context().Done():
+				outlived <- request.Context().Err()
+				return
+			case <-tick.C:
+				_, _ = writer.Write([]byte("x"))
+				http.NewResponseController(writer).Flush()
+			case <-done.C:
+				outlived <- nil
+				return
+			}
+		}
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/projects/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	if err := <-outlived; err != nil {
+		t.Fatalf("a GET was cancelled while it streamed (%v): the read deadline ended a request with no body", err)
+	}
+}
+
 // withStdin replaces os.Stdin with a pipe holding content, so the stdin path
 // can be exercised without a terminal.
 func withStdin(t *testing.T, content string) {

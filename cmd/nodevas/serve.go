@@ -938,10 +938,10 @@ func newCopilotService(
 	return service, nil
 }
 
-const (
-	requestReadTimeout   = 60 * time.Second
-	responseWriteTimeout = 10 * time.Minute
-)
+// requestReadTimeout is a variable so a test can wait out a short one.
+var requestReadTimeout = 60 * time.Second
+
+const responseWriteTimeout = 10 * time.Minute
 
 // protectHTTPTransport places absolute per-request body and response
 // deadlines around ordinary HTTP traffic. WebSockets get their own frame,
