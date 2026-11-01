@@ -107,7 +107,11 @@ beforeEach(() => {
   installPointerShims();
   vi.mocked(api.getState).mockResolvedValue({ state: { nodes: {}, history: [] }, statuses: {} });
   resetBoardStore([]);
-  mockBoardSize(1000, 600);
+  // A small view. Its culled window still mounts some sixty cards and thirty
+  // gates, and a pan brings in thirty more; every card and wire mounted costs
+  // jsdom time, and at 1000 by 600 the slowest test here ran past vitest's 5 s
+  // limit whenever the machine was busy.
+  mockBoardSize(640, 400);
   frames = manualFrames();
 });
 
@@ -131,12 +135,21 @@ function renderBoard() {
   /** Each drawn gate box and the wires into it, by the node it feeds. */
   const gates = () => {
     const drawn = new Map<string, string>();
+    // The boxes are looked up in one pass: a selector per gate walked the
+    // whole board once for each of them, and in jsdom those walks were close
+    // to half of the slowest test's time.
+    const boxes = new Map<string, Element>();
+    for (const badge of view.container.querySelectorAll("[data-gate-for]")) {
+      const target = badge.getAttribute("data-gate-for")!;
+      const box = badge.querySelector(".gate-node");
+      if (box && !boxes.has(target)) boxes.set(target, box);
+    }
     for (const group of view.container.querySelectorAll<SVGGElement>("g.gate")) {
       const keys = [...group.querySelectorAll(".dependency-line[data-edge-key]")].map(
         (line) => line.getAttribute("data-edge-key")!,
       );
       const target = keys[0]?.split("->")[1];
-      const box = view.container.querySelector(`[data-gate-for="${target}"] .gate-node`)!;
+      const box = boxes.get(target)!;
       const points = [...group.querySelectorAll("polyline")].map((line) =>
         line.getAttribute("points"),
       );
@@ -197,6 +210,7 @@ describe("gates on a culled board", () => {
     const opened = fresh.gates();
 
     expect(afterPans.size).toBeGreaterThan(10);
+    expect(opened.size).toBeGreaterThan(10);
     for (const [target, drawn] of opened) {
       if (afterPans.has(target)) expect(afterPans.get(target)).toBe(drawn);
     }
