@@ -41,7 +41,7 @@ describe("FilesPanel", () => {
     vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
     render(<FilesPanel />);
     const workspace = await screen.findByRole("region", { name: /^Workspace/ });
-    expect(within(workspace).getByText("login.md")).toBeInTheDocument();
+    expect(await within(workspace).findByText("login.md")).toBeInTheDocument();
     await userEvent.click(within(workspace).getByRole("button", { name: /docs/ }));
     expect(within(workspace).queryByText("notes.txt")).not.toBeInTheDocument();
     await userEvent.click(within(workspace).getByRole("button", { name: /docs/ }));
@@ -62,6 +62,7 @@ describe("FilesPanel", () => {
     vi.spyOn(explorerApi, "repos").mockResolvedValue([]);
     render(<FilesPanel />);
     const workspace = await screen.findByRole("region", { name: /^Workspace/ });
+    await within(workspace).findByText("login.md");
     const icon = (name: string) =>
       within(workspace).getByText(name).closest("button")!.querySelector(".ex-ico")!.textContent;
     expect(icon("notes.txt")).toBe("≡");
@@ -75,7 +76,7 @@ describe("FilesPanel", () => {
   it("gives every name, title and section name its whole text on hover", async () => {
     vi.spyOn(explorerApi, "repos").mockResolvedValue([repo()]);
     const { container } = render(<FilesPanel />);
-    await screen.findByRole("region", { name: /^Workspace/ });
+    await within(await screen.findByRole("region", { name: /^Workspace/ })).findByText("login.md");
     await screen.findByText("README.md");
     const cut = container.querySelectorAll(".ex-name, .ex-meta, .ex-sec-title");
     expect(cut.length).toBeGreaterThan(5);
@@ -124,7 +125,7 @@ describe("FilesPanel", () => {
     expect(
       within(off).getByText("Repo browsing is off on this runner (nodevas runner set repoBrowse on)."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Showing the first 5 entries.")).toBeInTheDocument();
+    expect(await screen.findByText("Showing the first 5 entries.")).toBeInTheDocument();
     expect(explorerApi.repoTree).not.toHaveBeenCalled();
   });
 });
