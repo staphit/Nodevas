@@ -223,8 +223,10 @@ func TestSearchNodesAnswersAWholeChineseQuestion(t *testing.T) {
 	awaitSearchIndex(t, pm)
 	storyBoard(t, pm)
 	session := mcpSession(t, url, "")
-	// The note's body reaches the built index in the background, a debounce
-	// and one pass after the save returns, so the answer is awaited.
+	// The title and the note's body are two saves, each reaching the built
+	// index in the background, a debounce and one pass after it returns: a
+	// hit on the title alone (no snippet yet) is not the answer, so the
+	// body's hit is awaited.
 	var out searchOutput
 	for began := time.Now(); ; {
 		out = searchOutput{}
@@ -232,7 +234,7 @@ func TestSearchNodesAnswersAWholeChineseQuestion(t *testing.T) {
 		if result.IsError {
 			t.Fatal(errorText(result))
 		}
-		if len(out.Results) > 0 || time.Since(began) > 10*time.Second {
+		if (len(out.Results) > 0 && out.Results[0].Snippet != "") || time.Since(began) > 10*time.Second {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
