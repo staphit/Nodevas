@@ -222,6 +222,11 @@ func describeOffer(o Offer) string {
 			terminalText(phase), terminalText(job.PRURL), terminalText(short(head)))
 	case runnerwire.JobJudge:
 		fmt.Fprintf(&b, "  kind:         JUDGE: checks %d acceptance criteria; reads, changes no files\n", len(job.Acceptance))
+		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
+		if runsTests(job) {
+			b.WriteString("  tests:        first runs this repository's test command (runner.json) at that base,\n" +
+				"                outside the agent's sandbox, as you\n")
+		}
 	case runnerwire.JobTest:
 		b.WriteString("  kind:         TEST: writes failing tests only, opens a draft pull request\n")
 	case runnerwire.JobPlan:
@@ -231,11 +236,7 @@ func describeOffer(o Offer) string {
 			fmt.Fprintf(&b, "  kind:         PLAN: breaks the node into tasks on the board; reads the code, changes no files\n")
 		}
 	default:
-		base := terminalText(job.Base)
-		if base == "" {
-			base = "(the repository's default branch)"
-		}
-		fmt.Fprintf(&b, "  base:         %s\n", base)
+		fmt.Fprintf(&b, "  base:         %s\n", baseText(job.Base))
 	}
 	fmt.Fprintf(&b, "  run:          %s\n", terminalText(job.RunID))
 	b.WriteString("  task:\n")
@@ -301,6 +302,15 @@ func printable(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// baseText is a job's base as the question shows it, as plain terminal text.
+func baseText(base string) string {
+	base = terminalText(base)
+	if base == "" {
+		return "(the repository's default branch)"
+	}
+	return base
 }
 
 func orDash(s string) string {

@@ -230,9 +230,9 @@ func Prompt(job runnerwire.Job, branch string) string {
 	return b.String()
 }
 
-// handoffSection tells an implement run it continues another run's work:
-// the partial work is already on its branch, and the earlier run's note is
-// data, fenced off from the instructions.
+// handoffSection tells an implement or Tester run it continues another
+// run's work: the partial work is already on its branch, and the earlier
+// run's note is data, fenced off from the instructions.
 func handoffSection(job runnerwire.Job) string {
 	var b strings.Builder
 	b.WriteString("\nYou are continuing another agent's work. An earlier run on this task stopped before " +

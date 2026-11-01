@@ -22,6 +22,33 @@ func TestReadOnly(t *testing.T) {
 	}
 }
 
+// A judge reads and judges, like a plan: it runs read only, with none of the
+// worktree's own agent config and none of the owner's wider permissions.
+func TestJudgeIsReadOnly(t *testing.T) {
+	job := runnerwire.Job{RunID: "r", NodeID: "n", Kind: runnerwire.JobJudge}
+	if !ReadOnly(job) {
+		t.Fatal("a judge is not read only")
+	}
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: t.TempDir(), TempDir: t.TempDir(),
+		PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash"},
+		MCP: MCPServer{Command: "/usr/bin/nodevas", Args: []string{"mcp"}}}
+	cmd, err := Claude{}.Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(cmd.Args, " "); !strings.Contains(args, "--setting-sources user --disallowedTools "+ClaudeReadOnlyDeny) {
+		t.Errorf("claude judge: %s", args)
+	}
+	env.Binary, env.PermissionMode = "/usr/bin/opencode", "full"
+	oc, err := OpenCode{}.Command(job, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := envValue(oc.Env, "OPENCODE_DISABLE_PROJECT_CONFIG"); v != "1" {
+		t.Errorf("opencode judge loads the project's config: %q", v)
+	}
+}
+
 func TestRepoConfigPaths(t *testing.T) {
 	paths := RepoConfigPaths()
 	for _, want := range []string{".opencode", "opencode.json", "opencode.jsonc", ".gemini", ".env", ".agents", "_agents",

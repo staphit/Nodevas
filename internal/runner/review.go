@@ -500,7 +500,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	if title := oneLine(job.NodeTitle); title != "" {
 		titled.NodeTitle = "Address review: " + title
 	}
-	committed := commitRun(ctx, wt, commitMessage(result.Summary, titled))
+	committed := j.commit(ctx, r, wt, commitMessage(result.Summary, titled))
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the changes: " + committed.Err.Error()})
 	}
@@ -521,13 +521,17 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 
 	switch {
 	case !committed.Changed && committed.Err == nil:
+		// Detached: the branch is the PR's, and stays.
+		removed := j.dropWorktree(r, wt, committed, false)
 		if result.Status != runnerwire.RunSucceeded {
 			// Nothing to keep; the PR stays as it was.
-			j.removePRWorktree(r, wt)
 			return &changes, nil, result
 		}
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "no changes; nothing pushed; worktree removed"})
-		j.removePRWorktree(r, wt)
+		text := "no changes; nothing pushed; worktree removed"
+		if !removed {
+			text = "no changes committed; nothing pushed; worktree kept at " + wt.Path
+		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		info := j.attachPR(r, wt, "")
 		return &changes, &info, result
 	case changes.Commit == "":
@@ -554,7 +558,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	}
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("pushed %s to %s", short(changes.Commit), wt.Branch)})
 	j.c.logf("run %s: pushed %s to %s (%s)", job.RunID, short(changes.Commit), wt.Branch, job.PRURL)
-	j.removePRWorktree(r, wt)
+	j.dropWorktree(r, wt, committed, false)
 	info := j.attachPR(r, wt, changes.Commit)
 	return &changes, &info, result
 }
@@ -563,13 +567,6 @@ func pushRejected(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "fetch first") ||
 		strings.Contains(msg, "[rejected]") || strings.Contains(msg, "stale info")
-}
-
-func (j *jobs) removePRWorktree(r *run, wt Worktree) {
-	// Detached: the branch is the PR's, and stays.
-	if err := removeWorktree(j.ctx, r.repo.Path, wt, false); err != nil {
-		j.c.logf("run %s: removing its worktree: %v", r.job.RunID, err)
-	}
 }
 
 // attachPR reads the revised PR back and watches it under this run as well,

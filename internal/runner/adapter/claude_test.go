@@ -281,9 +281,42 @@ func TestClaudeReadOnlyKinds(t *testing.T) {
 			t.Fatalf("kind %q: args %q", kind, cmd.Args)
 		}
 		if readOnly {
-			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell" || cmd.Args[i+2] != "--allowedTools" ||
+			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell,Monitor,WebFetch,WebSearch" ||
+				cmd.Args[i+2] != "--allowedTools" ||
 				cmd.Args[i+3] != NodevasMCPTools || cmd.Args[i-2] != "--setting-sources" || cmd.Args[i-1] != "user" {
 				t.Fatalf("kind %q: args %q", kind, cmd.Args)
+			}
+		}
+	}
+}
+
+// A read-only run reaches nothing beyond the worktree through Claude Code's
+// own tools, whatever the owner's mode: no web fetch or search (a
+// prompt-injected reviewer could send what it read to any URL) and no
+// background command, headless or in the TUI.
+func TestClaudeReadOnlyDeniesTheWeb(t *testing.T) {
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: t.TempDir(), TempDir: t.TempDir(),
+		PermissionMode: "bypassPermissions", MCP: MCPServer{Command: "/usr/bin/nodevas", Args: []string{"mcp"}}}
+	for _, kind := range []string{runnerwire.JobReview, runnerwire.JobPlan} {
+		job := runnerwire.Job{RunID: "r", NodeID: "n", Kind: kind}
+		headless, err := Claude{}.Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tui, err := Claude{}.InteractiveCommand(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, args := range map[string][]string{"headless": headless.Args, "interactive": tui.Args} {
+			i := slices.Index(args, "--disallowedTools")
+			if i < 0 {
+				t.Fatalf("%s %s: no deny list in %q", kind, name, args)
+			}
+			deny := strings.Split(args[i+1], ",")
+			for _, tool := range []string{"WebFetch", "WebSearch", "Monitor", "Bash", "PowerShell", "Edit", "Write"} {
+				if !slices.Contains(deny, tool) {
+					t.Errorf("%s %s: %s is not denied: %q", kind, name, tool, args[i+1])
+				}
 			}
 		}
 	}

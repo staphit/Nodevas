@@ -82,6 +82,11 @@ type run struct {
 	// remoteTyping: the dispatcher may type into this interactive run's
 	// terminal (auto-accepted under AllowRemoteTyping, or a yes here).
 	remoteTyping bool
+	// noRelay: auto-accepted without AllowShell, so the run's permission
+	// prompts are not relayed to the hub (denied headless) whatever
+	// permissionRelay says: a person there could otherwise approve a shell
+	// command the auto-accept policy keeps from the agent.
+	noRelay bool
 
 	// Outbound, unsent, in this order. events is bounded: a run that talks a
 	// lot while the socket is down loses its oldest events, never its finish.
@@ -487,6 +492,13 @@ func (j *jobs) ask(ctx context.Context, r *run) (bool, string) {
 		if interactive {
 			j.setRemoteTyping(r, policy.AllowRemoteTyping)
 		}
+		if !policy.AllowShell {
+			// Nobody here said yes: a prompt relayed to the hub must not be
+			// how the agent gets the shell the policy leaves to a person.
+			j.mu.Lock()
+			r.noRelay = true
+			j.mu.Unlock()
+		}
 		return true, ""
 	}
 	j.c.logf("run %s: not auto-accepted: %s; asking at the terminal", r.job.RunID, why)
@@ -580,15 +592,10 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 
 	cfg := j.c.Config
-	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
-		// A plan reads the code as a review does; what it writes goes on the
-		// board, through MCP, not into files.
-		mode, modeText = reviewPermission(cfg, job.Agent)
-		if job.Kind == runnerwire.JobPlan {
-			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
-		}
-	}
+	j.mu.Lock()
+	relay := cfg.PermissionRelay && !r.noRelay
+	j.mu.Unlock()
+	mode, modeText := runPermission(cfg, job, note == "")
 	runEnv := adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
@@ -601,7 +608,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		IgnoreUserConfig: cfg.CodexIgnoreUserConfig,
 		DisableMCP:       j.disabledMCP(ctx, r, bin, wt.Path),
 		Version:          version,
-		PermissionRelay:  cfg.PermissionRelay,
+		PermissionRelay:  relay,
 	}
 	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
 	if err != nil {
@@ -612,7 +619,9 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
 	}
-	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && relayOff {
+	if claimed, ok := strings.CutSuffix(modeText, relayedText); ok && !relay {
+		modeText = claimed + autoAcceptedNotRelayedText
+	} else if ok && relayOff {
 		// The adapter could not set the relay up (agy: no session settings,
 		// no hook that runs nodevas): the log says what the run really does.
 		modeText = claimed + notRelayedText
@@ -723,11 +732,38 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	return result, outcome.Text
 }
 
+// runPermission is how freely job's agent may act under this runner's
+// settings, and how its start line says so. acp is false when an OpenCode run
+// set to go over ACP goes through `opencode run` instead (withoutOpenCode2ACP).
+func runPermission(cfg *Config, job runnerwire.Job, acp bool) (mode, text string) {
+	if !adapter.ReadOnly(job) {
+		text = permissionText(cfg, job.Agent)
+		if claimed, ok := strings.CutSuffix(text, relayedText); ok && job.Agent == "opencode" && !acp {
+			text = claimed + notRelayedText
+		}
+		return cfg.PermissionModeFor(job.Agent), text
+	}
+	// A plan or a judge reads the code as a review does; what a plan writes
+	// goes on the board, through MCP, not into files.
+	mode, text = reviewPermission(cfg, job.Agent)
+	switch job.Kind {
+	case runnerwire.JobPlan:
+		text = strings.Replace(text, "for a review", "for a plan", 1)
+	case runnerwire.JobJudge:
+		text = strings.Replace(text, "for a review", "for a judge", 1)
+	}
+	return mode, text
+}
+
 // reviewPermission is how freely a review's agent may act: read only where
 // the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
 // approval mode, under which an edit needs an approval nobody can give
-// headless; OpenCode with edits and the shell denied; agy's plan mode), the
-// owner's setting otherwise. The prompt forbids edits either way, and the
+// headless; OpenCode with edits and the shell denied; agy's plan mode). Claude
+// Code keeps the owner's mode, with its writing, shell and web tools denied
+// (adapter.ClaudeReadOnlyDeny), except a mode that skips its prompts
+// (bypassPermissions, auto): that would leave reads anywhere on this machine
+// open, so the run gets acceptEdits instead, where such a read needs a yes
+// nobody gives headless. The prompt forbids edits either way, and the
 // review's worktree is thrown away after.
 func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	switch kind {
@@ -739,6 +775,16 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 		return "read-only", "permission read-only for a review"
 	case "antigravity":
 		return "plan", "mode plan for a review"
+	case "claude":
+		mode = cfg.ClaudePermissionMode()
+		if mode == "bypassPermissions" || mode == "auto" {
+			mode = adapter.DefaultClaudePermissionMode
+		}
+		text = "permission mode " + mode + " for a review"
+		if cfg.PermissionRelay && adapter.PermissionRelayApplies(kind, mode, false) {
+			text += relayedText
+		}
+		return mode, text
 	}
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }
@@ -748,6 +794,9 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 const (
 	relayedText    = ", permission prompts relayed to Nodevas"
 	notRelayedText = ", permission prompts not relayed (denied headless)"
+	// autoAcceptedNotRelayedText ends that of a run auto-accepted without
+	// allow-shell (run.noRelay).
+	autoAcceptedNotRelayedText = ", permission prompts not relayed: auto-accepted without allow-shell (denied headless)"
 )
 
 // permissionText says how freely the agent may act, for the run's log.
