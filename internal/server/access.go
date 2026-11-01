@@ -43,9 +43,12 @@ const (
 // Not required (audit mode), a bad or missing token is only logged, which is
 // how a deployment checks its Access setup before enforcing it.
 //
-// A request straight from this machine is exempt: the container healthcheck
-// and a local `nodevas mcp` never pass through Access. A proxy on the same
-// host adds forwarding headers, and its requests are checked like any other.
+// AccessMiddleware itself exempts every request straight from this machine
+// (auth.DirectLoopback). The server installs accessGate instead: on a hub
+// with accounts only the container healthcheck (/api/healthz) is exempt,
+// and a local `nodevas mcp` passes through Access like any other client. A
+// proxy on the same host that adds forwarding headers is checked like any
+// other caller.
 //
 // A verified identity is recorded on the request for the audit trail. It
 // signs nobody in: Nodevas sign-in stays its own second layer.
