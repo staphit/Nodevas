@@ -21,8 +21,9 @@
 // Environment variables remain available as a server deployment fallback:
 //
 //	NODEVAS_SMTP_PASSWORD / NODEVAS_SMTP_PASSWORD_FILE  SMTP secret
-//	NODEVAS_SECRET_KEY  base64 32-byte key encrypting stored secrets
-//	                    (a machine-local secrets/master.key is generated if unset)
+//	NODEVAS_SECRET_KEY / NODEVAS_SECRET_KEY_FILE  base64 32-byte key encrypting
+//	                    stored secrets (a machine-local secrets/master.key is
+//	                    generated if neither is set)
 //	NODEVAS_DATABASE_URL  postgres://… (or NODEVAS_DATABASE_URL_FILE) to keep the
 //	                    workspace's data on an existing PostgreSQL server;
 //	                    unset, serve starts the workspace's own embedded
