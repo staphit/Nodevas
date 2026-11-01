@@ -35,17 +35,19 @@ func newForwardingNotes(note func(peer string)) *forwardingNotes {
 }
 
 func warnUntrustedForwarder(peer string) {
-	slog.Warn("X-Forwarded-For from a peer that is not a trusted proxy; the header is ignored and "+
-		"every request through it counts as this one address. If this peer is your reverse proxy, "+
+	slog.Warn("forwarding headers from a peer that is not a trusted proxy; they are ignored: "+
+		"every request through it counts as this one address, and its X-Forwarded-Proto does not "+
+		"make sign-in cookies Secure or turn on HSTS. If this peer is your reverse proxy, "+
 		"add its network to --trusted-proxy (NODEVAS_SERVE_TRUSTED_PROXY) with --behind-proxy",
 		slog.String("event.code", "http.untrusted_forwarder"),
 		slog.String("source.ip", peer))
 }
 
 // observe notes r's peer if r carries forwarding headers its peer is not
-// trusted to set.
+// trusted to set: X-Forwarded-For, or X-Forwarded-Proto, which a proxy that
+// terminates TLS may send alone.
 func (n *forwardingNotes) observe(r *http.Request) {
-	if n == nil || r.Header.Get("X-Forwarded-For") == "" {
+	if n == nil || (r.Header.Get("X-Forwarded-For") == "" && r.Header.Get("X-Forwarded-Proto") == "") {
 		return
 	}
 	peer, trusted := auth.PeerIsTrustedProxy(r)
