@@ -69,5 +69,14 @@ func Names() []string { return append([]string(nil), hubSecrets...) }
 
 // Without is environ (KEY=value entries) without the hub's secrets.
 func Without(environ []string) []string {
-	return environ
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, found := strings.Cut(kv, "=")
+		// Windows' "=C:=C:\dir" entries name no variable.
+		if found && name != "" && IsHubSecret(name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
