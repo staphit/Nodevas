@@ -107,6 +107,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("run changes summary", () => {
@@ -218,16 +219,45 @@ describe("RunDiffDialog", () => {
   });
 
   it("points at the PR when the patch was too large", async () => {
+    // A day after the run: history retention cannot have cleared it yet.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-25T08:00:00Z") });
     setWide(true);
     vi.spyOn(api, "getRunChanges").mockResolvedValue({
       changes: { ...CHANGES, patch: undefined, patchTruncated: true },
     });
     render(<RunDiffDialog run={makeRun()} onClose={() => {}} />);
     expect(await screen.findByText(/Diff too large to show; open the PR/)).toBeInTheDocument();
+    expect(screen.queryByText(/history retention/)).toBeNull();
     expect(screen.getByRole("link", { name: "Open PR #42" })).toHaveAttribute(
       "href",
       "https://github.com/o/r/pull/42",
     );
+  });
+
+  // History retention blanks the diffs of runs older than its period (30
+  // days at the least) and marks them truncated, as a too-large diff is.
+  it("says history retention cleared the diff of an old run", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2027-05-01T08:00:00Z") });
+    setWide(true);
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: { ...CHANGES, patch: undefined, patchTruncated: true },
+    });
+    render(<RunDiffDialog run={makeRun()} onClose={() => {}} />);
+    expect(await screen.findByText(/no longer kept: history retention/)).toBeInTheDocument();
+    expect(screen.queryByText(/Diff too large to show/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Open PR #42" })).toBeInTheDocument();
+  });
+
+  it("says so in Traditional Chinese too", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2027-05-01T08:00:00Z") });
+    useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
+    setWide(true);
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: { ...CHANGES, patch: undefined, patchTruncated: true },
+    });
+    render(<RunDiffDialog run={makeRun({ prUrl: "", prNumber: undefined })} onClose={() => {}} />);
+    expect(await screen.findByText(/差異已不再保留/)).toBeInTheDocument();
+    expect(screen.queryByText(/差異太大/)).toBeNull();
   });
 
   it("closes on Escape without reaching the drawer", async () => {
