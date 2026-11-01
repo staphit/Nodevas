@@ -210,3 +210,32 @@ func TestKindOf(t *testing.T) {
 		}
 	}
 }
+
+// A tool the copilot can only ever be refused is not offered: acceptance
+// criteria are a person's or a planner/QA run's, a verdict is a review or QA
+// run's, and the copilot has no folder to save an attachment into. Each
+// would cost the model a call and the person a permission prompt for an
+// error.
+func TestOpenOffersNoToolTheCopilotCannotUse(t *testing.T) {
+	bridge, err := Open(context.Background(), Options{Handler: &stubServer{}, Project: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close()
+	listed := map[string]bool{}
+	for _, tool := range bridge.Tools() {
+		listed[tool.Name] = true
+	}
+	if !listed["send_message"] || !listed["get_node"] {
+		t.Fatalf("tools = %v, want the usable ones still listed", listed)
+	}
+	for _, name := range []string{"set_acceptance", "submit_verdict", "save_attachment"} {
+		if listed[name] {
+			t.Errorf("%s offered to the copilot, which is always refused it", name)
+		}
+		result, err := bridge.Call(context.Background(), name, json.RawMessage(`{}`))
+		if err != nil || !result.IsError || !strings.Contains(result.Output, "unknown tool") {
+			t.Errorf("calling %s = %+v, %v; want unknown tool", name, result, err)
+		}
+	}
+}
