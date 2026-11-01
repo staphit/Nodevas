@@ -13,13 +13,17 @@ npm ci --prefix web
 ## Checks
 
 ```bash
+gofmt -l ./cmd ./internal   # must print nothing
 go vet ./...
 go test ./...
+govulncheck ./...           # go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
 npm --prefix web exec -- tsc -b
 npm --prefix web run check:api-imports
 npm --prefix web exec -- vitest run
 npm run build --prefix web
+
+bash scripts/install_test.sh
 ```
 
 Database tests run on PostgreSQL. With nothing set, each test binary starts the embedded server (`internal/testpg`, a template initdb'd once per machine under the user cache directory) and gives every test a fresh migrated database; the first run downloads the pinned binaries. To use a server you already run instead:
@@ -45,9 +49,14 @@ npm run e2e --prefix web
 
 - `cmd/nodevas/`: CLI and server entry points.
 - `internal/engine/`: node state, lifecycle journal, conditions, and validation.
+- `internal/store/`: project files, version history, and trash.
 - `internal/mcp/`: MCP server, tools, resources, and prompts.
 - `internal/realtime/`: WebSocket presence and CRDT document sessions.
-- `internal/server/`: HTTP API, WebSocket routing, and file management.
+- `internal/server/`: middleware and the route list (`routes.go`); the handlers are in `internal/httpapi/`.
+- `internal/runner/`: the runner; `internal/runs/`: the hub's run records and dispatch.
+- `internal/agents/`: agent sessions, Agent chat and `ask_user`; `internal/copilot/`: the voice copilot.
+- `internal/db/` and `internal/embeddedpg/`: PostgreSQL and the embedded server.
 - `web/src/`: React and TypeScript interface.
+- `desktop/`: the Electron desktop app.
 
 When changing the plan/timeline UI, preserve the distinction between planned milestones in `graph.yaml` and actual lifecycle events in `run/journal.jsonl`.
