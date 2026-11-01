@@ -213,6 +213,13 @@ func (a *SessionAuth) RequestOTP(r *http.Request, email string) (Challenge, erro
 		// address alike, and the client still gets the same 202.
 		return Challenge{}, err
 	}
+	// The lookup's collation ignores invisible and full-width characters; the
+	// budgets above do not. Only the spelling whose budget was charged may
+	// reach the account, or every variant would be a fresh budget on one
+	// mailbox.
+	if !sameEmailKey(registered, address) {
+		return Challenge{}, ErrNoSuchAccount
+	}
 
 	code, err := newOTP()
 	if err != nil {
@@ -309,6 +316,11 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 		// database that cannot be read fails for every address alike, so the
 		// 500 says nothing about this one.
 		return SignInResult{}, err
+	}
+	// As in RequestOTP: a spelling the collation folds onto an account but
+	// the budget keyed apart is an address nobody registered.
+	if !sameEmailKey(found.email, address) {
+		return SignInResult{Refusal: SignInRefusal{Reason: RefusedUnknownAccount}}, ErrBadCredentials
 	}
 	actor, revision, needsSecondFactor := found.actor, found.revision, found.secondFactor
 	// From here a refusal is a refusal for this account, and the log may say
