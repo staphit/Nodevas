@@ -96,8 +96,10 @@ type wsClient struct {
 	queueMu  sync.Mutex
 	removed  bool
 	// stale is the tables this reader skipped while it was behind (offerTable),
-	// sent again once it has caught up (catchUp). Guarded by queueMu.
-	stale staleTables
+	// and staleDragEnds the peers whose drag end it skipped (offerDrag), sent
+	// once it has caught up (catchUp). Guarded by queueMu.
+	stale         staleTables
+	staleDragEnds map[string]struct{}
 
 	mu         sync.Mutex
 	actor      identity.Actor
@@ -567,7 +569,12 @@ func (h *Hub) relay(from *wsClient, event Event) {
 		client.mu.Lock()
 		inRoom := client.room == room
 		client.mu.Unlock()
-		if inRoom {
+		if !inRoom {
+			continue
+		}
+		if event.Drag != nil {
+			client.offerDrag(from.id, event.Drag.Active, clientOutbound{payload: payload})
+		} else {
 			client.offer(clientOutbound{payload: payload})
 		}
 	}
@@ -801,6 +808,24 @@ func (client *wsClient) offerLocked(out clientOutbound) bool {
 	}
 }
 
+// offerDrag is offer for a peer's drag ghost. The end of a drag is the one
+// frame nothing replaces, so a reader that skips it is owed it once it has
+// caught up, else it keeps the ghost. One end per peer, however many it sends.
+func (client *wsClient) offerDrag(from string, active bool, out clientOutbound) {
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	switch {
+	case client.offerLocked(out):
+		delete(client.staleDragEnds, from)
+	case !active && !client.removed && len(client.staleDragEnds) < maxWSConnections:
+		// Bounded by the peers there can be, whose ids it holds.
+		if client.staleDragEnds == nil {
+			client.staleDragEnds = map[string]struct{}{}
+		}
+		client.staleDragEnds[from] = struct{}{}
+	}
+}
+
 // offerTable queues one of a room's tables: who is in it, or which documents
 // are held. Each replaces the last, and anybody in the room can make one
 // change (a viewer by saying which document it looks at), so a reader that is
@@ -822,15 +847,23 @@ func (h *Hub) offerTable(client *wsClient, table staleTables, event Event) {
 	}
 }
 
-// catchUp sends a reader that has caught up the current tables it skipped
-// while it was behind (offerTable). writeLoop calls it after every frame: a
-// table is skipped only with half a queue still to write, so the reader always
-// gets here again.
+// catchUp sends a reader that has caught up what it skipped while it was
+// behind: the drag ends (offerDrag) and the current tables (offerTable).
+// writeLoop calls it after every frame: a frame is skipped only with half a
+// queue still to write, so the reader always gets here again.
 func (h *Hub) catchUp(client *wsClient) {
 	client.queueMu.Lock()
 	stale := client.stale
 	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
 		stale = 0
+	} else {
+		for from := range client.staleDragEnds {
+			payload, err := json.Marshal(Event{Type: "graph-drag", From: from, Drag: &DragGhost{}})
+			if err != nil || !client.offerLocked(clientOutbound{payload: payload}) {
+				break
+			}
+			delete(client.staleDragEnds, from)
+		}
 	}
 	client.stale &^= stale
 	client.queueMu.Unlock()
