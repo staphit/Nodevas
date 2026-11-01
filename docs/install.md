@@ -27,6 +27,7 @@ bash install.sh --hub https://nodevas.example.com --link --repo ~/code/my-app
 Using Nodevas alone on one PC, skip the install script and start both with one command:
 
 ```sh
+mkdir -p workspace
 nodevas serve --project ./workspace --repo ~/code/myapp
 ```
 
@@ -58,7 +59,7 @@ The runner is created when the link is redeemed and belongs to whoever made the 
 ### Store the runner access token (administrators)
 
 <!-- sec-pass: runner Access token storage, machine key -->
-Behind Cloudflare Access a runner cannot do the browser sign-in, so it passes the edge with a service token. Create one in Cloudflare Zero Trust (Access, Service Auth), allow it in the hub's Access application policy (a Service Auth rule), then, as an administrator on the hub: **Settings → Agents → Advanced → Runner access token (Cloudflare Access)**, enter the client ID and the client secret, and Save (a fresh step-up is required). The hub keeps the pair encrypted (`secrets/runner-access-*.enc` beside its other secrets, under the machine key or `NODEVAS_SECRET_KEY`) and never shows the secret again; from then on every device link carries it. Remove it there to stop putting it into new links. Runners already set up keep their copy, so to cut them off revoke or rotate the service token in Cloudflare.
+Behind Cloudflare Access a runner cannot do the browser sign-in, so it passes the edge with a service token. Create one in Cloudflare Zero Trust (Access, Service Auth), allow it in the hub's Access application policy (a Service Auth rule), then, as an administrator on the hub: **Settings → Agents → Advanced → Runner access token (Cloudflare Access)** (turn on **Let agents work here** if it is off), enter the client ID and the client secret, and Save (a fresh step-up is required). The hub keeps the pair encrypted (`secrets/runner-access-*.enc` beside its other secrets, under the machine key or `NODEVAS_SECRET_KEY`) and never shows the secret again; from then on every device link carries it. Remove it there to stop putting it into new links. Runners already set up keep their copy, so to cut them off revoke or rotate the service token in Cloudflare.
 
 <!-- sec-pass: Access on device-link redeem -->
 Access is never bypassed: the redeem request goes through the edge with that service token like every other runner request. Without a stored token, a link still works for a hub that is not behind Access.
@@ -118,7 +119,7 @@ It asks for the runner token, then the Access client secret, both hidden.
 | `--no-service` | Do not start the runner at login; run `nodevas runner` yourself. |
 | `--restart` | Restart a runner that is already running, to pick up changes. |
 | `--yes` | Do not ask before changing agent configs, restarting the runner or deleting files. |
-| `--dry-run` | Show every step and change nothing (the binary is still fetched or built, into a temporary directory). |
+| `--dry-run` | Show every step and change nothing. |
 | `--purge` | With `uninstall`, also delete the runner settings (token, repositories). |
 | `--config <file>` | Use a runner settings file other than the default. |
 
