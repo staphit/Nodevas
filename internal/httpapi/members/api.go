@@ -83,6 +83,10 @@ func (a *API) target(c *gin.Context, name string) (string, string, members.Acces
 		name, dir = active.Name, active.Path
 	} else {
 		st, err := a.pm.StoreFor(name)
+		if project.IsLookupFault(err) {
+			httpx.ProjectLookupFailed(c, err)
+			return "", "", members.Access{}, false
+		}
 		if err != nil {
 			httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", locale.Errorf("no such project", "沒有這個專案"), nil)
 			return "", "", members.Access{}, false

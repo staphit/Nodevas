@@ -166,8 +166,8 @@ func (s *Server) projectWritable(r *http.Request, dir string) bool {
 // the project named name. Work it handed off (an autopilot, a copilot
 // follow-up) runs past any request of its own and stops once it may not.
 // Without membership everyone may; an account that is gone, or a project
-// that no longer resolves, may not. An account that could not be read is
-// an error, not a refusal: the caller tries again rather than stopping
+// that no longer resolves, may not. An account or a project that could not
+// be read is an error, not a refusal: the caller tries again rather than stopping
 // work over a passing fault.
 func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) (bool, error) {
 	if s.members == nil {
@@ -175,6 +175,9 @@ func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) (b
 	}
 	st, err := s.pm.StoreFor(name)
 	if err != nil {
+		if project.IsLookupFault(err) {
+			return false, err
+		}
 		return false, nil
 	}
 	actor := identity.Actor{ID: accountID}

@@ -7,6 +7,7 @@ import (
 
 	"nodevas/internal/auth"
 	"nodevas/internal/locale"
+	"nodevas/internal/project"
 )
 
 // DenyProjectAccess answers a request for a project its actor may not read
@@ -24,12 +25,28 @@ func DenyProjectAccess(c *gin.Context) {
 // with the reason, next to a 403 for a restricted project, would tell which
 // names exist. Otherwise, and for an administrator, 400 with the reason. A
 // request with no actor attached is not an administrator's.
+//
+// A lookup the disk could not answer (project.IsLookupFault) is neither:
+// 503 PROJECT_LOOKUP_FAILED with Retry-After, so the client tries again
+// instead of telling its user the project is gone or not theirs.
 func RefuseUnknownProject(c *gin.Context, err error, membership bool) {
+	if project.IsLookupFault(err) {
+		ProjectLookupFailed(c, err)
+		return
+	}
 	if membership && auth.RequireAdmin(c.Request) != nil {
 		DenyProjectAccess(c)
 		return
 	}
 	Err(c, http.StatusBadRequest, err)
+}
+
+// ProjectLookupFailed answers a request whose project could not be looked
+// up (project.IsLookupFault): 503 PROJECT_LOOKUP_FAILED, retry in a few
+// seconds. The reason goes to the log, not to the caller.
+func ProjectLookupFailed(c *gin.Context, err error) {
+	c.Header("Retry-After", "5")
+	Coded(c, http.StatusServiceUnavailable, "PROJECT_LOOKUP_FAILED", err, nil)
 }
 
 // DenyProjectWrite answers a change to a project its actor may only read:

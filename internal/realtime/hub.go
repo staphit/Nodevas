@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -366,6 +367,11 @@ func (h *Hub) releaseReservationLocked(actorKey, ip string) {
 		h.ipConns[ip]--
 	}
 }
+
+// ErrLookupFault, wrapped in a project resolver's error, says the project
+// could not be looked up (the disk could not be read): a passing fault, not
+// an unknown or a forbidden project.
+var ErrLookupFault = errors.New("project lookup failed")
 
 // SetProjectResolver teaches the hub how to turn a project name into a room.
 func (h *Hub) SetProjectResolver(resolve func(name string) (string, error)) {
@@ -1257,6 +1263,13 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 	room := ""
 	if resolve != nil && project != "" {
 		resolved, err := resolve(project)
+		if errors.Is(err, ErrLookupFault) {
+			// Not an answer about the project: the client stays where it
+			// was and is not told it lost access; its next subscribe
+			// tries again.
+			log.Printf("ws subscribe %q: %v", project, err)
+			return
+		}
 		if err != nil {
 			log.Printf("ws subscribe %q: %v", project, err)
 			// With project access, a member is refused an unknown project

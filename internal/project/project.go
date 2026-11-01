@@ -741,7 +741,7 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 		if os.IsNotExist(err) {
 			return nil, locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 		}
-		return nil, err
+		return nil, lookupFailure(name, err)
 	}
 	if !graphInfo.Mode().IsRegular() {
 		return nil, locale.Errorf("project %q has no regular graph.yaml", "專案「%s」沒有一般的 graph.yaml", name)
@@ -760,7 +760,7 @@ func (pm *ProjectManager) ListedStore(name string) (*store.Store, error) {
 	}
 	detached, err := pm.loadDetachedProjects()
 	if err != nil {
-		return nil, err
+		return nil, &LookupError{Name: name, Err: err}
 	}
 	if projectIsDetached(name, detached) {
 		return nil, locale.Errorf("project %q is not in the workspace", "專案「%s」不在工作區內", name)

@@ -2,6 +2,7 @@ package project
 
 import (
 	"errors"
+	"os"
 
 	"nodevas/internal/store"
 )
@@ -27,6 +28,16 @@ func (e *LookupError) Unwrap() error { return e.Err }
 func IsLookupFault(err error) bool {
 	var lookup *LookupError
 	return errors.As(err, &lookup)
+}
+
+// lookupFailure is err from a lookup's stat: an unsafe path (a link, a
+// file where a folder belongs) is an answer, refused as such; anything
+// else is a LookupError.
+func lookupFailure(name string, err error) error {
+	if errors.Is(err, store.ErrUnsafeProjectPath) || errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return &LookupError{Name: name, Err: err}
 }
 
 // lookupFault, when set, is what every StoreFor fails with
