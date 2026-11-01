@@ -18,7 +18,7 @@ Every figure is an **API-equivalent estimate**. An agent signed in with a subscr
 - OpenCode 2 reports tokens at the end of each step but not after its last one, so an OpenCode 2 run's tokens and cost leave out the step that wrote the answer.
 - Otherwise the cost is estimated from the price table (`estimatedCostUsd`). A run is priced at the first of these that has a price: the model it reported, the model it was dispatched with, its CLI's default (`gpt-5.5` for Codex, `gemini-2.5-pro` for Gemini CLI and Antigravity). A run of a CLI that never reports a cost (Codex, Gemini CLI, Antigravity) always counts as an estimate.
 - Tokens of a model with no price are counted in `unpricedTokens` and in no cost.
-- A run's cost is worked out once, when the run reports its usage, at the prices of that moment; budgets and Agent performance add up these costs. Agent sessions and copilot turns are priced each time the report is made, so a price change reaches them but not runs already priced.
+- A run's cost is worked out when the run reports its usage, at the prices of that moment; budgets and Agent performance add up these costs. An interactive run, agent sessions and copilot turns are priced again at each report, so a price change reaches them but not other runs already priced.
 
 The built-in prices are Anthropic's first-party list prices as of `usage.PricesAsOf`. Cache writes are priced at the 5-minute rate. Claude Code's aliases (`opus`, `sonnet`, `haiku`) are priced as the models they resolved to on that date, and OpenCode's free models (`opencode/*-free`) cost nothing.
 
