@@ -782,6 +782,9 @@ func (client *wsClient) offer(out clientOutbound) {
 	}
 }
 
+// catchUp sends a reader that has caught up what it skipped while behind.
+func (h *Hub) catchUp(client *wsClient) {}
+
 func (h *Hub) writeLoop(client *wsClient) {
 	ping := time.NewTicker(wsPingInterval)
 	defer ping.Stop()
