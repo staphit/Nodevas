@@ -11,10 +11,13 @@
 package realtime
 
 import (
+	"cmp"
 	"errors"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/safego"
@@ -32,8 +35,16 @@ const (
 	docSnapshotTimeout       = 120 * time.Second
 	maxDocRevBytes           = 64
 
-	maxDocSessions     = 64
-	maxDocParticipants = 16
+	// The table is shared by every project on the hub, and each account holds
+	// a share of it: the sessions its connections are in, and the empty ones
+	// it was the last to leave while they wait out the reload grace. A window
+	// has one live document open, so the share is well past what a person
+	// uses and far short of the table, which is sized for a busy team rather
+	// than for one account. A session's memory is bounded by maxDocLogBytes
+	// and, for snapshots, maxHubSnapshotBytes.
+	maxDocSessions         = 256
+	maxDocSessionsPerActor = 16
+	maxDocParticipants     = 16
 
 	// The log is what a late joiner replays, so its two bounds have different
 	// jobs: the compaction thresholds are where the leader is asked for a
@@ -81,6 +92,14 @@ type docSession struct {
 	// When the last participant left, so the sweep can tell a session that is
 	// between reloads from one that is over.
 	emptyAt time.Time
+	// emptiedBy is the account of that last participant. An empty session
+	// still holds its slot in the table until the sweep, and the slot is
+	// charged to that account (actorDocSessionsLocked).
+	emptiedBy string
+	// emptiedSeq orders the empty sessions by when they were left. emptyAt
+	// cannot: Windows' clock moves in steps of up to 15.6 ms, so documents
+	// left in quick succession share one.
+	emptiedSeq uint64
 	// The file revision this state is consistent with: what the opener found on
 	// disk, or what the leader last reported flushing. It is what a stored
 	// session is measured against after a restart, and it is the entire
@@ -252,6 +271,35 @@ func (h *Hub) docSessionCountLocked() int {
 	return total
 }
 
+// actorDocSessionsLocked counts the sessions, in any room, that one account
+// holds a place in: those any of its connections is in, and the empty ones it
+// left last. Counting the empty ones is what stops opening and closing
+// documents from filling the table.
+func (h *Hub) actorDocSessionsLocked(actorKey string) int {
+	total := 0
+	for _, sessions := range h.docs {
+		for _, session := range sessions {
+			if session.heldByLocked(actorKey) {
+				total++
+			}
+		}
+	}
+	return total
+}
+
+func (session *docSession) heldByLocked(actorKey string) bool {
+	if len(session.members) == 0 {
+		return session.emptiedBy == actorKey
+	}
+	for member := range session.members {
+		// A connection's actor is fixed when it is accepted.
+		if actorConnectionKey(member.actor) == actorKey {
+			return true
+		}
+	}
+	return false
+}
+
 // lockDocPersistence orders every state change and sidecar mutation for one
 // room/document key. The registry entry outlives any individual docSession
 // while a holder or waiter exists, so an old session cannot clear or overwrite
@@ -286,33 +334,74 @@ func (h *Hub) lockDocPersistence(room, key string) func() {
 // sweepDocSessions drops the sessions nobody has come back to. Takes the clock
 // as an argument so the lifetime can be tested without waiting a minute for it.
 func (h *Hub) sweepDocSessions(now time.Time) {
-	type candidate struct {
-		room    string
-		key     string
-		session *docSession
-	}
-
+	due := func(session *docSession) bool { return now.Sub(session.emptyAt) >= docSessionGrace }
 	h.mu.Lock()
-	var candidates []candidate
+	var candidates []emptyDoc
 	for room, sessions := range h.docs {
 		for key, session := range sessions {
 			h.expireCompactionLocked(session, now)
 			if len(session.members) > 0 || session.emptyAt.IsZero() {
 				continue
 			}
-			if now.Sub(session.emptyAt) >= docSessionGrace {
-				candidates = append(candidates, candidate{room: room, key: key, session: session})
+			if due(session) {
+				candidates = append(candidates, emptyDoc{room: room, key: key, session: session})
 			}
 		}
 	}
 	h.mu.Unlock()
+	h.retireEmptyDocs(candidates, now, due)
+}
 
+// retireActorEmptyDocs is the sweep for one account at its share of the table,
+// about to open a document nobody has open. The empty sessions it left last,
+// oldest first, make way for the new one, as the sweep would have a little
+// later: somebody clicking through documents is never refused the next one,
+// and the document it just left keeps its reload grace. Sessions with people
+// in them are never touched.
+func (h *Hub) retireActorEmptyDocs(actorKey, room, key string, now time.Time) {
+	h.mu.Lock()
+	if h.docs[room][key] != nil {
+		// Joining takes no slot.
+		h.mu.Unlock()
+		return
+	}
+	excess := h.actorDocSessionsLocked(actorKey) - maxDocSessionsPerActor + 1
+	var candidates []emptyDoc
+	if excess > 0 {
+		for sessionRoom, sessions := range h.docs {
+			for sessionKey, session := range sessions {
+				if len(session.members) == 0 && !session.emptyAt.IsZero() && session.emptiedBy == actorKey {
+					candidates = append(candidates, emptyDoc{room: sessionRoom, key: sessionKey, session: session, emptiedSeq: session.emptiedSeq})
+				}
+			}
+		}
+	}
+	h.mu.Unlock()
+	if len(candidates) == 0 {
+		return
+	}
+	slices.SortFunc(candidates, func(a, b emptyDoc) int { return cmp.Compare(a.emptiedSeq, b.emptiedSeq) })
+	candidates = candidates[:min(excess, len(candidates))]
+	h.retireEmptyDocs(candidates, now, func(session *docSession) bool { return session.emptiedBy == actorKey })
+}
+
+// emptyDoc is a session that had nobody in it when it was picked to retire.
+type emptyDoc struct {
+	room       string
+	key        string
+	session    *docSession
+	emptiedSeq uint64
+}
+
+// retireEmptyDocs saves and drops each candidate that is still the same empty
+// session, and still due, once its document turn is free.
+func (h *Hub) retireEmptyDocs(candidates []emptyDoc, now time.Time, due func(*docSession) bool) {
 	for _, candidate := range candidates {
 		unlockPersistence := h.lockDocPersistence(candidate.room, candidate.key)
 		h.mu.Lock()
 		sessions := h.docs[candidate.room]
 		session := sessions[candidate.key]
-		ready := session == candidate.session && len(session.members) == 0 && !session.emptyAt.IsZero() && now.Sub(session.emptyAt) >= docSessionGrace
+		ready := session == candidate.session && len(session.members) == 0 && !session.emptyAt.IsZero() && due(session)
 		var card docSidecar
 		if ready {
 			card = session.sidecarLocked()
@@ -379,6 +468,7 @@ func (h *Hub) resetEmptyDoc(room, key string, expected *docSession, now time.Tim
 	h.mu.Lock()
 	if session := h.docs[room][key]; session == expected && len(session.members) == 0 {
 		session.emptyAt = now
+		session.emptiedSeq = docEmptiedSeq.Add(1)
 	}
 	h.mu.Unlock()
 }
@@ -417,7 +507,9 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 		return
 	}
 
-	h.sweepDocSessions(time.Now())
+	now := time.Now()
+	h.sweepDocSessions(now)
+	h.retireActorEmptyDocs(actorConnectionKey(actor), room, key, now)
 	unlockPersistence := h.lockDocPersistence(room, key)
 
 	h.mu.Lock()
@@ -485,7 +577,10 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 			h.sendTo(client, Event{Type: "doc-persistence-error", ID: key})
 			return
 		}
-		if h.docSessionCountLocked() >= maxDocSessions {
+		// A full table, or an account past its share of it. Only creating a
+		// session counts: joining one somebody else opened takes no slot.
+		if h.docSessionCountLocked() >= maxDocSessions ||
+			h.actorDocSessionsLocked(actorConnectionKey(actor)) >= maxDocSessionsPerActor {
 			recoverable := len(recovered) > 0
 			releaseRecoveryLocked()
 			h.mu.Unlock()
@@ -561,6 +656,7 @@ func (h *Hub) openDoc(client *wsClient, key string) {
 	seed := len(session.members) == 0 && len(session.log) == 0
 	session.members[client] = struct{}{}
 	session.emptyAt = time.Time{}
+	session.emptiedBy = ""
 	previous := session.leader
 	session.elect()
 	leads := session.leader == client
@@ -678,6 +774,9 @@ func (h *Hub) closeDoc(client *wsClient, key string) {
 	}
 }
 
+// docEmptiedSeq numbers the moments sessions are left (docSession.emptiedSeq).
+var docEmptiedSeq atomic.Uint64
+
 // dropLocked removes one participant and re-elects. The session itself stays:
 // its log is the document until the grace period says otherwise. The second
 // result is whether that participant was the last one, which is the moment the
@@ -693,6 +792,8 @@ func (session *docSession) dropLocked(client *wsClient, now time.Time) ([]leader
 	emptied := len(session.members) == 0
 	if emptied {
 		session.emptyAt = now
+		session.emptiedBy = actorConnectionKey(client.actor)
+		session.emptiedSeq = docEmptiedSeq.Add(1)
 	}
 	return session.leaderNotices(previous, client), emptied
 }
