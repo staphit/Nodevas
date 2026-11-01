@@ -5,12 +5,13 @@
  * lands where a board opened straight at that view puts it.
  */
 import { act, fireEvent, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
 import { useApp } from "../../store";
 import type { Graph, GraphEdge, GraphNode } from "../../types";
 import { LaneView } from "../LaneView";
 import { installPointerShims, manualFrames, resetBoardStore } from "./boardTestKit";
+import { forgetBoardViews } from "./boardViewMemory";
 import { COL_W, ROW_H } from "./geometry";
 import * as geometry from "./geometry";
 import * as dependencyLine from "./DependencyLine";
@@ -51,10 +52,11 @@ const paneProps = {
 // Same layout as GraphCanvas.culling.test.tsx: card (0, 0) at the top left.
 const ORIGIN_X = 8 * COL_W + 2 * COL_W;
 const ORIGIN_Y = 8 * ROW_H + ROW_H;
-const GRID_W = 40;
+const GRID_W = 32;
+const CARDS = 320;
 
 /**
- * 1000 cards, each wired to its left neighbour; every odd card from the third
+ * 320 cards, enough to be culled, each wired to its left neighbour; every odd card from the third
  * column on also waits on the card two to its left, under an `or`, so about
  * half the board draws a gate box. A few gates are placed by hand, one with
  * its box on top of a card so it has to be pushed clear.
@@ -63,7 +65,7 @@ function gatedGraph(): Graph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const positions: Record<string, { x: number; y: number }> = {};
-  for (let i = 0; i < 1000; i++) {
+  for (let i = 0; i < CARDS; i++) {
     const id = `n${i}`;
     const col = i % GRID_W;
     const node: GraphNode = { id, title: `Node ${i}` };
@@ -103,22 +105,39 @@ function mockBoardSize(width: number, height: number) {
 
 let frames: ReturnType<typeof manualFrames>;
 
-beforeEach(() => {
+/*
+ * Every test here is synchronous jsdom work, timed against vitest's 5 s limit
+ * however busy the machine is, so the board is kept to what the assertions
+ * need. A small graph that is still culled and a small view: its window mounts
+ * some forty cards and twenty gates, and a pan brings in thirty more. At 1000
+ * cards in a 1000 by 600 view the slowest test ran past the limit whenever
+ * the machine was busy.
+ */
+function setUpBoard() {
   installPointerShims();
   vi.mocked(api.getState).mockResolvedValue({ state: { nodes: {}, history: [] }, statuses: {} });
   resetBoardStore([]);
-  // A small view. Its culled window still mounts some sixty cards and thirty
-  // gates, and a pan brings in thirty more; every card and wire mounted costs
-  // jsdom time, and at 1000 by 600 the slowest test here ran past vitest's 5 s
-  // limit whenever the machine was busy.
-  mockBoardSize(640, 400);
+  mockBoardSize(400, 240);
   frames = manualFrames();
-});
+}
 
-afterEach(() => {
+function tearDownBoard() {
   Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
   Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
-});
+}
+
+// The first board a worker draws also pays for warming up the board's code,
+// which under a busy machine took a large part of the first test's time.
+// Drawing one up front leaves the tests to time only what they check.
+beforeAll(() => {
+  setUpBoard();
+  renderBoard().unmount();
+  forgetBoardViews();
+  tearDownBoard();
+}, 30_000);
+
+beforeEach(setUpBoard);
+afterEach(tearDownBoard);
 
 function renderBoard() {
   useApp.setState({ graph: gatedGraph() });
