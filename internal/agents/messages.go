@@ -171,6 +171,10 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 		if s != nil {
 			recipientActor[recipient] = s.ActorID
 			held[recipient] = s.Inbound == InboundHold && !in.system
+		} else if actor, _, ok := strings.Cut(recipient, "/"); ok {
+			// An <actor>/<name> address no session of that actor answers
+			// to (resolveRecipients): the mail waits for that account.
+			recipientActor[recipient] = actor
 		}
 		// A run (which reads attacker-controllable content) does not reach a
 		// person's session, or an address no session holds, unasked.
@@ -376,9 +380,16 @@ func (h *Hub) resolveRecipients(project, to string, claims []ClaimInfo) ([]strin
 			}
 		}
 		// Offline-session mail waits under the session name even if the session
-		// has not connected yet.
+		// has not connected yet. Addressed to an account's session, it waits
+		// under the whole address, for a session of that account (its inbox
+		// reads <actor>/<name>, recipientAliases): another account's session
+		// holding the name is not the one it is for.
 		if len(matched) == 0 {
-			add(targetName, false)
+			if targetActor != "" {
+				add(shortActor(targetActor)+"/"+targetName, false)
+			} else {
+				add(targetName, false)
+			}
 		}
 	}
 	return matched, online, nil
@@ -567,7 +578,7 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 
 	for {
 		ch := h.registerInboxWaiter(project)
-		msgs, err := h.popUnread(ctx, project, aliases)
+		msgs, err := h.popUnread(ctx, project, aliases, actorID)
 		if err != nil {
 			h.unregisterInboxWaiter(project, ch)
 			return nil, err
@@ -589,7 +600,7 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 			return nil, ctx.Err()
 		case <-timer.C:
 			h.unregisterInboxWaiter(project, ch)
-			return h.popUnread(ctx, project, aliases)
+			return h.popUnread(ctx, project, aliases, actorID)
 		case <-ch:
 			timer.Stop()
 			h.unregisterInboxWaiter(project, ch)
@@ -597,7 +608,12 @@ func (h *Hub) checkInbox(ctx context.Context, project, sessionName, actorID stri
 	}
 }
 
-func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) ([]Message, error) {
+// popUnread marks read and returns the delivered mail for aliases that is
+// actorID's: sent to no account in particular, or to actorID's (the
+// account whose session held the name when it was sent, RecipientActor). A
+// name is bound to its account in memory only, so after a restart another
+// account's session may answer to it; the mail stays with its account.
+func (h *Hub) popUnread(ctx context.Context, project string, aliases []string, actorID string) ([]Message, error) {
 	if len(aliases) == 0 {
 		return nil, nil
 	}
@@ -613,7 +629,7 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 		for i := range h.memMessages {
 			m := &h.memMessages[i]
 			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
-				aliasSet[strings.ToLower(m.Recipient)] {
+				aliasSet[strings.ToLower(m.Recipient)] && mailFor(*m, actorID) {
 				m.ReadAt = now
 				copied := *m
 				copied.Files = fileInfos(h.memFiles[m.ID])
@@ -626,15 +642,17 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 	var out []Message
 	err := h.database.Tx(ctx, func(tx *sql.Tx) error {
 		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(aliases)), ", ")
-		args := make([]any, 0, len(aliases)+1)
+		args := make([]any, 0, len(aliases)+4)
 		args = append(args, project)
 		for _, a := range aliases {
 			args = append(args, a)
 		}
+		args = append(args, actorForms(actorID)...)
 		rows, err := tx.QueryContext(ctx, `
 			SELECT `+messageColumns+`
 			  FROM agent_messages
 			 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
+			   AND `+recipientActorMatch+`
 			 ORDER BY created_at ASC, id ASC
 		`, args...)
 		if err != nil {
@@ -670,6 +688,22 @@ func (h *Hub) popUnread(ctx context.Context, project string, aliases []string) (
 	return out, nil
 }
 
+// recipientActorMatch is popUnread's condition on recipient_actor, with the
+// three actorForms as its arguments.
+const recipientActorMatch = `(recipient_actor = '' OR LOWER(recipient_actor) IN (?, ?, ?))`
+
+// actorForms are the lower-case spellings of actorID a message may be
+// stamped with (sameActor): as is, short, and with the "mcp:" prefix.
+func actorForms(actorID string) []any {
+	short := strings.ToLower(shortActor(actorID))
+	return []any{strings.ToLower(strings.TrimSpace(actorID)), short, "mcp:" + short}
+}
+
+// mailFor reports whether m is actorID's to read (popUnread).
+func mailFor(m Message, actorID string) bool {
+	return m.RecipientActor == "" || sameActor(m.RecipientActor, actorID)
+}
+
 // UnreadCount returns how many unread messages are waiting for sessionName /
 // actorID without marking them read. Used to append unread notices to MCP tool
 // responses. Held messages do not count: the agent cannot read them yet.
@@ -701,22 +735,24 @@ func (h *Hub) unreadCount(ctx context.Context, project, sessionName, actorID str
 		count := 0
 		for _, m := range h.memMessages {
 			if m.Project == project && m.ReadAt == 0 && m.Status == StatusDelivered &&
-				aliasSet[strings.ToLower(m.Recipient)] {
+				aliasSet[strings.ToLower(m.Recipient)] && mailFor(m, actorID) {
 				count++
 			}
 		}
 		return count
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(aliases)), ", ")
-	args := make([]any, 0, len(aliases)+1)
+	args := make([]any, 0, len(aliases)+4)
 	args = append(args, project)
 	for _, a := range aliases {
 		args = append(args, a)
 	}
+	args = append(args, actorForms(actorID)...)
 	var count int
 	_ = h.database.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM agent_messages
 		 WHERE project = ? AND read_at = 0 AND status = 'delivered' AND recipient IN (`+placeholders+`)
+		   AND `+recipientActorMatch+`
 	`, args...).Scan(&count)
 	return count
 }

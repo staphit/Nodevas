@@ -7,6 +7,7 @@
 package agents
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -288,9 +289,32 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		hb.Run = true
 	}
 
+	named := capName(sanitizeToken(hb.Name))
+	baseName := named
+	if baseName == "" {
+		prefix := sanitizeToken(filepath.Base(hb.Repo))
+		if prefix == "" || prefix == "." {
+			prefix = sanitizeToken(filepath.Base(project))
+		}
+		if prefix == "" || prefix == "." {
+			prefix = "work"
+		}
+		baseName = capName(prefix + "-" + agentKind)
+	}
+	key := project + "\x00" + sessionID
+	// A name the hub has to pick is checked against the mail it went by
+	// too: the bindings in memory are gone after a restart.
+	h.mu.Lock()
+	known, ok := h.sessions[key]
+	picking := !ok || (named != "" && named != known.Name)
+	h.mu.Unlock()
+	mailedTo := ""
+	if picking {
+		mailedTo = h.mailedNameOwner(project, baseName, now)
+	}
+
 	h.mu.Lock()
 	h.pruneExpiredLocked(now)
-	key := project + "\x00" + sessionID
 	existing, ok := h.sessions[key]
 	// presence: whether this heartbeat changes what the session looks like
 	// from outside (PresenceEvent), rather than only keeping it alive.
@@ -301,18 +325,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 		wasOnline, wasState, wasNode, wasDoing = existing.Online, existing.State, existing.NodeID, existing.Doing
 	}
 	if !ok {
-		baseName := capName(sanitizeToken(hb.Name))
-		if baseName == "" {
-			prefix := sanitizeToken(filepath.Base(hb.Repo))
-			if prefix == "" || prefix == "." {
-				prefix = sanitizeToken(filepath.Base(project))
-			}
-			if prefix == "" || prefix == "." {
-				prefix = "work"
-			}
-			baseName = capName(prefix + "-" + agentKind)
-		}
-		name := h.uniqueNameLocked(project, sessionID, actorID, baseName)
+		name := h.uniqueNameLocked(project, sessionID, actorID, baseName, mailedTo)
 		// Read before making room: the session giving up its place may be
 		// the one whose name and mail policy this one carries on.
 		inbound := h.inheritedInboundLocked(project, sessionID, actorID, name)
@@ -370,8 +383,8 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			existing.RunID = runID
 		}
 		if hb.Name != "" {
-			if wanted := capName(sanitizeToken(hb.Name)); wanted != "" && wanted != existing.Name {
-				existing.Name = h.uniqueNameLocked(project, sessionID, actorID, wanted)
+			if wanted := named; wanted != "" && wanted != existing.Name {
+				existing.Name = h.uniqueNameLocked(project, sessionID, actorID, wanted, mailedTo)
 			}
 		}
 		if hb.ActorID != "" {
@@ -585,17 +598,26 @@ func (h *Hub) SetInbound(project, sessionID, inbound, callerID string, callerAdm
 // uniqueNameLocked picks base, or base-N when another session holds it. An
 // offline session of the same actor gives its name up: that is the agent
 // continuing under a new conversation ID (Claude Code's /clear), and its mail
-// should follow it.
-func (h *Hub) uniqueNameLocked(project, sessionID, actorID, base string) string {
+// should follow it. mailedTo is the account base's latest mail went to
+// (mailedNameOwner): while no session in memory goes by base, it stays that
+// account's, as it would have in memory before a restart.
+func (h *Hub) uniqueNameLocked(project, sessionID, actorID, base, mailedTo string) string {
 	// One pass over the sessions, not one per candidate.
 	held := make(map[string]bool)
+	known := false
 	for _, s := range h.sessions {
 		if s.Project != project || s.ID == sessionID {
 			continue
 		}
+		if strings.EqualFold(s.Name, base) {
+			known = true
+		}
 		if s.Online || !strings.EqualFold(s.ActorID, actorID) {
 			held[strings.ToLower(s.Name)] = true
 		}
+	}
+	if !known && mailedTo != "" && !sameActor(mailedTo, actorID) {
+		held[strings.ToLower(base)] = true
 	}
 	taken := func(candidate string) bool { return held[strings.ToLower(candidate)] }
 	if !taken(base) {
@@ -608,6 +630,30 @@ func (h *Hub) uniqueNameLocked(project, sessionID, actorID, base string) string 
 		}
 	}
 	return base + "-" + newID()[:6]
+}
+
+// mailedNameOwner is the account the newest mail for the session name went
+// to within OfflineRetention before now: the account whose session held the
+// name then (Send stamps it). "" when there is none, or no database to ask.
+func (h *Hub) mailedNameOwner(project, name string, now int64) string {
+	if h.database == nil || name == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var actor string
+	_ = h.database.QueryRowContext(ctx, `
+		SELECT recipient_actor FROM agent_messages
+		 WHERE project = ? AND recipient = ? AND recipient_actor <> '' AND created_at >= ?
+		 ORDER BY created_at DESC LIMIT 1
+	`, project, strings.ToLower(name), now-OfflineRetention.Milliseconds()).Scan(&actor)
+	return actor
+}
+
+// sameActor reports whether a and b name the same account, with or without
+// the "mcp:" prefix an address leaves out (shortActor).
+func sameActor(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) || strings.EqualFold(shortActor(a), shortActor(b))
 }
 
 // nameHeldByOtherLocked reports whether a known session in project goes by

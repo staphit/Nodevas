@@ -559,7 +559,7 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 	if err != nil || m.Status != StatusDelivered {
 		return false
 	}
-	if m.RecipientActor != "" && !strings.EqualFold(m.RecipientActor, actorID) {
+	if !mailFor(m, actorID) {
 		return false
 	}
 	recipient := strings.ToLower(strings.TrimSpace(m.Recipient))
