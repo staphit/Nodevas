@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -15,14 +16,40 @@ import (
 // clockReadDelay holds back every clock read the watcher makes.
 const clockReadDelay = 20 * time.Millisecond
 
+// promptWriter is the watcher's stderr: it tells the test each time a
+// prompt is written.
+type promptWriter struct {
+	mu      sync.Mutex
+	out     bytes.Buffer
+	written chan struct{}
+}
+
+func (w *promptWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.out.Write(p)
+	w.written <- struct{}{}
+	return n, err
+}
+
+func (w *promptWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.out.String()
+}
+
 // stopsAfter feeds signals to watchStopSignals at the given clock times and
 // reports whether it returned (serve stops) and what it printed.
+//
+// Each signal is done with, a prompt written or the watcher returned, before
+// the clock moves on to the next one's time: the watcher reads the clock
+// after it takes a signal, and must read that signal's time however late.
 func stopsAfter(t *testing.T, confirm bool, signals []os.Signal, at []time.Duration) (bool, string) {
 	t.Helper()
 	// Written here while the watcher may still be reading the last value.
 	var clock atomic.Int64
 	ch := make(chan os.Signal)
-	var out bytes.Buffer
+	out := &promptWriter{written: make(chan struct{}, len(signals))}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -34,7 +61,7 @@ func stopsAfter(t *testing.T, confirm bool, signals []os.Signal, at []time.Durat
 			// still say the time that signal was sent at.
 			time.Sleep(clockReadDelay)
 			return time.Unix(0, clock.Load())
-		}, &out)
+		}, out)
 	}()
 	for i, sig := range signals {
 		clock.Store(int64(at[i]))
@@ -43,7 +70,17 @@ func stopsAfter(t *testing.T, confirm bool, signals []os.Signal, at []time.Durat
 		case <-done:
 			t.Fatalf("stopped before signal %d", i)
 		}
+		select {
+		case <-out.written:
+		case <-done:
+			if i < len(signals)-1 {
+				t.Fatalf("stopped at signal %d of %d", i, len(signals))
+			}
+			return true, out.String()
+		}
 	}
+	// The last signal was answered with a prompt; serve must keep running
+	// after it, not stop a moment later.
 	select {
 	case <-done:
 		return true, out.String()
