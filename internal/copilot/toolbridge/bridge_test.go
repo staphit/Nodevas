@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -228,6 +229,26 @@ func TestOpenOffersNoToolTheCopilotCannotUse(t *testing.T) {
 	}
 	if !listed["send_message"] || !listed["get_node"] {
 		t.Fatalf("tools = %v, want the usable ones still listed", listed)
+	}
+	// The copilot has no folder to attach files from, so send_message's
+	// files are always refused it.
+	for _, tool := range bridge.Tools() {
+		if tool.Name != "send_message" {
+			continue
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(tool.Schema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema.Properties["files"]; ok {
+			t.Errorf("send_message offers the copilot files to attach: %s", tool.Schema)
+		}
+		if _, ok := schema.Properties["message"]; !ok || !slices.Contains(schema.Required, "message") {
+			t.Errorf("send_message lost its other inputs: %s", tool.Schema)
+		}
 	}
 	for _, name := range []string{"set_acceptance", "submit_verdict", "save_attachment"} {
 		if listed[name] {

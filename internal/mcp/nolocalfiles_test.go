@@ -30,10 +30,14 @@ func TestANoLocalFilesClientUsesNoFolderOfTheProcess(t *testing.T) {
 
 	var heartbeat map[string]any
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/agents/heartbeat" {
-			_ = json.NewDecoder(r.Body).Decode(&heartbeat)
-		}
 		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/agents/heartbeat":
+			_ = json.NewDecoder(r.Body).Decode(&heartbeat)
+		case "/api/agents/inbox":
+			_, _ = w.Write([]byte(`{"messages":[{"id":"m1","from":"bob","body":"see file","files":[{"name":"plan.md","size":3}]}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer stub.Close()
@@ -63,6 +67,14 @@ func TestANoLocalFilesClientUsesNoFolderOfTheProcess(t *testing.T) {
 	}
 	if _, err := client.SaveAttachment(ctx, "abc", "note.md"); err == nil || !strings.Contains(err.Error(), "no working directory") {
 		t.Fatalf("save_attachment = %v, want refused", err)
+	}
+	// Nor is it told to save a peer's attachment it has nowhere to put.
+	inbox, err := client.CheckInbox(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(inbox.Formatted, `"plan.md"`) || strings.Contains(inbox.Formatted, "save_attachment") {
+		t.Fatalf("inbox = %q, want the file listed without save_attachment", inbox.Formatted)
 	}
 
 	// The same client without the flag is the agent's own, in its folder.
