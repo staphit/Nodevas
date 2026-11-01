@@ -184,6 +184,10 @@ type Store struct {
 	acknowledgedFallbackEvents uint64
 	lastFailureAt              time.Time
 	lastError                  string
+
+	// throttled keeps refusals for being over a budget to one row per key
+	// and window (RecordThrottledOrLog).
+	throttled throttledNotes
 }
 
 // Health reports both whether RecordOrLog most recently reached audit_events

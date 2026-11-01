@@ -107,7 +107,12 @@ func (a *API) finishSignIn(c *gin.Context, method string, result auth.SignInResu
 		// from is all its row records; its log line also says whose account
 		// the attempt named (refusedSignIn). The reason is a category, never
 		// the credential that was offered.
-		a.recordAuth(c, refusedSignIn(authFailureReason(ctx, err), method, refusal))
+		event := refusedSignIn(authFailureReason(ctx, err), method, refusal)
+		if errors.Is(err, auth.ErrTooManyLogins) {
+			a.recordAuthThrottled(c, event)
+		} else {
+			a.recordAuth(c, event)
+		}
 		httpx.Err(c, status, answer)
 		return
 	}
@@ -213,7 +218,10 @@ func (a *API) postRequestOTP(c *gin.Context) {
 	if requested.ActorEmail == "" {
 		requested.ActorEmail = auth.TypedAddress(body.Email)
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, auth.ErrTooManyOTPRequests):
+		a.recordAuthThrottled(c, requested)
+	case err != nil:
 		a.recordAuth(c, requested)
 	}
 	if requested.Reason == "error" {
@@ -281,6 +289,18 @@ func (a *API) recordAuth(c *gin.Context, event audit.Event) {
 		return
 	}
 	a.audit.RecordOrLog(c.Request.Context(), a.authEvent(c, event))
+}
+
+// recordAuthThrottled is recordAuth for a refusal for being over a budget,
+// which a stranger can repeat as fast as the pre-auth limiter allows: one row
+// per source a minute, the next one counting those held back
+// (audit.Store.RecordThrottledOrLog).
+func (a *API) recordAuthThrottled(c *gin.Context, event audit.Event) {
+	if a.audit == nil {
+		return
+	}
+	event = a.authEvent(c, event)
+	a.audit.RecordThrottledOrLog(c.Request.Context(), event, auth.SourceKey(event.ClientIP))
 }
 
 // recordAuthLater is recordAuth for a passcode handed to delivery: the row is
