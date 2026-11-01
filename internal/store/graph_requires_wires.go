@@ -42,16 +42,39 @@ func materializeRequiresWires(g *engine.Graph) {
 			live[edge.From+"->"+edge.To] = true
 		}
 	}
+	nodes := make(map[string]*engine.Node, len(g.Nodes))
+	for _, node := range g.Nodes {
+		if node != nil {
+			if _, seen := nodes[node.ID]; !seen {
+				nodes[node.ID] = node
+			}
+		}
+	}
+	// Each target's `requires` is parsed once, however many wires lead to it.
+	refs := map[string]map[string]bool{}
+	requiresRef := func(target *engine.Node, from string) bool {
+		names, ok := refs[target.ID]
+		if !ok {
+			names = map[string]bool{}
+			if expr, err := dsl.Parse(target.Requires); err == nil && expr != nil {
+				for _, ref := range dsl.NodeRefs(expr) {
+					names[ref] = true
+				}
+			}
+			refs[target.ID] = names
+		}
+		return names[from]
+	}
 	consider := func(key string) {
 		if live[key] || strings.HasPrefix(key, "gate:") || strings.HasPrefix(key, "logic:") {
 			return
 		}
 		from, to, ok := strings.Cut(key, "->")
-		if !ok || from == "" || to == "" || from == to || g.NodeByID(from) == nil {
+		if !ok || from == "" || to == "" || from == to || nodes[from] == nil {
 			return
 		}
-		target := g.NodeByID(to)
-		if target == nil || !nodeRequiresRef(target, from) || requiresWireGate(g, from, to) != "" {
+		target := nodes[to]
+		if target == nil || !requiresRef(target, from) || requiresWireGate(g, from, to) != "" {
 			return
 		}
 		g.Edges = append(g.Edges, &engine.Edge{From: from, To: to, Relation: engine.RelationRequired})
