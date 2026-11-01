@@ -60,6 +60,15 @@ const (
 	// maxPendingPermissions bounds one session's waiting permission
 	// prompts: one per tool call its CLI runs in parallel.
 	maxPendingPermissions = 8
+	// maxPendingAsksPerActor bounds one account's pending asks in a project
+	// over all its sessions, whose ids are its own to pick: a runner's
+	// most parallel runs (16) each with a question and maxPendingPermissions
+	// prompts fit under it.
+	maxPendingAsksPerActor = 160
+	// maxPendingAsksListed caps a listing of pending asks: each holds up to
+	// maxBodyBytes of question, and every browser in the project reloads
+	// the listing on each new ask.
+	maxPendingAsksListed = 500
 
 	MaxAskTimeout = 10 * time.Minute
 	// PermissionAskTimeout is how long a permission prompt waits at most;
@@ -398,6 +407,9 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if sessionName == "" {
 		sessionName = sessionID
 	}
+	// The name the answer is mailed to and an approval forwarded from: a
+	// session name, as Touch gives them, never markup.
+	sessionName = SessionName(sessionName)
 	if sessionID == "" || question == "" {
 		return Ask{}, fmt.Errorf("%w: sessionId and question are required", ErrInvalid)
 	}
@@ -490,7 +502,7 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if err := h.insertPendingAsk(ctx, ask); err != nil {
 		return Ask{}, err
 	}
-	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(question, 200))
+	h.LogAction(project, sessionID, runID, ActionAsk, ask.NodeID, capBytes(askActionDetail(ask), 200))
 
 	// The person may have allowed the tool for the run between the check
 	// above and the insert, after releaseRunPrompts listed what waited:
@@ -532,14 +544,30 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 }
 
 // sessionHeldByOther reports whether the session an ask names, by id or by
-// name, is registered to an account other than actorID.
+// name, is registered to an account other than actorID; or, when no session
+// goes by the name, whether its recent mail went to another account, which
+// keeps the name after a restart (uniqueNameLocked). A late answer is mail
+// to the name stamped for the asker, and would claim it.
 func (h *Hub) sessionHeldByOther(project, sessionID, sessionName, actorID string) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if s, ok := h.sessions[project+"\x00"+sessionID]; ok && !strings.EqualFold(s.ActorID, actorID) {
+		h.mu.Unlock()
 		return true
 	}
-	return h.nameHeldByOtherLocked(project, sessionName, actorID)
+	known := false
+	for _, s := range h.sessions {
+		if s.Project == project && strings.EqualFold(s.Name, sessionName) {
+			known = true
+			break
+		}
+	}
+	held := h.nameHeldByOtherLocked(project, sessionName, actorID)
+	h.mu.Unlock()
+	if held || known || sessionName == "" {
+		return held
+	}
+	owner := h.mailedNameOwner(project, sessionName, h.nowMillis())
+	return owner != "" && !sameActor(owner, actorID)
 }
 
 // receivedBy reports whether message id was delivered to sessionName (as
@@ -550,7 +578,7 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 	if err != nil || m.Status != StatusDelivered {
 		return false
 	}
-	if m.RecipientActor != "" && !strings.EqualFold(m.RecipientActor, actorID) {
+	if !mailFor(m, actorID) {
 		return false
 	}
 	recipient := strings.ToLower(strings.TrimSpace(m.Recipient))
@@ -566,7 +594,9 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 // question (approval, question or choice) at a time. Permission prompts are
 // counted apart: the CLI raises them for its own tool calls, possibly while
 // ask_user waits or several at once for parallel calls, so they never wait
-// behind a question; maxPendingPermissions bounds them instead.
+// behind a question; maxPendingPermissions bounds them instead. Session ids
+// are the caller's to pick, so maxPendingAsksPerActor bounds the asking
+// account's pending asks in the project over all its sessions.
 func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 	// Asks past their time wait on nobody: they never hold the session.
 	h.expireStaleAsks(ctx, ask.Project)
@@ -578,15 +608,23 @@ func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 	if h.database == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		count := 0
+		count, actorCount := 0, 0
 		for _, existing := range h.memAsks {
-			if existing.Project == ask.Project && existing.SessionID == ask.SessionID && existing.Status == AskPending &&
-				(existing.Kind == AskKindPermission) == permission {
+			if existing.Project != ask.Project || existing.Status != AskPending {
+				continue
+			}
+			if strings.EqualFold(existing.ActorID, ask.ActorID) {
+				actorCount++
+			}
+			if existing.SessionID == ask.SessionID && (existing.Kind == AskKindPermission) == permission {
 				count++
 			}
 		}
 		if count >= limit {
 			return ErrAskBusy
+		}
+		if actorCount >= maxPendingAsksPerActor {
+			return errActorAsksBusy
 		}
 		copied := ask
 		h.memAsks[ask.ID] = &copied
@@ -606,6 +644,17 @@ func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 		}
 		if count >= limit {
 			return ErrAskBusy
+		}
+		// The writer is one connection, so the count stays exact until the
+		// insert.
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM agent_asks
+			 WHERE project = ? AND status = 'pending' AND LOWER(actor_id) = LOWER(?)`,
+			ask.Project, ask.ActorID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= maxPendingAsksPerActor {
+			return errActorAsksBusy
 		}
 		return insertAsk(ctx, tx, ask)
 	})
@@ -659,9 +708,30 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 	} else if err := h.database.Tx(ctx, func(tx *sql.Tx) error { return insertAsk(ctx, tx, ask) }); err != nil {
 		return Ask{}, err
 	}
-	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(ask.Question, 200))
+	h.LogAction(ask.Project, ask.SessionID, ask.RunID, ActionAsk, ask.NodeID, capBytes(askActionDetail(ask), 200))
 	h.emit(ask.Project, AskAllowedForRunEvent, ask)
 	return ask, nil
+}
+
+// lateAnswerFile names the attachment a late answer's mail carries the
+// person's answer and note in: a file only the asker's account, the person
+// and admins may read (Viewer.mayRead), where the mail itself is listed to
+// everyone in the project.
+const lateAnswerFile = "answer.txt"
+
+// errActorAsksBusy refuses an ask past maxPendingAsksPerActor.
+var errActorAsksBusy = fmt.Errorf("%w: this account already has %d asks waiting in this project; answer or end some first",
+	ErrAskBusy, maxPendingAsksPerActor)
+
+// askActionDetail is what the session action log keeps of ask. The log is
+// served to everyone who can read the project, so a permission prompt is
+// logged as Viewer.Shown shows it to them: by its tool, never its question,
+// which quotes the call's input.
+func askActionDetail(ask Ask) string {
+	if ask.Kind == AskKindPermission {
+		return fmt.Sprintf("Allow %s?", ask.Tool)
+	}
+	return ask.Question
 }
 
 // releaseRunPrompts allows the permission prompts of run, tool and runKey
@@ -1086,24 +1156,34 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 		default:
 		}
 	} else if wasExpired && updated.SessionName != "" {
-		// Late answer: deliver to the asking session's mailbox.
+		// Late answer: deliver to the asking session's mailbox. Delivered
+		// mail is listed to everyone in the project, so the person's answer
+		// and note ride in a file only the asker's account may read.
 		body := fmt.Sprintf("[Late answer to ask %s (%q): %s]", updated.ID, updated.Question, updated.Status)
+		var answer strings.Builder
 		if updated.Answer != "" {
-			body += "\nAnswer: " + updated.Answer
+			answer.WriteString("Answer: " + updated.Answer + "\n")
 		}
 		if updated.Note != "" {
-			body += "\nNote: " + updated.Note
+			answer.WriteString("Note: " + updated.Note + "\n")
+		}
+		var files []FileInput
+		if answer.Len() > 0 {
+			body += "\nThe answer is in the attached " + lateAnswerFile + "."
+			files = []FileInput{{Name: lateAnswerFile, Content: answer.String()}}
 		}
 		_, _ = h.Send(ctx, SendInput{
-			Project:       project,
-			SenderActor:   decidedBy,
-			SenderSession: "web",
-			SenderAgent:   "human",
-			IsHuman:       true,
-			To:            updated.SessionName,
-			NodeID:        updated.NodeID,
-			Body:          body,
-			system:        true,
+			Project:        project,
+			SenderActor:    decidedBy,
+			SenderSession:  WebSession,
+			SenderAgent:    HumanAgent,
+			IsHuman:        true,
+			To:             updated.SessionName,
+			NodeID:         updated.NodeID,
+			Body:           body,
+			Files:          files,
+			system:         true,
+			recipientActor: updated.ActorID,
 		})
 	}
 
@@ -1115,6 +1195,9 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 			if updated.Answer != "" {
 				text = strings.TrimSpace("Answer: " + updated.Answer + "\n" + updated.Note)
 			}
+			// The person's words, inside the hub's verified block: they must
+			// not close it.
+			text = EscapeTrustMarkers(text)
 			approvalBody := fmt.Sprintf(
 				"<nodevas-approval from=%q about=%q decision=%q verified>\n%s\n</nodevas-approval>",
 				shortActor(decidedBy), updated.AboutMsgID, updated.Status, text,
@@ -1123,13 +1206,17 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 				Project:       project,
 				SenderActor:   decidedBy,
 				SenderSession: updated.SessionName,
-				SenderAgent:   "human",
+				SenderAgent:   HumanAgent,
 				IsHuman:       true,
 				To:            orig.SenderSession,
 				ReplyTo:       orig.ID,
 				NodeID:        updated.NodeID,
 				Body:          approvalBody,
 				system:        true,
+				// For the peer's account, whether or not its session is
+				// still known: the answer and note in it are theirs to read
+				// (Viewer.ShownMessage).
+				recipientActor: orig.SenderActor,
 			})
 		}
 	}
@@ -1190,10 +1277,10 @@ func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, erro
 		 ORDER BY created_at DESC, id DESC`
 		args = append(args, project, maxSettledAsks)
 	case AskPending:
-		// Bounded by the sessions themselves (one question and
-		// maxPendingPermissions prompts each).
-		query += ` AND status = ? ORDER BY created_at DESC, id DESC`
-		args = append(args, status)
+		// Bounded per actor (maxPendingAsksPerActor), and capped all the
+		// same: the newest are the ones a person is about to answer.
+		query += ` AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = append(args, status, maxPendingAsksListed)
 	default:
 		query += ` AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?`
 		args = append(args, status, maxSettledAsks)
