@@ -3,6 +3,7 @@ package realtime
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"nodevas/internal/identity"
 )
@@ -133,5 +134,41 @@ func TestClickingThroughDocumentsNeverLeavesYouEditingAlone(t *testing.T) {
 	}
 	if share > maxDocSessionsPerActor {
 		t.Fatalf("the account holds %d live documents, past its share of %d", share, maxDocSessionsPerActor)
+	}
+}
+
+// Windows' clock moves in steps of up to 15.6 ms, and somebody clicking
+// through documents can leave several inside one step. The order they were
+// left in still decides which go first: the one just left keeps its reload
+// grace however coarse the clock is.
+func TestTheDocumentLeftLastIsRetiredLastOnACoarseClock(t *testing.T) {
+	hub := NewHub()
+	hub.SetWriteAccess(func(identity.Actor, string) bool { return true })
+	person := docClient(hub, "aaa", identity.RoleMember)
+	for index := range maxDocSessionsPerActor {
+		key := fmt.Sprintf("doc-%03d", index)
+		hub.openDoc(person, key)
+		hub.closeDoc(person, key)
+	}
+	// Every one of them left in the same clock tick.
+	hub.mu.Lock()
+	var tick time.Time
+	for _, session := range hub.docs["room"] {
+		if tick.IsZero() {
+			tick = session.emptyAt
+		}
+		session.emptyAt = tick
+	}
+	hub.mu.Unlock()
+
+	for index := range maxDocSessionsPerActor / 2 {
+		hub.openDoc(person, fmt.Sprintf("next-%03d", index))
+		hub.mu.Lock()
+		_, oldestKept := hub.docs["room"][fmt.Sprintf("doc-%03d", index)]
+		_, nextKept := hub.docs["room"][fmt.Sprintf("doc-%03d", index+1)]
+		hub.mu.Unlock()
+		if oldestKept || !nextKept {
+			t.Fatalf("opening document %d retired the wrong one: oldest doc-%03d kept=%v, doc-%03d kept=%v", index, index, oldestKept, index+1, nextKept)
+		}
 	}
 }
