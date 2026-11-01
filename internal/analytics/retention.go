@@ -72,7 +72,8 @@ func RetentionDays(ctx context.Context, database *db.DB) (int, error) {
 
 // Prune deletes raw history older than days before now: the events of runs
 // that finished before the cutoff, session actions, route picks, and the
-// patches of old changes. Runs, verdicts, evidence, QA rounds and usage are
+// patches of old changes (marked patch_pruned; their file lists and counts
+// stay). Runs, verdicts, evidence, QA rounds and usage are
 // the aggregates and stay. Audit rows of refused attempts
 // (AuditRefusalActions) age out too. days 0 keeps everything.
 func Prune(ctx context.Context, database *db.DB, now time.Time, days int) (PruneResult, error) {
@@ -95,7 +96,7 @@ func Prune(ctx context.Context, database *db.DB, now time.Time, days int) (Prune
   SELECT id FROM agent_session_actions WHERE at < ? LIMIT ` + batchLimit + `)`, ""},
 		{&out.Picks, `DELETE FROM route_picks WHERE id IN (
   SELECT id FROM route_picks WHERE created_at < ? LIMIT ` + batchLimit + `)`, ""},
-		{&out.Patches, `UPDATE run_changes SET patch = '', patch_truncated = 1 WHERE run_id IN (
+		{&out.Patches, `UPDATE run_changes SET patch = '', patch_pruned = TRUE WHERE run_id IN (
   SELECT run_id FROM run_changes WHERE created_at < ? AND patch <> '' LIMIT ` + batchLimit + `)`, ""},
 		{&out.Refusals, `DELETE FROM audit_events WHERE id IN (
   SELECT id FROM audit_events WHERE at < ? AND action IN (` + auditRefusalList + `) LIMIT ` + batchLimit + `)`, auditCutoff},

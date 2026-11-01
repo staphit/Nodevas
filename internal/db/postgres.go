@@ -1105,6 +1105,15 @@ WHERE a.action = 'ask' AND a.run_id <> ''
 ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS hub_notice BOOLEAN NOT NULL DEFAULT FALSE;
 `,
 	},
+	{
+		// Whether history retention cleared a run's patch
+		// (runnerwire.RunChanges.PatchPruned), apart from patch_truncated, a
+		// patch too big to keep. Rows from before read as not pruned.
+		name: "0035_run_changes_patch_pruned",
+		stmt: `
+ALTER TABLE run_changes ADD COLUMN IF NOT EXISTS patch_pruned BOOLEAN NOT NULL DEFAULT FALSE;
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as

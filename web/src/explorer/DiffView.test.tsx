@@ -43,6 +43,42 @@ describe("DiffView", () => {
     expect(screen.getByRole("table")).toHaveTextContent("export const sub");
   });
 
+  // W3: the hub marks a patch history retention cleared apart from one too
+  // big to keep.
+  it("says history retention cleared a run's patch, not that it was too big", async () => {
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: {
+        commit: sha,
+        base: "main",
+        files: [{ path: "src/math.js", status: "modified", additions: 2, deletions: 1 }],
+        additions: 2,
+        deletions: 1,
+        patchPruned: true,
+      },
+    });
+    vi.spyOn(api, "getRun").mockResolvedValue(makeRun({ id: "r1" }));
+    render(<DiffView view={{ kind: "diff", source: "run", runId: "r1" }} />);
+    expect(await screen.findByText(/no longer kept: history retention/)).toBeInTheDocument();
+    expect(screen.queryByText(/too large/)).toBeNull();
+  });
+
+  it("says a run's patch was too big to show", async () => {
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: {
+        commit: sha,
+        base: "main",
+        files: [{ path: "src/math.js", status: "modified", additions: 2, deletions: 1 }],
+        additions: 2,
+        deletions: 1,
+        patchTruncated: true,
+      },
+    });
+    vi.spyOn(api, "getRun").mockResolvedValue(makeRun({ id: "r1" }));
+    render(<DiffView view={{ kind: "diff", source: "run", runId: "r1" }} />);
+    expect(await screen.findByText("Diff too large to show here.")).toBeInTheDocument();
+    expect(screen.queryByText(/history retention/)).toBeNull();
+  });
+
   it("counts more than one file in the plural", async () => {
     vi.spyOn(api, "getRunChanges").mockResolvedValue({
       changes: {

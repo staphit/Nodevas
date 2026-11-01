@@ -216,9 +216,9 @@ func (s *Store) Changes(ctx context.Context, runID string) (*runnerwire.RunChang
 	var files string
 	var additions, deletions, truncated int64
 	err := s.db.QueryRowContext(ctx, `
-SELECT commit_sha, base, files, additions, deletions, patch, patch_truncated
+SELECT commit_sha, base, files, additions, deletions, patch, patch_truncated, patch_pruned
 FROM run_changes WHERE run_id = ?`, runID).Scan(
-		&out.Commit, &out.Base, &files, &additions, &deletions, &out.Patch, &truncated)
+		&out.Commit, &out.Base, &files, &additions, &deletions, &out.Patch, &truncated, &out.PatchPruned)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

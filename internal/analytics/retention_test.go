@@ -60,8 +60,8 @@ func TestPruneKeepsAggregates(t *testing.T) {
 	if n := f.count(`SELECT COUNT(*) FROM run_verdicts`) + f.count(`SELECT COUNT(*) FROM run_evidence`); n != 2 {
 		t.Errorf("verdicts + evidence = %d, want both kept", n)
 	}
-	if n := f.count(`SELECT COUNT(*) FROM run_changes WHERE patch = '' AND patch_truncated = 1 AND run_id = 'old'`); n != 1 {
-		t.Errorf("old patch not cleared")
+	if n := f.count(`SELECT COUNT(*) FROM run_changes WHERE patch = '' AND patch_pruned AND patch_truncated = 0 AND run_id = 'old'`); n != 1 {
+		t.Errorf("old patch not cleared and marked pruned (and only pruned, not too big)")
 	}
 	if n := f.count(`SELECT COUNT(*) FROM run_changes WHERE patch <> '' AND run_id = 'new'`); n != 1 {
 		t.Errorf("recent patch cleared")
@@ -85,5 +85,50 @@ func TestPruneInBatches(t *testing.T) {
 	}
 	if n := f.count(`SELECT COUNT(*) FROM run_events`); n != 0 {
 		t.Fatalf("%d events left", n)
+	}
+}
+
+// W3: a patch retention cleared is marked pruned, apart from one too big to
+// keep, so the diff view can say which it is. A too-big patch was never kept
+// and is not pruned again; a recent one is neither.
+func TestPruneMarksPatchesPruned(t *testing.T) {
+	f := newFixture(t)
+	old, recent := testNow.AddDate(0, 0, -200), testNow.AddDate(0, 0, -10)
+	for _, id := range []string{"kept-old", "big-old", "new"} {
+		created := old
+		if id == "new" {
+			created = recent
+		}
+		f.run(seedRun{id: id, node: "n1", role: "executor", created: created, seconds: 60})
+	}
+	f.exec(`INSERT INTO run_changes (run_id, files, patch, patch_truncated, created_at) VALUES
+  ('kept-old', '[]', 'diff --git a b', 0, ?), ('big-old', '[]', '', 1, ?), ('new', '[]', 'diff --git c d', 0, ?)`, ts(old), ts(old), ts(recent))
+	res, err := Prune(context.Background(), f.db, testNow, DefaultRetentionDays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Patches != 1 {
+		t.Fatalf("pruned %d patches, want 1", res.Patches)
+	}
+	type row struct {
+		patch             string
+		truncated, pruned bool
+	}
+	want := map[string]row{
+		"kept-old": {patch: "", truncated: false, pruned: true},
+		"big-old":  {patch: "", truncated: true, pruned: false},
+		"new":      {patch: "diff --git c d", truncated: false, pruned: false},
+	}
+	for id, w := range want {
+		var got row
+		var truncated int
+		if err := f.db.QueryRowContext(context.Background(),
+			`SELECT patch, patch_truncated, patch_pruned FROM run_changes WHERE run_id = ?`, id).Scan(&got.patch, &truncated, &got.pruned); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		got.truncated = truncated != 0
+		if got != w {
+			t.Errorf("%s = %+v, want %+v", id, got, w)
+		}
 	}
 }

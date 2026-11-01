@@ -93,13 +93,38 @@ The command runs without a shell, so write `sh -c '…'` for `&&` or pipes; `--t
 
 A verify job runs no agent and no model. It runs code an agent wrote, outside that agent's sandbox, as you, so it is opt-in per repository and has its own auto-accept switch (off by default). It runs in a throwaway worktree at the PR head, with no git hooks, without the runner's or GitHub's tokens in its environment, and the whole process tree is stopped at the timeout. A goal QA judge runs the test command too, at its base, before its agent starts: auto-accept takes it only with `autoaccept verify on`, and at the terminal its offer shows a `base:` and a `tests:` line. Roles are a guardrail on the board, not an OS boundary: an agent with a shell on your account could reach another run's proxy address. The red/green runs, the diff guard and the hub's gates are checks the agent cannot touch.
 
+## Autopilot merges
+
+With **Merge approved PRs** on, the autopilot merges a task's approved PR once its checks pass; your runner merges with your `gh` login. That needs a person's review (**Who approves the PR**: **A person** or **Agents, then a person**) unless you also turn on **Merge without a person's review**. Without a person's review, a PR waits for you ("Not merged without you: …"; **Approve** to merge, or **Request changes**) when:
+
+- it changes a sensitive path (below); the reason names up to 8 of them;
+- its changed files cannot be read, its runner reported none, or it changes 2000 files or more;
+- its head is not a commit the autopilot's own runs made, or the run that opened it is not known.
+
+A path is sensitive when any folder in it, or the file itself, has one of these names: `.github`, `.gitlab`, `.circleci`, `.buildkite`, `.husky`, `.devcontainer`, `.claude`, `.cursor`, `.vscode`, `scripts`, `.codex`, `.gemini`, `.agents`, `_agents`, `.agent`, `.opencode`. A file is sensitive in any folder by its name:
+
+- CI and hooks: `.gitlab-ci.yml`, `.travis.yml`, `azure-pipelines.yml`, `Jenkinsfile`, `bitbucket-pipelines.yml`, `.drone.yml`, `appveyor.yml`, `.pre-commit-config.yaml` (or `.yml`), `lefthook.yml`;
+- git: any name starting with `.git` (`.gitignore`, `.gitattributes`, `.gitmodules`);
+- environment: `.env`, `.env.*`, `.envrc`;
+- containers: names starting with `Dockerfile`, `Containerfile` or `docker-compose`, names ending in `.dockerfile`, `compose.yaml`, `compose.yml`, `.dockerignore`;
+- build: `Makefile`, `GNUmakefile`, `justfile`, `Taskfile.yml`;
+- agent instructions and config: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`, `opencode.json`, `opencode.jsonc`, `tui.json`, `tui.jsonc`;
+- JavaScript: `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `bun.lock`, `bun.lockb`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.pnpmfile.cjs`;
+- Go: `go.mod`, `go.sum`, `go.work`, `go.work.sum`;
+- Rust: `Cargo.toml`, `Cargo.lock`, `build.rs`;
+- Python: `pyproject.toml`, `poetry.lock`, `uv.lock`, `Pipfile`, `Pipfile.lock`, `setup.py`, `setup.cfg`, `tox.ini`, `noxfile.py`, `conftest.py`, `pytest.ini`, `requirements*.txt`;
+- Ruby, PHP, JVM and .NET: `Gemfile`, `Gemfile.lock`, `composer.json`, `composer.lock`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, `gradle-wrapper.properties`, `NuGet.config`, `Directory.Build.props`, `Directory.Build.targets`, `packages.lock.json`;
+- test runners, names starting with: `vitest.config.`, `vitest.workspace.`, `vite.config.`, `jest.config.`, `playwright.config.`, `cypress.config.`, `karma.conf.`, `.mocharc`, `phpunit.xml`.
+
+Names match in any letter case, and a rename counts by its old and new path. The staged pipeline's diff guard uses the same list: an Executor change to one of these paths needs the reviewers' approval, or a person's when the stages have no Reviewer.
+
 ## Agent performance
 
 **Settings → Agents → Advanced → Agent performance** turns run history into **Insights** (cost per delivered task, first-pass rate, rework, waste), **Scorecards** per role, agent and model, and tiers (Senior, Mid, Probation), by fixed rules: no model is called and no tokens are spent. Its suggestions change a routing rule, a role's daily budget or auto routing only after you confirm.
 
 Under **Tiers & routing**, **Auto routing in this project** (off by default) picks the agent and model for a dispatch or an autopilot task when none of your routing rules matches: the cheapest combination that meets the role's required tier, with a share of tasks (10% by default) given to Probation combinations to gather samples. Budgets still apply.
 
-Every 6 hours the hub deletes raw events older than 180 days (finished runs' log lines, agent session actions and routing picks, and the audit rows of refused sign-ins, step-ups, authenticator codes and device links) and blanks old diffs; runs, usage, verdicts, scorecards and the rest of the audit log stay. Administrators change this under **Keep raw events for** (30 to 3650 days, or Forever).
+Every 6 hours the hub deletes raw events older than 180 days (finished runs' log lines, agent session actions and routing picks, and the audit rows of refused sign-ins, step-ups, authenticator codes and device links) and blanks old diffs, keeping their file lists and line counts (the diff view then says history retention cleared the diff); runs, usage, verdicts, scorecards and the rest of the audit log stay. Administrators change this under **Keep raw events for** (30 to 3650 days, or Forever).
 
 ## Demo videos
 
