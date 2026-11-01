@@ -625,7 +625,8 @@ func (c *Client) CheckInbox(ctx context.Context, waitSeconds int) (checkInboxOut
 		}
 		// What a sender wrote cannot close the envelope or forge a tag of
 		// the hub's; only the hub's own notice carries its verified
-		// approval (whose person's words the hub escaped).
+		// approval (whose person's words the hub escaped). The model reads
+		// the structured messages too, so they carry the escaped text.
 		esc := agents.EscapeTrustMarkers
 		body := m.Body
 		if !m.HubNotice() {
@@ -639,7 +640,7 @@ func (c *Client) CheckInbox(ctx context.Context, waitSeconds int) (checkInboxOut
 		if len(m.Files) > 0 {
 			names := make([]string, len(m.Files))
 			for i, f := range m.Files {
-				files = append(files, InboxFile{Name: f.Name, Size: f.Size})
+				files = append(files, InboxFile{Name: esc(f.Name), Size: f.Size})
 				names[i] = fmt.Sprintf("%q (%d bytes)", esc(f.Name), f.Size)
 			}
 			fmt.Fprintf(&formatted,
@@ -648,9 +649,9 @@ func (c *Client) CheckInbox(ctx context.Context, waitSeconds int) (checkInboxOut
 		}
 		items = append(items, InboxMessage{
 			ID:      m.ID,
-			From:    m.From,
+			From:    from,
 			ReplyTo: m.ReplyTo,
-			NodeID:  m.NodeID,
+			NodeID:  esc(m.NodeID),
 			Body:    body,
 			Notify:  m.Notify,
 			Files:   files,

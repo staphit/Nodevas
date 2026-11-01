@@ -149,7 +149,9 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	if senderActor == "" {
 		senderActor = "local"
 	}
-	senderSession := strings.TrimSpace(in.SenderSession)
+	// A session name, as Touch gives them: it is the From the recipient
+	// reads the mail under, and no place for markup.
+	senderSession := SessionName(in.SenderSession)
 	if senderSession == "" || (in.IsHuman && !in.system) {
 		if in.IsHuman {
 			senderSession = WebSession

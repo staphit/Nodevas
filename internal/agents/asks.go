@@ -407,6 +407,9 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 	if sessionName == "" {
 		sessionName = sessionID
 	}
+	// The name the answer is mailed to and an approval forwarded from: a
+	// session name, as Touch gives them, never markup.
+	sessionName = SessionName(sessionName)
 	if sessionID == "" || question == "" {
 		return Ask{}, fmt.Errorf("%w: sessionId and question are required", ErrInvalid)
 	}

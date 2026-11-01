@@ -450,6 +450,13 @@ func sessionField(s string) string {
 	return capBytes(strings.TrimSpace(s), maxSessionFieldBytes)
 }
 
+// SessionName is raw as a session name, the way Touch names a session:
+// lowercase letters, digits, '_' and single dashes, at most
+// maxSessionNameBytes.
+func SessionName(raw string) string {
+	return capName(sanitizeToken(raw))
+}
+
 // capName cuts a sanitized name to maxSessionNameBytes.
 func capName(name string) string {
 	return strings.TrimRight(capBytes(name, maxSessionNameBytes), "-")
@@ -567,8 +574,13 @@ func (h *Hub) PersonSession(project, name string) bool {
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s := h.sessionByNameLocked(project, strings.TrimSpace(name))
-	return s != nil && !s.Run
+	// As the name is given, and as Send and CreateAndWait will use it.
+	for _, n := range []string{strings.TrimSpace(name), SessionName(name)} {
+		if s := h.sessionByNameLocked(project, n); s != nil && !s.Run {
+			return true
+		}
+	}
+	return false
 }
 
 // SetInbound sets a session's inbound policy. Only the session's own actor
