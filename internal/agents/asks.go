@@ -65,6 +65,10 @@ const (
 	// most parallel runs (16) each with a question and maxPendingPermissions
 	// prompts fit under it.
 	maxPendingAsksPerActor = 160
+	// maxPendingAsksListed caps a listing of pending asks: each holds up to
+	// maxBodyBytes of question, and every browser in the project reloads
+	// the listing on each new ask.
+	maxPendingAsksListed = 500
 
 	MaxAskTimeout = 10 * time.Minute
 	// PermissionAskTimeout is how long a permission prompt waits at most;
@@ -571,7 +575,9 @@ func (h *Hub) receivedBy(ctx context.Context, project, id, sessionName, actorID 
 // question (approval, question or choice) at a time. Permission prompts are
 // counted apart: the CLI raises them for its own tool calls, possibly while
 // ask_user waits or several at once for parallel calls, so they never wait
-// behind a question; maxPendingPermissions bounds them instead.
+// behind a question; maxPendingPermissions bounds them instead. Session ids
+// are the caller's to pick, so maxPendingAsksPerActor bounds the asking
+// account's pending asks in the project over all its sessions.
 func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 	// Asks past their time wait on nobody: they never hold the session.
 	h.expireStaleAsks(ctx, ask.Project)
@@ -583,15 +589,23 @@ func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 	if h.database == nil {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		count := 0
+		count, actorCount := 0, 0
 		for _, existing := range h.memAsks {
-			if existing.Project == ask.Project && existing.SessionID == ask.SessionID && existing.Status == AskPending &&
-				(existing.Kind == AskKindPermission) == permission {
+			if existing.Project != ask.Project || existing.Status != AskPending {
+				continue
+			}
+			if strings.EqualFold(existing.ActorID, ask.ActorID) {
+				actorCount++
+			}
+			if existing.SessionID == ask.SessionID && (existing.Kind == AskKindPermission) == permission {
 				count++
 			}
 		}
 		if count >= limit {
 			return ErrAskBusy
+		}
+		if actorCount >= maxPendingAsksPerActor {
+			return errActorAsksBusy
 		}
 		copied := ask
 		h.memAsks[ask.ID] = &copied
@@ -611,6 +625,17 @@ func (h *Hub) insertPendingAsk(ctx context.Context, ask Ask) error {
 		}
 		if count >= limit {
 			return ErrAskBusy
+		}
+		// The writer is one connection, so the count stays exact until the
+		// insert.
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM agent_asks
+			 WHERE project = ? AND status = 'pending' AND LOWER(actor_id) = LOWER(?)`,
+			ask.Project, ask.ActorID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= maxPendingAsksPerActor {
+			return errActorAsksBusy
 		}
 		return insertAsk(ctx, tx, ask)
 	})
@@ -668,6 +693,10 @@ func (h *Hub) allowForRun(ctx context.Context, ask Ask, decidedBy string) (Ask, 
 	h.emit(ask.Project, AskAllowedForRunEvent, ask)
 	return ask, nil
 }
+
+// errActorAsksBusy refuses an ask past maxPendingAsksPerActor.
+var errActorAsksBusy = fmt.Errorf("%w: this account already has %d asks waiting in this project; answer or end some first",
+	ErrAskBusy, maxPendingAsksPerActor)
 
 // askActionDetail is what the session action log keeps of ask. The log is
 // served to everyone who can read the project, so a permission prompt is
@@ -1206,10 +1235,10 @@ func (h *Hub) ListAsks(ctx context.Context, project, status string) ([]Ask, erro
 		 ORDER BY created_at DESC, id DESC`
 		args = append(args, project, maxSettledAsks)
 	case AskPending:
-		// Bounded by the sessions themselves (one question and
-		// maxPendingPermissions prompts each).
-		query += ` AND status = ? ORDER BY created_at DESC, id DESC`
-		args = append(args, status)
+		// Bounded per actor (maxPendingAsksPerActor), and capped all the
+		// same: the newest are the ones a person is about to answer.
+		query += ` AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = append(args, status, maxPendingAsksListed)
 	default:
 		query += ` AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?`
 		args = append(args, status, maxSettledAsks)
