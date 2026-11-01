@@ -25,7 +25,8 @@ describe("RetentionSetting", () => {
     const put = vi.spyOn(analyticsApi, "putRetention").mockResolvedValue(0);
     render(<RetentionSetting isAdmin />);
     expect(await screen.findByRole("spinbutton", { name: "Keep raw events for" })).toHaveValue(180);
-    expect(screen.getByText("Totals and scorecards are kept forever.")).toBeInTheDocument();
+    // What goes, diffs included, and what stays.
+    expect(screen.getByText(/deletes the event logs of runs.*blanks the diffs.*scorecards are kept forever/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("checkbox", { name: "Forever" }));
     expect(put).toHaveBeenCalledWith(0);
   });
