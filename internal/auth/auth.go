@@ -205,6 +205,19 @@ func CSRFCookieNameFor(r *http.Request) string {
 	return cookieNameFor(r, CSRFCookieName)
 }
 
+// CookieNameFor is the name a cookie called name is set under in a response
+// to r: __Host- prefixed over TLS (such a cookie must be Secure, Path=/ and
+// have no Domain), plain otherwise. CookieValue reads it back.
+func CookieNameFor(r *http.Request, name string) string {
+	return cookieNameFor(r, name)
+}
+
+// CookieValue reads the one cookie called name the way SessionToken reads
+// the session cookie: false when there is none, or more than one.
+func CookieValue(r *http.Request, name string) (string, bool) {
+	return cookieValue(r, name)
+}
+
 func cookieNameFor(r *http.Request, name string) string {
 	if r != nil && RequestIsSecure(r) {
 		return hostCookiePrefix + name

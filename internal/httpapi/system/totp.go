@@ -35,8 +35,11 @@ import (
 // Every response carrying a secret or recovery codes is no-store.
 
 // signInTicketCookie carries a pending two-factor sign-in. HttpOnly: page
-// script never needs it, so an injected script cannot lift it either. Its
-// path is the one endpoint that reads it.
+// script never needs it, so an injected script cannot lift it either. Over
+// plain HTTP its path is the one endpoint that reads it; over TLS it is
+// __Host-nodevas_signin, which must have Path=/, so that a sibling subdomain
+// cannot set one for the parent domain and have the second step run on its
+// ticket instead of the person's.
 const (
 	signInTicketCookie = "nodevas_signin"
 	signInTicketPath   = "/api/auth/login/totp"
@@ -62,10 +65,15 @@ func clearSignInTicket(c *gin.Context) {
 // setSignInTicket sets (or, with a negative maxAge, clears) the sign-in
 // ticket cookie.
 func setSignInTicket(c *gin.Context, value string, maxAge int) {
+	name := auth.CookieNameFor(c.Request, signInTicketCookie)
+	path := signInTicketPath
+	if name != signInTicketCookie {
+		path = "/"
+	}
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     signInTicketCookie,
+		Name:     name,
 		Value:    value,
-		Path:     signInTicketPath,
+		Path:     path,
 		HttpOnly: true,
 		Secure:   auth.RequestIsSecure(c.Request),
 		SameSite: http.SameSiteStrictMode,
@@ -73,12 +81,12 @@ func setSignInTicket(c *gin.Context, value string, maxAge int) {
 	})
 }
 
-// signInTicket is the request's sign-in ticket, or "" when it carries none.
+// signInTicket is the request's sign-in ticket, or "" when it carries none
+// or more than one (auth.CookieValue); the second step then answers as for an
+// expired ticket.
 func signInTicket(r *http.Request) string {
-	if cookie, err := r.Cookie(signInTicketCookie); err == nil {
-		return cookie.Value
-	}
-	return ""
+	ticket, _ := auth.CookieValue(r, signInTicketCookie)
+	return ticket
 }
 
 // postLoginTOTP finishes a two-factor sign-in.
