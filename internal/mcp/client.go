@@ -495,6 +495,10 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 // process before anything gets a chance to trim it.
 const maxResponseBytes = 64 << 20
 
+// conflictAdvice is what decodeError adds to a 409: most are a revision
+// conflict. A call whose 409 means something else replaces it.
+const conflictAdvice = ". Someone changed this at the same time; re-read it and apply your change to the current version"
+
 // decodeError turns a non-2xx response into an APIError.
 func decodeError(status int, raw []byte) *APIError {
 	failure := &APIError{Code: codeFor(status), Status: status}
@@ -523,8 +527,7 @@ func decodeError(status int, raw []byte) *APIError {
 	}
 	switch failure.Code {
 	case CodeConflict:
-		failure.Message = failure.Message +
-			". Someone changed this at the same time; re-read it and apply your change to the current version"
+		failure.Message = failure.Message + conflictAdvice
 	case CodeRateLimited:
 		failure.Message = failure.Message + ". Slow down and try again"
 	}

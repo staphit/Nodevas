@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -690,6 +691,13 @@ func (c *Client) AskUser(ctx context.Context, in askUserInput) (askUserOutput, e
 		UnreadCount int        `json:"unreadCount"`
 	}
 	if err := c.doLongPoll(ctx, "/api/agents/asks", body, &resp, agents.MaxAskTimeout+30*time.Second); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == CodeConflict {
+			// The session's earlier question is still waiting for a person;
+			// nothing changed that could be re-read.
+			apiErr.Message = strings.TrimSuffix(apiErr.Message, conflictAdvice) +
+				". Do not ask again: the person's answer to your earlier question arrives in check_inbox"
+		}
 		return askUserOutput{}, err
 	}
 	c.mu.Lock()
