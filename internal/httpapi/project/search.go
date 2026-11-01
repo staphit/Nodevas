@@ -58,6 +58,9 @@ func (a *API) GetSearch(c *gin.Context) {
 			})
 		}
 		nodeResults, searchErr := a.pm.SearchProjectNodes(c.Request.Context(), info, normalized)
+		if c.Request.Context().Err() != nil {
+			return // the caller is gone
+		}
 		if searchErr != nil {
 			nodeResults = project.SearchProjectNodesDirect(info, normalized)
 		}
@@ -104,6 +107,9 @@ func (a *API) getRankedSearch(c *gin.Context, query string) {
 			continue
 		}
 		ranked, err := a.pm.RankProjectNodes(c.Request.Context(), info, query, limit)
+		if c.Request.Context().Err() != nil {
+			return // the caller is gone
+		}
 		if err != nil {
 			continue
 		}

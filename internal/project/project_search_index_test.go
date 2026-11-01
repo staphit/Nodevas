@@ -31,7 +31,7 @@ func searchEventually(t *testing.T, index *searchIndex, project ProjectInfo, que
 	t.Helper()
 	began := time.Now()
 	for {
-		results, err := index.search(project, query)
+		results, err := index.search(context.Background(), project, query)
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
@@ -78,7 +78,7 @@ func TestSearchIndexRefreshesNodeMarkdown(t *testing.T) {
 
 	project := ProjectInfo{Name: "main", Path: root}
 	index := newTestSearchIndex(t)
-	results, err := index.search(project, "before")
+	results, err := index.search(context.Background(), project, "before")
 	if err != nil {
 		t.Fatalf("initial search: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestSearchIndexFindsTextDeepInALongNode(t *testing.T) {
 	writeNodeBody(t, root, "alpha", body)
 
 	project := ProjectInfo{Name: "main", Path: root}
-	results, err := newTestSearchIndex(t).search(project, "buried needle")
+	results, err := newTestSearchIndex(t).search(context.Background(), project, "buried needle")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestSearchIndexAgreesWithTheDirectScan(t *testing.T) {
 	project := ProjectInfo{Name: "main", Path: root}
 	index := newTestSearchIndex(t)
 	for _, query := range []string{"设计", "接口设计", "english prose", "alpha", "high"} {
-		indexed, err := index.search(project, query)
+		indexed, err := index.search(context.Background(), project, query)
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
@@ -206,14 +206,14 @@ func TestSearchProjectNodesReturnsSubpagePageID(t *testing.T) {
 		if query == "overview" {
 			wantPage = ""
 		}
-		indexed, err := index.search(info, query)
+		indexed, err := index.search(context.Background(), info, query)
 		if err != nil {
 			t.Fatalf("search %q: %v", query, err)
 		}
 		if len(indexed) != 1 || indexed[0].PageID != wantPage {
 			t.Fatalf("index.search(%q) = %+v, want pageId=%q", query, indexed, wantPage)
 		}
-		ranked, err := index.rank(info, query, 10)
+		ranked, err := index.rank(context.Background(), info, query, 10)
 		if err != nil {
 			t.Fatalf("rank %q: %v", query, err)
 		}
@@ -240,13 +240,13 @@ func TestSearchProjectNodesReturnsSubpagePageID(t *testing.T) {
 func BenchmarkSearchWarmIndex(b *testing.B) {
 	root, project := benchmarkProject(b)
 	index := newTestSearchIndex(b)
-	if _, err := index.search(project, "needle"); err != nil {
+	if _, err := index.search(context.Background(), project, "needle"); err != nil {
 		b.Fatal(err)
 	}
 	_ = root
 	b.ResetTimer()
 	for b.Loop() {
-		if _, err := index.search(project, "needle"); err != nil {
+		if _, err := index.search(context.Background(), project, "needle"); err != nil {
 			b.Fatal(err)
 		}
 	}
