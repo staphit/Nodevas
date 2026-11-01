@@ -34,6 +34,10 @@ type Config struct {
 	// token, for a hub behind Access. The edge checks them; the hub never does.
 	AccessClientID     string `json:"accessClientId,omitempty"`
 	AccessClientSecret string `json:"accessClientSecret,omitempty"`
+	// HTTPLoopbackHub is the owner's word that a plain-http hub on this
+	// machine may have the token although `nodevas serve` did not start this
+	// runner (`nodevas runner set httpLoopbackHub on`).
+	HTTPLoopbackHub bool `json:"httpLoopbackHub,omitempty"`
 	// Name is an optional label for log lines; the hub's name for the runner
 	// is the one it was created under.
 	Name string `json:"name,omitempty"`

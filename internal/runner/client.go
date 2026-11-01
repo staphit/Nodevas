@@ -45,6 +45,10 @@ type Client struct {
 	// http.DefaultClient for the socket and a client without a timeout for
 	// the proxy.
 	HTTPClient *http.Client
+	// ServeManaged is true for the runner `nodevas serve` started for itself
+	// (NODEVAS_RUNNER_UNDER_SERVE): serve holds the hub's port for as long
+	// as this runner runs.
+	ServeManaged bool
 
 	// Accepter asks whether to take an offer the auto-accept policy does not
 	// cover; nil declines those.
