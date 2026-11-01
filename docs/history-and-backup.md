@@ -35,15 +35,15 @@ The trash still keeps its own copies under `.vised/trash/`.
 
 In **Settings → This project → Backup and history** (the **Cloud backup** panel), an admin can choose **Back up to a git remote**. Each project's history is then pushed to its own branch of one repository, for example a private GitHub repository: `nodevas/<project>`.
 
-<!-- sec-pass: git backup token and destinations -->
 - **Address:** HTTPS only. Use a token with write access to that repository. The username defaults to `x-access-token`, which works for GitHub tokens.
 - **The token:**
-  - Stored encrypted on the server, outside the workspace, and never shown again.
+  - Stored encrypted on the server under its machine key ([Operations](./operations.md#database)), and never shown again.
   - Sent to git only through its environment, never on a command line or in a URL.
   - Removed from error messages.
 - **Destinations:** a server that is not loopback-only refuses private, loopback and link-local addresses. The address is checked again before each push. With git 2.37 or newer, git is also pinned to the addresses that were checked.
 - **Schedule:** pushes run on the backup schedule, from **Back up entire workspace** (every project) and from **Back up current project**. They are never forced.
 - **When the remote branch has moved on** (someone pushed to it), that project is held back and shown as **The remote has newer commits** or **Local and remote have diverged**. The others still push. **Keep local** pushes your history to a side branch instead.
 - **Test connection** checks the address and token before the first backup.
+- Only a person can change these settings: an agent, the copilot included, gets `403`.
 
 The folder backup and `.veproj` import and export work as before.
