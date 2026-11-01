@@ -28,10 +28,12 @@ type PruneResult struct {
 	Actions int `json:"actions"`
 	Picks   int `json:"picks"`
 	Patches int `json:"patches"`
+	// Refusals are audit rows of refused attempts (AuditRefusalActions).
+	Refusals int `json:"refusals"`
 }
 
 // Total is every row Prune removed or cleared.
-func (r PruneResult) Total() int { return r.Events + r.Actions + r.Picks + r.Patches }
+func (r PruneResult) Total() int { return r.Events + r.Actions + r.Picks + r.Patches + r.Refusals }
 
 // ValidRetentionDays reports whether days may be stored.
 func ValidRetentionDays(days int) bool {
