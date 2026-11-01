@@ -152,7 +152,7 @@ func (s *Server) withAuth(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if !guarded || auth.PublicPaths[r.URL.Path] || publicHealthPath(r) {
+	if !guarded || auth.PublicPaths[r.URL.Path] || s.publicHealthPath(r) {
 		c.Next()
 		return
 	}
@@ -236,10 +236,15 @@ func (s *Server) authenticate(r *http.Request) (identity.Actor, string, error) {
 const runnerPathPrefix = "/api/runner/"
 
 // withRunnerAuth admits a request carrying a valid runner token, acting as
-// the runner's owner marked as a worker agent.
+// the runner's owner marked as a worker agent. A token it refuses is charged
+// to the pre-auth bucket it skipped (claimsIdentity), as a refused session
+// cookie is.
 func (s *Server) withRunnerAuth(c *gin.Context) {
 	r := c.Request
 	if s.runners == nil {
+		if s.chargeRefusedCredential(c) {
+			return
+		}
 		httpx.Err(c, http.StatusNotFound, locale.Errorf("runners are not enabled on this server", "這個伺服器沒有啟用 runner"))
 		return
 	}
@@ -247,6 +252,9 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 	if err != nil {
 		if !errors.Is(err, runners.ErrUnauthenticated) {
 			httpx.Err(c, http.StatusInternalServerError, err)
+			return
+		}
+		if s.chargeRefusedCredential(c) {
 			return
 		}
 		httpx.Err(c, http.StatusUnauthorized, err)
@@ -258,6 +266,17 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 		s.serveRunnerProxy(c, runner)
 		c.Abort()
 		return
+	}
+	// The owner's account is gone; so is everything it lent out. The proxy
+	// checks the same in runnerProxyActor.
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		if _, _, found := accounts.CurrentActor(r.Context(), runner.OwnerID); !found {
+			if s.chargeRefusedCredential(c) {
+				return
+			}
+			httpx.Err(c, http.StatusUnauthorized, runners.ErrUnauthenticated)
+			return
+		}
 	}
 	actor := runners.ActorFor(runner)
 	ctx := runners.WithRunner(auth.WithActor(r.Context(), actor), runner)
@@ -331,7 +350,9 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	// Read the request back off the context: earlier middleware may have
 	// replaced it, and the store the handler used hangs off that copy.
 	r = c.Request
-	actor := auth.ActorFrom(r)
+	// A public write (a device-link redeem) has nobody signed in; its row
+	// names no actor rather than the local administrator.
+	actor, _ := auth.AttachedActor(r)
 	op := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api/")
 
 	// The database trail is the one that is queried. It records server-wide

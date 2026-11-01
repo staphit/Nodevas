@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type Runner } from "../api";
+import { api, AuthError, type Runner } from "../api";
 import { ConfirmDialogHost } from "../components/ConfirmDialog";
 import { readPreferences } from "../preferences";
 import { useApp } from "../store";
 import { useBudget } from "../runs/budgetStore";
+import { useStepUp } from "../stepup/stepUpStore";
 import { RunnersPanel } from "./RunnersModal";
 import { useRunners } from "./runnerStore";
 
@@ -242,6 +243,44 @@ describe("RunnersPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "I saved the token" }));
     expect(screen.queryByDisplayValue("nvr_secret-token")).not.toBeInTheDocument();
+  });
+
+  // A runner token outlives the session that made it, so the hub asks for a
+  // fresh step-up first, as for a device link.
+  it("asks for a step-up before adding a runner and adds none without one", async () => {
+    useStepUp.getState().reset();
+    vi.spyOn(api, "getStepUp").mockResolvedValue({ required: true, active: false });
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+    const create = vi.spyOn(api, "createRunner").mockResolvedValue({ runner: laptop, token: "nvr_secret-token" });
+
+    render(<RunnersPanel />);
+    await screen.findByText(/No runners yet/);
+    useStepUp.setState({ status: { required: true, active: false } });
+    fireEvent.click(screen.getByRole("button", { name: "Add runner" }));
+    fireEvent.change(screen.getByLabelText("Runner name"), { target: { value: "laptop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(document.getElementById("stepup-title")).not.toBeNull());
+    expect(create).not.toHaveBeenCalled();
+    useStepUp.getState().reset();
+  });
+
+  it("opens the step-up when the hub refuses to add a runner for want of one", async () => {
+    useStepUp.getState().reset();
+    vi.spyOn(api, "getStepUp").mockResolvedValue({ required: true, active: false });
+    vi.spyOn(api, "listRunners").mockResolvedValue({ runners: [] });
+    vi.spyOn(api, "createRunner").mockRejectedValue(new AuthError(403, "verify it's you first"));
+
+    render(<RunnersPanel />);
+    await screen.findByText(/No runners yet/);
+    useStepUp.setState({ status: undefined });
+    fireEvent.click(screen.getByRole("button", { name: "Add runner" }));
+    fireEvent.change(screen.getByLabelText("Runner name"), { target: { value: "laptop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(document.getElementById("stepup-title")).not.toBeNull());
+    expect(screen.queryByText(/verify it's you first/)).toBeNull();
+    useStepUp.getState().reset();
   });
 
   it("revokes a runner only after confirmation", async () => {

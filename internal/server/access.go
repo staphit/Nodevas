@@ -53,8 +53,35 @@ func AccessMiddleware(verifier *auth.AccessVerifier, required bool) gin.HandlerF
 	return accessMiddleware(verifier, required, time.Now)
 }
 
+// accessGate is AccessMiddleware as this server installs it, exempting what
+// accessExempt exempts.
+func (s *Server) accessGate() gin.HandlerFunc {
+	return accessMiddlewareExempting(s.accessVerifier, s.accessRequired, s.accessExempt, time.Now)
+}
+
+// accessExempt reports a request Access does not apply to: one straight from
+// this machine. On a hub with accounts that is only the health probe. A proxy
+// on the same host that adds no forwarding header (nginx's defaults, ssh -L,
+// socat) looks exactly like this machine, and the app behind it, metrics
+// included, must stay closed to a caller that went around the edge; no
+// person on a hub with accounts uses it from loopback without Access anyway.
+func (s *Server) accessExempt(r *http.Request) bool {
+	if !auth.DirectLoopback(r) {
+		return false
+	}
+	if s.auth == nil || !s.auth.Remote() {
+		return true
+	}
+	return r.URL.Path == healthzPath
+}
+
 // accessMiddleware is AccessMiddleware on a clock a test can move.
 func accessMiddleware(verifier *auth.AccessVerifier, required bool, now func() time.Time) gin.HandlerFunc {
+	return accessMiddlewareExempting(verifier, required, auth.DirectLoopback, now)
+}
+
+// accessMiddlewareExempting is accessMiddleware with the exemption given.
+func accessMiddlewareExempting(verifier *auth.AccessVerifier, required bool, exempt func(*http.Request) bool, now func() time.Time) gin.HandlerFunc {
 	if verifier == nil {
 		return func(c *gin.Context) { c.Next() }
 	}
@@ -62,7 +89,7 @@ func accessMiddleware(verifier *auth.AccessVerifier, required bool, now func() t
 	unverified := newAccessNotes(accessUnverifiedEvery, now)
 	return func(c *gin.Context) {
 		r := c.Request
-		if auth.DirectLoopback(r) {
+		if exempt(r) {
 			c.Next()
 			return
 		}

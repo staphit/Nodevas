@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, type Runner } from "../api";
+import { needsStepUp } from "../stepup/freshStepUp";
 
 export interface RunnerStoreState {
   /** Whether anything has asked for runners yet. The realtime refresh only
@@ -16,8 +17,9 @@ export interface RunnerStoreState {
   refresh: () => Promise<void>;
   /** Refreshes only if the list was loaded before; used by runners-changed. */
   refreshIfLoaded: () => Promise<void>;
-  /** Creates a runner and returns its one-time token, or null on failure. */
-  create: (name: string) => Promise<{ runner: Runner; token: string } | null>;
+  /** Creates a runner and returns its one-time token, "step-up" when the hub
+   * wants a fresh step-up first (as for a device link), or null on failure. */
+  create: (name: string) => Promise<{ runner: Runner; token: string } | "step-up" | null>;
   revoke: (id: string) => Promise<boolean>;
   setError: (error: string | null) => void;
 }
@@ -57,6 +59,7 @@ export const useRunners = create<RunnerStoreState>((set, get) => ({
       await get().refresh();
       return created;
     } catch (error) {
+      if (await needsStepUp(error)) return "step-up";
       set({ error: message(error) });
       return null;
     } finally {

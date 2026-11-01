@@ -76,9 +76,16 @@ func (s *Server) auditRunnerLink(r *http.Request, action string, actor identity.
 	if accounts, ok := s.auth.(*auth.SessionAuth); ok && actor.ID != "" {
 		email = accounts.AccountEmail(r.Context(), actor.ID)
 	}
-	s.audit.RecordOrLog(r.Context(), audit.Event{
+	event := audit.Event{
 		At: time.Now(), ActorID: actor.ID, ActorName: actor.Name,
 		Action: action, Target: target, ClientIP: auth.ClientIP(r), Detail: detail,
 		ActorEmail: email,
-	})
+	}
+	// A redeem refused for being over its budget is a stranger's to repeat at
+	// will: one row per source a minute.
+	if action == audit.ActionRunnerLinkFailed && detail["reason"] == "throttled" {
+		s.audit.RecordThrottledOrLog(r.Context(), event, auth.SourceKey(event.ClientIP))
+		return
+	}
+	s.audit.RecordOrLog(r.Context(), event)
 }

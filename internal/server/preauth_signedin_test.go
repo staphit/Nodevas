@@ -169,3 +169,36 @@ func TestForwardedHeaderFromAnUntrustedPeerIsReportedOncePerPeer(t *testing.T) {
 		t.Fatalf("reported %d peers, want at most %d", len(noted), maxForwardingNotes+1)
 	}
 }
+
+// The hub-wide pre-auth bucket sheds a flood of anonymous requests. A
+// signed-in member loading the app asks /api/auth/status first, and the
+// container's health probe asks /api/healthz from this machine: a flood of
+// strangers emptying that bucket must refuse neither.
+func TestPreAuthFloodLeavesAppLoadAndHealthProbe(t *testing.T) {
+	server, _, inbox := accountServerForTest(t)
+	cookies, _ := signIn(t, server, inbox, testEmail)
+	handler := server.Handler()
+	get := func(path, remote string, cookies []*http.Cookie) int {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = remote
+		withCookies(request, cookies)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Code
+	}
+	refused := 0
+	for i := 0; i < 600; i++ {
+		if get("/api/projects", "198.51.100."+strconv.Itoa(i%15+1)+":40000", nil) == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Fatal("the flood never reached the hub-wide pre-auth limit")
+	}
+	if code := get("/api/auth/status", "192.0.2.1:40000", cookies); code != http.StatusOK {
+		t.Errorf("signed-in app load after the flood = %d", code)
+	}
+	if code := get("/api/healthz", "127.0.0.1:40000", nil); code != http.StatusOK {
+		t.Errorf("health probe after the flood = %d", code)
+	}
+}

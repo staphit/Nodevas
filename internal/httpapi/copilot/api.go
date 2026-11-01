@@ -381,11 +381,11 @@ func browserModel(value string) string {
 // carrying the session secret around: a hash of its cookie. Empty on a
 // loopback-only server, which has no sessions.
 func sessionFingerprint(r *http.Request) string {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := auth.SessionToken(r)
+	if !ok {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(cookie.Value))
+	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:16])
 }
 

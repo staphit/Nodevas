@@ -166,8 +166,8 @@ func (a *SessionAuth) CompleteSignIn(r *http.Request, ticket, code string) (Sign
 		source = ClientIP(r)
 	}
 	ctx := requestContext(r)
-	// The global and per-source budgets, charged before the ticket is even
-	// looked at, like every other sign-in door.
+	// The per-source budget, charged before the ticket is even looked at,
+	// like every other sign-in door.
 	if !a.chargeLogin("", source) {
 		return SignInResult{}, ErrTooManyLogins
 	}
@@ -440,7 +440,7 @@ func (a *SessionAuth) ConfirmTOTP(r *http.Request, code string) ([]string, error
 	if err := a.requireStepUp(r); err != nil {
 		return nil, err
 	}
-	if !a.chargeLogin("totp-enroll:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-enroll:" + account.ID) {
 		return nil, ErrTooManyLogins
 	}
 	if len(code) == 0 || len(code) > MaxOTPBytes {
@@ -475,7 +475,7 @@ func (a *SessionAuth) DisableTOTP(r *http.Request, code string) (SecondFactorPro
 	if err != nil {
 		return SecondFactorProof{}, err
 	}
-	if !a.chargeLogin("totp-change:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-change:" + account.ID) {
 		return SecondFactorProof{}, ErrTooManyLogins
 	}
 	ctx := requestContext(r)
@@ -504,7 +504,7 @@ func (a *SessionAuth) RegenerateRecoveryCodes(r *http.Request, code string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	if !a.chargeLogin("totp-change:"+account.ID, ClientIP(r)) {
+	if !a.chargeAccount("totp-change:" + account.ID) {
 		return nil, ErrTooManyLogins
 	}
 	ctx := requestContext(r)

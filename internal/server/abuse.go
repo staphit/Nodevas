@@ -17,6 +17,7 @@ import (
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
 	"nodevas/internal/locale"
+	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
 )
 
@@ -604,8 +605,16 @@ func (g *abuseGuard) recordRejection(class RouteClass) {
 }
 
 func (g *abuseGuard) AllowPreAuth(ip string, now time.Time) (bool, int) {
-	checks := []bucketCheck{
-		{key: "preauth:global", rate: g.preAuthGlobalRate, burst: g.preAuthGlobalBurst, cost: 1.0},
+	return g.allowPreAuth(ip, now, true)
+}
+
+// allowPreAuth is AllowPreAuth, charging the hub-wide bucket only when global
+// is set: a request that only its own source's flood should be able to
+// refuse is charged to that source's bucket alone.
+func (g *abuseGuard) allowPreAuth(ip string, now time.Time, global bool) (bool, int) {
+	var checks []bucketCheck
+	if global {
+		checks = append(checks, bucketCheck{key: "preauth:global", rate: g.preAuthGlobalRate, burst: g.preAuthGlobalBurst, cost: 1.0})
 	}
 	if ip != "" {
 		checks = append(checks, bucketCheck{
@@ -624,10 +633,16 @@ func (g *abuseGuard) AllowPreAuth(ip string, now time.Time) (bool, int) {
 }
 
 func (g *abuseGuard) AllowRoute(class RouteClass, cost float64, actorID, ip string, now time.Time) (bool, int) {
+	return g.allowRoute(class, cost, actorID, ip, true, now)
+}
+
+// allowRoute is AllowRoute, charging the class's hub-wide bucket only when
+// global is set (see routeChecks).
+func (g *abuseGuard) allowRoute(class RouteClass, cost float64, actorID, ip string, global bool, now time.Time) (bool, int) {
 	if class == ClassPublicAuth {
 		return true, 0
 	}
-	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip), now)
+	ok, retry := g.store.allowMulti(g.routeChecks(class, cost, actorID, ip, global), now)
 	if !ok {
 		g.recordRejection(class)
 		return false, retry
@@ -644,12 +659,12 @@ const readQueueWait = 10 * time.Second
 // ReserveRoute is AllowRoute for a request that waits its turn rather than
 // fail: it reports how long to wait (up to maxWait) and a cancel that gives
 // the place back when the request stops waiting. Past maxWait it refuses,
-// taking nothing, like AllowRoute.
-func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
+// taking nothing, like AllowRoute. global is as for allowRoute.
+func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip string, global bool, now time.Time, maxWait time.Duration) (time.Duration, bool, int, func()) {
 	if class == ClassPublicAuth {
 		return 0, true, 0, func() {}
 	}
-	checks := g.routeChecks(class, cost, actorID, ip)
+	checks := g.routeChecks(class, cost, actorID, ip, global)
 	wait, ok, retry := g.store.reserveMulti(checks, now, maxWait)
 	if !ok {
 		g.recordRejection(class)
@@ -659,8 +674,11 @@ func (g *abuseGuard) ReserveRoute(class RouteClass, cost float64, actorID, ip st
 }
 
 // routeChecks is the buckets a request of class is charged to: the class's
-// global one, its address's and its actor's.
-func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string) []bucketCheck {
+// global one when global is set, its address's and its actor's. A request
+// nobody signed in to is not charged to the global one: signed-in members'
+// requests share it, and strangers spread over a few addresses could empty
+// it for all of them. The pre-auth buckets already bound strangers.
+func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip string, global bool) []bucketCheck {
 	var gRate, gBurst, ipRate, ipBurst, actRate, actBurst float64
 	switch class {
 	case ClassRead:
@@ -689,8 +707,9 @@ func (g *abuseGuard) routeChecks(class RouteClass, cost float64, actorID, ip str
 		actRate, actBurst = g.readActorRate, g.readActorBurst
 	}
 
-	checks := []bucketCheck{
-		{key: string(class) + ":global", rate: gRate, burst: gBurst, cost: cost},
+	var checks []bucketCheck
+	if global {
+		checks = append(checks, bucketCheck{key: string(class) + ":global", rate: gRate, burst: gBurst, cost: cost})
 	}
 	if ip != "" {
 		checks = append(checks, bucketCheck{
@@ -812,17 +831,34 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if !s.chargePreAuth(c) {
+	if !s.chargePreAuth(c, !sourceOnlyPreAuth(c.Request)) {
 		return
 	}
 	c.Next()
 }
 
+// sourceOnlyPreAuth reports a request that is charged to its own source's
+// pre-auth bucket and not to the hub-wide one, so a flood of strangers cannot
+// refuse it: the sign-in door (asking who one is, the first request of every
+// app load; asking for a passcode; signing in), and this machine's health
+// probe. Guessing and mail at the door are bounded per source, per address
+// and per passcode (internal/auth); a hub-wide budget there would only hand
+// a stranger the means to lock every member out.
+func sourceOnlyPreAuth(r *http.Request) bool {
+	path := r.URL.Path
+	if auth.SignInPaths[path] || path == "/api/auth/status" {
+		return true
+	}
+	return path == healthzPath &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead) && auth.DirectLoopback(r)
+}
+
 // chargePreAuth takes one token from the pre-auth buckets for c's address,
-// and answers 429 when there is none.
-func (s *Server) chargePreAuth(c *gin.Context) bool {
+// and from the hub-wide one when global is set, and answers 429 when there is
+// none.
+func (s *Server) chargePreAuth(c *gin.Context, global bool) bool {
 	ip := auth.ClientIP(c.Request)
-	if ok, retrySec := s.abuse.AllowPreAuth(ip, time.Now()); !ok {
+	if ok, retrySec := s.abuse.allowPreAuth(auth.SourceKey(ip), time.Now(), global); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
 		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
@@ -838,26 +874,29 @@ func (s *Server) chargeRefusedCredential(c *gin.Context) bool {
 	if s.abuse == nil || !c.GetBool(preAuthDeferredKey) {
 		return false
 	}
-	return !s.chargePreAuth(c)
+	return !s.chargePreAuth(c, true)
 }
 
 // claimsIdentity reports a request that will be signed in by withAuth if
-// its claim holds: a session cookie on a guarded route, or a direct
-// loopback request to a standalone hub. Sign-in routes never qualify: the
-// pre-auth bucket is their only limit.
+// its claim holds: a session cookie on a guarded route, a runner token on a
+// runner route, or a direct loopback request to a standalone hub. Sign-in
+// routes never qualify: the pre-auth bucket is their only limit.
 func (s *Server) claimsIdentity(r *http.Request) bool {
 	path := r.URL.Path
-	if auth.PublicPaths[path] || path == runnerwire.LinkPath || strings.HasPrefix(path, runnerPathPrefix) {
+	if auth.PublicPaths[path] || path == runnerwire.LinkPath {
 		return false
+	}
+	if strings.HasPrefix(path, runnerPathPrefix) {
+		return strings.HasPrefix(runners.BearerToken(r), runnerwire.TokenPrefix)
 	}
 	if class, _ := ClassifyRoute(r.Method, path); class == ClassPublicAuth {
 		return false
 	}
-	if _, local := s.auth.(auth.LocalOnly); local && auth.DirectLoopback(r) {
+	if _, local := s.auth.(auth.LocalOnly); local && auth.LoopbackClient(r) {
 		return true
 	}
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	return err == nil && cookie.Value != ""
+	_, ok := auth.SessionToken(r)
+	return ok
 }
 
 // forwardingNotes is the server's untrusted-forwarder warning (forwarding.go).
@@ -890,12 +929,18 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		return
 	}
 
-	actor := auth.ActorFrom(c.Request)
+	// A request nobody signed in to (a device-link redeem) has no actor
+	// bucket: strangers are not one person, and charging them all to one
+	// would let one of them refuse the rest. Nor is it charged to the
+	// class's hub-wide bucket, which members' requests share (routeChecks);
+	// the pre-auth buckets and the per-source one still apply.
+	actor, attached := auth.AttachedActor(c.Request)
 	actorID := actor.ID
-	if actorID == "" {
+	if attached && actorID == "" {
 		actorID = "anonymous"
 	}
 	ip := auth.ClientIP(c.Request)
+	source := auth.SourceKey(ip)
 	now := time.Now()
 
 	// The person at the keyboard of a standalone hub is every tab, the copilot
@@ -914,14 +959,14 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	if class == ClassRead {
 		var wait time.Duration
 		var cancel func()
-		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, ip, now, readQueueWait)
+		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, source, attached, now, readQueueWait)
 		if allowed && wait > 0 && !waitTurn(c.Request.Context(), wait) {
 			cancel()
 			c.Abort()
 			return
 		}
 	} else {
-		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, ip, now)
+		allowed, retrySec = s.abuse.allowRoute(class, cost, actorID, source, attached, now)
 	}
 	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)
@@ -994,12 +1039,13 @@ func waitTurn(ctx context.Context, d time.Duration) bool {
 }
 
 // directLocalActor reports a request from the local user of a standalone
-// (loopback, no accounts) hub that reached it directly, not through a proxy.
+// (loopback, no accounts) hub that came from this machine, directly or
+// through the Vite dev server relaying this machine's browser.
 func (s *Server) directLocalActor(r *http.Request, actor identity.Actor) bool {
 	if _, local := s.auth.(auth.LocalOnly); !local {
 		return false
 	}
-	return actor.ID == identity.Local.ID && auth.DirectLoopback(r)
+	return actor.ID == identity.Local.ID && auth.LoopbackClient(r)
 }
 
 // AbuseStats reports limiter health and metrics for administrators.

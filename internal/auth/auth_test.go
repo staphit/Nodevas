@@ -223,14 +223,20 @@ func TestLoginLimiterBoundsRotatingInputs(t *testing.T) {
 		t.Fatalf("attempt buckets = %d, max %d", len(authenticator.attempts), maxLoginBuckets)
 	}
 
+	// Rotating the address does not rotate the account's own budget, and
+	// rotating both still leaves the bucket table bounded. There is no
+	// hub-wide budget to exhaust (chargeLogin).
 	other := NewSessionAuth(&UserStore{})
-	for index := 0; index < loginGlobalLimit; index++ {
-		if !other.allowLogin(fmt.Sprintf("rotate%d", index), fmt.Sprintf("198.51.100.%d", index)) {
-			t.Fatalf("global attempt %d rejected early", index)
+	for index := 0; index < LoginFailureLimit; index++ {
+		if !other.allowLogin("target", fmt.Sprintf("198.51.100.%d", index)) {
+			t.Fatalf("account attempt %d rejected early", index)
 		}
 	}
-	if other.allowLogin("rotated", "203.0.113.1") {
-		t.Fatal("global limit was bypassed by rotating both username and IP")
+	if other.allowLogin("target", "203.0.113.1") {
+		t.Fatal("account limit was bypassed by rotating the IP")
+	}
+	for index := 0; index < 3*maxLoginBuckets; index++ {
+		other.allowLogin(fmt.Sprintf("rotate%d", index), fmt.Sprintf("10.%d.%d.%d", index>>16&255, index>>8&255, index&255))
 	}
 	if len(other.attempts) > maxLoginBuckets {
 		t.Fatalf("attempt buckets = %d, max %d", len(other.attempts), maxLoginBuckets)
