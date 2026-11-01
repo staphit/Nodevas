@@ -99,7 +99,7 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "shortcutName": "Nodevas"
     },
     "dmg": {
