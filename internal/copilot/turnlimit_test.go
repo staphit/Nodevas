@@ -65,3 +65,37 @@ func TestServerKeyTurnsAreCappedPerAccount(t *testing.T) {
 	// Finished turns free their places.
 	h.start(h.turn(h.conversation(alice, ModeDefault), ModeDefault)).finish()
 }
+
+// A loopback server is the person's own PC and key: the cap that protects a
+// shared server's key never refuses their turns.
+func TestLoopbackServerTurnsAreNotCapped(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.ServerIsLocal = true })
+	entered := make(chan struct{}, 16)
+	release := make(chan struct{})
+	h.model.repeat = func(t *testing.T, ctx context.Context, req provider.Request, onDelta func(provider.Delta)) (provider.Response, error) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return provider.Response{}, ctx.Err()
+		}
+		return answer("done")(t, ctx, req, onDelta)
+	}
+
+	var turns []*running
+	for i := range maxServerTurnsPerAccount + 1 {
+		turn := h.start(h.turn(h.conversation(alice, ModeDefault), ModeDefault))
+		turns = append(turns, turn)
+		select {
+		case <-entered:
+		case err := <-turn.done:
+			t.Fatalf("loopback turn %d = %v, want it to reach the model", i+1, err)
+		case <-time.After(30 * time.Second):
+			t.Fatalf("loopback turn %d never reached the model", i+1)
+		}
+	}
+	close(release)
+	for _, turn := range turns {
+		turn.finish()
+	}
+}
