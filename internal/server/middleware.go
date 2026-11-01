@@ -259,6 +259,14 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 		c.Abort()
 		return
 	}
+	// The owner's account is gone; so is everything it lent out. The proxy
+	// checks the same in runnerProxyActor.
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		if _, _, found := accounts.CurrentActor(r.Context(), runner.OwnerID); !found {
+			httpx.Err(c, http.StatusUnauthorized, runners.ErrUnauthenticated)
+			return
+		}
+	}
 	actor := runners.ActorFor(runner)
 	ctx := runners.WithRunner(auth.WithActor(r.Context(), actor), runner)
 	c.Request = r.WithContext(ctx)
