@@ -17,7 +17,25 @@ func TestOneAccountCannotTakeEveryLiveDocument(t *testing.T) {
 	for index := range maxDocSessions {
 		hub.openDoc(attacker, fmt.Sprintf("bogus-%03d", index))
 	}
+	hub.mu.Lock()
+	share := hub.actorDocSessionsLocked("aaa")
+	hub.mu.Unlock()
+	if share > maxDocSessionsPerActor {
+		t.Fatalf("one account holds %d live documents, past its share of %d", share, maxDocSessionsPerActor)
+	}
 	assertOneAccountLeftRoom(t, hub)
+
+	// Past its share, the account still joins a document somebody else
+	// opened: that takes no slot.
+	joiner := docClientIn(hub, "aaa-other-window", "roomB")
+	joiner.actor = identity.Actor{ID: "aaa", Name: "aaa", Role: identity.RoleMember}
+	hub.openDoc(joiner, "real")
+	hub.mu.Lock()
+	joined := memberLocked(hub.docs["roomB"]["real"], joiner)
+	hub.mu.Unlock()
+	if !joined {
+		t.Fatal("an account past its share could not join somebody else's document")
+	}
 }
 
 // A closed document keeps its session for a moment, in case the closer was
