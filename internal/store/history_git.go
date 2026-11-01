@@ -62,6 +62,10 @@ type gitHistory struct {
 	timer    *time.Timer
 	closed   bool
 	inflight sync.WaitGroup
+	// committing counts batches of earlier versions taken from pending by a
+	// commit still writing them. With pending.segments, it is what a file's
+	// history does not list yet.
+	committing int
 
 	gitMu sync.Mutex
 	repo  *gitrepo.Repo
@@ -310,11 +314,42 @@ func (g *gitHistory) commitSegments(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	segments := g.takeSegments()
+	segments := g.takeSegmentsToCommit()
 	if len(segments) == 0 {
 		return nil
 	}
+	defer g.committed()
 	return g.commitSegmentsLocked(ctx, repo, g.titlesWithCommitted(ctx, repo), segments)
+}
+
+// takeSegmentsToCommit is takeSegments for a commit about to write them:
+// until it calls committed, they count as not listed yet.
+func (g *gitHistory) takeSegmentsToCommit() []gitSegment {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending == nil || len(g.pending.segments) == 0 {
+		return nil
+	}
+	segments := g.pending.segments
+	g.pending.segments = nil
+	g.committing++
+	return segments
+}
+
+// committed ends what takeSegmentsToCommit, or a takePending of a batch
+// with earlier versions, began.
+func (g *gitHistory) committed() {
+	g.mu.Lock()
+	g.committing--
+	g.mu.Unlock()
+}
+
+// unlisted reports whether earlier versions are waiting for their commit or
+// being written by one: a file's history would not show them yet.
+func (g *gitHistory) unlisted() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.committing > 0 || (g.pending != nil && len(g.pending.segments) > 0)
 }
 
 // hasSegments reports whether earlier versions wait in the batch.
@@ -395,6 +430,10 @@ func (g *gitHistory) commit(ctx context.Context, force bool) error {
 	// batch's earlier versions ahead of the work tree (importCopies).
 	repo, err := g.readyLocked(ctx)
 	pending := g.takePending()
+	if pending != nil && len(pending.segments) > 0 {
+		// Counted by takePending; requeued below, if at all, before this.
+		defer g.committed()
+	}
 	if errors.Is(err, errProjectGone) {
 		return nil
 	}
@@ -439,6 +478,9 @@ func (g *gitHistory) takePending() *gitPending {
 	defer g.mu.Unlock()
 	pending := g.pending
 	g.pending = nil
+	if pending != nil && len(pending.segments) > 0 {
+		g.committing++ // until the commit that took them calls committed
+	}
 	if g.timer != nil {
 		g.timer.Stop()
 		g.timer = nil
@@ -807,6 +849,17 @@ func (g *gitHistory) list(rel string) ([]HistoryVersion, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Earlier versions waiting for their background commit (a session's
+	// start, an outside edit) are committed first, or waited for if a commit
+	// is writing them: they are history already, and the panel lists them
+	// however busy the machine is. With none, the list reads at once and does
+	// not queue behind a commit. A failure is logged, as the background
+	// commit's is, and the list shows what is committed.
+	if g.unlisted() {
+		if err := g.commitSegments(ctx); err != nil {
+			log.Printf("history for %s: %v", g.s.root, err)
+		}
 	}
 	versions, err := repo.History(ctx, actual, historyPerFile)
 	if err != nil {
