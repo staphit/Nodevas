@@ -961,10 +961,18 @@ func (ix *indexView) rank(ctx context.Context, query string, limit int) ([]Ranke
 		}
 	}
 	// An exact title always comes first, even when the terms did not fetch it.
+	// Those come after the fetched ones, in graph order, so no more than limit
+	// of them can be shown, and no more are read: any number of nodes may
+	// share a title.
+	byTitle := 0
 	for _, id := range ix.order {
+		if limit > 0 && byTitle >= limit {
+			break
+		}
 		if byID[id] != nil || !ix.matchesTitle(id, trimmed) {
 			continue
 		}
+		byTitle++
 		stored, err := ix.store.document(ctx, ix.project, id)
 		if err != nil {
 			return nil, err

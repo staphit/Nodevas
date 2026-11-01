@@ -75,7 +75,7 @@ func explainRank(tb testing.TB, database *db.DB, root, query string, analyze boo
 	if analyze {
 		prefix = "EXPLAIN (ANALYZE, BUFFERS) "
 	}
-	rows, err := database.Reader().Query(prefix+rankedQuery, literals, project, project, project, 50)
+	rows, err := database.Reader().Query(prefix+rankedQuery, literals, project, project, project, 50, maxCandidateBytes)
 	if err != nil {
 		tb.Fatalf("explain: %v", err)
 	}

@@ -634,14 +634,21 @@ scored AS (
     GROUP BY tf.id
     ORDER BY score DESC, tf.id
     LIMIT ?
+),
+budget AS (
+    SELECT s.id, s.score,
+           sum(octet_length(d.meta) + octet_length(d.body)) OVER (ORDER BY s.score DESC, s.id) AS running
+    FROM scored s JOIN search_documents d ON d.id = s.id
 )
-SELECT d.node_id, d.title, d.meta, d.body, s.score
-FROM scored s JOIN search_documents d ON d.id = s.id
-ORDER BY s.score DESC, s.id`
+SELECT d.node_id, d.title, d.meta, d.body, b.score
+FROM budget b JOIN search_documents d ON d.id = b.id
+WHERE b.running <= ?
+ORDER BY b.score DESC, b.id`
 
 // rankedCandidates returns the project's documents holding any of the tokens,
 // best BM25 first, a few times more than limit so the tiers above BM25 (an
-// exact title, the whole phrase) have something to reorder.
+// exact title, the whole phrase) have something to reorder. Like a plain
+// search's candidates they stop at maxCandidateBytes of text, best first.
 func (s *docStore) rankedCandidates(ctx context.Context, project string, tokens []string, limit int) ([]*rankedDoc, error) {
 	if len(tokens) > maxRankTokens {
 		tokens = tokens[:maxRankTokens]
@@ -654,7 +661,7 @@ func (s *docStore) rankedCandidates(ctx context.Context, project string, tokens 
 		literals[i] = tsqueryLiteral(token)
 	}
 	fetch := min(max(limit*3, 50), 300)
-	rows, err := s.reader().QueryContext(ctx, rankedQuery, literals, project, project, project, fetch)
+	rows, err := s.reader().QueryContext(ctx, rankedQuery, literals, project, project, project, fetch, maxCandidateBytes)
 	if err != nil {
 		return nil, fmt.Errorf("ranked search: %w", err)
 	}
