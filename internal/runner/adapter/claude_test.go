@@ -281,7 +281,8 @@ func TestClaudeReadOnlyKinds(t *testing.T) {
 			t.Fatalf("kind %q: args %q", kind, cmd.Args)
 		}
 		if readOnly {
-			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell" || cmd.Args[i+2] != "--allowedTools" ||
+			if cmd.Args[i+1] != "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell,Monitor,WebFetch,WebSearch" ||
+				cmd.Args[i+2] != "--allowedTools" ||
 				cmd.Args[i+3] != NodevasMCPTools || cmd.Args[i-2] != "--setting-sources" || cmd.Args[i-1] != "user" {
 				t.Fatalf("kind %q: args %q", kind, cmd.Args)
 			}

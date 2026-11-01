@@ -720,8 +720,12 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 // reviewPermission is how freely a review's agent may act: read only where
 // the CLI has such a mode (Codex's read-only sandbox; Gemini CLI's default
 // approval mode, under which an edit needs an approval nobody can give
-// headless; OpenCode with edits and the shell denied; agy's plan mode), the
-// owner's setting otherwise. The prompt forbids edits either way, and the
+// headless; OpenCode with edits and the shell denied; agy's plan mode). Claude
+// Code keeps the owner's mode, with its writing, shell and web tools denied
+// (adapter.ClaudeReadOnlyDeny), except a mode that skips its prompts
+// (bypassPermissions, auto): that would leave reads anywhere on this machine
+// open, so the run gets acceptEdits instead, where such a read needs a yes
+// nobody gives headless. The prompt forbids edits either way, and the
 // review's worktree is thrown away after.
 func reviewPermission(cfg *Config, kind string) (mode, text string) {
 	switch kind {
@@ -733,6 +737,16 @@ func reviewPermission(cfg *Config, kind string) (mode, text string) {
 		return "read-only", "permission read-only for a review"
 	case "antigravity":
 		return "plan", "mode plan for a review"
+	case "claude":
+		mode = cfg.ClaudePermissionMode()
+		if mode == "bypassPermissions" || mode == "auto" {
+			mode = adapter.DefaultClaudePermissionMode
+		}
+		text = "permission mode " + mode + " for a review"
+		if cfg.PermissionRelay && adapter.PermissionRelayApplies(kind, mode, false) {
+			text += relayedText
+		}
+		return mode, text
 	}
 	return cfg.PermissionModeFor(kind), permissionText(cfg, kind)
 }

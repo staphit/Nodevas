@@ -32,8 +32,10 @@ const DefaultClaudePermissionMode = "acceptEdits"
 
 // ClaudeReadOnlyDeny is the --disallowedTools list of a review or plan run:
 // every built-in tool that writes a file or runs a command (PowerShell is
-// Claude Code's shell tool on Windows). Subagents inherit the deny.
-const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
+// Claude Code's shell tool on Windows, Monitor runs one in the background),
+// and the web: a prompt-injected reviewer could otherwise send what it read
+// to any URL. Subagents inherit the deny.
+const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell,Monitor,WebFetch,WebSearch"
 
 // NodevasMCPTools is the --allowedTools rule for every tool of the run's
 // nodevas MCP server.
