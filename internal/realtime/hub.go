@@ -53,6 +53,9 @@ type Hub struct {
 	// buckets bound sidecar encodes/fsyncs even for one-byte snapshots.
 	snapshotActorCadence map[string]*snapshotCadence
 	snapshotDocCadence   map[docPersistenceKey]*snapshotCadence
+	// relayBudgets is each account's allowance for the frames relayed to its
+	// whole room (cursors, drag ghosts), shared by all of its connections.
+	relayBudgets map[string]*relayBudget
 	// Large sidecar encoding duplicates the immutable strings into one output
 	// buffer. Serializing those copies prevents several 24 MiB documents from
 	// multiplying process memory at the same instant.
@@ -139,6 +142,21 @@ type snapshotCadence struct {
 	at     time.Time
 }
 
+// relayBudget is a frame count and a byte volume, refilled from one clock.
+type relayBudget struct {
+	tokens float64
+	bytes  float64
+	at     time.Time
+}
+
+func (budget *relayBudget) refill(now time.Time) {
+	if elapsed := now.Sub(budget.at).Seconds(); elapsed > 0 {
+		budget.tokens = min(float64(wsRelayBurst), budget.tokens+elapsed*wsRelayPerSecond)
+		budget.bytes = min(float64(wsRelayByteBurst), budget.bytes+elapsed*wsRelayBytesPerSec)
+		budget.at = now
+	}
+}
+
 type docPersistence struct {
 	mu   sync.Mutex
 	refs int
@@ -169,6 +187,7 @@ func NewHub() *Hub {
 		docEncode:            make(chan struct{}, 1),
 		snapshotActorCadence: map[string]*snapshotCadence{},
 		snapshotDocCadence:   map[docPersistenceKey]*snapshotCadence{},
+		relayBudgets:         map[string]*relayBudget{},
 		limits:               DefaultConnectionLimits(),
 	}
 }
@@ -263,6 +282,19 @@ const (
 	maxSnapshotActorCadences = 1024
 	maxAwarenessBytes        = 16 << 10
 	maxDragIDs               = 200
+
+	// Cursors and drag ghosts are relayed to the whole room, so the hub sends
+	// what one account streams once per reader. The account's connections
+	// share one allowance for them: more connections buy no bigger share of
+	// the uplink. Twice one connection's frames, because a second window still
+	// reports its caret; one connection's bytes, because only the window under
+	// the pointer sends anything large. A frame past it is dropped rather than
+	// refused, since the next one supersedes it anyway.
+	wsRelayBurst       = 2 * wsPayloadBurst
+	wsRelayPerSecond   = 2 * wsPayloadPerSecond
+	wsRelayByteBurst   = wsPayloadByteBurst
+	wsRelayBytesPerSec = wsPayloadBytesPerSec
+	maxRelayBudgets    = 1024
 	// One frame's ceiling. Big enough for an awareness update carrying a
 	// selection in a long document, small enough that 128 connections cannot
 	// each park a megabyte in the read buffer.
@@ -491,19 +523,68 @@ func (h *Hub) BroadcastReaders(room, evType, id string) {
 // The sender is left out rather than filtering on `From` in the browser: it
 // already has what it sent, and the round trip is the one thing that would
 // make a live cursor lag behind the pointer drawing it.
+//
+// Every frame here is superseded by the sender's next one, so neither limit
+// below ever costs anybody a connection: a frame past the sender account's
+// allowance goes nowhere, and a reader that is behind skips it (offer).
 func (h *Hub) relay(from *wsClient, event Event) {
 	from.mu.Lock()
 	room := from.room
+	actorKey := actorConnectionKey(from.actor)
 	from.mu.Unlock()
 	event.From = from.id
-	h.send(event, func(client *wsClient) bool {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("ws marshal: %v", err)
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.allowRelayLocked(actorKey, time.Now(), len(payload)) {
+		return
+	}
+	for client := range h.conns {
 		if client == from {
-			return false
+			continue
 		}
 		client.mu.Lock()
-		defer client.mu.Unlock()
-		return client.room == room
-	})
+		inRoom := client.room == room
+		client.mu.Unlock()
+		if inRoom {
+			client.offer(clientOutbound{payload: payload})
+		}
+	}
+}
+
+// allowRelayLocked charges one relayed frame of size bytes to its sender's
+// account. Caller holds h.mu.
+func (h *Hub) allowRelayLocked(actorKey string, now time.Time, size int) bool {
+	budget := h.relayBudgets[actorKey]
+	if budget == nil {
+		if len(h.relayBudgets) >= maxRelayBudgets {
+			// A full allowance is what a new entry starts with, so forgetting
+			// one loses nothing. Pruned only at the bound, which keeps the
+			// common path constant-time and the map bounded.
+			for key, other := range h.relayBudgets {
+				other.refill(now)
+				if other.tokens >= wsRelayBurst && other.bytes >= wsRelayByteBurst {
+					delete(h.relayBudgets, key)
+				}
+			}
+			if len(h.relayBudgets) >= maxRelayBudgets {
+				return false
+			}
+		}
+		budget = &relayBudget{tokens: wsRelayBurst, bytes: wsRelayByteBurst, at: now}
+		h.relayBudgets[actorKey] = budget
+	}
+	budget.refill(now)
+	if budget.tokens < 1 || budget.bytes < float64(size) {
+		return false
+	}
+	budget.tokens--
+	budget.bytes -= float64(size)
+	return true
 }
 
 // BroadcastOps tells a room which ops just landed, so a client can apply them
@@ -675,6 +756,23 @@ func (client *wsClient) enqueue(out clientOutbound) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// offer queues a frame that the sender's next one supersedes. Unlike a full
+// enqueue, which costs the connection, a connection already half a queue
+// behind just skips the frame: it misses something about to be stale, keeps
+// its locks and its documents, and the other half of its queue stays free for
+// the events it cannot miss.
+func (client *wsClient) offer(out clientOutbound) {
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
+		return
+	}
+	select {
+	case client.outbound <- out:
+	default:
 	}
 }
 
