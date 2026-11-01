@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/lockfile"
 )
 
 // Kept worktrees: a run whose commit left agent config out keeps its
@@ -19,9 +21,19 @@ import (
 // recorded in <dataDir>/kept-worktrees.json, so `nodevas runner status` can
 // show them and `nodevas runner prune-kept` can remove, when a person asks,
 // the ones that hold nothing else. Nothing removes them on its own.
+//
+// The record is read and written under kept-worktrees.lock, an operating-
+// system lock, as well as keptMu: a runner and `prune-kept`, or two runners
+// sharing a data directory, are separate processes, and an unlocked
+// read-modify-write in one could drop an entry the other just wrote.
 
 const (
-	keptFile = "kept-worktrees.json"
+	keptFile     = "kept-worktrees.json"
+	keptLockFile = "kept-worktrees.lock"
+	// keptLockWait bounds a wait for the record's lock. It is held only for
+	// a read and a write of a small file, and the system drops it when its
+	// holder exits, so this is reached only if a holder hangs.
+	keptLockWait = time.Minute
 	// maxKept bounds the record; past it the oldest entries are forgotten
 	// (their worktrees stay, only unlisted).
 	maxKept = 1000
@@ -29,7 +41,8 @@ const (
 	maxKeptReasonPaths = 5
 )
 
-// keptMu serialises this process's reads and writes of the record.
+// keptMu serialises this process's reads and writes of the record; the
+// lock file serialises them across processes.
 var keptMu sync.Mutex
 
 // Test seams: keptAfterLoad runs once RecordKept has read the record, before
@@ -71,6 +84,41 @@ type PruneReport struct {
 
 func keptPath(dataDir string) string { return filepath.Join(dataDir, keptFile) }
 
+// lockKept takes the record for this process and every other one, waiting
+// (never failing for being busy) until it is free or ctx is done.
+func lockKept(ctx context.Context, dataDir string) (unlock func(), err error) {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, keptLockWait)
+	defer cancel()
+	keptMu.Lock()
+	delay, waiting := 2*time.Millisecond, false
+	for {
+		lock, err := lockfile.Acquire(filepath.Join(dataDir, keptLockFile))
+		if err == nil {
+			return func() { _ = lock.Release(); keptMu.Unlock() }, nil
+		}
+		if !errors.Is(err, lockfile.ErrLocked) {
+			keptMu.Unlock()
+			return nil, err
+		}
+		if !waiting && keptLockWaiting != nil {
+			keptLockWaiting()
+		}
+		waiting = true
+		select {
+		case <-ctx.Done():
+			keptMu.Unlock()
+			return nil, fmt.Errorf("waiting for %s: %w", keptLockFile, context.Cause(ctx))
+		case <-time.After(delay):
+		}
+		if delay < 100*time.Millisecond {
+			delay *= 2
+		}
+	}
+}
+
 func loadKept(dataDir string) ([]KeptWorktree, error) {
 	raw, err := os.ReadFile(keptPath(dataDir))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -93,8 +141,13 @@ func RecordKept(ctx context.Context, dataDir, repoPath string, wt Worktree, with
 	entry := KeptWorktree{RunID: filepath.Base(wt.Path), Repo: repoPath, Path: wt.Path, Branch: wt.Branch, Head: head,
 		GitFile: wt.GitFile, GitDirs: wt.GitDirs, Withheld: slices.Clone(withheld),
 		KeptAt: time.Now().UTC().Format(time.RFC3339)}
-	keptMu.Lock()
-	defer keptMu.Unlock()
+	// The worktree is kept whatever becomes of the run, so its record is
+	// written even if the run is being cancelled.
+	unlock, err := lockKept(context.WithoutCancel(ctx), dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	entries, err := loadKept(dataDir)
 	if err != nil {
 		return err
@@ -113,9 +166,17 @@ func RecordKept(ctx context.Context, dataDir, repoPath string, wt Worktree, with
 // KeptWorktrees lists the recorded kept worktrees still on disk, oldest
 // first.
 func KeptWorktrees(dataDir string) ([]KeptWorktree, error) {
-	keptMu.Lock()
+	if _, err := os.Lstat(keptPath(dataDir)); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	// Under the lock too: on Windows a writer cannot replace the file while
+	// it is open here.
+	unlock, err := lockKept(context.Background(), dataDir)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := loadKept(dataDir)
-	keptMu.Unlock()
+	unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -136,9 +197,17 @@ func KeptWorktrees(dataDir string) ([]KeptWorktree, error) {
 // nothing is removed; Removed is what would be. Records of worktrees already
 // gone are dropped.
 func PruneKept(ctx context.Context, dataDir string, dryRun bool) (PruneReport, error) {
-	keptMu.Lock()
-	defer keptMu.Unlock()
+	if _, err := os.Lstat(keptPath(dataDir)); errors.Is(err, fs.ErrNotExist) {
+		return PruneReport{}, nil
+	}
+	// The lock is not held while worktrees are checked and removed, so a
+	// runner finishing a run meanwhile is not kept waiting on it.
+	unlock, err := lockKept(ctx, dataDir)
+	if err != nil {
+		return PruneReport{}, err
+	}
 	entries, err := loadKept(dataDir)
+	unlock()
 	if err != nil {
 		return PruneReport{}, err
 	}
@@ -168,6 +237,11 @@ func PruneKept(ctx context.Context, dataDir string, dryRun bool) (PruneReport, e
 		return report, nil
 	}
 	// Read again: a running runner may have kept another since.
+	unlock, err = lockKept(context.WithoutCancel(ctx), dataDir)
+	if err != nil {
+		return report, err
+	}
+	defer unlock()
 	entries, err = loadKept(dataDir)
 	if err != nil {
 		return report, err
