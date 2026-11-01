@@ -12,7 +12,7 @@ import (
 // emphasis, code, links and images. Anything it does not recognise survives
 // as literal text rather than being dropped.
 func Parse(source string) *Doc {
-	return &Doc{Blocks: parseBlocks(splitLines(source))}
+	return &Doc{Blocks: parseBlocks(splitLines(source), 0)}
 }
 
 // maxNesting bounds how deep quotes, lists and inline links or emphasis nest.
@@ -84,7 +84,15 @@ func stripQuote(line string) string {
 	return strings.TrimPrefix(trimmed, " ")
 }
 
-func parseBlocks(lines []string) []Block {
+// parseBlocks parses lines nested depth quotes or list items deep.
+func parseBlocks(lines []string, depth int) []Block {
+	if depth >= maxNesting {
+		text := strings.Join(lines, "\n")
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []Block{&Paragraph{Inlines: []Inline{&Text{Value: text}}}}
+	}
 	var blocks []Block
 	for i := 0; i < len(lines); {
 		line := lines[i]
@@ -110,13 +118,13 @@ func parseBlocks(lines []string) []Block {
 			continue
 		}
 		if isQuote(line) {
-			block, next := parseQuote(lines, i)
+			block, next := parseQuote(lines, i, depth)
 			blocks = append(blocks, block)
 			i = next
 			continue
 		}
 		if itemAt(line) != nil {
-			block, next := parseList(lines, i)
+			block, next := parseList(lines, i, depth)
 			blocks = append(blocks, block)
 			i = next
 			continue
@@ -179,7 +187,7 @@ func parseFence(lines []string, start int, m []string) (Block, int) {
 	return &CodeBlock{Lang: lang, Code: strings.Join(body, "\n")}, i
 }
 
-func parseQuote(lines []string, start int) (Block, int) {
+func parseQuote(lines []string, start, depth int) (Block, int) {
 	var inner []string
 	i := start
 	for i < len(lines) {
@@ -196,7 +204,7 @@ func parseQuote(lines []string, start int) (Block, int) {
 		inner = append(inner, strings.TrimLeft(line, " "))
 		i++
 	}
-	return &BlockQuote{Blocks: parseBlocks(inner)}, i
+	return &BlockQuote{Blocks: parseBlocks(inner, depth+1)}, i
 }
 
 func parseParagraph(lines []string, start int) (Block, int) {
@@ -275,7 +283,7 @@ func itemAt(line string) *itemMark {
 	return nil
 }
 
-func parseList(lines []string, start int) (Block, int) {
+func parseList(lines []string, start, depth int) (Block, int) {
 	first := itemAt(lines[start])
 	list := &List{Ordered: first.ordered, Start: first.number}
 	if list.Ordered && list.Start == 0 {
@@ -334,7 +342,7 @@ func parseList(lines []string, start int) (Block, int) {
 			item.Checked = strings.EqualFold(m[1], "x")
 			itemLines[0] = m[2]
 		}
-		item.Blocks = parseBlocks(itemLines)
+		item.Blocks = parseBlocks(itemLines, depth+1)
 		list.Items = append(list.Items, item)
 	}
 	return list, i
@@ -478,6 +486,17 @@ func findClosing(source string, from int, delim string) int {
 }
 
 func parseInline(source string) []Inline {
+	return parseInlines(source, 0)
+}
+
+// parseInlines parses source nested depth links or emphasis deep.
+func parseInlines(source string, depth int) []Inline {
+	if depth >= maxNesting {
+		if source == "" {
+			return nil
+		}
+		return []Inline{&Text{Value: source}}
+	}
 	var out []Inline
 	var buf strings.Builder
 	flush := func() {
@@ -527,7 +546,7 @@ func parseInline(source string) []Inline {
 				continue
 			}
 			flush()
-			out = append(out, &Image{URL: dest, Alt: PlainText(parseInline(label)), Title: title})
+			out = append(out, &Image{URL: dest, Alt: PlainText(parseInlines(label, depth+1)), Title: title})
 			i = end
 		case c == '[':
 			label, dest, title, end, ok := parseLinkish(source, i)
@@ -537,7 +556,7 @@ func parseInline(source string) []Inline {
 				continue
 			}
 			flush()
-			out = append(out, &Link{URL: dest, Title: title, Kids: parseInline(label)})
+			out = append(out, &Link{URL: dest, Title: title, Kids: parseInlines(label, depth+1)})
 			i = end
 		case c == '<':
 			inline, end := parseAngle(source, i)
@@ -559,10 +578,10 @@ func parseInline(source string) []Inline {
 				continue
 			}
 			flush()
-			out = append(out, &Strike{Kids: parseInline(source[i+2 : end])})
+			out = append(out, &Strike{Kids: parseInlines(source[i+2:end], depth+1)})
 			i = end + 2
 		case c == '*' || c == '_':
-			node, end := parseEmphasis(source, i)
+			node, end := parseEmphasis(source, i, depth)
 			if node == nil {
 				buf.WriteByte(c)
 				i++
@@ -580,7 +599,7 @@ func parseInline(source string) []Inline {
 	return out
 }
 
-func parseEmphasis(source string, i int) (Inline, int) {
+func parseEmphasis(source string, i, depth int) (Inline, int) {
 	c := source[i]
 	// `_` inside a word (snake_case) is literal.
 	if c == '_' && i > 0 && isWordByte(source[i-1]) {
@@ -593,7 +612,7 @@ func parseEmphasis(source string, i int) (Inline, int) {
 			if c == '_' && end+2 < len(source) && isWordByte(source[end+2]) {
 				return nil, i
 			}
-			return &Strong{Kids: parseInline(source[i+2 : end])}, end + 2
+			return &Strong{Kids: parseInlines(source[i+2:end], depth+1)}, end + 2
 		}
 	}
 	if i+1 < len(source) && source[i+1] == ' ' {
@@ -603,7 +622,7 @@ func parseEmphasis(source string, i int) (Inline, int) {
 		if c == '_' && end+1 < len(source) && isWordByte(source[end+1]) {
 			return nil, i
 		}
-		return &Emphasis{Kids: parseInline(source[i+1 : end])}, end + 1
+		return &Emphasis{Kids: parseInlines(source[i+1:end], depth+1)}, end + 1
 	}
 	return nil, i
 }
