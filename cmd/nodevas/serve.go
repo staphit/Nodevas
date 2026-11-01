@@ -348,7 +348,14 @@ func serve(args []string) {
 		configPath = filepath.Join(projectDefault, config.DefaultFileName)
 	}
 
-	serveConfig, err := config.LoadServeConfig(configPath, !configSet)
+	// A file named on purpose is the operator's; the one found in the
+	// workspace is workspace content, and may not say everything.
+	var serveConfig config.ServeConfig
+	if configSet {
+		serveConfig, err = config.LoadServeConfig(configPath, false)
+	} else {
+		serveConfig, err = config.LoadWorkspaceServeConfig(configPath)
+	}
 	if err != nil {
 		fatalf("config: %v", err)
 	}

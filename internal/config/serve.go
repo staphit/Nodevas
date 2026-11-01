@@ -259,6 +259,13 @@ func LoadServeConfig(path string, optional bool) (ServeConfig, error) {
 	return cfg, nil
 }
 
+// LoadWorkspaceServeConfig loads the nodevas.yaml serve reads without being
+// told to: the workspace's own, or the working directory's without
+// --project. A missing file is an empty configuration.
+func LoadWorkspaceServeConfig(path string) (ServeConfig, error) {
+	return LoadServeConfig(path, true)
+}
+
 // ApplyEnvironment applies the documented NODEVAS_SERVE_* overrides. The
 // lookup function is injected so parsing stays deterministic and testable.
 func ApplyEnvironment(cfg *ServeConfig, lookup func(string) (string, bool)) error {

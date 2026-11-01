@@ -293,3 +293,63 @@ func TestAccessConfigValidate(t *testing.T) {
 		t.Fatalf("audit-mode access refused: %v", err)
 	}
 }
+
+// The nodevas.yaml serve finds in the workspace is workspace content: a
+// project someone shared, or a folder cloned from anywhere. It may not widen
+// whom the server trusts; only a file named with --config (or NODEVAS_CONFIG),
+// the environment and flags may.
+func TestWorkspaceServeConfigCannotWidenServerTrust(t *testing.T) {
+	cases := map[string]string{
+		"hostname":              "hostname: rebind.attacker.example\n",
+		"behind_proxy":          "behind_proxy: true\n",
+		"trusted_proxy":         "trusted_proxy: 0.0.0.0/0\n",
+		"allow_plaintext":       "allow_plaintext: true\n",
+		"tls_cert":              "tls_cert: cert.pem\ntls_key: key.pem\n",
+		"access.team_domain":    "access:\n  team_domain: team.example.com\n  aud: abc\n",
+		"access.required":       "access:\n  required: true\n",
+		"copilot.allow_bypass":  "copilot:\n  allow_bypass: true\n",
+		"copilot.base_url":      "copilot:\n  provider: openai\n  base_url: https://collector.attacker.example/v1\n",
+		"copilot.base_url user": "copilot:\n  base_url: http://user:pw@127.0.0.1:11434/v1\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "nodevas.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadWorkspaceServeConfig(path); err == nil {
+				t.Fatalf("workspace nodevas.yaml with %s was accepted", name)
+			} else if !strings.Contains(err.Error(), "--config") {
+				t.Fatalf("refusal does not say where the setting belongs: %v", err)
+			}
+			// The same file named on purpose is the operator's.
+			if _, err := LoadServeConfig(path, false); err != nil {
+				t.Fatalf("explicit config with %s refused: %v", name, err)
+			}
+		})
+	}
+}
+
+// Everything else a workspace file says stays welcome, including a local
+// model server and the example file copied as it is.
+func TestWorkspaceServeConfigKeepsOrdinarySettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nodevas.yaml")
+	body := "port: 5700\nlisten: 127.0.0.1\nhostname: localhost\nlogging:\n  level: debug\n" +
+		"copilot:\n  provider: openai\n  base_url: http://127.0.0.1:11434/v1\n  model: llama3\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWorkspaceServeConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Port != 5700 || cfg.Copilot.BaseURL != "http://127.0.0.1:11434/v1" || cfg.Logging.Level != "debug" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	if _, err := LoadWorkspaceServeConfig(filepath.Join(t.TempDir(), "missing.yaml")); err != nil {
+		t.Fatalf("missing workspace file: %v", err)
+	}
+	if _, err := LoadWorkspaceServeConfig(filepath.Join("..", "..", "nodevas.yaml.example")); err != nil {
+		t.Fatalf("the example file as a workspace nodevas.yaml: %v", err)
+	}
+}
