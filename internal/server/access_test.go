@@ -235,3 +235,48 @@ func TestAccessMiddlewareAcceptsServiceToken(t *testing.T) {
 		t.Fatalf("access identity = %q", seen)
 	}
 }
+
+// A same-host proxy that sets only X-Forwarded-Proto, or names itself in
+// Via, or forwards the Host, is still a proxy: what it relays is somebody
+// else's request, and must show Access's token.
+func TestAccessExemptionNeedsNoForwardingHeaderAtAll(t *testing.T) {
+	f := newAccessFixture(t)
+	r := accessRouter(f, true, nil)
+	for header, value := range map[string]string{
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "hub.example.test",
+		"X-Forwarded-Port":  "443",
+		"Via":               "1.1 nginx",
+		"True-Client-Ip":    "203.0.113.7",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+		req.RemoteAddr = "127.0.0.1:50000"
+		req.Header.Set(header, value)
+		if code := serveAccess(r, req); code != http.StatusForbidden {
+			t.Errorf("loopback with %s and no Access token = %d, want 403", header, code)
+		}
+	}
+}
+
+// On a hub with accounts, a proxy beside it that adds no forwarding header
+// at all (nginx's defaults, ssh -L, socat) looks like this machine. Only
+// the health probe and the metrics scraper are exempt from Access there;
+// everything else must come through the edge.
+func TestRemoteHubExemptsOnlyHealthAndMetricsFromAccess(t *testing.T) {
+	f := newAccessFixture(t)
+	server, _, _ := accountServerForTest(t)
+	server.UseAccess(f.v, true)
+	handler := server.Handler()
+	for path, want := range map[string]int{
+		"/api/auth/status": http.StatusForbidden,
+		"/":                http.StatusForbidden,
+		"/api/healthz":     http.StatusOK,
+		"/api/metrics":     http.StatusOK,
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = "127.0.0.1:50000"
+		if code := serveAccess(handler, req); code != want {
+			t.Errorf("headerless loopback GET %s = %d, want %d", path, code, want)
+		}
+	}
+}
