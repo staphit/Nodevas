@@ -407,7 +407,13 @@ func (s *Service) deliver(ctx context.Context, f Followup) {
 	// It reads the goal and, for a revision, writes the board as the owner,
 	// who may have been removed from the project (or made a viewer) since
 	// the run started.
-	if may, err := s.mayWork(ctx, run.Project, current.AccountID); err != nil || !may {
+	may, err := s.mayWork(ctx, run.Project, current.AccountID)
+	if err != nil {
+		// Could not tell: it stays pending, for the next look.
+		slog.Warn("copilot: follow-up's owner access", slog.String("followup", current.ID), slog.Any("error", err))
+		return
+	}
+	if !may {
 		slog.Info("copilot: follow-up's owner can no longer change the project; dropped",
 			slog.String("followup", current.ID), slog.String("run", run.ID))
 		_ = s.store.endFollowup(ctx, current.ID, followupDropped)

@@ -354,7 +354,13 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 		return nil
 	}
 	before := snapshot(w)
-	if may, err := o.mayWork(ctx, w.rec); err != nil || !may {
+	may, err := o.mayWork(ctx, w.rec)
+	if err != nil {
+		// It could not tell (the account store failing for a moment): this
+		// pass does nothing, and the next one asks again.
+		return err
+	}
+	if !may {
 		// It works as its creator, who may no longer change the project:
 		// nothing is dispatched, merged or written on the board in their
 		// name. It waits, paused, until they may again or someone cancels it.
@@ -1284,7 +1290,9 @@ func (o *Orchestrator) Resume(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if may, err := o.mayWork(ctx, rec); err != nil || !may {
+	if may, err := o.mayWork(ctx, rec); err != nil {
+		return err
+	} else if !may {
 		return errCreatorLostAccess()
 	}
 	return o.setStatus(ctx, id, runnerwire.AutopilotPaused, runnerwire.AutopilotRunning, "")
@@ -1351,6 +1359,9 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 	}
 	if may, err := o.mayWork(ctx, w.rec); err != nil || !may {
 		unlock()
+		if err != nil {
+			return err
+		}
 		return errCreatorLostAccess()
 	}
 	if w.rec.Status != runnerwire.AutopilotPaused {
