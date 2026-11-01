@@ -37,10 +37,8 @@ func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]
 	ctx, cancel := context.WithTimeout(ctx, openCodeConfigTimeout)
 	defer cancel()
 	if readOnly {
-		// One directory for every run: OpenCode 2 records each directory it
-		// is asked about as a project of the owner's.
-		empty := filepath.Join(os.TempDir(), "nodevas-opencode-empty")
-		if err := os.MkdirAll(empty, 0o700); err != nil {
+		empty, err := openCodeEmptyDir()
+		if err != nil {
 			return nil, err
 		}
 		dir = empty
@@ -64,6 +62,17 @@ func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]
 		return nil, fmt.Errorf("opencode debug config: %w", err)
 	}
 	return names, nil
+}
+
+// openCodeEmptyDir is where a read-only run asks OpenCode for its config.
+// One directory for every run: OpenCode 2 records each directory it is asked
+// about as a project of the owner's.
+func openCodeEmptyDir() (string, error) {
+	empty := filepath.Join(os.TempDir(), "nodevas-opencode-empty")
+	if err := os.MkdirAll(empty, 0o700); err != nil {
+		return "", err
+	}
+	return empty, nil
 }
 
 // openCodeServerNames reads `opencode debug config`'s output, either shape.
