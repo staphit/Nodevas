@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// clockReadDelay holds back every clock read the watcher makes.
+const clockReadDelay = 20 * time.Millisecond
+
 // stopsAfter feeds signals to watchStopSignals at the given clock times and
 // reports whether it returned (serve stops) and what it printed.
 func stopsAfter(t *testing.T, confirm bool, signals []os.Signal, at []time.Duration) (bool, string) {
@@ -25,7 +28,13 @@ func stopsAfter(t *testing.T, confirm bool, signals []os.Signal, at []time.Durat
 	defer cancel()
 	go func() {
 		defer close(done)
-		watchStopSignals(ctx, ch, confirm, 3*time.Second, func() time.Time { return time.Unix(0, clock.Load()) }, &out)
+		watchStopSignals(ctx, ch, confirm, 3*time.Second, func() time.Time {
+			// The watcher reads the clock some time after it took the
+			// signal; a busy machine can make that late. The clock must
+			// still say the time that signal was sent at.
+			time.Sleep(clockReadDelay)
+			return time.Unix(0, clock.Load())
+		}, &out)
 	}()
 	for i, sig := range signals {
 		clock.Store(int64(at[i]))
