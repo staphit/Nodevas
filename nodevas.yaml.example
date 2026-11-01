@@ -3,6 +3,11 @@
 # are applied between the file and command-line flags.
 # Keep SMTP passwords outside YAML. Use NODEVAS_SMTP_PASSWORD or the
 # file-backed NODEVAS_SMTP_PASSWORD_FILE variable.
+# The workspace's own nodevas.yaml may not change whom the server trusts:
+# hostname (beyond localhost), behind_proxy, trusted_proxy, tls_*,
+# allow_plaintext, access, copilot.allow_bypass: true and a copilot base_url
+# off this machine are refused there. Set those in a file given with --config
+# (or NODEVAS_CONFIG), the environment, or flags.
 
 listen: 127.0.0.1
 port: 5666
