@@ -58,3 +58,7 @@ func mayContain(s string) bool {
 	}
 	return false
 }
+
+// Output is String for a run's output (events, summary, errors, PR bodies,
+// review comments).
+func Output(s string) string { return String(s) }

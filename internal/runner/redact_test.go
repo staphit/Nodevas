@@ -29,3 +29,24 @@ func TestRunOutputIsRedacted(t *testing.T) {
 		t.Fatalf("commit message: %q", msg)
 	}
 }
+
+// An agent that printed the owner's environment: the values of its secret
+// variables and a password in a URL stay on this machine.
+func TestRunOutputRedactsEnvironmentDumps(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	j := newJobs(ctx, &Client{Config: &Config{}})
+	dump := "GEMINI_API_KEY=AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUvW\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG\n" +
+		"DATABASE_URL=postgres://u:s3cr3t@db/x"
+	r := &run{job: testJob("run-env", "ok:")}
+	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventToolResult, Tool: "Bash", Input: "env", Text: dump})
+	j.finishWith(r, runnerwire.RunResult{Status: runnerwire.RunFailed, Summary: dump, Error: dump}, nil, nil)
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	all := r.events[0].Text + r.finish.Summary + r.finish.Error
+	for _, secret := range []string{"AIzaSy", "wJalrXUtnFEMI", "s3cr3t"} {
+		if strings.Contains(all, secret) {
+			t.Errorf("%q left the machine: %q", secret, all)
+		}
+	}
+}
