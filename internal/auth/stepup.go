@@ -87,11 +87,11 @@ func (a *SessionAuth) sessionLocked(r *http.Request) (string, *Session, bool) {
 	if r == nil {
 		return "", nil, false
 	}
-	cookie, err := r.Cookie(SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := SessionToken(r)
+	if !ok {
 		return "", nil, false
 	}
-	key := sessionKey(cookie.Value)
+	key := sessionKey(token)
 	session, ok := a.sessions[key]
 	if !ok || time.Now().After(session.expires) {
 		return "", nil, false

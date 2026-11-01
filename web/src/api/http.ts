@@ -109,9 +109,11 @@ export function notifyUnauthorized(): void {
 
 /** Reads the CSRF cookie the login response set. It is deliberately not
  * HttpOnly: the check is that its value comes back in a header, which a
- * cross-site page cannot set. */
+ * cross-site page cannot set. Over TLS the hub names it __Host-nodevas_csrf,
+ * which no sibling subdomain can set, and that one wins over a plain one. */
 export function csrfToken(cookie: string = document.cookie): string {
-  const match = /(?:^|;\s*)nodevas_csrf=([^;]*)/.exec(cookie);
+  const match =
+    /(?:^|;\s*)__Host-nodevas_csrf=([^;]*)/.exec(cookie) ?? /(?:^|;\s*)nodevas_csrf=([^;]*)/.exec(cookie);
   return match ? decodeURIComponent(match[1]) : "";
 }
 

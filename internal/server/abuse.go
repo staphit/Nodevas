@@ -834,8 +834,8 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 func sourceOnlyPreAuth(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/api/auth/status":
-		cookie, err := r.Cookie(auth.SessionCookieName)
-		return err == nil && cookie.Value != ""
+		_, ok := auth.SessionToken(r)
+		return ok
 	case healthzPath:
 		return (r.Method == http.MethodGet || r.Method == http.MethodHead) && auth.DirectLoopback(r)
 	}
@@ -881,8 +881,8 @@ func (s *Server) claimsIdentity(r *http.Request) bool {
 	if _, local := s.auth.(auth.LocalOnly); local && auth.DirectLoopback(r) {
 		return true
 	}
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	return err == nil && cookie.Value != ""
+	_, ok := auth.SessionToken(r)
+	return ok
 }
 
 // forwardingNotes is the server's untrusted-forwarder warning (forwarding.go).

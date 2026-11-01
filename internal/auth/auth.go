@@ -172,17 +172,74 @@ var SignInPaths = map[string]bool{
 const (
 	CSRFCookieName = "nodevas_csrf"
 	CSRFHeaderName = "X-CSRF-Token"
+
+	// hostCookiePrefix names a cookie the browser accepts only Secure, for
+	// Path=/ and without a Domain, so a sibling subdomain cannot set one.
+	hostCookiePrefix = "__Host-"
 )
+
+// SessionCookieNameFor is the session cookie's name in a response to r:
+// __Host- prefixed when the browser reached the server over TLS, the plain
+// name otherwise (a browser refuses a __Host- cookie on plain HTTP).
+func SessionCookieNameFor(r *http.Request) string {
+	return cookieNameFor(r, SessionCookieName)
+}
+
+// CSRFCookieNameFor is the CSRF cookie's name in a response to r, chosen as
+// SessionCookieNameFor chooses.
+func CSRFCookieNameFor(r *http.Request) string {
+	return cookieNameFor(r, CSRFCookieName)
+}
+
+func cookieNameFor(r *http.Request, name string) string {
+	if r != nil && RequestIsSecure(r) {
+		return hostCookiePrefix + name
+	}
+	return name
+}
+
+// SessionToken is the request's session cookie, and false when it carries
+// none, or more than one: a sibling subdomain can set a cookie of the plain
+// name for the parent domain, which the browser sends beside, or before,
+// the server's own, and serving either would put the person in an account
+// that is not theirs. Over TLS only the __Host- cookie counts.
+func SessionToken(r *http.Request) (string, bool) {
+	return cookieValue(r, SessionCookieName)
+}
+
+// cookieValue reads the one cookie called name: the __Host- prefixed one when
+// it is there, and the plain one only on a request that is not over TLS. An
+// in-process request replays a TLS browser's Cookie header without TLS of
+// its own, hence a __Host- cookie is taken whatever the transport.
+func cookieValue(r *http.Request, name string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	if host := r.CookiesNamed(hostCookiePrefix + name); len(host) > 0 {
+		if len(host) > 1 || host[0].Value == "" {
+			return "", false
+		}
+		return host[0].Value, true
+	}
+	if RequestIsSecure(r) {
+		return "", false
+	}
+	plain := r.CookiesNamed(name)
+	if len(plain) != 1 || plain[0].Value == "" {
+		return "", false
+	}
+	return plain[0].Value, true
+}
 
 // CheckCSRF does the double-submit check: the cookie is sent automatically by
 // the browser, the header can only be set by same-origin script.
 func CheckCSRF(r *http.Request) error {
-	cookie, err := r.Cookie(CSRFCookieName)
-	if err != nil || cookie.Value == "" {
+	cookie, ok := cookieValue(r, CSRFCookieName)
+	if !ok {
 		return ErrCSRF
 	}
 	header := r.Header.Get(CSRFHeaderName)
-	if header == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(header)) != 1 {
+	if header == "" || subtle.ConstantTimeCompare([]byte(cookie), []byte(header)) != 1 {
 		return ErrCSRF
 	}
 	return nil

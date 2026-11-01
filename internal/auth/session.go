@@ -206,11 +206,11 @@ func (a *SessionAuth) Authenticate(r *http.Request) (identity.Actor, error) {
 // well: the check reads the account's row on every request anyway, and the
 // request's log line names the address.
 func (a *SessionAuth) AuthenticateWithEmail(r *http.Request) (identity.Actor, string, error) {
-	cookie, err := r.Cookie(SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := SessionToken(r)
+	if !ok {
 		return identity.Actor{}, "", ErrUnauthenticated
 	}
-	key := sessionKey(cookie.Value)
+	key := sessionKey(token)
 	a.mu.Lock()
 	found, ok := a.sessions[key]
 	if !ok {
