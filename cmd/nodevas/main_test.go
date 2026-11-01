@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/auth"
@@ -44,12 +45,54 @@ func (writer *deadlineWriter) SetWriteDeadline(deadline time.Time) error {
 func TestProtectHTTPTransportSetsAndClearsOrdinaryDeadlines(t *testing.T) {
 	handler := protectHTTPTransport(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	writer := &deadlineWriter{}
-	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/auth/login", nil))
+	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{}`)))
 	if len(writer.readCalls) != 2 || writer.readCalls[0].IsZero() || !writer.readCalls[1].IsZero() {
 		t.Fatalf("read deadlines = %v, want set then clear", writer.readCalls)
 	}
 	if len(writer.writeCalls) != 2 || writer.writeCalls[0].IsZero() || !writer.writeCalls[1].IsZero() {
 		t.Fatalf("write deadlines = %v, want set then clear", writer.writeCalls)
+	}
+
+	// Without a body there is nothing to read, so no read deadline; the
+	// response is still bounded.
+	writer = &deadlineWriter{}
+	handler.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/api/projects/export", nil))
+	if len(writer.readCalls) != 0 {
+		t.Fatalf("read deadlines = %v on a request without a body, want none", writer.readCalls)
+	}
+	if len(writer.writeCalls) != 2 || writer.writeCalls[0].IsZero() || !writer.writeCalls[1].IsZero() {
+		t.Fatalf("write deadlines = %v, want set then clear", writer.writeCalls)
+	}
+}
+
+// The read deadline still does its job for a body: a client that sends part
+// of one and stalls does not hold the handler for longer than the timeout.
+func TestProtectHTTPTransportCutsOffAStalledBody(t *testing.T) {
+	shortReadTimeout(t, 200*time.Millisecond)
+	readErr := make(chan error, 1)
+	server := httptest.NewServer(protectHTTPTransport(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		_, err := io.ReadAll(request.Body)
+		readErr <- err
+	})))
+	defer server.Close()
+
+	conn, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// Ten bytes promised, three sent, and then nothing.
+	if _, err := io.WriteString(conn, "POST /api/nodes HTTP/1.1\r\nHost: 127.0.0.1\r\n"+
+		"Content-Type: application/json\r\nContent-Length: 10\r\n\r\n{\"a"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readErr:
+		if err == nil {
+			t.Fatal("a stalled body read to the end")
+		}
+	case <-time.After(10 * requestReadTimeout):
+		t.Fatal("a stalled body held the handler past the read timeout")
 	}
 }
 

@@ -946,20 +946,33 @@ const responseWriteTimeout = 10 * time.Minute
 // protectHTTPTransport places absolute per-request body and response
 // deadlines around ordinary HTTP traffic. WebSockets get their own frame,
 // rate, ping, and write deadlines after upgrade, so they are excluded here.
+//
+// The read deadline is for a request body only. Without one there is nothing
+// left to read (ReadHeaderTimeout covered the headers, IdleTimeout covers the
+// wait for the next request), and Go's server is already reading the
+// connection in the background to notice the client leaving: a deadline
+// there cancels the request when it passes, so a download slower than it
+// would stop half-way. With a body, the server clears the deadline itself
+// once the body has been read.
 func protectHTTPTransport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/ws" {
 			next.ServeHTTP(writer, request)
 			return
 		}
+		hasBody := request.Body != nil && request.Body != http.NoBody
 		if auth.SignInPaths[request.URL.Path] && request.Body != nil {
 			request.Body = http.MaxBytesReader(writer, request.Body, auth.MaxLoginBodyBytes)
 		}
 		controller := http.NewResponseController(writer)
-		_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		if hasBody {
+			_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		}
 		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		defer func() {
-			_ = controller.SetReadDeadline(time.Time{})
+			if hasBody {
+				_ = controller.SetReadDeadline(time.Time{})
+			}
 			_ = controller.SetWriteDeadline(time.Time{})
 		}()
 		next.ServeHTTP(writer, request)
