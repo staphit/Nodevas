@@ -101,6 +101,40 @@ describe("sendTurn", () => {
     expect(state.items.at(-1)).toMatchObject({ kind: "notice", tone: "error" });
   });
 
+  // On the server's model an account runs at most two turns at once; a
+  // third is refused with 429 copilot_busy before anything streams. The
+  // server's text is English only; the panel says it in the reader's words.
+  it("says the copilot is busy with your other turns on a 429 copilot_busy", async () => {
+    useCopilot.setState({ activeId: "c1" });
+    const busy = () =>
+      vi.fn(async (url: string) =>
+        url.endsWith("/turns")
+          ? new Response(
+              JSON.stringify({
+                error: "you already have 2 copilot turns running on the server's model; wait for one to finish",
+                code: "copilot_busy",
+              }),
+              { status: 429, headers: { "Content-Type": "application/json" } },
+            )
+          : new Response(JSON.stringify({ conversations: [] })),
+      );
+    vi.stubGlobal("fetch", busy());
+    await sendTurn("hi", "text");
+    let state = useCopilot.getState();
+    expect(state.running).toBe(false);
+    expect(state.items.at(-1)).toMatchObject({ kind: "notice", tone: "error" });
+    expect(state.items.at(-1)).toMatchObject({ text: expect.stringContaining("你其他的回合") });
+
+    useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
+    vi.stubGlobal("fetch", busy());
+    await sendTurn("hi again", "text");
+    state = useCopilot.getState();
+    expect(state.items.at(-1)).toMatchObject({
+      kind: "notice",
+      text: expect.stringContaining("busy with your other turns"),
+    });
+  });
+
   it("runs a model request on the browser's model and posts the raw answer", async () => {
     const prompts: { input: string; options: unknown }[] = [];
     vi.stubGlobal("LanguageModel", {
