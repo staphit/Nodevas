@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
@@ -273,4 +274,77 @@ func TestRunDoesNotCommitAgentConfig(t *testing.T) {
 		!hasEvent(events, ".codex") {
 		t.Errorf("events = %+v", events)
 	}
+}
+
+// Agent config a commit leaves out stays in the worktree, as the run's
+// events tell the person: removing the worktree would throw it away. That
+// holds for a run whose only change is that config, and for one whose other
+// work went to a handoff branch, was pushed to the PR it revised, or went
+// into a PR that was then merged.
+func TestWithheldConfigKeepsTheWorktree(t *testing.T) {
+	kept := func(t *testing.T, env *jobEnv, runID string) {
+		t.Helper()
+		path := filepath.Join(env.client.Config.DataDir, "worktrees", runID, ".codex", "config.toml")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("the agent config left out of the commit is gone: %v", err)
+		}
+	}
+	t.Run("nothing else changed", func(t *testing.T) {
+		env := startJobRunner(t, nil)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-only", "repoconfig: add an MCP server"))
+		finish := env.hub.wait("run-cfg-only", runnerwire.TypeFinish)
+		if finish.Result == nil || finish.Result.Status != runnerwire.RunSucceeded {
+			t.Fatalf("result = %+v", finish.Result)
+		}
+		kept(t, env, "run-cfg-only")
+		if events := eventsOf(env.hub.messages("run-cfg-only")); hasEvent(events, "worktree removed") ||
+			!hasEvent(events, "worktree kept at") {
+			t.Errorf("events = %+v", events)
+		}
+	})
+	t.Run("handed off", func(t *testing.T) {
+		env := startJobRunner(t, nil)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-q", "plant-quota: add hello"))
+		finish := env.hub.wait("run-cfg-q", runnerwire.TypeFinish)
+		if finish.Result == nil || finish.Result.HandoffBranch == "" {
+			t.Fatalf("result = %+v", finish.Result)
+		}
+		kept(t, env, "run-cfg-q")
+	})
+	t.Run("revised", func(t *testing.T) {
+		env := startReviewRunner(t, nil)
+		env.hub.hello()
+		env.hub.offer(prJob("run-cfg-rvs", runnerwire.JobRevise, "plant: Fix it"))
+		result := env.hub.wait("run-cfg-rvs", runnerwire.TypeFinish).Result
+		if result.Status != runnerwire.RunSucceeded {
+			t.Fatalf("result = %+v", result)
+		}
+		if head := gitT(t, env.bare, "rev-parse", "refs/heads/"+reviewBranch); head == env.head {
+			t.Fatal("the revise pushed nothing")
+		}
+		kept(t, env.jobEnv, "run-cfg-rvs")
+	})
+	t.Run("PR merged", func(t *testing.T) {
+		gh := &ghFake{url: "https://github.com/o/r/pull/7"}
+		gh.setView("OPEN", "")
+		env := startPRRunner(t, gh, func(c *Client) { c.PRPollInterval = 30 * time.Millisecond })
+		withOrigin(t, env.repo)
+		env.hub.hello()
+		env.hub.offer(testJob("run-cfg-pr", "plant: do it"))
+		env.hub.wait("run-cfg-pr", runnerwire.TypeFinish)
+		if got := env.client.jobs.watchedRuns(); !slices.Equal(got, []string{"run-cfg-pr"}) {
+			t.Fatalf("watched %v", got)
+		}
+		gh.setView("MERGED", "success")
+		deadline := time.Now().Add(10 * time.Second)
+		for len(env.client.jobs.watchedRuns()) != 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := env.client.jobs.watchedRuns(); len(got) != 0 {
+			t.Fatalf("still watched %v", got)
+		}
+		kept(t, env, "run-cfg-pr")
+	})
 }

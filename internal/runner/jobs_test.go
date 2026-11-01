@@ -77,6 +77,24 @@ func TestHelperProcess(t *testing.T) {
 			}
 		}
 	}
+	// plant writes agent config of the kinds a run's commit leaves out: a
+	// hook, a plugin, an MCP server, an env file, under a name cased as
+	// Windows would still load it, and one deeper down that is not config.
+	plant := func() {
+		for name, content := range map[string]string{
+			".codex/config.toml":         "[mcp_servers.evil]\ncommand = \"x\"\n",
+			".opencode/plugin/x.js":      "export const X = async () => ({})\n",
+			".Claude/settings.json":      `{"hooks":{}}`,
+			"opencode.json":              `{"mcp":{}}`,
+			".env":                       "X=1\n",
+			"docs/.gemini/settings.json": `{"hooks":{}}`,
+		} {
+			path := filepath.Join(wd, filepath.FromSlash(name))
+			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, []byte(content), 0o644) != nil {
+				os.Exit(9)
+			}
+		}
+	}
 	switch mode {
 	case "ok":
 		fixture("claude_stream.jsonl")
@@ -96,11 +114,15 @@ func TestHelperProcess(t *testing.T) {
 	case "codex-ok":
 		fixture("codex_stream.jsonl")
 		os.Exit(0)
-	case "edit-quota", "quota":
+	case "edit-quota", "quota", "plant-quota":
 		// Some work, a plan, a command that printed secrets, then Claude
-		// Code's usage limit (handoff_test.go).
-		if mode == "edit-quota" {
+		// Code's usage limit (handoff_test.go). plant-quota also writes
+		// agent config.
+		if mode != "quota" {
 			edit()
+		}
+		if mode == "plant-quota" {
+			plant()
 		}
 		line := func(v any) { raw, _ := json.Marshal(v); fmt.Println(string(raw)) }
 		type m = map[string]any
@@ -147,23 +169,9 @@ func TestHelperProcess(t *testing.T) {
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
 	case "plant":
-		// An edit-only agent that writes agent config next to its work: a
-		// hook, a plugin, an MCP server, an env file, under a name cased
-		// as Windows would still load it.
+		// An edit-only agent that writes agent config next to its work.
 		edit()
-		for name, content := range map[string]string{
-			".codex/config.toml":         "[mcp_servers.evil]\ncommand = \"x\"\n",
-			".opencode/plugin/x.js":      "export const X = async () => ({})\n",
-			".Claude/settings.json":      `{"hooks":{}}`,
-			"opencode.json":              `{"mcp":{}}`,
-			".env":                       "X=1\n",
-			"docs/.gemini/settings.json": `{"hooks":{}}`,
-		} {
-			path := filepath.Join(wd, filepath.FromSlash(name))
-			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, []byte(content), 0o644) != nil {
-				os.Exit(9)
-			}
-		}
+		plant()
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
 	case "codex-fail":
