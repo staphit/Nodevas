@@ -14,7 +14,7 @@
 - **管理依賴**：用 `AND`、`OR` 等條件連接節點，Nodevas 會告訴你哪些工作可以開始。
 - **把工作交給 agent**：把節點派給 Claude Code、Codex、Gemini CLI、OpenCode 或 Antigravity CLI，即時看它工作、看 diff、合併 PR。
   <!-- sec-pass: permission relay -->
-- **回覆你的 agent**：agent 可以請你核准、問你問題或請你選擇；你替 runner 開啟轉發後，它也會把 agent CLI 的權限請求轉給你。在 Agent 對話或工作站回覆。
+- **回覆你的 agent**：agent 可以請你核准、問你問題或請你選擇；你替 runner 開啟轉發後，它也會把 Claude Code、Antigravity CLI 與 OpenCode（ACP）的權限請求轉給你。在 Agent 對話或工作站回覆。
 - **接上任何 MCP client**：agent 可以找出可做的任務、認領，並回報進度。
 
 ## 看板、工作站與設定
@@ -43,7 +43,7 @@ mkdir -p workspace && ./nodevas serve --project ./workspace
 
 開啟 <http://127.0.0.1:5666>。第一次啟動會下載一次固定版本的 PostgreSQL（約 40–93 MB）；按兩次 Ctrl+C 即可停止。同一個指令也會啟動執行 coding agent 的 runner；加上 `--repo ~/code/my-app` 讓 run 能在該 repo 工作，或用 `--no-runner` 不啟動它。更多內容（含 Linux 上的 Docker）：[Standalone](./docs/getting-started.md#standalone)（英文）。
 
-**團隊 server**：在 server 或 NAS 上用 Docker（`ghcr.io/staphit/nodevas`）執行 hub，經 HTTPS 對外，並設定管理員帳號（`nodevas user add`）與寄送登入驗證碼的 SMTP relay；大家用瀏覽器開啟。每個人可在自己電腦上用 `scripts/install.sh --hub <url> --link` 加裝 runner，它會下載經 GitHub 驗證的執行檔，或在有 Go 1.26.10 以上的 checkout 裡從原始碼建置（[細節](./docs/install.md)，英文）。步驟：[Team server](./docs/getting-started.md#team-server)（英文）。
+**團隊 server**：在 server 或 NAS 上用 Docker（`ghcr.io/staphit/nodevas`）執行 hub，經 HTTPS 對外，並設定管理員帳號（`nodevas user add`）與寄送登入驗證碼的 SMTP relay；大家用瀏覽器開啟。每個人可在自己電腦上用 `scripts/install.sh --hub <url> --link` 加裝 runner，它會下載經 GitHub 驗證的執行檔，或在有 Go 1.26 以上的 checkout 裡從原始碼建置（[細節](./docs/install.md)，英文）。步驟：[Team server](./docs/getting-started.md#team-server)（英文）。
 
 ## 在自己電腦上跑 agent
 

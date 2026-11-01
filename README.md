@@ -14,7 +14,7 @@ Put your work on a canvas as nodes, connect them, and see what is ready to start
 - **Model dependencies.** Link nodes with conditions like `AND` or `OR`; Nodevas shows which work is ready.
 - **Hand work to agents.** Send a node to Claude Code, Codex, Gemini CLI, OpenCode, or Antigravity CLI. Watch it run live, review the diff, merge the PR.
   <!-- sec-pass: permission relay -->
-- **Answer your agents.** Agents can ask for your approval, ask you a question, or offer a choice; a runner can also relay their CLI's permission prompts once you turn that on. Answer in Agent chat or Station.
+- **Answer your agents.** Agents can ask for your approval, ask you a question, or offer a choice; a runner can also relay the permission prompts of Claude Code, Antigravity CLI and OpenCode (over ACP) once you turn that on. Answer in Agent chat or Station.
 - **Connect any MCP client.** Agents can find ready tasks, claim them, and report back.
 
 ## Board, Station and Settings
@@ -43,7 +43,7 @@ mkdir -p workspace && ./nodevas serve --project ./workspace
 
 Open <http://127.0.0.1:5666>. The first start downloads a pinned PostgreSQL build once (about 40–93 MB); press Ctrl+C twice to stop. The same command starts a runner for coding agents; add `--repo ~/code/my-app` to let runs work in a repository, or `--no-runner` to leave it out. More, including Docker on Linux: [Standalone](./docs/getting-started.md#standalone).
 
-**Team server.** Run the hub with Docker (`ghcr.io/staphit/nodevas`) on a server or NAS behind HTTPS, with an admin account (`nodevas user add`) and an SMTP relay for sign-in passcodes; people open it in a browser. Each person can add a runner on their PC with `scripts/install.sh --hub <url> --link`, which downloads a GitHub-verified build, or builds from a checkout with Go 1.26.10 or newer ([details](./docs/install.md)). Steps: [Team server](./docs/getting-started.md#team-server).
+**Team server.** Run the hub with Docker (`ghcr.io/staphit/nodevas`) on a server or NAS behind HTTPS, with an admin account (`nodevas user add`) and an SMTP relay for sign-in passcodes; people open it in a browser. Each person can add a runner on their PC with `scripts/install.sh --hub <url> --link`, which downloads a GitHub-verified build, or builds from a checkout with Go 1.26 or newer ([details](./docs/install.md)). Steps: [Team server](./docs/getting-started.md#team-server).
 
 ## Run agents on your machine
 
