@@ -94,3 +94,30 @@ func TestGHGitLooksIntoNoSubmodule(t *testing.T) {
 		})
 	}
 }
+
+// gh run outside any repository (gh pr merge runs in the run data dir) gets
+// the plain overrides; a .gitmodules gh's git could not read either fails
+// the call before gh runs.
+func TestGHGitEnvOutsideARepoAndOnABadGitmodules(t *testing.T) {
+	ctx := context.Background()
+	env, err := ghGitEnv(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("outside a repository: %v", err)
+	}
+	if strings.Join(env, "\n") != strings.Join(gitConfigEnv(), "\n") {
+		t.Fatalf("outside a repository: %q, want %q", env, gitConfigEnv())
+	}
+
+	repo := newTestRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitmodules"), []byte("[submodule \"x\"\n\tpath = x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &gitStatusRunner{}
+	g := &ghCLI{run: fake, bin: "gh"}
+	if _, err := g.call(ctx, repo, "", "pr", "create"); err == nil || !strings.Contains(err.Error(), ".gitmodules") {
+		t.Fatalf("a malformed .gitmodules: err %v, want one naming .gitmodules", err)
+	}
+	if fake.env != nil {
+		t.Fatal("gh ran although its git could not be told to skip every submodule")
+	}
+}

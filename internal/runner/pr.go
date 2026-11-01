@@ -93,7 +93,11 @@ func (c *Client) gh() (*ghCLI, error) {
 func (g *ghCLI) call(ctx context.Context, dir, stdin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, ghTimeout)
 	defer cancel()
-	return g.run.RunIn(ctx, dir, append(slices.Clone(ghEnv), gitConfigEnv()...), stdin, g.bin, args...)
+	gitEnv, err := ghGitEnv(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	return g.run.RunIn(ctx, dir, append(slices.Clone(ghEnv), gitEnv...), stdin, g.bin, args...)
 }
 
 // prRequest is one pull request to open.
