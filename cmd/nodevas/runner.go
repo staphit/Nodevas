@@ -126,7 +126,9 @@ func runnerUsage(w io.Writer) {
                                              every repo here, installed agents, headless; false = off),
                                              interactive (true|false, default true: take runs whose
                                              agent TUI the dispatcher watches, typing only if allowed;
-                                             each still accepted here or by autoaccept);
+                                             each still accepted here or by autoaccept),
+                                             repoBrowse (on|off, default on: the hub's Explorer may list
+                                             and read the repos added here, read-only, secrets hidden);
                                              Claude Code: permissionMode (acceptEdits|auto|
                                              bypassPermissions|manual|dontAsk|plan), allowedTools
                                              (one per argument, or comma-separated; "none" clears);
