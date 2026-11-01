@@ -194,6 +194,17 @@ func (a *SessionAuth) CurrentActor(ctx context.Context, id string) (identity.Act
 	return a.users.ActorRevision(ctx, id)
 }
 
+// LookupActor is CurrentActor for work done on an account's behalf outside
+// any request: it tells an account that is gone (not found) from one that
+// could not be read (an error), which the caller may try again.
+func (a *SessionAuth) LookupActor(ctx context.Context, id string) (identity.Actor, bool, error) {
+	user, found, err := a.users.lookupAccount(ctx, id)
+	if err != nil || !found {
+		return identity.Actor{}, false, err
+	}
+	return identity.Actor{ID: user.ID, Name: user.Name, Role: user.Role}, true, nil
+}
+
 // Authenticate resolves the session cookie to an account. The
 // X-Nodevas-Agent-Role header is deliberately ignored here: it is only
 // trustworthy on a loopback server, where the OS account is the boundary. The

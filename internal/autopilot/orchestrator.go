@@ -85,6 +85,12 @@ type Options struct {
 	// that, or with auto routing on and no rule, its own pick. Nil keeps the
 	// rules' pick.
 	Route RouteFunc
+	// MayWork reports whether the account that created an autopilot may
+	// still change its project (internal/members). An autopilot whose
+	// creator may not pauses (ReasonCreatorLostAccess) and does nothing
+	// more until they may again. An error means it could not tell. Nil:
+	// always.
+	MayWork func(ctx context.Context, project, accountID string) (bool, error)
 }
 
 // RouteRequest is one routing decision the orchestrator asks for.
@@ -104,6 +110,10 @@ func routeWith(ctx context.Context, route RouteFunc, in RouteRequest) runnerwire
 	}
 	return route(ctx, in)
 }
+
+// ReasonCreatorLostAccess is a paused autopilot's reason once its creator
+// may no longer change its project (Options.MayWork).
+const ReasonCreatorLostAccess = "paused: its creator can no longer change this project"
 
 // ChangedEvent is the realtime event an autopilot change sends to its
 // project's room; its id is the autopilot's.
@@ -344,6 +354,21 @@ func (o *Orchestrator) reconcileLocked(ctx context.Context, id string) error {
 		return nil
 	}
 	before := snapshot(w)
+	may, err := o.mayWork(ctx, w.rec)
+	if err != nil {
+		// It could not tell (the account store failing for a moment): this
+		// pass does nothing, and the next one asks again.
+		return err
+	}
+	if !may {
+		// It works as its creator, who may no longer change the project:
+		// nothing is dispatched, merged or written on the board in their
+		// name. It waits, paused, until they may again or someone cancels it.
+		if w.rec.Status == runnerwire.AutopilotRunning {
+			w.rec.Status, w.rec.Reason, w.dirty = runnerwire.AutopilotPaused, ReasonCreatorLostAccess, true
+		}
+		return o.save(ctx, w, before)
+	}
 	o.syncMembers(w)
 	o.refresh(ctx, w)
 	o.propagateFailures(w)
@@ -1261,7 +1286,29 @@ func (o *Orchestrator) Pause(ctx context.Context, id string) error {
 
 // Resume schedules again.
 func (o *Orchestrator) Resume(ctx context.Context, id string) error {
+	rec, err := o.opts.Store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if may, err := o.mayWork(ctx, rec); err != nil {
+		return err
+	} else if !may {
+		return errCreatorLostAccess()
+	}
 	return o.setStatus(ctx, id, runnerwire.AutopilotPaused, runnerwire.AutopilotRunning, "")
+}
+
+// mayWork is Options.MayWork for the autopilot's creator.
+func (o *Orchestrator) mayWork(ctx context.Context, rec Record) (bool, error) {
+	if o.opts.MayWork == nil {
+		return true, nil
+	}
+	return o.opts.MayWork(ctx, rec.Project, rec.CreatedBy)
+}
+
+func errCreatorLostAccess() error {
+	return conflictf("its creator can no longer change this project: give them the project back, or cancel the autopilot",
+		"建立者已無法修改這個專案：請讓建立者重新取得專案權限，或取消 autopilot")
 }
 
 func (o *Orchestrator) setStatus(ctx context.Context, id, from, to, reason string) error {
@@ -1309,6 +1356,13 @@ func (o *Orchestrator) Adopt(ctx context.Context, id string) error {
 	if err != nil {
 		unlock()
 		return err
+	}
+	if may, err := o.mayWork(ctx, w.rec); err != nil || !may {
+		unlock()
+		if err != nil {
+			return err
+		}
+		return errCreatorLostAccess()
 	}
 	if w.rec.Status != runnerwire.AutopilotPaused {
 		unlock()

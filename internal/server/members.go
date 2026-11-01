@@ -12,7 +12,6 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
-	"nodevas/internal/locale"
 	"nodevas/internal/members"
 	"nodevas/internal/project"
 )
@@ -82,8 +81,32 @@ var readOnlyPosts = map[string]bool{
 	"/api/dsl/check":   true,
 }
 
+// projectlessPaths are the account-level routes that never read the
+// request's project, so it is not resolved for them (withRequestProject):
+// whatever a request names there, the answer is the same. Some serve
+// clients that are not signed in, and a browser still showing a project it
+// lost sends that name on every request, which must not keep it from its
+// own settings or from signing out.
+var projectlessPaths = []string{
+	"/api/auth/",
+	"/api/runs/budget",
+	"/api/runs/routing",
+	"/api/usage/prices",
+	"/api/notify/",
+}
+
 func accountLevelPath(path string) bool {
-	for _, prefix := range accountLevelPaths {
+	return underAny(path, accountLevelPaths)
+}
+
+// projectlessPath reports a route that never reads the request's project:
+// projectlessPaths, and the health probes.
+func projectlessPath(r *http.Request) bool {
+	return underAny(r.URL.Path, projectlessPaths) || publicHealthPath(r)
+}
+
+func underAny(path string, prefixes []string) bool {
+	for _, prefix := range prefixes {
 		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, prefix) {
 			return true
 		}
@@ -109,16 +132,12 @@ func (s *Server) withProjectAccess(c *gin.Context) {
 	}
 	access := s.members.Access(auth.ActorFrom(r), project.Key(st.Root()))
 	if !access.CanRead() {
-		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
-			locale.Errorf("you are not a member of this project", "你不是這個專案的成員"), nil)
-		c.Abort()
+		httpx.DenyProjectAccess(c)
 		return
 	}
 	writes := (isUnsafeMethod(r.Method) && !readOnlyPosts[r.URL.Path]) || stateChangingGET(r)
 	if writes && !access.CanWrite() {
-		httpx.Coded(c, http.StatusForbidden, "PROJECT_READ_ONLY",
-			locale.Errorf("you can view this project but not change it", "你可以檢視這個專案，但不能修改"), nil)
-		c.Abort()
+		httpx.DenyProjectWrite(c)
 		return
 	}
 	c.Next()
@@ -133,10 +152,48 @@ func (s *Server) projectReadable(r *http.Request, dir string) bool {
 	return s.members.Access(auth.ActorFrom(r), project.Key(dir)).CanRead()
 }
 
+// projectWritable is whether the request's actor may change the project in
+// dir, for the routes that name a project past the gate (a transfer's
+// source and target).
+func (s *Server) projectWritable(r *http.Request, dir string) bool {
+	if s.members == nil {
+		return true
+	}
+	return s.members.Access(auth.ActorFrom(r), project.Key(dir)).CanWrite()
+}
+
+// AccountMayWrite reports whether the account accountID may still change
+// the project named name. Work it handed off (an autopilot, a copilot
+// follow-up) runs past any request of its own and stops once it may not.
+// Without membership everyone may; an account that is gone, or a project
+// that no longer resolves, may not. An account that could not be read is
+// an error, not a refusal: the caller tries again rather than stopping
+// work over a passing fault.
+func (s *Server) AccountMayWrite(ctx context.Context, name, accountID string) (bool, error) {
+	if s.members == nil {
+		return true, nil
+	}
+	st, err := s.pm.StoreFor(name)
+	if err != nil {
+		return false, nil
+	}
+	actor := identity.Actor{ID: accountID}
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		current, found, err := accounts.LookupActor(ctx, accountID)
+		if err != nil || !found {
+			return false, err
+		}
+		actor = current
+	}
+	return s.members.Access(actor, project.Key(st.Root())).CanWrite(), nil
+}
+
 // projectAccess is the catalog's view of membership.
 type projectAccess struct{ s *Server }
 
 func (p projectAccess) Readable(r *http.Request, dir string) bool { return p.s.projectReadable(r, dir) }
+
+func (p projectAccess) Writable(r *http.Request, dir string) bool { return p.s.projectWritable(r, dir) }
 
 // ReadableTree also requires every restricted project under dir to be
 // readable: an archive of a folder carries all of them.

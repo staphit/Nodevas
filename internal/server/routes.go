@@ -40,7 +40,12 @@ func (s *Server) Handler() http.Handler {
 
 	api := router.Group("/api")
 	graph.New(s.pm, s.hub).Register(api)
-	node.New(s.pm, s.hub).Register(api)
+	nodeAPI := node.New(s.pm, s.hub)
+	if s.members != nil {
+		// A transfer names two projects in its body; the gate sees neither.
+		nodeAPI.UseAccess(projectAccess{s})
+	}
+	nodeAPI.Register(api)
 	// With accounts, each one has its own current project; it is remembered
 	// in memory when there is no database to keep it in.
 	if s.users != nil && s.current == nil {

@@ -268,11 +268,12 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 
 // withRequestProject resolves ?project= / X-Nodevas-Project once per request.
 // An unknown project fails with 400 here, before any handler runs, instead of
-// silently operating on the active project.
+// silently operating on the active project; with membership, a non-admin
+// gets the 403 a restricted project gives (httpx.RefuseUnknownProject).
 func (s *Server) withRequestProject(c *gin.Context) {
 	r := c.Request
 	name := httpx.RequestProjectName(r)
-	if !httpx.ProjectScopedPath(r.URL.Path) {
+	if !httpx.ProjectScopedPath(r.URL.Path) || projectlessPath(r) {
 		c.Next()
 		return
 	}
@@ -291,7 +292,15 @@ func (s *Server) withRequestProject(c *gin.Context) {
 	}
 	st, err := s.pm.StoreFor(name)
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, err)
+		httpx.RefuseUnknownProject(c, err, s.members != nil)
+		return
+	}
+	// The access gate passes an account's own routes through, but they still
+	// read the project named here: one the actor may not read is refused as
+	// one that does not exist is, or the two answers would tell which
+	// restricted names exist.
+	if accountLevelPath(r.URL.Path) && !s.projectReadable(r, st.Root()) {
+		httpx.DenyProjectAccess(c)
 		return
 	}
 	c.Request = r.WithContext(httpx.WithStore(r.Context(), st))

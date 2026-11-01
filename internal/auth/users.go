@@ -602,17 +602,27 @@ func (u *UserStore) revisionAndEmail(ctx context.Context, id string) (string, st
 // accountRecord reads one account's row by ID. Failure is treated as
 // absence.
 func (u *UserStore) accountRecord(ctx context.Context, id string) (UserRecord, bool) {
+	user, found, err := u.lookupAccount(ctx, id)
+	return user, found && err == nil
+}
+
+// lookupAccount is accountRecord telling a read that failed (an error) from
+// an account that does not exist (not found, no error).
+func (u *UserStore) lookupAccount(ctx context.Context, id string) (UserRecord, bool, error) {
 	// The id arrives from a session cookie or a stored capability, which is to
 	// say from a client. It is a bound parameter and cannot inject, but there is
 	// no reason to carry an arbitrarily long one as far as the database.
 	if id == "" || len(id) > maxAccountIDBytes {
-		return UserRecord{}, false
+		return UserRecord{}, false, nil
 	}
 	users, err := u.accounts(ctx, accountByID, 1, id)
-	if err != nil || len(users) == 0 {
-		return UserRecord{}, false
+	if err != nil {
+		return UserRecord{}, false, err
 	}
-	return users[0], true
+	if len(users) == 0 {
+		return UserRecord{}, false, nil
+	}
+	return users[0], true, nil
 }
 
 // FindAccount resolves one account by its exact name or sign-in address. It

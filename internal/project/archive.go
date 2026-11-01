@@ -888,7 +888,7 @@ func (pm *ProjectManager) InstallArchiveMode(
 			http.StatusInternalServerError, locale.Errorf("activate imported project: %w", "開啟匯入的專案：%w", err),
 		}
 	}
-	pm.hub.Broadcast("project-changed", activateName)
+	pm.hub.Broadcast("project-changed", "") // no name: every socket hears it, members or not
 	return activateName, destination, nil
 }
 
@@ -964,7 +964,7 @@ func (pm *ProjectManager) installBundleAtRoot(
 			locale.Errorf("activate imported project: %w", "開啟匯入的專案：%w", err),
 		)
 	}
-	pm.hub.Broadcast("project-changed", activateName)
+	pm.hub.Broadcast("project-changed", "") // no name: every socket hears it, members or not
 	return activateName, destination, nil
 }
 

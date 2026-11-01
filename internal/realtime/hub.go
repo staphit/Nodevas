@@ -1249,22 +1249,29 @@ func (h *Hub) subscribe(client *wsClient, project string) {
 	resolve := h.resolve
 	h.mu.Unlock()
 
+	client.mu.Lock()
+	actor := client.actor
+	previous := client.room
+	client.mu.Unlock()
+
 	room := ""
 	if resolve != nil && project != "" {
 		resolved, err := resolve(project)
 		if err != nil {
-			// An unknown project leaves the client in the catch-all room
-			// rather than silently muted.
 			log.Printf("ws subscribe %q: %v", project, err)
+			// With project access, a member is refused an unknown project
+			// as a restricted one: two answers would tell which restricted
+			// names exist. Otherwise it leaves the client in the catch-all
+			// room rather than silently muted.
+			if h.accessFunc() != nil && !actor.IsAdmin() {
+				h.deny(client, previous, project)
+				return
+			}
 		} else {
 			room = resolved
 		}
 	}
 
-	client.mu.Lock()
-	actor := client.actor
-	previous := client.room
-	client.mu.Unlock()
 	if !h.mayWatch(actor, room) {
 		// Not the catch-all either: that would hand it every other room's
 		// events it may watch, and this one's it may not, by asking.

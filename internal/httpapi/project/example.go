@@ -44,6 +44,6 @@ func (a *API) PostProjectExample(c *gin.Context) {
 		return
 	}
 	a.follow(c.Request, name)
-	a.pm.Hub().Broadcast("project-changed", name)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "name": name, "active": name})
 }
