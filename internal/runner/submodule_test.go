@@ -112,3 +112,47 @@ func TestRunnerGitLooksIntoNoSubmodule(t *testing.T) {
 		t.Fatalf("the moved submodule was not committed: %q, want %s", tree, moved)
 	}
 }
+
+// An agent can turn a submodule into plain files: remove its repository
+// and write files in its directory. git add -A never looks into a directory
+// the index holds as a submodule, so those files were left out of the commit
+// while the old pointer stayed. They are committed in its place; a
+// submodule nobody populated (an empty directory) stays a pointer.
+func TestStageAllCommitsASubmoduleTurnedIntoFiles(t *testing.T) {
+	ctx := context.Background()
+	sub := newTestRepo(t)
+	pointer := gitT(t, sub, "rev-parse", "HEAD")
+	repo := newTestRepo(t)
+	gitT(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+pointer+",nested")
+	gitT(t, repo, "update-index", "--add", "--cacheinfo", "160000,"+pointer+",untouched")
+	if err := os.WriteFile(filepath.Join(repo, ".gitmodules"),
+		[]byte("[submodule \"nested\"]\n\tpath = nested\n\turl = ./nested\n[submodule \"untouched\"]\n\tpath = untouched\n\turl = ./untouched\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, repo, "add", ".gitmodules")
+	gitT(t, repo, "commit", "-q", "-m", "submodules")
+
+	wt, err := CreateWorktree(ctx, repo, t.TempDir(), "run-subfiles", "n", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"nested/deep", "untouched"} {
+		if err := os.MkdirAll(filepath.Join(wt.Path, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "nested", "deep", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := commitRun(ctx, wt, "vendor the submodule")
+	if res.Err != nil || res.Commit == "" {
+		t.Fatalf("commit: %+v", res)
+	}
+	tree := gitT(t, wt.Path, "ls-tree", "-r", "HEAD")
+	if !strings.Contains(tree, "\tnested/deep/a.txt") || strings.Contains(tree, "160000 commit "+pointer+"\tnested\n") {
+		t.Fatalf("the files that replaced the submodule were not committed in its place:\n%s", tree)
+	}
+	if !strings.Contains(tree, "160000 commit "+pointer+"\tuntouched") {
+		t.Fatalf("an unpopulated submodule lost its pointer:\n%s", tree)
+	}
+}
