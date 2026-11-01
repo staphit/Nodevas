@@ -91,12 +91,9 @@ func main() {
 
 	panelAddr := net.JoinHostPort(*listen, fmt.Sprint(*port))
 	panelURL := "http://" + panelAddr + "/"
-	mux := http.NewServeMux()
-	registerRoutes(mux, sup, builder)
-
 	httpServer := &http.Server{
 		Addr:              panelAddr,
-		Handler:           mux,
+		Handler:           panelHandler(sup, builder),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	listener, err := net.Listen("tcp", panelAddr)
@@ -196,6 +193,13 @@ func openBrowser(url string) {
 		return
 	}
 	go func() { _ = cmd.Wait() }()
+}
+
+// panelHandler is the whole control panel: its page and its API.
+func panelHandler(sup *supervisor, builds *builder) http.Handler {
+	mux := http.NewServeMux()
+	registerRoutes(mux, sup, builds)
+	return mux
 }
 
 func registerRoutes(mux *http.ServeMux, sup *supervisor, builds *builder) {
