@@ -71,7 +71,11 @@ export interface UsageReport {
   byNode: UsageGroup[];
 }
 
-export type PriceSource = "builtin" | "custom";
+/**
+ * builtin: a vendor's list price; estimate: Nodevas's own estimate for a model
+ * whose CLI reports no cost (Codex, Gemini, Antigravity); custom: the owner's.
+ */
+export type PriceSource = "builtin" | "custom" | "estimate";
 
 /** USD per million tokens. */
 export interface ModelPrice {
@@ -174,7 +178,7 @@ export function normalizePrices(raw: unknown): UsagePrices {
       outputPerMTok: num(p.outputPerMTok),
       cacheReadPerMTok: num(p.cacheReadPerMTok),
       cacheWritePerMTok: num(p.cacheWritePerMTok),
-      source: p.source === "custom" ? "custom" : "builtin",
+      source: p.source === "custom" || p.source === "estimate" ? p.source : "builtin",
     })),
   };
 }

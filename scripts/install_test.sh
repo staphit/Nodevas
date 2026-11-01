@@ -328,5 +328,14 @@ server.serve_forever()
 	expect_eq "hub does not say: keeps going" "$?" 0
 fi
 
+# The hub pages the help and the prompts send people to exist: runners are
+# added and linked under Settings -> Agents (there is no Runners page).
+help_text="$(usage; cmd_server)"
+case "$help_text" in
+*"Settings -> Agents -> Add runner"*"Settings -> Agents -> Link a new device"*) pass ;;
+*) fail "help does not name Settings -> Agents -> Add runner / Link a new device" ;;
+esac
+if grep -n 'Runners ->' "$HERE/install.sh" >&2; then fail "install.sh names a Runners page"; else pass; fi
+
 printf '%d passed, %d failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" = 0 ]

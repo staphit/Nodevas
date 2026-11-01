@@ -28,6 +28,9 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The job's token can push images: only the sign-in step gets it.
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
@@ -91,11 +94,12 @@ jobs:
     if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/testflight-v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Builds with a token that only reads: npm, esbuild's installer, vite and
+    # go run here, and any step of a job can read that job's token from the
+    # runner's memory. cli-publish, which can push and attest, runs none of
+    # this code.
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,6 +160,41 @@ jobs:
             echo "::error::the binary says it is commit '${got}', not ${GITHUB_SHA}" >&2
             exit 1
           fi
+
+      # Kept for one day: long enough for cli-publish, short enough not to
+      # fill the account's small artifact quota.
+      - name: Hand the binaries to cli-publish
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nodevas-cli
+          path: |
+            dist/nodevas-*
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  cli-publish:
+    name: Publish runner binaries
+    # Runs no project or dependency code and checks nothing out: the token
+    # that can push and attest reaches only the attestation, oras and the
+    # checksum check. Skipped with cli, so the same refs as cli.
+    needs: cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nodevas-cli
+          path: dist
+
+      - name: The binaries match their checksums
+        run: cd dist && sha256sum --check --strict SHA256SUMS
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

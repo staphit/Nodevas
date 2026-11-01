@@ -80,4 +80,12 @@ describe("usage API", () => {
     expect(prices.prices.map((p) => p.source)).toEqual(["custom", "builtin"]);
     expect(prices.prices[1].outputPerMTok).toBe(0);
   });
+
+  it("keeps an estimate price apart from a built-in list price", () => {
+    const prices = normalizePrices({
+      asOf: "2026-10-06",
+      prices: [{ model: "gpt-5.5", inputPerMTok: 1.25, source: "estimate" }],
+    });
+    expect(prices.prices.map((p) => p.source)).toEqual(["estimate"]);
+  });
 });

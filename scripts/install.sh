@@ -50,8 +50,8 @@ here, else fetch the build GitHub made of the commit the hub runs):
 hub and login:
   --hub <url>              the hub, e.g. https://nodevas.example.com
                            runner token: prompted (hidden); $NODEVAS_RUNNER_TOKEN only for unattended installs
-                           (create one on the hub: Runners -> Add runner)
-  --link                   log in with a device link (hub: Runners -> Link a new device)
+                           (create one on the hub: Settings -> Agents -> Add runner)
+  --link                   log in with a device link (hub: Settings -> Agents -> Link a new device)
                            instead of a token: prompted (hidden); $NODEVAS_RUNNER_LINK only
                            for unattended installs. It brings the hub's Access service token
   --name <label>           this machine's name in the hub's log lines
@@ -676,8 +676,8 @@ step_login_link() {
 	fi
 	local link="${NODEVAS_RUNNER_LINK:-}"
 	if [ -z "$link" ]; then
-		[ -t 0 ] || die "no device link: set NODEVAS_RUNNER_LINK (make one on the hub: Runners -> Link a new device)"
-		read -r -s -p "device link (from the hub's Runners -> Link a new device): " link
+		[ -t 0 ] || die "no device link: set NODEVAS_RUNNER_LINK (make one on the hub: Settings -> Agents -> Link a new device)"
+		read -r -s -p "device link (from the hub's Settings -> Agents -> Link a new device): " link
 		echo
 	fi
 	[ -n "$link" ] || die "no device link given"
@@ -734,8 +734,8 @@ step_login() {
 
 	local token="${NODEVAS_RUNNER_TOKEN:-}" secret="${NODEVAS_ACCESS_CLIENT_SECRET:-}"
 	if [ -z "$token" ]; then
-		[ -t 0 ] || die "no runner token: set NODEVAS_RUNNER_TOKEN (create one on the hub: Runners -> Add runner)"
-		read -r -s -p "runner token (from the hub's Runners -> Add runner): " token
+		[ -t 0 ] || die "no runner token: set NODEVAS_RUNNER_TOKEN (create one on the hub: Settings -> Agents -> Add runner)"
+		read -r -s -p "runner token (from the hub's Settings -> Agents -> Add runner): " token
 		echo
 	fi
 	[ -n "$token" ] || die "no runner token given"
@@ -1219,9 +1219,9 @@ The hub (nodevas serve) runs on the server; a runner never serves. To deploy it:
   - Docker or a plain binary: docs/getting-started.md ("Team server") and
     docs/operations.md ("Allow network access")
   - behind Cloudflare Access: create a service token for runners and store it on the hub
-    (Runners -> Runner access token, as an administrator); then install each runner with
-    --link (Runners -> Link a new device), or with --access-client-id <id> (secret in
-    NODEVAS_ACCESS_CLIENT_SECRET)
+    (Settings -> Agents -> Advanced -> Runner access token, as an administrator); then
+    install each runner with --link (Settings -> Agents -> Link a new device), or with
+    --access-client-id <id> (secret in NODEVAS_ACCESS_CLIENT_SECRET)
 
 This script does not change servers.
 EOF
