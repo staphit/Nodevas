@@ -45,14 +45,32 @@ var patterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`),
 }
 
-// kept are secrets whose surroundings stay: the password of a URL
-// (scheme://user:password@host) and an HTTP bearer value.
+// kept are secrets whose surroundings stay: an HTTP bearer value.
 var kept = []struct {
 	re   *regexp.Regexp
 	with string
 }{
-	{regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@\s/]+@`), "${1}" + Placeholder + "@"},
 	{regexp.MustCompile(`(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}`), "${1}" + Placeholder},
+}
+
+// urlPassword is the password of a URL, scheme://user:password@host, the
+// user possibly empty (redis://:password@host): up to the last '@' before
+// whitespace, as a password may hold '/' and '@' unencoded.
+var urlPassword = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]*:)(\S*)@`)
+
+// urlPort is what urlPassword takes from scheme://host:port/path@…: a port
+// and a path, not a password.
+var urlPort = regexp.MustCompile(`^[0-9]{1,5}/`)
+
+// redactURLPasswords keeps scheme://user: and @host around a URL's password.
+func redactURLPasswords(s string) string {
+	return urlPassword.ReplaceAllStringFunc(s, func(m string) string {
+		sub := urlPassword.FindStringSubmatch(m)
+		if urlPort.MatchString(sub[2]) {
+			return m
+		}
+		return sub[1] + Placeholder + "@"
+	})
 }
 
 // quick are substrings one of which every pattern's match contains: text
@@ -71,6 +89,9 @@ func String(s string) string {
 	for _, k := range kept {
 		s = k.re.ReplaceAllString(s, k.with)
 	}
+	if strings.Contains(s, "://") {
+		s = redactURLPasswords(s)
+	}
 	return s
 }
 
@@ -83,18 +104,29 @@ func mayContain(s string) bool {
 	return false
 }
 
-// secretAssignment is an environment-style assignment to a secret-sounding
-// name, as an `env` dump or a printed .env file has them: the name in
-// capitals, so prose ("the token: it expires") keeps its words.
-var secretAssignment = regexp.MustCompile(`\b([A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH)[A-Z0-9_]*)(\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|\S+)`)
+// secretName is a secret-sounding name in capitals, as an environment
+// variable has it, so prose ("the token: it expires") keeps its words.
+const secretName = `[A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH)[A-Z0-9_]*`
+
+// secretAssignment is an assignment to a secret name, as an `env` dump, a
+// printed .env file or a JSON object ("NAME": "value") has it.
+var secretAssignment = regexp.MustCompile(`\b(` + secretName + `)("?\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|\S+)`)
+
+// secretRow is a secret name and its value in PowerShell's `Get-ChildItem
+// env:` table: the name at the start of a line, two or more spaces, the
+// value to the end of the line.
+var secretRow = regexp.MustCompile(`(?m)^([ \t]*` + secretName + `[ \t]{2,})\S[^\r\n]*`)
 
 // Output is String for a run's output on its way off the machine (events,
 // summary, errors, PR bodies, review comments), plus the values of secret
 // assignments. A diff keeps String alone: an assignment there is code.
 func Output(s string) string {
 	s = String(s)
-	if !strings.ContainsAny(s, "=:") {
-		return s
+	if strings.ContainsAny(s, "=:") {
+		s = secretAssignment.ReplaceAllString(s, "${1}${2}"+Placeholder)
 	}
-	return secretAssignment.ReplaceAllString(s, "${1}${2}"+Placeholder)
+	if strings.Contains(s, "  ") || strings.Contains(s, "\t") {
+		s = secretRow.ReplaceAllString(s, "${1}"+Placeholder)
+	}
+	return s
 }
