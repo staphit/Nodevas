@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nodevas/internal/auth"
 	"nodevas/internal/locale"
 )
 
@@ -15,6 +16,19 @@ import (
 func DenyProjectAccess(c *gin.Context) {
 	Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
 		locale.Errorf("you are not a member of this project", "你不是這個專案的成員"), nil)
+}
+
+// RefuseUnknownProject answers a request naming a project that does not
+// resolve (err). With membership on, a caller who is not an administrator
+// is answered as for a project they may not read (DenyProjectAccess): a 400
+// with the reason, next to a 403 for a restricted project, would tell which
+// names exist. Otherwise, and for an administrator, 400 with the reason.
+func RefuseUnknownProject(c *gin.Context, err error, membership bool) {
+	if membership && !auth.ActorFrom(c.Request).IsAdmin() {
+		DenyProjectAccess(c)
+		return
+	}
+	Err(c, http.StatusBadRequest, err)
 }
 
 // DenyProjectWrite answers a change to a project its actor may only read:

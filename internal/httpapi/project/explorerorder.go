@@ -9,6 +9,7 @@ package project
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,25 @@ func (a *API) GetProjectOrder(c *gin.Context) {
 	if order == nil {
 		order = []string{}
 	}
-	c.JSON(http.StatusOK, map[string]any{"projectOrder": order})
+	c.JSON(http.StatusOK, map[string]any{"projectOrder": a.readableOrder(c.Request, order)})
+}
+
+// readableOrder leaves out the projects the caller may not read. The order
+// is the administrators' arrangement of the whole tree, restricted projects
+// included, and a name is what a non-member must not learn. Folders, readable
+// projects and names that no longer exist stay.
+func (a *API) readableOrder(r *http.Request, order []string) []string {
+	if a.access == nil {
+		return order
+	}
+	workspace := a.pm.Workspace()
+	out := make([]string, 0, len(order))
+	for _, name := range order {
+		if a.readable(r, filepath.Join(workspace, filepath.FromSlash(name))) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // PutProjectOrder replaces the whole arrangement, which keeps the client's

@@ -306,14 +306,14 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 	if name := strings.TrimSpace(body.Source); name != "" {
 		resolved, err := a.pm.StoreFor(name)
 		if err != nil {
-			httpx.Err(c, http.StatusBadRequest, err)
+			httpx.RefuseUnknownProject(c, err, a.access != nil)
 			return
 		}
 		source = resolved
 	}
 	target, err := a.pm.StoreFor(strings.TrimSpace(body.Target))
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, err)
+		httpx.RefuseUnknownProject(c, err, a.access != nil)
 		return
 	}
 	if !a.mayTransfer(c, source, target, mode == "cut") {

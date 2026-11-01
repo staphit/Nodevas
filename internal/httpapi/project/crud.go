@@ -67,7 +67,7 @@ func (a *API) PostProjectOpen(c *gin.Context) {
 		httpx.Err(c, 400, err)
 		return
 	}
-	a.pm.Hub().Broadcast("project-changed", body.Name)
+	a.catalogChanged()
 	c.JSON(200, map[string]string{
 		"root": a.visibleHostPath(a.pm.Store().Root()), "active": body.Name,
 	})
@@ -82,7 +82,7 @@ func (a *API) openForCaller(c *gin.Context, name string, create bool, template, 
 			return
 		}
 		// A new project in everyone's tree; nobody else's current one moves.
-		a.pm.Hub().Broadcast("project-changed", name)
+		a.catalogChanged()
 	}
 	if err := a.current.Open(c.Request, name); err != nil {
 		switch {
@@ -124,7 +124,7 @@ func (a *API) PostProjectFolder(c *gin.Context) {
 		httpx.Err(c, status, err)
 		return
 	}
-	a.pm.Hub().Broadcast("project-changed", name)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "name": name})
 }
 
@@ -218,7 +218,7 @@ func (a *API) PostProjectImportPath(c *gin.Context) {
 		return
 	}
 	a.follow(c.Request, name)
-	a.pm.Hub().Broadcast("project-changed", name)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{"ok": true, "name": name, "files": copied})
 }
 
@@ -326,7 +326,7 @@ func (a *API) PostProjectCopy(c *gin.Context) {
 		a.follow(c.Request, newName)
 		active = newName
 	}
-	a.pm.Hub().Broadcast("project-changed", newName)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{
 		"ok": true, "name": newName, "active": active, "files": copied,
 	})
@@ -514,7 +514,7 @@ func (a *API) PostProjectMove(c *gin.Context) {
 		a.current.Moved(c.Request.Context(), name, newName)
 		newActive = a.currentName(c.Request)
 	}
-	a.pm.Hub().Broadcast("project-changed", newName)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":        true,
 		"name":      newName,
@@ -552,7 +552,7 @@ func (a *API) PostProjectRemove(c *gin.Context) {
 		// if it was the one removed.
 		active = a.currentName(c.Request)
 	}
-	a.pm.Hub().Broadcast("project-changed", active)
+	a.catalogChanged()
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":           true,
 		"active":       active,
