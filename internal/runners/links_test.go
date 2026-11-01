@@ -2,6 +2,7 @@ package runners
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -71,5 +72,26 @@ func TestLinksCapAndThrottle(t *testing.T) {
 	}
 	if _, err := l.Redeem("", "7.7.7.7"); !errors.Is(err, ErrLinkNotFound) {
 		t.Fatalf("empty code = %v", err)
+	}
+}
+
+// A stranger who fills the failure table from many one-shot addresses must
+// not leave every newcomer sharing one exhausted bucket: the owner's new
+// machine, at an address never seen, still redeems its code.
+func TestFullFailureTableDoesNotLockOutNewcomers(t *testing.T) {
+	l := NewLinks()
+	bea := identity.Actor{ID: "u-bea"}
+	code, _, err := l.Issue(bea, "", "laptop", locale.English)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxFailureSources+linkFailureLimit; i++ {
+		source := fmt.Sprintf("2001:db8:%x::1", i)
+		if _, err := l.Redeem("nope", source); !errors.Is(err, ErrLinkNotFound) {
+			t.Fatalf("miss %d = %v", i, err)
+		}
+	}
+	if _, err := l.Redeem(code, "203.0.113.50"); err != nil {
+		t.Fatalf("a newcomer's good code after the flood = %v", err)
 	}
 }
