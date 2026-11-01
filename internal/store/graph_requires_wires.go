@@ -65,6 +65,40 @@ func materializeRequiresWires(g *engine.Graph) {
 		}
 		return names[from]
 	}
+	// The gate drawing each output is found once, as requiresWireGate would
+	// find it: scanning every gate's inputs per bent wire cost wires times gate
+	// inputs. Validation refuses gates that share an output, so the first gate
+	// is the only one.
+	gateFor := map[string]*engine.LogicGate{}
+	for index := range g.UI.LogicGates {
+		gate := &g.UI.LogicGates[index]
+		for _, output := range gate.OutputNodes() {
+			if _, seen := gateFor[output]; !seen {
+				gateFor[output] = gate
+			}
+		}
+	}
+	gateInputs := map[*engine.LogicGate]map[string]bool{}
+	gated := func(from, to string) bool {
+		gate := gateFor[to]
+		if gate == nil {
+			return false
+		}
+		// A boolean gate draws its output's whole condition; a relation gate
+		// only the wires from its inputs.
+		if !relationGateOperator(gate.Operator) {
+			return true
+		}
+		inputs, ok := gateInputs[gate]
+		if !ok {
+			inputs = make(map[string]bool, len(gate.Inputs))
+			for _, input := range gate.Inputs {
+				inputs[input] = true
+			}
+			gateInputs[gate] = inputs
+		}
+		return inputs[from]
+	}
 	consider := func(key string) {
 		if live[key] || strings.HasPrefix(key, "gate:") || strings.HasPrefix(key, "logic:") {
 			return
@@ -74,7 +108,7 @@ func materializeRequiresWires(g *engine.Graph) {
 			return
 		}
 		target := nodes[to]
-		if target == nil || !requiresRef(target, from) || requiresWireGate(g, from, to) != "" {
+		if target == nil || !requiresRef(target, from) || gated(from, to) {
 			return
 		}
 		g.Edges = append(g.Edges, &engine.Edge{From: from, To: to, Relation: engine.RelationRequired})
