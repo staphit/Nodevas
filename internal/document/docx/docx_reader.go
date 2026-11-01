@@ -24,6 +24,12 @@ const (
 	maxDOCXPartBytes              = 64 << 20
 	maxDOCXImageBytes             = 16 << 20
 	maxDOCXImages                 = 256
+
+	// Nesting bounds: every nested table costs reader frames and every list
+	// level a renderer frame, and a Go stack overflow is fatal, not a panic.
+	// Word itself stops at nine list levels.
+	maxDOCXTableDepth = 32
+	maxDOCXListDepth  = 32
 )
 
 // ReadDOCX converts a Word document into the block model. It reads the subset
