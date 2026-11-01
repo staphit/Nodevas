@@ -47,6 +47,7 @@ func (h *Hub) LogAction(project, sessionID, runID, action, nodeID, detail string
 	}
 	project = strings.Trim(strings.TrimSpace(project), "/")
 	detail = capBytes(detail, MaxActionDetail)
+	nodeID = agentNodeID(nodeID)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _ = database.ExecContext(ctx, `

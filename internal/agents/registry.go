@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"nodevas/internal/db"
+	"nodevas/internal/engine"
 )
 
 const (
@@ -350,7 +351,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			State:     state,
 			Since:     now,
 			Doing:     sessionField(hb.Doing),
-			NodeID:    strings.TrimSpace(hb.NodeID),
+			NodeID:    agentNodeID(hb.NodeID),
 			LastSeen:  now,
 			Online:    true,
 			Run:       hb.Run,
@@ -419,7 +420,7 @@ func (h *Hub) Touch(hb Heartbeat) (Session, error) {
 			existing.Doing = sessionField(hb.Doing)
 		}
 		if hb.NodeID != "" || explicitIdle {
-			existing.NodeID = strings.TrimSpace(hb.NodeID)
+			existing.NodeID = agentNodeID(hb.NodeID)
 		}
 		if model != "" {
 			existing.Model = model
@@ -455,6 +456,18 @@ func sessionField(s string) string {
 // maxSessionNameBytes.
 func SessionName(raw string) string {
 	return capName(sanitizeToken(raw))
+}
+
+// agentNodeID is a node id an agent reported: trimmed, and kept only when it
+// is a node id the graph could hold (engine.ValidNodeID: at most 128 bytes of
+// letters, digits, '_', '.', '-'). Anything else names no node and is
+// dropped, so it cannot grow the session, its mail or the action log.
+func agentNodeID(s string) string {
+	s = strings.TrimSpace(s)
+	if !engine.ValidNodeID(s) {
+		return ""
+	}
+	return s
 }
 
 // capName cuts a sanitized name to maxSessionNameBytes.

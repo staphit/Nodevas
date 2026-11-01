@@ -197,7 +197,7 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 
 	replyTo := strings.TrimSpace(in.ReplyTo)
 	threadID := ""
-	nodeID := strings.TrimSpace(in.NodeID)
+	nodeID := agentNodeID(in.NodeID)
 	if replyTo != "" {
 		parent, err := h.getMessageByID(ctx, project, replyTo)
 		if err == nil {
@@ -315,7 +315,7 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 	}
 	if in.SenderSession != "" && !in.IsHuman {
 		h.LogAction(project, in.SenderSession, h.sessionRunID(project, in.SenderSession), ActionMessage,
-			strings.TrimSpace(in.NodeID), to)
+			nodeID, to)
 	}
 	return SendResult{
 		ThreadID:   threadID,
