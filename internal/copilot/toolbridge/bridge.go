@@ -88,6 +88,11 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		ChromaURL:  opts.ChromaURL,
 		RAGPython:  opts.RAGPython,
 		HTTPClient: &http.Client{Transport: transport, Timeout: requestTimeout},
+		// The hub's folder is not the person's: in the Docker image it is
+		// the whole workspace, restricted projects and secrets included.
+		// Files reach the copilot only through the API, which checks who
+		// may read them.
+		NoLocalFiles: true,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("toolbridge: build MCP server: %w", err))

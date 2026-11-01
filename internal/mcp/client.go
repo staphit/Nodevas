@@ -183,6 +183,10 @@ type ClientOptions struct {
 	// WorkDir overrides the process's working directory (tests, hooks that
 	// are told the agent's cwd).
 	WorkDir string
+	// NoLocalFiles: the client reads and writes no file on this machine, not
+	// even to learn its git branch: it has no working directory, so
+	// attachments are refused both ways. See Options.NoLocalFiles.
+	NoLocalFiles bool
 	// OffNetwork names the excluded folder WorkDir is in; set, the client
 	// sends no heartbeats and refuses to send messages.
 	OffNetwork string
@@ -233,7 +237,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		httpClient = &http.Client{Timeout: timeout}
 	}
 	actor := strings.TrimSpace(opts.Actor)
-	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor)
+	sessionID, agentKind, repo, branch, cwd := detectSessionIdentity(actor, !opts.NoLocalFiles)
 	if strings.TrimSpace(opts.SessionID) != "" {
 		sessionID = strings.TrimSpace(opts.SessionID)
 	}
@@ -247,11 +251,19 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		branch = strings.TrimSpace(opts.Branch)
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
-	if workDir == "" {
+	switch {
+	case opts.NoLocalFiles:
+		workDir = ""
+	case workDir == "":
 		workDir, _ = os.Getwd()
 	}
 	if abs, err := filepath.Abs(workDir); err == nil && workDir != "" {
 		workDir = abs
+	}
+	follow := followMode(opts.SessionID, agentKind)
+	if opts.NoLocalFiles {
+		// Following Claude Code reads its session registry from disk.
+		follow = ""
 	}
 	model := strings.TrimSpace(opts.Model)
 	if model == "" {
@@ -279,7 +291,7 @@ func NewClient(opts ClientOptions) (*Client, error) {
 		cwd:         cwd,
 		state:       "idle",
 		names:       map[string]string{},
-		follow:      followMode(opts.SessionID, agentKind),
+		follow:      follow,
 	}, nil
 }
 

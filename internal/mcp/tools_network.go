@@ -778,7 +778,9 @@ func (c *Client) doLongPoll(ctx context.Context, path string, body, out any, tim
 	return c.post(context.WithValue(ctx, longPollClientKey{}, &longClient), path, nil, body, out)
 }
 
-func detectSessionIdentity(actor string) (sessionID, agentKind, repo, branch, cwd string) {
+// detectSessionIdentity reads who is running from the environment and, with
+// local, the working directory's name and git branch from the disk.
+func detectSessionIdentity(actor string, local bool) (sessionID, agentKind, repo, branch, cwd string) {
 	envPairs := []struct {
 		env   string
 		agent string
@@ -806,6 +808,9 @@ func detectSessionIdentity(actor string) (sessionID, agentKind, repo, branch, cw
 	}
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("%s:proc-%d", agentKind, os.Getpid())
+	}
+	if !local {
+		return sessionID, agentKind, "", "", ""
 	}
 	if wd, err := os.Getwd(); err == nil {
 		cwd = filepath.Base(wd)
