@@ -32,7 +32,7 @@ workspace/
 
 `graph.yaml` stores graph structure, metadata, relationships, layouts, users, and planned work. Node bodies are Markdown files, with subpages in `<id>.pages/`. Run state is rebuilt from the append-only journal.
 
-Each project's `.vised/` holds drafts, trash, its [version history](./history-and-backup.md) (`git/`, or `history/` when history is kept as file copies) and the shared-editing state (`crdt/`). The workspace's own `.vised/` holds the lifecycle statuses shared by every project (`workflow.json`), the deadline-reminder settings, the database id, and the lock that keeps a second Nodevas process off the workspace. With git history, Nodevas writes `<project>/.vised/.gitignore` so a surrounding Git checkout ignores that folder; otherwise exclude `.vised/` yourself.
+Each project's `.vised/` holds drafts, trash, its [version history](./history-and-backup.md) (`git/`, or `history/` when history is kept as file copies) and the shared-editing state (`crdt/`). The workspace's own `.vised/` holds the lifecycle statuses shared by every project (`workflow.json`), the deadline-reminder settings, the database id, and the lock that keeps a second Nodevas process off the workspace. With git history, Nodevas writes `<project>/.vised/.gitignore` so a surrounding Git checkout ignores that folder. Exclude the workspace's own `.vised/` yourself, and a project's too when history is kept as file copies.
 
 The database is not in the workspace: the embedded PostgreSQL lives under `NODEVAS_PG_HOME` (by default in your user data folder), or the data is on your own PostgreSQL server.
 

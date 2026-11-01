@@ -14,7 +14,7 @@ It needs git 2.32 or newer, the first that lets Nodevas ignore your machine's gi
   - Later saves are grouped into one commit per five minutes per project.
   - A restore, a delete or a page conversion commits at once. So does shutting the server down.
 - **Who it credits:** each commit's author is the person or agent who saved. Anyone else who saved in the same five minutes is added as `Co-authored-by`. Edits made outside Nodevas (another editor, a sync tool) are committed as `Nodevas`.
-- **Where you see it:** the node panel's **Activity** tab, under **History → File versions**, lists the versions of the page open in the editor with their time and author. You can preview one and restore it. A restore is a new commit, so it can be undone too. With git history, the Explorer's **Git** tab shows the same history for the whole project: changes not yet committed (M, A, D, R) and the newest 50 commits, each with its patch.
+- **Where you see it:** the node panel's **Activity** tab, under **History → File versions**, lists the versions of the page open in the editor with their time and author. You can preview one and restore it. A restore is a new commit, so it can be undone too. With git history, the project explorer's **Git** tab shows the same history for the whole project: changes not yet committed (M, A, D) and the newest 50 commits, each with its patch.
 - **Upgrading:** the first time a project opens with git, its older copies under `.vised/history/` are imported as commits in their original order and with their original times. The old copies are left in place.
 - **Without git:**
   - If git is not installed, Nodevas keeps file copies under `.vised/history/` as before.

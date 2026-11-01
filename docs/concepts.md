@@ -60,8 +60,8 @@ Metadata is saved as fields change. A status change is staged until you press **
 
 ## Also included
 
-<!-- sec-pass: Explorer browses runner repositories (first bullet) -->
-- **Explorer** (left of the board): **Nodes**; **Files** (the project folder and your runners' repositories, read-only); **Git** (this project's uncommitted changes and version history, agents' branches, and uncommitted changes in your runners' repositories); **Agent** (running, external and recently finished agent sessions).
+<!-- sec-pass: Project explorer browses runner repositories (first bullet) -->
+- **Project explorer** (left of the board): **Nodes**; **Files** (the project folder and your runners' repositories, read-only); **Git** (this project's uncommitted changes and version history, agents' branches, and uncommitted changes in your runners' repositories); **Agent** (running, external and recently finished agent sessions).
 - Multiple projects and subprojects in one workspace tree.
 - Ctrl/⌘+K searches the nodes and pages of every project you can open, subpages included, and runs commands.
 - **Problems** (board header) lists validation warnings, schedule issues such as overdue nodes, and hints.
