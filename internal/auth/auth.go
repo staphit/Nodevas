@@ -113,23 +113,34 @@ type revalidatorKey struct{}
 
 // ActorFrom returns the actor the auth middleware attached to the request.
 func ActorFrom(r *http.Request) identity.Actor {
-	if r != nil {
-		if actor, ok := r.Context().Value(actorKey{}).(identity.Actor); ok {
-			return actor
-		}
+	if actor, ok := AttachedActor(r); ok {
+		return actor
 	}
 	return identity.Local
 }
 
-// RequireAdmin verifies that authentication middleware attached an
-// administrator to the request. HTTP packages can use this after their normal
-// authentication check without depending on the concrete authenticator.
-func RequireAdmin(r *http.Request) error {
+// AttachedActor is the actor the auth middleware attached, and false when it
+// attached none: a public route (sign-in, a device-link redeem) has nobody
+// signed in, and must not be taken for the local administrator that
+// ActorFrom falls back to.
+func AttachedActor(r *http.Request) (identity.Actor, bool) {
 	if r == nil {
-		return ErrAdminRequired
+		return identity.Actor{}, false
 	}
-	actor, attached := r.Context().Value(actorKey{}).(identity.Actor)
-	if !attached || !actor.IsAdmin() {
+	actor, ok := r.Context().Value(actorKey{}).(identity.Actor)
+	return actor, ok
+}
+
+// RequireAdmin verifies that authentication middleware attached an
+// administrator to the request, and that a person sent it. Server-wide
+// settings are a person's to change: an agent acting for an administrator,
+// through the copilot or a runner, is refused, as account administration
+// and the runner access token already refuse it. HTTP packages can use this
+// after their normal authentication check without depending on the concrete
+// authenticator.
+func RequireAdmin(r *http.Request) error {
+	actor, attached := AttachedActor(r)
+	if !attached || !actor.IsAdmin() || actor.IsAgent() {
 		return ErrAdminRequired
 	}
 	return nil

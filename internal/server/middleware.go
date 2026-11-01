@@ -322,7 +322,9 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	// Read the request back off the context: earlier middleware may have
 	// replaced it, and the store the handler used hangs off that copy.
 	r = c.Request
-	actor := auth.ActorFrom(r)
+	// A public write (a device-link redeem) has nobody signed in; its row
+	// names no actor rather than the local administrator.
+	actor, _ := auth.AttachedActor(r)
 	op := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api/")
 
 	// The database trail is the one that is queried. It records server-wide
