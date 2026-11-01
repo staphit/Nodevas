@@ -49,6 +49,12 @@ type Options struct {
 	Model string
 	// WorkDir overrides the working directory (tests).
 	WorkDir string
+	// NoLocalFiles keeps the session off this machine's files: no working
+	// directory (send_message attaches nothing, save_attachment saves
+	// nothing), no git branch read from one, no agent session registry. The
+	// copilot's in-process bridge sets it: it runs inside the hub, whose
+	// folder holds every project and the server's secrets.
+	NoLocalFiles bool
 	// IgnoreExclusion keeps the session on the network even in an excluded
 	// folder: a runner's run was dispatched on purpose, by a person, to
 	// exactly that repo.
@@ -121,7 +127,10 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 		return nil, nil, err
 	}
 	workDir := opts.WorkDir
-	if workDir == "" {
+	switch {
+	case opts.NoLocalFiles:
+		workDir = ""
+	case workDir == "":
 		workDir, _ = os.Getwd()
 	}
 	// The in-process copilot bridge has no folder of its own; a sidecar in
@@ -149,6 +158,9 @@ func newServer(ctx context.Context, opts Options) (*mcp.Server, func(), error) {
 		AgentRole:   opts.AgentRole,
 		Role:        role,
 		HTTPClient:  opts.HTTPClient,
+		// No working directory is not enough: the client would find the
+		// process's own.
+		NoLocalFiles: opts.NoLocalFiles,
 	})
 	if err != nil {
 		return nil, nil, err

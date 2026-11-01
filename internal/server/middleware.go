@@ -336,7 +336,10 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	r := c.Request
 	if !strings.HasPrefix(r.URL.Path, "/api/") ||
 		!isUnsafeMethod(r.Method) ||
-		strings.HasPrefix(r.URL.Path, "/api/auth/") {
+		strings.HasPrefix(r.URL.Path, "/api/auth/") ||
+		// An agent session's presence, every 30 s: not a change anybody
+		// made, and a row each would bury the ones that are.
+		r.URL.Path == "/api/agents/heartbeat" {
 		c.Next()
 		return
 	}

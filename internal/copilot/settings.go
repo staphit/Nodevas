@@ -186,6 +186,12 @@ func (s *settingsStore) resolve(ctx context.Context) (Settings, string, string, 
 			return s.keyed(settings, ""), key, "stored", nil
 		}
 	}
+	if !s.operatorEndpoint(settings.BaseURL) {
+		// The environment's keys are the operator's: they go to the
+		// operator's endpoint or a vendor's own, never to one an
+		// administrator typed.
+		return settings, "", "", nil
+	}
 	if key := strings.TrimSpace(s.defaults.APIKey); key != "" {
 		return s.keyed(settings, ""), key, "environment", nil
 	}
@@ -200,6 +206,14 @@ func (s *settingsStore) resolve(ctx context.Context) (Settings, string, string, 
 		}
 	}
 	return settings, "", "", nil
+}
+
+// operatorEndpoint reports whether baseURL is one a key may go to without an
+// administrator re-entering it: the vendor's own (empty) or the one the
+// server was started with.
+func (s *settingsStore) operatorEndpoint(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	return baseURL == "" || baseURL == strings.TrimSpace(s.defaults.BaseURL)
 }
 
 // keyed resolves the automatic provider once a key is configured: the key
@@ -237,6 +251,7 @@ func (s *settingsStore) update(ctx context.Context, update SettingsUpdate) error
 	if err != nil {
 		return err
 	}
+	original := saved
 	if update.Provider != nil {
 		value := strings.TrimSpace(*update.Provider)
 		if value != "" && value != "anthropic" && value != "openai" && value != ProviderAuto {
@@ -285,6 +300,19 @@ func (s *settingsStore) update(ctx context.Context, update SettingsUpdate) error
 			return fmt.Errorf("%w: keySource must be server, runner or auto", ErrInvalidSettings)
 		}
 		saved.KeySource = value
+	}
+	if endpoint := s.effective(saved).BaseURL; update.APIKey == nil && s.keys != nil &&
+		endpoint != s.effective(original).BaseURL && !s.operatorEndpoint(endpoint) {
+		// The key is write-only; a new endpoint would receive it on the next
+		// turn. Like the SMTP password, it never follows an endpoint edit
+		// implicitly.
+		stored, err := s.keys.Load()
+		if err != nil {
+			return fmt.Errorf("copilot API key: %w", err)
+		}
+		if strings.TrimSpace(string(stored)) != "" {
+			return fmt.Errorf("%w: apiKey must be re-entered when baseUrl changes", ErrInvalidSettings)
+		}
 	}
 	if update.APIKey != nil {
 		key := strings.TrimSpace(*update.APIKey)
