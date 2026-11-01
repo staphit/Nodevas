@@ -16,8 +16,8 @@ import (
 )
 
 // Liveness and metrics for an operator: GET /api/healthz for the
-// container's health probe, and GET /api/metrics for an administrator or a
-// scraper on the same machine.
+// container's health probe, and GET /api/metrics for an administrator, or a
+// scraper on the same machine when the hub has no accounts.
 
 const (
 	healthzPath = "/api/healthz"
@@ -31,16 +31,25 @@ const (
 )
 
 // publicHealthPath reports a route withAuth lets through without a
-// session: the health probe always, metrics from a direct loopback peer
-// (the handler checks the rest).
-func publicHealthPath(r *http.Request) bool {
+// session: the health probe always, metrics for a local scraper (the
+// handler checks the rest).
+func (s *Server) publicHealthPath(r *http.Request) bool {
 	switch r.URL.Path {
 	case healthzPath:
 		return true
 	case metricsPath:
-		return auth.DirectLoopback(r)
+		return s.localScraper(r)
 	}
 	return false
+}
+
+// localScraper reports a metrics request that needs no administrator: one
+// straight from this machine to a hub without accounts. On a hub with
+// accounts a proxy beside it that adds no forwarding header (nginx's
+// defaults, ssh -L, socat) looks exactly like this machine, so there
+// metrics take an administrator's session like everything else.
+func (s *Server) localScraper(r *http.Request) bool {
+	return auth.DirectLoopback(r) && (s.auth == nil || !s.auth.Remote())
 }
 
 // useDatabase remembers the workspace database for healthz and metrics.
@@ -105,7 +114,7 @@ type connectionCounter interface {
 // rate-limiter refusals by class, runs by state, and the audit queue.
 func (s *Server) metrics(c *gin.Context) {
 	r := c.Request
-	if !auth.DirectLoopback(r) {
+	if !s.localScraper(r) {
 		actor := auth.ActorFrom(r)
 		if !actor.IsAdmin() || actor.IsAgent() {
 			httpx.Err(c, http.StatusForbidden, locale.Errorf("metrics are for administrators", "指標只給管理員看"))

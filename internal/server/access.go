@@ -60,10 +60,10 @@ func (s *Server) accessGate() gin.HandlerFunc {
 }
 
 // accessExempt reports a request Access does not apply to: one straight from
-// this machine. On a hub with accounts that is only the health probe and the
-// metrics scraper. A proxy on the same host that adds no forwarding header
-// (nginx's defaults, ssh -L, socat) looks exactly like this machine, and the
-// app behind it must stay closed to a caller that went around the edge; no
+// this machine. On a hub with accounts that is only the health probe. A proxy
+// on the same host that adds no forwarding header (nginx's defaults, ssh -L,
+// socat) looks exactly like this machine, and the app behind it, metrics
+// included, must stay closed to a caller that went around the edge; no
 // person on a hub with accounts uses it from loopback without Access anyway.
 func (s *Server) accessExempt(r *http.Request) bool {
 	if !auth.DirectLoopback(r) {
@@ -72,7 +72,7 @@ func (s *Server) accessExempt(r *http.Request) bool {
 	if s.auth == nil || !s.auth.Remote() {
 		return true
 	}
-	return r.URL.Path == healthzPath || r.URL.Path == metricsPath
+	return r.URL.Path == healthzPath
 }
 
 // accessMiddleware is AccessMiddleware on a clock a test can move.
