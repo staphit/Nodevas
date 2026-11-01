@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -142,6 +143,33 @@ var unusable = map[string]bool{
 	"save_attachment": true,
 }
 
+// unusableInputs are tool inputs the hub always refuses the copilot. They are
+// left out of the schema the model sees, for the same reason as unusable.
+var unusableInputs = map[string][]string{
+	// No folder to attach files from (NoLocalFiles).
+	"send_message": {"files"},
+}
+
+// withoutInputs is schema without the named properties. The listed schema
+// is not changed: a copy of its top level and of its properties is.
+func withoutInputs(schema any, names []string) any {
+	fields, ok := schema.(map[string]any)
+	if !ok || len(names) == 0 {
+		return schema
+	}
+	properties, ok := fields["properties"].(map[string]any)
+	if !ok {
+		return schema
+	}
+	kept := maps.Clone(properties)
+	for _, name := range names {
+		delete(kept, name)
+	}
+	copied := maps.Clone(fields)
+	copied["properties"] = kept
+	return copied
+}
+
 // writeTools change content in a way history can undo. Everything else that
 // is not read-only is risky, so a tool added to internal/mcp later is asked
 // about until someone decides it deserves less.
@@ -172,7 +200,7 @@ func KindOf(name string, readOnly bool) Kind {
 func mapTool(tool *sdk.Tool) (Tool, error) {
 	schema := json.RawMessage(`{"type":"object"}`)
 	if tool.InputSchema != nil {
-		encoded, err := json.Marshal(tool.InputSchema)
+		encoded, err := json.Marshal(withoutInputs(tool.InputSchema, unusableInputs[tool.Name]))
 		if err != nil {
 			return Tool{}, fmt.Errorf("toolbridge: schema of %s: %w", tool.Name, err)
 		}
