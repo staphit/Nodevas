@@ -6,19 +6,19 @@ English: [workstation.md](./workstation.md)
 server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程式。你電腦上的 **runner**（`nodevas runner`）主動連到 hub，接下你同意的 run，用你自己的登入執行 agent CLI。程式碼、agent 登入與 `gh` 登入都只留在 runner 上。
 
 - **Run**：分成 headless 與互動兩種。headless 把事件串流到節點上；互動模式把 agent 的 TUI 放進瀏覽器。runner 會 commit、push，再用 `gh` 開 PR，並回報 diff 與 CI 狀態。
-- **模型**：每次 run 可以自己選 agent 與模型，也可以交給路由規則與 fallback 鏈決定。遇到 rate limit、額度用完或 CLI 不存在時，就改用鏈上的下一個模型。OpenCode 也可以改走 [Agent Client Protocol](https://agentclientprotocol.com)（`nodevas runner set opencodeProtocol acp`，實驗性，僅限 OpenCode 1.x；OpenCode 2 的 run 會改用 `opencode run`）：每個工具呼叫即時串流。headless run 沒有人可以核准權限，所以 CLI 要求的權限一律拒絕，除非你把[權限提示轉給 Nodevas](#權限提示預設關閉)。
+- **模型**：每次 run 可以自己選 agent 與模型，也可以交給路由規則與 fallback 鏈決定。遇到 rate limit、額度用完或 CLI 不存在時，就改用鏈上的下一個模型。OpenCode 也可以改走 [Agent Client Protocol](https://agentclientprotocol.com)（`nodevas runner set opencodeProtocol acp`，實驗性，僅限 OpenCode 1.x；OpenCode 2 的 run 會改用 `opencode run`）：每個工具呼叫即時串流；權限提示見[權限提示](#權限提示預設關閉)。
 - **審查管線**：實作完成後，可以交給其他 agent 或模型審查、交給人審，或兩者都要。要求修改時會再跑一次 revise run。
 - **Agent 對話**：agent 可以看到還有誰在工作、互相傳訊息，也能透過 hub 停下來問你（`ask_user`）；見[回覆你的 agent](#回覆你的-agent)。
 - **工作站**：每個專案的工作站（頂列的「看板｜工作站｜設定」切換）把這些都放在同一個畫面：
   - 頂端的 **全部暫停**：暫停你啟動的自動推進，並取消還沒開始的 run（也可以一併取消執行中的）。之後按 **全部恢復**，這些自動推進就從停下的地方繼續；
   - **等你處理**：提問與權限提示、暫留訊息、審查、要合併或修正的 PR、runner 還沒接受的 run、用量上限與每日預算；
   - 目標的自動推進：在目標節點面板頂端按 **自動推進**，就會在這裡開啟；
-  - 戰情室：把整個工作區畫成一棟像素風大樓，有這個專案的辦公室、其他專案的辦公室、閒置 agent 共用的休息室，以及每個 runner 一座機櫃的機房。每個 agent 都是按鈕：它的選單可以開啟它的 run、改動、節點或目標，或暫停、取消它；
+  - 戰情室：把整個工作區畫成一棟像素風大樓，有這個專案的辦公室、其他專案的辦公室、閒置 agent 共用的休息室，以及每個 runner 一座機櫃的機房。每個 agent 都是按鈕：它的選單可以開啟它的 run、改動、節點或目標，暫停或恢復它的自動推進，或取消這次 run；
   - 過去一小時誰做了什麼；
   - 側欄有今天的花費、runner，以及可以直接發訊息的 Agent 對話。
 
   agent 提問、權限提示、用量達上限、每日預算用完時，瀏覽器也會通知你。
-<!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
+  <!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
 - **安全預設**：
   - run 需要你在 runner 的終端機上同意。遠端派工需要 step-up passcode，加上你在 runner 上設定的 auto-accept 白名單。
   - 遠端 merge 預設關閉，要自己打開。
@@ -33,7 +33,7 @@ app 裡與 agent 有關的部分（runner、run、自動推進、Agent 對話與
 設定只要兩步：
 
 1. 部署 hub：見 [Getting started: Team server](./getting-started.md#team-server)。
-2. 在 hub 上打開 **設定 → Agent 與 Runner → 連結新裝置**，複製一次性連結。在你的電腦上執行 [`scripts/install.sh --hub <網址> --link`](./install.md#set-up-a-new-pc-with-a-device-link)，帶入允許 run 使用的 repo，出現提示時貼上連結。連結只能用一次、十分鐘內有效；若管理員存過 hub 的 Access service token，連結也會一併帶上，不必再從 Cloudflare 手動複製。
+2. 在 hub 上打開 **設定 → Agent 與 Runner**，打開 **讓 agent 在這裡工作**，再按 **連結新裝置**，複製一次性連結。在你的電腦上執行 [`scripts/install.sh --hub <網址> --link`](./install.md#set-up-a-new-pc-with-a-device-link)，帶入允許 run 使用的 repo，出現提示時貼上連結。連結只能用一次、十分鐘內有效；若管理員存過 hub 的 Access service token，連結也會一併帶上，不必再從 Cloudflare 手動複製。
 
 只在一台電腦上自己用時，一個指令就能同時啟動兩者：`nodevas serve --project ./workspace [--repo ~/code/myapp]`（只要 hub 時加 `--no-runner`）。runner 仍是獨立的程序、用自己的 token 連線，每個 run 仍要你在執行 `serve` 的終端機接受。見 [Hub and runner on one machine](./install.md#hub-and-runner-on-one-machine)。
 

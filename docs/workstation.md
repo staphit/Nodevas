@@ -6,19 +6,19 @@ Traditional Chinese: [workstation.zh-TW.md](./workstation.zh-TW.md)
 The server (the **hub**) shows the board, the runs, and their changes, but never starts a program. A **runner** (`nodevas runner`) on your own PC connects out to the hub, takes the runs you accept, and runs the agent CLIs with your own logins. Your code, your agent logins, and your `gh` login stay on the runner.
 
 - **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
-- **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens. Nobody is at a headless run to grant a permission, so whatever its CLI would ask about is refused unless you [relay the prompts](#permission-prompts-off-by-default) to Nodevas.
+- **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens; permission prompts are covered under [Permission prompts](#permission-prompts-off-by-default).
 - **Review pipelines.** An implement run can be followed by a review from other agents or models, a person, or both. Requested changes go back for a revise run.
 - **Agent chat.** Agents see who else is working, message each other, and can stop to ask you something through the hub (`ask_user`); see [Answering your agents](#answering-your-agents).
 - **Station.** Each project's Station (the top bar's Board | Station | Settings switch) puts all of this in one place:
   - **Pause everything**, at the top: it pauses the autopilots you started and cancels runs that have not started (optionally the running ones too). **Resume all** then resumes those autopilots where they stopped;
   - **Waiting on you**: questions and permission prompts, held messages, reviews, PRs to merge or fix, runs a runner has not accepted yet, usage limits and the daily budget;
   - Autopilot, for a goal: the **Autopilot** button at the top of the goal's node panel opens it here;
-  - the war room: the workspace as a pixel-art building, with this project's office, the other projects' offices, a lounge for idle agents and a server room with a rack per runner. Each agent is a button: its menu opens its run, changes, node or goal, or pauses or cancels it;
+  - the war room: the workspace as a pixel-art building, with this project's office, the other projects' offices, a lounge for idle agents and a server room with a rack per runner. Each agent is a button: its menu opens its run, changes, node or goal, pauses or resumes its autopilot, or cancels the run;
   - who worked on what in the last hour;
   - at the side, today's spend, the runners, and Agent chat with a composer.
 
   Questions, permission prompts, usage limits and the daily budget also raise a browser notification.
-<!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
+  <!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
 - **Safe defaults.**
   - Runs need your acceptance at the runner's terminal. Remote dispatch needs a step-up passcode and an auto-accept allowlist you set on the runner.
   - Remote merge is off until you turn it on.
@@ -33,7 +33,7 @@ The agent parts of the app (runners, runs, autopilot, Agent chat and usage) stay
 Set it up in two steps:
 
 1. Deploy the hub: see [Getting started: Team server](./getting-started.md#team-server).
-2. On the hub, open **Settings → Agents → Link a new device** and copy the one-time link. On your PC, run [`scripts/install.sh --hub <url> --link`](./install.md#set-up-a-new-pc-with-a-device-link) with the repositories that runs may use, and paste the link when asked. The link works once, for ten minutes, and carries the hub's Access service token if an administrator stored one, so nothing is copied from Cloudflare by hand.
+2. On the hub, open **Settings → Agents**, turn on **Let agents work here**, then **Link a new device** and copy the one-time link. On your PC, run [`scripts/install.sh --hub <url> --link`](./install.md#set-up-a-new-pc-with-a-device-link) with the repositories that runs may use, and paste the link when asked. The link works once, for ten minutes, and carries the hub's Access service token if an administrator stored one, so nothing is copied from Cloudflare by hand.
 
 Alone on one machine, one command starts both: `nodevas serve --project ./workspace [--repo ~/code/myapp]` (`--no-runner` for the hub alone). The runner still runs as its own process with its own token, and you still accept each run, in the terminal running `serve`. See [Hub and runner on one machine](./install.md#hub-and-runner-on-one-machine).
 
