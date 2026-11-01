@@ -260,7 +260,7 @@ func redeemMail(runner runnerwire.Runner, device, deviceOS, source string, at ti
 			fmt.Fprintf(&b, "裝置：%s %s\n", device, deviceOS)
 		}
 		fmt.Fprintf(&b, "來源：%s\n時間：%s\n\n", source, when)
-		b.WriteString("如果不是你，請立即到 Runners 頁面撤銷它：它能以你的名義執行 agent。\n")
+		b.WriteString("如果不是你，請立即到「設定 → Agent 與 Runner」撤銷它：它能以你的名義執行 agent。\n")
 		return "Nodevas 新裝置已連結", b.String()
 	}
 	fmt.Fprintf(&b, "A new device was linked to your Nodevas account as runner %q.\n\n", runner.Name)
@@ -268,7 +268,7 @@ func redeemMail(runner runnerwire.Runner, device, deviceOS, source string, at ti
 		fmt.Fprintf(&b, "Device: %s %s\n", device, deviceOS)
 	}
 	fmt.Fprintf(&b, "From: %s\nAt: %s\n\n", source, when)
-	b.WriteString("If this was not you, revoke the runner on the Runners page now: it can run agents on your behalf.\n")
+	b.WriteString("If this was not you, revoke the runner under Settings → Agents now: it can run agents on your behalf.\n")
 	return "Nodevas: new device linked", b.String()
 }
 

@@ -29,7 +29,7 @@ func TestLocalRunnerTokenKeepsAGoodTokenAndReplacesOthers(t *testing.T) {
 		t.Fatalf("restart: created=%v same=%v err=%v", created, again == token, err)
 	}
 
-	// Revoked on the Runners page, or never this hub's: a new runner.
+	// Revoked under Settings → Agents, or never this hub's: a new runner.
 	if err := local.runners.Revoke(ctx, identity.Local, runner.ID); err != nil {
 		t.Fatal(err)
 	}

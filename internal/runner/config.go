@@ -826,7 +826,7 @@ func isLoopbackHost(host string) bool {
 // Access secret pasted by mistake is caught here rather than as a 401 later.
 func ValidateToken(token string) error {
 	if !strings.HasPrefix(token, runnerwire.TokenPrefix) || len(token) <= len(runnerwire.TokenPrefix)+16 {
-		return fmt.Errorf("that is not a runner token: runner tokens start with %q (create one on the Runners page)",
+		return fmt.Errorf("that is not a runner token: runner tokens start with %q (add a runner on the hub under Settings → Agents)",
 			runnerwire.TokenPrefix)
 	}
 	if strings.ContainsAny(token, " \t\r\n") {

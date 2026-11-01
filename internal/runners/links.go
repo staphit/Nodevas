@@ -23,7 +23,7 @@ import (
 var (
 	// ErrLinkNotFound is a code that is unknown, expired or already used. The
 	// three are one answer: a caller holding a stale code learns nothing more.
-	ErrLinkNotFound = locale.Errorf("that device link is unknown, expired or already used; make a new one on the Runners page", "這個裝置連結不存在、已過期或已使用；請在 Runners 頁面建立新的")
+	ErrLinkNotFound = locale.Errorf("that device link is unknown, expired or already used; make a new one on the hub under Settings → Agents → Link a new device", "這個裝置連結不存在、已過期或已使用；請在 hub 的「設定 → Agent 與 Runner → 連結新裝置」建立新的")
 	// ErrTooManyLinks is a person with MaxLinksPerUser codes outstanding.
 	ErrTooManyLinks = locale.Errorf("too many device links are waiting to be used; use one or let them expire", "等待使用的裝置連結太多；請先使用或等它們過期")
 	// ErrLinkThrottled is a source that failed too many redeems lately.
