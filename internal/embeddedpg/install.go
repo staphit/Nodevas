@@ -455,6 +455,9 @@ type extractor struct {
 	dir     string
 	written int64
 	links   map[string]string // rel -> resolved rel target
+	// seen holds every regular file and symlink read so far, true when it
+	// was kept: a hard link may only name one of these.
+	seen map[string]bool
 }
 
 func (x *extractor) file(rel string, mode os.FileMode, body io.Reader) error {
@@ -479,6 +482,42 @@ func (x *extractor) file(rel string, mode os.FileMode, body io.Reader) error {
 		return fmt.Errorf("%w: archive expands past %d bytes", ErrUnsafeArchive, maxExtractedBytes)
 	}
 	return nil
+}
+
+// hardLink writes rel as a copy of the earlier entry its header names. The
+// Linux and macOS archives store identical time zone files this way. The
+// target is an archive path like any entry's, so it must lie inside root,
+// and it must be a file or symlink already read: a link to anything else
+// (outside the archive, or not written yet) is refused. A copy rather than
+// a link keeps the extracted tree free of shared inodes, and counts toward
+// the size cap like any file.
+func (x *extractor) hardLink(rel, root string, header *tar.Header) error {
+	target, err := entryPath(header.Linkname, root)
+	if err != nil {
+		return fmt.Errorf("%w: hard link %q -> %q", ErrUnsafeArchive, header.Name, header.Linkname)
+	}
+	kept, seen := x.seen[target]
+	if target == "" || target == rel || !seen {
+		return fmt.Errorf("%w: hard link %q -> %q is not an earlier entry", ErrUnsafeArchive, header.Name, header.Linkname)
+	}
+	x.seen[rel] = kept && rel != "" && keep(rel)
+	if !x.seen[rel] {
+		return nil // a link to, or as, something the allowlist dropped
+	}
+	if resolved, ok := x.links[target]; ok {
+		x.links[rel] = resolved
+		return nil
+	}
+	source, err := os.Open(filepath.Join(x.dir, filepath.FromSlash(target)))
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	return x.file(rel, info.Mode(), source)
 }
 
 // finishLinks makes the symlinks once their targets exist; where symlinks
@@ -520,7 +559,7 @@ func extractTarGz(archive, root, dir string) error {
 	}
 	defer gz.Close()
 	reader := tar.NewReader(gz)
-	x := &extractor{dir: dir, links: map[string]string{}}
+	x := &extractor{dir: dir, links: map[string]string{}, seen: map[string]bool{}}
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -541,18 +580,24 @@ func extractTarGz(archive, root, dir string) error {
 			if err != nil {
 				return err
 			}
-			if rel != "" && keep(rel) {
+			kept := rel != "" && keep(rel)
+			if kept {
 				x.links[rel] = resolved
 			}
+			x.seen[rel] = kept
 		case tar.TypeReg:
-			if rel == "" || !keep(rel) {
+			kept := rel != "" && keep(rel)
+			x.seen[rel] = kept
+			if !kept {
 				continue
 			}
 			if err := x.file(rel, os.FileMode(header.Mode), reader); err != nil {
 				return err
 			}
 		case tar.TypeLink:
-			return fmt.Errorf("%w: hard link %q", ErrUnsafeArchive, header.Name)
+			if err := x.hardLink(rel, root, header); err != nil {
+				return err
+			}
 		default:
 			// Devices, fifos and the like have no place in a binaries archive.
 			return fmt.Errorf("%w: %q has type %c", ErrUnsafeArchive, header.Name, header.Typeflag)
