@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FileChange, Run, RunChanges } from "../api";
+import { RETENTION_MIN_DAYS } from "../api/analytics";
 import { IconClose } from "../icons";
 import { useI18n } from "../i18n";
 import {
@@ -234,6 +235,7 @@ function FileView({
   prHref,
   prNumber,
   layout,
+  cleared,
 }: {
   change: FileChange;
   file: DiffFile | undefined;
@@ -242,13 +244,21 @@ function FileView({
   prHref: string;
   prNumber?: number;
   layout: DiffLayout;
+  /** A missing patch may have been cleared by history retention. */
+  cleared: boolean;
 }) {
   const { t } = useI18n();
   let body: React.ReactNode;
   if (changes.patchTruncated || !changes.patch) {
+    const why =
+      cleared && changes.patchTruncated
+        ? t("diff.cleared")
+        : prHref
+          ? t("diff.truncated")
+          : t("diff.truncatedNoPr");
     body = (
       <p className="run-diff-note">
-        {prHref ? t("diff.truncated") : t("diff.truncatedNoPr")}
+        {why}
         {prHref && (
           <>
             {" "}
@@ -313,6 +323,7 @@ export function DiffDialog({
   subtitle,
   prHref = "",
   prNumber,
+  cleared = false,
   summary,
   footer,
   onClose,
@@ -325,6 +336,11 @@ export function DiffDialog({
   subtitle: string;
   prHref?: string;
   prNumber?: number;
+  /**
+   * The changes are old enough for history retention to have cleared their
+   * patch: a missing one says so rather than "too large".
+   */
+  cleared?: boolean;
   /** The line under the head; defaults to the counts and file total. */
   summary?: (changes: RunChanges, files: number) => React.ReactNode;
   footer?: React.ReactNode;
@@ -421,6 +437,7 @@ export function DiffDialog({
               prHref={prHref}
               prNumber={prNumber}
               layout={layout}
+              cleared={cleared}
             />
           </section>
         )}
@@ -480,6 +497,19 @@ export function DiffDialog({
   );
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether history retention may have cleared a run's patch: it blanks the
+ * patches of changes older than its period, 30 days at the least, and marks
+ * them truncated as a too-large patch is. The period itself is an
+ * administrator's setting, so the shortest one is assumed.
+ */
+export function retentionMayHaveCleared(run: Pick<Run, "finishedAt" | "createdAt">, now = Date.now()): boolean {
+  const at = Date.parse(run.finishedAt || run.createdAt || "");
+  return Number.isFinite(at) && now - at > RETENTION_MIN_DAYS * DAY_MS;
+}
+
 /**
  * A finished run's changes: fetched when opened, with the run's PR to fall
  * back on for a diff too big to carry and its merge approval at the foot.
@@ -507,6 +537,7 @@ export function RunDiffDialog({ run, onClose }: { run: Run; onClose: () => void 
       })}
       prHref={safeExternalUrl(run.prUrl) ?? ""}
       prNumber={run.prNumber}
+      cleared={retentionMayHaveCleared(run)}
       summary={(changes, files) => (
         <RunChangesSummary
           run={{

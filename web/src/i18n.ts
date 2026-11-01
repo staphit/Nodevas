@@ -2518,6 +2518,8 @@ const messages: Record<Language, MessageCatalog> = {
     "diff.none": "No changes reported for this run yet.",
     "diff.truncated": "Diff too large to show; open the PR.",
     "diff.truncatedNoPr": "Diff too large to show here.",
+    "diff.cleared":
+      "This run's diff is no longer kept: history retention clears the diffs of older runs and keeps their file lists and line counts. (A diff too large to keep looks the same.)",
     "diff.openPr": "Open PR #{number}",
     "diff.binary": "Binary files differ",
     "diff.noLines": "No line changes to show (a mode change or an empty file).",
@@ -6197,6 +6199,7 @@ const messages: Record<Language, MessageCatalog> = {
     "diff.none": "這次執行還沒有回報改動。",
     "diff.truncated": "差異太大無法顯示，請開啟 PR 查看。",
     "diff.truncatedNoPr": "差異太大，無法在這裡顯示。",
+    "diff.cleared": "這次執行的差異已不再保留：歷史保留期限會清除較舊執行的差異，只留下檔案清單與行數。（太大而未保存的差異看起來也一樣。）",
     "diff.openPr": "開啟 PR #{number}",
     "diff.binary": "二進位檔案不同",
     "diff.noLines": "沒有可顯示的行差異（權限變更或空檔案）。",
