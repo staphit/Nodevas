@@ -32,6 +32,11 @@ const (
 // keptMu serialises this process's reads and writes of the record.
 var keptMu sync.Mutex
 
+// Test seams: keptAfterLoad runs once RecordKept has read the record, before
+// it writes it back; keptLockWaiting runs when the record's lock is held
+// elsewhere and the caller starts to wait for it.
+var keptAfterLoad, keptLockWaiting func()
+
 // KeptWorktree is a run's worktree the runner kept because its commit left
 // agent config out.
 type KeptWorktree struct {
@@ -93,6 +98,9 @@ func RecordKept(ctx context.Context, dataDir, repoPath string, wt Worktree, with
 	entries, err := loadKept(dataDir)
 	if err != nil {
 		return err
+	}
+	if keptAfterLoad != nil {
+		keptAfterLoad()
 	}
 	entries = slices.DeleteFunc(entries, func(e KeptWorktree) bool { return sameRepoPath(e.Path, wt.Path) })
 	entries = append(entries, entry)
