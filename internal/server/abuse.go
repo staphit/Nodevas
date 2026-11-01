@@ -841,12 +841,17 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 // pre-auth bucket and not to the hub-wide one, so a flood of strangers cannot
 // refuse it: the sign-in door (asking who one is, the first request of every
 // app load; asking for a passcode; signing in), and this machine's health
-// probe. Guessing and mail at the door are bounded per source, per address
+// probe, and a device-link redeem. Guessing and mail at the door are bounded per source, per address
 // and per passcode (internal/auth); a hub-wide budget there would only hand
 // a stranger the means to lock every member out.
 func sourceOnlyPreAuth(r *http.Request) bool {
 	path := r.URL.Path
 	if auth.SignInPaths[path] || path == "/api/auth/status" {
+		return true
+	}
+	// A device-link redeem is the sign-in door of a member's new machine:
+	// bounded per source and its code per failures (runner_links.go).
+	if path == runnerwire.LinkPath && r.Method == http.MethodPost {
 		return true
 	}
 	return path == healthzPath &&
