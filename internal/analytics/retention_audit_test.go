@@ -2,8 +2,11 @@ package analytics
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
+
+	"nodevas/internal/audit"
 )
 
 // A refused sign-in, step-up, authenticator code or device-link redeem
@@ -34,5 +37,13 @@ func TestPruneAgesOutAuditRefusals(t *testing.T) {
 	}
 	if n := f.count(`SELECT COUNT(*) FROM audit_events WHERE action IN ('auth.signin','account.remove','runner.link.redeem')`); n != 3 {
 		t.Errorf("other audit rows left = %d, want all 3", n)
+	}
+}
+
+// The list names the audit package's refusal actions as it spells them.
+func TestAuditRefusalActionsAreTheTrailsOwn(t *testing.T) {
+	want := []string{audit.ActionSignInFailed, audit.ActionStepUpFailed, audit.ActionTOTPFailed, audit.ActionRunnerLinkFailed}
+	if !slices.Equal(AuditRefusalActions, want) {
+		t.Errorf("AuditRefusalActions = %q, want %q", AuditRefusalActions, want)
 	}
 }

@@ -85,7 +85,7 @@ func (s *Server) pruneHistory(ctx context.Context, database *db.DB) {
 	if res.Total() > 0 && s.audit != nil {
 		s.audit.RecordOrLog(ctx, audit.Event{At: time.Now(), ActorID: identity.Local.ID, ActorName: "nodevas",
 			Action: "analytics.retention.prune", Target: analytics.RetentionSettingKey,
-			Detail: map[string]any{"days": days, "events": res.Events, "actions": res.Actions, "picks": res.Picks, "patches": res.Patches}})
+			Detail: map[string]any{"days": days, "events": res.Events, "actions": res.Actions, "picks": res.Picks, "patches": res.Patches, "refusals": res.Refusals}})
 	}
 }
 
