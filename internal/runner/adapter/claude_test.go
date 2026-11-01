@@ -289,6 +289,38 @@ func TestClaudeReadOnlyKinds(t *testing.T) {
 	}
 }
 
+// A read-only run reaches nothing beyond the worktree through Claude Code's
+// own tools, whatever the owner's mode: no web fetch or search (a
+// prompt-injected reviewer could send what it read to any URL) and no
+// background command, headless or in the TUI.
+func TestClaudeReadOnlyDeniesTheWeb(t *testing.T) {
+	env := RunEnv{Binary: "/usr/bin/claude", Workdir: t.TempDir(), TempDir: t.TempDir(),
+		PermissionMode: "bypassPermissions", MCP: MCPServer{Command: "/usr/bin/nodevas", Args: []string{"mcp"}}}
+	for _, kind := range []string{runnerwire.JobReview, runnerwire.JobPlan} {
+		job := runnerwire.Job{RunID: "r", NodeID: "n", Kind: kind}
+		headless, err := Claude{}.Command(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tui, err := Claude{}.InteractiveCommand(job, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, args := range map[string][]string{"headless": headless.Args, "interactive": tui.Args} {
+			i := slices.Index(args, "--disallowedTools")
+			if i < 0 {
+				t.Fatalf("%s %s: no deny list in %q", kind, name, args)
+			}
+			deny := strings.Split(args[i+1], ",")
+			for _, tool := range []string{"WebFetch", "WebSearch", "Monitor", "Bash", "PowerShell", "Edit", "Write"} {
+				if !slices.Contains(deny, tool) {
+					t.Errorf("%s %s: %s is not denied: %q", kind, name, tool, args[i+1])
+				}
+			}
+		}
+	}
+}
+
 // With permissionRelay a prompt goes to the hub's approve_tool, which waits
 // for a person: the tool is allowed and the MCP timeout outlasts the wait.
 // The runner's own limits stay: a read-only run's deny list and the mode.

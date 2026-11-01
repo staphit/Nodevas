@@ -605,6 +605,24 @@ func TestReviewPermission(t *testing.T) {
 	}
 }
 
+// A Claude review or plan never runs in a mode that skips Claude Code's own
+// permission prompts: there, the deny list leaves reads anywhere on this
+// machine open. Modes that ask (headless: refuse) or never allow stay the
+// owner's.
+func TestReviewPermissionClaudeKeepsPrompts(t *testing.T) {
+	for _, owner := range []string{"bypassPermissions", "auto"} {
+		mode, text := reviewPermission(&Config{PermissionMode: owner}, "claude")
+		if mode != "acceptEdits" || !strings.Contains(text, mode) || strings.Contains(text, owner) {
+			t.Errorf("owner's %s: review runs in %q (%q)", owner, mode, text)
+		}
+	}
+	for _, owner := range []string{"acceptEdits", "manual", "dontAsk", "plan"} {
+		if mode, _ := reviewPermission(&Config{PermissionMode: owner}, "claude"); mode != owner {
+			t.Errorf("owner's %s: review runs in %q", owner, mode)
+		}
+	}
+}
+
 // permissionRelay is off unless the owner turns it on; the run's log says
 // when it applies, and only for the CLIs that can relay.
 func TestPermissionRelaySetting(t *testing.T) {
