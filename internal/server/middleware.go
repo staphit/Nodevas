@@ -292,7 +292,7 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 func (s *Server) withRequestProject(c *gin.Context) {
 	r := c.Request
 	name := httpx.RequestProjectName(r)
-	if !httpx.ProjectScopedPath(r.URL.Path) || projectlessPath(r) {
+	if !httpx.ProjectScopedPath(r.URL.Path) || s.projectlessPath(r) {
 		c.Next()
 		return
 	}

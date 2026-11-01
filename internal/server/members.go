@@ -101,8 +101,8 @@ func accountLevelPath(path string) bool {
 
 // projectlessPath reports a route that never reads the request's project:
 // projectlessPaths, and the health probes.
-func projectlessPath(r *http.Request) bool {
-	return underAny(r.URL.Path, projectlessPaths) || publicHealthPath(r)
+func (s *Server) projectlessPath(r *http.Request) bool {
+	return underAny(r.URL.Path, projectlessPaths) || s.publicHealthPath(r)
 }
 
 func underAny(path string, prefixes []string) bool {
