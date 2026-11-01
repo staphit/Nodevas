@@ -110,8 +110,8 @@ export function notifyUnauthorized(): void {
 /** Reads the CSRF cookie the login response set. It is deliberately not
  * HttpOnly: the check is that its value comes back in a header, which a
  * cross-site page cannot set. */
-export function csrfToken(): string {
-  const match = /(?:^|;\s*)nodevas_csrf=([^;]*)/.exec(document.cookie);
+export function csrfToken(cookie: string = document.cookie): string {
+  const match = /(?:^|;\s*)nodevas_csrf=([^;]*)/.exec(cookie);
   return match ? decodeURIComponent(match[1]) : "";
 }
 
