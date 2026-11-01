@@ -2,8 +2,7 @@
  * State registry [A-01].
  *
  * One row per domain: where the truth lives on disk, which API touches it, who
- * is allowed to write it, and how a write is confirmed. This is the machine
- * readable version of §4 of `PROJECT_REDESIGN_PLAN.md`; UI code can render it
+ * is allowed to write it, and how a write is confirmed. UI code can render it
  * (Settings → about/debug) and reviews can diff it.
  *
  * Adding a new persisted concept means adding a row here first.
@@ -22,7 +21,8 @@ export type DomainId =
 /**
  * How a change becomes durable.
  *
- * - `commit-autosave` — value is written when the field commits (blur/enter).
+ * - `commit-autosave` — value is written when the field commits (blur/enter),
+ *   or, for documents, when the editor goes idle, loses focus or is hidden.
  * - `manual-save` — user presses save; dirty state is visible until then.
  * - `explicit-apply` — user presses an apply button; appends to the journal.
  * - `instant-local` — written to local storage immediately, never to the project.
@@ -123,16 +123,17 @@ export const DOMAIN_REGISTRY: Record<DomainId, DomainDescriptor> = {
     owner: "Node Inspector / Document, Popout",
     readers: ["Drawer", "Popout", "Search"],
     writers: ["setTabContent", "saveTab", "saveDraft", "applyDraft", "resolveConflict"],
-    savePolicy: "manual-save",
+    savePolicy: "commit-autosave",
     undo: "editor",
     derived: [".vised/drafts"],
   },
   workflow: {
     id: "workflow",
     titleKey: "term.workflow",
-    sourceOfTruth: "graph.yaml → ui.customStatuses / ui.planStatuses / node_types",
+    sourceOfTruth:
+      "<workspace>/.vised/workflow.json (custom statuses shared by every project) + graph.yaml → ui.customStatuses (this project's own) / ui.planStatuses / node_types",
     diskPath: "graph.yaml",
-    api: ["GET /api/graph", "PUT /api/graph"],
+    api: ["GET /api/graph", "PUT /api/graph", "GET|PUT /api/workspaces/statuses"],
     owner: "Project Settings / Workflow",
     readers: ["Graph", "Timeline", "Node Inspector", "Sidebar legend"],
     writers: ["updateWorkflowDefinition"],
