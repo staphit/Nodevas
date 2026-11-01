@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ConflictError } from "../api";
 import { useApp } from "../store";
 import type { Graph, NodeStyle, RunState } from "../types";
-import { invalidateGenerations } from "./internals";
+import { invalidateGenerations, queues } from "./internals";
 import { clearUndo } from "./undo";
 
 vi.mock("../api", async (importOriginal) => {
@@ -450,6 +450,12 @@ describe("a reload on the wire beside a save", () => {
     vi.mocked(api.getGraph).mockImplementationOnce(() => read.promise);
   });
 
+  // The read that follows the saves lands inside the test that caused it.
+  afterEach(async () => {
+    await queues.graphSave;
+    await useApp.getState().loadAll();
+  });
+
   /** Shape saved; its echo's reload and the alignment's save both on the wire. */
   async function shapeSavedAndAlignmentSending() {
     const shape = setStyle({ shape: "diamond" });
@@ -497,6 +503,23 @@ describe("a reload on the wire beside a save", () => {
     const { graph, baseRev } = await nextSave();
     expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
     expect(baseRev).toBe("rev-3");
+  });
+
+  // The reload left out was what someone else's change was told with: it is
+  // read again once the saves are through, without another trigger.
+  it("reads again after the saves, so someone else's change still arrives", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    const theirs = styled({ shape: "diamond", align: "left" });
+    theirs.nodes![0].title = "別人改的";
+    vi.mocked(api.getGraph).mockResolvedValue({ graph: theirs, rev: "rev-5", statuses: {}, issues: null });
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+
+    await vi.waitFor(() => expect(useApp.getState().graphRev).toBe("rev-5"));
+    expect(useApp.getState().graph).toEqual(theirs);
+    expect(api.getGraph).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -16,7 +16,7 @@
 
 import { api } from "../api";
 import { translate } from "../i18n";
-import { queues } from "./internals";
+import { queues, sendGraphWrite } from "./internals";
 import {
   clearRedo,
   peekRedo,
@@ -103,7 +103,7 @@ async function applyEntry(
     const restored = structuredClone(entry.graph);
     set({ graph: restored });
     try {
-      const res = await api.putGraph(restored, graphRev);
+      const res = await sendGraphWrite(() => api.putGraph(restored, graphRev));
       set({ graphRev: res.rev, issues: res.issues ?? [], error: null });
       attempt.applied = true;
     } catch (error) {
@@ -142,7 +142,7 @@ async function applyEntry(
     const before = get().graph ? structuredClone(get().graph!) : null;
     const current = await api.getGraph();
     const restored = structuredClone(entry.graph);
-    await api.putGraph(restored, current.rev);
+    await sendGraphWrite(() => api.putGraph(restored, current.rev));
     set({ graph: restored });
     attempt.applied = true;
     inverse =
