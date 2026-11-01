@@ -22,9 +22,10 @@ func DenyProjectAccess(c *gin.Context) {
 // resolve (err). With membership on, a caller who is not an administrator
 // is answered as for a project they may not read (DenyProjectAccess): a 400
 // with the reason, next to a 403 for a restricted project, would tell which
-// names exist. Otherwise, and for an administrator, 400 with the reason.
+// names exist. Otherwise, and for an administrator, 400 with the reason. A
+// request with no actor attached is not an administrator's.
 func RefuseUnknownProject(c *gin.Context, err error, membership bool) {
-	if membership && !auth.ActorFrom(c.Request).IsAdmin() {
+	if membership && auth.RequireAdmin(c.Request) != nil {
 		DenyProjectAccess(c)
 		return
 	}

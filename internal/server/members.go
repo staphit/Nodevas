@@ -81,8 +81,32 @@ var readOnlyPosts = map[string]bool{
 	"/api/dsl/check":   true,
 }
 
+// projectlessPaths are the account-level routes that never read the
+// request's project, so it is not resolved for them (withRequestProject):
+// whatever a request names there, the answer is the same. Some serve
+// clients that are not signed in, and a browser still showing a project it
+// lost sends that name on every request, which must not keep it from its
+// own settings or from signing out.
+var projectlessPaths = []string{
+	"/api/auth/",
+	"/api/runs/budget",
+	"/api/runs/routing",
+	"/api/usage/prices",
+	"/api/notify/",
+}
+
 func accountLevelPath(path string) bool {
-	for _, prefix := range accountLevelPaths {
+	return underAny(path, accountLevelPaths)
+}
+
+// projectlessPath reports a route that never reads the request's project:
+// projectlessPaths, and the health probes.
+func projectlessPath(r *http.Request) bool {
+	return underAny(r.URL.Path, projectlessPaths) || publicHealthPath(r)
+}
+
+func underAny(path string, prefixes []string) bool {
+	for _, prefix := range prefixes {
 		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, prefix) {
 			return true
 		}
