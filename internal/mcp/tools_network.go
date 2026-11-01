@@ -660,7 +660,7 @@ func formatInbox(messages []agents.Message, workDir string) checkInboxOutput {
 		items = append(items, InboxMessage{
 			ID:      m.ID,
 			From:    from,
-			ReplyTo: m.ReplyTo,
+			ReplyTo: esc(m.ReplyTo),
 			NodeID:  esc(m.NodeID),
 			Body:    body,
 			Notify:  m.Notify,

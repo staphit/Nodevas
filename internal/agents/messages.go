@@ -51,6 +51,11 @@ type Message struct {
 	// decides who may approve the message or read its files, so it is not
 	// something to hand to every browser in the project.
 	RecipientActor string `json:"-"`
+	// Notice is the hub's stamp on its own notice of a person's decision,
+	// stored with it (agent_messages.hub_notice). Only Send's system notices
+	// set it; mail stored before it existed has none, whatever its sender
+	// fields claim.
+	Notice bool `json:"hubNotice,omitempty"`
 }
 
 // A person's own mail is sent as HumanAgent from WebSession; only the
@@ -62,9 +67,18 @@ const (
 )
 
 // HubNotice reports whether m is the hub's own notice of a person's
-// decision (a verified approval, AnswerWith), as only the hub may send:
-// as HumanAgent, from a session other than WebSession.
+// decision (a verified approval, AnswerWith): stamped as one by the hub
+// (Notice) and sent as only the hub may send, as HumanAgent from a session
+// other than WebSession. Its markup is the hub's; everything else's is
+// escaped before an agent reads it.
 func (m Message) HubNotice() bool {
+	return m.Notice && m.claimsHubNotice()
+}
+
+// claimsHubNotice reports whether m's sender fields are a hub notice's. Mail
+// stored before Send refused them to agents may claim it without being one;
+// it is still kept from those who may not read a notice (ShownMessage).
+func (m Message) claimsHubNotice() bool {
 	return strings.EqualFold(m.SenderAgent, HumanAgent) && !strings.EqualFold(m.SenderSession, WebSession)
 }
 
@@ -280,6 +294,8 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 			Files:          fileInfos(files),
 			RecipientActor: recipientActor[recipient],
 		}
+		// Only the hub's own notices carry the stamp (HubNotice).
+		msg.Notice = in.system && msg.claimsHubNotice()
 		if err := h.persistMessage(ctx, msg, files); err != nil {
 			return SendResult{}, err
 		}
@@ -462,7 +478,7 @@ func (h *Hub) resolveRecipients(project, to string, claims []ClaimInfo) ([]strin
 // scanMessage's order.
 const messageColumns = `id, project, sender_actor, sender_session, sender_agent,
 	       recipient, reply_to, thread_id, node_id, body, created_at, read_at,
-	       status, notify, recipient_actor, decided_by, decided_at`
+	       status, notify, recipient_actor, decided_by, decided_at, hub_notice`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -476,7 +492,7 @@ func scanMessage(row rowScanner) (Message, error) {
 	if err := row.Scan(
 		&m.ID, &m.Project, &m.SenderActor, &m.SenderSession, &m.SenderAgent,
 		&m.Recipient, &m.ReplyTo, &m.ThreadID, &m.NodeID, &m.Body, &m.CreatedAt, &m.ReadAt,
-		&m.Status, &notify, &m.RecipientActor, &m.DecidedBy, &m.DecidedAt,
+		&m.Status, &notify, &m.RecipientActor, &m.DecidedBy, &m.DecidedAt, &m.Notice,
 	); err != nil {
 		return Message{}, err
 	}
@@ -507,12 +523,12 @@ func (h *Hub) persistMessage(ctx context.Context, msg Message, files []storedFil
 			INSERT INTO agent_messages (
 				id, project, sender_actor, sender_session, sender_agent,
 				recipient, reply_to, thread_id, node_id, body, created_at, read_at,
-				status, notify, recipient_actor, decided_by, decided_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 0)
+				status, notify, recipient_actor, decided_by, decided_at, hub_notice
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '', 0, ?)
 		`,
 			msg.ID, msg.Project, msg.SenderActor, msg.SenderSession, msg.SenderAgent,
 			msg.Recipient, msg.ReplyTo, msg.ThreadID, msg.NodeID, msg.Body, msg.CreatedAt,
-			msg.Status, boolInt(msg.Notify), msg.RecipientActor,
+			msg.Status, boolInt(msg.Notify), msg.RecipientActor, msg.Notice,
 		); err != nil {
 			return err
 		}

@@ -1095,6 +1095,16 @@ WHERE a.action = 'ask' AND a.run_id <> ''
     WHERE k.session_id = a.session_id AND starts_with(k.question, a.detail));
 `,
 	},
+	{
+		// The hub's stamp on its own notices of a person's decision
+		// (agents.Message.HubNotice). Mail stored before it reads as not a
+		// notice, so an agent's mail claiming to be one is escaped like any
+		// other.
+		name: "0034_agent_message_hub_notice",
+		stmt: `
+ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS hub_notice BOOLEAN NOT NULL DEFAULT FALSE;
+`,
+	},
 }
 
 // SearchIndexSchema is migration 0026: the search index's table, as
