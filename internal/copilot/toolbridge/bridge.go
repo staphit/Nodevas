@@ -116,6 +116,9 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		if err != nil {
 			return fail(fmt.Errorf("toolbridge: list tools: %w", err))
 		}
+		if unusable[tool.Name] {
+			continue
+		}
 		mapped, err := mapTool(tool)
 		if err != nil {
 			return fail(err)
@@ -124,6 +127,19 @@ func Open(ctx context.Context, opts Options) (Bridge, error) {
 		b.known[tool.Name] = true
 	}
 	return b, nil
+}
+
+// unusable are tools the hub always refuses the copilot. Offering them
+// would cost the model a call, and the person a permission prompt, for an
+// error.
+var unusable = map[string]bool{
+	// A person or a planner/QA run writes acceptance criteria; the copilot
+	// is an agent without a run role.
+	"set_acceptance": true,
+	// Only a review or QA run records a verdict.
+	"submit_verdict": true,
+	// The copilot has no folder of its own to save into (NoLocalFiles).
+	"save_attachment": true,
 }
 
 // writeTools change content in a way history can undo. Everything else that
