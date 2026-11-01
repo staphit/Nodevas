@@ -86,9 +86,9 @@ func runnerUsage(w io.Writer) {
                                              token on stdin's first line; with --access-client-id,
                                              the Access service token's secret on the second
        nodevas runner login --link [--hub <url>] [--name <label>]
-                                             a device link (Runners → Link a new device) on stdin's
-                                             first line, prompted hidden at a terminal; never as an
-                                             argument. It brings the hub and its Access service token
+                                             a device link (Settings → Agents → Link a new device)
+                                             on stdin's first line, prompted hidden at a terminal; never
+                                             as an argument. It brings the hub and its Access service token
        nodevas runner logout                 forget the token and the Access secret
        nodevas runner status                 settings (secrets masked) and the agents found here
        nodevas runner hub-version            the commit the hub was built from (the installer uses it
