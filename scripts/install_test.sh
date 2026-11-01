@@ -152,7 +152,7 @@ else
 	# A registry that answers like ghcr.io for one repository: an anonymous
 	# token, manifests by tag, and blobs through a redirect.
 	python3 -I -c '
-import http.server, os, ssl, sys
+import http.server, os, socketserver, ssl, sys
 root, portfile, cert, key = sys.argv[1:5]
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -185,7 +185,13 @@ class H(http.server.BaseHTTPRequestHandler):
         if p.startswith(prefix + "blobs/sha256:"):
             return self.send(307, extra={"Location": "/store/" + p.rsplit(":", 1)[1]})
         self.send(404)
-server = http.server.HTTPServer(("127.0.0.1", 0), H)
+# HTTPServer.server_bind looks up the host name (socket.getfqdn), a
+# reverse DNS query that can stall for half a minute on CI runners.
+class S(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+server = S(("127.0.0.1", 0), H)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert, key)
 server.socket = ctx.wrap_socket(server.socket, server_side=True)
