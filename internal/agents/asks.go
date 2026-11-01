@@ -544,14 +544,30 @@ func (h *Hub) CreateAndWait(ctx context.Context, in AskInput, timeout time.Durat
 }
 
 // sessionHeldByOther reports whether the session an ask names, by id or by
-// name, is registered to an account other than actorID.
+// name, is registered to an account other than actorID; or, when no session
+// goes by the name, whether its recent mail went to another account, which
+// keeps the name after a restart (uniqueNameLocked). A late answer is mail
+// to the name stamped for the asker, and would claim it.
 func (h *Hub) sessionHeldByOther(project, sessionID, sessionName, actorID string) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if s, ok := h.sessions[project+"\x00"+sessionID]; ok && !strings.EqualFold(s.ActorID, actorID) {
+		h.mu.Unlock()
 		return true
 	}
-	return h.nameHeldByOtherLocked(project, sessionName, actorID)
+	known := false
+	for _, s := range h.sessions {
+		if s.Project == project && strings.EqualFold(s.Name, sessionName) {
+			known = true
+			break
+		}
+	}
+	held := h.nameHeldByOtherLocked(project, sessionName, actorID)
+	h.mu.Unlock()
+	if held || known || sessionName == "" {
+		return held
+	}
+	owner := h.mailedNameOwner(project, sessionName, h.nowMillis())
+	return owner != "" && !sameActor(owner, actorID)
 }
 
 // receivedBy reports whether message id was delivered to sessionName (as
