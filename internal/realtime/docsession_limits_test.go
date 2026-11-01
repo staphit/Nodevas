@@ -87,3 +87,51 @@ func assertOneAccountLeftRoom(t *testing.T, hub *Hub) {
 		t.Fatalf("%d leaders for one document, want one", leaders)
 	}
 }
+
+// Somebody clicking through documents faster than the reload grace leaves a
+// trail of empty sessions behind. Those are the account's own to give up: the
+// oldest make way for the next document, so an ordinary person is never told
+// to edit alone beside a colleague, and the one just left is kept for a
+// reload.
+func TestClickingThroughDocumentsNeverLeavesYouEditingAlone(t *testing.T) {
+	hub := NewHub()
+	hub.SetWriteAccess(func(identity.Actor, string) bool { return true })
+	person := docClient(hub, "aaa", identity.RoleMember)
+	colleague := docClient(hub, "bbb", identity.RoleMember)
+	last := ""
+	for index := range 2 * maxDocSessionsPerActor {
+		last = fmt.Sprintf("doc-%03d", index)
+		hub.openDoc(person, last)
+		hub.closeDoc(person, last)
+	}
+	docEvents(t, person)
+
+	hub.openDoc(person, "next")
+	hub.openDoc(colleague, "next")
+	hub.mu.Lock()
+	members := 0
+	if session := hub.docs["room"]["next"]; session != nil {
+		members = len(session.members)
+	}
+	_, kept := hub.docs["room"][last]
+	share := hub.actorDocSessionsLocked("aaa")
+	hub.mu.Unlock()
+	if members != 2 {
+		t.Fatalf("after clicking through documents, the next one is shared by %d members, want 2", members)
+	}
+	leaders := 0
+	for _, client := range []*wsClient{person, colleague} {
+		if firstEvent(t, client, "doc-state").Leader {
+			leaders++
+		}
+	}
+	if leaders != 1 {
+		t.Fatalf("%d leaders for one document, want one", leaders)
+	}
+	if !kept {
+		t.Fatal("the document just left lost its reload grace")
+	}
+	if share > maxDocSessionsPerActor {
+		t.Fatalf("the account holds %d live documents, past its share of %d", share, maxDocSessionsPerActor)
+	}
+}
