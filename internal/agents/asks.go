@@ -1197,6 +1197,10 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 				NodeID:        updated.NodeID,
 				Body:          approvalBody,
 				system:        true,
+				// For the peer's account, whether or not its session is
+				// still known: the answer and note in it are theirs to read
+				// (Viewer.ShownMessage).
+				recipientActor: orig.SenderActor,
 			})
 		}
 	}

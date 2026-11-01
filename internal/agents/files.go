@@ -419,7 +419,16 @@ func (v Viewer) MayAnswer(a Ask) bool {
 	return v.Admin
 }
 
-// ShownMessage is m as v may see it in the project's message list.
+// ShownMessage is m as v may see it in the project's message list. A hub
+// notice forwards a person's decision on an ask (deliverDecision) with
+// their answer and note, which are for its sender, its recipient's account
+// and admins (as Shown keeps an ask's): anyone else sees its opening line,
+// which carries the decision, and not what follows.
 func (v Viewer) ShownMessage(m Message) Message {
+	if !m.HubNotice() || v.mayRead(m) {
+		return m
+	}
+	head, _, _ := strings.Cut(m.Body, "\n")
+	m.Body = head + "\n</nodevas-approval>"
 	return m
 }

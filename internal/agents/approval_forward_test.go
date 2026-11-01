@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"nodevas/internal/testpg"
 )
 
 // The verified approval an ask's aboutMsgId forwards is for the peer that
@@ -51,4 +54,55 @@ func TestApprovalForwardIsForTheSendersAccount(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A forwarded approval is stamped for the account that sent the message it
+// answers, under whatever session name that sender claimed: it must not
+// make that name the sender's after a restart.
+func TestApprovalForwardDoesNotReserveAName(t *testing.T) {
+	ctx := context.Background()
+	database := testpg.New(t)
+	t.Cleanup(func() { _ = database.Close() })
+
+	before := NewHub(database, nil)
+	mustTouch(t, before, Heartbeat{SessionID: "alice-sess", Project: "p", ActorID: "u_alice", Name: "api-claude"})
+	if _, err := before.Send(ctx, SendInput{Project: "p", SenderActor: "u_carol", IsHuman: true, To: "api-claude", Body: "for alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	after := NewHub(database, nil)
+	mustTouch(t, after, Heartbeat{SessionID: "bob-sess", Project: "p", ActorID: "u_bob", Name: "bob-bot"})
+	sent, err := after.Send(ctx, SendInput{Project: "p", SenderActor: "u_bob", SenderSession: "api-claude", To: "bob-bot", Body: "approve me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := after.CreateAndWait(ctx, AskInput{
+			Project: "p", SessionID: "bob-sess", SessionName: "bob-bot", ActorID: "u_bob",
+			Question: "ok?", AboutMsgID: sent.Deliveries[0].MessageID,
+		}, 5*time.Second)
+		done <- err
+	}()
+	var ask Ask
+	for range 300 {
+		if pending, _ := after.ListAsks(ctx, "p", AskPending); len(pending) == 1 {
+			ask = pending[0]
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ask.ID == "" {
+		t.Fatal("the ask never became pending")
+	}
+	if _, err := after.AnswerWith(ctx, "p", ask.ID, AnswerInput{Decision: DecisionApprove}, Viewer{ID: "u_bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if bob := mustTouch(t, after, Heartbeat{SessionID: "bob-sess-2", Project: "p", ActorID: "u_bob", Name: "api-claude"}); bob.Name == "api-claude" {
+		t.Errorf("u_bob took u_alice's session name %q through a forwarded approval", bob.Name)
+	}
 }

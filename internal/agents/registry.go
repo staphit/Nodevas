@@ -656,11 +656,15 @@ func (h *Hub) mailedNameOwner(project, name string, now int64) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var actor string
+	// Not a hub notice (Message.HubNotice): it is stamped for the account
+	// that sent the message it answers, under whatever session name that
+	// sender claimed, not for one whose session held the name.
 	_ = h.database.QueryRowContext(ctx, `
 		SELECT recipient_actor FROM agent_messages
 		 WHERE project = ? AND recipient = ? AND recipient_actor <> '' AND created_at >= ?
+		   AND NOT (lower(sender_agent) = ? AND lower(sender_session) <> ?)
 		 ORDER BY created_at DESC LIMIT 1
-	`, project, strings.ToLower(name), now-OfflineRetention.Milliseconds()).Scan(&actor)
+	`, project, strings.ToLower(name), now-OfflineRetention.Milliseconds(), HumanAgent, WebSession).Scan(&actor)
 	return actor
 }
 
