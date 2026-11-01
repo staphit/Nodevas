@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -62,6 +64,47 @@ func TestPlanRemovesRepoConfig(t *testing.T) {
 	}
 	if hasEvent(events, "the planner changed files") {
 		t.Errorf("the runner's own removals counted as the planner's changes: %+v", events)
+	}
+}
+
+// A judge reads at whatever base the hub named, like a plan: its agent never
+// sees that base's agent config, and runs read only.
+func TestJudgeRemovesRepoConfig(t *testing.T) {
+	env := startJobRunner(t, nil)
+	commitRepoConfig(t, env.repo)
+	env.hub.hello()
+	job := testJob("run-judge-cfg", "repoconfig: judge it")
+	job.Kind, job.Role = runnerwire.JobJudge, "reviewer"
+	job.Acceptance = []runnerwire.AcceptanceItem{{ID: "a1", Text: "it works"}}
+	env.hub.offer(job)
+	env.hub.wait("run-judge-cfg", runnerwire.TypeFinish)
+	if found := env.recorded(t, "run-judge-cfg", "found"); found != "." {
+		t.Fatalf("the judge found the repository's config: %s", found)
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(env.recorded(t, "run-judge-cfg", "args")), &args); err != nil {
+		t.Fatal(err)
+	}
+	if line := strings.Join(args, " "); !strings.Contains(line, "--setting-sources user --disallowedTools "+adapter.ClaudeReadOnlyDeny) {
+		t.Errorf("judge args: %s", line)
+	}
+	events := eventsOf(env.hub.messages("run-judge-cfg"))
+	if !hasEvent(events, "removed the worktree's own agent config") || !hasEvent(events, "for a judge") {
+		t.Errorf("events = %+v", events)
+	}
+}
+
+// The owner's shell-capable settings do not reach a judge, which runs read
+// only like a review.
+func TestShellAccessJudge(t *testing.T) {
+	cfg := Config{PermissionMode: "bypassPermissions", AllowedTools: []string{"Bash"}, CodexSandbox: "danger-full-access",
+		GeminiApprovalMode: "yolo", OpenCodePermission: "full", AntigravityMode: "full"}
+	for _, agent := range []string{"claude", "codex", "gemini", "opencode", "antigravity"} {
+		job := testJob("run-1", "x")
+		job.Agent, job.Kind = agent, runnerwire.JobJudge
+		if shell := cfg.ShellAccess(job); shell != "" {
+			t.Errorf("%s judge: ShellAccess = %q", agent, shell)
+		}
 	}
 }
 
