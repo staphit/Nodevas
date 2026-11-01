@@ -870,10 +870,13 @@ func (s *Store) encodePageContent(nodeID, format, content string) ([]byte, error
 	if PageFormatIsText(format) {
 		return []byte(content), nil
 	}
-	return docx.RenderDOCX(document.Parse(content), document.Options{
+	return renderDOCX(document.Parse(content), document.Options{
 		Assets: s.DocumentAssets(),
 	})
 }
+
+// renderDOCX renders a Word page; tests watch it.
+var renderDOCX = docx.RenderDOCX
 
 // convertPageContent rewrites a page's bytes for a different format, going
 // through the block model so every pair of formats is covered by one path.
