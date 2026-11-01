@@ -102,7 +102,7 @@ const reviewing = makeRun({
   usage: { inputTokens: 12000, outputTokens: 345, costUsd: 0.042 },
 });
 
-beforeEach(() => {
+function setUpStores() {
   useApp.setState({
     activeProject: "p",
     preferences: { ...readPreferences(), language: "en" },
@@ -128,7 +128,9 @@ beforeEach(() => {
     error: null,
     runners: [{ id: "r1", name: "desktop", online: true, info: { agents: [] } } as never],
   });
-});
+}
+
+beforeEach(setUpStores);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -175,9 +177,18 @@ function mount() {
 
 // The room is a lazy chunk. Its first import is transformed on demand, which
 // under a full parallel run took longer than a findBy's one second; loading it
-// up front leaves the tests to time only what they check.
+// up front leaves the tests to time only what they check. So does the first
+// room drawn and the first role query answered (about 0.4 s idle, many times
+// that on a busy machine): one room is drawn here and put away.
 beforeAll(async () => {
   await import("../game/warroom/WarRoom");
+  setUpStores();
+  vi.spyOn(api, "listActiveRuns").mockResolvedValue({ runs: [reviewing, offered] });
+  vi.spyOn(api, "listActiveAutopilots").mockResolvedValue([]);
+  const view = mount();
+  await screen.findByRole("button", { name: /, on “Fix the login”/ }, { timeout: 30_000 });
+  view.unmount();
+  vi.restoreAllMocks();
 }, 30_000);
 
 /** A character in the war room, by the node it works on. */
