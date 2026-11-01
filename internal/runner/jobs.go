@@ -579,12 +579,15 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 
 	cfg := j.c.Config
 	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
-	if job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan {
-		// A plan reads the code as a review does; what it writes goes on the
-		// board, through MCP, not into files.
+	if adapter.ReadOnly(job) {
+		// A plan or a judge reads the code as a review does; what a plan
+		// writes goes on the board, through MCP, not into files.
 		mode, modeText = reviewPermission(cfg, job.Agent)
-		if job.Kind == runnerwire.JobPlan {
+		switch job.Kind {
+		case runnerwire.JobPlan:
 			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
+		case runnerwire.JobJudge:
+			modeText = strings.Replace(modeText, "for a review", "for a judge", 1)
 		}
 	}
 	runEnv := adapter.RunEnv{

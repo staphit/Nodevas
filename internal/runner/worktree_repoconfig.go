@@ -14,8 +14,8 @@ import (
 	"nodevas/internal/runnerwire"
 )
 
-// A read-only run (a review or a plan) checks out content that is not the
-// owner's, and agent CLIs run programs from config they find in the
+// A read-only run (a review, a plan or a judge) checks out content that is
+// not the owner's, and agent CLIs run programs from config they find in the
 // directory they run in. See adapter/repoconfig.go for what each CLI reads
 // and which have a switch for it; for the rest, the runner removes that
 // config from the worktree before the agent starts and again after it exits,

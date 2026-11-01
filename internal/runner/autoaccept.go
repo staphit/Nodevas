@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -197,7 +198,7 @@ var bashTool = regexp.MustCompile(`(^|[\s,])Bash($|[\s,(])`)
 // such runs to a person unless the owner said otherwise (AllowShell).
 func (c *Config) ShellAccess(job runnerwire.Job) string {
 	mode := c.PermissionModeFor(job.Agent)
-	readOnly := job.Mode != runnerwire.ModeInteractive && (job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan)
+	readOnly := job.Mode != runnerwire.ModeInteractive && adapter.ReadOnly(job)
 	if readOnly {
 		mode, _ = reviewPermission(c, job.Agent)
 	}
@@ -220,7 +221,7 @@ func (c *Config) ShellAccess(job runnerwire.Job) string {
 		}
 	case "claude":
 		if readOnly {
-			// Reviews and plans run with Bash disallowed (adapter.ClaudeReadOnlyDeny),
+			// Reviews, plans and judges run with Bash disallowed (adapter.ClaudeReadOnlyDeny),
 			// which wins over any allow.
 			return ""
 		}
