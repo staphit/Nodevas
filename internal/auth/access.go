@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -390,6 +392,92 @@ func AccessEmailFrom(ctx context.Context) string {
 var forwardingHeaders = []string{
 	"X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "X-Forwarded-Port",
 	"X-Real-Ip", "Forwarded", "Via", "Cf-Connecting-Ip", "True-Client-Ip", AccessHeaderName,
+}
+
+// LoopbackClient reports whether a request came from this machine: a
+// loopback peer that relayed, if anything, only this machine's own request.
+// The Vite dev server on this machine relays the person's browser with
+// X-Forwarded-For 127.0.0.1; DirectLoopback would not count it.
+func LoopbackClient(r *http.Request) bool {
+	peer, ok := remoteAddress(r)
+	return ok && peer.IsLoopback() && ForwardedForThisMachine(r)
+}
+
+// ForwardedForThisMachine reports whether every forwarding header on r names
+// this machine: each client address X-Forwarded-For, X-Real-IP,
+// CF-Connecting-IP, True-Client-IP or Forwarded's for= gives is a loopback
+// address, and each host X-Forwarded-Host or Forwarded's host= gives is a
+// loopback name. A request with none is the peer's own. Via names a proxy,
+// never a client, so it never counts as this machine.
+func ForwardedForThisMachine(r *http.Request) bool {
+	if r == nil {
+		return true
+	}
+	if len(r.Header.Values("Via")) > 0 {
+		return false
+	}
+	for _, name := range []string{"X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "True-Client-Ip"} {
+		for _, value := range r.Header.Values(name) {
+			for _, entry := range strings.Split(value, ",") {
+				if !loopbackAddress(entry) {
+					return false
+				}
+			}
+		}
+	}
+	for _, value := range r.Header.Values("X-Forwarded-Host") {
+		for _, entry := range strings.Split(value, ",") {
+			if !loopbackHostName(entry) {
+				return false
+			}
+		}
+	}
+	for _, value := range r.Header.Values("Forwarded") {
+		for _, element := range strings.FieldsFunc(value, func(c rune) bool { return c == ',' || c == ';' }) {
+			key, param, found := strings.Cut(strings.TrimSpace(element), "=")
+			if !found {
+				continue
+			}
+			param = strings.Trim(strings.TrimSpace(param), `"`)
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "for":
+				if !loopbackAddress(param) {
+					return false
+				}
+			case "host":
+				if !loopbackHostName(param) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// loopbackAddress reports a forwarded client address on this machine: an IP,
+// optionally bracketed or with a port, as proxies write them.
+func loopbackAddress(value string) bool {
+	value = strings.TrimSpace(value)
+	if addressPort, err := netip.ParseAddrPort(value); err == nil {
+		return addressPort.Addr().Unmap().IsLoopback()
+	}
+	address, err := netip.ParseAddr(strings.Trim(value, "[]"))
+	return err == nil && address.Unmap().IsLoopback()
+}
+
+// loopbackHostName reports a Host value, port or not, that names this
+// machine: localhost or a loopback address.
+func loopbackHostName(value string) bool {
+	value = strings.TrimSpace(value)
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	value = strings.Trim(value, "[]")
+	if strings.EqualFold(value, "localhost") {
+		return true
+	}
+	address, err := netip.ParseAddr(value)
+	return err == nil && address.Unmap().IsLoopback()
 }
 
 // DirectLoopback reports whether a request came straight from this machine:

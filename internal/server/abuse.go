@@ -878,7 +878,7 @@ func (s *Server) claimsIdentity(r *http.Request) bool {
 	if class, _ := ClassifyRoute(r.Method, path); class == ClassPublicAuth {
 		return false
 	}
-	if _, local := s.auth.(auth.LocalOnly); local && auth.DirectLoopback(r) {
+	if _, local := s.auth.(auth.LocalOnly); local && auth.LoopbackClient(r) {
 		return true
 	}
 	_, ok := auth.SessionToken(r)
@@ -1024,12 +1024,13 @@ func waitTurn(ctx context.Context, d time.Duration) bool {
 }
 
 // directLocalActor reports a request from the local user of a standalone
-// (loopback, no accounts) hub that reached it directly, not through a proxy.
+// (loopback, no accounts) hub that came from this machine, directly or
+// through the Vite dev server relaying this machine's browser.
 func (s *Server) directLocalActor(r *http.Request, actor identity.Actor) bool {
 	if _, local := s.auth.(auth.LocalOnly); !local {
 		return false
 	}
-	return actor.ID == identity.Local.ID && auth.DirectLoopback(r)
+	return actor.ID == identity.Local.ID && auth.LoopbackClient(r)
 }
 
 // AbuseStats reports limiter health and metrics for administrators.

@@ -64,13 +64,27 @@ const RoleHeaderName = "X-Nodevas-Role"
 var ErrInvalidRole = locale.Errorf("invalid %s: send a built-in role or custom-role-<id>",
 	"%s 無效：請送出內建角色或 custom-role-<id>", RoleHeaderName)
 
+// ErrRelayedRequest refuses, on a server without accounts, a request a proxy
+// on this machine relayed for somebody else.
+var ErrRelayedRequest = locale.Errorf(
+	"this server has no accounts and answers only this machine; it was reached through a proxy for another one (serve it with accounts to share it)",
+	"這個伺服器沒有帳號，只回應本機；這個請求是經由代理從別台機器來的（要分享請啟用帳號）")
+
 // LocalOnly is the authenticator for a server bound to loopback: the OS
 // already decided who may connect, so every request is the local user.
+//
+// That holds only for a request this machine sent. A tunnel, a reverse proxy
+// or the Vite dev server opened to the LAN connects from loopback too, and
+// says in its forwarding headers whom it relays; a request whose headers
+// name anybody but this machine is refused (ForwardedForThisMachine).
 type LocalOnly struct{}
 
 func (LocalOnly) Authenticate(r *http.Request) (identity.Actor, error) {
 	if r == nil {
 		return identity.Local, nil
+	}
+	if !ForwardedForThisMachine(r) {
+		return identity.Actor{}, ErrRelayedRequest
 	}
 	class := identity.AgentClass(r.Header.Get(AgentRoleHeaderName))
 	switch class {
