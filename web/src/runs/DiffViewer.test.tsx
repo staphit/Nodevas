@@ -218,9 +218,10 @@ describe("RunDiffDialog", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("points at the PR when the patch was too large", async () => {
-    // A day after the run: history retention cannot have cleared it yet.
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-25T08:00:00Z") });
+  // W3: the hub says which: patchTruncated for a diff too big to keep,
+  // patchPruned for one history retention cleared. The run's age is no clue.
+  it("points at the PR when the patch was too large, however old the run", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2027-05-01T08:00:00Z") });
     setWide(true);
     vi.spyOn(api, "getRunChanges").mockResolvedValue({
       changes: { ...CHANGES, patch: undefined, patchTruncated: true },
@@ -234,30 +235,53 @@ describe("RunDiffDialog", () => {
     );
   });
 
-  // History retention blanks the diffs of runs older than its period (30
-  // days at the least) and marks them truncated, as a too-large diff is.
-  it("says history retention cleared the diff of an old run", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2027-05-01T08:00:00Z") });
+  it("says history retention cleared the diff when the hub marks it pruned", async () => {
+    // A day after the run: only the hub's flag can say so.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-25T08:00:00Z") });
     setWide(true);
     vi.spyOn(api, "getRunChanges").mockResolvedValue({
-      changes: { ...CHANGES, patch: undefined, patchTruncated: true },
+      changes: { ...CHANGES, patch: undefined, patchPruned: true },
     });
     render(<RunDiffDialog run={makeRun()} onClose={() => {}} />);
-    expect(await screen.findByText(/no longer kept: history retention/)).toBeInTheDocument();
-    expect(screen.queryByText(/Diff too large to show/)).toBeNull();
+    expect(
+      await screen.findByText(
+        "This run's diff is no longer kept: history retention clears the diffs of older runs and keeps their file lists and line counts.",
+        { exact: false },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/too large/)).toBeNull();
+    expect(screen.queryByText(/looks the same/)).toBeNull();
     expect(screen.getByRole("link", { name: "Open PR #42" })).toBeInTheDocument();
   });
 
-  it("says so in Traditional Chinese too", async () => {
+  it("names neither when a missing patch has no flag", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2027-05-01T08:00:00Z") });
+    setWide(true);
+    vi.spyOn(api, "getRunChanges").mockResolvedValue({ changes: { ...CHANGES, patch: undefined } });
+    render(<RunDiffDialog run={makeRun()} onClose={() => {}} />);
+    expect(await screen.findByText("This file's diff is not in the patch.")).toBeInTheDocument();
+    expect(screen.queryByText(/too large/)).toBeNull();
+    expect(screen.queryByText(/history retention/)).toBeNull();
+  });
+
+  it("says so in Traditional Chinese too, with full-width punctuation", async () => {
     useApp.setState({ preferences: { ...readPreferences(), language: "zh-TW" } });
     setWide(true);
-    vi.spyOn(api, "getRunChanges").mockResolvedValue({
-      changes: { ...CHANGES, patch: undefined, patchTruncated: true },
+    const changes = vi.spyOn(api, "getRunChanges").mockResolvedValue({
+      changes: { ...CHANGES, patch: undefined, patchPruned: true },
     });
-    render(<RunDiffDialog run={makeRun({ prUrl: "", prNumber: undefined })} onClose={() => {}} />);
-    expect(await screen.findByText(/差異已不再保留/)).toBeInTheDocument();
+    const { unmount } = render(<RunDiffDialog run={makeRun({ prUrl: "", prNumber: undefined })} onClose={() => {}} />);
+    expect(
+      await screen.findByText("這次執行的差異已不再保留：歷史保留期限會清除較舊執行的差異，只留下檔案清單與行數。"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/差異太大/)).toBeNull();
+    unmount();
+
+    useRuns.getState().reset();
+    changes.mockResolvedValue({ changes: { ...CHANGES, patch: undefined, patchTruncated: true } });
+    render(<RunDiffDialog run={makeRun({ prUrl: "", prNumber: undefined })} onClose={() => {}} />);
+    expect(await screen.findByText("差異太大，無法在這裡顯示。")).toBeInTheDocument();
+    expect(screen.queryByText(/不再保留/)).toBeNull();
   });
 
   it("closes on Escape without reaching the drawer", async () => {

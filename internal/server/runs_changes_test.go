@@ -249,3 +249,51 @@ func TestRunChangesRefusals(t *testing.T) {
 	}})
 	f.waitRun(t, run.ID, "a PR error", func(r runnerwire.Run) bool { return r.PRError == "gh is not signed in" && r.PRURL == "" })
 }
+
+// W3: history retention clears an old run's patch and the changes say so
+// (patchPruned), apart from a patch too big to keep (patchTruncated), so the
+// diff view does not have to guess from the run's age.
+func TestRunChangesSayRetentionPrunedThePatch(t *testing.T) {
+	f := newRunsFixture(t)
+	conn := f.connect(t, runsHello(1))
+	run := f.startedRun(t, conn)
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeChanges, RunID: run.ID, Changes: testChanges()})
+	sendEnvelope(t, conn, runnerwire.Envelope{Type: runnerwire.TypeFinish, RunID: run.ID, Result: &runnerwire.RunResult{
+		Status: runnerwire.RunSucceeded, Summary: "Fixed.",
+	}})
+	f.waitStatus(t, run.ID, runnerwire.RunSucceeded)
+
+	raw := func() map[string]any {
+		t.Helper()
+		recorder := f.do(t, &f.bea, http.MethodGet, "/api/runs/"+run.ID+"/changes", "", nil)
+		var out struct {
+			Changes map[string]any `json:"changes"`
+		}
+		if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &out) != nil || out.Changes == nil {
+			t.Fatalf("changes = %d %s", recorder.Code, recorder.Body.String())
+		}
+		return out.Changes
+	}
+	if got := raw(); got["patch"] != testChanges().Patch || got["patchPruned"] != nil || got["patchTruncated"] != nil {
+		t.Fatalf("fresh changes: patch %q, pruned %v, truncated %v", got["patch"], got["patchPruned"], got["patchTruncated"])
+	}
+
+	// The changes age past the retention period; the hub's prune runs.
+	ctx := context.Background()
+	old := time.Now().AddDate(0, 0, -400).UTC().Format(time.RFC3339Nano)
+	if _, err := f.server.analyticsDB.ExecContext(ctx, `UPDATE runs SET created_at = ?, finished_at = ? WHERE id = ?`, old, old, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.server.analyticsDB.ExecContext(ctx, `UPDATE run_changes SET created_at = ? WHERE run_id = ?`, old, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.server.pruneHistory(ctx, f.server.analyticsDB)
+
+	got := raw()
+	if _, has := got["patch"]; has || got["patchPruned"] != true || got["patchTruncated"] != nil {
+		t.Fatalf("pruned changes: patch %q, pruned %v, truncated %v", got["patch"], got["patchPruned"], got["patchTruncated"])
+	}
+	if files, _ := got["files"].([]any); len(files) != 2 || got["additions"] != float64(14) || got["deletions"] != float64(2) {
+		t.Fatalf("pruned changes lost the file list or counts: %+v", got)
+	}
+}

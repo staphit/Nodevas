@@ -117,8 +117,8 @@ func TestMigrationNamesUniqueAndOrdered(t *testing.T) {
 			t.Errorf("step %s is gone: the NAS database has it recorded", kept)
 		}
 	}
-	if n := len(names); n < 9 || names[n-9] != "0026_search_index" || names[n-8] != "0027_legacy_imports" || names[n-7] != "0028_agent_analytics" || names[n-6] != "0029_search_gin_fastupdate" || names[n-5] != "0030_agent_ask_kinds" || names[n-4] != "0031_agent_ask_run_key" || names[n-3] != "0032_agent_ask_input_truncated" || names[n-2] != "0033_permission_prompt_action_details" || names[n-1] != "0034_agent_message_hub_notice" {
-		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate, 0030_agent_ask_kinds, 0031_agent_ask_run_key, 0032_agent_ask_input_truncated, 0033_permission_prompt_action_details, 0034_agent_message_hub_notice", names[max(0, len(names)-10):])
+	if n := len(names); n < 10 || names[n-10] != "0026_search_index" || names[n-9] != "0027_legacy_imports" || names[n-8] != "0028_agent_analytics" || names[n-7] != "0029_search_gin_fastupdate" || names[n-6] != "0030_agent_ask_kinds" || names[n-5] != "0031_agent_ask_run_key" || names[n-4] != "0032_agent_ask_input_truncated" || names[n-3] != "0033_permission_prompt_action_details" || names[n-2] != "0034_agent_message_hub_notice" || names[n-1] != "0035_run_changes_patch_pruned" {
+		t.Fatalf("chain ends %v, want ... 0026_search_index, 0027_legacy_imports, 0028_agent_analytics, 0029_search_gin_fastupdate, 0030_agent_ask_kinds, 0031_agent_ask_run_key, 0032_agent_ask_input_truncated, 0033_permission_prompt_action_details, 0034_agent_message_hub_notice, 0035_run_changes_patch_pruned", names[max(0, len(names)-11):])
 	}
 }
 
