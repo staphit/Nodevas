@@ -1266,3 +1266,18 @@ func TestRunStartLineFollowsTheLaunchRelayDecision(t *testing.T) {
 		t.Errorf("start line %q claims a relay the adapter switched off", text)
 	}
 }
+
+// OpenCode 2 set to go over ACP runs `opencode run`, which relays nothing:
+// its start line must not say its prompts go to Nodevas.
+func TestOpenCode2StartLineClaimsNoRelay(t *testing.T) {
+	cfg := &Config{PermissionRelay: true, OpenCodeProtocol: "acp"}
+	job := testJob("run-1", "x")
+	job.Agent = "opencode"
+	if _, text := runPermission(cfg, job, true); !strings.Contains(text, relayedText) {
+		t.Errorf("over ACP: %q", text)
+	}
+	if _, text := runPermission(cfg, job, false); strings.Contains(text, "relayed to Nodevas") ||
+		!strings.Contains(text, "not relayed") {
+		t.Errorf("through opencode run: %q", text)
+	}
+}

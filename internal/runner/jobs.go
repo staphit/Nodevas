@@ -593,18 +593,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	j.mu.Lock()
 	relay := cfg.PermissionRelay && !r.noRelay
 	j.mu.Unlock()
-	mode, modeText := cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
-	if adapter.ReadOnly(job) {
-		// A plan or a judge reads the code as a review does; what a plan
-		// writes goes on the board, through MCP, not into files.
-		mode, modeText = reviewPermission(cfg, job.Agent)
-		switch job.Kind {
-		case runnerwire.JobPlan:
-			modeText = strings.Replace(modeText, "for a review", "for a plan", 1)
-		case runnerwire.JobJudge:
-			modeText = strings.Replace(modeText, "for a review", "for a judge", 1)
-		}
-	}
+	mode, modeText := runPermission(cfg, job, note == "")
 	runEnv := adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
@@ -735,6 +724,25 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		}
 	}
 	return result, outcome.Text
+}
+
+// runPermission is how freely job's agent may act under this runner's
+// settings, and how its start line says so. acp is false when an OpenCode run
+// set to go over ACP goes through `opencode run` instead (withoutOpenCode2ACP).
+func runPermission(cfg *Config, job runnerwire.Job, acp bool) (mode, text string) {
+	if !adapter.ReadOnly(job) {
+		return cfg.PermissionModeFor(job.Agent), permissionText(cfg, job.Agent)
+	}
+	// A plan or a judge reads the code as a review does; what a plan writes
+	// goes on the board, through MCP, not into files.
+	mode, text = reviewPermission(cfg, job.Agent)
+	switch job.Kind {
+	case runnerwire.JobPlan:
+		text = strings.Replace(text, "for a review", "for a plan", 1)
+	case runnerwire.JobJudge:
+		text = strings.Replace(text, "for a review", "for a judge", 1)
+	}
+	return mode, text
 }
 
 // reviewPermission is how freely a review's agent may act: read only where
