@@ -74,11 +74,14 @@ func TestRunnerSendsNoTokenToAPlainLocalHub(t *testing.T) {
 		t.Error("serve's own runner did not connect")
 	}
 
-	// The owner's opt-in.
+	// The owner's opt-in, `nodevas runner set httpLoopbackHub on`.
+	if err := client.Config.Set("httpLoopbackHub", []string{"on"}); err != nil || !client.Config.HTTPLoopbackHub {
+		t.Fatalf("set httpLoopbackHub on: %v", err)
+	}
 	opted := &tokenRecorder{}
 	srv3 := httptest.NewServer(opted)
 	defer srv3.Close()
-	client.Config.Hub, client.ServeManaged, client.Config.HTTPLoopbackHub = srv3.URL, false, true
+	client.Config.Hub, client.ServeManaged = srv3.URL, false
 	_ = runBriefly(t, client)
 	if len(opted.tokens()) == 0 {
 		t.Error("a runner whose owner allowed the plain-http hub did not connect")

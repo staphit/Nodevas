@@ -119,6 +119,8 @@ func TestCopilotTurnRunsOnTheOwnersRunner(t *testing.T) {
 		},
 		Commands:     noCommands{},
 		PingInterval: time.Second,
+		// The test hub is plain http on loopback, as serve's own is.
+		ServeManaged: true,
 	}
 	runCtx, stopRunner := context.WithCancel(ctx)
 	var runErr error

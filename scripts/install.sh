@@ -793,6 +793,17 @@ step_settings() {
 		run "$NV" runner set autoAccept "$AUTO_ACCEPT" ${CFG[@]+"${CFG[@]}"} >/dev/null
 		NEEDS_RESTART=1
 	fi
+	case "$HUB" in
+	http://*)
+		# Plain http is allowed for a hub on this machine only. A runner that
+		# `nodevas serve` did not start sends its token there only with the
+		# owner's say-so, which --hub http://… is.
+		warn "the hub $HUB is plain http: this runner sends its token to whatever holds that port here,"
+		warn "another user's program while the hub is down. \`nodevas serve\` starts a runner of its own instead."
+		run "$NV" runner set httpLoopbackHub on ${CFG[@]+"${CFG[@]}"} >/dev/null
+		NEEDS_RESTART=1
+		;;
+	esac
 }
 
 # loopback_url: whether a URL's host is this machine.

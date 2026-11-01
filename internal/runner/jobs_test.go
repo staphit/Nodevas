@@ -487,6 +487,7 @@ func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
 			return nil
 		},
 		Accepter:      acceptFunc(func(context.Context, Offer) (bool, string) { return true, "" }),
+		ServeManaged:  true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval:  time.Second,
 		BackoffMin:    5 * time.Millisecond,
 		BackoffMax:    20 * time.Millisecond,

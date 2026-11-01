@@ -100,6 +100,9 @@ func (c *Client) Run(ctx context.Context) error {
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
 		return err
 	}
+	if err := c.Config.PlainLocalHubRefusal(c.ServeManaged); err != nil {
+		return err
+	}
 	if c.Config.LegacyAutoAccept() {
 		// The CLI migrates and saves before this; a Config built elsewhere
 		// is migrated here, in memory.
