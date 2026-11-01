@@ -9,7 +9,7 @@
 | `operationsSlice` | pending／saved／error／conflict，依 scope 分開 | 全部 |
 | `preferencesSlice` | 本機偏好；`theme`、`paneOpen` 為衍生值 | `ui-preference` |
 | `workspaceSlice` | workspace、專案清單、切換、trash 清單 | — |
-| `documentSlice` | 分頁、dirty、draft、conflict、手動存檔 | `document` |
+| `documentSlice` | 分頁、dirty、draft、conflict、存檔的意義（何時存由 `autosave.ts` 決定） | `document` |
 | `runSlice` | 實際狀態、journal append | `lifecycle` |
 | `graphSlice` | `graph.yaml` 全部寫入；`saveGraph` 與 typed command | `node-metadata`、`plan-milestone`、`workflow`、`project-layout` |
 | `remoteSlice` | 備份設定、備份清單、同步狀態、截止提醒設定 | — |
@@ -19,6 +19,14 @@
 
 `internals.ts` 放共用管線：graph 寫入佇列（同一 `baseRev` 不併發）、每份文件的存檔佇列、
 以及 load／state generation（切專案後丟棄舊回應）。
+
+其他模組：
+
+- `autosave.ts`：文件自動存檔的時機，不碰 React 與 store，可以單獨測試。
+- `reconnect.ts`：socket 斷線後回來時，清掉只是「連不上伺服器」的錯誤，重新載入可能漏掉的變更；conflict 不代答。
+- `projectListSync.ts`：沒收到通知時（agent、腳本直接寫進 workspace）也讓專案清單保持最新。
+- `liveProjects.ts`：專案清單加上目前專案從畫面上的 graph 讀出的節點數，explorer 與頂列共用。
+- `graphUnreadable`（`graphSlice`）：`graph.yaml` 無法解析或驗證時（GET 回 422）記下原因，所有 graph 寫入都拒絕，直到檔案修好、watcher 觸發重新載入。
 
 `coalesce.ts` 管讀取合併：一次改動會同時來自 mutation 自己的 refresh、WebSocket 回聲、
 以及檔案 watcher，過去每一個都各發一次 GET。同一資源在 30ms 視窗內的觸發合成一次請求，
@@ -40,7 +48,7 @@ scope 由 `operationScope.*` 產生（`node:<id>`、`plan:<id>`、`document:<id>
 UI 用 `useOperation(scope)` 讀，不要自己管 busy／error boolean。
 conflict 一定要使用者處理，不可自動清掉。
 
-## 3. Undo policy [A-06]
+## 3. Undo policy
 
 | 類型 | 還原方式 | 是否進 undo stack |
 |---|---|---|
