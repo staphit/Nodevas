@@ -173,6 +173,43 @@ func TestARoomsTablesNeverDropASlowReader(t *testing.T) {
 	}
 }
 
+// A drag ending is not superseded by anything: a reader that misses it keeps a
+// ghost of the cards hovering where they were let go. A reader that is behind
+// still gets it once it has caught up, and ending a drag over and over takes
+// no more of its queue than moving one does.
+func TestASlowReaderStillSeesADragEnd(t *testing.T) {
+	hub := NewHub()
+	check := &writers{ids: map[string]bool{"writer": true}}
+	hub.SetWriteAccess(check.check)
+	reader := docClient(hub, "reader", identity.RoleMember)
+	reader.outbound = make(chan clientOutbound, 32)
+	writer := docClient(hub, "writer", identity.RoleMember)
+	for range cap(reader.outbound)/2 - 1 {
+		hub.BroadcastRoom("room", "graph-changed", "")
+	}
+
+	hub.handleMessage(writer, clientMessage{Type: "graph-drag", IDs: []string{"card"}, DX: 5, DY: 5, Active: true})
+	for range 40 {
+		hub.handleMessage(writer, clientMessage{Type: "graph-drag", IDs: []string{"card"}, DX: 5, DY: 5})
+	}
+	for range cap(reader.outbound) / 2 {
+		hub.BroadcastRoom("room", "graph-changed", "")
+	}
+	if !connected(hub, reader) {
+		t.Fatal("ending a drag filled the queue an ordinary event needed")
+	}
+
+	var ghost *DragGhost
+	for _, event := range caughtUpEvents(t, hub, reader) {
+		if event.Type == "graph-drag" && event.From == writer.id {
+			ghost = event.Drag
+		}
+	}
+	if ghost == nil || ghost.Active {
+		t.Fatalf("after catching up the reader still shows the writer's ghost: %+v", ghost)
+	}
+}
+
 // caughtUpEvents is a write loop that has caught up: everything that was
 // queued, then whatever the reader was owed once it had room.
 func caughtUpEvents(t *testing.T, hub *Hub, client *wsClient) []Event {
