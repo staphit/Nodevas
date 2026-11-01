@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ const (
 // The title, not the summary's first line: agents open with "Done." as often
 // as with anything that says what changed, and the node is what the work was.
 func commitMessage(summary string, job runnerwire.Job) string {
-	summary = strings.TrimSpace(strings.ReplaceAll(redact.String(summary), "\r\n", "\n"))
+	summary = strings.TrimSpace(strings.ReplaceAll(redact.Output(summary), "\r\n", "\n"))
 	subject := subjectLine(oneLine(job.NodeTitle))
 	if subject == "" {
 		for _, line := range strings.Split(summary, "\n") {
@@ -133,7 +134,7 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	if out, err := git(ctx, wt.Path, "merge-base", "HEAD", wt.BaseRef); err == nil && strings.TrimSpace(out) != "" {
 		res.Base = strings.TrimSpace(out)
 	}
-	if _, err := git(ctx, wt.Path, "add", "-A"); err != nil {
+	if err := stageAll(ctx, wt.Path); err != nil {
 		res.Err = err
 		res.Changed = true
 		return res
@@ -369,4 +370,42 @@ func removeWorktree(ctx context.Context, repoPath string, wt Worktree, dropBranc
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// stageAll is `git add -A` that never looks inside a submodule. add -A runs
+// `git status` in every populated submodule, whatever the config or
+// .gitmodules says, and a submodule's repository is the agent's to write: a
+// filter its config names would run as the owner. So the populated
+// submodules are left out of add -A, and update-index records where each one
+// now points, which reads only its HEAD.
+func stageAll(ctx context.Context, dir string) error {
+	staged, err := git(ctx, dir, "ls-files", "--stage", "-z")
+	if err != nil {
+		return err
+	}
+	var populated []string
+	for _, rec := range strings.Split(staged, "\x00") {
+		meta, path, ok := strings.Cut(rec, "\t")
+		if !ok || !strings.HasPrefix(meta, "160000 ") {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path), ".git")); err == nil {
+			populated = append(populated, path)
+		}
+	}
+	args := []string{"add", "-A"}
+	if len(populated) > 0 {
+		args = append(args, "--", ".")
+		for _, path := range populated {
+			args = append(args, ":(exclude,literal)"+path)
+		}
+	}
+	if _, err := git(ctx, dir, args...); err != nil {
+		return err
+	}
+	if len(populated) == 0 {
+		return nil
+	}
+	_, err = git(ctx, dir, append([]string{"update-index", "--add", "--remove", "--"}, populated...)...)
+	return err
 }

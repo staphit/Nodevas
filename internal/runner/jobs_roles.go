@@ -11,6 +11,7 @@ import (
 
 	"nodevas/internal/engine"
 	"nodevas/internal/identity"
+	"nodevas/internal/redact"
 	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
@@ -27,7 +28,7 @@ func parseChecks(text string) []runnerwire.CheckResult {
 		if m == nil {
 			continue
 		}
-		note := strings.TrimSpace(strings.Trim(strings.TrimSpace(m[3]), "*_`"))
+		note := redact.Output(strings.TrimSpace(strings.Trim(strings.TrimSpace(m[3]), "*_`")))
 		out = append(out, runnerwire.CheckResult{
 			ID:   m[1],
 			Pass: strings.EqualFold(m[2], "pass"),

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -567,7 +569,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
-	tmp, err := os.MkdirTemp("", "nodevas-run-")
+	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
 	}
@@ -601,7 +603,11 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Version:          version,
 		PermissionRelay:  cfg.PermissionRelay,
 	}
-	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
+	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+	if err != nil {
+		return fail(runnerwire.FailureTask, "could not write the MCP server's address: %v", err)
+	}
+	runEnv.MCP.Args = mcpArgs(serverFile, job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
@@ -776,10 +782,10 @@ func modeText(cfg *Config, kind string) string {
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
-// runner's proxy, as a worker, under a session name that says which run it is,
-// with only the tools a run uses: each definition is paid for on every model
-// call.
-func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
+// runner's proxy (its URL in serverFile, see writeMCPServerFile), as a worker,
+// under a session name that says which run it is, with only the tools a run
+// uses: each definition is paid for on every model call.
+func mcpArgs(serverFile string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
 	model := job.Model
 	if model == "" {
 		model = "default"
@@ -794,7 +800,7 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools
 	}
 	args := []string{
 		"mcp",
-		"--server", server,
+		"--server-file", serverFile,
 		"--project", job.Project,
 		"--agent-role", roleAgentClass(job),
 		"--actor", "run:" + job.Agent,
@@ -806,6 +812,30 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools
 		return append(args, role...)
 	}
 	return append(args, "--toolset", "run")
+}
+
+// writeMCPServerFile puts the run's proxy URL in its private temp dir, owner
+// only, for `nodevas mcp --server-file`: the URL carries the run's proxy
+// secret, and every user on the machine can read a command line.
+func writeMCPServerFile(tmp, url string) (string, error) {
+	path := filepath.Join(tmp, "mcp-server")
+	return path, os.WriteFile(path, []byte(url), 0o600)
+}
+
+// runTempDir makes a run's private directory for the files programs outside
+// any sandbox read (the MCP config, agy's hooks): under the runner's data
+// dir, owner-only, never the system's temp dir, which a Codex run's default
+// sandbox may write. The caller removes it when the run ends.
+func (j *jobs) runTempDir() (string, error) {
+	dataDir, err := j.c.Config.RunDataDir()
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Join(dataDir, "tmp")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(parent, "run-")
 }
 
 func (j *jobs) proxyFor() (*Proxy, error) {
@@ -842,8 +872,8 @@ func minutesText(d time.Duration) string {
 // emit stamps an event and queues it.
 func (j *jobs) emit(r *run, ev runnerwire.RunEvent) {
 	// Whatever the agent read or printed, a key does not reach the hub.
-	ev.Text = adapter.Truncate(redact.String(ev.Text), runnerwire.MaxEventText)
-	ev.Input = adapter.Truncate(redact.String(ev.Input), runnerwire.MaxEventText)
+	ev.Text = adapter.Truncate(redact.Output(ev.Text), runnerwire.MaxEventText)
+	ev.Input = adapter.Truncate(redact.Output(ev.Input), runnerwire.MaxEventText)
 	j.mu.Lock()
 	r.trail.see(ev)
 	r.seq++
@@ -872,9 +902,24 @@ func (j *jobs) finish(r *run, result runnerwire.RunResult) {
 func (j *jobs) finishWith(r *run, result runnerwire.RunResult, changes *runnerwire.RunChanges, pr *runnerwire.PRInfo) {
 	// Every failed run says why in a word the hub can route on; a failure
 	// nothing recognised (a worktree git refused, a push) is the task's.
-	result.Summary, result.Error = redact.String(result.Summary), redact.String(result.Error)
+	// Every text in the result goes through redaction here, whatever its
+	// source already did.
+	result.Summary, result.Error = redact.Output(result.Summary), redact.Output(result.Error)
+	result.HandoffNote = redact.Output(result.HandoffNote)
+	if result.Verify != nil {
+		v := *result.Verify
+		v.Output = redact.Output(v.Output)
+		result.Verify = &v
+	}
+	if len(result.Checks) > 0 {
+		checks := slices.Clone(result.Checks)
+		for i := range checks {
+			checks[i].Note = redact.Output(checks[i].Note)
+		}
+		result.Checks = checks
+	}
 	if pr != nil {
-		pr.Error = redact.String(pr.Error)
+		pr.Error = redact.Output(pr.Error)
 	}
 	switch {
 	case result.Status != runnerwire.RunFailed:

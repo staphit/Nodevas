@@ -58,6 +58,10 @@ func TestHelperProcess(t *testing.T) {
 		mcp, _ := os.ReadFile(path)
 		put("mcp.json", string(mcp))
 		put("mcp-path", path)
+		// What the run's `nodevas mcp --server-file` reads.
+		if server, err := os.ReadFile(filepath.Join(filepath.Dir(path), "mcp-server")); err == nil {
+			put("mcp-server", string(server))
+		}
 	}
 	put("pid", strconv.Itoa(os.Getpid()))
 
@@ -483,6 +487,7 @@ func startJobRunner(t *testing.T, tweak func(*Client)) *jobEnv {
 			return nil
 		},
 		Accepter:      acceptFunc(func(context.Context, Offer) (bool, string) { return true, "" }),
+		ServeManaged:  true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval:  time.Second,
 		BackoffMin:    5 * time.Millisecond,
 		BackoffMax:    20 * time.Millisecond,
@@ -625,10 +630,11 @@ func TestRunSucceeds(t *testing.T) {
 	}
 	server := mcp.MCPServers["nodevas"]
 	exe, _ := os.Executable()
-	if server.Command != exe || len(server.Args) != 13 || server.Args[0] != "mcp" || server.Args[1] != "--server" {
+	if server.Command != exe || len(server.Args) != 13 || server.Args[0] != "mcp" || server.Args[1] != "--server-file" ||
+		!samePath(filepath.Dir(server.Args[2]), filepath.Dir(env.recorded(t, "run-ok", "mcp-path"))) {
 		t.Fatalf("mcp server = %+v", server)
 	}
-	proxyURL := server.Args[2]
+	proxyURL := env.recorded(t, "run-ok", "mcp-server")
 	if !strings.HasPrefix(proxyURL, "http://127.0.0.1:") || !strings.Contains(proxyURL, "/r/") {
 		t.Errorf("proxy url %q", proxyURL)
 	}
@@ -1177,8 +1183,8 @@ func TestLineWriter(t *testing.T) {
 // write permission are separate flags.
 func TestMCPArgsServeTheRunToolset(t *testing.T) {
 	job := runnerwire.Job{RunID: "run-abcdef12", Agent: "claude", Model: "sonnet", Project: "demo"}
-	got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"})
-	want := []string{"mcp", "--server", "http://127.0.0.1:5/r/s", "--project", "demo", "--agent-role", "worker",
+	got := mcpArgs("/run/tmp/mcp-server", job, runnerwire.Repo{Name: "web"})
+	want := []string{"mcp", "--server-file", "/run/tmp/mcp-server", "--project", "demo", "--agent-role", "worker",
 		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab", "--toolset", "run"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("mcpArgs = %q, want %q", got, want)

@@ -795,6 +795,24 @@ step_settings() {
 	fi
 }
 
+# step_http_hub vouches for a plain-http hub (allowed on this machine only)
+# right after login, before step_match_hub asks it anything: a runner that
+# `nodevas serve` did not start sends its token there only with the owner's
+# say-so, which --hub http://… is.
+step_http_hub() {
+	case "$HUB" in
+	http://*)
+		# Plain http is allowed for a hub on this machine only. A runner that
+		# `nodevas serve` did not start sends its token there only with the
+		# owner's say-so, which --hub http://… is.
+		warn "the hub $HUB is plain http: this runner sends its token to whatever holds that port here,"
+		warn "another user's program while the hub is down. \`nodevas serve\` starts a runner of its own instead."
+		run "$NV" runner set httpLoopbackHub on ${CFG[@]+"${CFG[@]}"} >/dev/null
+		NEEDS_RESTART=1
+		;;
+	esac
+}
+
 # loopback_url: whether a URL's host is this machine.
 loopback_url() {
 	local host="${1#*://}"
@@ -1134,6 +1152,7 @@ cmd_install() {
 	fi
 	step_binary
 	step_login
+	step_http_hub
 	step_match_hub
 	# The secrets are in runner.json now. Nothing started from here on (the
 	# runner service, the agent CLIs it spawns) inherits them from this shell.

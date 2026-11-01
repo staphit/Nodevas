@@ -49,8 +49,13 @@ func TestRunAsksShareTheSidecarSessionID(t *testing.T) {
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
 			job := runnerwire.Job{RunID: "run-abcdef12", Agent: tc.agent, Model: "m", Project: "demo", NodeID: "n-1", Prompt: "do it"}
-			args := mcpArgs(srv.URL+"/r/secret", job, runnerwire.Repo{Name: "web"})
-			env := adapter.RunEnv{Binary: tc.agent, Workdir: t.TempDir(), Branch: "b", TempDir: t.TempDir(),
+			tmp := t.TempDir()
+			serverFile, err := writeMCPServerFile(tmp, srv.URL+"/r/secret")
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := mcpArgs(serverFile, job, runnerwire.Repo{Name: "web"})
+			env := adapter.RunEnv{Binary: tc.agent, Workdir: t.TempDir(), Branch: "b", TempDir: tmp,
 				MCP: adapter.MCPServer{Command: "/opt/nodevas", Args: args}, PermissionRelay: true}
 			cmd, err := tc.ad.Command(job, env)
 			if err != nil {

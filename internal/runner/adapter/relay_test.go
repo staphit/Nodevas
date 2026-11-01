@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -173,6 +175,18 @@ func TestHubAskerFailsClosed(t *testing.T) {
 	}
 	if _, ok := HubAskerFromMCPArgs([]string{"mcp", "--project", "demo"}); ok {
 		t.Error("an asker without a server")
+	}
+	// A runner's run names its proxy URL in a file, off the command line.
+	file := filepath.Join(t.TempDir(), "mcp-server")
+	if err := os.WriteFile(file, []byte("http://127.0.0.1:9/r/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if h, ok := HubAskerFromMCPArgs([]string{"mcp", "--server-file", file, "--session-name", "s"}); !ok ||
+		h.Server != "http://127.0.0.1:9/r/x" || h.SessionName != "s" {
+		t.Errorf("--server-file: %+v, %v", h, ok)
+	}
+	if _, ok := HubAskerFromMCPArgs([]string{"mcp", "--server-file", file + ".gone"}); ok {
+		t.Error("an asker from a missing --server-file")
 	}
 	if PermissionWait < 330*time.Second {
 		t.Errorf("PermissionWait = %v", PermissionWait)

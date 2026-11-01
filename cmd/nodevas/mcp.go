@@ -26,7 +26,12 @@ import (
 func mcpServe(args []string) {
 	fs, f := newMCPFlags(flag.ExitOnError)
 	_ = fs.Parse(mcpArgsFor(args, os.Getenv(runMCPEnv)))
-	server, projectName, actor, agentRole, toolset := f.server, f.projectName, f.actor, f.agentRole, f.toolset
+	serverURL, err := mcpServerURL(fs, f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nodevas mcp: %v\n", err)
+		os.Exit(2)
+	}
+	projectName, actor, agentRole, toolset := f.projectName, f.actor, f.agentRole, f.toolset
 	roleName, toolList := strings.TrimSpace(*f.role), splitToolList(*f.tools)
 	sessionName, model, chromaURL, ragPython := f.sessionName, f.model, f.chromaURL, f.ragPython
 
@@ -68,8 +73,8 @@ func mcpServe(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := mcp.Serve(ctx, mcp.Options{
-		Server:      *server,
+	err = mcp.Serve(ctx, mcp.Options{
+		Server:      serverURL,
 		Project:     strings.TrimSpace(*projectName),
 		Actor:       name,
 		SessionName: strings.TrimSpace(*sessionName),
@@ -131,10 +136,35 @@ func runMCPArgs(value string) ([]string, bool) {
 	return words[1:], true
 }
 
+// mcpServerURL is the server to work through: --server, or what the file
+// --server-file names holds. A runner uses the file: its run's proxy URL
+// carries a secret, and a command line is readable by every user on the
+// machine.
+func mcpServerURL(fs *flag.FlagSet, f mcpFlags) (string, error) {
+	path := strings.TrimSpace(*f.serverFile)
+	if path == "" {
+		return *f.server, nil
+	}
+	both := false
+	fs.Visit(func(fl *flag.Flag) { both = both || fl.Name == "server" })
+	if both {
+		return "", errors.New("--server and --server-file both name the server: use one")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("--server-file: %w", err)
+	}
+	server := strings.TrimSpace(string(raw))
+	if server == "" {
+		return "", fmt.Errorf("--server-file: %s is empty", path)
+	}
+	return server, nil
+}
+
 // mcpFlags are `nodevas mcp`'s flags.
 type mcpFlags struct {
 	server, projectName, actor, agentRole, sessionName, model, chromaURL, ragPython, toolset *string
-	role, tools                                                                              *string
+	role, tools, serverFile                                                                  *string
 }
 
 // splitToolList reads --tools: comma-separated tool names, blanks dropped.
@@ -153,6 +183,8 @@ func newMCPFlags(handling flag.ErrorHandling) (*flag.FlagSet, mcpFlags) {
 	return fs, mcpFlags{
 		server: fs.String("server", mcp.DefaultServer,
 			"the running Nodevas server to work through; must be on this machine"),
+		serverFile: fs.String("server-file", "",
+			"a file holding --server's value, which then stays off the command line"),
 		projectName: fs.String("project", "",
 			"which project in that server's workspace to act on; empty means whichever one it has open"),
 		actor: fs.String("actor", mcp.DefaultActor,

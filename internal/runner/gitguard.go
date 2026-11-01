@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,26 +23,34 @@ var (
 	noHooksDir  string
 )
 
-// noHooksPath is an empty directory the runner owns, for core.hooksPath: no
-// hook — the repository's own, or one a run wrote — runs from the runner's git.
+// noHooksPath is the core.hooksPath that runs no hook, as internal/gitrepo's:
+// a path inside the git executable, which is a file, so no directory can
+// ever exist there and nobody who could not already replace git can put a
+// hook there. Never a directory: one in the temp dir is writable by a Codex
+// run's default sandbox, and a hook planted there would run as the owner.
 func noHooksPath() string {
 	noHooksOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nodevas-nohooks-")
+		base, err := exec.LookPath("git")
 		if err != nil {
 			// A path inside the null device holds no files either.
-			dir = filepath.Join(os.DevNull, "nodevas-nohooks")
+			base = os.DevNull
 		}
-		noHooksDir = filepath.ToSlash(dir)
+		noHooksDir = filepath.ToSlash(base) + "/no-hooks"
 	})
 	return noHooksDir
 }
 
 // hardenedArgs puts the runner's overrides in front of a git command line:
 // command-line -c wins over any repository or worktree config.
+// diff.ignoreSubmodules=dirty keeps porcelain from running `git status`
+// inside a submodule, whose repository (and the filters its config names) an
+// agent can write; .gitmodules can undo it, so the runner's own commands that
+// read the worktree also pass --ignore-submodules (or stage as stageAll does).
 func hardenedArgs(dir string, args []string) []string {
 	return append([]string{"-C", dir,
 		"-c", "core.hooksPath=" + noHooksPath(),
 		"-c", "core.fsmonitor=false",
+		"-c", "diff.ignoreSubmodules=dirty",
 	}, args...)
 }
 
@@ -108,7 +117,8 @@ func (j *jobs) guardGitDir(r *run, wt Worktree) bool {
 // run git themselves (gh): command-scope config, which wins over the
 // repository's own.
 func gitConfigEnv() []string {
-	return []string{"GIT_CONFIG_COUNT=2",
+	return []string{"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=" + noHooksPath(),
-		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false"}
+		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false",
+		"GIT_CONFIG_KEY_2=diff.ignoreSubmodules", "GIT_CONFIG_VALUE_2=dirty"}
 }

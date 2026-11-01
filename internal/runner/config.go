@@ -34,6 +34,10 @@ type Config struct {
 	// token, for a hub behind Access. The edge checks them; the hub never does.
 	AccessClientID     string `json:"accessClientId,omitempty"`
 	AccessClientSecret string `json:"accessClientSecret,omitempty"`
+	// HTTPLoopbackHub is the owner's word that a plain-http hub on this
+	// machine may have the token although `nodevas serve` did not start this
+	// runner (`nodevas runner set httpLoopbackHub on`).
+	HTTPLoopbackHub bool `json:"httpLoopbackHub,omitempty"`
 	// Name is an optional label for log lines; the hub's name for the runner
 	// is the one it was created under.
 	Name string `json:"name,omitempty"`
@@ -355,7 +359,7 @@ func (c *Config) RelaysPermissions(kind string) bool {
 // SettingKeys are the keys `nodevas runner set` takes, in display order.
 var SettingKeys = []string{"maxConcurrent", "runTimeoutMinutes", "reviewTimeoutMinutes", "planTimeoutMinutes", "dataDir", "permissionMode", "allowedTools",
 	"codexSandbox", "codexIgnoreUserConfig", "geminiApprovalMode", "opencodePermission", "opencodeProtocol", "antigravityMode",
-	"permissionRelay", "autoAccept", "interactive", "repoBrowse",
+	"permissionRelay", "autoAccept", "interactive", "repoBrowse", "httpLoopbackHub",
 	"autoPR", "prDraft", "prLabels", "prPollSeconds", "remoteMerge", "mergeMethod", "deleteBranchOnMerge",
 	"copilotProvider", "copilotModel", "copilotBaseURL",
 	"advisorProvider", "advisorModel", "advisorBaseURL"}
@@ -556,6 +560,16 @@ func (c *Config) Set(key string, values []string) error {
 			return errors.New("interactive must be true or false")
 		}
 		c.Interactive = &on
+	case "httpLoopbackHub":
+		if reset {
+			c.HTTPLoopbackHub = false
+			return nil
+		}
+		on, ok := onOff(value)
+		if !ok {
+			return errors.New("httpLoopbackHub must be on or off")
+		}
+		c.HTTPLoopbackHub = on
 	case "repoBrowse":
 		if reset {
 			c.RepoBrowse = nil
@@ -780,6 +794,24 @@ func ValidateHub(raw string) (string, error) {
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u.String(), nil
+}
+
+// PlainLocalHubRefusal is why a runner does not connect to its hub, or nil:
+// a plain-http hub (which ValidateHub allows on loopback only) is whatever
+// process holds that port, so while the real hub is down another user of
+// this machine could take the port, the runner token and the hub's say over
+// this runner. Only the runner serve started for itself (serveManaged; serve
+// holds the port for as long as it runs) and an owner who said so
+// (HTTPLoopbackHub) send the token there.
+func (c *Config) PlainLocalHubRefusal(serveManaged bool) error {
+	u, err := url.Parse(strings.TrimSpace(c.Hub))
+	if err != nil || u.Scheme != "http" || serveManaged || c.HTTPLoopbackHub {
+		return nil
+	}
+	return fmt.Errorf("hub %s is plain http: a runner `nodevas serve` did not start would send its token to "+
+		"whatever process holds that port, another user's while the hub is down. Use the runner `nodevas serve` "+
+		"starts for itself, or an https hub; if nobody else can run programs on this machine, allow it with "+
+		"`nodevas runner set httpLoopbackHub on`", c.Hub)
 }
 
 func isLoopbackHost(host string) bool {

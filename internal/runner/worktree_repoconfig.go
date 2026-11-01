@@ -122,9 +122,10 @@ func repoConfigTarget(root *os.Root, path string) (string, error) {
 }
 
 // changedFiles is `git status --porcelain` of a read-only run's worktree,
-// leaving out the agent config the runner removed there.
+// leaving out the agent config the runner removed there. It does not look
+// inside submodules (see hardenedArgs).
 func changedFiles(ctx context.Context, dir string) (string, error) {
-	args := []string{"status", "--porcelain", "--", "."}
+	args := []string{"status", "--porcelain", "--ignore-submodules=dirty", "--", "."}
 	for _, path := range adapter.RepoConfigPaths() {
 		args = append(args, ":(exclude,literal)"+path)
 	}

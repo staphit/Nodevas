@@ -456,6 +456,7 @@ func testClient(srv *httptest.Server) *Client {
 	return &Client{
 		Config:       &Config{Hub: srv.URL, Token: testToken, AccessClientID: "cid", AccessClientSecret: "sec"},
 		Commands:     &fakeCommands{paths: map[string]string{}},
+		ServeManaged: true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval: 20 * time.Millisecond,
 		BackoffMin:   5 * time.Millisecond,
 		BackoffMax:   20 * time.Millisecond,

@@ -45,6 +45,10 @@ type Client struct {
 	// http.DefaultClient for the socket and a client without a timeout for
 	// the proxy.
 	HTTPClient *http.Client
+	// ServeManaged is true for the runner `nodevas serve` started for itself
+	// (NODEVAS_RUNNER_UNDER_SERVE): serve holds the hub's port for as long
+	// as this runner runs.
+	ServeManaged bool
 
 	// Accepter asks whether to take an offer the auto-accept policy does not
 	// cover; nil declines those.
@@ -94,6 +98,9 @@ func (c *Client) Run(ctx context.Context) error {
 		return err
 	}
 	if _, err := ValidateHub(c.Config.Hub); err != nil {
+		return err
+	}
+	if err := c.Config.PlainLocalHubRefusal(c.ServeManaged); err != nil {
 		return err
 	}
 	if c.Config.LegacyAutoAccept() {
@@ -413,7 +420,9 @@ func (c *Client) logf(format string, args ...any) {
 	if c.Config.Name != "" {
 		prefix = "runner " + c.Config.Name + ": "
 	}
-	fmt.Fprintf(c.Log, prefix+format+"\n", args...)
+	// One line, whatever it quotes: run ids, names and errors come from the
+	// hub or an agent, and reach the terminal next to the accept question.
+	fmt.Fprintln(c.Log, prefix+terminalText(fmt.Sprintf(format, args...)))
 }
 
 func (c *Client) pingInterval() time.Duration {

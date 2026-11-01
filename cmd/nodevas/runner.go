@@ -228,13 +228,17 @@ func runnerStart(args []string, stdin io.Reader, stderr io.Writer) error {
 	if cfg.Hub == "" || cfg.Token == "" {
 		return fmt.Errorf("not logged in (%s): run nodevas runner login --hub <url> first", path)
 	}
+	// Read before runnerStopContext removes it: serve's own runner may use
+	// serve's plain-http loopback port (runner.Config.PlainLocalHubRefusal).
+	underServe := os.Getenv(localRunnerUnderServeEnv) == "1"
 	ctx, stop := runnerStopContext()
 	defer stop()
 	// Offers are accepted here, at this terminal, by whoever started the
 	// runner. Without a terminal (a service, a pipe) nobody can say yes, and
 	// offers the auto-accept policy does not cover are declined at once.
 	accepter := &runner.TerminalAccepter{In: stdin, Out: stderr, Interactive: stdinIsTerminal(stdin)}
-	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter}
+	client := &runner.Client{Config: cfg, Commands: runnerCommands, Log: stderr, Accepter: accepter,
+		ServeManaged: underServe}
 	return client.Run(ctx)
 }
 
@@ -291,6 +295,9 @@ func runnerLogin(args []string, in *bufio.Reader, stdout, stderr io.Writer) erro
 		return err
 	}
 	fmt.Fprintf(stdout, "saved %s\nstart the runner with: nodevas runner\n", path)
+	if err := cfg.PlainLocalHubRefusal(false); err != nil {
+		fmt.Fprintf(stderr, "note: %v\n", err)
+	}
 	return nil
 }
 
@@ -388,6 +395,13 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 		repoBrowse += " (the default)"
 	}
 	setting("repoBrowse", fmt.Sprintf("%t (%s)", cfg.RepoBrowseOn(), repoBrowse))
+	if strings.HasPrefix(cfg.Hub, "http:") || cfg.HTTPLoopbackHub {
+		loopback := "only the runner `nodevas serve` starts sends its token to a plain-http hub here"
+		if cfg.HTTPLoopbackHub {
+			loopback = "this runner sends its token to whatever holds the plain-http hub's port here"
+		}
+		setting("httpLoopbackHub", fmt.Sprintf("%t (%s)", cfg.HTTPLoopbackHub, loopback))
+	}
 	fmt.Fprintln(w, "claude runs:")
 	setting("permissionMode", cfg.ClaudePermissionMode())
 	setting("allowedTools", tools)
