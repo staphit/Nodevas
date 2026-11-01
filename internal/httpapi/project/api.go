@@ -98,6 +98,13 @@ func (a *API) readable(r *http.Request, dir string) bool {
 	return a.access == nil || a.access.Readable(r, dir)
 }
 
+// catalogChanged tells every socket that the project tree changed. The id
+// stays empty: the event reaches everyone, members of a restricted project
+// or not, and a client reloads the whole catalog on it anyway.
+func (a *API) catalogChanged() {
+	a.pm.Hub().Broadcast("project-changed", "")
+}
+
 // readableProjects drops the projects the caller may not read; folders stay.
 func (a *API) readableProjects(r *http.Request, projects []project.ProjectInfo) []project.ProjectInfo {
 	if a.access == nil {

@@ -456,6 +456,7 @@ func testClient(srv *httptest.Server) *Client {
 	return &Client{
 		Config:       &Config{Hub: srv.URL, Token: testToken, AccessClientID: "cid", AccessClientSecret: "sec"},
 		Commands:     &fakeCommands{paths: map[string]string{}},
+		ServeManaged: true, // the fake hub is plain http on loopback, as serve's own is
 		PingInterval: 20 * time.Millisecond,
 		BackoffMin:   5 * time.Millisecond,
 		BackoffMax:   20 * time.Millisecond,
@@ -602,6 +603,24 @@ func TestReviewPermission(t *testing.T) {
 	}
 	if text := permissionText(cfg, "opencode"); text != "permission full" {
 		t.Errorf("opencode text = %q", text)
+	}
+}
+
+// A Claude review or plan never runs in a mode that skips Claude Code's own
+// permission prompts: there, the deny list leaves reads anywhere on this
+// machine open. Modes that ask (headless: refuse) or never allow stay the
+// owner's.
+func TestReviewPermissionClaudeKeepsPrompts(t *testing.T) {
+	for _, owner := range []string{"bypassPermissions", "auto"} {
+		mode, text := reviewPermission(&Config{PermissionMode: owner}, "claude")
+		if mode != "acceptEdits" || !strings.Contains(text, mode) || strings.Contains(text, owner) {
+			t.Errorf("owner's %s: review runs in %q (%q)", owner, mode, text)
+		}
+	}
+	for _, owner := range []string{"acceptEdits", "manual", "dontAsk", "plan"} {
+		if mode, _ := reviewPermission(&Config{PermissionMode: owner}, "claude"); mode != owner {
+			t.Errorf("owner's %s: review runs in %q", owner, mode)
+		}
 	}
 }
 

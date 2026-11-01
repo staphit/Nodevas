@@ -159,7 +159,12 @@ func (c *Cluster) PID() int {
 
 func loopbackURL(role, password string, port int, database string) string {
 	// The passwords are hex, so nothing in them needs escaping.
-	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable&connect_timeout=5", role, password, port, database)
+	// require_auth: the cluster only speaks SCRAM (hbaRule), and SCRAM proves
+	// the server knows the password too. Whatever else is listening on the
+	// port (another local user who bound it first) and asks for the password
+	// in clear, as MD5, or for nothing at all, gets the connection closed.
+	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable&require_auth=scram-sha-256&connect_timeout=5",
+		role, password, port, database)
 }
 
 // Start takes the owner lock, initdbs on first use, recovers a stale

@@ -82,6 +82,12 @@ func normalizeEmail(address string) (string, error) {
 // its case was typed. It is never stored and never compared against the row.
 func emailKey(address string) string { return strings.ToLower(address) }
 
+// sameEmailKey reports whether the address an account was found by is the one
+// the caller's budgets were charged under.
+func sameEmailKey(registered, typed string) bool {
+	return emailKey(registered) == emailKey(typed)
+}
+
 // TypedAddress is what a person typed at the sign-in form, as the server's
 // log names it when no account was found for it: parsed like any sign-in
 // address and lower-cased, so attempts on one mailbox read alike however it

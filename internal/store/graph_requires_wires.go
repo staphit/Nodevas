@@ -42,16 +42,73 @@ func materializeRequiresWires(g *engine.Graph) {
 			live[edge.From+"->"+edge.To] = true
 		}
 	}
+	nodes := make(map[string]*engine.Node, len(g.Nodes))
+	for _, node := range g.Nodes {
+		if node != nil {
+			if _, seen := nodes[node.ID]; !seen {
+				nodes[node.ID] = node
+			}
+		}
+	}
+	// Each target's `requires` is parsed once, however many wires lead to it.
+	refs := map[string]map[string]bool{}
+	requiresRef := func(target *engine.Node, from string) bool {
+		names, ok := refs[target.ID]
+		if !ok {
+			names = map[string]bool{}
+			if expr, err := dsl.Parse(target.Requires); err == nil && expr != nil {
+				for _, ref := range dsl.NodeRefs(expr) {
+					names[ref] = true
+				}
+			}
+			refs[target.ID] = names
+		}
+		return names[from]
+	}
+	// The gate drawing each output is found once, as requiresWireGate would
+	// find it: scanning every gate's inputs per bent wire cost wires times gate
+	// inputs. Validation refuses gates that share an output, so the first gate
+	// is the only one.
+	gateFor := map[string]*engine.LogicGate{}
+	for index := range g.UI.LogicGates {
+		gate := &g.UI.LogicGates[index]
+		for _, output := range gate.OutputNodes() {
+			if _, seen := gateFor[output]; !seen {
+				gateFor[output] = gate
+			}
+		}
+	}
+	gateInputs := map[*engine.LogicGate]map[string]bool{}
+	gated := func(from, to string) bool {
+		gate := gateFor[to]
+		if gate == nil {
+			return false
+		}
+		// A boolean gate draws its output's whole condition; a relation gate
+		// only the wires from its inputs.
+		if !relationGateOperator(gate.Operator) {
+			return true
+		}
+		inputs, ok := gateInputs[gate]
+		if !ok {
+			inputs = make(map[string]bool, len(gate.Inputs))
+			for _, input := range gate.Inputs {
+				inputs[input] = true
+			}
+			gateInputs[gate] = inputs
+		}
+		return inputs[from]
+	}
 	consider := func(key string) {
 		if live[key] || strings.HasPrefix(key, "gate:") || strings.HasPrefix(key, "logic:") {
 			return
 		}
 		from, to, ok := strings.Cut(key, "->")
-		if !ok || from == "" || to == "" || from == to || g.NodeByID(from) == nil {
+		if !ok || from == "" || to == "" || from == to || nodes[from] == nil {
 			return
 		}
-		target := g.NodeByID(to)
-		if target == nil || !nodeRequiresRef(target, from) || requiresWireGate(g, from, to) != "" {
+		target := nodes[to]
+		if target == nil || !requiresRef(target, from) || gated(from, to) {
 			return
 		}
 		g.Edges = append(g.Edges, &engine.Edge{From: from, To: to, Relation: engine.RelationRequired})

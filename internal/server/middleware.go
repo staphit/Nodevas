@@ -94,8 +94,10 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	underAPI := strings.HasPrefix(r.URL.Path, "/api/")
 	// A GET that changes state is a write wearing a safe method's clothes, so
 	// it gets the same cross-origin treatment even though the method check
-	// would wave it through.
-	if underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r)) {
+	// would wave it through. The realtime socket is one too: it reads
+	// documents as they are typed and writes edits back, and a proxy in
+	// front (the Vite dev server) may have rewritten its Origin.
+	if (underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r))) || r.URL.Path == "/ws" {
 		if origin := r.Header.Get("Origin"); origin != "" && !s.isAllowedOrigin(origin, r.Host) {
 			httpx.Err(c, http.StatusForbidden, locale.Errorf("cross-origin API request rejected", "拒絕跨來源的 API 請求"))
 			return
@@ -152,7 +154,7 @@ func (s *Server) withAuth(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if !guarded || auth.PublicPaths[r.URL.Path] || publicHealthPath(r) {
+	if !guarded || auth.PublicPaths[r.URL.Path] || s.publicHealthPath(r) {
 		c.Next()
 		return
 	}
@@ -236,10 +238,15 @@ func (s *Server) authenticate(r *http.Request) (identity.Actor, string, error) {
 const runnerPathPrefix = "/api/runner/"
 
 // withRunnerAuth admits a request carrying a valid runner token, acting as
-// the runner's owner marked as a worker agent.
+// the runner's owner marked as a worker agent. A token it refuses is charged
+// to the pre-auth bucket it skipped (claimsIdentity), as a refused session
+// cookie is.
 func (s *Server) withRunnerAuth(c *gin.Context) {
 	r := c.Request
 	if s.runners == nil {
+		if s.chargeRefusedCredential(c) {
+			return
+		}
 		httpx.Err(c, http.StatusNotFound, locale.Errorf("runners are not enabled on this server", "這個伺服器沒有啟用 runner"))
 		return
 	}
@@ -247,6 +254,9 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 	if err != nil {
 		if !errors.Is(err, runners.ErrUnauthenticated) {
 			httpx.Err(c, http.StatusInternalServerError, err)
+			return
+		}
+		if s.chargeRefusedCredential(c) {
 			return
 		}
 		httpx.Err(c, http.StatusUnauthorized, err)
@@ -259,6 +269,17 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 		c.Abort()
 		return
 	}
+	// The owner's account is gone; so is everything it lent out. The proxy
+	// checks the same in runnerProxyActor.
+	if accounts, ok := s.auth.(*auth.SessionAuth); ok {
+		if _, _, found := accounts.CurrentActor(r.Context(), runner.OwnerID); !found {
+			if s.chargeRefusedCredential(c) {
+				return
+			}
+			httpx.Err(c, http.StatusUnauthorized, runners.ErrUnauthenticated)
+			return
+		}
+	}
 	actor := runners.ActorFor(runner)
 	ctx := runners.WithRunner(auth.WithActor(r.Context(), actor), runner)
 	c.Request = r.WithContext(ctx)
@@ -268,11 +289,12 @@ func (s *Server) withRunnerAuth(c *gin.Context) {
 
 // withRequestProject resolves ?project= / X-Nodevas-Project once per request.
 // An unknown project fails with 400 here, before any handler runs, instead of
-// silently operating on the active project.
+// silently operating on the active project; with membership, a non-admin
+// gets the 403 a restricted project gives (httpx.RefuseUnknownProject).
 func (s *Server) withRequestProject(c *gin.Context) {
 	r := c.Request
 	name := httpx.RequestProjectName(r)
-	if !httpx.ProjectScopedPath(r.URL.Path) {
+	if !httpx.ProjectScopedPath(r.URL.Path) || s.projectlessPath(r) {
 		c.Next()
 		return
 	}
@@ -291,7 +313,15 @@ func (s *Server) withRequestProject(c *gin.Context) {
 	}
 	st, err := s.pm.StoreFor(name)
 	if err != nil {
-		httpx.Err(c, http.StatusBadRequest, err)
+		httpx.RefuseUnknownProject(c, err, s.members != nil)
+		return
+	}
+	// The access gate passes an account's own routes through, but they still
+	// read the project named here: one the actor may not read is refused as
+	// one that does not exist is, or the two answers would tell which
+	// restricted names exist.
+	if accountLevelPath(r.URL.Path) && !s.projectReadable(r, st.Root()) {
+		httpx.DenyProjectAccess(c)
 		return
 	}
 	c.Request = r.WithContext(httpx.WithStore(r.Context(), st))
@@ -306,7 +336,10 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	r := c.Request
 	if !strings.HasPrefix(r.URL.Path, "/api/") ||
 		!isUnsafeMethod(r.Method) ||
-		strings.HasPrefix(r.URL.Path, "/api/auth/") {
+		strings.HasPrefix(r.URL.Path, "/api/auth/") ||
+		// An agent session's presence, every 30 s: not a change anybody
+		// made, and a row each would bury the ones that are.
+		r.URL.Path == "/api/agents/heartbeat" {
 		c.Next()
 		return
 	}
@@ -322,7 +355,9 @@ func (s *Server) withAuditTrail(c *gin.Context) {
 	// Read the request back off the context: earlier middleware may have
 	// replaced it, and the store the handler used hangs off that copy.
 	r = c.Request
-	actor := auth.ActorFrom(r)
+	// A public write (a device-link redeem) has nobody signed in; its row
+	// names no actor rather than the local administrator.
+	actor, _ := auth.AttachedActor(r)
 	op := r.Method + " " + strings.TrimPrefix(r.URL.Path, "/api/")
 
 	// The database trail is the one that is queried. It records server-wide

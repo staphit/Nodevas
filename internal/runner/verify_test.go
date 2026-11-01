@@ -387,3 +387,44 @@ func TestVerifyAutoAcceptNeedsAllowVerify(t *testing.T) {
 		t.Fatal("SetAllowVerify(true) did not stick")
 	}
 }
+
+// A goal judge runs the repository's test command at its base before its
+// agent starts: like a verify job, it is taken unasked only with the owner's
+// verify switch on, and the question at the terminal says the tests run and
+// where.
+func TestGoalJudgeNeedsVerifyConsent(t *testing.T) {
+	policy := runnerwire.AutoAcceptPolicy{Enabled: true, RequireStepUp: true, Repos: []string{"r1"}, Agents: []string{"claude"}}
+	job := testJob("run-judge", "judge it")
+	job.Kind, job.Role, job.SteppedUp, job.Base = runnerwire.JobJudge, "qa", true, "agent/n-1-evil0000"
+	job.Acceptance = []runnerwire.AcceptanceItem{{ID: "a1", Text: "it works"}}
+	job.Verify = &runnerwire.VerifySpec{Phase: runnerwire.VerifyGoal}
+	offer := Offer{Job: job, Repo: runnerwire.Repo{ID: "r1", Name: "demo"}}
+	if ok, reason := AutoAcceptDecision(policy, offer); ok || !strings.Contains(reason, "autoaccept verify on") {
+		t.Fatalf("goal judge without AllowVerify: %v %q", ok, reason)
+	}
+	policy.AllowVerify = true
+	if ok, reason := AutoAcceptDecision(policy, offer); !ok {
+		t.Fatalf("goal judge with AllowVerify: %q", reason)
+	}
+	// AllowVerify does not loosen the agent's own conditions.
+	offer.Job.Agent = "codex"
+	if ok, _ := AutoAcceptDecision(policy, offer); ok {
+		t.Fatal("AllowVerify let a goal judge with an unlisted agent in")
+	}
+	// A judge without tests needs no verify switch.
+	policy.AllowVerify = false
+	offer.Job.Agent, offer.Job.Verify = "claude", nil
+	if ok, reason := AutoAcceptDecision(policy, offer); !ok {
+		t.Fatalf("judge without tests: %q", reason)
+	}
+
+	text := describeOffer(Offer{Job: job, Repo: runnerwire.Repo{ID: "r1", Name: "demo"}})
+	if !strings.Contains(text, "test command") || !strings.Contains(text, "agent/n-1-evil0000") {
+		t.Errorf("goal judge offer hides its test run or base:\n%s", text)
+	}
+	job.Verify = nil
+	if text := describeOffer(Offer{Job: job}); strings.Contains(text, "test command") ||
+		!strings.Contains(text, "agent/n-1-evil0000") {
+		t.Errorf("judge offer:\n%s", text)
+	}
+}

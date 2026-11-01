@@ -58,10 +58,50 @@ type Notifier struct {
 	testAttempts []testMailAttempt
 	mailRateMu   sync.Mutex
 	mailAttempts []mailAttempt
+
+	readersMu sync.RWMutex
+	readers   func(projectPath, address string) (string, bool)
 }
 
 func NewNotifier(pm *project.ProjectManager) *Notifier {
 	return &Notifier{pm: pm}
+}
+
+// UseReaders tells a server with accounts who may be mailed about a
+// project: readers reports whether address belongs to an account that can
+// read the project at projectPath, and if so the address stored on that
+// account.
+func (n *Notifier) UseReaders(readers func(projectPath, address string) (string, bool)) {
+	n.readersMu.Lock()
+	n.readers = readers
+	n.readersMu.Unlock()
+}
+
+// Recipient reports where a reminder about the project at projectPath may
+// go for address, an assignee's email from the project's graph. Anyone who
+// edits the graph chooses those addresses, so on a server with accounts the
+// hub's mail only goes to an account that can read the project, and to the
+// address stored on that account, never the typed one with whatever display
+// name an editor wrapped around it; a loopback server's graph is its one
+// person's own.
+func (n *Notifier) Recipient(projectPath, address string) (string, bool) {
+	if address == "" {
+		return "", false
+	}
+	if n.pm == nil || !n.pm.IsRemote() {
+		return address, true
+	}
+	n.readersMu.RLock()
+	readers := n.readers
+	n.readersMu.RUnlock()
+	if readers == nil {
+		return "", false
+	}
+	stored, ok := readers(projectPath, address)
+	if !ok || stored == "" {
+		return "", false
+	}
+	return stored, true
 }
 
 func (n *Notifier) settingsPath() string {
@@ -334,8 +374,9 @@ func (n *Notifier) scan(now time.Time) {
 			if _, done := sent[key]; done {
 				continue
 			}
-			to := emails[node.Assignee]
-			if to == "" {
+			to, ok := n.Recipient(project.Path, emails[node.Assignee])
+			if !ok {
+				// The administrator's own fallback address.
 				to = strings.TrimSpace(settings.DefaultTo)
 			}
 			if to == "" {

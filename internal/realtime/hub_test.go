@@ -795,14 +795,18 @@ func TestSessionLimitsHoldForParticipantsAndSessions(t *testing.T) {
 		t.Fatalf("participants = %d, want %d", members, maxDocParticipants)
 	}
 
-	opener := docClient(hub, "aaa", identity.RoleMember)
 	// One session already exists above, so this fills the rest of the table.
+	// An account may hold only its share of it, so it takes several.
+	var opener *wsClient
 	for index := 0; index < maxDocSessions-1; index++ {
+		if index%maxDocSessionsPerActor == 0 {
+			opener = docClient(hub, fmt.Sprintf("opener-%03d", index/maxDocSessionsPerActor), identity.RoleMember)
+		}
 		hub.openDoc(opener, fmt.Sprintf("doc-%03d", index))
 	}
-	docEvents(t, opener)
-	hub.openDoc(opener, "one-too-many")
-	if state := firstEvent(t, opener, "doc-state"); !state.Seed || !state.Leader {
+	latecomer := docClient(hub, "aaa", identity.RoleMember)
+	hub.openDoc(latecomer, "one-too-many")
+	if state := firstEvent(t, latecomer, "doc-state"); !state.Seed || !state.Leader {
 		t.Fatalf("the client that found no room was not left alone with the file: %+v", state)
 	}
 	hub.mu.Lock()

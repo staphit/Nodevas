@@ -49,6 +49,11 @@ const maxQueryTokens = 16
 // result.
 const maxCandidates = 2000
 
+// maxCandidateBytes bounds the text one plain search reads, so a project of
+// megabyte documents costs a search tens of megabytes, not gigabytes. See
+// candidates.
+const maxCandidateBytes = 64 << 20
+
 // maxLexemeBytes bounds the lexemes of one tsvector. PostgreSQL refuses a
 // tsvector whose lexemes add up to a megabyte or more; a megabyte of Chinese
 // holds about 350,000 distinct bigrams at six bytes each, so the biggest
@@ -499,17 +504,15 @@ func tsqueryLiteral(token string) string {
 	return "'" + token + "'"
 }
 
-// candidates returns the documents of a project that hold every one of the
-// given tokens (in either column), plus every oversize document, or all of
-// them when the query produced no tokens at all.
-func (s *docStore) candidates(ctx context.Context, project string, tokens []string) ([]*storedDoc, error) {
+// candidates hands visit the documents of a project that hold every one of
+// the given tokens (in either column), plus every oversize document, or all of
+// them when the query produced no tokens at all. Rows are visited as they
+// arrive, so a document visit does not keep costs nothing once it returns.
+func (s *docStore) candidates(ctx context.Context, project string, tokens []string, visit func(*storedDoc)) error {
 	if len(tokens) > maxQueryTokens {
 		tokens = tokens[:maxQueryTokens]
 	}
-	query := `
-SELECT node_id, title, meta, body
-FROM search_documents
-WHERE project = ?`
+	filter := `project = ?`
 	args := []any{project}
 	if len(tokens) > 0 {
 		var where strings.Builder
@@ -521,45 +524,57 @@ WHERE project = ?`
 			literal := tsqueryLiteral(token)
 			args = append(args, literal, literal)
 		}
-		query = `
-SELECT node_id, title, meta, body
-FROM search_documents
-WHERE id IN (
-    SELECT id FROM search_documents WHERE project = ? AND ` + where.String() + `
-    UNION
-    SELECT id FROM search_documents WHERE project = ? AND oversize
-)`
+		filter = `id IN (
+        SELECT id FROM search_documents WHERE project = ? AND ` + where.String() + `
+        UNION
+        SELECT id FROM search_documents WHERE project = ? AND oversize
+    )`
 		args = append(args, project)
 	}
-	// A ceiling, because both branches select the full prose of every document
-	// they match and the HTTP layer's own cap applies only after that. The
-	// shortest query the API accepts is two characters, which is one very
-	// common bigram, so without this a large project answers it by loading
-	// every node's body into memory.
+	// Two ceilings, because both branches select the full prose of every
+	// document they match and the HTTP layer's own cap applies only after
+	// that: a count, and the bytes of text. The shortest query the API accepts
+	// is two characters, which is one very common bigram, so without them a
+	// large project answers it by reading every node's body; and every
+	// oversize document, a megabyte each, is a candidate of every search. The
+	// byte budget takes the documents that matched tokens first, smallest
+	// first, which keeps the most candidates; octet_length reads a stored
+	// value's size without reading the value.
 	//
-	// It can cost recall on a pathological query and cannot cost correctness:
-	// postings are a candidate filter and the verification pass decides the
-	// result either way — the same argument maxQueryTokens already makes.
-	query += ` LIMIT ?`
-	args = append(args, maxCandidates)
+	// They can cost recall on a pathological query or project and cannot cost
+	// correctness: postings are a candidate filter and the verification pass
+	// decides the result either way — the same argument maxQueryTokens
+	// already makes.
+	query := `
+WITH picked AS (
+    SELECT id, sum(octet_length(meta) + octet_length(body)) OVER w AS running
+    FROM search_documents
+    WHERE ` + filter + `
+    WINDOW w AS (ORDER BY oversize, octet_length(meta) + octet_length(body), id)
+    ORDER BY oversize, octet_length(meta) + octet_length(body), id
+    LIMIT ?
+)
+SELECT d.node_id, d.title, d.meta, d.body
+FROM picked p JOIN search_documents d ON d.id = p.id
+WHERE p.running <= ?`
+	args = append(args, maxCandidates, maxCandidateBytes)
 
 	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
+		return fmt.Errorf("search: %w", err)
 	}
 	defer rows.Close()
-	out := make([]*storedDoc, 0, 16)
 	for rows.Next() {
 		doc := &storedDoc{}
 		if err := rows.Scan(&doc.nodeID, &doc.title, &doc.meta, &doc.body); err != nil {
-			return nil, fmt.Errorf("scan search result: %w", err)
+			return fmt.Errorf("scan search result: %w", err)
 		}
-		out = append(out, doc)
+		visit(doc)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("search: %w", err)
+		return fmt.Errorf("search: %w", err)
 	}
-	return out, nil
+	return nil
 }
 
 // rankedDoc is a candidate with its BM25 score, higher is better.
@@ -619,14 +634,21 @@ scored AS (
     GROUP BY tf.id
     ORDER BY score DESC, tf.id
     LIMIT ?
+),
+budget AS (
+    SELECT s.id, s.score,
+           sum(octet_length(d.meta) + octet_length(d.body)) OVER (ORDER BY s.score DESC, s.id) AS running
+    FROM scored s JOIN search_documents d ON d.id = s.id
 )
-SELECT d.node_id, d.title, d.meta, d.body, s.score
-FROM scored s JOIN search_documents d ON d.id = s.id
-ORDER BY s.score DESC, s.id`
+SELECT d.node_id, d.title, d.meta, d.body, b.score
+FROM budget b JOIN search_documents d ON d.id = b.id
+WHERE b.running <= ?
+ORDER BY b.score DESC, b.id`
 
 // rankedCandidates returns the project's documents holding any of the tokens,
 // best BM25 first, a few times more than limit so the tiers above BM25 (an
-// exact title, the whole phrase) have something to reorder.
+// exact title, the whole phrase) have something to reorder. Like a plain
+// search's candidates they stop at maxCandidateBytes of text, best first.
 func (s *docStore) rankedCandidates(ctx context.Context, project string, tokens []string, limit int) ([]*rankedDoc, error) {
 	if len(tokens) > maxRankTokens {
 		tokens = tokens[:maxRankTokens]
@@ -639,7 +661,7 @@ func (s *docStore) rankedCandidates(ctx context.Context, project string, tokens 
 		literals[i] = tsqueryLiteral(token)
 	}
 	fetch := min(max(limit*3, 50), 300)
-	rows, err := s.reader().QueryContext(ctx, rankedQuery, literals, project, project, project, fetch)
+	rows, err := s.reader().QueryContext(ctx, rankedQuery, literals, project, project, project, fetch, maxCandidateBytes)
 	if err != nil {
 		return nil, fmt.Errorf("ranked search: %w", err)
 	}

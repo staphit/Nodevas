@@ -10,9 +10,9 @@ import (
 	"nodevas/internal/runnerwire"
 )
 
-// Handoff (runnerwire/handoff.go). A headless implement run that stops at
-// its agent's usage limit leaves its partial work on a local branch of its
-// runner, and a note. Whatever runs the task next continues from there:
+// Handoff (runnerwire/handoff.go). A headless implement or Tester run that
+// stops at its agent's usage limit leaves its partial work on a local branch
+// of its runner, and a note. Whatever runs the task next continues from there:
 //
 //   - the next model of the fallback chain, at once (dispatcher_routing.go);
 //   - with no fallback left, the same agent and model once the limit resets:
@@ -26,8 +26,9 @@ import (
 // job names is one of its own before it uses it.
 
 // canHandOff reports whether a run's work is handed on when it stops at a
-// limit: headless implement runs only. A review or plan changes no files,
-// and a revise already works on its pull request's branch.
+// limit: headless implement and Tester runs, which the runner continues
+// (runner.prepareHandoff). A review, plan or judge changes no files, and a
+// revise already works on its pull request's branch.
 func canHandOff(r Record) bool {
 	return (r.Kind == runnerwire.JobImplement || r.Kind == runnerwire.JobTest) && r.Mode == runnerwire.ModeHeadless
 }

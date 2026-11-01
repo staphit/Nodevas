@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"nodevas/internal/redact"
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -37,7 +39,7 @@ const (
 // The title, not the summary's first line: agents open with "Done." as often
 // as with anything that says what changed, and the node is what the work was.
 func commitMessage(summary string, job runnerwire.Job) string {
-	summary = strings.TrimSpace(strings.ReplaceAll(redact.String(summary), "\r\n", "\n"))
+	summary = strings.TrimSpace(strings.ReplaceAll(redact.Output(summary), "\r\n", "\n"))
 	subject := subjectLine(oneLine(job.NodeTitle))
 	if subject == "" {
 		for _, line := range strings.Split(summary, "\n") {
@@ -113,10 +115,14 @@ type commitResult struct {
 	// Err is why a commit with changes failed (git refused it, or the
 	// worktree's git directory was changed).
 	Err error
+	// Withheld is the agent config the run added, changed or removed, which
+	// the commit leaves out (unstageRepoConfig).
+	Withheld []string
 }
 
-// commitRun stages everything in the worktree and commits it. The agent may
-// have committed on its own; its commits count as the run's too.
+// commitRun stages everything in the worktree but agent config and commits
+// it. The agent may have committed on its own; its commits count as the
+// run's too.
 func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	var res commitResult
 	if err := checkGitDir(ctx, wt); err != nil {
@@ -133,7 +139,12 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	if out, err := git(ctx, wt.Path, "merge-base", "HEAD", wt.BaseRef); err == nil && strings.TrimSpace(out) != "" {
 		res.Base = strings.TrimSpace(out)
 	}
-	if _, err := git(ctx, wt.Path, "add", "-A"); err != nil {
+	if err := stageAll(ctx, wt.Path); err != nil {
+		res.Err = err
+		res.Changed = true
+		return res
+	}
+	if res.Withheld, err = unstageRepoConfig(ctx, wt.Path); err != nil {
 		res.Err = err
 		res.Changed = true
 		return res
@@ -166,6 +177,61 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 		res.Changed = true
 	}
 	return res
+}
+
+// unstageRepoConfig takes the repository's agent config
+// (adapter.RepoConfigPaths, in any letter case: Windows and macOS load
+// .Codex as .codex) back out of the index, as HEAD has it, and returns
+// what it took out. Some of that config runs programs as whoever runs the
+// next agent there (hooks, plugins, MCP servers), and an agent that may only
+// edit files must not hand itself, or the next run on its branch, a shell
+// that way: a revise, a handoff, or an implement or judge at that base
+// loads its branch's config. The files stay in the worktree, for a person to
+// commit if they meant it.
+func unstageRepoConfig(ctx context.Context, dir string) ([]string, error) {
+	specs := []string{"--"}
+	for _, path := range adapter.RepoConfigPaths() {
+		specs = append(specs, ":(icase,literal)"+path)
+	}
+	out, err := git(ctx, dir, append([]string{"diff", "--cached", "--name-only", "-z"}, specs...)...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+	if _, err := git(ctx, dir, append([]string{"reset", "-q"}, specs...)...); err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimRight(out, "\x00"), "\x00"), nil
+}
+
+// commit is commitRun for r, saying in its events what agent config the
+// commit left out.
+func (j *jobs) commit(ctx context.Context, r *run, wt Worktree, message string) commitResult {
+	res := commitRun(ctx, wt, message)
+	if len(res.Withheld) > 0 {
+		list := res.Withheld
+		if len(list) > 20 {
+			list = append(list[:20:20], fmt.Sprintf("and %d more", len(res.Withheld)-20))
+		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "agent config left out of the commit " +
+			"(a later run on this branch would load it); it stays uncommitted in the worktree at " + wt.Path +
+			", which is kept: commit it yourself if it is meant, then remove the worktree: " + strings.Join(list, ", ")})
+	}
+	return res
+}
+
+// dropWorktree removes a run's worktree once its commit is done with it,
+// unless the commit left agent config out (committed.Withheld): that config
+// lives only in the worktree, so the worktree and its branch stay for the
+// person to commit or discard it. It reports whether it removed it.
+func (j *jobs) dropWorktree(r *run, wt Worktree, committed commitResult, dropBranch bool) bool {
+	if len(committed.Withheld) > 0 {
+		j.c.logf("run %s: worktree kept at %s: it holds agent config the commit left out", r.job.RunID, wt.Path)
+		return false
+	}
+	if err := removeWorktree(j.ctx, r.repo.Path, wt, dropBranch); err != nil {
+		j.c.logf("run %s: removing its worktree: %v", r.job.RunID, err)
+	}
+	return true
 }
 
 // identityArgs names the fallback author when git has no identity of its own;
@@ -369,4 +435,42 @@ func removeWorktree(ctx context.Context, repoPath string, wt Worktree, dropBranc
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// stageAll is `git add -A` that never looks inside a submodule. add -A runs
+// `git status` in every populated submodule, whatever the config or
+// .gitmodules says, and a submodule's repository is the agent's to write: a
+// filter its config names would run as the owner. So the populated
+// submodules are left out of add -A, and update-index records where each one
+// now points, which reads only its HEAD.
+func stageAll(ctx context.Context, dir string) error {
+	staged, err := git(ctx, dir, "ls-files", "--stage", "-z")
+	if err != nil {
+		return err
+	}
+	var populated []string
+	for _, rec := range strings.Split(staged, "\x00") {
+		meta, path, ok := strings.Cut(rec, "\t")
+		if !ok || !strings.HasPrefix(meta, "160000 ") {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path), ".git")); err == nil {
+			populated = append(populated, path)
+		}
+	}
+	args := []string{"add", "-A"}
+	if len(populated) > 0 {
+		args = append(args, "--", ".")
+		for _, path := range populated {
+			args = append(args, ":(exclude,literal)"+path)
+		}
+	}
+	if _, err := git(ctx, dir, args...); err != nil {
+		return err
+	}
+	if len(populated) == 0 {
+		return nil
+	}
+	_, err = git(ctx, dir, append([]string{"update-index", "--add", "--remove", "--"}, populated...)...)
+	return err
 }

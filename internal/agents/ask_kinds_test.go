@@ -220,9 +220,13 @@ func TestLateAnswerToAQuestionCarriesTheText(t *testing.T) {
 		if err != nil || late.Status != AskAnswered || late.Answer != "eu-west-1" {
 			t.Fatalf("late = %+v, %v", late, err)
 		}
+		// The text rides in the mail's file, which only the asker reads.
 		inbox, _ := hub.CheckInbox(ctx, "alpha", "api-claude", "alice", 0)
-		if len(inbox) != 1 || !strings.Contains(inbox[0].Body, "eu-west-1") {
+		if len(inbox) != 1 {
 			t.Fatalf("late answer mail = %+v", inbox)
+		}
+		if _, text, err := hub.FileContent(ctx, "alpha", inbox[0].ID, lateAnswerFile, Viewer{ID: "alice"}); err != nil || !strings.Contains(text, "eu-west-1") {
+			t.Fatalf("late answer mail = %+v, its file %q, %v", inbox, text, err)
 		}
 	})
 }

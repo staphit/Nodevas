@@ -187,7 +187,8 @@ func repoDiff(ctx context.Context, root, ref string) (runnerwire.RepoDiff, error
 	var over bool
 	var err error
 	if ref == "" {
-		raw, over, err = repoGit(ctx, root, runnerwire.MaxRepoPatchBytes, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD")
+		raw, over, err = repoGit(ctx, root, runnerwire.MaxRepoPatchBytes, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+			"--ignore-submodules=dirty", "--submodule=short", "HEAD")
 	} else {
 		raw, over, err = repoGit(ctx, root, runnerwire.MaxRepoPatchBytes, "show", "--no-ext-diff", "--no-textconv", "--no-color", "--format=", ref)
 	}

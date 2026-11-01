@@ -7,10 +7,13 @@ import (
 )
 
 // sensitiveDirs are directories whose files change how code is built, tested
-// or run (CI, hooks, scripts, agent instructions).
+// or run (CI, hooks, scripts, agent instructions and every agent CLI's
+// repository config: see adapter.RepoConfigPaths). A file or symlink by one
+// of these names is sensitive too.
 var sensitiveDirs = []string{
 	".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".devcontainer",
 	".claude", ".cursor", ".vscode", "scripts",
+	".codex", ".gemini", ".agents", "_agents", ".agent", ".opencode",
 }
 
 // sensitiveFiles are manifests, lockfiles, build, CI and test-runner files,
@@ -24,8 +27,9 @@ var sensitiveFiles = map[string]bool{
 	".dockerignore": true, "compose.yaml": true, "compose.yml": true,
 	// Build.
 	"makefile": true, "gnumakefile": true, "justfile": true, "taskfile.yml": true,
-	// Agent instructions and tools.
-	"claude.md": true, "agents.md": true, ".mcp.json": true,
+	// Agent instructions, tools and config (adapter.RepoConfigPaths).
+	"claude.md": true, "agents.md": true, "gemini.md": true, ".mcp.json": true,
+	"opencode.json": true, "opencode.jsonc": true, "tui.json": true, "tui.jsonc": true,
 	// JavaScript.
 	"package.json": true, "package-lock.json": true, "npm-shrinkwrap.json": true, "yarn.lock": true,
 	"pnpm-lock.yaml": true, "pnpm-workspace.yaml": true, "bun.lock": true, "bun.lockb": true,
@@ -48,14 +52,15 @@ var sensitiveFiles = map[string]bool{
 // testRunnerConfigs are base-name prefixes of test-runner configuration: a
 // change there can skip or neuter the tests the test command runs.
 var testRunnerConfigs = []string{
-	"vitest.config.", "vitest.workspace.", "jest.config.", "playwright.config.", "cypress.config.",
+	"vitest.config.", "vitest.workspace.", "vite.config.", "jest.config.", "playwright.config.", "cypress.config.",
 	"karma.conf.", ".mocharc", "phpunit.xml",
 }
 
 // SensitivePath reports whether p is a path whose change can neuter the test
 // command or the CI gate, or that an unattended merge must not change: CI and
 // hook configuration, manifests and lockfiles, container, build and
-// test-runner files, scripts, git configuration and agent instructions.
+// test-runner files, scripts, git configuration, agent instructions and
+// agent config.
 // Shared by the staged pipeline's diff guard and the autopilot's merge hold.
 func SensitivePath(p string) bool {
 	p = strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "./"))
@@ -63,7 +68,7 @@ func SensitivePath(p string) bool {
 		return false
 	}
 	parts := strings.Split(path.Clean(p), "/")
-	for _, dir := range parts[:len(parts)-1] {
+	for _, dir := range parts {
 		if slices.Contains(sensitiveDirs, dir) {
 			return true
 		}
@@ -71,6 +76,8 @@ func SensitivePath(p string) bool {
 	base := parts[len(parts)-1]
 	switch {
 	case sensitiveFiles[base]:
+		return true
+	case base == ".env" || strings.HasPrefix(base, ".env."), base == ".envrc": // an agent CLI's or direnv's environment
 		return true
 	case strings.HasPrefix(base, ".git"): // .gitignore, .gitattributes, .gitmodules
 		return true

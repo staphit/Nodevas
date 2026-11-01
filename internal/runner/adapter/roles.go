@@ -93,6 +93,9 @@ func testerPrompt(job runnerwire.Job, branch string) string {
 		b.WriteString(strings.TrimSpace(job.Review))
 		b.WriteString("\n")
 	}
+	if job.HandoffBranch != "" {
+		b.WriteString(handoffSection(job))
+	}
 	return b.String()
 }
 

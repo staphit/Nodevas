@@ -317,6 +317,14 @@ func (s *Server) UseAccounts(users *auth.UserStore) {
 	if s.pm != nil {
 		s.pm.SetRemote(true)
 	}
+	// Deadline reminders go only to accounts that can read the project.
+	s.notifier.UseReaders(func(projectPath, address string) (string, bool) {
+		actor, _, stored, err := users.AccountByEmail(context.Background(), address)
+		if err != nil || actor.ID == "" || !s.members.Access(actor, project.Key(projectPath)).CanRead() {
+			return "", false
+		}
+		return stored, true
+	})
 }
 
 // UseAccess puts Cloudflare Access in front of every route: with required, a

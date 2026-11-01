@@ -4,9 +4,9 @@ import "nodevas/internal/runnerwire"
 
 // Repository-local agent config in read-only runs.
 //
-// A review checks out a pull request's head and a plan reads the repository
-// at a base a collaborator may have pushed to: what is in the worktree is not
-// the owner's. Every agent CLI also reads config from the directory it runs
+// A review checks out a pull request's head, and a plan or a judge reads the
+// repository at a base a collaborator may have pushed to: what is in the
+// worktree is not the owner's. Every agent CLI also reads config from the directory it runs
 // in, and some of that config runs programs as the owner: hooks, plugins, MCP
 // servers, tool discovery commands, a .env that points the CLI's API at
 // another host. So a read-only run must not load the worktree's own config,
@@ -50,10 +50,15 @@ import "nodevas/internal/runnerwire"
 // Implement and revise runs work on the owner's own branches, as trusted as
 // the repository itself, and keep its config.
 
-// ReadOnly reports whether job is a read-only run: a review or a plan. Its
-// worktree is thrown away after, and its agent is told to change nothing.
+// ReadOnly reports whether job is a read-only run: a review, a plan or a
+// judge. Its worktree is thrown away after, and its agent is told to change
+// nothing.
 func ReadOnly(job runnerwire.Job) bool {
-	return job.Kind == runnerwire.JobReview || job.Kind == runnerwire.JobPlan
+	switch job.Kind {
+	case runnerwire.JobReview, runnerwire.JobPlan, runnerwire.JobJudge:
+		return true
+	}
+	return false
 }
 
 // repoConfigPaths is every path, relative to the worktree's root and in

@@ -22,14 +22,29 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	if g == nil {
 		return locale.Errorf("graph is null", "圖是空值")
 	}
+	// Writing a bent wire's edge parses its target's `requires` and scans the
+	// nodes and gates, so the sizes are checked before that work.
+	if len(g.Nodes) > MaxGraphNodes {
+		return locale.Errorf("graph has too many nodes (maximum %d)", "圖的節點太多（最多 %d 個）", MaxGraphNodes)
+	}
+	if len(g.Edges) > maxGraphEdges {
+		return locale.Errorf("graph has too many edges (maximum %d)", "圖的連線太多（最多 %d 條）", maxGraphEdges)
+	}
+	if g.UI != nil && len(g.UI.LogicGates) > maxLogicGates {
+		return locale.Errorf("graph has too many logic gates (maximum %d)", "圖的邏輯閘太多（最多 %d 個）", maxLogicGates)
+	}
+	for _, node := range g.Nodes {
+		if node != nil {
+			if err := checkNodeTextSize(node); err != nil {
+				return err
+			}
+		}
+	}
 	// Rewriting `requires` rebuilds the edge list, so labels and bend points of
 	// dropped edges are swept before validation. A bend on a dependency named
 	// only in `requires` is kept: its edge is written first.
 	materializeRequiresWires(g)
 	pruneEdgeDecorations(g)
-	if len(g.Nodes) > MaxGraphNodes {
-		return locale.Errorf("graph has too many nodes (maximum %d)", "圖的節點太多（最多 %d 個）", MaxGraphNodes)
-	}
 	if len(g.Edges) > maxGraphEdges {
 		return locale.Errorf("graph has too many edges (maximum %d)", "圖的連線太多（最多 %d 條）", maxGraphEdges)
 	}
@@ -343,12 +358,20 @@ func ValidateGraphForStorage(g *engine.Graph) error {
 	return nil
 }
 
+// checkNodeTextSize refuses a title or `requires` over 64 KiB.
+func checkNodeTextSize(node *engine.Node) error {
+	if len(node.Requires) > 64<<10 || len(node.Title) > 64<<10 {
+		return locale.Errorf("node %q contains an oversized title or requirement", "節點「%s」的標題或前置條件過長", node.ID)
+	}
+	return nil
+}
+
 // validateNodeForStorage checks one node's own fields (not its id or its
 // uniqueness, which need the whole graph). create_subgraph calls it per new
 // node so an error can name the offending entry.
 func validateNodeForStorage(node *engine.Node, userIDs map[string]struct{}) error {
-	if len(node.Requires) > 64<<10 || len(node.Title) > 64<<10 {
-		return locale.Errorf("node %q contains an oversized title or requirement", "節點「%s」的標題或前置條件過長", node.ID)
+	if err := checkNodeTextSize(node); err != nil {
+		return err
 	}
 	// An unknown kind is kept (it reads as Task), including a legacy
 	// free-text one ("bug", "伏筆"), so old graphs stay saveable; only its

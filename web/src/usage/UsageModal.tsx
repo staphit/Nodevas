@@ -390,7 +390,8 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
   }, [loadPrices]);
 
   const custom = useMemo(() => (prices?.prices ?? []).filter((p) => p.source === "custom"), [prices]);
-  const builtin = useMemo(() => (prices?.prices ?? []).filter((p) => p.source === "builtin"), [prices]);
+  // Nodevas's estimates sit with the list prices, each marked as one.
+  const builtin = useMemo(() => (prices?.prices ?? []).filter((p) => p.source !== "custom"), [prices]);
 
   // Drafts start from the saved custom prices, plus a row for each model the
   // warning sent us here for.
@@ -519,6 +520,11 @@ function PricesPanel({ suggested }: { suggested: string[] }) {
                   <tr key={p.model} className={overridden.has(p.model.toLowerCase()) ? "usage-overridden" : undefined}>
                     <th scope="row" className="usage-model">
                       {p.model}
+                      {p.source === "estimate" && (
+                        <span className="usage-actor" title={t("usage.price.estimateTitle")}>
+                          {t("usage.price.estimate")}
+                        </span>
+                      )}
                       {overridden.has(p.model.toLowerCase()) && (
                         <span className="usage-actor">{t("usage.price.overridden")}</span>
                       )}

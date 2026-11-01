@@ -99,6 +99,29 @@ func secretRel(rel string) bool {
 	return false
 }
 
+// nestedProject reports whether dir, a directory below a project's root,
+// is a project of its own: it holds a graph.yaml (of any kind, so a link or
+// a folder by that name errs toward hiding). That project has its own
+// members (internal/members) and its own Files tab; a reader of this one
+// may not be allowed to read it.
+func nestedProject(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, "graph.yaml"))
+	return err == nil
+}
+
+// inNestedProject reports whether rel, a clean slash path below root, is a
+// nested project's folder or lies inside one.
+func inNestedProject(root, rel string) bool {
+	dir := root
+	for _, seg := range strings.Split(rel, "/") {
+		dir = filepath.Join(dir, seg)
+		if nestedProject(dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // nodeTitles maps node ids to titles, for naming node files.
 func (s *Store) nodeTitles() map[string]string {
 	out := map[string]string{}
@@ -126,8 +149,8 @@ func nodeOfFile(rel string, titles map[string]string) (string, string) {
 }
 
 // WorkspaceFiles walks the project root: at most MaxWorkspaceDepth deep and
-// MaxWorkspaceEntries entries, dot directories and secrets left out, and
-// symlinks never followed.
+// MaxWorkspaceEntries entries, dot directories, secrets and nested projects
+// left out, and symlinks never followed.
 func (s *Store) WorkspaceFiles() (WorkspaceListing, error) {
 	out := WorkspaceListing{Entries: []WorkspaceEntry{}}
 	titles := s.nodeTitles()
@@ -164,6 +187,11 @@ func (s *Store) WorkspaceFiles() (WorkspaceListing, error) {
 		if d.Type()&fs.ModeSymlink != 0 {
 			// A link is never followed: shown neither as its target nor at all.
 			return nil
+		}
+		if d.IsDir() && nestedProject(abs) {
+			// Another project, shown in its own Files tab to those who may
+			// read it: not even its name is listed here.
+			return fs.SkipDir
 		}
 		if len(out.Entries) >= MaxWorkspaceEntries {
 			out.Truncated = true
@@ -226,7 +254,9 @@ func workspaceVisible(rel string) error {
 	return nil
 }
 
-// ReadWorkspaceFile reads one file under the project root.
+// ReadWorkspaceFile reads one file under the project root. A file inside a
+// nested project (nestedProject) is not this project's: it answers as if
+// it did not exist, as the listing leaves it out.
 func (s *Store) ReadWorkspaceFile(rel string) (WorkspaceFile, error) {
 	clean, err := cleanWorkspacePath(rel)
 	if err != nil {
@@ -235,6 +265,9 @@ func (s *Store) ReadWorkspaceFile(rel string) (WorkspaceFile, error) {
 	if err := workspaceVisible(clean); err != nil {
 		return WorkspaceFile{}, err
 	}
+	if inNestedProject(s.root, clean) {
+		return WorkspaceFile{}, os.ErrNotExist
+	}
 	// The name asked for may not be the file's own (a Windows short name, a
 	// different case, a link inside the root): its real path is checked too.
 	if realRoot, err := filepath.EvalSymlinks(s.root); err == nil {
@@ -242,6 +275,9 @@ func (s *Store) ReadWorkspaceFile(rel string) (WorkspaceFile, error) {
 			if rel, err := filepath.Rel(realRoot, real); err == nil {
 				if err := workspaceVisible(filepath.ToSlash(rel)); err != nil {
 					return WorkspaceFile{}, err
+				}
+				if filepath.IsLocal(rel) && inNestedProject(realRoot, filepath.ToSlash(rel)) {
+					return WorkspaceFile{}, os.ErrNotExist
 				}
 			}
 		}

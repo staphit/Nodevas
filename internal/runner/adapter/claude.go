@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,8 +33,10 @@ const DefaultClaudePermissionMode = "acceptEdits"
 
 // ClaudeReadOnlyDeny is the --disallowedTools list of a review or plan run:
 // every built-in tool that writes a file or runs a command (PowerShell is
-// Claude Code's shell tool on Windows). Subagents inherit the deny.
-const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
+// Claude Code's shell tool on Windows, Monitor runs one in the background),
+// and the web: a prompt-injected reviewer could otherwise send what it read
+// to any URL. Subagents inherit the deny.
+const ClaudeReadOnlyDeny = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell,Monitor,WebFetch,WebSearch"
 
 // NodevasMCPTools is the --allowedTools rule for every tool of the run's
 // nodevas MCP server.
@@ -174,18 +177,30 @@ func claudeMCPTimeoutAtLeast(ms int) bool {
 // An agent that a task or a repository file talks into running `env` must find
 // nothing worth stealing. ANTHROPIC_API_KEY and OPENAI_API_KEY stay: agents may
 // sign in with them.
+//
+// On Windows it adds NoDefaultCurrentDirectoryInExePath: an npm .cmd shim
+// runs a bare "node" when no node.exe sits next to it, and cmd.exe would look
+// for that in the current directory, the run's worktree, before PATH; a
+// node.cmd a branch put there would run as the owner, outside every sandbox.
 func childEnv() []string {
 	env := os.Environ()
 	out := env[:0:0]
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if strippedEnv(name) {
+		if strippedEnv(name) || strings.EqualFold(name, noCwdExeEnv) {
 			continue
 		}
 		out = append(out, kv)
 	}
+	if runtime.GOOS == "windows" {
+		out = append(out, noCwdExeEnv+"=1")
+	}
 	return out
 }
+
+// noCwdExeEnv, set to anything, keeps cmd.exe (and CreateProcess's search for
+// a bare program name) from looking in the current directory.
+const noCwdExeEnv = "NoDefaultCurrentDirectoryInExePath"
 
 // outerAgentEnv are the variables an agent sets for what it starts, naming
 // its session (the ones `nodevas mcp` reads to tell which session it serves)

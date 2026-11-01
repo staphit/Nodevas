@@ -17,7 +17,8 @@ import (
 )
 
 // Store encrypts one file with AES-256-GCM. The key is either supplied through
-// NODEVAS_SECRET_KEY or kept in a 0600 machine-local key file.
+// NODEVAS_SECRET_KEY (or the file NODEVAS_SECRET_KEY_FILE names) or kept in a
+// 0600 machine-local key file.
 type Store struct {
 	Path    string
 	KeyPath string
@@ -77,13 +78,17 @@ func (s *Store) Clear() error {
 }
 
 func loadKey(keyPath string) ([]byte, error) {
-	if encoded := strings.TrimSpace(os.Getenv("NODEVAS_SECRET_KEY")); encoded != "" {
-		key, err := base64.StdEncoding.DecodeString(encoded)
+	supplied, source, err := environmentKey()
+	if err != nil {
+		return nil, err
+	}
+	if supplied != "" {
+		key, err := base64.StdEncoding.DecodeString(supplied)
 		if err != nil {
-			return nil, fmt.Errorf("NODEVAS_SECRET_KEY must be base64: %w", err)
+			return nil, fmt.Errorf("%s must be base64: %w", source, err)
 		}
 		if len(key) != 32 {
-			return nil, fmt.Errorf("NODEVAS_SECRET_KEY must decode to 32 bytes")
+			return nil, fmt.Errorf("%s must decode to 32 bytes", source)
 		}
 		return key, nil
 	}
@@ -130,6 +135,33 @@ func loadKey(keyPath string) ([]byte, error) {
 		return nil, closeErr
 	}
 	return key, nil
+}
+
+// environmentKey is the base64 key the environment supplies, and which
+// variable supplied it: NODEVAS_SECRET_KEY itself, or the file
+// NODEVAS_SECRET_KEY_FILE names (a Docker or Kubernetes secret, which keeps
+// the key out of the volume the secrets live in). "" means neither is set
+// and the machine key file is used. Both at once is refused, as is a named
+// file that cannot be read: generating a new key instead would silently
+// orphan every secret sealed with the real one.
+func environmentKey() (string, string, error) {
+	value := strings.TrimSpace(os.Getenv("NODEVAS_SECRET_KEY"))
+	file := strings.TrimSpace(os.Getenv("NODEVAS_SECRET_KEY_FILE"))
+	if file == "" {
+		return value, "NODEVAS_SECRET_KEY", nil
+	}
+	if value != "" {
+		return "", "", fmt.Errorf("NODEVAS_SECRET_KEY and NODEVAS_SECRET_KEY_FILE are mutually exclusive")
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "", "", fmt.Errorf("read NODEVAS_SECRET_KEY_FILE: %w", err)
+	}
+	encoded := strings.TrimSpace(string(data))
+	if encoded == "" {
+		return "", "", fmt.Errorf("NODEVAS_SECRET_KEY_FILE %q is empty", file)
+	}
+	return encoded, "NODEVAS_SECRET_KEY_FILE", nil
 }
 
 func encrypt(key, plain, aad []byte) ([]byte, error) {

@@ -125,6 +125,11 @@ jobs:
       - name: Unit tests
         run: npm --prefix web run test
 
+      # Node's own test runner, no dependencies: the desktop packaging rules
+      # and how the release and image workflows hand out their token.
+      - name: Desktop and workflow checks
+        run: npm --prefix desktop test
+
       - name: Build bundle
         run: npm run build --prefix web
 

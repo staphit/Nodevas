@@ -176,8 +176,8 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 		job.HandoffNote = ""
 		return ""
 	}
-	if job.Kind != runnerwire.JobImplement || job.Mode == runnerwire.ModeInteractive {
-		return "a handoff is only continued by a headless implement run"
+	if (job.Kind != runnerwire.JobImplement && job.Kind != runnerwire.JobTest) || job.Mode == runnerwire.ModeInteractive {
+		return "a handoff is only continued by a headless implement or test run"
 	}
 	dataDir, err := j.c.Config.RunDataDir()
 	if err != nil {
@@ -197,13 +197,13 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 
 // handOff keeps a failed run's partial work: it commits the worktree, puts
 // the commit on the run's handoff branch, writes the note and removes the
-// worktree. With nothing changed there is no branch. result gets the branch
-// and note; the changes are reported as any run's are.
+// worktree (dropWorktree). With nothing changed there is no branch. result
+// gets the branch and note; the changes are reported as any run's are.
 func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runnerwire.RunChanges {
 	ctx := j.ctx
 	job := r.job
 	message := commitMessage(fmt.Sprintf("Partial work: the agent stopped (%s) before finishing.", result.FailureKind), job)
-	committed := commitRun(ctx, wt, message)
+	committed := j.commit(ctx, r, wt, message)
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the partial work: " + committed.Err.Error()})
 	}
@@ -217,10 +217,11 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 		j.c.logf("run %s: partial work not kept for a handoff; worktree kept at %s", job.RunID, wt.Path)
 		return &changes
 	case !committed.Changed || changes.Commit == "":
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "no changes to hand off; worktree removed"})
-		if err := removeWorktree(ctx, r.repo.Path, wt, true); err != nil {
-			j.c.logf("run %s: removing its worktree: %v", job.RunID, err)
+		text := "no changes to hand off; worktree removed"
+		if !j.dropWorktree(r, wt, committed, true) {
+			text = "no changes to hand off; worktree kept at " + wt.Path
 		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		return &changes
 	}
 	branch := runnerwire.HandoffBranchName(job.RunID)
@@ -242,9 +243,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 		j.c.logf("run %s: handoff not recorded: %v; worktree kept at %s", job.RunID, err, wt.Path)
 		return &changes
 	}
-	if err := removeWorktree(ctx, r.repo.Path, wt, true); err != nil {
-		j.c.logf("run %s: removing its worktree: %v", job.RunID, err)
-	}
+	j.dropWorktree(r, wt, committed, true)
 	j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf(
 		"kept the partial work on local branch %s (%s: %d files, +%d −%d) for the next run; not pushed",
 		branch, short(changes.Commit), len(changes.Files), changes.Additions, changes.Deletions)})

@@ -338,12 +338,12 @@ func (a *API) getMessages(c *gin.Context) {
 		msgs, err = a.hub.ListMessages(c.Request.Context(), projectKey, c.Query("nodeId"), status, 150)
 		if err == nil {
 			// Held and rejected mail shows only to those it concerns, and
-			// never to an agent.
+			// never to an agent; a forwarded decision's answer and note too.
 			viewer := humanViewer(c.Request)
 			kept := msgs[:0]
 			for _, m := range msgs {
 				if viewer.MaySee(m) {
-					kept = append(kept, m)
+					kept = append(kept, viewer.ShownMessage(m))
 				}
 			}
 			msgs = kept

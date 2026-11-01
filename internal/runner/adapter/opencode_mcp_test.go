@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -78,6 +79,31 @@ func TestOpenCodeServerNames(t *testing.T) {
 	}
 	if _, err := openCodeServerNames([]byte("Error: no service")); err == nil {
 		t.Error("not JSON: no error")
+	}
+}
+
+// A read-only run asks OpenCode for its config in a directory only the owner
+// can write. OpenCode loads the config and the plugins it finds there and in
+// the directories above; in the shared temp dir another local user, or a
+// Codex run whose sandbox may write there, could have left some.
+func TestOpenCodeEmptyDirIsTheOwners(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("LOCALAPPDATA", cache)   // os.UserCacheDir on Windows
+	t.Setenv("XDG_CACHE_HOME", cache) // on Linux
+	t.Setenv("HOME", cache)           // on macOS, under Library/Caches
+	dir, err := openCodeEmptyDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, err := filepath.Rel(cache, dir); err != nil || !filepath.IsLocal(rel) {
+		t.Fatalf("read-only runs ask OpenCode in %s, not in the owner's cache dir %s", dir, cache)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("%s: %v", dir, err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Errorf("%s has mode %v, want 0700", dir, info.Mode().Perm())
 	}
 }
 

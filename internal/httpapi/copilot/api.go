@@ -92,6 +92,8 @@ func fail(c *gin.Context, err error) {
 		httpx.Err(c, http.StatusBadRequest, err)
 	case errors.Is(err, copilot.ErrBusy):
 		httpx.Coded(c, http.StatusConflict, "turn_in_progress", err, nil)
+	case errors.Is(err, copilot.ErrTurnLimit):
+		httpx.Coded(c, http.StatusTooManyRequests, "copilot_busy", err, nil)
 	case errors.Is(err, copilot.ErrUnavailable):
 		// The reason is the operator's configuration, not a secret, and the
 		// panel shows it so the person knows whom to ask.
@@ -381,11 +383,11 @@ func browserModel(value string) string {
 // carrying the session secret around: a hash of its cookie. Empty on a
 // loopback-only server, which has no sessions.
 func sessionFingerprint(r *http.Request) string {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token, ok := auth.SessionToken(r)
+	if !ok {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(cookie.Value))
+	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:16])
 }
 

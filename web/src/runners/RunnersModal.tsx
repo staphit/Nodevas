@@ -5,6 +5,7 @@ import { IconShield, IconTrash } from "../icons";
 import { MODE_INTERACTIVE } from "../runs/autoAccept";
 import { formatClock, StepUpDialog } from "../stepup/StepUpDialog";
 import { stepUpActive, useStepUp } from "../stepup/stepUpStore";
+import { useFreshStepUp } from "../stepup/freshStepUp";
 import { formatList, languageLocale, useI18n } from "../i18n";
 import { CopyButton, LinkDeviceDialog } from "./LinkDevice";
 import { useTeamServer } from "../components/SignIn";
@@ -422,14 +423,29 @@ export function RunnersPanel({
   const [linkOpen, setLinkOpen] = useState(false);
   const closeLink = useCallback(() => setLinkOpen(false), []);
 
-  const submit = async () => {
-    if (!name.trim()) return;
+  // A runner token outlives this session, so a hub with accounts wants a
+  // fresh step-up first, as for a device link (LinkDevice.tsx).
+  const stepUp = useFreshStepUp();
+  useEffect(() => {
+    void useStepUp.getState().load();
+  }, []);
+
+  const createNow = async () => {
     const result = await create(name);
+    if (result === "step-up") {
+      stepUp.ask(() => void createNow());
+      return;
+    }
     if (result) {
       setCreated({ name: result.runner.name, token: result.token });
       setAdding(false);
       setName("");
     }
+  };
+
+  const submit = () => {
+    if (!name.trim()) return;
+    stepUp.run(() => void createNow());
   };
 
   const hub = typeof window === "undefined" ? "" : window.location.origin;
@@ -497,7 +513,7 @@ export function RunnersPanel({
           className="runner-add"
           onSubmit={(event) => {
             event.preventDefault();
-            void submit();
+            submit();
           }}
         >
           <label htmlFor="runner-name">{t("runners.name")}</label>
@@ -539,6 +555,7 @@ export function RunnersPanel({
         )}
       </div>
       {linkOpen && <LinkDeviceDialog onClose={closeLink} />}
+      {stepUp.dialog}
     </div>
   );
 }

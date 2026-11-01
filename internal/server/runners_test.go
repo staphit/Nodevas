@@ -64,7 +64,26 @@ func (s *runnerTestServer) do(t *testing.T, b *browser, method, path, body strin
 	return response
 }
 
+// create gives b's account a runner and its token. Minting one over HTTP
+// takes a fresh step-up (TestAddingARunnerNeedsAFreshStepUp, createOverHTTP);
+// the tests that only need a runner take it from the registry, as a device
+// link's redeem does, so their sessions stay as they signed in.
 func (s *runnerTestServer) create(t *testing.T, b browser, name string) runnerwire.CreateResponse {
+	t.Helper()
+	request := withCookies(httptest.NewRequest(http.MethodGet, "/api/runners", nil), b.cookies)
+	actor, err := s.server.auth.Authenticate(request)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	runner, token, err := s.server.runners.Create(context.Background(), actor, name)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	return runnerwire.CreateResponse{Runner: runner, Token: token}
+}
+
+// createOverHTTP is POST /api/runners as the web app's Add runner sends it.
+func (s *runnerTestServer) createOverHTTP(t *testing.T, b browser, name string) runnerwire.CreateResponse {
 	t.Helper()
 	response := s.do(t, &b, http.MethodPost, "/api/runners", `{"name":"`+name+`"}`, nil)
 	if response.Code != http.StatusCreated {
@@ -75,6 +94,30 @@ func (s *runnerTestServer) create(t *testing.T, b browser, name string) runnerwi
 		t.Fatal(err)
 	}
 	return created
+}
+
+// A runner token is a credential that outlives the session that minted it,
+// acts as its owner, and can pose as their copilot's model. A stolen session
+// cookie alone must not be able to mint one, as it cannot make a device link;
+// and the owner hears about a new one, as about a linked device.
+func TestAddingARunnerNeedsAFreshStepUp(t *testing.T) {
+	s := newRunnerTestServer(t)
+	bea := s.signIn(t, "bea@example.test")
+	response := s.do(t, &bea, http.MethodPost, "/api/runners", `{"name":"rogue"}`, nil)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "STEP_UP_REQUIRED") {
+		t.Fatalf("create without a step-up = %d %s", response.Code, response.Body)
+	}
+	stepUp(t, s, bea)
+	before := s.inbox.count()
+	created := s.createOverHTTP(t, bea, "bea-pc")
+	if !strings.HasPrefix(created.Token, runnerwire.TokenPrefix) {
+		t.Fatalf("created = %+v", created)
+	}
+	s.inbox.waitFor(t, before+1)
+	notice := s.inbox.last(t)
+	if notice.to != "bea@example.test" || !strings.Contains(notice.body, "bea-pc") {
+		t.Fatalf("notice = %+v, want a mail to bea naming the runner", notice)
+	}
 }
 
 func TestRunnersAPI(t *testing.T) {
@@ -113,6 +156,7 @@ func TestRunnersAPI(t *testing.T) {
 	if code := s.do(t, &cal, http.MethodDelete, "/api/runners/"+created.Runner.ID, "", nil).Code; code != http.StatusNotFound {
 		t.Fatalf("cal revoking bea's runner: status = %d", code)
 	}
+	stepUp(t, s, bea)
 	if code := s.do(t, &bea, http.MethodPost, "/api/runners", `{"name":""}`, nil).Code; code != http.StatusBadRequest {
 		t.Fatalf("empty name: status = %d", code)
 	}
@@ -286,5 +330,22 @@ func TestLoopbackRunnerSocketStillNeedsAToken(t *testing.T) {
 	_ = json.Unmarshal(response.Body.Bytes(), &created)
 	if created.Runner.OwnerID != "local" {
 		t.Fatalf("owner = %q, want local", created.Runner.OwnerID)
+	}
+}
+
+// Removing an account ends everything it lent out: its runners' tokens stop
+// opening the runner socket, not only the proxy.
+func TestRemovedAccountsRunnerCannotConnect(t *testing.T) {
+	s := newRunnerTestServer(t)
+	bea := s.signIn(t, "bea@example.test")
+	created := s.create(t, bea, "bea-pc")
+	if err := s.server.users.Remove(context.Background(), "bea"); err != nil {
+		t.Fatal(err)
+	}
+	header := map[string]string{"Authorization": "Bearer " + created.Token}
+	for _, path := range []string{runnerwire.ConnectPath, runnerwire.VersionPath} {
+		if response := s.do(t, nil, http.MethodGet, path, "", header); response.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s with a removed account's runner token = %d %s, want 401", path, response.Code, response.Body)
+		}
 	}
 }

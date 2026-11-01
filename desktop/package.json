@@ -99,7 +99,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
+      "include": "nsis/lock-install-folder.nsh",
       "shortcutName": "Nodevas"
     },
     "dmg": {

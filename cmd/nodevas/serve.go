@@ -66,8 +66,26 @@ func isWildcardHost(host string) bool {
 	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
-func isRemoteDeployment(host string, behindProxy bool) bool {
-	return behindProxy || !isLoopbackHost(host)
+// isRemoteDeployment reports whether the hub is reachable from anywhere but
+// this machine, which is what makes accounts mandatory: a listener beyond
+// loopback, or a loopback one that something on this machine forwards to. A
+// proxy (--behind-proxy), a name that is not this machine's (--hostname) and
+// Cloudflare Access in front of the hub each say that something does.
+func isRemoteDeployment(host string, behindProxy bool, hostNames []string, access bool) bool {
+	if behindProxy || access || !isLoopbackHost(host) {
+		return true
+	}
+	return publicHostName(hostNames) != ""
+}
+
+// publicHostName is the first of names that is not this machine's, or "".
+func publicHostName(names []string) string {
+	for _, name := range names {
+		if !isLoopbackHost(name) {
+			return name
+		}
+	}
+	return ""
 }
 
 // hostList splits the --hostname value into the names to accept.
@@ -160,6 +178,7 @@ func validateServeFlags(
 	keyFile string,
 	behindProxy bool,
 	allowPlaintext bool,
+	access bool,
 ) error {
 	if port < 1 || port > 65535 {
 		return errors.New("port must be between 1 and 65535")
@@ -170,11 +189,27 @@ func validateServeFlags(
 	// A loopback listener behind a reverse proxy is still remotely reachable;
 	// treating it as local would silently disable accounts for the common
 	// same-host proxy deployment.
-	remote := isRemoteDeployment(listen, behindProxy)
+	remote := isRemoteDeployment(listen, behindProxy, hostNames, access)
 	useTLS := certFile != ""
 	proxyOnlyTransport := behindProxy && isLoopbackHost(listen)
 	if remote && isWildcardHost(listen) && len(hostNames) == 0 {
 		return fmt.Errorf("refusing wildcard listen %s without --hostname; configure the public Host name to prevent DNS rebinding", listen)
+	}
+	// A loopback listener with a public name or Access in front is reached
+	// through a tunnel or proxy on this machine. Unless the transport is
+	// settled otherwise (TLS, or plaintext accepted), that proxy is the
+	// HTTPS edge, and the hub has to be told so.
+	if remote && isLoopbackHost(listen) && !behindProxy && !useTLS && !allowPlaintext {
+		reason := "Cloudflare Access is configured"
+		drop := "remove the access settings"
+		if name := publicHostName(hostNames); name != "" {
+			reason = "--hostname " + name + " is not this machine"
+			drop = "drop --hostname"
+		}
+		return fmt.Errorf(
+			"refusing to serve %s: %s, so requests reach it through a proxy or tunnel on this machine; "+
+				"pass --behind-proxy (the hub then requires accounts), or %s to keep it to this machine",
+			listen, reason, drop)
 	}
 	if remote && !useTLS && !proxyOnlyTransport && !allowPlaintext {
 		return fmt.Errorf(
@@ -313,7 +348,14 @@ func serve(args []string) {
 		configPath = filepath.Join(projectDefault, config.DefaultFileName)
 	}
 
-	serveConfig, err := config.LoadServeConfig(configPath, !configSet)
+	// A file named on purpose is the operator's; the one found in the
+	// workspace is workspace content, and may not say everything.
+	var serveConfig config.ServeConfig
+	if configSet {
+		serveConfig, err = config.LoadServeConfig(configPath, false)
+	} else {
+		serveConfig, err = config.LoadWorkspaceServeConfig(configPath)
+	}
 	if err != nil {
 		fatalf("config: %v", err)
 	}
@@ -329,7 +371,8 @@ func serve(args []string) {
 	listen := fs.String("listen", serveConfig.Listen,
 		"listen address; anything other than loopback requires accounts (nodevas user add)")
 	hostname := fs.String("hostname", serveConfig.Hostname,
-		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy)")
+		"comma-separated further Host names this server answers on (the public DNS name in front of a proxy); "+
+			"a name other than this machine's makes it a networked hub, which requires accounts")
 	behindProxy := fs.Bool("behind-proxy", serveConfig.BehindProxy,
 		"trust X-Forwarded-Proto from a terminating reverse proxy")
 	trustedProxy := fs.String("trusted-proxy", serveConfig.TrustedProxy,
@@ -473,11 +516,14 @@ func serve(args []string) {
 		fatalf("config: %v", err)
 	}
 
+	hostNames := hostList(*hostname)
+	remote := isRemoteDeployment(*listen, *behindProxy, hostNames, serveConfig.Access.Enabled())
+
 	// Logging is set up before anything else can fail, so a startup error is
 	// itself a structured record rather than the one line that escapes the
 	// pipeline. A standalone hub's log also goes to a file under the catalog
 	// root, with the runtime's crash output (serve_console.go).
-	standalone := !isRemoteDeployment(*listen, *behindProxy)
+	standalone := !remote
 	logs := openServeLogs(os.Stderr, standalone)
 	defer logs.close()
 	logger, err := logging.Setup(logs.writer, logging.Config{
@@ -499,13 +545,11 @@ func serve(args []string) {
 	if _, err := os.Stat(root); err != nil {
 		fatalf("project dir: %v", err)
 	}
-	hostNames := hostList(*hostname)
 	if err := validateServeFlags(
-		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext,
+		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext, serveConfig.Access.Enabled(),
 	); err != nil {
 		fatal(err)
 	}
-	remote := isRemoteDeployment(*listen, *behindProxy)
 	useTLS := *certFile != ""
 	proxyOnlyTransport := *behindProxy && isLoopbackHost(*listen)
 	runnerMode, runnerNote, err := planLocalRunner(*withRunner, *noRunner, repos, remote, useTLS, serveConfig.Access.Enabled())
@@ -938,28 +982,41 @@ func newCopilotService(
 	return service, nil
 }
 
-const (
-	requestReadTimeout   = 60 * time.Second
-	responseWriteTimeout = 10 * time.Minute
-)
+// requestReadTimeout is a variable so a test can wait out a short one.
+var requestReadTimeout = 60 * time.Second
+
+const responseWriteTimeout = 10 * time.Minute
 
 // protectHTTPTransport places absolute per-request body and response
 // deadlines around ordinary HTTP traffic. WebSockets get their own frame,
 // rate, ping, and write deadlines after upgrade, so they are excluded here.
+//
+// The read deadline is for a request body only. Without one there is nothing
+// left to read (ReadHeaderTimeout covered the headers, IdleTimeout covers the
+// wait for the next request), and Go's server is already reading the
+// connection in the background to notice the client leaving: a deadline
+// there cancels the request when it passes, so a download slower than it
+// would stop half-way. With a body, the server clears the deadline itself
+// once the body has been read.
 func protectHTTPTransport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/ws" {
 			next.ServeHTTP(writer, request)
 			return
 		}
+		hasBody := request.Body != nil && request.Body != http.NoBody
 		if auth.SignInPaths[request.URL.Path] && request.Body != nil {
 			request.Body = http.MaxBytesReader(writer, request.Body, auth.MaxLoginBodyBytes)
 		}
 		controller := http.NewResponseController(writer)
-		_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		if hasBody {
+			_ = controller.SetReadDeadline(time.Now().Add(requestReadTimeout))
+		}
 		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		defer func() {
-			_ = controller.SetReadDeadline(time.Time{})
+			if hasBody {
+				_ = controller.SetReadDeadline(time.Time{})
+			}
 			_ = controller.SetWriteDeadline(time.Time{})
 		}()
 		next.ServeHTTP(writer, request)

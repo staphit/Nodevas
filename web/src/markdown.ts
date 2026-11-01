@@ -78,8 +78,12 @@ export function sanitizeHTML(html: string, options: SanitizeOptions = {}): strin
       "style", "iframe", "object", "embed", "form", "input", "button", "textarea", "select",
       // Media beyond <img> only adds more remote-fetch attributes.
       "video", "audio", "source", "track", "picture",
+      // An <area> is a link the new-tab rule below never sees, and an open
+      // <dialog> floats over the page.
+      "map", "area", "dialog",
     ],
-    FORBID_ATTR: ["srcdoc", "srcset", "poster"],
+    // A table's background is fetched with no click, like an image.
+    FORBID_ATTR: ["srcdoc", "srcset", "poster", "background"],
   });
   const document = new DOMParser().parseFromString(sanitized, "text/html");
   for (const element of document.body.querySelectorAll<HTMLElement>("[style]")) {
@@ -101,10 +105,25 @@ export function sanitizeHTML(html: string, options: SanitizeOptions = {}): strin
   for (const anchor of document.body.querySelectorAll<HTMLAnchorElement>("a")) {
     anchor.rel = "noopener noreferrer";
     // A link in untrusted text must not replace the app's own tab (a look-alike
-    // sign-in page, unsaved work lost). Node links stay in-app.
-    if (!anchor.hasAttribute("data-node-link") && anchor.getAttribute("href")) {
+    // sign-in page, unsaved work lost). Node links stay in-app and are no URL:
+    // "#", as the renderer writes them, whatever the text said.
+    if (anchor.hasAttribute("data-node-link")) {
+      anchor.setAttribute("href", "#");
+    } else if (anchor.getAttribute("href")) {
       anchor.target = "_blank";
     }
+  }
+  // The app's own class names would let text pose as its dialogs
+  // (.confirm-backdrop covers the whole window). Only the classes the
+  // renderer writes stay: node-link on node links, language-* on code.
+  for (const element of document.body.querySelectorAll("[class]")) {
+    const kept = Array.from(element.classList).filter((name) =>
+      element.hasAttribute("data-node-link")
+        ? name === "node-link"
+        : element.tagName === "CODE" && name.startsWith("language-"),
+    );
+    if (kept.length > 0) element.setAttribute("class", kept.join(" "));
+    else element.removeAttribute("class");
   }
   return document.body.innerHTML;
 }

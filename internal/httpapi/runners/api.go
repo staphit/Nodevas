@@ -18,6 +18,7 @@ import (
 	"nodevas/internal/auth"
 	"nodevas/internal/buildinfo"
 	"nodevas/internal/httpapi/httpx"
+	"nodevas/internal/identity"
 	"nodevas/internal/locale"
 	"nodevas/internal/runners"
 	"nodevas/internal/runnerwire"
@@ -119,10 +120,6 @@ func (a *API) list(c *gin.Context) {
 }
 
 func (a *API) create(c *gin.Context) {
-	var body runnerwire.CreateRequest
-	if !httpx.DecodeJSONLimit(c, &body, maxCreateBody) {
-		return
-	}
 	actor := auth.ActorFrom(c.Request)
 	// A runner acts as its owner; an agent minting one would hand itself a
 	// credential that outlives its session.
@@ -130,13 +127,40 @@ func (a *API) create(c *gin.Context) {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", locale.Errorf("agents cannot create runners", "agent 不能建立 runner"), nil)
 		return
 	}
+	// The token outlives the session that mints it and can pose as the
+	// owner's copilot model, so minting one takes what a device link takes: a
+	// fresh step-up where there are accounts. A stolen session cookie alone
+	// must not turn into a credential that signing in again does not end.
+	if a.link != nil && !a.freshStepUp(c) {
+		return
+	}
+	var body runnerwire.CreateRequest
+	if !httpx.DecodeJSONLimit(c, &body, maxCreateBody) {
+		return
+	}
 	runner, token, err := a.reg.Create(c.Request.Context(), actor, body.Name)
 	if err != nil {
 		fail(c, err)
 		return
 	}
+	a.noticeNewRunner(c, actor, runner)
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, runnerwire.CreateResponse{Runner: runner, Token: token})
+}
+
+// noticeNewRunner mails the owner the notice a redeemed device link sends:
+// the alarm for a runner they did not add. Nothing is sent on a server
+// without accounts or mail.
+func (a *API) noticeNewRunner(c *gin.Context, actor identity.Actor, runner runnerwire.Runner) {
+	if a.link == nil || a.link.Mail == nil || a.link.Owner == nil {
+		return
+	}
+	account, ok := a.link.Owner(c.Request.Context(), actor.ID)
+	if !ok || account.Email == "" {
+		return
+	}
+	source, at, language := auth.ClientIP(c.Request), time.Now(), httpx.Language(c.Request)
+	safego.Go("runner notice mail", func() { a.mailRedeem(account.Email, runner, "", "", source, at, language) })
 }
 
 func (a *API) revoke(c *gin.Context) {

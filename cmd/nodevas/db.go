@@ -176,6 +176,10 @@ func pgTool(ctx context.Context, root, program string, args ...string) error {
 	if mode := sslMode(rawURL); mode != "" {
 		cmd.Env = append(cmd.Env, "PGSSLMODE="+mode)
 	}
+	// The embedded cluster's URL insists on SCRAM; the tool must too.
+	if config.RequireAuth != "" {
+		cmd.Env = append(cmd.Env, "PGREQUIREAUTH="+config.RequireAuth)
+	}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
