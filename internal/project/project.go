@@ -660,7 +660,9 @@ func (pm *ProjectManager) SwitchWorkspace(root string) error {
 	if err := pm.SaveActiveWorkspace(); err != nil {
 		log.Printf("save active workspace: %v", err)
 	}
-	pm.hub.Broadcast("project-changed", root)
+	// No path: every socket hears it, members and agents included, and the
+	// client only reloads.
+	pm.hub.Broadcast("project-changed", "")
 	return nil
 }
 
