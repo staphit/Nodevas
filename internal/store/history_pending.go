@@ -123,7 +123,9 @@ func (s *Store) historyGitOnce(ctx context.Context) (WorkspaceGit, error) {
 			continue
 		}
 		xy, rel := rec[:2], rec[3:]
-		if strings.HasPrefix(rel, DataDir+"/") || secretRel(rel) {
+		// A nested project's folder is untracked here, and its own Git tab
+		// shows it to those who may read it (inNestedProject).
+		if strings.HasPrefix(rel, DataDir+"/") || secretRel(rel) || inNestedProject(s.root, strings.TrimSuffix(rel, "/")) {
 			continue
 		}
 		out.Pending = append(out.Pending, WorkspacePending{Path: rel, Mark: pendingMark(xy)})
