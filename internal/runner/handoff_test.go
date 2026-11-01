@@ -157,7 +157,7 @@ func TestRunHandoffRejectsForeignBranches(t *testing.T) {
 			t.Errorf("%s: decline reason %q", id, decline.Reason)
 		}
 	}
-	// Only implement runs continue a handoff.
+	// Only implement and Tester runs continue a handoff.
 	review := testJob("run-review", "ok:")
 	review.Kind, review.HandoffBranch = runnerwire.JobPlan, "nodevas/handoff/forged"
 	env.hub.offer(review)

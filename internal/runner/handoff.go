@@ -176,8 +176,8 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 		job.HandoffNote = ""
 		return ""
 	}
-	if job.Kind != runnerwire.JobImplement || job.Mode == runnerwire.ModeInteractive {
-		return "a handoff is only continued by a headless implement run"
+	if (job.Kind != runnerwire.JobImplement && job.Kind != runnerwire.JobTest) || job.Mode == runnerwire.ModeInteractive {
+		return "a handoff is only continued by a headless implement or test run"
 	}
 	dataDir, err := j.c.Config.RunDataDir()
 	if err != nil {
