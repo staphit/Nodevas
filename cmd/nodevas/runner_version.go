@@ -44,6 +44,11 @@ func runnerHubVersion(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Never serve's own runner: a plain-http hub needs the owner's opt-in, as
+	// for `runner start`, or the token goes to whoever holds the port.
+	if err := cfg.PlainLocalHubRefusal(false); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), hubHTTPClient.Timeout+5*time.Second)
 	defer cancel()
 	commit, err := fetchHubCommit(ctx, hub, cfg)

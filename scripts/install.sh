@@ -793,6 +793,13 @@ step_settings() {
 		run "$NV" runner set autoAccept "$AUTO_ACCEPT" ${CFG[@]+"${CFG[@]}"} >/dev/null
 		NEEDS_RESTART=1
 	fi
+}
+
+# step_http_hub vouches for a plain-http hub (allowed on this machine only)
+# right after login, before step_match_hub asks it anything: a runner that
+# `nodevas serve` did not start sends its token there only with the owner's
+# say-so, which --hub http://… is.
+step_http_hub() {
 	case "$HUB" in
 	http://*)
 		# Plain http is allowed for a hub on this machine only. A runner that
@@ -1145,6 +1152,7 @@ cmd_install() {
 	fi
 	step_binary
 	step_login
+	step_http_hub
 	step_match_hub
 	# The secrets are in runner.json now. Nothing started from here on (the
 	# runner service, the agent CLIs it spawns) inherits them from this shell.
