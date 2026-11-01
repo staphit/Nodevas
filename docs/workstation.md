@@ -2,8 +2,7 @@
 
 Traditional Chinese: [workstation.zh-TW.md](./workstation.zh-TW.md)
 
-<!-- sec-pass: runner trust (code and logins stay on the runner) -->
-The server (the **hub**) shows the board, the runs, and their changes, but never starts a program. A **runner** (`nodevas runner`) on your own PC connects out to the hub, takes the runs you accept, and runs the agent CLIs with your own logins. Your code, your agent logins, and your `gh` login stay on the runner.
+The server (the **hub**) shows the board, the runs, and their changes, but never starts a program. A **runner** (`nodevas runner`) on your own PC connects out to the hub, takes the runs you accept, and runs the agent CLIs with your own logins. Your code, your agent logins, and your `gh` login stay on the runner, and it runs only what you accept, within its own limits (see the [Security model](../README.md#security-model)).
 
 - **Runs.** Each run is either headless, streaming its events to the node, or interactive, with the agent's TUI in your browser. The runner commits the work, pushes, and opens a PR with `gh`, then reports the diff and CI status.
 - **Models.** Choose the agent and model per run, or let routing rules and fallback chains choose. Rate limits, used-up quota, and missing CLIs fall through to the next model in the chain. OpenCode can also be driven over the [Agent Client Protocol](https://agentclientprotocol.com) (`nodevas runner set opencodeProtocol acp`, experimental, OpenCode 1.x only; OpenCode 2 runs fall back to `opencode run`), where each tool call streams as it happens; permission prompts are covered under [Permission prompts](#permission-prompts-off-by-default).
@@ -18,12 +17,12 @@ The server (the **hub**) shows the board, the runs, and their changes, but never
   - at the side, today's spend, the runners, and Agent chat with a composer.
 
   Questions, permission prompts, usage limits and the daily budget also raise a browser notification.
-  <!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
 - **Safe defaults.**
   - Runs need your acceptance at the runner's terminal. Remote dispatch needs a step-up passcode and an auto-accept allowlist you set on the runner.
   - Remote merge is off until you turn it on.
-  - Reviews and plans run read only, without the repository's own agent config.
-  - Permission prompts are refused at a headless run unless you [relay them](#permission-prompts-off-by-default).
+  - Reviews, plans and judges (goal QA and checklist checks) run read only, without the repository's own agent config; Claude Code also gets no WebFetch, WebSearch or Monitor there.
+  - Agent config a run adds or changes (`.claude/settings.json`, `.mcp.json`, `.codex/`, `.gemini/`, `opencode.json` and the like) is left out of its commit, and the worktree is kept so you can commit it yourself.
+  - Permission prompts are refused at a headless run unless you [relay them](#permission-prompts-off-by-default), and an auto-accepted run is relayed only with `allow-shell` on.
   - The project explorer's **Files** tab shows your runners' repositories to you alone, read-only, and hides files that look like secrets (`.env`, keys, `.ssh`, credentials). `nodevas runner set repoBrowse off` and a runner restart turn that off.
   - Put the hub behind Cloudflare Access; the runner connects with a service token.
   - Turn on two-factor authentication with an authenticator app (**Settings → Account**). Sign-in then needs the app's code too, and step-up asks the app instead of sending email.
@@ -61,8 +60,7 @@ Only the runner's owner can answer a permission prompt, in the same places as ot
 
 The web has no note field on permission prompts. A prompt nobody answers is denied after 5 minutes, and open prompts expire when the run ends.
 
-<!-- sec-pass: permission relay trust trade-off -->
-With the relay on, your answer reaches the runner through the hub, so a compromised hub could allow a prompt you never saw.
+With the relay on, your answer reaches the runner through the hub, so a compromised hub could allow a prompt you never saw. Keep it off unless you trust the hub. It never widens a run: the CLI asks only after its own deny rules and permission mode, so a read-only run stays read only. A run auto-accepted without `nodevas runner autoaccept allow-shell on` is not relayed; its start line ends with "permission prompts not relayed: auto-accepted without allow-shell (denied headless)".
 
 ## Usage limits and handoff
 
@@ -93,8 +91,7 @@ nodevas runner autoaccept verify on   # optional: with auto-accept on, take veri
 
 The command runs without a shell, so write `sh -c '…'` for `&&` or pipes; `--test-command ""` clears it. The timeout is in minutes (default 20, at most 180). Restart the runner after a change.
 
-<!-- sec-pass: verify job isolation; roles are not an OS boundary -->
-A verify job runs no agent and no model. It runs code an agent wrote, outside that agent's sandbox, as you, so it is opt-in per repository and has its own auto-accept switch (off by default). It runs in a throwaway worktree at the PR head, with no git hooks, without the runner's or GitHub's tokens in its environment, and the whole process tree is stopped at the timeout. Roles are a guardrail on the board, not an OS boundary: an agent with a shell on your account could reach another run's proxy address. The red/green runs, the diff guard and the hub's gates are checks the agent cannot touch.
+A verify job runs no agent and no model. It runs code an agent wrote, outside that agent's sandbox, as you, so it is opt-in per repository and has its own auto-accept switch (off by default). It runs in a throwaway worktree at the PR head, with no git hooks, without the runner's or GitHub's tokens in its environment, and the whole process tree is stopped at the timeout. A goal QA judge runs the test command too, at its base, before its agent starts: auto-accept takes it only with `autoaccept verify on`, and at the terminal its offer shows a `base:` and a `tests:` line. Roles are a guardrail on the board, not an OS boundary: an agent with a shell on your account could reach another run's proxy address. The red/green runs, the diff guard and the hub's gates are checks the agent cannot touch.
 
 ## Agent performance
 

@@ -2,8 +2,7 @@
 
 English: [workstation.md](./workstation.md)
 
-<!-- sec-pass: runner trust (code and logins stay on the runner) -->
-server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程式。你電腦上的 **runner**（`nodevas runner`）主動連到 hub，接下你同意的 run，用你自己的登入執行 agent CLI。程式碼、agent 登入與 `gh` 登入都只留在 runner 上。
+server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程式。你電腦上的 **runner**（`nodevas runner`）主動連到 hub，接下你同意的 run，用你自己的登入執行 agent CLI。程式碼、agent 登入與 `gh` 登入都只留在 runner 上，而且它只執行你同意的工作，並守住自己的限制（見[安全模型](../README.zh-TW.md#安全模型)）。
 
 - **Run**：分成 headless 與互動兩種。headless 把事件串流到節點上；互動模式把 agent 的 TUI 放進瀏覽器。runner 會 commit、push，再用 `gh` 開 PR，並回報 diff 與 CI 狀態。
 - **模型**：每次 run 可以自己選 agent 與模型，也可以交給路由規則與 fallback 鏈決定。遇到 rate limit、額度用完或 CLI 不存在時，就改用鏈上的下一個模型。OpenCode 也可以改走 [Agent Client Protocol](https://agentclientprotocol.com)（`nodevas runner set opencodeProtocol acp`，實驗性，僅限 OpenCode 1.x；OpenCode 2 的 run 會改用 `opencode run`）：每個工具呼叫即時串流；權限提示見[權限提示](#權限提示預設關閉)。
@@ -18,12 +17,12 @@ server（**hub**）負責顯示看板、run 與改動，但從不啟動任何程
   - 側欄有今天的花費、runner，以及可以直接發訊息的 Agent 對話。
 
   agent 提問、權限提示、用量達上限、每日預算用完時，瀏覽器也會通知你。
-  <!-- sec-pass: safe defaults (run acceptance, step-up, remote merge, read-only reviews, permission relay, repo browsing, Cloudflare Access, two-factor) -->
 - **安全預設**：
   - run 需要你在 runner 的終端機上同意。遠端派工需要 step-up passcode，加上你在 runner 上設定的 auto-accept 白名單。
   - 遠端 merge 預設關閉，要自己打開。
-  - 審查與拆解一律唯讀，而且不載入 repo 自帶的 agent 設定。
-  - headless run 的權限提示一律拒絕，除非你[轉給 Nodevas](#權限提示預設關閉)。
+  - 審查、拆解與評審（目標 QA 與檢查清單檢查）一律唯讀，而且不載入 repo 自帶的 agent 設定；Claude Code 在這些 run 裡也不能用 WebFetch、WebSearch 或 Monitor。
+  - run 新增或修改的 agent 設定（`.claude/settings.json`、`.mcp.json`、`.codex/`、`.gemini/`、`opencode.json` 等）不會進它的 commit，worktree 會保留下來，讓你自己決定要不要 commit。
+  - headless run 的權限提示一律拒絕，除非你[轉給 Nodevas](#權限提示預設關閉)；自動接受的 run 只有在打開 `allow-shell` 時才會轉送。
   - 專案總管的 **檔案** 分頁只讓你本人唯讀瀏覽你 runner 上的 repo，並隱藏看起來像祕密的檔案（`.env`、金鑰、`.ssh`、憑證）。執行 `nodevas runner set repoBrowse off` 並重啟 runner 即可關閉。
   - hub 放在 Cloudflare Access 後面，runner 用 service token 連線。
   - 可以用驗證器 App 開啟兩步驟驗證（**設定 → 帳號**）。開啟後登入還要輸入 App 的驗證碼，step-up 也改問 App，不再寄 email。
@@ -61,8 +60,7 @@ Codex、Gemini CLI 與 `opencode run` 無法轉送權限提示；互動 run 則�
 
 網頁上的權限提示沒有備註欄。沒人回覆的權限提示 5 分鐘後視同拒絕；run 結束時，尚未回覆的權限提示會失效。
 
-<!-- sec-pass: permission relay trust trade-off -->
-轉送打開後，你的回覆會經由 hub 送到 runner，所以被入侵的 hub 可以替你允許一個你從沒看過的權限提示。
+轉送打開後，你的回覆會經由 hub 送到 runner，所以被入侵的 hub 可以替你允許一個你從沒看過的權限提示。除非你信任這個 hub，否則請保持關閉。轉送不會放寬任何 run：CLI 要先過自己的拒絕規則與權限模式才會來問，所以唯讀的 run 仍是唯讀。沒有執行 `nodevas runner autoaccept allow-shell on` 而被自動接受的 run 不會轉送；它的開頭那行會以「permission prompts not relayed: auto-accepted without allow-shell (denied headless)」結尾。
 
 ## 用量上限與交接
 
@@ -93,8 +91,7 @@ nodevas runner autoaccept verify on   # 選用：auto-accept 打開時，在白�
 
 測試指令不經過 shell 執行，需要 `&&` 或管線時請寫成 `sh -c '…'`；`--test-command ""` 會清除它。逾時以分鐘計（預設 20，最多 180）。改完要重啟 runner。
 
-<!-- sec-pass: verify job isolation; roles are not an OS boundary -->
-verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在 agent 沙箱之外執行 agent 寫的程式碼，所以必須逐一 repo 開啟，並有獨立的自動接受開關（預設關閉）。它在 PR head 的拋棄式 worktree 中執行，不跑 git hook，環境變數中不含 runner 與 GitHub 的 token，逾時會停止整個程序樹。角色是看板上的防護欄，不是作業系統的隔離：在你帳號下擁有 shell 的 agent 仍可能碰到其他 run 的 proxy 位址。紅綠驗證、diff 檢查與 hub 的關卡才是 agent 無法干預的檢查。
+verify 工作不執行 agent 也不呼叫模型，但它會以你的身分、在 agent 沙箱之外執行 agent 寫的程式碼，所以必須逐一 repo 開啟，並有獨立的自動接受開關（預設關閉）。它在 PR head 的拋棄式 worktree 中執行，不跑 git hook，環境變數中不含 runner 與 GitHub 的 token，逾時會停止整個程序樹。目標 QA 評審也會跑測試指令：在它的 base 上、agent 開始前執行，所以只有打開 `autoaccept verify on` 時才會被自動接受；在終端機上，它的派工會多顯示 `base:` 與 `tests:` 兩行。角色是看板上的防護欄，不是作業系統的隔離：在你帳號下擁有 shell 的 agent 仍可能碰到其他 run 的 proxy 位址。紅綠驗證、diff 檢查與 hub 的關卡才是 agent 無法干預的檢查。
 
 ## Agent 表現
 
