@@ -604,8 +604,16 @@ func (g *abuseGuard) recordRejection(class RouteClass) {
 }
 
 func (g *abuseGuard) AllowPreAuth(ip string, now time.Time) (bool, int) {
-	checks := []bucketCheck{
-		{key: "preauth:global", rate: g.preAuthGlobalRate, burst: g.preAuthGlobalBurst, cost: 1.0},
+	return g.allowPreAuth(ip, now, true)
+}
+
+// allowPreAuth is AllowPreAuth, charging the hub-wide bucket only when global
+// is set: a request that only its own source's flood should be able to
+// refuse is charged to that source's bucket alone.
+func (g *abuseGuard) allowPreAuth(ip string, now time.Time, global bool) (bool, int) {
+	var checks []bucketCheck
+	if global {
+		checks = append(checks, bucketCheck{key: "preauth:global", rate: g.preAuthGlobalRate, burst: g.preAuthGlobalBurst, cost: 1.0})
 	}
 	if ip != "" {
 		checks = append(checks, bucketCheck{
@@ -812,17 +820,34 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if !s.chargePreAuth(c) {
+	if !s.chargePreAuth(c, !sourceOnlyPreAuth(c.Request)) {
 		return
 	}
 	c.Next()
 }
 
+// sourceOnlyPreAuth reports a request that is charged to its own source's
+// pre-auth bucket and not to the hub-wide one, so a flood of strangers cannot
+// refuse it: a signed-in browser asking who it is (the first request of every
+// app load; a made-up cookie buys nothing but its own source's budget), and
+// this machine's health probe.
+func sourceOnlyPreAuth(r *http.Request) bool {
+	switch r.URL.Path {
+	case "/api/auth/status":
+		cookie, err := r.Cookie(auth.SessionCookieName)
+		return err == nil && cookie.Value != ""
+	case healthzPath:
+		return (r.Method == http.MethodGet || r.Method == http.MethodHead) && auth.DirectLoopback(r)
+	}
+	return false
+}
+
 // chargePreAuth takes one token from the pre-auth buckets for c's address,
-// and answers 429 when there is none.
-func (s *Server) chargePreAuth(c *gin.Context) bool {
+// and from the hub-wide one when global is set, and answers 429 when there is
+// none.
+func (s *Server) chargePreAuth(c *gin.Context, global bool) bool {
 	ip := auth.ClientIP(c.Request)
-	if ok, retrySec := s.abuse.AllowPreAuth(auth.SourceKey(ip), time.Now()); !ok {
+	if ok, retrySec := s.abuse.allowPreAuth(auth.SourceKey(ip), time.Now(), global); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
 		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
@@ -838,7 +863,7 @@ func (s *Server) chargeRefusedCredential(c *gin.Context) bool {
 	if s.abuse == nil || !c.GetBool(preAuthDeferredKey) {
 		return false
 	}
-	return !s.chargePreAuth(c)
+	return !s.chargePreAuth(c, true)
 }
 
 // claimsIdentity reports a request that will be signed in by withAuth if
