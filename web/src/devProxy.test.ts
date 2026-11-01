@@ -62,6 +62,27 @@ describe.each(entries)("dev proxy %s", (_path, entry) => {
     expect(await refused(entry, rebound)).toBe(true);
   });
 
+  // A tunnel or reverse proxy on this machine (ngrok with --host-header, say)
+  // reaches the dev server from loopback, but says in its headers that the
+  // request came from elsewhere. The proxy makes a loopback peer's request
+  // look direct to the backend, so it must not let such a request through.
+  it("refuses a request a local tunnel forwarded from elsewhere", async () => {
+    const forwarded: Record<string, string>[] = [
+      { "x-forwarded-for": "203.0.113.9" },
+      { "x-forwarded-for": "203.0.113.9, 127.0.0.1" },
+      { "x-forwarded-host": "shared.ngrok.example" },
+      { forwarded: "for=203.0.113.9" },
+      { "x-real-ip": "203.0.113.9" },
+      { "cf-connecting-ip": "203.0.113.9" },
+    ];
+    for (const headers of forwarded) {
+      const tunnelled = request({ host: "localhost:5173", "sec-fetch-site": "same-origin", ...headers });
+      expect(await refused(entry, tunnelled), JSON.stringify(headers)).toBe(true);
+      const ipv6 = request({ host: "localhost:5173", ...headers }, "::1");
+      expect(await refused(entry, ipv6), JSON.stringify(headers)).toBe(true);
+    }
+  });
+
   it("passes the dev server's own pages, a phone on the LAN and curl", async () => {
     const own = request({ host: "localhost:5173", origin: "http://localhost:5173", "sec-fetch-site": "same-origin" });
     expect(await refused(entry, own)).toBe(false);
