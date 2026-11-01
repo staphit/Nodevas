@@ -95,7 +95,7 @@ func runnerLoginLink(in *bufio.Reader, stdout, stderr io.Writer, configFlag, hub
 		cfg.Name = strings.TrimSpace(nameFlag)
 	}
 	if err := runner.SaveConfig(path, cfg); err != nil {
-		return fmt.Errorf("the hub created runner %q but its token could not be saved (%w); revoke it on the Runners page and link again",
+		return fmt.Errorf("the hub created runner %q but its token could not be saved (%w); revoke it on the hub (Settings → Agents) and link again",
 			redeemed.Name, err)
 	}
 	fmt.Fprintf(stdout, "linked as runner %q on %s\nsaved %s\nstart the runner with: nodevas runner\n", redeemed.Name, hub, path)
@@ -138,9 +138,10 @@ func redeemLink(ctx context.Context, hub string, payload runnerwire.LinkPayload,
 		response.StatusCode == http.StatusForbidden && !isJSON(response):
 		return runnerwire.RedeemLinkResponse{}, errors.New("Cloudflare Access did not let this request through: " +
 			"the link carries no runner service token, or the stored one is no longer valid. " +
-			"Ask an administrator to set the runner access token on the hub, then make a new link")
+			"Ask an administrator to set the runner access token on the hub (Settings → Agents → Advanced → " +
+			"Runner access token (Cloudflare Access)), then make a new link")
 	case response.StatusCode == http.StatusNotFound:
-		return runnerwire.RedeemLinkResponse{}, errors.New("that device link is unknown, expired or already used; make a new one on the hub's Runners page")
+		return runnerwire.RedeemLinkResponse{}, errors.New("that device link is unknown, expired or already used; make a new one on the hub under Settings → Agents → Link a new device")
 	case response.StatusCode == http.StatusTooManyRequests:
 		return runnerwire.RedeemLinkResponse{}, errors.New("the hub refused: too many attempts; wait ten minutes and try a new link")
 	}

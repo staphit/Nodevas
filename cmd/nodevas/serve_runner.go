@@ -82,7 +82,7 @@ func planLocalRunner(withRunner, noRunner bool, repos []string, remote, useTLS, 
 		}
 		if remote {
 			return noLocalRunner, "", errors.New(flag + " is for a server on this machine only (a loopback --listen, no proxy); " +
-				"on a networked hub, link each runner from the Runners page")
+				"on a networked hub, link each runner under Settings → Agents → Link a new device")
 		}
 		if useTLS {
 			return noLocalRunner, "", errors.New(flag + " talks to its runner over loopback http; drop --tls-cert/--tls-key, " +
@@ -92,14 +92,14 @@ func planLocalRunner(withRunner, noRunner bool, repos []string, remote, useTLS, 
 	}
 	switch {
 	case remote:
-		// A networked hub: its runners are linked from the Runners page.
+		// A networked hub: its runners are linked under Settings → Agents.
 		return noLocalRunner, "", nil
 	case useTLS:
 		return noLocalRunner, "local runner not started: it talks to the hub over loopback http, and this hub serves TLS; " +
 			"start `nodevas runner` yourself", nil
 	case access:
 		return noLocalRunner, "local runner not started: Cloudflare Access is on, so this hub is reachable off this machine; " +
-			"link runners from the Runners page", nil
+			"link runners under Settings → Agents → Link a new device", nil
 	}
 	return defaultLocalRunner, "", nil
 }

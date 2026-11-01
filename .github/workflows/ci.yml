@@ -143,8 +143,8 @@ jobs:
         run: npm audit --audit-level=high --prefix web
 
       # The desktop shell's whole tree, the packaging toolchain included:
-      # Electron is what ships to users, and electron-builder runs in the
-      # release job next to its token and signing secrets.
+      # Electron is what ships to users, and electron-builder builds every
+      # release (signing happens in a job of its own, with Apple's tools).
       - name: Known vulnerabilities in the desktop shell
         run: npm audit --audit-level=high --prefix desktop
 

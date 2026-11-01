@@ -76,7 +76,7 @@ func TestPlanLocalRunner(t *testing.T) {
 	// Today's refusal of --with-runner on a networked hub, word for word.
 	if _, _, err := planLocalRunner(true, false, nil, true, false, false); err == nil ||
 		err.Error() != "--with-runner is for a server on this machine only (a loopback --listen, no proxy); "+
-			"on a networked hub, link each runner from the Runners page" {
+			"on a networked hub, link each runner under Settings → Agents → Link a new device" {
 		t.Fatalf("networked --with-runner: %v", err)
 	}
 }

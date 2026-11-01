@@ -282,14 +282,28 @@ export async function* readTurnEvents(
   }
 }
 
-async function errorMessage(res: Response): Promise<string> {
+async function errorBody(res: Response): Promise<{ message: string; code: string }> {
   try {
     const body = await res.json();
-    if (body && typeof body.error === "string" && body.error) return body.error;
+    const code = body && typeof body.code === "string" ? body.code : "";
+    if (body && typeof body.error === "string" && body.error) return { message: body.error, code };
+    return { message: `${res.status}`, code };
   } catch {
     /* keep status */
   }
-  return `${res.status}`;
+  return { message: `${res.status}`, code: "" };
+}
+
+/**
+ * A turn the server refused because this account already runs as many
+ * turns on the server's model as it may (429 copilot_busy). Nothing ran;
+ * the same text can be sent again once one of them finishes.
+ */
+export class CopilotBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CopilotBusyError";
+  }
 }
 
 /**
@@ -325,8 +339,9 @@ export async function* streamTurn(
     throw new UnauthorizedError();
   }
   if (!res.ok) {
-    const message = await errorMessage(res);
+    const { message, code } = await errorBody(res);
     if (res.status === 403) throw new AuthError(403, message);
+    if (res.status === 429 && code === "copilot_busy") throw new CopilotBusyError(message);
     throw new Error(message);
   }
   if (!res.body) throw new Error("empty response");

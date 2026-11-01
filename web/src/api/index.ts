@@ -62,6 +62,7 @@ export type {
 } from "./auth";
 export {
   COPILOT_MODES,
+  CopilotBusyError,
   NdjsonParser,
   parseTurnEventLine,
   readTurnEvents,

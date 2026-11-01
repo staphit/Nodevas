@@ -178,7 +178,7 @@ describe("RunnersPanel", () => {
     expect(relaySection).toHaveTextContent("轉發權限請求至 Nodevas：關閉");
     expect(relaySection.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
     expect(relaySection).toHaveTextContent(
-      "要修改請在那台機器上執行：nodevas runner set permissionRelay true（或 false）；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
+      "要修改請在那台機器上執行：nodevas runner set permissionRelay true（或 false）；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行，不含未開 allow-shell 的自動接受執行與 OpenCode 2；審查、規劃與評判執行仍維持唯讀限制。",
     );
     expect(relaySection).toHaveTextContent(
       "「nodevas serve」在只供本機使用的 hub 旁啟動的 runner（預設即會啟動，桌面版也是；或加上 --with-runner、--repo）會將設定保存在自己的檔案中，位於 <使用者設定資料夾>/nodevas/local-runners/，因此請以 --config 指定該檔案。",
@@ -346,7 +346,7 @@ describe("RunnersPanel", () => {
     expect(section).toHaveTextContent("Permission prompts relayed to Nodevas: Off");
     expect(section.querySelector("code")?.textContent).toBe("nodevas runner set permissionRelay true");
     expect(section).toHaveTextContent(
-      "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs.",
+      "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs, not to runs auto-accepted without allow-shell or to OpenCode 2, and review, plan and judge runs keep their read-only limits.",
     );
     expect(section).toHaveTextContent(
       "The runner that 'nodevas serve' starts beside a hub only this machine uses (by default, as in the desktop app, or with --with-runner or --repo) keeps its settings in its own file under <user config folder>/nodevas/local-runners/, so pass that file as --config.",

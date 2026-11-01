@@ -149,7 +149,10 @@ func runnerUsage(w io.Writer) {
                                              auto|full; full skips every permission);
                                              permissionRelay (true|false, default false: Claude Code,
                                              Antigravity (accept-edits) and OpenCode over ACP (edit)
-                                             ask you in Nodevas for a permission instead of refusing);
+                                             ask you in Nodevas for a permission instead of refusing;
+                                             not runs auto-accepted without allow-shell, nor OpenCode 2
+                                             (it runs through opencode run); review, plan and judge
+                                             runs keep their read-only limits whatever you answer);
                                              pull requests: autoPR (true|false), prDraft (true|false),
                                              prLabels (one per argument, or comma-separated; {model}
                                              and {agent} are filled in; "none" for no labels),
@@ -486,7 +489,8 @@ func printRunSettings(w io.Writer, cfg *runner.Config) {
 	fmt.Fprintln(w, "permission prompts:")
 	relay := "headless runs refuse what needs a permission (the default)"
 	if cfg.PermissionRelay {
-		relay = "Claude Code, Antigravity and OpenCode ACP runs ask you in Nodevas instead of refusing"
+		relay = "Claude Code, Antigravity and OpenCode ACP runs ask you in Nodevas instead of refusing, " +
+			"except runs auto-accepted without allow-shell and OpenCode 2; read-only runs keep their limits"
 	}
 	setting("permissionRelay", fmt.Sprintf("%t (%s)", cfg.PermissionRelay, relay))
 	labels := "(none)"

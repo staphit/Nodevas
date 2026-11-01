@@ -26,12 +26,12 @@ function block(lines, i) {
 const grantsWrite = (lines, i) => block(lines, i).some((line) => /:\s*write\b|\bwrite-all\b/.test(code(line)));
 
 /**
- * The jobs of a workflow whose token can write: { name, start, body }, start
- * being the job's line index. A job without permissions of its own gets the
- * workflow's; a workflow without any gets the repository's default, which
- * may be write.
+ * The jobs of a workflow: { name, start, body, writes }, start being the
+ * job's line index and writes whether its token can write. A job without
+ * permissions of its own gets the workflow's; a workflow without any gets
+ * the repository's default, which may be write.
  */
-function writingJobs(text) {
+function jobsOf(text) {
   const lines = text.split(/\r?\n/);
   const top = lines.findIndex((line) => /^permissions:/.test(line));
   const workflowWrites = top === -1 || grantsWrite(lines, top);
@@ -44,10 +44,13 @@ function writingJobs(text) {
     const body = block(lines, j);
     const own = body.findIndex((line) => /^ {4}permissions:/.test(line));
     const writes = own === -1 ? workflowWrites : grantsWrite(body, own);
-    if (writes) found.push({ name: job[1], start: j, body });
+    found.push({ name: job[1], start: j, body, writes });
   }
   return found;
 }
+
+/** The jobs of a workflow whose token can write. */
+const writingJobs = (text) => jobsOf(text).filter((job) => job.writes);
 
 /** The checkouts of a workflow that keep a token able to write: "job: line". */
 export function checkoutsKeepingWriteToken(text) {
@@ -74,20 +77,59 @@ export function checkoutsKeepingWriteToken(text) {
 // separate job publishes what it built.
 const buildTool = /(^|[\s;&|(])(npm|npx|pnpm|yarn|node|go|electron-builder)\s/;
 
+/** The run steps of a job that start a build tool: "job: line". */
+function buildSteps({ name, start, body }) {
+  const found = [];
+  body.forEach((line, k) => {
+    if (!/^\s*(- )?run:/.test(code(line))) return;
+    const script = block(body, k).map((l, i) => {
+      const text = code(l);
+      return i === 0 ? text.replace(/^\s*(- )?run:\s*[|>]?[-+]?/, " ") : text;
+    });
+    if (script.some((l) => buildTool.test(l))) found.push(`${name}: line ${start + k + 1}`);
+  });
+  return found;
+}
+
 /** The run steps of jobs able to write that start a build tool: "job: line". */
 export function writersRunningBuildCode(text) {
+  return writingJobs(text).flatMap(buildSteps);
+}
+
+// Signing and notarization credentials (a Developer ID certificate and its
+// password, an Apple ID app password) are worth more than any job token:
+// they outlive the run, and whoever holds them can ship code as the
+// project. Every step of a job can read the secrets the job is handed from
+// the runner's memory, so a job that names one runs no project or
+// dependency code: it checks nothing out, sets up no toolchain and starts
+// no build tool. It signs, with Apple's own tools, what a job without
+// secrets built. And it runs in the release environment, whose required
+// reviewer approves every use: environment secrets reach only its jobs.
+const secretRef = /\bsecrets\.(?!GITHUB_TOKEN\b)\w/;
+const untrustedAction = /^\s*(- )?uses:\s*(\.\/|actions\/(checkout|setup-node|setup-go|setup-python|cache)@)/;
+
+/** The jobs naming a secret other than their token. */
+const secretHolders = (text) => jobsOf(text).filter(({ body }) => body.some((line) => secretRef.test(code(line))));
+
+const byLine = (a, b) => Number(a.split(" line ")[1]) - Number(b.split(" line ")[1]);
+
+/** The steps of jobs holding a secret that run project or dependency code: "job: line". */
+export function secretHoldersRunningUntrustedCode(text) {
   const found = [];
-  for (const { name, start, body } of writingJobs(text)) {
-    body.forEach((line, k) => {
-      if (!/^\s*(- )?run:/.test(code(line))) return;
-      const script = block(body, k).map((l, i) => {
-        const text = code(l);
-        return i === 0 ? text.replace(/^\s*(- )?run:\s*[|>]?[-+]?/, " ") : text;
-      });
-      if (script.some((l) => buildTool.test(l))) found.push(`${name}: line ${start + k + 1}`);
+  for (const job of secretHolders(text)) {
+    job.body.forEach((line, k) => {
+      if (untrustedAction.test(code(line))) found.push(`${job.name}: line ${job.start + k + 1}`);
     });
+    found.push(...buildSteps(job));
   }
-  return found;
+  return found.sort(byLine);
+}
+
+/** The jobs holding a secret outside the release environment. */
+export function secretHoldersOutsideRelease(text) {
+  return secretHolders(text)
+    .filter(({ body }) => !body.some((line) => /^ {4}environment:\s*release\s*$/.test(code(line))))
+    .map(({ name }) => name);
 }
 
 test("the check finds a checkout that keeps a token able to write", () => {
@@ -171,4 +213,62 @@ test("no job that can write runs project or dependency code", () => {
     }
   }
   assert.deepEqual(found, []);
+});
+
+test("the check finds a job holding signing secrets that runs untrusted code", () => {
+  const workflow = (steps, extra = []) =>
+    [
+      "permissions:",
+      "  contents: read",
+      "jobs:",
+      "  sign:",
+      "    runs-on: macos-14",
+      ...extra,
+      "    steps:",
+      ...steps,
+      "      - name: Sign",
+      "        env:",
+      "          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}",
+      '        run: codesign --sign "${identity}" app',
+    ].join("\n");
+  const checkout = ["      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7"];
+  assert.deepEqual(secretHoldersRunningUntrustedCode(workflow(checkout)), ["sign: line 7"]);
+  assert.deepEqual(secretHoldersRunningUntrustedCode(workflow(["      - run: npm ci --prefix desktop"])), [
+    "sign: line 7",
+  ]);
+  const node = ["      - uses: actions/setup-node@0123456789abcdef0123456789abcdef01234567 # v7"];
+  assert.deepEqual(secretHoldersRunningUntrustedCode(workflow(node)), ["sign: line 7"]);
+  assert.deepEqual(secretHoldersRunningUntrustedCode(workflow(["      - uses: ./.github/actions/sign"])), [
+    "sign: line 7",
+  ]);
+  // Downloading what another job built and signing it with Apple's tools is fine.
+  const download = ["      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567 # v8"];
+  assert.deepEqual(secretHoldersRunningUntrustedCode(workflow(download)), []);
+  // The job's own token is not such a secret.
+  const token = workflow(checkout).replace("secrets.MAC_CSC_LINK", "secrets.GITHUB_TOKEN");
+  assert.deepEqual(secretHoldersRunningUntrustedCode(token), []);
+  assert.deepEqual(secretHoldersOutsideRelease(workflow(download)), ["sign"]);
+  assert.deepEqual(secretHoldersOutsideRelease(workflow(download, ["    environment: release"])), []);
+});
+
+test("no job holding signing secrets runs project or dependency code", () => {
+  const found = [];
+  for (const name of readdirSync(workflows).filter((file) => /\.ya?ml$/.test(file)).sort()) {
+    const text = readFileSync(join(workflows, name), "utf8");
+    for (const where of secretHoldersRunningUntrustedCode(text)) found.push(`${name} ${where}`);
+    for (const job of secretHoldersOutsideRelease(text)) found.push(`${name} ${job}: outside the release environment`);
+  }
+  assert.deepEqual(found, []);
+});
+
+// Signing left the build job; the release still publishes what was signed,
+// not the unsigned build.
+test("the macOS release publishes what its signing job made", () => {
+  const text = readFileSync(join(workflows, "release-macos.yml"), "utf8");
+  const jobs = Object.fromEntries(jobsOf(text).map((job) => [job.name, job.body.join("\n")]));
+  assert.ok(jobs["sign-macos"], "release-macos.yml has a sign-macos job");
+  assert.match(jobs["sign-macos"], /needs:\s*build-macos/);
+  assert.match(jobs["publish-macos"], /needs:[^\n]*sign-macos/);
+  assert.match(jobs["publish-macos"], /name:\s*macos-signed/);
+  assert.doesNotMatch(jobs["build-macos"], /secrets\./, "the build job is handed no secret");
 });

@@ -1238,7 +1238,7 @@ The hub (nodevas serve) runs on the server; a runner never serves. To deploy it:
   - Docker or a plain binary: docs/getting-started.md ("Team server") and
     docs/operations.md ("Allow network access")
   - behind Cloudflare Access: create a service token for runners and store it on the hub
-    (Settings -> Agents -> Advanced -> Runner access token, as an administrator); then
+    (Settings -> Agents -> Advanced -> Runner access token (Cloudflare Access), as an administrator); then
     install each runner with --link (Settings -> Agents -> Link a new device), or with
     --access-client-id <id> (secret in NODEVAS_ACCESS_CLIENT_SECRET)
 
