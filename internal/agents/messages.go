@@ -73,6 +73,9 @@ type SendInput struct {
 	// approval): they carry a decision a person already made, so a hold that
 	// asks a person again would only ask the same question twice.
 	system bool
+	// recipientActor, on a system notice, is the account it is for, whoever
+	// answers to the address now: the asker of a late answer.
+	recipientActor string
 }
 
 // DeliveryStatus reports the outcome for one resolved recipient.
@@ -175,6 +178,9 @@ func (h *Hub) Send(ctx context.Context, in SendInput) (SendResult, error) {
 			// An <actor>/<name> address no session of that actor answers
 			// to (resolveRecipients): the mail waits for that account.
 			recipientActor[recipient] = actor
+		}
+		if in.system && in.recipientActor != "" {
+			recipientActor[recipient] = in.recipientActor
 		}
 		// A run (which reads attacker-controllable content) does not reach a
 		// person's session, or an address no session holds, unasked.

@@ -1137,24 +1137,34 @@ func (h *Hub) deliverDecision(ctx context.Context, updated Ask, wasExpired bool,
 		default:
 		}
 	} else if wasExpired && updated.SessionName != "" {
-		// Late answer: deliver to the asking session's mailbox.
+		// Late answer: deliver to the asking session's mailbox. Delivered
+		// mail is listed to everyone in the project, so the person's answer
+		// and note ride in a file only the asker's account may read.
 		body := fmt.Sprintf("[Late answer to ask %s (%q): %s]", updated.ID, updated.Question, updated.Status)
+		var answer strings.Builder
 		if updated.Answer != "" {
-			body += "\nAnswer: " + updated.Answer
+			answer.WriteString("Answer: " + updated.Answer + "\n")
 		}
 		if updated.Note != "" {
-			body += "\nNote: " + updated.Note
+			answer.WriteString("Note: " + updated.Note + "\n")
+		}
+		var files []FileInput
+		if answer.Len() > 0 {
+			body += "\nThe answer is in the attached " + lateAnswerFile + "."
+			files = []FileInput{{Name: lateAnswerFile, Content: answer.String()}}
 		}
 		_, _ = h.Send(ctx, SendInput{
-			Project:       project,
-			SenderActor:   decidedBy,
-			SenderSession: "web",
-			SenderAgent:   "human",
-			IsHuman:       true,
-			To:            updated.SessionName,
-			NodeID:        updated.NodeID,
-			Body:          body,
-			system:        true,
+			Project:        project,
+			SenderActor:    decidedBy,
+			SenderSession:  "web",
+			SenderAgent:    "human",
+			IsHuman:        true,
+			To:             updated.SessionName,
+			NodeID:         updated.NodeID,
+			Body:           body,
+			Files:          files,
+			system:         true,
+			recipientActor: updated.ActorID,
 		})
 	}
 
