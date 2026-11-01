@@ -374,16 +374,10 @@ func (t *Terminal) setFinal(status string) {
 // A seam for tests.
 var termUnlisted func(*Terminal)
 
-// expire drops an ended run's relay and lets its viewers go.
+// expire lets an ended run's viewers go and then drops its relay. In that
+// order: whoever finds the relay gone finds its viewers let go too. A gone
+// relay still in the map for that moment takes no output and no viewer.
 func (ts *Terminals) expire(t *Terminal) {
-	ts.mu.Lock()
-	if ts.runs[t.runID] == t {
-		delete(ts.runs, t.runID)
-	}
-	ts.mu.Unlock()
-	if termUnlisted != nil {
-		termUnlisted(t)
-	}
 	t.mu.Lock()
 	t.gone = true
 	t.buf = nil
@@ -392,6 +386,14 @@ func (ts *Terminals) expire(t *Terminal) {
 	t.mu.Unlock()
 	for v := range viewers {
 		v.close(TermEnded)
+	}
+	ts.mu.Lock()
+	if ts.runs[t.runID] == t {
+		delete(ts.runs, t.runID)
+	}
+	ts.mu.Unlock()
+	if termUnlisted != nil {
+		termUnlisted(t)
 	}
 }
 
