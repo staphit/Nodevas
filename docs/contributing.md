@@ -23,6 +23,8 @@ npm --prefix web run check:api-imports
 npm --prefix web exec -- vitest run
 npm run build --prefix web
 
+npm --prefix desktop test     # desktop packaging and workflow checks (CI runs them too)
+
 bash scripts/install_test.sh
 ```
 

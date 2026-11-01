@@ -7,7 +7,11 @@ This document describes how Nodevas release artifacts are built and signed.
 - **Windows**: the NSIS installer (`Nodevas-*-Windows-x64.exe`) and the
   portable ZIP produced by `electron-builder` from `desktop/`. These are
   currently published **unsigned**, so SmartScreen may warn; verify them with
-  the checksums below.
+  the checksums below. The installer has no folder picker: it installs to
+  Program Files (all users) or `%LOCALAPPDATA%\Programs` (just me), and an
+  upgrade keeps the folder of the previous install. An all-users folder outside
+  Program Files (from an older installer or `/D=`) is given Program Files'
+  permissions, so only administrators can change the files in it.
 - **macOS**: the universal DMG and ZIP produced by `electron-builder`
   (signed and notarized with Apple credentials when configured).
 
@@ -26,9 +30,11 @@ tagged commit on this repository:
 - [`release-macos.yml`](../.github/workflows/release-macos.yml)
 
 Each workflow builds the web frontend, compiles the Go backend, packages the
-Electron shell, generates `SHA256SUMS-*.txt` checksums, and uploads the
-artifacts to the corresponding GitHub release. No release artifact is built on
-a developer machine.
+Electron shell and generates `SHA256SUMS-*.txt` checksums in a build job whose
+GitHub token can only read; a separate publish job, which runs no build or
+dependency code, takes the artifacts (kept for one day) and uploads them to the
+corresponding GitHub release. No release artifact is built on a developer
+machine.
 
 ## Who can trigger signing
 
