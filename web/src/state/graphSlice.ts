@@ -26,7 +26,7 @@ import {
 } from "./operations";
 import { graphCommandToOps, graphOpsNeedServerGraph } from "./graphOps";
 import { coalesceRequest } from "./coalesce";
-import { generations, queues, scopeForCommand } from "./internals";
+import { generations, graphWrites, queues, scopeForCommand, sendGraphWrite } from "./internals";
 import { pushUndo } from "./undo";
 import type { AppSlice, AppState, GraphSlice } from "./types";
 
@@ -106,7 +106,7 @@ function writeGraph(
     }
     set({ graph: copy });
     try {
-      const res = await api.putGraph(copy, graphRev);
+      const res = await sendGraphWrite(() => api.putGraph(copy, graphRev));
       set({ graphRev: res.rev, issues: res.issues ?? [], error: null });
       if (recordUndo) pushUndo({ kind: "graph", graph: structuredClone(previous) });
       get().settleOperation(scope, { status: "saved", operation: name });
@@ -179,6 +179,8 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
     await Promise.all([
       coalesceRequest("graph", async () => {
         const generation = ++generations.load;
+        const writesSent = graphWrites.sent;
+        const besideWrite = graphWrites.open > 0;
         let g;
         try {
           g = await api.getGraph();
@@ -194,6 +196,14 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         }
         // Dropped when a project switch happened while this was in flight.
         if (generation !== generations.load) return;
+        // Dropped when a graph write was on the wire beside it: the board
+        // already shows that write, and this may be the graph from before it.
+        // Read again once the queued writes are through, so a change someone
+        // else made still arrives.
+        if (besideWrite || graphWrites.sent !== writesSent) {
+          void queues.graphSave.then(() => get().loadAll()).catch(() => undefined);
+          return;
+        }
         set((state) => ({
           ...(state.graphUnreadable !== null ? withoutUnreadableRefusals(state) : {}),
           graphUnreadable: null,
@@ -268,7 +278,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
         if (ops) {
           // The peer id travels with the write so the server can tell the room
           // what changed without this browser being told about its own edit.
-          const res = await api.graphOps(ops, get().selfPeerID);
+          const res = await sendGraphWrite(() => api.graphOps(ops, get().selfPeerID));
           // A reply without a graph (never from the hub) keeps what is shown.
           set((state) =>
             res?.graph
@@ -288,7 +298,7 @@ export const createGraphSlice: AppSlice<GraphSlice> = (set, get) => ({
           // The ops response already carries fresh statuses; no refreshState.
           return commandSucceeded(name, scope, undefined);
         }
-        const res = await api.putGraph(copy, graphRev);
+        const res = await sendGraphWrite(() => api.putGraph(copy, graphRev));
         set({ graphRev: res.rev, issues: res.issues ?? [], error: null });
         if (options.recordUndo !== false) {
           pushUndo({ kind: "graph", graph: structuredClone(previous), label });
