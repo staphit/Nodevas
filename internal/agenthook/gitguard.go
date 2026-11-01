@@ -14,7 +14,10 @@ import (
 // repository that agent can write. Like the runner's git (internal/runner
 // gitguard.go, repobrowse_git.go), it runs nothing the repository's config
 // names: no hooks, no fsmonitor, no external diff, no filter driver; the diff
-// also passes --no-textconv.
+// also passes --no-textconv. Nor does it look inside a submodule: a
+// submodule's own repository (and the filters its config names) is the
+// agent's to write as well, and a command-line --ignore-submodules is the one
+// setting .gitmodules and the repository's config cannot undo.
 
 var (
 	noHooksOnce sync.Once
@@ -38,7 +41,7 @@ func noHooksPath() string {
 // command-line -c wins over any repository config.
 func gitArgs(ctx context.Context, dir string, args []string) []string {
 	front := []string{"-C", dir, "-c", "core.hooksPath=" + noHooksPath(), "-c", "core.fsmonitor=false",
-		"-c", "diff.external="}
+		"-c", "diff.external=", "-c", "diff.ignoreSubmodules=dirty", "-c", "diff.submodule=short"}
 	for _, name := range filterDrivers(ctx, front) {
 		front = append(front, "-c", "filter."+name+".clean=", "-c", "filter."+name+".smudge=",
 			"-c", "filter."+name+".process=", "-c", "filter."+name+".required=false")

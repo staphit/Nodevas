@@ -42,10 +42,15 @@ func noHooksPath() string {
 
 // hardenedArgs puts the runner's overrides in front of a git command line:
 // command-line -c wins over any repository or worktree config.
+// diff.ignoreSubmodules=dirty keeps porcelain from running `git status`
+// inside a submodule, whose repository (and the filters its config names) an
+// agent can write; .gitmodules can undo it, so the runner's own commands that
+// read the worktree also pass --ignore-submodules (or stage as stageAll does).
 func hardenedArgs(dir string, args []string) []string {
 	return append([]string{"-C", dir,
 		"-c", "core.hooksPath=" + noHooksPath(),
 		"-c", "core.fsmonitor=false",
+		"-c", "diff.ignoreSubmodules=dirty",
 	}, args...)
 }
 
@@ -112,7 +117,8 @@ func (j *jobs) guardGitDir(r *run, wt Worktree) bool {
 // run git themselves (gh): command-scope config, which wins over the
 // repository's own.
 func gitConfigEnv() []string {
-	return []string{"GIT_CONFIG_COUNT=2",
+	return []string{"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=" + noHooksPath(),
-		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false"}
+		"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false",
+		"GIT_CONFIG_KEY_2=diff.ignoreSubmodules", "GIT_CONFIG_VALUE_2=dirty"}
 }

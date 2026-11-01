@@ -204,7 +204,7 @@ func Snapshot(ctx context.Context, cwd string) (runnerwire.RunChanges, bool) {
 	defer cleanup()
 
 	diff := func(args ...string) []string {
-		return append(append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M"}, args...), "HEAD")
+		return append(append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "--submodule=short", "-M"}, args...), "HEAD")
 	}
 	statuses, err := git(ctx, root, env, nil, diff("--name-status", "-z")...)
 	if err != nil {
