@@ -10,6 +10,7 @@ Configuration precedence is:
 built-in defaults < YAML < environment variables < command-line flags
 ```
 
+<!-- sec-pass: nodevas.yaml server-trust keys -->
 By default, Nodevas reads `nodevas.yaml` from the workspace root. Use `-config` or `NODEVAS_CONFIG` to select another file. See [nodevas.yaml.example](../nodevas.yaml.example).
 
 ```yaml
@@ -37,8 +38,13 @@ logging:
 
 Keep the SMTP password out of YAML. Set `NODEVAS_SMTP_PASSWORD` through a secret store or the process environment. Containers can instead set `NODEVAS_SMTP_PASSWORD_FILE` to a mounted secret file. Do not set both variables. Deployment environments can use `NODEVAS_SERVE_*` variables to override YAML values.
 
+The file is strict: an unknown key stops `serve`. Rate limits (`abuse.*`) are set the same three ways; `nodevas serve -h` lists them.
+
+**WebSocket connections.** The hub keeps at most 512 open, 16 per account and 32 per client address (each open browser tab holds one); one more gets `429`. Change the caps with `--ws-max-conns`, `--ws-max-conns-per-account` and `--ws-max-conns-per-ip`, or `NODEVAS_SERVE_WS_MAX_CONNS`, `NODEVAS_SERVE_WS_MAX_CONNS_PER_ACCOUNT` and `NODEVAS_SERVE_WS_MAX_CONNS_PER_IP`; they have no YAML key. People behind one address, such as an office network, share the per-address cap.
+
 ## Allow network access
 
+<!-- sec-pass: network start-up checks -->
 A server that listens beyond loopback, or sits behind a proxy, needs all of the following, and refuses to start without the first three (the host name only when it listens on every interface):
 
 - **A host name.** Listening on every interface (`0.0.0.0`) needs `-hostname`, the name browsers use, to prevent DNS rebinding.
@@ -46,6 +52,7 @@ A server that listens beyond loopback, or sits behind a proxy, needs all of the 
 - **An account.** Create one before the first start.
 - **Outgoing mail.** Web sign-in is the account's email address plus a one-time passcode sent to it, so without `smtp` settings nobody can sign in.
 
+<!-- sec-pass: account creation -->
 Create the account with its sign-in address:
 
 ```bash
@@ -54,8 +61,10 @@ printf '%s' 'PASSWORD' | ./nodevas user add \
   --email you@example.com --password-stdin
 ```
 
+<!-- sec-pass: account password -->
 Use a secure stdin mechanism and do not put a real password in shell history. `nodevas user email --user USER_NAME --email ...` sets or changes the address later.
 
+<!-- sec-pass: proxy deployment -->
 Then start the server, for example behind a reverse proxy on the same host that terminates TLS:
 
 ```bash
@@ -63,11 +72,30 @@ Then start the server, for example behind a reverse proxy on the same host that 
   -listen 127.0.0.1 -hostname nodevas.example.com -behind-proxy
 ```
 
+<!-- sec-pass: trusted_proxy -->
 Configure `trusted_proxy` to match the proxy addresses that are allowed to forward client information. Get it right: with the proxy's network missing, every user has the proxy's address and shares its rate-limit buckets and WebSocket allowance. The server warns once per peer (`event.code: http.untrusted_forwarder`) when a request carries `X-Forwarded-For` from a peer that is not a trusted proxy; behind Cloudflare Tunnel, that peer is the `cloudflared` container, so include its network.
 
+<!-- sec-pass: rate limits -->
 Rate limits: requests without a signed-in identity share a per-address pre-auth bucket (40 a second, bursts of 80). Signed-in requests skip it and are held to per-account limits by kind of route instead; a session cookie that does not sign in is charged to the pre-auth bucket.
 
+<!-- sec-pass: step-up window -->
+**Step-up.** Inviting an account, changing its role or removing it, setting up two-factor sign-in, making a device link, and storing or clearing the runner access token first ask the signed-in person to confirm it is them (a mailed passcode, or their authenticator code once two-factor sign-in is on). A runner set to require it auto-accepts only runs whose dispatcher did so. A step-up lasts 10 minutes; `--step-up-minutes` (or `NODEVAS_STEP_UP_MINUTES`) sets 1 to 720.
+
 For the container image, see [Getting started: Run the hub with Docker](./getting-started.md#run-the-hub-with-docker).
+
+### Cloudflare Access
+
+<!-- sec-pass: Cloudflare Access configuration -->
+Behind Cloudflare Access, the hub can check Access's token on every request as well. Give it your team domain and the Access application's audience tag, in `nodevas.yaml` or with `NODEVAS_SERVE_ACCESS_TEAM_DOMAIN`, `NODEVAS_SERVE_ACCESS_AUD` and `NODEVAS_SERVE_ACCESS_REQUIRED` (there are no flags):
+
+```yaml
+access:
+  team_domain: myteam.cloudflareaccess.com
+  aud: "<the application's AUD tag>"
+  required: false
+```
+
+`serve` refuses one value without the other, or `required` without both. Until `required` is `true`, a request without a valid token is only logged (`auth.access.denied`, below), so you can check the setup first; then it gets `403`. Requests made directly on this machine, such as the container's health check, are not checked. Access does not sign anyone in: people still sign in to Nodevas. With Access configured, `serve` does not start a runner of its own unasked; link runners as on a team server ([Install a runner](./install.md)).
 
 ## Database
 
@@ -82,23 +110,26 @@ Accounts, sessions, the audit trail, settings, runs, the copilot's conversations
 | `NODEVAS_PG_BINARIES` | Preinstalled binaries (the desktop app's bundle). Refused unless their stamp names the pinned version and archive hash. |
 | `NODEVAS_PG_OFFLINE=1`, `NODEVAS_PG_MIRROR` | Never download; or download from another base URL (the hash is still enforced). |
 
-**Embedded server (no URL).** `serve` starts the workspace's own PostgreSQL 17.11.1 before the hub and stops it on exit, Ctrl+C, a closed console or, with `--stop-on-stdin-close`, end of stdin (how the desktop app and `nodevas-dev` stop it on Windows). It listens on `127.0.0.1` only, on a free port, with a random password kept in owner-only files; the app connects as a role that is not a superuser. The binaries are a pinned [theseus-rs/postgresql-binaries](https://github.com/theseus-rs/postgresql-binaries) build whose SHA-256 per platform is compiled into Nodevas; a first CLI start downloads and verifies them once (Linux about 40 MB, Windows 48 MB, macOS 90 MB; about 65–110 MB unpacked after unused parts are dropped). Each workspace has its own data directory, named by `<workspace>/.vised/database-id`, so moving the folder keeps its database. A first start takes a few seconds (initdb; longer on Windows while Defender scans the new files), later starts under a second; `db.embedded_ready` in the log has the measured `initdb_ms`, `start_ms` and `data_bytes`. If the server dies it is restarted on the same port (three times a minute at most, then `serve` exits). A crash leaves a stale `postmaster.pid`, which the next start recovers. A command such as `nodevas user add` run beside a running `serve` connects to its server. A copied workspace carries the original's id: run `nodevas db detach --project <copy>` to give it its own database. Linux builds need glibc 2.36 or newer; on older systems use `NODEVAS_DATABASE_URL`.
+<!-- sec-pass: embedded PostgreSQL auth -->
+**Embedded server (no URL).** `serve` starts the workspace's own PostgreSQL 17.11.1 before the hub and stops it on exit, Ctrl+C, a closed console or, with `--stop-on-stdin-close`, end of stdin (how the desktop app and `nodevas-dev` stop it on Windows). It listens on `127.0.0.1` only, on a free port, with a random password kept in owner-only files; the app connects as a role that is not a superuser. The binaries are a pinned [theseus-rs/postgresql-binaries](https://github.com/theseus-rs/postgresql-binaries) build whose SHA-256 per platform is compiled into Nodevas; a first CLI start downloads and verifies them once (Linux about 40 MB, Windows 48 MB, macOS 90–93 MB; about 65–110 MB unpacked after unused parts are dropped). Offline, `nodevas db install-postgres --archive <file>` installs the archive fetched elsewhere, checked against the same hash. Each workspace has its own data directory, named by `<workspace>/.vised/database-id`, so moving the folder keeps its database. A first start takes a few seconds (initdb; longer on Windows while Defender scans the new files), later starts under a second; `db.embedded_ready` in the log has the measured `initdb_ms`, `start_ms` and `data_bytes`. If the server dies it is restarted on the same port (three times a minute at most, then `serve` exits). A crash leaves a stale `postmaster.pid`, which the next start recovers. A command such as `nodevas user add` run beside a running `serve` connects to its server. A copied workspace carries the original's id: run `nodevas db detach --project <copy>` to give it its own database. Linux builds need glibc 2.36 or newer; on older systems use `NODEVAS_DATABASE_URL`.
 
-**Backups.** The database is no longer a file in the workspace, so copying the workspace folder does not back it up. Use `nodevas db dump --out nodevas.dump` (the bundled `pg_dump`, custom format) and `nodevas db restore --in nodevas.dump`; both work against the embedded or an external server. `nodevas db status` shows which one a workspace uses.
+**Backups.** The database is not a file in the workspace, so copying the workspace folder does not back it up. Use `nodevas db dump --out nodevas.dump` (custom format) and `nodevas db restore --in nodevas.dump` (drops and recreates what the dump holds, in one transaction). Both run the pinned PostgreSQL 17.11.1 `pg_dump` and `pg_restore`, downloaded on first use like the embedded server, against whichever server the workspace uses, embedded or external. Those Linux builds need glibc, so in the container image use the PostgreSQL server's own `pg_dump`, as in the upgrade below. `nodevas db status` shows which server a workspace uses and its last schema step. Dumps you make yourself can leave out `search_documents` (rebuilt from the Markdown) and `legacy_imports`.
+
+<!-- sec-pass: machine key -->
+**Machine key.** Two-factor secrets (in the database) and the secrets saved in the app (copilot key, runner access token, git backup token, notification mail password; files beside the key) are encrypted with `nodevas/secrets/master.key` in your user config directory (`%AppData%` on Windows, `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` elsewhere; `/data/.config` in the container examples), created on first use, or with `NODEVAS_SECRET_KEY` (32 bytes, base64) when it is set. Move that `secrets` folder (or the variable) with the database, or those secrets cannot be read.
+
+**Run history retention.** By default, every 6 hours the hub deletes raw history older than 180 days: the event log of each run that finished before then (what its agent said and did), agent session activity and auto-routing picks, and it empties the diffs of older changes. Runs, with their results and usage, verdicts, evidence and scorecards stay. An administrator sets the period in **Settings → Agents → Advanced → Agent performance → Tiers & routing → Keep raw events for** (30 to 3650 days, or Forever); a pass that removes anything writes an `analytics.retention.prune` audit row.
 
 **Search index freshness.** A project's index is built in the background when the project is opened; only a search that arrives before any index exists waits for it. After that, searches read the last committed index and never wait on a reindex: a save, a card move or an outside edit is reindexed in the background (just the nodes it touched) and is searchable within about a tenth of a second, and a walk every quarter second of searching catches anything nobody reported.
 
 **Upgrading from a SQLite release.** Earlier releases kept this data in `<workspace>/.vised/nodevas.db`. On the first start of this release, a workspace whose new database is empty imports that file in one transaction and renames it `nodevas.db.imported` (with its `-wal` and `-shm` files); it is never deleted. If the import fails, `serve` stops without changing anything: `nodevas db import-sqlite --report` compares the file with the database, and `NODEVAS_SKIP_SQLITE_IMPORT=1` starts without it (`nodevas db import-sqlite` imports it later). The importer is removed in the next release.
 
-**Upgrading a server on PostgreSQL (the NAS).**
+**Upgrading a server that already uses PostgreSQL.**
 
 1. Back up first: `pg_dump -Fc nodevas > nodevas-before-upgrade.dump`.
-2. Check what it has: `SELECT name FROM schema_migrations ORDER BY name` ends at `0024_run_handoff` (or `0025_agent_roles`). Steps are matched by name and never renumbered.
-3. Start the new image. `0025_agent_roles`, `0026_search_index` and `0027_legacy_imports` apply in place, under an advisory lock, without touching existing rows.
-4. The search index now lives in the same database (`search_documents`). It starts empty and is rebuilt from the Markdown as projects are opened.
-5. `/data/.vised/nodevas.db` is no longer read, and is not imported because the server already holds data (the log says `db.legacy_sqlite_present`). It may hold rows written while an earlier release fell back to SQLite; run `nodevas db import-sqlite --report --project /data` and keep the file until the report shows nothing missing.
-6. There is no SQLite fallback any more: a database that is down makes `serve` exit, and the container's restart policy starts it again once the database is back.
-7. Database backups that dump every table can skip `search_documents` (rebuilt from the Markdown) and `legacy_imports`.
+2. Start the new release. Pending schema steps apply in place at start, each in one transaction under an advisory lock; they are matched by name and never renumbered. `nodevas db status` names the last one.
+3. A leftover `<workspace>/.vised/nodevas.db` is not imported into a database that already holds data (the log says `db.legacy_sqlite_present`). It may hold rows an earlier release wrote while it fell back to SQLite: run `nodevas db import-sqlite --report` and keep the file until the report shows nothing missing.
+4. A database that is down makes `serve` exit; a container restart policy starts it again once the database is back.
 
 ## Version history and backup
 
@@ -114,9 +145,9 @@ Each project keeps its history in its own git repository (`<project>/.vised/git`
 
 ## Logs and audit events
 
-`nodevas serve` writes one JSON object per line to stderr; `logging.format: text` prints the same fields for a terminal. Keys are flat dotted names. Every line has `@timestamp` (UTC, milliseconds), `log.level` (`debug`, `info`, `warn` or `error`), `message` and `service.name` (`nodevas`). A line written while serving a request also has `http.request.id`, the value the browser gets back as `X-Request-Id`.
+`nodevas serve` writes one JSON object per line to stderr; `logging.format: text` prints the same fields for a terminal. Keys are flat dotted names. Every line has `@timestamp` (UTC, milliseconds), `log.level` (`debug`, `info`, `warn` or `error`), `message` and `service.name` (`nodevas`). A line written while serving a request also has `http.request.id`, the value the browser gets back as `X-Request-Id`. A standalone hub (loopback, no proxy) also writes its log, and any crash report, to `nodevas/logs/serve.log` in your user config directory, moved to `serve.log.1` at 10 MB; `serve` prints the path at start.
 
-**Requests.** One line per request: `event.category: web`, `event.action: http.request`, `http.request.method`, `url.path` (never the query string), `http.response.status_code`, `event.duration_ms` (and ECS `event.duration`, in nanoseconds), `client.ip`, `user_agent.original` (at most 256 characters), `user.id` and `user.name` once the request is signed in, and `user.email` when it is signed in with a session. Successful `GET` and `HEAD` requests for `/assets/` and the container's health probe are left out; a write, every 5xx, and every `401` and `403` are always logged. Other 4xx responses (a `429` from the rate limiter above all, which a client can cause by the tens of thousands a second) are sampled: at most five lines a second, and one `warn` line with `event.action: http.request.suppressed` in the next second that has a request, counting what was left out (`nodevas.suppressed_count`, and per status in `nodevas.suppressed_statuses`, such as `429:9995,404:3`). The rate limiter's own `rate limit exceeded` lines are capped the same way. A read past its rate limit is not refused but waits its turn, so a person clicking fast in a few tabs is slowed for a moment rather than shown an error; only a read that would wait more than 10 seconds gets the `429`. Writes, exports, reports and other costly routes are still refused at once.
+**Requests.** One line per request: `event.category: web`, `event.action: http.request`, `http.request.method`, `url.path` (never the query string), `http.response.status_code`, `event.duration_ms` (and ECS `event.duration`, in nanoseconds), `client.ip`, `user_agent.original` (at most 256 characters), `user.id` and `user.name` once the request is signed in, and `user.email` when it is signed in with a session. Successful `GET` and `HEAD` requests for `/assets/` and the container's health probe are left out; a write, every 5xx, and every `401` and `403` are always logged. Other 4xx responses (a `429` from the rate limiter above all, which a client can cause by the tens of thousands a second) are sampled: at most five lines a second, and one `warn` line with `event.action: http.request.suppressed` in the next second that has a request, counting what was left out (`nodevas.suppressed_count`, and per status in `nodevas.suppressed_statuses`, such as `429:9995,404:3`). The rate limiter's own `rate limit exceeded` lines have a cap of their own: 10 a second, bursts of 20, with no count of the rest. A read past its rate limit is not refused but waits its turn, so a person clicking fast in a few tabs is slowed for a moment rather than shown an error; only a read that would wait more than 10 seconds gets the `429`. Writes, exports, reports and other costly routes are still refused at once, except that the Agent performance reports wait up to 5 seconds for a free slot.
 
 **Log size in Docker.** The default `json-file` log driver keeps every line forever. Cap it in the service's `logging:` block (the [Compose example](./getting-started.md#behind-a-reverse-proxy-with-docker-compose) does), or with `--log-opt max-size=10m --log-opt max-file=5` on `docker run`, or once for every container in `/etc/docker/daemon.json` (`"log-opts": {"max-size": "10m", "max-file": "5"}`).
 
@@ -124,6 +155,7 @@ Each project keeps its history in its own git repository (`<project>/.vised/git`
 
 A passcode request's line is written once the mail relay has answered, so each request is one line: `success` when the passcode went out, and when the relay refused it or never answered, `failure` with `event.reason: error` and the relay's `error.message`. Its row is written at once and says `delivered: true` either way, as such rows always have: a passcode was minted and handed to delivery.
 
+<!-- sec-pass: sign-in audit reasons -->
 | Stored action | `event.category` | `event.action` | Notes |
 |---|---|---|---|
 | `auth.passcode.request` | `authentication` | `auth.code.request` | failure reasons: `throttled`, `unknown-account`, `cancelled`, `error` (no passcode could be made, or the relay did not take it) |
@@ -138,18 +170,23 @@ A passcode request's line is written once the mail relay has answered, so each r
 | `auth.totp.enable`, `auth.totp.disable`, `auth.totp.recovery.regenerate` | `iam` | `iam.account.update` | |
 | `auth.totp.failed` | `iam` | `iam.account.update` | failure: a refused code while changing the second factor |
 | `PUT projects/members`, `DELETE projects/members`, `POST projects/members/open` | `iam` | `iam.account.update` | project membership: `nodevas.project` is the project changed, `nodevas.audit.target` the member's account ID and `nodevas.audit.detail` the role given; opening a project drops every member and names no account |
-| `account.invite`, `account.role`, `account.remove` | `iam` | `iam.account.update` | server accounts changed from *Settings → Server accounts*: `nodevas.audit.target` is the account's ID and `nodevas.audit.detail` its name and role (`from` for a role change; `emailSent` and `delivery` — `sent`, `failed` or `unconfigured` — for an invitation); server-wide, never under a project |
+| `account.invite`, `account.role`, `account.remove` | `iam` | `iam.account.update` | server accounts changed from *Settings → Account → Server accounts*: `nodevas.audit.target` is the account's ID and `nodevas.audit.detail` its name and role (`from` for a role change; `emailSent` and `delivery` — `sent`, `failed` or `unconfigured` — for an invitation); server-wide, never under a project |
 | `runner.access-token.set`, `runner.access-token.clear` | `configuration` | `config.change` | |
 | `PUT notify/settings`, `PUT copilot/settings`, `PUT remote/config`, `PUT runs/budget`, `PUT runs/routing`, `PUT usage/prices` | `configuration` | `config.change` | who wrote the settings, not what changed |
 | `POST control/pause-all` | `audit` | `POST control/pause-all` | Station's *Pause everything*: one row for the whole act, under the project it stopped. `nodevas.audit.detail` has `cancelRunning`, the counts `autopilotsPaused`, `runsCancelled` and `skipped` (someone else's autopilots and runs, running runs left alone, anything that moved on meanwhile), and the IDs paused and cancelled (`autopilot:<id>`, `run:<id>`, up to 50 each) |
-| anything else (`auth.totp.enroll`, `auth.totp.recovery.used`, `POST nodes`, `run.merge.done`, ...) | `audit` | the stored action | `failure` when the action ends in `.failed` |
+| anything else (`auth.totp.enroll`, `auth.totp.recovery.used`, `POST nodes`, `run.merge.approve`, `run.merge.merged`, `run.merge.failed`, `run.terminal.attach`, `analytics.retention.prune`, ...) | `audit` | the stored action | `failure` when the action ends in `.failed` |
 
-**Reading the trail.** Server administrators read it in the app under *Settings → Audit log* (`GET /api/audit`, admin-only): recent events, server-wide or the active project's writes, filtered by kind (sign-in, step-up, two-factor, devices and runners, accounts and members, settings, other) and by text. The same page shows audit health (`GET /api/audit/health`): when a row could not reach the database, its line above (`event.code: audit.persistence_fallback`) is the only record of it, and health stays degraded until an administrator has found those lines and pressed *Acknowledge* (`POST /api/audit/health/acknowledge`), which is refused while database writes are still failing or when more fallbacks arrived since the page loaded. It also shows the rate limiter's refusals per kind of route since the server started (`GET /api/audit/limiter`).
+<!-- sec-pass: audit trail access -->
+**Reading the trail.** Server administrators read it in the app under *Settings → Account → Audit log* (`GET /api/audit`, admin-only): recent events, server-wide or the active project's writes, filtered by kind (sign-in, step-up, two-factor, devices and runners, accounts and members, settings, other) and by text. The same page shows audit health (`GET /api/audit/health`): when a row could not reach the database, its line above (`event.code: audit.persistence_fallback`) is the only record of it, and health stays degraded until an administrator has found those lines and pressed *Acknowledge* (`POST /api/audit/health/acknowledge`), which is refused while database writes are still failing or when more fallbacks arrived since the page loaded. It also shows the rate limiter's refusals per kind of route since the server started (`GET /api/audit/limiter`).
 
+<!-- sec-pass: step-up events -->
 A step-up, a signed-in session proving itself again, is neither a sign-in nor a sign-in passcode, so it reads as this server's own `audit` event, and a count of `auth.signin` or `auth.code.request` lines counts sign-ins alone. Sign-in and step-up lines also carry `nodevas.auth.purpose` (`sign-in` or `step-up`). `nodevas account totp-reset` runs on the server host and writes its `auth.totp.reset` row directly, without a line in the server's log.
 
+<!-- sec-pass: Access and session log lines -->
 **Logged, not audited.** `auth.session.expired`, when an expired session cookie is presented and refused. With Cloudflare Access configured, `auth.access.granted` (at most once per identity and client address every 30 minutes) and `auth.access.denied` (`warn`, with `event.reason` `missing-jwt`, `invalid-jwt`, `bad-audience` or `expired-jwt`, and `event.code: access.invalid`): one line for every refused request while `access.required` is on, and in audit mode, where nothing is refused, `nodevas.access.required: false` and at most one line per address and reason a minute. A panic while serving a request is one `error` line with `event.code: http.panic`, `error.message` and `error.stack_trace`; the request is named by its `http.request.id`, never dumped.
 
+<!-- sec-pass: never logged -->
 **Never logged.** Passcodes, authenticator and recovery codes, the session, CSRF and sign-in ticket cookies, Access tokens, device links, runner tokens, passwords, secrets and query strings. Addresses are logged: an account's own, or, when the sign-in form named no account, the address typed, lower-cased, once it parses as an address. What does not parse as one, such as a passcode typed into the wrong box, is not logged.
 
+<!-- sec-pass: client.ip and forwarding headers -->
 **`client.ip`** is the connection's peer address. Forwarding headers are believed only from a peer inside `trusted_proxy` (with `behind_proxy`), and `X-Forwarded-For` is then read from the right, up to the first address that is not a trusted proxy.
