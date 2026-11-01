@@ -52,15 +52,16 @@ test("the Windows installer locks down a just-me folder outside the user's Progr
   const macro = /!macro customInstall\b([\s\S]*?)!macroend/.exec(script)?.[1] ?? "";
   const mine = /\$\{(?:if|elseif)\} \$installMode == "CurrentUser"([\s\S]*?)\$\{endif\}\s*$/.exec(macro)?.[1] ?? "";
   assert.notEqual(mine, "", "a just-me install is not locked down");
-  assert.match(mine, /"\$LOCALAPPDATA\Programs\\"/, "the user's own Programs folder is left as it is");
-  assert.match(mine, /\$SYSDIR\whoami\.exe" \/user/, "the user's SID comes from whoami in the system folder");
+  assert.match(mine, /"\$LOCALAPPDATA\\Programs\\"/, "the user's own Programs folder is left as it is");
+  assert.match(mine, /\$SYSDIR\\whoami\.exe" \/user/, "the user's SID comes from whoami in the system folder");
   const lock = mine.split("\n").find((line) => line.includes("/inheritance:r")) ?? "";
   assert.match(lock, /\*S-1-5-18:\(OI\)\(CI\)F/, "SYSTEM keeps full control");
   assert.match(lock, /\*S-1-5-32-544:\(OI\)\(CI\)F/, "administrators keep full control");
   assert.match(lock, /\*\$\d:\(OI\)\(CI\)F/, "the user keeps full control, so updates still install");
   assert.doesNotMatch(lock, /S-1-5-32-545|S-1-5-11|S-1-1-0/, "no other user may read or change it");
   assert.match(mine, /\/reset \/T/, "files already there lose ACEs of their own");
-  // A SID that is not one leaves the folder as it is rather than locking
-  // the user out of their own install.
-  assert.match(mine, /S-1-5-/, "only a real account SID is used");
+  // Only the SID whoami prints is granted: without one the folder stays as
+  // it is rather than locking the user out of their own install.
+  assert.match(mine, /',"S-1-'/, "the SID is read from whoami's CSV line");
+  assert.match(mine, /\$\{if\} \$1 < 8/, "no grant without a SID");
 });
