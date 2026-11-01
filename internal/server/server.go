@@ -318,9 +318,12 @@ func (s *Server) UseAccounts(users *auth.UserStore) {
 		s.pm.SetRemote(true)
 	}
 	// Deadline reminders go only to accounts that can read the project.
-	s.notifier.UseReaders(func(projectPath, address string) bool {
-		actor, _, _, err := users.AccountByEmail(context.Background(), address)
-		return err == nil && actor.ID != "" && s.members.Access(actor, project.Key(projectPath)).CanRead()
+	s.notifier.UseReaders(func(projectPath, address string) (string, bool) {
+		actor, _, stored, err := users.AccountByEmail(context.Background(), address)
+		if err != nil || actor.ID == "" || !s.members.Access(actor, project.Key(projectPath)).CanRead() {
+			return "", false
+		}
+		return stored, true
 	})
 }
 

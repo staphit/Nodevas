@@ -60,7 +60,7 @@ type Notifier struct {
 	mailAttempts []mailAttempt
 
 	readersMu sync.RWMutex
-	readers   func(projectPath, address string) bool
+	readers   func(projectPath, address string) (string, bool)
 }
 
 func NewNotifier(pm *project.ProjectManager) *Notifier {
@@ -69,29 +69,34 @@ func NewNotifier(pm *project.ProjectManager) *Notifier {
 
 // UseReaders tells a server with accounts who may be mailed about a
 // project: readers reports whether address belongs to an account that can
-// read the project at projectPath.
-func (n *Notifier) UseReaders(readers func(projectPath, address string) bool) {
+// read the project at projectPath, and if so the address stored on that
+// account.
+func (n *Notifier) UseReaders(readers func(projectPath, address string) (string, bool)) {
 	n.readersMu.Lock()
 	n.readers = readers
 	n.readersMu.Unlock()
 }
 
-// MayRemind reports whether a reminder about the project at projectPath may
-// go to address, an assignee's email from the project's graph. Anyone who
+// Recipient reports where a reminder about the project at projectPath may
+// go for address, an assignee's email from the project's graph. Anyone who
 // edits the graph chooses those addresses, so on a server with accounts the
 // hub's mail only goes to an account that can read the project; a loopback
 // server's graph is its one person's own.
-func (n *Notifier) MayRemind(projectPath, address string) bool {
+func (n *Notifier) Recipient(projectPath, address string) (string, bool) {
 	if address == "" {
-		return false
+		return "", false
 	}
 	if n.pm == nil || !n.pm.IsRemote() {
-		return true
+		return address, true
 	}
 	n.readersMu.RLock()
 	readers := n.readers
 	n.readersMu.RUnlock()
-	return readers != nil && readers(projectPath, address)
+	if readers == nil {
+		return "", false
+	}
+	_, ok := readers(projectPath, address)
+	return address, ok
 }
 
 func (n *Notifier) settingsPath() string {
@@ -364,8 +369,8 @@ func (n *Notifier) scan(now time.Time) {
 			if _, done := sent[key]; done {
 				continue
 			}
-			to := emails[node.Assignee]
-			if !n.MayRemind(project.Path, to) {
+			to, ok := n.Recipient(project.Path, emails[node.Assignee])
+			if !ok {
 				// The administrator's own fallback address.
 				to = strings.TrimSpace(settings.DefaultTo)
 			}
