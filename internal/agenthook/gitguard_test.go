@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The hook's git runs as the person, at the end of an agent's turn, in a
@@ -53,5 +54,63 @@ func TestSnapshotRunsNothingFromRepoConfig(t *testing.T) {
 	}
 	if len(names) > 0 {
 		t.Fatalf("the hook's git ran what the repository configured: %v", names)
+	}
+}
+
+// A submodule's own repository is the agent's to write too: a filter its
+// config names would run when git looks inside it for changes, whatever
+// .gitmodules or the repository's config says about ignoring it. The hook's
+// git never looks inside a submodule.
+func TestSnapshotLooksIntoNoSubmodule(t *testing.T) {
+	repo := gitRepo(t)
+	sub := gitRepo(t)
+	gitIn := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.test",
+			"-c", "commit.gpgsign=false"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	gitIn(repo, "update-index", "--add", "--cacheinfo", "160000,"+gitIn(sub, "rev-parse", "HEAD")+",nested")
+	write(t, filepath.Join(repo, ".gitmodules"), "[submodule \"nested\"]\n\tpath = nested\n\turl = ./nested\n\tignore = none\n")
+	gitIn(repo, "add", ".gitmodules")
+	gitIn(repo, "commit", "-q", "-m", "submodule")
+	gitIn(repo, "config", "submodule.nested.ignore", "none")
+	gitIn(repo, "config", "diff.submodule", "diff")
+	gitIn(repo, "clone", "-q", sub, "nested")
+	nested := filepath.Join(repo, "nested")
+	marker := filepath.ToSlash(filepath.Join(t.TempDir(), "marker"))
+	write(t, filepath.Join(nested, ".gitattributes"), "*.go filter=evil\n")
+	gitIn(nested, "config", "filter.evil.clean", "echo x > '"+marker+"'; cat")
+	stamp := time.Now().Add(-48 * time.Hour)
+	dirty := func() {
+		t.Helper()
+		stamp = stamp.Add(time.Hour)
+		if err := os.Chtimes(filepath.Join(nested, "a.go"), stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove(marker)
+	}
+
+	// Control: plain git runs it, so the test proves something.
+	dirty()
+	if out, err := exec.Command("git", "-C", repo, "diff", "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("git diff: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("control: plain git diff did not run the filter, so the test proves nothing: %v", err)
+	}
+
+	dirty()
+	write(t, filepath.Join(repo, "a.go"), "package a\n\nvar x = 2\n")
+	snap, ok := Snapshot(context.Background(), repo)
+	if !ok || !strings.Contains(snap.Patch, "+var x = 2") {
+		t.Fatalf("snapshot = %+v, %v", snap, ok)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the hook's git ran the filter a submodule's config names")
 	}
 }
