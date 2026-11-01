@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ConflictError } from "../api";
 import { useApp } from "../store";
-import type { Graph, RunState } from "../types";
+import type { Graph, NodeStyle, RunState } from "../types";
 import { invalidateGenerations } from "./internals";
 import { clearUndo } from "./undo";
 
@@ -407,6 +407,96 @@ describe("loadAll", () => {
     useApp.setState({ activeProject: "board", graphProject: "" });
     await useApp.getState().loadAll();
     expect(useApp.getState().graphProject).toBe("board");
+  });
+});
+
+// Every whole-file save is echoed back as graph-changed, and the reload that
+// echo starts is on the wire beside the next save in the queue. Its answer can
+// be the graph from before that save; shown, it took the save's edit off the
+// board, and the save after it wrote the board as shown, edit missing, with a
+// baseRev the server accepted.
+describe("a reload on the wire beside a save", () => {
+  type Saved = Awaited<ReturnType<typeof api.putGraph>>;
+  type Read = Awaited<ReturnType<typeof api.getGraph>>;
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return { promise, resolve };
+  }
+
+  const setStyle = (patch: Partial<NodeStyle>) =>
+    useApp.getState().updateNode({ type: "node.setStyle", nodeId: "a", patch });
+
+  function styled(style: NodeStyle): Graph {
+    const graph = baseGraph();
+    graph.ui = { nodeStyles: { a: style } };
+    return graph;
+  }
+
+  let saves: Array<ReturnType<typeof deferred<Saved>>>;
+  let read: ReturnType<typeof deferred<Read>>;
+
+  beforeEach(() => {
+    saves = [];
+    vi.mocked(api.putGraph).mockImplementation(() => {
+      const save = deferred<Saved>();
+      saves.push(save);
+      return save.promise;
+    });
+    read = deferred<Read>();
+    vi.mocked(api.getGraph).mockImplementationOnce(() => read.promise);
+  });
+
+  /** Shape saved; its echo's reload and the alignment's save both on the wire. */
+  async function shapeSavedAndAlignmentSending() {
+    const shape = setStyle({ shape: "diamond" });
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    const align = setStyle({ align: "left" });
+    saves[0].resolve({ ok: true, rev: "rev-2", issues: null });
+    await shape;
+    const echo = useApp.getState().loadAll();
+    await vi.waitFor(() => expect(api.getGraph).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(saves).toHaveLength(2));
+    return { align, echo };
+  }
+
+  async function nextSave() {
+    const valign = setStyle({ valign: "top" });
+    await vi.waitFor(() => expect(saves).toHaveLength(3));
+    const [graph, baseRev] = vi.mocked(api.putGraph).mock.calls[2];
+    saves[2].resolve({ ok: true, rev: "rev-4", issues: null });
+    await valign;
+    return { graph, baseRev };
+  }
+
+  it("keeps an edit whose save was answered after the reload", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+
+    expect(useApp.getState().graph!.ui!.nodeStyles!.a).toMatchObject({ align: "left" });
+    const { graph, baseRev } = await nextSave();
+    expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
+    expect(baseRev).toBe("rev-3");
+  });
+
+  it("keeps an edit whose save was answered before the reload", async () => {
+    const { align, echo } = await shapeSavedAndAlignmentSending();
+    saves[1].resolve({ ok: true, rev: "rev-3", issues: null });
+    await align;
+    read.resolve({ graph: styled({ shape: "diamond" }), rev: "rev-2", statuses: {}, issues: null });
+    await echo;
+
+    expect(useApp.getState().graph!.ui!.nodeStyles!.a).toMatchObject({ align: "left" });
+    expect(useApp.getState().graphRev).toBe("rev-3");
+    const { graph, baseRev } = await nextSave();
+    expect(graph.ui!.nodeStyles!.a).toEqual({ shape: "diamond", align: "left", valign: "top" });
+    expect(baseRev).toBe("rev-3");
   });
 });
 
