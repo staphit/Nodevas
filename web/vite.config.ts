@@ -1,5 +1,64 @@
-import { defineConfig } from "vite";
+import type { ClientRequest, IncomingMessage } from "node:http";
+import { isIP } from "node:net";
+import { defineConfig, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
+
+// The Go server the dev server proxies /api and /ws to. On loopback it has no
+// sign-in: every request it gets is the local person. So the proxy passes on
+// only what the dev server's own pages send.
+const backend = "http://127.0.0.1:5666";
+
+// hostName is a Host header's name, without the port or IPv6 brackets.
+function hostName(host: string): string {
+  const name = host.startsWith("[") ? host.slice(1, host.indexOf("]")) : host.replace(/:\d*$/, "");
+  return name.toLowerCase();
+}
+
+// Headers a proxy or tunnel adds to say whom it forwards for. A browser
+// never sends them.
+const forwardingHeaders = ["x-forwarded-for", "x-forwarded-host", "forwarded", "x-real-ip", "cf-connecting-ip"];
+
+// devPageOnly refuses (404) a request that is not from a page this dev
+// server served: a Host that is not this machine or an IP literal (a name
+// rebound to this machine; Vite checks Host on plain requests but not on
+// proxied WebSocket upgrades), an Origin other than the dev server's own,
+// a browser saying the request came from another site, or a loopback peer
+// that is a tunnel or proxy forwarding someone else (presentToBackend would
+// make it look like the local person).
+const devPageOnly: ProxyOptions["bypass"] = (req) => {
+  if (loopbackPeer(req) && forwardingHeaders.some((header) => req.headers[header] !== undefined)) return false;
+  const host = req.headers.host ?? "";
+  const name = hostName(host);
+  if (name !== "localhost" && !name.endsWith(".localhost") && isIP(name) === 0) return false;
+  const origin = req.headers.origin;
+  if (origin !== undefined && origin !== `http://${host}` && origin !== `https://${host}`) return false;
+  const site = req.headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+  return undefined;
+};
+
+function loopbackPeer(req: IncomingMessage): boolean {
+  const address = req.socket?.remoteAddress ?? "";
+  return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+}
+
+// presentToBackend runs on every request devPageOnly let through. The backend
+// trusts only its own origin, so a page's Origin becomes the backend's.
+// xfwd has named the client in X-Forwarded-For: a peer on the network stays
+// visible as forwarded, while the developer's own browser reaches the backend
+// as the direct local request it is.
+const presentToBackend: ProxyOptions["configure"] = (proxy) => {
+  const present = (proxyReq: ClientRequest, req: IncomingMessage) => {
+    if (req.headers.origin !== undefined) proxyReq.setHeader("Origin", backend);
+    if (loopbackPeer(req)) {
+      for (const header of ["x-forwarded-for", "x-forwarded-host", "x-forwarded-port", "x-forwarded-proto"]) {
+        proxyReq.removeHeader(header);
+      }
+    }
+  };
+  proxy.on("proxyReq", present);
+  proxy.on("proxyReqWs", present);
+};
 
 export default defineConfig({
   plugins: [react()],
@@ -36,21 +95,25 @@ export default defineConfig({
   server: {
     port: 5173,
     // The backend only trusts a loopback Origin on its own port, so the proxy
-    // presents itself as the backend instead of forwarding the dev server's
-    // origin on :5173, which the server has no reason to trust.
+    // presents the dev server's own pages as the backend (presentToBackend)
+    // and refuses everything else (devPageOnly).
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:5666",
+        target: backend,
         // An interactive run's terminal is a WebSocket under /api/runs/:id/terminal.
         ws: true,
         changeOrigin: true,
-        headers: { Origin: "http://127.0.0.1:5666" },
+        xfwd: true,
+        bypass: devPageOnly,
+        configure: presentToBackend,
       },
       "/ws": {
         target: "ws://127.0.0.1:5666",
         ws: true,
         changeOrigin: true,
-        headers: { Origin: "http://127.0.0.1:5666" },
+        xfwd: true,
+        bypass: devPageOnly,
+        configure: presentToBackend,
       },
     },
   },

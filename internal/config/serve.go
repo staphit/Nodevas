@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -257,6 +259,84 @@ func LoadServeConfig(path string, optional bool) (ServeConfig, error) {
 		return cfg, fmt.Errorf("server config %q: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// LoadWorkspaceServeConfig loads the nodevas.yaml serve reads without being
+// told to: the workspace's own, or the working directory's without
+// --project. A missing file is an empty configuration.
+//
+// That file is workspace content, as likely shared or cloned as the notes
+// beside it, so it may not widen whom the server trusts: the names it
+// answers on, proxies and Access, the transport, copilot bypass, or where
+// the copilot's API key or the SMTP password and sign-in passcodes go.
+// Those belong to the operator, in a file
+// named with --config (or NODEVAS_CONFIG), the environment, or flags.
+func LoadWorkspaceServeConfig(path string) (ServeConfig, error) {
+	cfg, err := LoadServeConfig(path, true)
+	if err != nil {
+		return cfg, err
+	}
+	if keys := trustSettings(cfg); len(keys) > 0 {
+		return cfg, fmt.Errorf(
+			"server config %q is the workspace's own nodevas.yaml and may not set %s: "+
+				"these decide whom the server trusts or where its secrets go, so move them to a file given with --config "+
+				"(or NODEVAS_CONFIG), the NODEVAS_SERVE_* / NODEVAS_COPILOT_* environment, or flags",
+			path, strings.Join(keys, ", "))
+	}
+	return cfg, nil
+}
+
+// trustSettings lists the keys of cfg that differ from the defaults in a
+// way that widens whom the server trusts or sends its secrets to.
+func trustSettings(cfg ServeConfig) []string {
+	defaults := DefaultServeConfig()
+	var keys []string
+	add := func(set bool, key string) {
+		if set {
+			keys = append(keys, key)
+		}
+	}
+	add(!loopbackNames(cfg.Hostname), "hostname")
+	add(cfg.BehindProxy, "behind_proxy")
+	add(strings.TrimSpace(cfg.TrustedProxy) != defaults.TrustedProxy, "trusted_proxy")
+	add(cfg.AllowPlaintext, "allow_plaintext")
+	add(strings.TrimSpace(cfg.TLSCert) != "", "tls_cert")
+	add(strings.TrimSpace(cfg.TLSKey) != "", "tls_key")
+	add(cfg.Access != AccessConfig{}, "access")
+	add(cfg.Copilot.AllowBypass != nil && *cfg.Copilot.AllowBypass, "copilot.allow_bypass")
+	add(strings.TrimSpace(cfg.Copilot.BaseURL) != "" && !loopbackURL(cfg.Copilot.BaseURL), "copilot.base_url")
+	add(strings.TrimSpace(cfg.SMTP.Host) != "" && !loopbackHost(strings.TrimSpace(cfg.SMTP.Host)), "smtp.host")
+	return keys
+}
+
+// loopbackNames reports whether every name in a comma-separated list is
+// this machine's.
+func loopbackNames(list string) bool {
+	for _, name := range strings.Split(list, ",") {
+		if name = strings.TrimSpace(name); name != "" && !loopbackHost(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// loopbackURL reports whether rawURL is plain http(s) to this machine, with
+// no credentials in it: a local model server such as Ollama or LM Studio.
+func loopbackURL(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return false
+	}
+	return loopbackHost(u.Hostname())
+}
+
+func loopbackHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ApplyEnvironment applies the documented NODEVAS_SERVE_* overrides. The
