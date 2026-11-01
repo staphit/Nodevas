@@ -30,9 +30,11 @@ func TestLateAnswerStaysWithTheAsker(t *testing.T) {
 				if err != nil || expired.Status != AskExpired {
 					t.Fatalf("ask = %+v, %v; want expired", expired, err)
 				}
+				// An admin answers for alice: her agent reads the answer as
+				// the account the mail is for, not as the one who sent it.
 				if _, err := hub.AnswerWith(ctx, "alpha", expired.ID, AnswerInput{
 					Decision: DecisionAnswer, Answer: "SECRET-ANSWER", Note: "SECRET-NOTE",
-				}, Viewer{ID: "u_alice"}); err != nil {
+				}, Viewer{ID: "u_admin", Admin: true}); err != nil {
 					t.Fatal(err)
 				}
 
