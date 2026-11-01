@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nodevas/internal/secretenv"
 )
 
 // postmaster is one started PostgreSQL server process.
@@ -71,10 +73,11 @@ func (t *tail) String() string {
 }
 
 // pgEnv is the environment PostgreSQL's programs run with: this process's,
-// minus the libpq and server variables that could point them elsewhere.
+// minus the libpq and server variables that could point them elsewhere and
+// the hub's own secrets.
 func pgEnv() []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range secretenv.Without(os.Environ()) {
 		name, _, _ := strings.Cut(kv, "=")
 		upper := strings.ToUpper(name)
 		if strings.HasPrefix(upper, "PG") || strings.HasPrefix(upper, "NODEVAS_DATABASE") {

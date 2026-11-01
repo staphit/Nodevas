@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,7 +70,7 @@ func BenchmarkSearchUnderWrites(b *testing.B) {
 	pm, info, st := searchLoadProject(b, nodes)
 	actor := identity.Actor{ID: "bench", Name: "bench"}
 	// The cold build is not what is measured here.
-	if _, err := pm.SearchProjectNodes(info, "needle"); err != nil {
+	if _, err := pm.SearchProjectNodes(context.Background(), info, "needle"); err != nil {
 		b.Fatal(err)
 	}
 
@@ -143,7 +144,7 @@ func BenchmarkSearchUnderWrites(b *testing.B) {
 					return
 				}
 				began := time.Now()
-				if _, err := pm.SearchProjectNodes(info, "needle"); err != nil {
+				if _, err := pm.SearchProjectNodes(context.Background(), info, "needle"); err != nil {
 					b.Error(err)
 					return
 				}

@@ -109,6 +109,8 @@ type ProjectManager struct {
 	// lookups is what StoreFor remembers about project names; see
 	// lookup_cache.go.
 	lookups projectLookups
+	// fault: see InjectLookupFault.
+	fault atomic.Pointer[lookupFault]
 
 	// lock is the OS-level advisory lock on the *active* workspace, held for
 	// as long as this manager serves it. It is an outer layer over the
@@ -660,7 +662,9 @@ func (pm *ProjectManager) SwitchWorkspace(root string) error {
 	if err := pm.SaveActiveWorkspace(); err != nil {
 		log.Printf("save active workspace: %v", err)
 	}
-	pm.hub.Broadcast("project-changed", root)
+	// No path: every socket hears it, members and agents included, and the
+	// client only reloads.
+	pm.hub.Broadcast("project-changed", "")
 	return nil
 }
 
@@ -717,7 +721,13 @@ func (pm *ProjectManager) cachedStore(dir string) *store.Store {
 //
 // A project found once is remembered (lookup_cache.go), so the requests that
 // follow do not stat the disk.
+//
+// An error is a LookupError (IsLookupFault) when the disk could not be read,
+// and otherwise means the name names no project this workspace serves.
 func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
+	if err := pm.injectedFault(); err != nil {
+		return nil, &LookupError{Name: name, Err: err}
+	}
 	workspace := pm.workspaceRoot()
 	if dir, ok := pm.lookups.get(workspace, name); ok {
 		return pm.cachedStore(dir), nil
@@ -726,12 +736,12 @@ func (pm *ProjectManager) StoreFor(name string) (*store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	graphInfo, err := store.StatProjectPath(dir, filepath.Join(dir, "graph.yaml"))
+	graphInfo, err := statProjectPath(dir, filepath.Join(dir, "graph.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, locale.Errorf("project %q has no graph.yaml", "專案「%s」沒有 graph.yaml", name)
 		}
-		return nil, err
+		return nil, lookupFailure(name, err)
 	}
 	if !graphInfo.Mode().IsRegular() {
 		return nil, locale.Errorf("project %q has no regular graph.yaml", "專案「%s」沒有一般的 graph.yaml", name)
@@ -750,7 +760,7 @@ func (pm *ProjectManager) ListedStore(name string) (*store.Store, error) {
 	}
 	detached, err := pm.loadDetachedProjects()
 	if err != nil {
-		return nil, err
+		return nil, &LookupError{Name: name, Err: err}
 	}
 	if projectIsDetached(name, detached) {
 		return nil, locale.Errorf("project %q is not in the workspace", "專案「%s」不在工作區內", name)

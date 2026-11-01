@@ -96,11 +96,11 @@ func (si *searchIndex) changed(projectPath, path string) {
 	si.indexes().Notify(projectPath, path)
 }
 
-func (si *searchIndex) search(project ProjectInfo, normalized string) ([]SearchResult, error) {
+func (si *searchIndex) search(ctx context.Context, project ProjectInfo, normalized string) ([]SearchResult, error) {
 	if si == nil {
 		return nil, os.ErrInvalid
 	}
-	matches, err := si.indexes().Search(project.Path, normalized)
+	matches, err := si.indexes().SearchContext(ctx, project.Path, normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -118,11 +118,11 @@ func (si *searchIndex) search(project ProjectInfo, normalized string) ([]SearchR
 	return out, nil
 }
 
-func (si *searchIndex) rank(project ProjectInfo, query string, limit int) ([]SearchResult, error) {
+func (si *searchIndex) rank(ctx context.Context, project ProjectInfo, query string, limit int) ([]SearchResult, error) {
 	if si == nil {
 		return nil, os.ErrInvalid
 	}
-	ranked, err := si.indexes().RankContext(context.Background(), project.Path, query, limit)
+	ranked, err := si.indexes().RankContext(ctx, project.Path, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +217,35 @@ var coldSearchWait = 50 * time.Millisecond
 // rather than time a search under load. One atomic load when unset.
 var coldSearchWaited atomic.Pointer[func(projectPath string, within time.Duration)]
 
+// maxConcurrentSearches bounds the searches running at once, process-wide:
+// each reads up to searchindex's per-project budget. It matches the
+// database's read pool.
+const maxConcurrentSearches = 4
+
+// searchSlots holds one token per search running.
+var searchSlots = make(chan struct{}, maxConcurrentSearches)
+
+// acquireSearch waits for a search slot: a search past the bound queues
+// (it is an interactive read) until one frees or ctx ends. The returned
+// release gives the slot back.
+func acquireSearch(ctx context.Context) (release func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case searchSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if hook := searchRunning.Load(); hook != nil {
+		(*hook)()
+	}
+	return func() { <-searchSlots }, nil
+}
+
+// searchRunning is a test seam: called as each search starts its work.
+var searchRunning atomic.Pointer[func()]
+
 // warmingForSearch reports whether the project's first index build is still
 // running after a search has waited coldSearchWait for it.
 func (pm *ProjectManager) warmingForSearch(index *searchIndex, projectPath string) bool {
@@ -226,12 +255,23 @@ func (pm *ProjectManager) warmingForSearch(index *searchIndex, projectPath strin
 	return index.indexes().Warming(projectPath, coldSearchWait)
 }
 
-func (pm *ProjectManager) SearchProjectNodes(project ProjectInfo, normalized string) ([]SearchResult, error) {
+func (pm *ProjectManager) SearchProjectNodes(ctx context.Context, project ProjectInfo, normalized string) ([]SearchResult, error) {
+	release, err := acquireSearch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	index := pm.getSearchIndex()
 	if pm.warmingForSearch(index, project.Path) {
 		return pm.searchWhileIndexing(project, normalized), nil
 	}
-	return index.search(project, normalized)
+	results, err := index.search(ctx, project, normalized)
+	if err == nil || ctx.Err() != nil {
+		return results, err
+	}
+	// No index to read (no database, or it failed): the direct scan, still
+	// within this search's slot.
+	return SearchProjectNodesDirect(project, normalized), nil
 }
 
 // AwaitSearchIndex reports whether the index of the project at projectPath is
@@ -332,7 +372,12 @@ func nodeSearchMetadata(node *engine.Node, userNames map[string]string) string {
 //
 // While the project's first index build runs, it answers from
 // searchWhileIndexing: hits whose title holds the query first.
-func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit int) ([]SearchResult, error) {
+func (pm *ProjectManager) RankProjectNodes(ctx context.Context, info ProjectInfo, query string, limit int) ([]SearchResult, error) {
+	release, err := acquireSearch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	index := pm.getSearchIndex()
 	if pm.warmingForSearch(index, info.Path) {
 		normalized := strings.ToLower(strings.TrimSpace(query))
@@ -351,9 +396,12 @@ func (pm *ProjectManager) RankProjectNodes(info ProjectInfo, query string, limit
 		}
 		return results, nil
 	}
-	results, err := index.rank(info, query, limit)
+	results, err := index.rank(ctx, info, query, limit)
 	if err == nil {
 		return results, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	direct := SearchProjectNodesDirect(info, strings.ToLower(strings.TrimSpace(query)))
 	if limit > 0 && len(direct) > limit {

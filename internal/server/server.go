@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -256,6 +257,9 @@ func New(pm *project.ProjectManager, hub *realtime.Hub, webFS fs.FS) *Server {
 		// window reload for an edit it cannot see.
 		hub.SetProjectResolver(func(name string) (string, error) {
 			st, err := pm.StoreFor(name)
+			if project.IsLookupFault(err) {
+				return "", fmt.Errorf("%w: %w", realtime.ErrLookupFault, err)
+			}
 			if err != nil {
 				return "", err
 			}

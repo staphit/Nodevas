@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 	pm, info, _ := searchLoadProject(t, 3000)
 	waits := watchColdSearchWaits(t, info.Path, 0)
 
-	results, err := pm.SearchProjectNodes(info, "n1234")
+	results, err := pm.SearchProjectNodes(context.Background(), info, "n1234")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 		t.Fatalf("first search = %+v, want the node titled n1234", results)
 	}
 
-	ranked, err := pm.RankProjectNodes(info, "n2345", 10)
+	ranked, err := pm.RankProjectNodes(context.Background(), info, "n2345", 10)
 	if err != nil {
 		t.Fatalf("ranked search: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestFirstSearchBeforeTheIndexIsBuiltAnswersFromTitles(t *testing.T) {
 	if wait := untilTestDeadline(t); !pm.AwaitSearchIndex(info.Path, wait) {
 		t.Fatalf("the index build did not finish within %v", wait)
 	}
-	results, err = pm.SearchProjectNodes(info, "buried needle")
+	results, err = pm.SearchProjectNodes(context.Background(), info, "buried needle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,14 +199,14 @@ func TestFirstSearchOfAFewNodesWithManyPagesAnswersFromTitles(t *testing.T) {
 	}
 	waits := watchColdSearchWaits(t, info.Path, coldSearchBudget+50*time.Millisecond)
 
-	results, err := pm.SearchProjectNodes(info, "n0002")
+	results, err := pm.SearchProjectNodes(context.Background(), info, "n0002")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(results) != 1 || results[0].NodeID != "n0002" {
 		t.Fatalf("first search = %+v, want the node titled n0002", results)
 	}
-	paged, err := pm.SearchProjectNodes(info, "only the index should read")
+	paged, err := pm.SearchProjectNodes(context.Background(), info, "only the index should read")
 	if err != nil {
 		t.Fatal(err)
 	}

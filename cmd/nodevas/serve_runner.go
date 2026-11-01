@@ -18,6 +18,7 @@ import (
 
 	"nodevas/internal/runner"
 	"nodevas/internal/runnerwire"
+	"nodevas/internal/secretenv"
 )
 
 // A standalone `serve` (loopback --listen, no proxy, no TLS, no Cloudflare
@@ -168,6 +169,14 @@ func prepareLocalRunner(ctx context.Context, path, hub string, repos []string, m
 	return runner.SaveConfig(path, cfg)
 }
 
+// localRunnerEnv is the local runner's environment: serve's, without the
+// hub's own secrets (the runner, its agents and their verify commands work
+// on content an attacker may control and need none of them), and marked as
+// started by serve.
+func localRunnerEnv() []string {
+	return append(secretenv.Without(os.Environ()), localRunnerUnderServeEnv+"=1")
+}
+
 // startLocalRunner starts `nodevas runner start --config path` on this
 // terminal: its questions go where serve's log goes, and its answers come
 // from serve's stdin, which serve itself never reads. The returned stop asks
@@ -181,7 +190,7 @@ func startLocalRunner(path string, stdin *os.File, stderr *os.File) (stop func()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stderr, stderr
 	// Serve owns Ctrl+C on the terminal they share (it asks for a second
 	// one); the runner ends when serve stops it.
-	cmd.Env = append(os.Environ(), localRunnerUnderServeEnv+"=1")
+	cmd.Env = localRunnerEnv()
 	endWithServe(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start the local runner: %w", err)

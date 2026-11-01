@@ -172,9 +172,12 @@ func fail(c *gin.Context, err error) {
 		httpx.Coded(c, http.StatusForbidden, "PERMISSION_DENIED", err, nil)
 	case errors.Is(err, agents.ErrRateLimited):
 		httpx.Coded(c, http.StatusTooManyRequests, "RATE_LIMITED", err, nil)
+	// Each 409 names its conflict: the caller's next move differs.
 	case errors.Is(err, agents.ErrLoopDetected):
-		httpx.Coded(c, http.StatusConflict, "CONFLICT", err, nil)
-	case errors.Is(err, agents.ErrAskBusy), errors.Is(err, agents.ErrNotHeld):
+		httpx.Coded(c, http.StatusConflict, "LOOP_DETECTED", err, nil)
+	case errors.Is(err, agents.ErrNotHeld):
+		httpx.Coded(c, http.StatusConflict, "NOT_HELD", err, nil)
+	case errors.Is(err, agents.ErrAskBusy):
 		httpx.Coded(c, http.StatusConflict, "CONFLICT", err, nil)
 	default:
 		httpx.Err(c, http.StatusInternalServerError, err)

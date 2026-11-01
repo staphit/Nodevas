@@ -462,7 +462,10 @@ func (pm *ProjectManager) Resolve(name string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", locale.Errorf("project %q resolves outside the workspace", "專案「%s」指向工作區之外", name)
 	}
-	if _, err := store.StatProjectPath(pm.workspace, candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if _, err := statProjectPath(pm.workspace, candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if failure := lookupFailure(name, err); IsLookupFault(failure) {
+			return "", failure
+		}
 		return "", locale.Errorf("project %q: %w", "專案「%s」：%w", name, err)
 	}
 	return onDiskSpelling(pm.workspace, rel), nil

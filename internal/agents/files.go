@@ -425,7 +425,9 @@ func (v Viewer) MayAnswer(a Ask) bool {
 // and admins (as Shown keeps an ask's): anyone else sees its opening line,
 // which carries the decision, and not what follows.
 func (v Viewer) ShownMessage(m Message) Message {
-	if !m.HubNotice() || v.mayRead(m) {
+	// By the sender fields alone: a notice stored before the hub stamped
+	// its notices is kept from others as any notice is.
+	if !m.claimsHubNotice() || v.mayRead(m) {
 		return m
 	}
 	head, _, _ := strings.Cut(m.Body, "\n")

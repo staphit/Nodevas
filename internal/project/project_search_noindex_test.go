@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"testing"
 
 	"nodevas/internal/engine"
@@ -18,7 +19,7 @@ func TestRankFallsBackToDirectScanWithoutIndex(t *testing.T) {
 	writeNodeBody(t, root, "phrase", "那天海風很冷。")
 	writeNodeBody(t, root, "terms", "海 風 冷 很")
 	pm := &ProjectManager{}
-	results, err := pm.RankProjectNodes(ProjectInfo{Name: "main", Path: root}, "海風很冷", 10)
+	results, err := pm.RankProjectNodes(context.Background(), ProjectInfo{Name: "main", Path: root}, "海風很冷", 10)
 	if err != nil {
 		t.Fatalf("RankProjectNodes: %v", err)
 	}

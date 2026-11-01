@@ -325,6 +325,13 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 		base := filepath.Base(filename)
 		title = strings.TrimSuffix(base, filepath.Ext(base))
 	}
+	// Decode first (ReadDOCX is bounded): a file that does not decode as
+	// its name claims is refused before anything is written. Its media
+	// wait in memory until the page exists.
+	content, media, err := s.parsePageContent(nodeID, format, data)
+	if err != nil {
+		return zero, "", "", err
+	}
 	page, _, _, err := s.CreateNodePage(actor, nodeID, title, format)
 	if err != nil {
 		return zero, "", "", err
@@ -338,12 +345,24 @@ func (s *Store) ImportNodePage(actor identity.Actor, nodeID, title, filename str
 	if err != nil {
 		return zero, "", "", err
 	}
-	content, err := s.decodePageContent(nodeID, format, data)
-	if err != nil {
-		// The file is stored; only its conversion failed.
+	if err := s.commitPageMedia(nodeID, media); err != nil {
+		// The file is stored; only its images are missing.
 		return page, "", Rev(data), err
 	}
 	return page, content, Rev(data), nil
+}
+
+// parsePageContent is decodePageContent without committing a Word page's
+// media: the caller commits them (commitPageMedia) once the page is stored.
+func (s *Store) parsePageContent(nodeID, format string, data []byte) (string, map[string]pendingPageMedia, error) {
+	if PageFormatIsText(format) {
+		return string(data), nil, nil
+	}
+	doc, media, err := s.parseDOCXPage(nodeID, data)
+	if err != nil {
+		return "", nil, err
+	}
+	return document.RenderMarkdown(doc), media, nil
 }
 
 // ConvertNodePage rewrites a page in another format: the new file replaces
@@ -478,35 +497,40 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 	if len(content) > maxPageBytes {
 		return "", locale.Errorf("page content is too large", "頁面內容太大")
 	}
+	// A Word page is rendered before the store's lock is taken: rendering
+	// a whole document under it would hold up a graph write, and every
+	// reader queued behind that write, for as long as it takes. The checks
+	// run again under the lock, and a page converted meanwhile is a
+	// conflict like any other change.
+	var rendered []byte
+	renderedFormat := ""
+	s.mu.RLock()
+	page, err := s.pageForSaveLocked(actor, nodeID, pageID)
+	s.mu.RUnlock()
+	if err != nil {
+		return "", err
+	}
+	if !PageFormatIsText(page.Format) {
+		if rendered, err = s.encodePageContent(nodeID, page.Format, content); err != nil {
+			return "", err
+		}
+		renderedFormat = page.Format
+	}
 	// Shared, not exclusive: readers and saves of other pages go on while
 	// this one writes; the page's own lock below orders saves of this page
 	// (see lockPath).
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	g, _, err := s.graphViewLocked()
+	page, err = s.pageForSaveLocked(actor, nodeID, pageID)
 	if err != nil {
 		return "", err
 	}
-	if g.NodeByID(nodeID) == nil {
-		return "", locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
-	}
-	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
-		return "", err
-	}
-	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
-		return "", err
-	}
-	manifest, err := s.parseNodePagesManifest(nodeID)
-	if err != nil {
-		return "", err
-	}
-	page, found := findManifestPage(manifest, pageID)
-	if !found {
-		return "", locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
-	}
-	data, err := s.encodePageContent(nodeID, page.Format, content)
-	if err != nil {
-		return "", err
+	data := rendered
+	switch {
+	case PageFormatIsText(page.Format):
+		data = []byte(content)
+	case page.Format != renderedFormat:
+		return "", &ErrConflict{}
 	}
 	path := s.NodePagePath(nodeID, pageID, page.Format)
 	unlock := s.lockPath(path)
@@ -520,6 +544,33 @@ func (s *Store) SaveNodePage(actor identity.Actor, nodeID, pageID, content, base
 		return "", err
 	}
 	return Rev(data), nil
+}
+
+// pageForSaveLocked is the page a save of nodeID's pageID by actor writes,
+// once the save is allowed. The caller holds s.mu.
+func (s *Store) pageForSaveLocked(actor identity.Actor, nodeID, pageID string) (NodePageInfo, error) {
+	g, _, err := s.graphViewLocked()
+	if err != nil {
+		return NodePageInfo{}, err
+	}
+	if g.NodeByID(nodeID) == nil {
+		return NodePageInfo{}, locale.Errorf("node %q not found in graph", "圖中找不到節點「%s」", nodeID)
+	}
+	if err := checkNodeWrite(actor, g.NodeByID(nodeID)); err != nil {
+		return NodePageInfo{}, err
+	}
+	if err := checkRole(actor, g, engine.CapBody, g.NodeByID(nodeID)); err != nil {
+		return NodePageInfo{}, err
+	}
+	manifest, err := s.parseNodePagesManifest(nodeID)
+	if err != nil {
+		return NodePageInfo{}, err
+	}
+	page, found := findManifestPage(manifest, pageID)
+	if !found {
+		return NodePageInfo{}, locale.Errorf("page %q not found for node %q", "節點「%[2]s」找不到頁面「%[1]s」", pageID, nodeID)
+	}
+	return page, nil
 }
 
 // UpdateNodePage changes page metadata without changing its stable ID or content.
@@ -784,6 +835,18 @@ type pendingPageMedia struct {
 // complete document has parsed. A malformed document therefore cannot leave
 // attachments behind, and a failed commit removes every file it created.
 func (s *Store) readDOCXPage(nodeID string, data []byte) (*document.Doc, error) {
+	doc, pending, err := s.parseDOCXPage(nodeID, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.commitPageMedia(nodeID, pending); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// parseDOCXPage parses a Word page, staging its media in memory.
+func (s *Store) parseDOCXPage(nodeID string, data []byte) (*document.Doc, map[string]pendingPageMedia, error) {
 	pending := map[string]pendingPageMedia{}
 	sink := s.pageMediaSink(nodeID)
 	doc, err := docx.ReadDOCX(data, func(name string, data []byte) (string, error) {
@@ -799,12 +862,9 @@ func (s *Store) readDOCXPage(nodeID string, data []byte) (*document.Doc, error) 
 		return mediaURL, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := s.commitPageMedia(nodeID, pending); err != nil {
-		return nil, err
-	}
-	return doc, nil
+	return doc, pending, nil
 }
 
 func (s *Store) commitPageMedia(nodeID string, pending map[string]pendingPageMedia) error {
@@ -870,10 +930,13 @@ func (s *Store) encodePageContent(nodeID, format, content string) ([]byte, error
 	if PageFormatIsText(format) {
 		return []byte(content), nil
 	}
-	return docx.RenderDOCX(document.Parse(content), document.Options{
+	return renderDOCX(document.Parse(content), document.Options{
 		Assets: s.DocumentAssets(),
 	})
 }
+
+// renderDOCX renders a Word page; tests watch it.
+var renderDOCX = docx.RenderDOCX
 
 // convertPageContent rewrites a page's bytes for a different format, going
 // through the block model so every pair of formats is covered by one path.

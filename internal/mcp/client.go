@@ -43,10 +43,14 @@ const (
 	CodeAlreadyClaimed    = "ALREADY_CLAIMED"
 	CodeLeaseExpired      = "LEASE_EXPIRED"
 	CodeConflict          = "CONFLICT"
-	CodeRateLimited       = "RATE_LIMITED"
-	CodeAuthRequired      = "AUTH_REQUIRED"
-	CodePermissionDenied  = "PERMISSION_DENIED"
-	CodeServerError       = "SERVER_ERROR"
+	// The agents network's other 409s: a thread at its agent-turn limit,
+	// and a held message someone already approved or rejected.
+	CodeLoopDetected     = "LOOP_DETECTED"
+	CodeNotHeld          = "NOT_HELD"
+	CodeRateLimited      = "RATE_LIMITED"
+	CodeAuthRequired     = "AUTH_REQUIRED"
+	CodePermissionDenied = "PERMISSION_DENIED"
+	CodeServerError      = "SERVER_ERROR"
 
 	// Node-type refusals (store.CodeNodeType*), and the rest of the codes the
 	// planning tools can meet.
@@ -528,6 +532,10 @@ func decodeError(status int, raw []byte) *APIError {
 	switch failure.Code {
 	case CodeConflict:
 		failure.Message = failure.Message + conflictAdvice
+	case CodeLoopDetected:
+		failure.Message = failure.Message + ". Do not send again in this thread: a person has to reply before agents can continue it; wait in check_inbox"
+	case CodeNotHeld:
+		failure.Message = failure.Message + ". Someone already approved or rejected it; there is nothing to retry"
 	case CodeRateLimited:
 		failure.Message = failure.Message + ". Slow down and try again"
 	}
