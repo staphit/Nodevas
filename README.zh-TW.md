@@ -56,9 +56,9 @@ agent 相關功能一開始是隱藏的。開啟 **設定 → Agent 與 Runner �
 
 ## 延伸閱讀
 
-- [核心概念](./docs/concepts.md) · [時間軸](./docs/timeline.md) · [MCP](./docs/mcp.md) · [語音 copilot](./COPILOT.md) · [Token 用量](./docs/usage.md)
+- [核心概念](./docs/concepts.md) · [時間軸](./docs/timeline.md) · [MCP](./docs/mcp.md) · [語音 Copilot](./COPILOT.md) · [Token 用量](./docs/usage.md)
 - [安裝 runner](./docs/install.md) · [維運](./docs/operations.md) · [版本歷史與備份](./docs/history-and-backup.zh-TW.md) · [團隊 server 與共編](./docs/collaboration.md)
-- 範例：[AI harness](./demo/ai-harness-engineering) · [日常排程](./demo/daily-work-schedule) · [小說撰寫](./demo/novel-writing)
+- 範例：[AI harness](./demo/zh-TW/ai-harness-engineering) · [日常排程](./demo/zh-TW/daily-work-schedule) · [小說撰寫](./demo/zh-TW/novel-writing)
 - [協助開發](./docs/contributing.md) · [程式碼簽章政策](./docs/code-signing-policy.md)
 
 Agent 工作站、MCP、即時共編、備份與歷史紀錄目前為 Beta，之後可能調整。
