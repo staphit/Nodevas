@@ -244,6 +244,7 @@ func TestParseVerdictAndSummary(t *testing.T) {
 func TestReviseJob(t *testing.T) {
 	env := startReviewRunner(t, nil)
 	env.hub.hello()
+	ownPR(env)
 	env.hub.offer(prJob("run-rvs", runnerwire.JobRevise, "edit: Fix it"))
 	result := env.hub.wait("run-rvs", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunSucceeded || result.FailureKind != "" {
@@ -293,7 +294,7 @@ func TestReviseJob(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.client.Config.DataDir, "worktrees", "run-rvs")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("revise worktree still there: %v", err)
 	}
-	if got := env.client.jobs.watchedRuns(); !slices.Equal(got, []string{"run-rvs"}) {
+	if got := env.client.jobs.watchedRuns(); !slices.Equal(got, []string{"run-impl", "run-rvs"}) {
 		t.Errorf("watched %v", got)
 	}
 }
@@ -301,6 +302,7 @@ func TestReviseJob(t *testing.T) {
 func TestReviseRejectedPush(t *testing.T) {
 	env := startReviewRunner(t, nil)
 	env.hub.hello()
+	ownPR(env)
 	env.hub.offer(prJob("run-race", runnerwire.JobRevise, "race: "+reviewBranch))
 	result := env.hub.wait("run-race", runnerwire.TypeFinish).Result
 	if result.Status != runnerwire.RunFailed || result.FailureKind != runnerwire.FailureTask ||
@@ -317,8 +319,8 @@ func TestReviseRejectedPush(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.client.Config.DataDir, "worktrees", "run-race", "hello.txt")); err != nil {
 		t.Errorf("the run's work was not kept: %v", err)
 	}
-	if len(env.client.jobs.watchedRuns()) != 0 {
-		t.Error("watching after a refused push")
+	if got := env.client.jobs.watchedRuns(); !slices.Equal(got, []string{"run-impl"}) {
+		t.Errorf("watching %v after a refused push", got)
 	}
 }
 

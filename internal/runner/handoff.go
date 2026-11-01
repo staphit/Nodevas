@@ -47,9 +47,12 @@ const (
 
 // handoffEntry is one handoff branch this runner made.
 type handoffEntry struct {
-	Branch    string `json:"branch"`
-	RepoID    string `json:"repoId"`
-	RepoPath  string `json:"repoPath"`
+	Branch   string `json:"branch"`
+	RepoID   string `json:"repoId"`
+	RepoPath string `json:"repoPath"`
+	// NodeID is the node the run was for; a handoff is continued only for
+	// it. Records from before it was kept have none.
+	NodeID    string `json:"nodeId,omitempty"`
 	Commit    string `json:"commit"`
 	RunID     string `json:"runId"`
 	Note      string `json:"note"`
@@ -140,8 +143,9 @@ func registerHandoff(ctx context.Context, dataDir string, entry handoffEntry) er
 }
 
 // lookupHandoff checks a job's handoff branch: a handoff branch name, made
-// by this runner for this repository, still at the commit it was made at.
-func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, branch string) (handoffEntry, error) {
+// by this runner for this repository and node, still at the commit it was
+// made at.
+func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, nodeID, branch string) (handoffEntry, error) {
 	if !runnerwire.ValidHandoffBranch(branch) {
 		return handoffEntry{}, fmt.Errorf("handoff branch %q is not a handoff branch name", branch)
 	}
@@ -161,6 +165,9 @@ func lookupHandoff(ctx context.Context, dataDir string, repo runnerwire.Repo, br
 		}
 		if head != e.Commit {
 			return handoffEntry{}, fmt.Errorf("handoff branch %s moved since this runner made it", branch)
+		}
+		if e.NodeID != "" && e.NodeID != nodeID {
+			return handoffEntry{}, fmt.Errorf("handoff branch %s was made for another node, not %s", branch, nodeID)
 		}
 		return e, nil
 	}
@@ -183,7 +190,7 @@ func (j *jobs) prepareHandoff(ctx context.Context, r *run) string {
 	if err != nil {
 		return "cannot read the handoff record: " + err.Error()
 	}
-	entry, err := lookupHandoff(ctx, dataDir, r.repo, job.HandoffBranch)
+	entry, err := lookupHandoff(ctx, dataDir, r.repo, job.NodeID, job.HandoffBranch)
 	if err != nil {
 		return err.Error()
 	}
@@ -233,7 +240,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 	dataDir, err := j.c.Config.RunDataDir()
 	if err == nil {
 		err = registerHandoff(ctx, dataDir, handoffEntry{
-			Branch: branch, RepoID: r.repo.ID, RepoPath: r.repo.Path, Commit: changes.Commit,
+			Branch: branch, RepoID: r.repo.ID, RepoPath: r.repo.Path, NodeID: job.NodeID, Commit: changes.Commit,
 			RunID: job.RunID, Note: note, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		})
 	}
