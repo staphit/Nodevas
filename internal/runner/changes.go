@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -443,19 +444,33 @@ func removeWorktree(ctx context.Context, repoPath string, wt Worktree, dropBranc
 // filter its config names would run as the owner. So the populated
 // submodules are left out of add -A, and update-index records where each one
 // now points, which reads only its HEAD.
+//
+// A submodule whose directory holds files but no repository was turned into
+// plain files by the agent: add -A never looks into a directory the index
+// holds as a submodule, so its pointer is dropped from the index first and
+// add -A then stages the files. An empty directory is a submodule nobody
+// populated and keeps its pointer.
 func stageAll(ctx context.Context, dir string) error {
 	staged, err := git(ctx, dir, "ls-files", "--stage", "-z")
 	if err != nil {
 		return err
 	}
-	var populated []string
+	var populated, replaced []string
 	for _, rec := range strings.Split(staged, "\x00") {
 		meta, path, ok := strings.Cut(rec, "\t")
 		if !ok || !strings.HasPrefix(meta, "160000 ") {
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path), ".git")); err == nil {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if _, err := os.Lstat(filepath.Join(full, ".git")); err == nil {
 			populated = append(populated, path)
+		} else if holdsFiles(full) {
+			replaced = append(replaced, path)
+		}
+	}
+	if len(replaced) > 0 {
+		if _, err := git(ctx, dir, append([]string{"update-index", "--force-remove", "--"}, replaced...)...); err != nil {
+			return err
 		}
 	}
 	args := []string{"add", "-A"}
@@ -473,4 +488,25 @@ func stageAll(ctx context.Context, dir string) error {
 	}
 	_, err = git(ctx, dir, append([]string{"update-index", "--add", "--remove", "--"}, populated...)...)
 	return err
+}
+
+// holdsFiles says whether dir is a real directory with anything but
+// directories somewhere under it. Symlinks are not followed.
+func holdsFiles(dir string) bool {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	found := false
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
 }
