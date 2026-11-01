@@ -23,7 +23,8 @@ import (
 // Worktrees: one whose run changed nothing is removed at once, with its
 // branch. One with a PR stays until the PR is merged or closed. Every other
 // one stays for the owner to look at: a cancelled run, a commit git
-// refused, a push or PR that failed, autoPR off.
+// refused, a push or PR that failed, autoPR off, and agent config the
+// commit left out (dropWorktree), which keeps it past its PR too.
 func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runnerwire.RunChanges, *runnerwire.PRInfo) {
 	ctx := j.ctx // a cancel from the hub no longer applies: the agent is done
 	job := r.job
@@ -42,10 +43,11 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 
 	switch {
 	case !committed.Changed && committed.Err == nil:
-		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "no changes; worktree removed"})
-		if err := removeWorktree(ctx, r.repo.Path, wt, true); err != nil {
-			j.c.logf("run %s: removing its worktree: %v", job.RunID, err)
+		text := "no changes; worktree removed"
+		if !j.dropWorktree(r, wt, committed, true) {
+			text = "no changes committed; worktree kept at " + wt.Path
 		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: text})
 		return &changes, nil
 	case changes.Commit != "":
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: fmt.Sprintf("committed %s on %s: %d files, +%d −%d",
@@ -70,8 +72,13 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 	} else {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "opened " + pr.URL})
 		j.c.logf("run %s: opened %s", job.RunID, pr.URL)
-		j.watch(watchedPR{RunID: job.RunID, NodeID: job.NodeID, URL: pr.URL, Worktree: wt.Path, Repo: r.repo.Path,
-			Branch: wt.Branch, PR: pr})
+		watched := watchedPR{RunID: job.RunID, NodeID: job.NodeID, URL: pr.URL, Worktree: wt.Path, Repo: r.repo.Path,
+			Branch: wt.Branch, PR: pr}
+		if len(committed.Withheld) > 0 {
+			// It holds agent config the commit left out: it outlives the PR.
+			watched.Worktree = ""
+		}
+		j.watch(watched)
 	}
 	return &changes, &pr
 }
