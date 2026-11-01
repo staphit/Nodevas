@@ -30,7 +30,7 @@ tagged commit on this repository:
 - [`release-macos.yml`](../.github/workflows/release-macos.yml)
 
 Each workflow builds the web frontend, compiles the Go backend, packages the
-Electron shell and generates `SHA256SUMS-*.txt` checksums in a build job whose
+Electron shell and generates checksums (`SHA256SUMS-windows.txt`, `SHA256SUMS.txt`) in a build job whose
 GitHub token can only read; a separate publish job, which runs no build or
 dependency code, takes the artifacts (kept for one day) and uploads them to the
 corresponding GitHub release. No release artifact is built on a developer

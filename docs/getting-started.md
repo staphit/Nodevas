@@ -69,7 +69,7 @@ go run ./cmd/nodevas serve -project ./workspace -port 5666
 npm run dev --prefix web
 ```
 
-Open <http://127.0.0.1:5173>. Vite proxies `/api` and `/ws` to port `5666` for this machine's own pages only. It answers `404` to another origin, a Host name that is not `localhost` or an IP address, a page the browser marks as cross-site, and a tunnel or proxy on this machine (a loopback request that already carries forwarding headers, such as ngrok in front of port 5173). The hub has no accounts here, so it answers `401` to a request the dev server relays for another machine: the dev server opened to the network (`--host`) shows other devices the page but no workspace. See [Opening the app on a phone](../scripts/serve-lan.md).
+Open <http://127.0.0.1:5173>. Vite proxies `/api` and `/ws` to port `5666` for this machine's own pages only. It answers `404` to another origin, a Host name that is not `localhost`, a `*.localhost` name or an IP address, a page the browser marks as cross-site, and a tunnel or proxy on this machine (a loopback request that already carries forwarding headers, such as ngrok in front of port 5173; a tunnel that adds no such header is not caught). The hub has no accounts here, so it answers `401` to a request the dev server relays for another machine: the dev server opened to the network (`--host`) shows other devices the page but no workspace. See [Opening the app on a phone](../scripts/serve-lan.md).
 
 ## Team server
 

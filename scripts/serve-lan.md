@@ -61,7 +61,10 @@ with `401` ("this server has no accounts and answers only this machine"): a
 phone on the Wi-Fi gets the app shell and no workspace. That is on purpose. A
 hub without accounts trusts whoever reaches it, so it may only be reached from
 this machine; the dev server also refuses (`404`) other origins, other Host
-names, cross-site pages and a tunnel on this machine.
+names, cross-site pages and a proxy or tunnel on this machine that adds
+forwarding headers. A raw TCP tunnel (ssh -R, `ngrok tcp`, `adb reverse`) adds
+none and is treated as this machine: never point one at a dev server or hub you
+would not hand to whoever reaches the tunnel.
 
 An iPhone has no USB port forward like `adb reverse`. Test it against a hub with
 accounts and HTTPS ([Team server](../docs/getting-started.md#team-server)), or

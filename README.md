@@ -54,11 +54,11 @@ The agent controls are hidden at first. They appear when you turn on **Settings 
 
 ## Security model
 
-- **Standalone and desktop trust this machine.** A hub on loopback has no accounts, so any program running on this computer, under any user, can reach it and act as you. Use them on a single-user machine. A per-launch token that closes this is a possible future change; open an issue if you need it.
+- **Standalone and desktop trust this machine.** A standalone hub (loopback, with no proxy, TLS or Access) has no accounts, so any program running on this computer, under any user, can reach it and act as you. Use them on a single-user machine. A per-launch token that closes this is a possible future change; open an issue if you need it.
 - **A team hub** needs accounts, HTTPS and mail. Settings that decide whom it trusts (public host name, proxy, TLS, Cloudflare Access, copilot bypass, a copilot or SMTP server off the machine) come from `--config` / `NODEVAS_CONFIG`, the environment or flags, never from the workspace's own `nodevas.yaml`; see [Operations](./docs/operations.md#configuration).
 - **The runner runs what the hub sends, within its own limits.** You accept each run at its terminal, read-only runs stay read only, and an agent that may run any shell command is left to a person. Auto-accept is off by default: keep it off, or limited to repositories and agents you would let anyone who controls the hub run.
 - **The permission relay is a trade-off.** With `permissionRelay` on, your **Allow** reaches the runner through the hub, so a compromised hub could forge one. It never widens a read-only run or the CLI's own deny rules. It is off by default; keep it off unless you trust the hub.
-- **Known limits.** Someone who knows a member's sign-in address can keep that member from signing in for a few minutes at a time by typing wrong passcodes. Behind a proxy, a `trusted_proxy` that misses the proxy makes the hub take HTTPS requests for plain HTTP: its cookies lose `Secure` and it sends no HSTS.
+- **Known limits.** Someone who knows a member's sign-in address can keep that member from signing in for a few minutes at a time by typing wrong passcodes. Behind a proxy, a `trusted_proxy` that misses the proxy makes the hub take HTTPS requests for plain HTTP: its cookies lose `Secure` and it sends no HSTS. A standalone hub or dev server reached through a proxy or tunnel on this machine that adds no forwarding header (raw TCP tunnels, nginx with default headers) treats the visitor as you.
 
 ## Learn more
 
