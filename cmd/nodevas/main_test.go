@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"nodevas/internal/auth"
+	"nodevas/internal/db"
 	"nodevas/internal/testpg"
 	"os"
 	"path/filepath"
@@ -255,29 +257,29 @@ func TestSecretEnvironmentReadsFileAndRejectsAmbiguousInput(t *testing.T) {
 // mistyped command line and a workspace on the open network, so each one is
 // asserted on its own rather than through a single "it errors" check.
 func TestValidateServeFlagsRefusesUnsafeDeployments(t *testing.T) {
-	if err := validateServeFlags("0.0.0.0", 5666, nil, "cert.pem", "key.pem", false, false); err == nil {
+	if err := validateServeFlags("0.0.0.0", 5666, nil, "cert.pem", "key.pem", false, false, false); err == nil {
 		t.Fatal("a wildcard bind without --hostname was accepted")
 	}
-	if err := validateServeFlags("0.0.0.0", 5666, []string{"nodes.example.com"}, "", "", false, false); err == nil {
+	if err := validateServeFlags("0.0.0.0", 5666, []string{"nodes.example.com"}, "", "", false, false, false); err == nil {
 		t.Fatal("a networked plaintext listener was accepted without --allow-plaintext")
 	}
-	if err := validateServeFlags("127.0.0.1", 5666, nil, "cert.pem", "", false, false); err == nil {
+	if err := validateServeFlags("127.0.0.1", 5666, nil, "cert.pem", "", false, false, false); err == nil {
 		t.Fatal("--tls-cert was accepted without --tls-key")
 	}
-	if err := validateServeFlags("127.0.0.1", 0, nil, "", "", false, false); err == nil {
+	if err := validateServeFlags("127.0.0.1", 0, nil, "", "", false, false, false); err == nil {
 		t.Fatal("port 0 was accepted")
 	}
 
 	// The safe shapes: loopback needs nothing, a named wildcard with TLS is a
 	// proper deployment, and a loopback listener behind a proxy that terminates
 	// TLS is plaintext on purpose.
-	if err := validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false); err != nil {
+	if err := validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false, false); err != nil {
 		t.Fatalf("loopback plaintext refused: %v", err)
 	}
-	if err := validateServeFlags("0.0.0.0", 443, []string{"nodes.example.com"}, "cert.pem", "key.pem", false, false); err != nil {
+	if err := validateServeFlags("0.0.0.0", 443, []string{"nodes.example.com"}, "cert.pem", "key.pem", false, false, false); err != nil {
 		t.Fatalf("a named TLS deployment was refused: %v", err)
 	}
-	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodes.example.com"}, "", "", true, false); err != nil {
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodes.example.com"}, "", "", true, false, false); err != nil {
 		t.Fatalf("a same-host reverse proxy deployment was refused: %v", err)
 	}
 }
@@ -310,8 +312,71 @@ func TestWildcardAndLoopbackClassification(t *testing.T) {
 	if !isWildcardHost("") || !isWildcardHost("0.0.0.0") || !isWildcardHost("::") || isWildcardHost("127.0.0.1") {
 		t.Fatal("wildcard classification is unsafe")
 	}
-	if !isRemoteDeployment("127.0.0.1", true) || isRemoteDeployment("127.0.0.1", false) {
+	if !isRemoteDeployment("127.0.0.1", true, nil, false) || isRemoteDeployment("127.0.0.1", false, nil, false) {
 		t.Fatal("same-host reverse proxy did not force remote authentication")
+	}
+}
+
+// A loopback listener is only private while nothing on this machine forwards
+// to it. A public --hostname, or Cloudflare Access in front, says something
+// does: a tunnel or a proxy brings other people's requests in over loopback,
+// and a hub without accounts would take each of them for the person at the
+// keyboard.
+func TestALoopbackHubReachedFromElsewhereIsRemote(t *testing.T) {
+	if !isRemoteDeployment("127.0.0.1", false, []string{"nodevas.example.com"}, false) {
+		t.Error("a loopback hub answering on a public --hostname was classed as local")
+	}
+	if !isRemoteDeployment("127.0.0.1", false, []string{"localhost", "nodevas.example.com"}, false) {
+		t.Error("a public name after a loopback one was not noticed")
+	}
+	if !isRemoteDeployment("127.0.0.1", false, nil, true) {
+		t.Error("a loopback hub behind Cloudflare Access was classed as local")
+	}
+	// Loopback names add nobody.
+	if isRemoteDeployment("127.0.0.1", false, []string{"localhost", "127.0.0.1", "::1"}, false) {
+		t.Error("loopback --hostname values made a standalone hub remote")
+	}
+}
+
+// Without --behind-proxy such a hub would not trust the proxy's scheme
+// header and would get no accounts, so serve refuses it and says what to pass.
+func TestValidateServeFlagsRefusesAForwardedLoopbackHubWithoutAProxy(t *testing.T) {
+	err := validateServeFlags("127.0.0.1", 5666, []string{"nodevas.example.com"}, "", "", false, false, false)
+	if err == nil {
+		t.Fatal("a public --hostname on a loopback listener was accepted without --behind-proxy")
+	}
+	if !strings.Contains(err.Error(), "--behind-proxy") {
+		t.Errorf("the refusal %q does not say to pass --behind-proxy", err)
+	}
+	err = validateServeFlags("127.0.0.1", 5666, nil, "", "", false, false, true)
+	if err == nil {
+		t.Fatal("Cloudflare Access on a loopback listener was accepted without --behind-proxy")
+	}
+	if !strings.Contains(err.Error(), "--behind-proxy") {
+		t.Errorf("the refusal %q does not say to pass --behind-proxy", err)
+	}
+
+	// The shapes that stay: behind the proxy it names, and loopback names on
+	// a standalone hub.
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"nodevas.example.com"}, "", "", true, false, true); err != nil {
+		t.Fatalf("a same-host proxy with Access was refused: %v", err)
+	}
+	if err := validateServeFlags("127.0.0.1", 5666, []string{"localhost"}, "", "", false, false, false); err != nil {
+		t.Fatalf("a loopback --hostname on a standalone hub was refused: %v", err)
+	}
+}
+
+// serve itself applies the refusal: it ends before it opens the workspace's
+// database, which this environment does not have.
+func TestServeRefusesAPublicHostnameOnLoopbackWithoutAProxy(t *testing.T) {
+	root := t.TempDir()
+	out, code := runNodevas(t, isolatedEnv(t, "NODEVAS_REQUIRE_DATABASE_URL=1", db.URLEnv+"=", db.URLFileEnv+"="), "",
+		"serve", "--project", root, "--port", fmt.Sprint(freePort(t)), "--no-runner", "--hostname", "nodevas.example.com")
+	if code == 0 {
+		t.Fatalf("serve exited 0:\n%s", out)
+	}
+	if !strings.Contains(out, "--behind-proxy") {
+		t.Fatalf("serve went on past a public --hostname on loopback without --behind-proxy:\n%s", out)
 	}
 }
 

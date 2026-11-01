@@ -66,7 +66,9 @@ func isWildcardHost(host string) bool {
 	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
-func isRemoteDeployment(host string, behindProxy bool) bool {
+// isRemoteDeployment reports whether the hub is reachable from anywhere but
+// this machine, which is what makes accounts mandatory.
+func isRemoteDeployment(host string, behindProxy bool, hostNames []string, access bool) bool {
 	return behindProxy || !isLoopbackHost(host)
 }
 
@@ -160,6 +162,7 @@ func validateServeFlags(
 	keyFile string,
 	behindProxy bool,
 	allowPlaintext bool,
+	access bool,
 ) error {
 	if port < 1 || port > 65535 {
 		return errors.New("port must be between 1 and 65535")
@@ -170,7 +173,7 @@ func validateServeFlags(
 	// A loopback listener behind a reverse proxy is still remotely reachable;
 	// treating it as local would silently disable accounts for the common
 	// same-host proxy deployment.
-	remote := isRemoteDeployment(listen, behindProxy)
+	remote := isRemoteDeployment(listen, behindProxy, hostNames, access)
 	useTLS := certFile != ""
 	proxyOnlyTransport := behindProxy && isLoopbackHost(listen)
 	if remote && isWildcardHost(listen) && len(hostNames) == 0 {
@@ -473,11 +476,14 @@ func serve(args []string) {
 		fatalf("config: %v", err)
 	}
 
+	hostNames := hostList(*hostname)
+	remote := isRemoteDeployment(*listen, *behindProxy, hostNames, serveConfig.Access.Enabled())
+
 	// Logging is set up before anything else can fail, so a startup error is
 	// itself a structured record rather than the one line that escapes the
 	// pipeline. A standalone hub's log also goes to a file under the catalog
 	// root, with the runtime's crash output (serve_console.go).
-	standalone := !isRemoteDeployment(*listen, *behindProxy)
+	standalone := !remote
 	logs := openServeLogs(os.Stderr, standalone)
 	defer logs.close()
 	logger, err := logging.Setup(logs.writer, logging.Config{
@@ -499,13 +505,11 @@ func serve(args []string) {
 	if _, err := os.Stat(root); err != nil {
 		fatalf("project dir: %v", err)
 	}
-	hostNames := hostList(*hostname)
 	if err := validateServeFlags(
-		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext,
+		*listen, *port, hostNames, *certFile, *keyFile, *behindProxy, *allowPlaintext, serveConfig.Access.Enabled(),
 	); err != nil {
 		fatal(err)
 	}
-	remote := isRemoteDeployment(*listen, *behindProxy)
 	useTLS := *certFile != ""
 	proxyOnlyTransport := *behindProxy && isLoopbackHost(*listen)
 	runnerMode, runnerNote, err := planLocalRunner(*withRunner, *noRunner, repos, remote, useTLS, serveConfig.Access.Enabled())
