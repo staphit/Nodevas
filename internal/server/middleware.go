@@ -94,8 +94,10 @@ func (s *Server) secureHTTP(c *gin.Context) {
 	underAPI := strings.HasPrefix(r.URL.Path, "/api/")
 	// A GET that changes state is a write wearing a safe method's clothes, so
 	// it gets the same cross-origin treatment even though the method check
-	// would wave it through.
-	if underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r)) {
+	// would wave it through. The realtime socket is one too: it reads
+	// documents as they are typed and writes edits back, and a proxy in
+	// front (the Vite dev server) may have rewritten its Origin.
+	if (underAPI && (isUnsafeMethod(r.Method) || stateChangingGET(r))) || r.URL.Path == "/ws" {
 		if origin := r.Header.Get("Origin"); origin != "" && !s.isAllowedOrigin(origin, r.Host) {
 			httpx.Err(c, http.StatusForbidden, locale.Errorf("cross-origin API request rejected", "拒絕跨來源的 API 請求"))
 			return
