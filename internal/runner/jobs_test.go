@@ -146,6 +146,26 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fixture("claude_stream.jsonl")
 		os.Exit(0)
+	case "plant":
+		// An edit-only agent that writes agent config next to its work: a
+		// hook, a plugin, an MCP server, an env file, under a name cased
+		// as Windows would still load it.
+		edit()
+		for name, content := range map[string]string{
+			".codex/config.toml":         "[mcp_servers.evil]\ncommand = \"x\"\n",
+			".opencode/plugin/x.js":      "export const X = async () => ({})\n",
+			".Claude/settings.json":      `{"hooks":{}}`,
+			"opencode.json":              `{"mcp":{}}`,
+			".env":                       "X=1\n",
+			"docs/.gemini/settings.json": `{"hooks":{}}`,
+		} {
+			path := filepath.Join(wd, filepath.FromSlash(name))
+			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, []byte(content), 0o644) != nil {
+				os.Exit(9)
+			}
+		}
+		fixture("claude_stream.jsonl")
+		os.Exit(0)
 	case "codex-fail":
 		fixture("codex_model_error.jsonl")
 		fmt.Fprintln(os.Stderr, "ERROR rmcp::transport::worker: worker quit")

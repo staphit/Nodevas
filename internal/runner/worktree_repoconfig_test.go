@@ -233,3 +233,44 @@ func TestClearRepoConfigJunction(t *testing.T) {
 		t.Fatalf("the junction's target was touched: %q, %v", b, err)
 	}
 }
+
+// Agent config a run writes is not committed with its work: a later run on
+// that branch (a revise, a handoff, an implement or judge at that base) would
+// load it, and some of it runs programs as the owner. The run says what it
+// left out, and the rest of the work is committed as usual.
+func TestRunDoesNotCommitAgentConfig(t *testing.T) {
+	env := startJobRunner(t, nil)
+	env.hub.hello()
+	env.hub.offer(testJob("run-plant", "plant: do it"))
+	finish := env.hub.wait("run-plant", runnerwire.TypeFinish)
+	if finish.Result == nil || finish.Result.Status != runnerwire.RunSucceeded {
+		t.Fatalf("result = %+v", finish.Result)
+	}
+	tree := strings.Fields(gitT(t, env.repo, "ls-tree", "-r", "--name-only", BranchName("n-1", "run-plant")))
+	if !slices.Contains(tree, "hello.txt") {
+		t.Fatalf("the run's work was not committed: %q", tree)
+	}
+	for _, name := range []string{".codex/config.toml", ".opencode/plugin/x.js", ".Claude/settings.json", "opencode.json", ".env"} {
+		if slices.Contains(tree, name) {
+			t.Errorf("the run committed %s: %q", name, tree)
+		}
+	}
+	// Deeper down, a CLI does not read it as the repository's config.
+	if !slices.Contains(tree, "docs/.gemini/settings.json") {
+		t.Errorf("the run lost docs/.gemini/settings.json: %q", tree)
+	}
+	for _, msg := range env.hub.messages("run-plant") {
+		if msg.Type != runnerwire.TypeChanges {
+			continue
+		}
+		for _, f := range msg.Changes.Files {
+			if strings.HasPrefix(f.Path, ".codex") || f.Path == "opencode.json" {
+				t.Errorf("changes list %s", f.Path)
+			}
+		}
+	}
+	if events := eventsOf(env.hub.messages("run-plant")); !hasEvent(events, "left out of the commit") ||
+		!hasEvent(events, ".codex") {
+		t.Errorf("events = %+v", events)
+	}
+}
