@@ -203,7 +203,7 @@ func (j *jobs) handOff(r *run, wt Worktree, result *runnerwire.RunResult) *runne
 	ctx := j.ctx
 	job := r.job
 	message := commitMessage(fmt.Sprintf("Partial work: the agent stopped (%s) before finishing.", result.FailureKind), job)
-	committed := commitRun(ctx, wt, message)
+	committed := j.commit(ctx, r, wt, message)
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the partial work: " + committed.Err.Error()})
 	}

@@ -30,7 +30,7 @@ func (j *jobs) publish(r *run, wt Worktree, result runnerwire.RunResult) (*runne
 	cfg := j.c.Config
 
 	message := commitMessage(result.Summary, job)
-	committed := commitRun(ctx, wt, message)
+	committed := j.commit(ctx, r, wt, message)
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the changes: " + committed.Err.Error()})
 	}

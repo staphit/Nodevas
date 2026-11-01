@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"nodevas/internal/redact"
+	"nodevas/internal/runner/adapter"
 	"nodevas/internal/runnerwire"
 )
 
@@ -113,10 +114,14 @@ type commitResult struct {
 	// Err is why a commit with changes failed (git refused it, or the
 	// worktree's git directory was changed).
 	Err error
+	// Withheld is the agent config the run added, changed or removed, which
+	// the commit leaves out (unstageRepoConfig).
+	Withheld []string
 }
 
-// commitRun stages everything in the worktree and commits it. The agent may
-// have committed on its own; its commits count as the run's too.
+// commitRun stages everything in the worktree but agent config and commits
+// it. The agent may have committed on its own; its commits count as the
+// run's too.
 func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	var res commitResult
 	if err := checkGitDir(ctx, wt); err != nil {
@@ -134,6 +139,11 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 		res.Base = strings.TrimSpace(out)
 	}
 	if _, err := git(ctx, wt.Path, "add", "-A"); err != nil {
+		res.Err = err
+		res.Changed = true
+		return res
+	}
+	if res.Withheld, err = unstageRepoConfig(ctx, wt.Path); err != nil {
 		res.Err = err
 		res.Changed = true
 		return res
@@ -164,6 +174,45 @@ func commitRun(ctx context.Context, wt Worktree, message string) commitResult {
 	if head != res.Base {
 		res.Commit = head
 		res.Changed = true
+	}
+	return res
+}
+
+// unstageRepoConfig takes the repository's agent config
+// (adapter.RepoConfigPaths, in any letter case: Windows and macOS load
+// .Codex as .codex) back out of the index, as HEAD has it, and returns
+// what it took out. Some of that config runs programs as whoever runs the
+// next agent there (hooks, plugins, MCP servers), and an agent that may only
+// edit files must not hand itself, or the next run on its branch, a shell
+// that way: a revise, a handoff, or an implement or judge at that base
+// loads its branch's config. The files stay in the worktree, for a person to
+// commit if they meant it.
+func unstageRepoConfig(ctx context.Context, dir string) ([]string, error) {
+	specs := []string{"--"}
+	for _, path := range adapter.RepoConfigPaths() {
+		specs = append(specs, ":(icase,literal)"+path)
+	}
+	out, err := git(ctx, dir, append([]string{"diff", "--cached", "--name-only", "-z"}, specs...)...)
+	if err != nil || out == "" {
+		return nil, err
+	}
+	if _, err := git(ctx, dir, append([]string{"reset", "-q"}, specs...)...); err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimRight(out, "\x00"), "\x00"), nil
+}
+
+// commit is commitRun for r, saying in its events what agent config the
+// commit left out.
+func (j *jobs) commit(ctx context.Context, r *run, wt Worktree, message string) commitResult {
+	res := commitRun(ctx, wt, message)
+	if len(res.Withheld) > 0 {
+		list := res.Withheld
+		if len(list) > 20 {
+			list = append(list[:20:20], fmt.Sprintf("and %d more", len(res.Withheld)-20))
+		}
+		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "agent config left out of the commit " +
+			"(a later run on this branch would load it); commit it yourself if it is meant: " + strings.Join(list, ", ")})
 	}
 	return res
 }

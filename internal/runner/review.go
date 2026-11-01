@@ -500,7 +500,7 @@ func (j *jobs) publishRevise(r *run, wt Worktree, result runnerwire.RunResult) (
 	if title := oneLine(job.NodeTitle); title != "" {
 		titled.NodeTitle = "Address review: " + title
 	}
-	committed := commitRun(ctx, wt, commitMessage(result.Summary, titled))
+	committed := j.commit(ctx, r, wt, commitMessage(result.Summary, titled))
 	if committed.Err != nil {
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "could not commit the changes: " + committed.Err.Error()})
 	}
