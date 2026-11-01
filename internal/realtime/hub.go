@@ -95,6 +95,9 @@ type wsClient struct {
 	ip       string
 	queueMu  sync.Mutex
 	removed  bool
+	// stale is the tables this reader skipped while it was behind (offerTable),
+	// sent again once it has caught up (catchUp). Guarded by queueMu.
+	stale staleTables
 
 	mu         sync.Mutex
 	actor      identity.Actor
@@ -126,6 +129,14 @@ type docOutboundSnapshot struct {
 	tail            []string
 	tailBytes       int
 }
+
+// staleTables says which of a room's tables a reader is owed.
+type staleTables uint8
+
+const (
+	stalePresence staleTables = 1 << iota
+	staleLocks
+)
 
 type clientOutbound struct {
 	payload  []byte
@@ -773,17 +784,69 @@ func (client *wsClient) enqueue(out clientOutbound) bool {
 func (client *wsClient) offer(out clientOutbound) {
 	client.queueMu.Lock()
 	defer client.queueMu.Unlock()
+	client.offerLocked(out)
+}
+
+// offerLocked is offer for a caller holding queueMu. It reports whether the
+// frame was queued.
+func (client *wsClient) offerLocked(out clientOutbound) bool {
 	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
-		return
+		return false
 	}
 	select {
 	case client.outbound <- out:
+		return true
 	default:
+		return false
 	}
 }
 
-// catchUp sends a reader that has caught up what it skipped while behind.
-func (h *Hub) catchUp(client *wsClient) {}
+// offerTable queues one of a room's tables: who is in it, or which documents
+// are held. Each replaces the last, and anybody in the room can make one
+// change (a viewer by saying which document it looks at), so a reader that is
+// behind skips it as it would a cursor rather than being dropped, which would
+// release its locks and its live documents. It is sent the current table once
+// it has caught up.
+func (h *Hub) offerTable(client *wsClient, table staleTables, event Event) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("ws marshal: %v", err)
+		return
+	}
+	client.queueMu.Lock()
+	defer client.queueMu.Unlock()
+	if client.offerLocked(clientOutbound{payload: payload}) {
+		client.stale &^= table
+	} else if !client.removed {
+		client.stale |= table
+	}
+}
+
+// catchUp sends a reader that has caught up the current tables it skipped
+// while it was behind (offerTable). writeLoop calls it after every frame: a
+// table is skipped only with half a queue still to write, so the reader always
+// gets here again.
+func (h *Hub) catchUp(client *wsClient) {
+	client.queueMu.Lock()
+	stale := client.stale
+	if client.removed || len(client.outbound) >= cap(client.outbound)/2 {
+		stale = 0
+	}
+	client.stale &^= stale
+	client.queueMu.Unlock()
+	if stale == 0 {
+		return
+	}
+	client.mu.Lock()
+	room := client.room
+	client.mu.Unlock()
+	if stale&stalePresence != 0 {
+		h.sendPresence(room, client)
+	}
+	if stale&staleLocks != 0 {
+		h.sendLocks(room, client)
+	}
+}
 
 func (h *Hub) writeLoop(client *wsClient) {
 	ping := time.NewTicker(wsPingInterval)
@@ -808,6 +871,7 @@ func (h *Hub) writeLoop(client *wsClient) {
 					h.remove(client)
 					return
 				}
+				h.catchUp(client)
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -817,6 +881,7 @@ func (h *Hub) writeLoop(client *wsClient) {
 				h.remove(client)
 				return
 			}
+			h.catchUp(client)
 		case <-ping.C:
 			if client.authorized != nil && !client.authorized() {
 				h.remove(client)
@@ -1097,11 +1162,15 @@ func (h *Hub) handleMessage(client *wsClient, message clientMessage) {
 		h.subscribe(client, message.Project)
 	case "presence":
 		client.mu.Lock()
+		changed := client.nodeID != message.NodeID || client.editing != message.Editing
 		client.nodeID = message.NodeID
 		client.editing = message.Editing
 		room := client.room
 		client.mu.Unlock()
-		h.publishPresence(room)
+		// Saying again what the room already knows changes nothing.
+		if changed {
+			h.publishPresence(room)
+		}
 	case "lock":
 		h.acquireLock(client, message.NodeID, message.Steal)
 	case "unlock":
@@ -1292,6 +1361,12 @@ func (h *Hub) releaseAll(client *wsClient, room string) {
 
 // publishPresence tells a room who is in it and what they are looking at.
 func (h *Hub) publishPresence(room string) {
+	h.sendPresence(room, nil)
+}
+
+// sendPresence is publishPresence for one client of the room, or for all of
+// them when only is nil.
+func (h *Hub) sendPresence(room string, only *wsClient) {
 	h.mu.Lock()
 	peers := make([]Peer, 0, len(h.conns))
 	targets := make([]*wsClient, 0, len(h.conns))
@@ -1305,14 +1380,14 @@ func (h *Hub) publishPresence(room string) {
 			Editing: client.editing,
 			Color:   peerColor(client.actor),
 		}
-		project := client.project
 		client.mu.Unlock()
 		if !inRoom {
 			continue
 		}
-		_ = project
 		peers = append(peers, peer)
-		targets = append(targets, client)
+		if only == nil || client == only {
+			targets = append(targets, client)
+		}
 	}
 	h.mu.Unlock()
 
@@ -1320,7 +1395,7 @@ func (h *Hub) publishPresence(room string) {
 		client.mu.Lock()
 		project := client.project
 		client.mu.Unlock()
-		h.sendTo(client, Event{Type: "presence", Project: project, Peers: peers})
+		h.offerTable(client, stalePresence, Event{Type: "presence", Project: project, Peers: peers})
 	}
 }
 
@@ -1366,6 +1441,6 @@ func (h *Hub) sendLocks(room string, only *wsClient) {
 		client.mu.Lock()
 		project := client.project
 		client.mu.Unlock()
-		h.sendTo(client, Event{Type: "locks", Project: project, Locks: mine})
+		h.offerTable(client, staleLocks, Event{Type: "locks", Project: project, Locks: mine})
 	}
 }
