@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -162,6 +163,11 @@ func tailString(s string, n int) string {
 
 // scrubbedEnv is the runner's environment without its credentials or
 // GitHub's: the test command runs code an agent wrote.
+//
+// On Windows it sets NoDefaultCurrentDirectoryInExePath, as agents get it
+// (adapter.childEnv): a test command that is an npm .cmd shim runs a bare
+// "node", which cmd.exe would look for in the worktree, the PR's head,
+// before PATH.
 func scrubbedEnv() []string {
 	var out []string
 	for _, kv := range os.Environ() {
@@ -170,10 +176,14 @@ func scrubbedEnv() []string {
 		switch {
 		case strings.HasPrefix(upper, "NODEVAS_"),
 			upper == "GH_TOKEN", upper == "GITHUB_TOKEN", upper == "GH_ENTERPRISE_TOKEN",
-			upper == "GITHUB_ENTERPRISE_TOKEN", upper == "GIT_ASKPASS", upper == "SSH_AUTH_SOCK":
+			upper == "GITHUB_ENTERPRISE_TOKEN", upper == "GIT_ASKPASS", upper == "SSH_AUTH_SOCK",
+			upper == "NODEFAULTCURRENTDIRECTORYINEXEPATH":
 			continue
 		}
 		out = append(out, kv)
+	}
+	if runtime.GOOS == "windows" {
+		out = append(out, "NoDefaultCurrentDirectoryInExePath=1")
 	}
 	out = append(out, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	return append(out, gitConfigEnv()...)
