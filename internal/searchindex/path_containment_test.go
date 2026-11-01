@@ -31,8 +31,9 @@ func TestSearchDoesNotIndexSymlinkedNode(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	manager := NewManager()
-	t.Cleanup(func() { _ = manager.Close() })
+	// A manager over a database: one without answers every search with
+	// ErrNoIndex, and so never reached the file the link points at.
+	manager := newManager(t)
 	matches, err := manager.Search(root, "unique-index-secret")
 	if err != nil {
 		t.Fatal(err)
