@@ -606,11 +606,14 @@ test("a permission card fits a phone (390 px) without clipping (zh-TW)", async (
     expect(box!.x + box!.width).toBeLessThanOrEqual(390 + 1);
   };
   const card = cardOf(page, ask);
-  // At phone width the panel may need opening by hand.
-  if (!(await card.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    await page.keyboard.press("Control+Shift+A");
-  }
-  await expect(card).toBeVisible();
+  // The panel opens itself when the ask arrives; if it has not, its button
+  // opens it. Never the shortcut: it toggles, and pressed just after the
+  // panel opened itself it closed it again (isVisible does not wait).
+  const fab = page.getByRole("button", { name: /^開啟 Agent 對話/ });
+  await expect(async () => {
+    if (!(await card.isVisible()) && (await fab.isVisible())) await fab.click({ timeout: 1_000 });
+    await expect(card).toBeVisible({ timeout: 1_000 });
+  }).toPass();
   // The command is in view, inside the card, with no click needed.
   const input = card.locator(".agent-ask-tool-input pre");
   await expect(input).toBeVisible();
