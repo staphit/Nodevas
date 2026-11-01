@@ -21,6 +21,8 @@ interface Shown {
   sub?: string;
   patch: string;
   truncated: boolean;
+  /** History retention cleared a run's patch (the hub's patchPruned). */
+  pruned?: boolean;
   /** The run behind it, when it is known. */
   runId?: string;
   /** A commit's author and time, to find the agent that made it. */
@@ -61,6 +63,7 @@ async function load(view: DiffViewProps["view"]): Promise<Shown> {
       chip: ciChip(run),
       patch: changes?.patch ?? loose.patch ?? "",
       truncated: Boolean(changes?.patchTruncated ?? loose.patchTruncated),
+      pruned: Boolean(changes?.patchPruned),
       runId: view.runId,
       stat: changes
         ? { files: changes.files?.length ?? 0, add: changes.additions, del: changes.deletions }
@@ -173,7 +176,11 @@ export default function DiffView({ view }: DiffViewProps) {
         {loaded.error != null && (
           <p className="ex-note">{loaded.error instanceof Error ? loaded.error.message : String(loaded.error)}</p>
         )}
-        {shown?.truncated && <p className="ex-note">{t("diff.truncatedNoPr")}</p>}
+        {shown?.pruned ? (
+          <p className="ex-note">{t("diff.cleared")}</p>
+        ) : (
+          shown?.truncated && <p className="ex-note">{t("diff.truncatedNoPr")}</p>
+        )}
         {files.map((file) => (
           <div key={file.path} className="ex-diff-file">
             <div className="ex-crumb">{file.path}</div>

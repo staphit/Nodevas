@@ -285,9 +285,12 @@ export interface RunChanges {
   files: FileChange[] | null;
   additions: number;
   deletions: number;
-  /** The unified diff, at most 1 MiB; absent when patchTruncated. */
+  /** The unified diff, at most 1 MiB; absent when patchTruncated or patchPruned. */
   patch?: string;
+  /** The diff was too big to keep. */
   patchTruncated?: boolean;
+  /** History retention cleared the diff; the files and counts are kept. */
+  patchPruned?: boolean;
 }
 
 export interface RunChangesResponse {
