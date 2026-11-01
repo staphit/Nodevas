@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -42,5 +43,37 @@ func TestAccountRoutesDoNotTellRestrictedNamesFromMissingOnes(t *testing.T) {
 	header := map[string]string{"X-Nodevas-Project": "other"}
 	if response := f.do(t, &f.dan, http.MethodGet, "/api/auth/totp", "", header); response.Code != http.StatusOK {
 		t.Errorf("dan's two-factor settings with a stale project: %d %s", response.Code, response.Body)
+	}
+}
+
+// Over the socket too: subscribing to a restricted project and to one that
+// does not exist get the same refusal, for a member who may not read it.
+func TestSubscribeDoesNotTellRestrictedNamesFromMissingOnes(t *testing.T) {
+	f := newMembersFixture(t)
+	if response := f.setMember(t, f.bea, "cal", "viewer"); response.Code != http.StatusOK {
+		t.Fatalf("restrict other: %d %s", response.Code, response.Body)
+	}
+	live := httptest.NewServer(f.handler)
+	t.Cleanup(live.Close)
+
+	restricted := f.dialAs(t, live, f.dan)
+	restricted.send(map[string]any{"type": "subscribe", "project": "other"})
+	restricted.await("access-denied", nil)
+	missing := f.dialAs(t, live, f.dan)
+	missing.send(map[string]any{"type": "subscribe", "project": "nosuch"})
+	missing.await("access-denied", nil)
+
+	// A project dan may read is watched as before.
+	open := f.dialAs(t, live, f.dan)
+	open.send(map[string]any{"type": "subscribe", "project": "main"})
+	open.await("presence", nil)
+
+	// An administrator asking for a missing project stays in the catch-all
+	// room, as before.
+	ann := f.dialAs(t, live, f.ann)
+	ann.send(map[string]any{"type": "subscribe", "project": "nosuch"})
+	f.server.hub.Broadcast("marker", "")
+	if seenBefore(t, ann, "access-denied", "marker") {
+		t.Fatal("an administrator was refused a missing project")
 	}
 }
