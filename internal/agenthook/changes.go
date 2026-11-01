@@ -112,7 +112,7 @@ func dedupe(in []string) []string {
 func git(ctx context.Context, dir string, env []string, stdin io.Reader, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(ctx, dir, args)...)
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_OPTIONAL_LOCKS=0"), env...)
 	cmd.Stdin = stdin
 	var out bytes.Buffer
@@ -204,7 +204,7 @@ func Snapshot(ctx context.Context, cwd string) (runnerwire.RunChanges, bool) {
 	defer cleanup()
 
 	diff := func(args ...string) []string {
-		return append(append([]string{"diff", "--no-color", "--no-ext-diff", "-M"}, args...), "HEAD")
+		return append(append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M"}, args...), "HEAD")
 	}
 	statuses, err := git(ctx, root, env, nil, diff("--name-status", "-z")...)
 	if err != nil {
@@ -342,7 +342,7 @@ func scratchIndex(ctx context.Context, root string) ([]string, func()) {
 func gitCapped(ctx context.Context, dir string, env []string, limit int, args ...string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(ctx, dir, args)...)
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_OPTIONAL_LOCKS=0"), env...)
 	out := &capWriter{limit: limit}
 	cmd.Stdout = out
