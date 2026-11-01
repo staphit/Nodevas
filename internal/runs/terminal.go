@@ -370,6 +370,10 @@ func (t *Terminal) setFinal(status string) {
 	}
 }
 
+// termUnlisted, when set, is called as an expired relay leaves the map.
+// A seam for tests.
+var termUnlisted func(*Terminal)
+
 // expire drops an ended run's relay and lets its viewers go.
 func (ts *Terminals) expire(t *Terminal) {
 	ts.mu.Lock()
@@ -377,6 +381,9 @@ func (ts *Terminals) expire(t *Terminal) {
 		delete(ts.runs, t.runID)
 	}
 	ts.mu.Unlock()
+	if termUnlisted != nil {
+		termUnlisted(t)
+	}
 	t.mu.Lock()
 	t.gone = true
 	t.buf = nil

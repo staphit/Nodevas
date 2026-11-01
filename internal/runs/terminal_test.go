@@ -206,6 +206,31 @@ func TestTerminalViewerCapAndExpiry(t *testing.T) {
 	}
 }
 
+// A relay that is gone from the map has let its viewers go: whoever finds
+// the run's relay missing must not find its viewers still open.
+func TestAnExpiredRelayHasLetItsViewersGoWhenItIsUnlisted(t *testing.T) {
+	ts := newTerminals()
+	ts.SetKeep(time.Millisecond)
+	term := &Terminal{runID: "run-1", runnerID: "runner-1", owner: ts, status: runnerwire.RunRunning, viewers: map[*TermViewer]struct{}{}}
+	ts.runs["run-1"] = term
+	viewer, err := term.attach(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan TermCloseReason, 1)
+	termUnlisted = func(*Terminal) { seen <- viewer.Reason() }
+	t.Cleanup(func() { termUnlisted = nil })
+	term.setStatus(runnerwire.RunFailed)
+	select {
+	case reason := <-seen:
+		if reason != TermEnded {
+			t.Fatalf("viewer reason when the relay left the map = %v, want %v", reason, TermEnded)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("terminal never expired")
+	}
+}
+
 func TestClampTermSize(t *testing.T) {
 	for _, tc := range []struct{ cols, rows, wantCols, wantRows int }{
 		{80, 24, 80, 24},
