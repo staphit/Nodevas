@@ -2,7 +2,8 @@ package project
 
 import (
 	"errors"
-	"os"
+	"slices"
+	"syscall"
 
 	"nodevas/internal/store"
 )
@@ -30,14 +31,19 @@ func IsLookupFault(err error) bool {
 	return errors.As(err, &lookup)
 }
 
-// lookupFailure is err from a lookup's stat: an unsafe path (a link, a
-// file where a folder belongs) is an answer, refused as such; anything
-// else is a LookupError.
+// lookupFailure is err from a lookup's stat. Only an error saying the disk
+// could not be read (diskFaultErrnos: I/O errors, out of handles or memory,
+// a dropped network share) is a LookupError. Anything else is an answer
+// about the name and refused as such: an error that depends on what the
+// name names (a file where a folder belongs, a link, a name the file
+// system will not take), answered as a passing fault, would tell an
+// outsider that the name, or a file inside a project, is there.
 func lookupFailure(name string, err error) error {
-	if errors.Is(err, store.ErrUnsafeProjectPath) || errors.Is(err, os.ErrNotExist) {
-		return err
+	var errno syscall.Errno
+	if errors.As(err, &errno) && slices.Contains(diskFaultErrnos, errno) {
+		return &LookupError{Name: name, Err: err}
 	}
-	return &LookupError{Name: name, Err: err}
+	return err
 }
 
 // lookupFault, when set, is what every StoreFor fails with
