@@ -5,6 +5,7 @@ package project
 
 import (
 	"net/http"
+	"nodevas/internal/auth"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/locale"
 	"nodevas/internal/project"
@@ -182,11 +183,15 @@ func (a *API) GetProjects(c *gin.Context) {
 	}
 	// A fresh slice, never nil: "projects" is always a JSON array.
 	visible := make([]project.ProjectInfo, 0, len(projects))
+	readable := 0
 	for _, p := range projects {
 		// A project the caller may not read is not listed at all; its
 		// folder still is, as a plain directory in the tree.
 		if !p.IsFolder && !a.readable(c.Request, p.Path) {
 			continue
+		}
+		if !p.IsFolder {
+			readable++
 		}
 		if (!perAccount && p.Path == root) || (perAccount && !p.IsFolder && p.Name == current) {
 			active = p.Name
@@ -201,6 +206,15 @@ func (a *API) GetProjects(c *gin.Context) {
 	}
 	if workspaces == nil {
 		workspaces = []project.WorkspaceInfo{}
+	}
+	// Nor is it counted: the whole count would tell a member that
+	// restricted projects exist, and how many.
+	if a.access != nil && auth.RequireAdmin(c.Request) != nil {
+		for index := range workspaces {
+			if workspaces[index].Active {
+				workspaces[index].Projects = readable
+			}
+		}
 	}
 	// Host paths are implementation details, not workspace identifiers. A
 	// remote account is scoped to the active workspace and must not learn what
