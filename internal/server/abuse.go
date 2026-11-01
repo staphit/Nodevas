@@ -822,7 +822,7 @@ func (s *Server) preAuthAbuseLimits(c *gin.Context) {
 // and answers 429 when there is none.
 func (s *Server) chargePreAuth(c *gin.Context) bool {
 	ip := auth.ClientIP(c.Request)
-	if ok, retrySec := s.abuse.AllowPreAuth(ip, time.Now()); !ok {
+	if ok, retrySec := s.abuse.AllowPreAuth(auth.SourceKey(ip), time.Now()); !ok {
 		s.abuse.logRateLimit(c.Request.Context(), ClassPublicAuth, routeTemplateOrPath(c), "pre-auth", ip, retrySec)
 		c.Header("Retry-After", strconv.Itoa(retrySec))
 		httpx.Err(c, http.StatusTooManyRequests, locale.Errorf("too many requests", "請求太多"))
@@ -890,12 +890,17 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 		return
 	}
 
-	actor := auth.ActorFrom(c.Request)
+	// A request nobody signed in to (a device-link redeem) has no actor
+	// bucket: strangers are not one person, and charging them all to one
+	// would let one of them refuse the rest. The global and per-source
+	// buckets still apply.
+	actor, attached := auth.AttachedActor(c.Request)
 	actorID := actor.ID
-	if actorID == "" {
+	if attached && actorID == "" {
 		actorID = "anonymous"
 	}
 	ip := auth.ClientIP(c.Request)
+	source := auth.SourceKey(ip)
 	now := time.Now()
 
 	// The person at the keyboard of a standalone hub is every tab, the copilot
@@ -914,14 +919,14 @@ func (s *Server) withAbuseLimits(c *gin.Context) {
 	if class == ClassRead {
 		var wait time.Duration
 		var cancel func()
-		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, ip, now, readQueueWait)
+		wait, allowed, retrySec, cancel = s.abuse.ReserveRoute(class, cost, actorID, source, now, readQueueWait)
 		if allowed && wait > 0 && !waitTurn(c.Request.Context(), wait) {
 			cancel()
 			c.Abort()
 			return
 		}
 	} else {
-		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, ip, now)
+		allowed, retrySec = s.abuse.AllowRoute(class, cost, actorID, source, now)
 	}
 	if !allowed {
 		s.abuse.logRateLimit(c.Request.Context(), class, routeTemplateOrPath(c), string(actor.Role), ip, retrySec)

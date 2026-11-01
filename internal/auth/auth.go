@@ -316,6 +316,27 @@ func ClientIP(r *http.Request) string {
 	return client.String()
 }
 
+// SourceKey is the throttle identity of a client address. An IPv6 address
+// stands for its /64: one host or one subscriber holds the whole of it, so
+// stepping through it must not buy a fresh budget each time. An IPv4 address,
+// or anything that is not an address, is returned as given.
+func SourceKey(address string) string {
+	address = strings.TrimSpace(address)
+	parsed, err := netip.ParseAddr(address)
+	if err != nil {
+		return address
+	}
+	parsed = parsed.Unmap()
+	if !parsed.Is6() {
+		return parsed.String()
+	}
+	prefix, err := parsed.WithZone("").Prefix(64)
+	if err != nil {
+		return address
+	}
+	return prefix.String()
+}
+
 // RequestIsSecure reports whether the browser reached this server over TLS,
 // including through a terminating reverse proxy when one is trusted. Session
 // cookies are marked Secure only then: a Secure cookie on plain HTTP is

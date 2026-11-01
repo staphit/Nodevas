@@ -28,8 +28,6 @@ const (
 	LoginFailureLimit = 10 // retained name for compatibility; all attempts count
 	loginIPWindow     = 1 * time.Minute
 	loginIPLimit      = 20
-	loginGlobalWindow = 1 * time.Minute
-	loginGlobalLimit  = 60
 	maxLoginBuckets   = 2048
 	maxSessions       = 4096
 )
@@ -412,9 +410,9 @@ func (a *SessionAuth) Logout(token string) error {
 	return a.removeSessionsLocked(key)
 }
 
-// allowLogin atomically charges global, source-IP, and account buckets before
-// Argon2 starts. Rotating names cannot bypass the global/IP budgets, and every
-// map and timestamp slice is bounded.
+// allowLogin atomically charges the source and account buckets before Argon2
+// starts. Rotating names cannot bypass the source budget, and every map and
+// timestamp slice is bounded.
 func (a *SessionAuth) allowLogin(name, source string) bool {
 	account := ""
 	if userNamePattern.MatchString(name) {
@@ -425,7 +423,7 @@ func (a *SessionAuth) allowLogin(name, source string) bool {
 
 // allowEmailLogin is allowLogin for the email sign-in: the address, already
 // reduced to its throttle key, stands where the account name does. An empty
-// key charges only the global and per-source budgets.
+// key charges only the per-source budget.
 func (a *SessionAuth) allowEmailLogin(key, source string) bool {
 	account := ""
 	if key != "" {
@@ -434,15 +432,21 @@ func (a *SessionAuth) allowEmailLogin(key, source string) bool {
 	return a.chargeLogin(account, source)
 }
 
-// chargeLogin charges the global and per-source sign-in budgets, plus the
-// per-account one when account is not empty.
+// chargeLogin charges the per-source sign-in budget, plus the per-account one
+// when account is not empty.
+//
+// There is deliberately no hub-wide budget. Every attempt would count against
+// it, so a stranger spending a request a second from a few addresses would
+// hold the door shut for everybody; the per-source, per-address and
+// per-passcode budgets already bound guessing, and the pre-auth limiter bounds
+// the load.
 func (a *SessionAuth) chargeLogin(account, source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepAttemptsLocked(now)
 
-	charges := []rateCharge{{key: "global", window: loginGlobalWindow, limit: loginGlobalLimit}}
+	var charges []rateCharge
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "ip:" + source, window: loginIPWindow, limit: loginIPLimit})
 	}
@@ -450,6 +454,17 @@ func (a *SessionAuth) chargeLogin(account, source string) bool {
 		charges = append(charges, rateCharge{key: account, window: loginUserWindow, limit: LoginFailureLimit})
 	}
 	return a.chargeLocked(charges, now)
+}
+
+// chargeAccount charges only an account's own budget, for a check a signed-in
+// person makes (step-up, authenticator changes). Strangers cannot reach it, so
+// nothing they send to the sign-in door counts against it.
+func (a *SessionAuth) chargeAccount(account string) bool {
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sweepAttemptsLocked(now)
+	return a.chargeLocked([]rateCharge{{key: account, window: loginUserWindow, limit: LoginFailureLimit}}, now)
 }
 
 // rateCharge is one budget: how many events of a kind are allowed in a window.
@@ -486,7 +501,7 @@ func normalizeSource(source string) string {
 	if source == "" || len(source) > 64 {
 		return ""
 	}
-	return source
+	return SourceKey(source)
 }
 
 func (a *SessionAuth) recentAttemptsLocked(key string, window time.Duration, now time.Time) []time.Time {
@@ -508,7 +523,7 @@ func (a *SessionAuth) recentAttemptsLocked(key string, window time.Duration, now
 func (a *SessionAuth) sweepAttemptsLocked(now time.Time) {
 	cutoff := now.Add(-loginUserWindow)
 	for key, bucket := range a.attempts {
-		if key != "global" && bucket.touched.Before(cutoff) {
+		if bucket.touched.Before(cutoff) {
 			delete(a.attempts, key)
 		}
 	}
@@ -519,9 +534,6 @@ func (a *SessionAuth) makeBucketRoomLocked() {
 		oldestKey := ""
 		var oldest time.Time
 		for key, bucket := range a.attempts {
-			if key == "global" {
-				continue
-			}
 			if oldestKey == "" || bucket.touched.Before(oldest) {
 				oldestKey, oldest = key, bucket.touched
 			}

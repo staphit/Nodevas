@@ -202,7 +202,8 @@ func (a *API) redeemLink(c *gin.Context) {
 		}
 		httpx.Coded(c, http.StatusNotFound, "NOT_FOUND", runners.ErrLinkNotFound, nil)
 	}
-	link, err := a.link.Links.Redeem(body.Code, source)
+	// Failures count per source, an IPv6 /64 standing for one.
+	link, err := a.link.Links.Redeem(body.Code, auth.SourceKey(source))
 	switch {
 	case errors.Is(err, runners.ErrLinkThrottled):
 		refuse("throttled", identity.Actor{}, err)

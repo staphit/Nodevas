@@ -157,7 +157,7 @@ func (l *Links) Redeem(code, source string) (Link, error) {
 	defer l.mu.Unlock()
 	now := l.now()
 	l.pruneLocked(now)
-	if f := l.failures[l.failureKey(source)]; f != nil && f.count >= linkFailureLimit {
+	if f := l.failures[source]; f != nil && f.count >= linkFailureLimit {
 		return Link{}, ErrLinkThrottled
 	}
 	hash := sha256.Sum256([]byte(strings.TrimSpace(code)))
@@ -177,24 +177,32 @@ func (l *Links) Redeem(code, source string) (Link, error) {
 	return link, nil
 }
 
-// failureKey is the bucket a source's failures count in: its own, unless the
-// table is full of sources still in their window, when newcomers share one
-// rather than push anybody's failures out.
-func (l *Links) failureKey(source string) string {
-	if _, ok := l.failures[source]; ok || len(l.failures) < maxFailureSources {
-		return source
-	}
-	return "overflow"
-}
-
+// failLocked counts a miss against source. When the table is full of sources
+// still in their window, the one whose window began first is forgotten to make
+// room. Newcomers used to share one bucket instead, which a stranger filled
+// from one-shot addresses to refuse every new machine on the hub; forgetting a
+// source costs nothing comparable, since a code is linkCodeBytes of entropy
+// and the table only makes guessing slower, not possible.
 func (l *Links) failLocked(source string, now time.Time) {
-	key := l.failureKey(source)
-	f := l.failures[key]
+	f := l.failures[source]
 	if f == nil {
+		if len(l.failures) >= maxFailureSources {
+			l.forgetOldestFailureLocked()
+		}
 		f = &failureCount{since: now}
-		l.failures[key] = f
+		l.failures[source] = f
 	}
 	f.count++
+}
+
+func (l *Links) forgetOldestFailureLocked() {
+	oldestKey, oldest := "", time.Time{}
+	for key, f := range l.failures {
+		if oldestKey == "" || f.since.Before(oldest) {
+			oldestKey, oldest = key, f.since
+		}
+	}
+	delete(l.failures, oldestKey)
 }
 
 // Outstanding counts owner's codes still redeemable.

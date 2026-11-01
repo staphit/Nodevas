@@ -369,16 +369,19 @@ func (a *SessionAuth) SignInWithOTP(r *http.Request, email, otp string) (SignInR
 	return SignInResult{Actor: actor, Token: token, CSRF: csrf}, nil
 }
 
-// allowOTPRequest charges the global and per-source budgets for a passcode
-// request. It reuses the login buckets so the two endpoints cannot be played
-// off against each other.
+// allowOTPRequest charges the per-source budget for a passcode request.
+//
+// There is no hub-wide budget: one would let a stranger asking for passcodes
+// for made-up addresses from a handful of sources keep everybody else from
+// getting one. Mail stays bounded without it, since an unknown address gets
+// none and a registered one is under its own budgets (allowOTPForAddress).
 func (a *SessionAuth) allowOTPRequest(source string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepAttemptsLocked(now)
 
-	charges := []rateCharge{{key: "otp-global", window: otpRequestWindow, limit: loginGlobalLimit}}
+	var charges []rateCharge
 	if source = normalizeSource(source); source != "" {
 		charges = append(charges, rateCharge{key: "otp-ip:" + source, window: otpRequestWindow, limit: otpRequestLimit})
 	}
@@ -397,7 +400,7 @@ func (a *SessionAuth) allowOTPForAddress(key string) bool {
 	defer a.mu.Unlock()
 	// Anyone can put an address in this map now, so it is swept rather than
 	// trusted to stay small. An entry older than the cooldown decides nothing,
-	// and the global request budget bounds how many younger ones can exist.
+	// and the per-source request budgets bound how fast younger ones arrive.
 	for seen, last := range a.lastOTPRequest {
 		if now.Sub(last) >= otpResendCooldown {
 			delete(a.lastOTPRequest, seen)
