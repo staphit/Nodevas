@@ -26,11 +26,12 @@ function block(lines, i) {
 const grantsWrite = (lines, i) => block(lines, i).some((line) => /:\s*write\b|\bwrite-all\b/.test(code(line)));
 
 /**
- * The checkouts of a workflow that keep a token able to write: "job: line".
- * A job without permissions of its own gets the workflow's; a workflow
- * without any gets the repository's default, which may be write.
+ * The jobs of a workflow whose token can write: { name, start, body }, start
+ * being the job's line index. A job without permissions of its own gets the
+ * workflow's; a workflow without any gets the repository's default, which
+ * may be write.
  */
-export function checkoutsKeepingWriteToken(text) {
+function writingJobs(text) {
   const lines = text.split(/\r?\n/);
   const top = lines.findIndex((line) => /^permissions:/.test(line));
   const workflowWrites = top === -1 || grantsWrite(lines, top);
@@ -43,14 +44,47 @@ export function checkoutsKeepingWriteToken(text) {
     const body = block(lines, j);
     const own = body.findIndex((line) => /^ {4}permissions:/.test(line));
     const writes = own === -1 ? workflowWrites : grantsWrite(body, own);
-    if (!writes) continue;
+    if (writes) found.push({ name: job[1], start: j, body });
+  }
+  return found;
+}
+
+/** The checkouts of a workflow that keep a token able to write: "job: line". */
+export function checkoutsKeepingWriteToken(text) {
+  const found = [];
+  for (const { name, start, body } of writingJobs(text)) {
     body.forEach((line, k) => {
       if (!/^\s*(- )?uses:\s*actions\/checkout@/.test(code(line))) return;
       // The step: the "- " line the uses key belongs to.
       let step = k;
       while (step > 0 && !code(body[step]).trimStart().startsWith("- ")) step -= 1;
       const persists = !block(body, step).some((l) => /^\s*persist-credentials:\s*false\b/.test(code(l)));
-      if (persists) found.push(`${job[1]}: line ${j + k + 1}`);
+      if (persists) found.push(`${name}: line ${start + k + 1}`);
+    });
+  }
+  return found;
+}
+
+// persist-credentials only keeps the token out of git config. The runner
+// holds a job's token in memory from the job's first step, and every step
+// runs as an administrator (Windows) or with sudo (macOS, Linux): a
+// compromised build dependency can read it there, as the tj-actions
+// compromise did. So a job whose token can write runs no project or
+// dependency code: building happens in a job that can only read, and a
+// separate job publishes what it built.
+const buildTool = /(^|[\s;&|(])(npm|npx|pnpm|yarn|node|go|electron-builder)\s/;
+
+/** The run steps of jobs able to write that start a build tool: "job: line". */
+export function writersRunningBuildCode(text) {
+  const found = [];
+  for (const { name, start, body } of writingJobs(text)) {
+    body.forEach((line, k) => {
+      if (!/^\s*(- )?run:/.test(code(line))) return;
+      const script = block(body, k).map((l, i) => {
+        const text = code(l);
+        return i === 0 ? text.replace(/^\s*(- )?run:\s*[|>]?[-+]?/, " ") : text;
+      });
+      if (script.some((l) => buildTool.test(l))) found.push(`${name}: line ${start + k + 1}`);
     });
   }
   return found;
@@ -88,6 +122,51 @@ test("no job that can write leaves its token to the steps after checkout", () =>
   const found = [];
   for (const name of readdirSync(workflows).filter((file) => /\.ya?ml$/.test(file)).sort()) {
     for (const where of checkoutsKeepingWriteToken(readFileSync(join(workflows, name), "utf8"))) {
+      found.push(`${name} ${where}`);
+    }
+  }
+  assert.deepEqual(found, []);
+});
+
+test("the check finds a job able to write that runs build code", () => {
+  const workflow = (permissions, steps) =>
+    [
+      "permissions:",
+      `  contents: ${permissions}`,
+      "jobs:",
+      "  release:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - name: Set up Go",
+      "        uses: actions/setup-go@0123456789abcdef0123456789abcdef01234567 # v7",
+      "        with:",
+      "          go-version-file: go.mod",
+      ...steps,
+    ].join("\n");
+  const build = ["      - name: Build", "        run: |", "          mkdir -p out", "          CGO_ENABLED=0 go build ./cmd/x"];
+  assert.deepEqual(writersRunningBuildCode(workflow("write", build)), ["release: line 12"]);
+  assert.deepEqual(writersRunningBuildCode(workflow("write", ["      - run: npm ci --prefix web"])), [
+    "release: line 11",
+  ]);
+  assert.deepEqual(writersRunningBuildCode(workflow("read", build)), []);
+  // Publishing alone, and words that only look like a tool, are fine.
+  const publish = [
+    "      - name: Publish",
+    "        run: |",
+    "          # npm ci ran in the build job",
+    '          gh release upload "${tag}" dist/nodevas-* --clobber',
+    '          echo "go.mod and node_modules stay behind"',
+  ];
+  assert.deepEqual(writersRunningBuildCode(workflow("write", publish)), []);
+  // A job's own permissions win over the workflow's.
+  const own = workflow("write", build).replace("    runs-on:", "    permissions:\n      contents: read\n    runs-on:");
+  assert.deepEqual(writersRunningBuildCode(own), []);
+});
+
+test("no job that can write runs project or dependency code", () => {
+  const found = [];
+  for (const name of readdirSync(workflows).filter((file) => /\.ya?ml$/.test(file)).sort()) {
+    for (const where of writersRunningBuildCode(readFileSync(join(workflows, name), "utf8"))) {
       found.push(`${name} ${where}`);
     }
   }
