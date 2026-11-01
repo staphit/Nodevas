@@ -218,8 +218,13 @@ func TestAnExpiredRelayHasLetItsViewersGoWhenItIsUnlisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := make(chan TermCloseReason, 1)
-	termUnlisted = func(*Terminal) { seen <- viewer.Reason() }
-	t.Cleanup(func() { termUnlisted = nil })
+	hook := func(unlisted *Terminal) {
+		if unlisted == term {
+			seen <- viewer.Reason()
+		}
+	}
+	termUnlisted.Store(&hook)
+	t.Cleanup(func() { termUnlisted.Store(nil) })
 	term.setStatus(runnerwire.RunFailed)
 	select {
 	case reason := <-seen:

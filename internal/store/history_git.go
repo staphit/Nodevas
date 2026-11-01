@@ -270,8 +270,8 @@ func (g *gitHistory) commitSoon() {
 
 // segmentsCommitHook, when set, runs before a background commit of earlier
 // versions starts. A seam for tests: it holds that commit back, as a busy
-// machine does.
-var segmentsCommitHook func()
+// machine does. Atomic, since other tests' commits run meanwhile.
+var segmentsCommitHook atomic.Pointer[func()]
 
 // commitStartsSoon commits the batch's earlier versions now, in the
 // background, and leaves the rest of the batch (who saved, the final state)
@@ -287,8 +287,8 @@ func (g *gitHistory) commitStartsSoon() {
 	go func() {
 		defer g.inflight.Done()
 		defer safego.Recover("history commit segments")
-		if segmentsCommitHook != nil {
-			segmentsCommitHook()
+		if hook := segmentsCommitHook.Load(); hook != nil {
+			(*hook)()
 		}
 		if err := g.commitSegments(context.Background()); err != nil {
 			log.Printf("history for %s: %v", g.s.root, err)

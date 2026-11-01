@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nodevas/internal/locale"
@@ -371,8 +372,8 @@ func (t *Terminal) setFinal(status string) {
 }
 
 // termUnlisted, when set, is called as an expired relay leaves the map.
-// A seam for tests.
-var termUnlisted func(*Terminal)
+// A seam for tests; atomic, since other tests' relays expire meanwhile.
+var termUnlisted atomic.Pointer[func(*Terminal)]
 
 // expire lets an ended run's viewers go and then drops its relay. In that
 // order: whoever finds the relay gone finds its viewers let go too. A gone
@@ -392,8 +393,8 @@ func (ts *Terminals) expire(t *Terminal) {
 		delete(ts.runs, t.runID)
 	}
 	ts.mu.Unlock()
-	if termUnlisted != nil {
-		termUnlisted(t)
+	if hook := termUnlisted.Load(); hook != nil {
+		(*hook)(t)
 	}
 }
 

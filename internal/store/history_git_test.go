@@ -604,12 +604,13 @@ func TestGitHistoryListsASessionsStartWhileItsCommitIsHeldBack(t *testing.T) {
 	s, _ := newGitStore(t, time.Hour)
 	held := make(chan struct{})
 	var release sync.Once
-	segmentsCommitHook = func() { <-held }
+	hold := func() { <-held }
+	segmentsCommitHook.Store(&hold)
 	t.Cleanup(func() {
 		release.Do(func() { close(held) })
 		// Close waits for the background commits, which read the hook.
 		_ = s.Close(context.Background())
-		segmentsCommitHook = nil
+		segmentsCommitHook.Store(nil)
 	})
 	saveNode(t, s, ann, "alpha", "starter\n")
 	// The next save starts a session of its own.
