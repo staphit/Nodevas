@@ -216,6 +216,15 @@ func (j *jobs) commit(ctx context.Context, r *run, wt Worktree, message string) 
 		j.emit(r, runnerwire.RunEvent{Type: runnerwire.EventLog, Text: "agent config left out of the commit " +
 			"(a later run on this branch would load it); it stays uncommitted in the worktree at " + wt.Path +
 			", which is kept: commit it yourself if it is meant, then remove the worktree: " + strings.Join(list, ", ")})
+		// Listed by `nodevas runner status`; `nodevas runner prune-kept`
+		// removes it on request once it holds nothing else.
+		dataDir, err := j.c.Config.RunDataDir()
+		if err == nil {
+			err = RecordKept(ctx, dataDir, r.repo.Path, wt, res.Withheld)
+		}
+		if err != nil {
+			j.c.logf("run %s: recording the kept worktree %s: %v", r.job.RunID, wt.Path, err)
+		}
 	}
 	return res
 }

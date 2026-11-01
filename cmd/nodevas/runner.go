@@ -43,6 +43,8 @@ func runnerCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		err = runnerLogout(args, stdout, stderr)
 	case "status":
 		err = runnerStatus(args, stdout, stderr)
+	case "prune-kept":
+		err = runnerPruneKept(args, stdout, stderr)
 	case "hub-version":
 		err = runnerHubVersion(args, stdout, stderr)
 	case "repo":
@@ -90,7 +92,10 @@ func runnerUsage(w io.Writer) {
                                              on stdin's first line, prompted hidden at a terminal; never
                                              as an argument. It brings the hub and its Access service token
        nodevas runner logout                 forget the token and the Access secret
-       nodevas runner status                 settings (secrets masked) and the agents found here
+       nodevas runner status                 settings (secrets masked), the agents found here and the
+                                             worktrees kept for agent config their commits left out
+       nodevas runner prune-kept [--dry-run] remove those kept worktrees whose only uncommitted change
+                                             is that config (their branches stay); never done on its own
        nodevas runner hub-version            the commit the hub was built from (the installer uses it
                                              to fetch the matching runner binary from GitHub)
        nodevas runner repo add <path> [--name <n>] [--yes]
@@ -359,8 +364,68 @@ func runnerStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "  %-7s %s  [models: %s]\n", agent.Kind, state, strings.Join(models, ", "))
 	}
 	printRepos(stdout, cfg)
+	printKept(stdout, cfg)
 	printRunSettings(stdout, cfg)
 	return nil
+}
+
+// printKept lists the worktrees runs kept because their commits left agent
+// config out: nothing removes them on its own.
+func printKept(w io.Writer, cfg *runner.Config) {
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		fmt.Fprintf(w, "kept worktrees: unknown (%v)\n", err)
+		return
+	}
+	kept, err := runner.KeptWorktrees(dataDir)
+	if err != nil {
+		fmt.Fprintf(w, "kept worktrees: unknown (%s)\n", runner.TerminalText(err.Error()))
+		return
+	}
+	if len(kept) == 0 {
+		fmt.Fprintln(w, "kept worktrees: 0")
+		return
+	}
+	fmt.Fprintf(w, "kept worktrees: %d (they hold agent config their commits left out; commit what you meant, "+
+		"then remove the rest with nodevas runner prune-kept)\n", len(kept))
+	for _, k := range kept {
+		fmt.Fprintf(w, "  %s  (run %s; withheld: %s)\n", runner.TerminalText(k.Path), runner.TerminalText(k.RunID),
+			runner.TerminalText(strings.Join(k.Withheld, ", ")))
+	}
+}
+
+// runnerPruneKept removes, when asked, the kept worktrees that hold nothing
+// but the agent config their commits left out.
+func runnerPruneKept(args []string, stdout, stderr io.Writer) error {
+	fs, configFlag := newRunnerFlags("prune-kept")
+	dryRun := fs.Bool("dry-run", false, "only list")
+	if rest, err := parseInterspersed(fs, args); err != nil || len(rest) > 0 {
+		return errUsage
+	}
+	_, cfg, err := loadRunnerConfig(*configFlag, stderr)
+	if err != nil {
+		return err
+	}
+	dataDir, err := cfg.RunDataDir()
+	if err != nil {
+		return err
+	}
+	report, err := runner.PruneKept(context.Background(), dataDir, *dryRun)
+	verb := "removed"
+	if *dryRun {
+		verb = "would remove"
+	}
+	for _, k := range report.Removed {
+		fmt.Fprintf(stdout, "%s %s (run %s; withheld: %s)\n", verb, runner.TerminalText(k.Path),
+			runner.TerminalText(k.RunID), runner.TerminalText(strings.Join(k.Withheld, ", ")))
+	}
+	for _, s := range report.Skipped {
+		fmt.Fprintf(stdout, "kept %s: %s\n", runner.TerminalText(s.Path), runner.TerminalText(s.Reason))
+	}
+	if len(report.Removed) == 0 && len(report.Skipped) == 0 && err == nil {
+		fmt.Fprintln(stdout, "no kept worktrees")
+	}
+	return err
 }
 
 func printRunSettings(w io.Writer, cfg *runner.Config) {
