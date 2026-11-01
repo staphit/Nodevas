@@ -413,7 +413,9 @@ func (c *Client) logf(format string, args ...any) {
 	if c.Config.Name != "" {
 		prefix = "runner " + c.Config.Name + ": "
 	}
-	fmt.Fprintf(c.Log, prefix+format+"\n", args...)
+	// One line, whatever it quotes: run ids, names and errors come from the
+	// hub or an agent, and reach the terminal next to the accept question.
+	fmt.Fprintln(c.Log, prefix+terminalText(fmt.Sprintf(format, args...)))
 }
 
 func (c *Client) pingInterval() time.Duration {
