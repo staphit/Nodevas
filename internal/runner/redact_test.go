@@ -50,3 +50,34 @@ func TestRunOutputRedactsEnvironmentDumps(t *testing.T) {
 		}
 	}
 }
+
+// The other ways a run's text leaves the machine: the commit the runner
+// pushes (its body is the agent's summary), a verify job's test output, a
+// judge's CHECK notes and the handoff note.
+func TestRunOutputRedactsEveryResultText(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	j := newJobs(ctx, &Client{Config: &Config{}})
+	secrets := []string{"wJalrXUtnFEMI", "hunter2xyz"}
+	dump := "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG\nDB_PASSWORD=hunter2xyz"
+	msg := commitMessage("done\n\n"+dump, testJob("run-c", "ok:"))
+	r := &run{job: testJob("run-v", "ok:")}
+	j.finishWith(r, runnerwire.RunResult{Status: runnerwire.RunSucceeded,
+		Verify:      &runnerwire.VerifyResult{Phase: runnerwire.VerifyRed, Output: "env\n" + dump},
+		Checks:      parseChecks("CHECK a1: fail — " + strings.ReplaceAll(dump, "\n", " / ")),
+		HandoffNote: dump,
+	}, nil, nil)
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if len(r.finish.Checks) != 1 || r.finish.Verify == nil {
+		t.Fatalf("finish = %+v", r.finish)
+	}
+	for what, text := range map[string]string{"commit message": msg, "verify output": r.finish.Verify.Output,
+		"check note": r.finish.Checks[0].Note, "handoff note": r.finish.HandoffNote} {
+		for _, secret := range secrets {
+			if strings.Contains(text, secret) {
+				t.Errorf("%s: %q left the machine: %q", what, secret, text)
+			}
+		}
+	}
+}
