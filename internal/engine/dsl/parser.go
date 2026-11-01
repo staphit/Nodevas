@@ -26,6 +26,10 @@ func Parse(src string) (Expr, *ParseError) {
 	return e, nil
 }
 
+// maxNesting bounds how deep parentheses, `not` and all()/any() nest. Every
+// level costs parser frames, and a Go stack overflow is fatal, not a panic.
+const maxNesting = 256
+
 type parser struct {
 	toks []token
 	i    int
