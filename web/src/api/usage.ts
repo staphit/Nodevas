@@ -71,7 +71,7 @@ export interface UsageReport {
   byNode: UsageGroup[];
 }
 
-export type PriceSource = "builtin" | "custom";
+export type PriceSource = "builtin" | "custom" | "estimate";
 
 /** USD per million tokens. */
 export interface ModelPrice {

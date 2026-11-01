@@ -212,6 +212,32 @@ describe("UsageModal", () => {
     expect(screen.getByRole("region", { name: "Built-in prices" })).toHaveTextContent("claude-opus-5-5");
   });
 
+  it("lists estimate prices with the built-in ones, marked as estimates", async () => {
+    vi.spyOn(api, "getUsage").mockResolvedValue(report());
+    vi.spyOn(api, "getUsagePrices").mockResolvedValue({
+      ...prices,
+      prices: [
+        ...prices.prices,
+        {
+          model: "gpt-5.5",
+          inputPerMTok: 1.25,
+          outputPerMTok: 10,
+          cacheReadPerMTok: 0.125,
+          cacheWritePerMTok: 0,
+          source: "estimate",
+        },
+      ],
+    });
+    render(<UsageModal onClose={vi.fn()} />);
+    await screen.findByText("2M");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Prices" }));
+    const builtin = await screen.findByRole("region", { name: "Built-in prices" });
+    const estimate = within(builtin).getByRole("rowheader", { name: /gpt-5\.5/ });
+    expect(estimate).toHaveTextContent("estimate");
+    expect(within(builtin).getByRole("rowheader", { name: /claude-opus-5-5/ })).not.toHaveTextContent("estimate");
+  });
+
   it("hides the warning when everything is priced", async () => {
     vi.spyOn(api, "getUsage").mockResolvedValue(
       report({ totals: bucket({ inputTokens: 10, costUsd: 1 }) }),
