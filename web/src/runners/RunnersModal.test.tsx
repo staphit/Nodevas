@@ -180,7 +180,7 @@ describe("RunnersPanel", () => {
       "要修改請在那台機器上執行：nodevas runner set permissionRelay true（或 false）；僅適用於 Claude Code、Antigravity 與 OpenCode ACP 執行。",
     );
     expect(relaySection).toHaveTextContent(
-      "由「nodevas serve --with-runner」啟動的 runner 會將設定保存在自己的設定檔中，因此請傳入該 runner 所使用的相同 --config。",
+      "「nodevas serve」在只供本機使用的 hub 旁啟動的 runner（預設即會啟動，桌面版也是；或加上 --with-runner、--repo）會將設定保存在自己的檔案中，位於 <使用者設定資料夾>/nodevas/local-runners/，因此請以 --config 指定該檔案。",
     );
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -310,7 +310,7 @@ describe("RunnersPanel", () => {
       "To change it, run on that machine: nodevas runner set permissionRelay true (or false); applies only to Claude Code, Antigravity and OpenCode ACP runs.",
     );
     expect(section).toHaveTextContent(
-      "A runner started by 'nodevas serve --with-runner' keeps its settings in its own config file, so pass the same --config as that runner uses.",
+      "The runner that 'nodevas serve' starts beside a hub only this machine uses (by default, as in the desktop app, or with --with-runner or --repo) keeps its settings in its own file under <user config folder>/nodevas/local-runners/, so pass that file as --config.",
     );
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
