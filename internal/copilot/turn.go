@@ -177,6 +177,7 @@ func (s *Service) Turn(ctx context.Context, req TurnRequest, emit func(Event)) e
 	turn := &activeTurn{
 		id: newID(), conversationID: conversation.ID, accountID: req.Actor.ID, session: req.Session,
 		cancel:      cancel,
+		onServer:    plan.host == ModelHostServer && !s.opts.ServerIsLocal, // loopback: the person's own PC and key
 		permissions: map[string]chan permissionAnswer{},
 		clientCalls: map[string]chan toolbridge.Result{},
 		modelCalls:  map[string]chan browserAnswer{},

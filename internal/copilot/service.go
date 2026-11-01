@@ -31,9 +31,10 @@ var (
 	// Two turns interleaving their tool calls and transcript entries would
 	// leave a history no model can replay.
 	ErrBusy = errors.New("this conversation already has a turn in progress")
-	// ErrTurnLimit is a turn past the account's share of the server's key
-	// (429): maxServerTurnsPerAccount turns already run on it.
-	ErrTurnLimit = errors.New("you already have copilot turns running on the server's key; wait for one to finish")
+	// ErrTurnLimit is a turn past the account's share of the server's model
+	// (429): maxServerTurnsPerAccount of its turns already run there.
+	ErrTurnLimit = fmt.Errorf("you already have %d copilot turns running on the server's model; wait for one to finish",
+		maxServerTurnsPerAccount)
 	// ErrUnavailable wraps the reasons the copilot cannot answer at all: it is
 	// switched off, has no key, or its provider could not be built (503).
 	ErrUnavailable = errors.New("the copilot is unavailable")
@@ -47,8 +48,8 @@ const (
 	defaultClientToolTimeout = 60 * time.Second
 	defaultMaxToolCalls      = 25
 	// maxServerTurnsPerAccount bounds the turns one account runs at once
-	// on the server's own key on a server with accounts, where every
-	// member's turns are billed to it.
+	// on the server's own model (its key, or a model on its machine) on a
+	// server with accounts, where every member's turns are billed to it.
 	maxServerTurnsPerAccount = 2
 	// maxTurnTextBytes bounds one utterance. Speech recognition produces a
 	// sentence or two; a pasted essay is still welcome, a megabyte is not.
@@ -339,6 +340,9 @@ type activeTurn struct {
 	// session fingerprints the sign-in session that started the turn.
 	session string
 	cancel  context.CancelFunc
+	// onServer: the server makes the model calls, with its own key, for
+	// an account on a server with accounts; see maxServerTurnsPerAccount.
+	onServer bool
 
 	mu          sync.Mutex
 	permissions map[string]chan permissionAnswer
@@ -358,6 +362,17 @@ func (s *Service) register(turn *activeTurn) error {
 	defer s.mu.Unlock()
 	if _, taken := s.busy[turn.conversationID]; taken {
 		return ErrBusy
+	}
+	if turn.onServer {
+		running := 0
+		for _, other := range s.turns {
+			if other.onServer && other.accountID == turn.accountID {
+				running++
+			}
+		}
+		if running >= maxServerTurnsPerAccount {
+			return ErrTurnLimit
+		}
 	}
 	s.turns[turn.id] = turn
 	s.busy[turn.conversationID] = turn.id

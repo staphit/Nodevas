@@ -92,6 +92,8 @@ func fail(c *gin.Context, err error) {
 		httpx.Err(c, http.StatusBadRequest, err)
 	case errors.Is(err, copilot.ErrBusy):
 		httpx.Coded(c, http.StatusConflict, "turn_in_progress", err, nil)
+	case errors.Is(err, copilot.ErrTurnLimit):
+		httpx.Coded(c, http.StatusTooManyRequests, "copilot_busy", err, nil)
 	case errors.Is(err, copilot.ErrUnavailable):
 		// The reason is the operator's configuration, not a secret, and the
 		// panel shows it so the person knows whom to ask.
