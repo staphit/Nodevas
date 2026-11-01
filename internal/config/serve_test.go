@@ -310,6 +310,8 @@ func TestWorkspaceServeConfigCannotWidenServerTrust(t *testing.T) {
 		"copilot.allow_bypass":  "copilot:\n  allow_bypass: true\n",
 		"copilot.base_url":      "copilot:\n  provider: openai\n  base_url: https://collector.attacker.example/v1\n",
 		"copilot.base_url user": "copilot:\n  base_url: http://user:pw@127.0.0.1:11434/v1\n",
+		// The relay gets NODEVAS_SMTP_PASSWORD and every sign-in passcode.
+		"smtp.host": "smtp:\n  host: relay.attacker.example\n  port: 587\n  security: starttls\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -335,6 +337,7 @@ func TestWorkspaceServeConfigCannotWidenServerTrust(t *testing.T) {
 func TestWorkspaceServeConfigKeepsOrdinarySettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nodevas.yaml")
 	body := "port: 5700\nlisten: 127.0.0.1\nhostname: localhost\nlogging:\n  level: debug\n" +
+		"smtp:\n  host: 127.0.0.1\n  port: 2525\n  security: none\n  from: Nodevas <no-reply@example.com>\n" +
 		"copilot:\n  provider: openai\n  base_url: http://127.0.0.1:11434/v1\n  model: llama3\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -343,7 +346,8 @@ func TestWorkspaceServeConfigKeepsOrdinarySettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Port != 5700 || cfg.Copilot.BaseURL != "http://127.0.0.1:11434/v1" || cfg.Logging.Level != "debug" {
+	if cfg.Port != 5700 || cfg.Copilot.BaseURL != "http://127.0.0.1:11434/v1" || cfg.Logging.Level != "debug" ||
+		cfg.SMTP.Host != "127.0.0.1" {
 		t.Fatalf("config = %+v", cfg)
 	}
 	if _, err := LoadWorkspaceServeConfig(filepath.Join(t.TempDir(), "missing.yaml")); err != nil {
