@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"nodevas/internal/locale"
+	"nodevas/internal/secretenv"
 )
 
 // Dir is the git directory inside a project folder.
@@ -204,10 +205,11 @@ func (r *Repo) WorkTree() string { return r.workTree }
 // dropped first: one left in the server's environment could point git at
 // another repository or index (GIT_DIR, GIT_INDEX_FILE), or turn on tracing
 // that prints a backup push's credentials (GIT_TRACE*, GIT_CURL_VERBOSE,
-// which counts as on whatever its value). Callers add their own in extra.
+// which counts as on whatever its value). The hub's own secrets are dropped
+// too: git runs a repository's content. Callers add their own in extra.
 func (r *Repo) env(extra []string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range secretenv.Without(os.Environ()) {
 		if !strings.HasPrefix(strings.ToUpper(kv), "GIT_") {
 			env = append(env, kv)
 		}

@@ -24,6 +24,7 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/dbconn"
 	"nodevas/internal/embeddedpg"
+	"nodevas/internal/secretenv"
 )
 
 // database is `nodevas db`: where a workspace's data lives, backups, the
@@ -209,9 +210,11 @@ func sslMode(rawURL string) string {
 	return ""
 }
 
+// scrubbedEnv is the PostgreSQL tools' environment: no libpq variable that
+// could point them elsewhere, and none of the hub's secrets.
 func scrubbedEnv() []string {
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range secretenv.Without(os.Environ()) {
 		name, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(strings.ToUpper(name), "PG") {
 			continue
