@@ -85,6 +85,9 @@ type Options struct {
 	// that, or with auto routing on and no rule, its own pick. Nil keeps the
 	// rules' pick.
 	Route RouteFunc
+	// MayWork reports whether the account that created an autopilot may
+	// still change its project (internal/members). Nil: always.
+	MayWork func(ctx context.Context, project, accountID string) bool
 }
 
 // RouteRequest is one routing decision the orchestrator asks for.
@@ -104,6 +107,10 @@ func routeWith(ctx context.Context, route RouteFunc, in RouteRequest) runnerwire
 	}
 	return route(ctx, in)
 }
+
+// ReasonCreatorLostAccess is a paused autopilot's reason once its creator
+// may no longer change its project (Options.MayWork).
+const ReasonCreatorLostAccess = "paused: its creator can no longer change this project"
 
 // ChangedEvent is the realtime event an autopilot change sends to its
 // project's room; its id is the autopilot's.

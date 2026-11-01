@@ -115,6 +115,9 @@ type Options struct {
 	// the account.
 	SkipTask func(ctx context.Context, project, nodeID, by, note string) error
 	NoteTask func(ctx context.Context, project, nodeID, accountID, note string) error
+	// MayWork reports whether an account may still change a project
+	// (internal/members). Nil: always.
+	MayWork func(ctx context.Context, project, accountID string) bool
 }
 
 // Service is the copilot. One per server.
