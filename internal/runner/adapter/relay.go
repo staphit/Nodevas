@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -116,7 +117,8 @@ type HubAsker struct {
 }
 
 // HubAskerFromMCPArgs reads a run's `nodevas mcp` arguments (RunEnv.MCP.Args,
-// or RunMCPEnv in an agent's hook). ok is false without a --server.
+// or RunMCPEnv in an agent's hook). ok is false without a --server or a
+// readable --server-file.
 func HubAskerFromMCPArgs(args []string) (HubAsker, bool) {
 	var h HubAsker
 	for i := 0; i+1 < len(args); i++ {
@@ -124,6 +126,12 @@ func HubAskerFromMCPArgs(args []string) (HubAsker, bool) {
 		switch args[i] {
 		case "--server":
 			h.Server = value
+		case "--server-file":
+			// The run's proxy URL, kept off the command line (runner
+			// writeMCPServerFile).
+			if raw, err := os.ReadFile(value); err == nil {
+				h.Server = strings.TrimSpace(string(raw))
+			}
 		case "--project":
 			h.Project = value
 		case "--agent-role":

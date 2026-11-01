@@ -137,10 +137,28 @@ func runMCPArgs(value string) ([]string, bool) {
 }
 
 // mcpServerURL is the server to work through: --server, or what the file
-// --server-file names holds.
+// --server-file names holds. A runner uses the file: its run's proxy URL
+// carries a secret, and a command line is readable by every user on the
+// machine.
 func mcpServerURL(fs *flag.FlagSet, f mcpFlags) (string, error) {
-	_ = fs
-	return *f.server, nil
+	path := strings.TrimSpace(*f.serverFile)
+	if path == "" {
+		return *f.server, nil
+	}
+	both := false
+	fs.Visit(func(fl *flag.Flag) { both = both || fl.Name == "server" })
+	if both {
+		return "", errors.New("--server and --server-file both name the server: use one")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("--server-file: %w", err)
+	}
+	server := strings.TrimSpace(string(raw))
+	if server == "" {
+		return "", fmt.Errorf("--server-file: %s is empty", path)
+	}
+	return server, nil
 }
 
 // mcpFlags are `nodevas mcp`'s flags.

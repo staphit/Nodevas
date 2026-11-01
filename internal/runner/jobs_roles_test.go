@@ -13,8 +13,8 @@ import (
 func TestMCPArgsCarryRoleAndTools(t *testing.T) {
 	job := runnerwire.Job{RunID: "run-abcdef12", Agent: "claude", Model: "sonnet", Project: "demo",
 		Role: "tester", Tools: []string{"get_node", "ask_user", "check_inbox", "send_message"}}
-	got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"})
-	want := []string{"mcp", "--server", "http://127.0.0.1:5/r/s", "--project", "demo", "--agent-role", "worker",
+	got := mcpArgs("/run/tmp/mcp-server", job, runnerwire.Repo{Name: "web"})
+	want := []string{"mcp", "--server-file", "/run/tmp/mcp-server", "--project", "demo", "--agent-role", "worker",
 		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab",
 		"--role", "tester", "--tools", "get_node,ask_user,check_inbox,send_message"}
 	if !slices.Equal(got, want) {
@@ -23,7 +23,7 @@ func TestMCPArgsCarryRoleAndTools(t *testing.T) {
 	// A planner run is an orchestrator on the board, and still only its tools.
 	planner := job
 	planner.Role, planner.Tools = "planner", []string{"get_node", "create_subgraph"}
-	args := mcpArgs("http://127.0.0.1:5/r/s", planner, runnerwire.Repo{Name: "web"})
+	args := mcpArgs("/run/tmp/mcp-server", planner, runnerwire.Repo{Name: "web"})
 	if i := slices.Index(args, "--agent-role"); i < 0 || args[i+1] != "orchestrator" {
 		t.Fatalf("planner args = %q", args)
 	}
@@ -33,22 +33,22 @@ func TestMCPArgsCarryRoleAndTools(t *testing.T) {
 	// A tool name that could smuggle a flag is refused, not passed.
 	evil := job
 	evil.Tools = []string{"get_node", "--server=http://evil"}
-	if args := mcpArgs("http://127.0.0.1:5/r/s", evil, runnerwire.Repo{Name: "web"}); strings.Contains(strings.Join(args, " "), "evil") {
+	if args := mcpArgs("/run/tmp/mcp-server", evil, runnerwire.Repo{Name: "web"}); strings.Contains(strings.Join(args, " "), "evil") {
 		t.Fatalf("a flag rode in on the tools: %q", args)
 	}
 }
 
 func TestLegacyJobArgsUnchanged(t *testing.T) {
 	job := runnerwire.Job{RunID: "run-abcdef12", Agent: "claude", Model: "sonnet", Project: "demo"}
-	got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"})
-	want := []string{"mcp", "--server", "http://127.0.0.1:5/r/s", "--project", "demo", "--agent-role", "worker",
+	got := mcpArgs("/run/tmp/mcp-server", job, runnerwire.Repo{Name: "web"})
+	want := []string{"mcp", "--server-file", "/run/tmp/mcp-server", "--project", "demo", "--agent-role", "worker",
 		"--actor", "run:claude", "--session-name", "web-claude-sonnet-run-ab", "--toolset", "run"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("legacy mcpArgs = %q, want %q", got, want)
 	}
 	// Tools without a role are ignored: the hub never widens a legacy run.
 	job.Tools = []string{"update_node_meta"}
-	if got := mcpArgs("http://127.0.0.1:5/r/s", job, runnerwire.Repo{Name: "web"}); !slices.Equal(got, want) {
+	if got := mcpArgs("/run/tmp/mcp-server", job, runnerwire.Repo{Name: "web"}); !slices.Equal(got, want) {
 		t.Fatalf("legacy job with tools = %q", got)
 	}
 }

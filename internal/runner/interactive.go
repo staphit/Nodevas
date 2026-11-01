@@ -125,13 +125,18 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 		return fail("cannot find the nodevas executable for the MCP server: %v", err)
 	}
 
+	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+	if err != nil {
+		return fail("could not write the MCP server's address: %v", err)
+	}
+
 	cfg := j.c.Config
 	cmd, err := ia.InteractiveCommand(job, adapter.RunEnv{
 		Binary:         bin,
 		Workdir:        wt.Path,
 		Branch:         wt.Branch,
 		TempDir:        tmp,
-		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(proxy.URL(secret), job, r.repo)},
+		MCP:            adapter.MCPServer{Command: exe, Args: mcpArgs(serverFile, job, r.repo)},
 		PermissionMode: cfg.PermissionModeFor(job.Agent),
 		AllowedTools:   cfg.AllowedTools,
 		DisableMCP:     j.disabledMCP(ctx, r, bin, wt.Path),

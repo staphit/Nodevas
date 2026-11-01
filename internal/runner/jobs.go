@@ -602,7 +602,11 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 		Version:          version,
 		PermissionRelay:  cfg.PermissionRelay,
 	}
-	runEnv.MCP.Args = mcpArgs(proxy.URL(secret), job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
+	serverFile, err := writeMCPServerFile(tmp, proxy.URL(secret))
+	if err != nil {
+		return fail(runnerwire.FailureTask, "could not write the MCP server's address: %v", err)
+	}
+	runEnv.MCP.Args = mcpArgs(serverFile, job, r.repo, adapter.RelayMCPTools(job.Agent, runEnv)...)
 	cmd, relayOff, err := adapter.Launch(ad, job, runEnv)
 	if err != nil {
 		return fail(runnerwire.FailureTask, "%v", err)
@@ -777,10 +781,10 @@ func modeText(cfg *Config, kind string) string {
 }
 
 // mcpArgs is the run's `nodevas mcp` command line: the board through this
-// runner's proxy, as a worker, under a session name that says which run it is,
-// with only the tools a run uses: each definition is paid for on every model
-// call.
-func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
+// runner's proxy (its URL in serverFile, see writeMCPServerFile), as a worker,
+// under a session name that says which run it is, with only the tools a run
+// uses: each definition is paid for on every model call.
+func mcpArgs(serverFile string, job runnerwire.Job, repo runnerwire.Repo, relayTools ...string) []string {
 	model := job.Model
 	if model == "" {
 		model = "default"
@@ -795,7 +799,7 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools
 	}
 	args := []string{
 		"mcp",
-		"--server", server,
+		"--server-file", serverFile,
 		"--project", job.Project,
 		"--agent-role", roleAgentClass(job),
 		"--actor", "run:" + job.Agent,
@@ -807,6 +811,14 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools
 		return append(args, role...)
 	}
 	return append(args, "--toolset", "run")
+}
+
+// writeMCPServerFile puts the run's proxy URL in its private temp dir, owner
+// only, for `nodevas mcp --server-file`: the URL carries the run's proxy
+// secret, and every user on the machine can read a command line.
+func writeMCPServerFile(tmp, url string) (string, error) {
+	path := filepath.Join(tmp, "mcp-server")
+	return path, os.WriteFile(path, []byte(url), 0o600)
 }
 
 // runTempDir makes a run's private directory for the files programs outside
