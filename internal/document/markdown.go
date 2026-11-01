@@ -15,6 +15,11 @@ func Parse(source string) *Doc {
 	return &Doc{Blocks: parseBlocks(splitLines(source))}
 }
 
+// maxNesting bounds how deep quotes, lists and inline links or emphasis nest.
+// Every level costs a parser frame, and a Go stack overflow is a fatal error,
+// not a panic, so deeper markup stays literal text instead.
+const maxNesting = 64
+
 func splitLines(source string) []string {
 	source = strings.ReplaceAll(source, "\r\n", "\n")
 	source = strings.ReplaceAll(source, "\r", "\n")
