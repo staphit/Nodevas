@@ -10,10 +10,19 @@ import { useExplorer } from "./explorerStore";
 import FilesPanel from "./FilesPanel";
 import { repo, workspaceListing } from "./testFixtures";
 
+/**
+ * The workspace listing arrives a moment after the panel is drawn, as from
+ * a server: its section is on screen before its files are. Answered at
+ * once, the tests passed or failed by which of the two came first.
+ */
+function answerLater<T>(value: T): () => Promise<T> {
+  return () => new Promise((resolve) => setTimeout(() => resolve(value), 0));
+}
+
 beforeEach(() => {
   useApp.setState({ preferences: { ...readPreferences(), language: "en" } });
   useExplorer.setState({ view: null });
-  vi.spyOn(explorerApi, "workspaceFiles").mockResolvedValue(workspaceListing);
+  vi.spyOn(explorerApi, "workspaceFiles").mockImplementation(answerLater(workspaceListing));
   vi.spyOn(explorerApi, "repoTree").mockResolvedValue({
     path: "",
     entries: [
@@ -104,7 +113,7 @@ describe("FilesPanel", () => {
       repo({ repoId: "r2", name: "game", online: false, runnerName: "laptop" }),
       repo({ repoId: "r3", name: "site", browsable: false, reason: "REPO_BROWSE_OFF" }),
     ]);
-    vi.spyOn(explorerApi, "workspaceFiles").mockResolvedValue({ ...workspaceListing, truncated: true });
+    vi.spyOn(explorerApi, "workspaceFiles").mockImplementation(answerLater({ ...workspaceListing, truncated: true }));
     render(<FilesPanel />);
     const offline = await screen.findByRole("region", { name: "Repo · game" });
     expect(within(offline).getByText("offline")).toBeInTheDocument();
