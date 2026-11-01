@@ -115,7 +115,7 @@ func (j *jobs) runInteractive(ctx context.Context, r *run, wt Worktree) runnerwi
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
-	tmp, err := os.MkdirTemp("", "nodevas-run-")
+	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail("could not make a temporary directory: %v", err)
 	}

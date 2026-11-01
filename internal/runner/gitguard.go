@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,16 +23,19 @@ var (
 	noHooksDir  string
 )
 
-// noHooksPath is an empty directory the runner owns, for core.hooksPath: no
-// hook — the repository's own, or one a run wrote — runs from the runner's git.
+// noHooksPath is the core.hooksPath that runs no hook, as internal/gitrepo's:
+// a path inside the git executable, which is a file, so no directory can
+// ever exist there and nobody who could not already replace git can put a
+// hook there. Never a directory: one in the temp dir is writable by a Codex
+// run's default sandbox, and a hook planted there would run as the owner.
 func noHooksPath() string {
 	noHooksOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nodevas-nohooks-")
+		base, err := exec.LookPath("git")
 		if err != nil {
 			// A path inside the null device holds no files either.
-			dir = filepath.Join(os.DevNull, "nodevas-nohooks")
+			base = os.DevNull
 		}
-		noHooksDir = filepath.ToSlash(dir)
+		noHooksDir = filepath.ToSlash(base) + "/no-hooks"
 	})
 	return noHooksDir
 }

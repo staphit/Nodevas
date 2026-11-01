@@ -66,9 +66,15 @@ func OpenCodeMCPServers(ctx context.Context, bin, dir string, readOnly bool) ([]
 
 // openCodeEmptyDir is where a read-only run asks OpenCode for its config.
 // One directory for every run: OpenCode 2 records each directory it is asked
-// about as a project of the owner's.
+// about as a project of the owner's. It is in the owner's cache dir, not the
+// shared temp dir, where another local user or a Codex run's sandbox could
+// have left an opencode.json or a plugin for OpenCode to load.
 func openCodeEmptyDir() (string, error) {
-	empty := filepath.Join(os.TempDir(), "nodevas-opencode-empty")
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	empty := filepath.Join(cache, "nodevas", "opencode-empty")
 	if err := os.MkdirAll(empty, 0o700); err != nil {
 		return "", err
 	}

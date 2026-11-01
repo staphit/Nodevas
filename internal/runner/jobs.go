@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -567,7 +568,7 @@ func (j *jobs) startAgent(ctx context.Context, r *run, wt Worktree, job runnerwi
 	}
 	secret := proxy.Register(job.RunID)
 	defer proxy.Revoke(secret)
-	tmp, err := os.MkdirTemp("", "nodevas-run-")
+	tmp, err := j.runTempDir()
 	if err != nil {
 		return fail(runnerwire.FailureTask, "could not make a temporary directory: %v", err)
 	}
@@ -806,6 +807,22 @@ func mcpArgs(server string, job runnerwire.Job, repo runnerwire.Repo, relayTools
 		return append(args, role...)
 	}
 	return append(args, "--toolset", "run")
+}
+
+// runTempDir makes a run's private directory for the files programs outside
+// any sandbox read (the MCP config, agy's hooks): under the runner's data
+// dir, owner-only, never the system's temp dir, which a Codex run's default
+// sandbox may write. The caller removes it when the run ends.
+func (j *jobs) runTempDir() (string, error) {
+	dataDir, err := j.c.Config.RunDataDir()
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Join(dataDir, "tmp")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(parent, "run-")
 }
 
 func (j *jobs) proxyFor() (*Proxy, error) {
