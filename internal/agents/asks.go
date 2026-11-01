@@ -60,6 +60,11 @@ const (
 	// maxPendingPermissions bounds one session's waiting permission
 	// prompts: one per tool call its CLI runs in parallel.
 	maxPendingPermissions = 8
+	// maxPendingAsksPerActor bounds one account's pending asks in a project
+	// over all its sessions, whose ids are its own to pick: a runner's
+	// most parallel runs (16) each with a question and maxPendingPermissions
+	// prompts fit under it.
+	maxPendingAsksPerActor = 160
 
 	MaxAskTimeout = 10 * time.Minute
 	// PermissionAskTimeout is how long a permission prompt waits at most;
