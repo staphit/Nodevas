@@ -316,6 +316,9 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		httpx.Err(c, http.StatusBadRequest, err)
 		return
 	}
+	if !a.mayTransfer(c, source, target, mode == "cut") {
+		return
+	}
 	if source == target {
 		httpx.Err(c, http.StatusBadRequest,
 			locale.Errorf("the source and target are the same project; use Duplicate instead", "來源與目標是同一個專案；請用「建立副本」"))
@@ -384,4 +387,25 @@ func (a *API) postNodesTransfer(c *gin.Context) {
 		"trashFiles":     trashFiles,
 		"cleanupPending": cleanupPending,
 	})
+}
+
+// mayTransfer checks a transfer's two projects as the project gate checks a
+// request's own, which is all the gate saw: the selection is read from the
+// source and written into the target, and a cut also deletes it from the
+// source. A project the actor may not read answers 403 PROJECT_ACCESS_DENIED,
+// one it may only read 403 PROJECT_READ_ONLY.
+func (a *API) mayTransfer(c *gin.Context, source, target *store.Store, cut bool) bool {
+	if a.access == nil {
+		return true
+	}
+	r := c.Request
+	if !a.access.Readable(r, source.Root()) || !a.access.Readable(r, target.Root()) {
+		httpx.DenyProjectAccess(c)
+		return false
+	}
+	if !a.access.Writable(r, target.Root()) || (cut && !a.access.Writable(r, source.Root())) {
+		httpx.DenyProjectWrite(c)
+		return false
+	}
+	return true
 }

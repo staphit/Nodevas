@@ -12,7 +12,6 @@ import (
 	"nodevas/internal/db"
 	"nodevas/internal/httpapi/httpx"
 	"nodevas/internal/identity"
-	"nodevas/internal/locale"
 	"nodevas/internal/members"
 	"nodevas/internal/project"
 )
@@ -109,16 +108,12 @@ func (s *Server) withProjectAccess(c *gin.Context) {
 	}
 	access := s.members.Access(auth.ActorFrom(r), project.Key(st.Root()))
 	if !access.CanRead() {
-		httpx.Coded(c, http.StatusForbidden, "PROJECT_ACCESS_DENIED",
-			locale.Errorf("you are not a member of this project", "你不是這個專案的成員"), nil)
-		c.Abort()
+		httpx.DenyProjectAccess(c)
 		return
 	}
 	writes := (isUnsafeMethod(r.Method) && !readOnlyPosts[r.URL.Path]) || stateChangingGET(r)
 	if writes && !access.CanWrite() {
-		httpx.Coded(c, http.StatusForbidden, "PROJECT_READ_ONLY",
-			locale.Errorf("you can view this project but not change it", "你可以檢視這個專案，但不能修改"), nil)
-		c.Abort()
+		httpx.DenyProjectWrite(c)
 		return
 	}
 	c.Next()
@@ -133,10 +128,22 @@ func (s *Server) projectReadable(r *http.Request, dir string) bool {
 	return s.members.Access(auth.ActorFrom(r), project.Key(dir)).CanRead()
 }
 
+// projectWritable is whether the request's actor may change the project in
+// dir, for the routes that name a project past the gate (a transfer's
+// source and target).
+func (s *Server) projectWritable(r *http.Request, dir string) bool {
+	if s.members == nil {
+		return true
+	}
+	return s.members.Access(auth.ActorFrom(r), project.Key(dir)).CanWrite()
+}
+
 // projectAccess is the catalog's view of membership.
 type projectAccess struct{ s *Server }
 
 func (p projectAccess) Readable(r *http.Request, dir string) bool { return p.s.projectReadable(r, dir) }
+
+func (p projectAccess) Writable(r *http.Request, dir string) bool { return p.s.projectWritable(r, dir) }
 
 // ReadableTree also requires every restricted project under dir to be
 // readable: an archive of a folder carries all of them.
