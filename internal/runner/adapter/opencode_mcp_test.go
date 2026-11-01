@@ -34,10 +34,19 @@ func TestOpenCodeDisablesOtherMCP(t *testing.T) {
 	}
 }
 
+// realAgentTestsEnv opts in to the tests that start a real agent CLI. They
+// run the owner's installed agent, with its own config and sign-in, so a
+// plain `go test` never starts one just because it is on PATH.
+const realAgentTestsEnv = "NODEVAS_REAL_AGENT_TESTS"
+
 // realOpenCode is the installed OpenCode for the tests against the real CLI,
-// which skip when there is none or when it is one runs refuse.
+// which skip unless NODEVAS_REAL_AGENT_TESTS=1, and when there is none or it
+// is one runs refuse.
 func realOpenCode(t *testing.T) string {
 	t.Helper()
+	if os.Getenv(realAgentTestsEnv) != "1" {
+		t.Skip("set " + realAgentTestsEnv + "=1 to run the tests against the installed agent CLIs")
+	}
 	bin, err := exec.LookPath("opencode")
 	if err != nil {
 		t.Skip("opencode not installed")
