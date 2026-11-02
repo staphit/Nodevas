@@ -1,7 +1,7 @@
 // Boots the real app for the demo videos (playwright.demo.config.ts):
-//   vite build → go build → serve a throwaway workspace seeded with one
+//   vite build → go build → serve a throwaway workspace seeded with an
 // English project whose tasks have dependencies, so the board looks like a
-// real piece of work rather than two test nodes.
+// real piece of work rather than two test nodes, and a few smaller ones.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
@@ -51,6 +51,25 @@ lines.push("  - from: dashboard", "    to: goal", "  - from: docs", "    to: goa
 writeFileSync(join(project, "graph.yaml"), lines.join("\n"), "utf8");
 for (const [id, title, , body] of nodes) {
   writeFileSync(join(project, "nodes", `${id}.md`), `# ${title}\n\n${body}\n`, "utf8");
+}
+
+// The workspace's other projects: the explorer lists them, and Station's
+// building draws an office for each (demo-stills.spec.ts fills those in).
+const others = {
+  "billing-app": ["Invoice PDF", "Tax rules", "Refunds"],
+  handbook: ["Onboarding guide", "Code review norms"],
+  "mobile-app": ["Sign-in screen", "Push notifications"],
+  site: ["Pricing page", "Changelog"],
+};
+for (const [name, titles] of Object.entries(others)) {
+  const dir = join(workspace, name);
+  mkdirSync(join(dir, "nodes"), { recursive: true });
+  const ids = titles.map((title) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+  const graph = ["version: 1", "nodes:"];
+  titles.forEach((title, i) => graph.push(`  - id: ${ids[i]}`, `    title: ${title}`, "    kind: task"));
+  graph.push("edges: []", "");
+  writeFileSync(join(dir, "graph.yaml"), graph.join("\n"), "utf8");
+  titles.forEach((title, i) => writeFileSync(join(dir, "nodes", `${ids[i]}.md`), `# ${title}\n`, "utf8"));
 }
 
 // Keep the workspace catalog away from the developer's real config.
