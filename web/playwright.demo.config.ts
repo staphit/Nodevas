@@ -12,10 +12,18 @@ const PORT = Number(process.env.VISED_E2E_PORT ?? 5702);
  * spec, so no runner or agent has to exist. Run it with:
  *
  *   npm run demo:videos
+ *
+ * e2e/demo-stills.spec.ts takes the README's Station stills and the feature
+ * tour's frames the same way; e2e/demo-tour.mjs makes the tour's GIF:
+ *
+ *   npm run demo:stills
+ *
+ * Each run empties demo-videos/.results, so encode a run's footage before
+ * starting the next.
  */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /demo-videos\.spec\.ts/,
+  testMatch: /demo-(videos|stills)\.spec\.ts/,
   timeout: 180_000,
   fullyParallel: false,
   workers: 1,
@@ -37,7 +45,8 @@ export default defineConfig({
     env: { VISED_E2E_PORT: String(PORT) },
     url: `http://127.0.0.1:${PORT}/api/projects`,
     timeout: 300_000,
-    reuseExistingServer: false,
+    // DEMO_REUSE_SERVER=1: a demo-serve.mjs already running on the port (re-takes).
+    reuseExistingServer: process.env.DEMO_REUSE_SERVER === "1",
     stdout: "ignore",
     stderr: "pipe",
   },

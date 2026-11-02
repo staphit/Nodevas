@@ -13,7 +13,8 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "preview:mobile": "playwright test --config playwright.mobile.config.ts",
-    "demo:videos": "playwright test --config playwright.demo.config.ts && node e2e/demo-encode.mjs"
+    "demo:videos": "playwright test --config playwright.demo.config.ts demo-videos && node e2e/demo-encode.mjs",
+    "demo:stills": "playwright test --config playwright.demo.config.ts demo-stills && node e2e/demo-tour.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

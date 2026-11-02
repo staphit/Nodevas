@@ -47,6 +47,8 @@ npm run e2e --prefix web
 
 `npm run demo:videos --prefix web` records the README's feature videos (dark theme, zoomed on each step, captioned) into `docs/videos/*.mp4`; it needs ffmpeg. GitHub plays a video in Markdown only from an attachment, so after re-recording, drag each MP4 into a GitHub comment box (don't post it), copy the `https://github.com/user-attachments/assets/…` URL it inserts, and put that URL on its own line where the video goes in `README*.md` or `docs/workstation*.md`.
 
+`npm run demo:stills --prefix web` takes the README's Station stills (`docs/screenshots/station-warroom.png`, `game-warroom.png`) and builds `docs/screenshots/nodevas-feature-tour.gif` from a captioned frame per stop. Both commands start their own demo server; run them one after the other, not at once.
+
 ## Main code locations
 
 - `cmd/nodevas/`: CLI and server entry points.
