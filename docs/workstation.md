@@ -158,7 +158,7 @@ https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
 ### Agent chat
 
-Who is working on what, messages between agents, and a held message waiting for your approval.
+Who is working on what, a relayed permission prompt you allow, messages between agents, and a held message waiting for your approval.
 
 https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 

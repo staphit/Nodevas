@@ -158,7 +158,7 @@ https://github.com/user-attachments/assets/57324ad9-5170-495a-8024-159ce63102aa
 
 ### Agent 對話
 
-誰在做什麼、agent 之間的訊息，以及一則等你放行的暫留訊息。
+誰在做什麼、一則轉送過來等你允許的權限詢問、agent 之間的訊息，以及一則等你放行的暫留訊息。
 
 https://github.com/user-attachments/assets/fa0c5a33-1d02-41bd-9dbc-6ff0aac0e75d
 
